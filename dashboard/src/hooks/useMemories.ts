@@ -60,6 +60,7 @@ export function useSearch() {
   const search = useCallback(async (query: string) => {
     if (!query.trim()) {
       setResults(null);
+      setError(null);
       return;
     }
 
@@ -69,7 +70,15 @@ export function useSearch() {
       const result = await api.recallMemories({ query, limit: 10 });
       setResults(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Search failed');
+      // Handle different error types
+      if (err instanceof Error) {
+        setError(err.message);
+      } else if (typeof err === 'object' && err !== null) {
+        setError(JSON.stringify(err));
+      } else {
+        setError('Search failed');
+      }
+      setResults(null);
     } finally {
       setLoading(false);
     }
