@@ -1,15 +1,29 @@
 """
 Remembra Intelligent Extraction Module
 
-LLM-powered fact extraction and memory consolidation.
+LLM-powered fact extraction, memory consolidation, and entity resolution.
 """
 
 from .extractor import FactExtractor, ExtractionConfig
-from .consolidator import MemoryConsolidator, ConsolidationAction
+from .consolidator import MemoryConsolidator, ConsolidationAction, ExistingMemory
+from .entities import EntityExtractor, ExtractedEntity, ExtractedRelationship, ExtractionResult
+from .matcher import EntityMatcher, ExistingEntity, MatchResult
 
 __all__ = [
+    # Fact extraction
     "FactExtractor",
     "ExtractionConfig", 
+    # Memory consolidation
     "MemoryConsolidator",
     "ConsolidationAction",
+    "ExistingMemory",
+    # Entity extraction
+    "EntityExtractor",
+    "ExtractedEntity",
+    "ExtractedRelationship",
+    "ExtractionResult",
+    # Entity matching
+    "EntityMatcher",
+    "ExistingEntity",
+    "MatchResult",
 ]

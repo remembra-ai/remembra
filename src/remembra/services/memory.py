@@ -25,6 +25,9 @@ from remembra.extraction.consolidator import (
     ConsolidationAction,
     ExistingMemory,
 )
+from remembra.extraction.entities import EntityExtractor, ExtractedEntity
+from remembra.extraction.matcher import EntityMatcher, ExistingEntity, MatchResult
+from remembra.models.memory import Entity, Relationship
 
 log = structlog.get_logger(__name__)
 
@@ -100,6 +103,17 @@ class MemoryService:
             model=settings.extraction_model,
             api_key=settings.openai_api_key,
             similarity_threshold=settings.consolidation_threshold,
+        )
+        
+        # Initialize entity resolution (Week 5)
+        self.entity_extractor = EntityExtractor(
+            model=settings.extraction_model,
+            api_key=settings.openai_api_key,
+        )
+        self.entity_matcher = EntityMatcher(
+            model=settings.extraction_model,
+            api_key=settings.openai_api_key,
+            min_confidence=0.6,
         )
 
     # -----------------------------------------------------------------------
@@ -264,7 +278,158 @@ class MemoryService:
             expires_at=memory.expires_at,
         )
         
+        # Extract and link entities (Week 5)
+        if self.settings.enable_entity_resolution:
+            try:
+                await self._process_entities_for_memory(
+                    memory_id=memory.id,
+                    content=content,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+            except Exception as e:
+                # Don't fail the whole store if entity extraction fails
+                log.warning("entity_extraction_failed", error=str(e), memory_id=memory.id)
+        
         return {"id": memory.id, "content": content}
+    
+    async def _process_entities_for_memory(
+        self,
+        memory_id: str,
+        content: str,
+        user_id: str,
+        project_id: str,
+    ) -> list[EntityRef]:
+        """
+        Extract entities from content and link to memory.
+        
+        Steps:
+        1. Extract entities and relationships
+        2. Match each entity against existing ones
+        3. Create new entities or add aliases
+        4. Store relationships
+        5. Link memory to entities
+        """
+        try:
+            # Step 1: Extract entities
+            extraction = await self.entity_extractor.extract(content)
+            
+            if not extraction.entities:
+                return []
+            
+            log.debug(
+                "processing_entities",
+                memory_id=memory_id,
+                entity_count=len(extraction.entities),
+            )
+            
+            entity_refs: list[EntityRef] = []
+            entity_id_map: dict[str, str] = {}  # name -> entity_id
+            
+            # Step 2 & 3: Match or create entities
+            for extracted in extraction.entities:
+                # Get existing entities for matching
+                existing = await self._get_existing_entities(user_id, project_id, extracted.type)
+                
+                # Try to match
+                match_result = await self.entity_matcher.match(extracted, existing)
+                
+                if match_result.match and match_result.matched_entity_id:
+                    # Matched existing entity - add alias if suggested
+                    entity_id = match_result.matched_entity_id
+                    if match_result.suggested_aliases:
+                        await self._add_entity_aliases(
+                            entity_id, 
+                            match_result.suggested_aliases
+                        )
+                    log.debug(
+                        "entity_matched",
+                        name=extracted.name,
+                        matched_id=entity_id,
+                    )
+                else:
+                    # Create new entity
+                    entity = Entity(
+                        canonical_name=extracted.name,
+                        type=extracted.type.lower(),
+                        aliases=extracted.aliases,
+                        attributes={"description": extracted.description},
+                        confidence=1.0,
+                    )
+                    await self.db.save_entity(entity, user_id, project_id)
+                    entity_id = entity.id
+                    log.debug("entity_created", name=extracted.name, id=entity_id)
+                
+                entity_id_map[extracted.name] = entity_id
+                entity_refs.append(EntityRef(
+                    id=entity_id, 
+                    canonical_name=extracted.name,
+                    type=extracted.type.lower(),
+                    confidence=1.0,
+                ))
+            
+            # Step 4: Store relationships (only between valid entities)
+            for rel in extraction.relationships:
+                subject_id = entity_id_map.get(rel.subject)
+                object_id = entity_id_map.get(rel.object)
+                
+                # Only save relationships where both ends are entities
+                # Skip value relationships like ROLE -> "CEO"
+                if subject_id and object_id:
+                    relationship = Relationship(
+                        from_entity_id=subject_id,
+                        to_entity_id=object_id,
+                        type=rel.predicate.lower(),
+                        properties={},
+                        confidence=1.0,
+                        source_memory_id=memory_id,
+                    )
+                    try:
+                        await self.db.save_relationship(relationship)
+                    except Exception as e:
+                        log.warning("relationship_save_failed", error=str(e))
+            
+            # Step 5: Link memory to entities
+            for entity_id in entity_id_map.values():
+                await self.db.link_memory_to_entity(memory_id, entity_id)
+            
+            log.info(
+                "entities_processed",
+                memory_id=memory_id,
+                entities_linked=len(entity_id_map),
+            )
+            
+            return entity_refs
+            
+        except Exception as e:
+            log.error("entity_processing_error", error=str(e), memory_id=memory_id)
+            return []
+    
+    async def _get_existing_entities(
+        self,
+        user_id: str,
+        project_id: str,
+        entity_type: str,
+    ) -> list[ExistingEntity]:
+        """Get existing entities for matching."""
+        entities = await self.db.get_entities_by_type(user_id, project_id, entity_type)
+        return [
+            ExistingEntity(
+                id=e.id,
+                name=e.canonical_name,
+                type=e.type,
+                description=e.attributes.get("description", ""),
+                aliases=e.aliases,
+            )
+            for e in entities
+        ]
+    
+    async def _add_entity_aliases(self, entity_id: str, aliases: list[str]) -> None:
+        """Add aliases to an existing entity."""
+        entity = await self.db.get_entity(entity_id)
+        if entity:
+            new_aliases = list(set(entity.aliases + aliases))
+            await self.db.update_entity_aliases(entity_id, new_aliases)
 
     def _simple_fact_extraction(self, content: str) -> list[str]:
         """
@@ -304,8 +469,9 @@ class MemoryService:
         Steps:
         1. Embed the query
         2. Semantic search in Qdrant
-        3. Synthesize context from results
-        4. Track access (for temporal decay)
+        3. Entity-aware retrieval (find memories via entity graph)
+        4. Combine and deduplicate results
+        5. Synthesize context from results
         """
         log.info(
             "recalling_memories",
@@ -317,7 +483,7 @@ class MemoryService:
         # Embed query
         query_vector = await self.embeddings.embed(request.query)
 
-        # Search Qdrant
+        # Search Qdrant (semantic search)
         results = await self.qdrant.search(
             query_vector=query_vector,
             user_id=request.user_id,
@@ -325,50 +491,92 @@ class MemoryService:
             limit=request.limit,
             score_threshold=request.threshold,
         )
+        
+        # Entity-aware retrieval (Week 5)
+        entity_memory_ids: set[str] = set()
+        matched_entities: list[EntityRef] = []
+        
+        if self.settings.enable_entity_resolution:
+            try:
+                entity_results = await self._find_memories_by_entity(
+                    query=request.query,
+                    user_id=request.user_id,
+                    project_id=request.project_id,
+                )
+                entity_memory_ids = entity_results["memory_ids"]
+                matched_entities = entity_results["entities"]
+                
+                log.debug(
+                    "entity_recall",
+                    matched_entities=len(matched_entities),
+                    memory_ids=len(entity_memory_ids),
+                )
+            except Exception as e:
+                log.warning("entity_recall_failed", error=str(e))
 
-        if not results:
+        if not results and not entity_memory_ids:
             log.info("recall_no_results", user_id=request.user_id)
             return RecallResponse(context="", memories=[], entities=[])
 
-        # Build recall results
+        # Track seen memory IDs to avoid duplicates
+        seen_memory_ids: set[str] = set()
+        
+        # Build recall results from semantic search
         memories: list[RecallResult] = []
-        all_entities: list[EntityRef] = []
+        all_entities: list[EntityRef] = list(matched_entities)  # Start with matched entities
         context_parts: list[str] = []
 
         for memory_id, score, payload in results:
+            memory_id_str = str(memory_id)
+            if memory_id_str in seen_memory_ids:
+                continue
+            seen_memory_ids.add(memory_id_str)
+            
             content = payload.get("content", "")
             created_at_str = payload.get("created_at", datetime.utcnow().isoformat())
 
             memories.append(
                 RecallResult(
-                    id=str(memory_id),
+                    id=memory_id_str,
                     relevance=score,
                     content=content,
                     created_at=datetime.fromisoformat(created_at_str),
                 )
             )
-
-            # Add to context
             context_parts.append(content)
+            await self.db.update_access(memory_id_str)
+        
+        # Add entity-linked memories that weren't in semantic results
+        for entity_mem_id in entity_memory_ids:
+            if entity_mem_id in seen_memory_ids:
+                continue
+            seen_memory_ids.add(entity_mem_id)
+            
+            # Fetch memory from database
+            mem_data = await self.db.get_memory(entity_mem_id)
+            if mem_data:
+                memories.append(
+                    RecallResult(
+                        id=entity_mem_id,
+                        relevance=0.5,  # Default relevance for entity matches
+                        content=mem_data.get("content", ""),
+                        created_at=datetime.fromisoformat(
+                            mem_data.get("created_at", datetime.utcnow().isoformat())
+                        ),
+                    )
+                )
+                context_parts.append(mem_data.get("content", ""))
+                await self.db.update_access(entity_mem_id)
 
-            # Collect entities
-            entity_dicts = payload.get("entities", [])
-            for ed in entity_dicts:
-                if isinstance(ed, dict):
-                    all_entities.append(EntityRef(**ed))
-
-            # Update access tracking
-            await self.db.update_access(str(memory_id))
-
-        # Synthesize context (simple join for now, TODO: LLM synthesis in Week 6)
+        # Synthesize context
         context = " ".join(context_parts)
 
         # Deduplicate entities by ID
-        seen_ids = set()
-        unique_entities = []
+        seen_entity_ids: set[str] = set()
+        unique_entities: list[EntityRef] = []
         for entity in all_entities:
-            if entity.id not in seen_ids:
-                seen_ids.add(entity.id)
+            if entity.id not in seen_entity_ids:
+                seen_entity_ids.add(entity.id)
                 unique_entities.append(entity)
 
         log.info(
@@ -383,6 +591,62 @@ class MemoryService:
             memories=memories,
             entities=unique_entities,
         )
+    
+    async def _find_memories_by_entity(
+        self,
+        query: str,
+        user_id: str,
+        project_id: str,
+    ) -> dict[str, Any]:
+        """
+        Find memories linked to entities mentioned in the query.
+        
+        Steps:
+        1. Extract entity mentions from query
+        2. Match to existing entities (including aliases)
+        3. Get all memories linked to matched entities
+        
+        Returns:
+            Dict with "memory_ids" (set) and "entities" (list of EntityRef)
+        """
+        # Simple entity matching: check if any entity name/alias appears in query
+        all_entities = await self.db.get_user_entities(user_id, project_id)
+        
+        matched_entities: list[EntityRef] = []
+        memory_ids: set[str] = set()
+        query_lower = query.lower()
+        
+        for entity in all_entities:
+            # Check canonical name
+            if entity.canonical_name.lower() in query_lower:
+                matched_entities.append(EntityRef(
+                    id=entity.id,
+                    canonical_name=entity.canonical_name,
+                    type=entity.type,
+                    confidence=1.0,
+                ))
+                # Get linked memories
+                linked = await self.db.get_memories_by_entity(entity.id)
+                memory_ids.update(linked)
+                continue
+            
+            # Check aliases
+            for alias in entity.aliases:
+                if alias.lower() in query_lower:
+                    matched_entities.append(EntityRef(
+                        id=entity.id,
+                        canonical_name=entity.canonical_name,
+                        type=entity.type,
+                        confidence=0.9,
+                    ))
+                    linked = await self.db.get_memories_by_entity(entity.id)
+                    memory_ids.update(linked)
+                    break
+        
+        return {
+            "memory_ids": memory_ids,
+            "entities": matched_entities,
+        }
 
     # -----------------------------------------------------------------------
     # Forget

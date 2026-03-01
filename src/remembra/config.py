@@ -65,9 +65,20 @@ class Settings(BaseSettings):
     )
 
     # -----------------------------------------------------------------------
+    # Entity Resolution (Week 5)
+    # -----------------------------------------------------------------------
+    enable_entity_resolution: bool = Field(
+        True,
+        description="Enable entity extraction and resolution"
+    )
+    entity_matching_threshold: float = Field(
+        0.6,
+        description="Minimum confidence for entity matching"
+    )
+
+    # -----------------------------------------------------------------------
     # Features
     # -----------------------------------------------------------------------
-    enable_entity_resolution: bool = True
     enable_temporal_decay: bool = True
     default_ttl_days: int | None = None
     max_memories_per_recall: int = 10

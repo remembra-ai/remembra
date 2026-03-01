@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-03-01
+
+### Added
+- **Entity Extraction** - LLM extracts PERSON, ORG, LOCATION entities from memories
+- **Entity Matching** - Resolves aliases ("Mr. Kim" → "David Kim", "NYC" → "New York City")
+- **Alias Management** - Automatic alias tracking and resolution
+- **Relationship Storage** - Stores entity relationships (WORKS_AT, SPOUSE_OF, KNOWS, etc.)
+- **Memory-Entity Links** - Bidirectional links between memories and entities
+- **Entity-Aware Recall** - Find memories via entity graph traversal
+- New `entities.py` module for entity extraction
+- New `matcher.py` module for entity resolution
+- Entity resolution documentation
+
+### Changed
+- Memory storage now extracts and links entities automatically
+- Recall considers entity relationships for improved relevance
+
 ## [0.2.0] - 2026-03-01
 
 ### Added

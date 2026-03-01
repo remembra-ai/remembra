@@ -284,11 +284,11 @@ class Database:
 
     async def get_user_entities(
         self, user_id: str, project_id: str = "default"
-    ) -> list[EntityRef]:
-        """Get all entities for a user as lightweight refs."""
+    ) -> list[Entity]:
+        """Get all entities for a user with full details including aliases."""
         cursor = await self.conn.execute(
             """
-            SELECT id, canonical_name, type, confidence 
+            SELECT id, canonical_name, type, aliases, attributes, confidence 
             FROM entities 
             WHERE user_id = ? AND project_id = ?
             ORDER BY updated_at DESC
@@ -298,10 +298,12 @@ class Database:
         rows = await cursor.fetchall()
 
         return [
-            EntityRef(
+            Entity(
                 id=row["id"],
                 canonical_name=row["canonical_name"],
                 type=row["type"],
+                aliases=json.loads(row["aliases"] or "[]"),
+                attributes=json.loads(row["attributes"] or "{}"),
                 confidence=row["confidence"],
             )
             for row in rows
@@ -314,6 +316,78 @@ class Database:
         )
         await self.conn.commit()
         return cursor.rowcount
+    
+    async def get_entity(self, entity_id: str) -> Entity | None:
+        """Get entity by ID."""
+        cursor = await self.conn.execute(
+            "SELECT * FROM entities WHERE id = ?", (entity_id,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return Entity(
+            id=row["id"],
+            canonical_name=row["canonical_name"],
+            type=row["type"],
+            aliases=json.loads(row["aliases"] or "[]"),
+            attributes=json.loads(row["attributes"] or "{}"),
+            confidence=row["confidence"],
+        )
+    
+    async def get_entities_by_type(
+        self, 
+        user_id: str, 
+        project_id: str, 
+        entity_type: str
+    ) -> list[Entity]:
+        """Get all entities of a specific type for a user/project."""
+        cursor = await self.conn.execute(
+            """
+            SELECT * FROM entities 
+            WHERE user_id = ? AND project_id = ? AND LOWER(type) = LOWER(?)
+            """,
+            (user_id, project_id, entity_type),
+        )
+        rows = await cursor.fetchall()
+        return [
+            Entity(
+                id=row["id"],
+                canonical_name=row["canonical_name"],
+                type=row["type"],
+                aliases=json.loads(row["aliases"] or "[]"),
+                attributes=json.loads(row["attributes"] or "{}"),
+                confidence=row["confidence"],
+            )
+            for row in rows
+        ]
+    
+    async def update_entity_aliases(self, entity_id: str, aliases: list[str]) -> None:
+        """Update aliases for an entity."""
+        await self.conn.execute(
+            "UPDATE entities SET aliases = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(aliases), datetime.utcnow().isoformat(), entity_id),
+        )
+        await self.conn.commit()
+    
+    async def link_memory_to_entity(self, memory_id: str, entity_id: str) -> None:
+        """Link a memory to an entity."""
+        await self.conn.execute(
+            """
+            INSERT OR IGNORE INTO memory_entities (memory_id, entity_id, confidence)
+            VALUES (?, ?, 1.0)
+            """,
+            (memory_id, entity_id),
+        )
+        await self.conn.commit()
+    
+    async def get_memories_by_entity(self, entity_id: str) -> list[str]:
+        """Get all memory IDs linked to an entity."""
+        cursor = await self.conn.execute(
+            "SELECT memory_id FROM memory_entities WHERE entity_id = ?",
+            (entity_id,),
+        )
+        rows = await cursor.fetchall()
+        return [row["memory_id"] for row in rows]
 
     # -----------------------------------------------------------------------
     # Relationship operations
