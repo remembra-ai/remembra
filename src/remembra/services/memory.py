@@ -19,6 +19,12 @@ from remembra.models.memory import (
 from remembra.storage.database import Database
 from remembra.storage.embeddings import EmbeddingService
 from remembra.storage.qdrant import QdrantStore
+from remembra.extraction.extractor import FactExtractor, ExtractionConfig
+from remembra.extraction.consolidator import (
+    MemoryConsolidator,
+    ConsolidationAction,
+    ExistingMemory,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -82,6 +88,19 @@ class MemoryService:
         self.qdrant = qdrant
         self.db = db
         self.embeddings = embeddings
+        
+        # Initialize intelligent extraction (Week 4)
+        extraction_config = ExtractionConfig(
+            enabled=settings.smart_extraction_enabled,
+            model=settings.extraction_model,
+            api_key=settings.openai_api_key,
+        )
+        self.extractor = FactExtractor(extraction_config)
+        self.consolidator = MemoryConsolidator(
+            model=settings.extraction_model,
+            api_key=settings.openai_api_key,
+            similarity_threshold=settings.consolidation_threshold,
+        )
 
     # -----------------------------------------------------------------------
     # Store
@@ -89,12 +108,12 @@ class MemoryService:
 
     async def store(self, request: StoreRequest) -> StoreResponse:
         """
-        Store a new memory.
+        Store a new memory with intelligent extraction and consolidation.
         
         Steps:
-        1. Extract facts from content (TODO: LLM-powered in Week 4)
-        2. Generate embedding
-        3. Resolve entities (TODO: Week 5)
+        1. Extract atomic facts from content (LLM-powered)
+        2. For each fact, check for similar existing memories
+        3. Consolidate: ADD new, UPDATE existing, or skip duplicates
         4. Store in Qdrant (vector) + SQLite (metadata)
         """
         log.info(
@@ -104,7 +123,6 @@ class MemoryService:
             content_length=len(request.content),
         )
 
-        # Create memory object
         now = datetime.utcnow()
         
         # Calculate expiration if TTL provided
@@ -116,30 +134,125 @@ class MemoryService:
         elif self.settings.default_ttl_days:
             expires_at = now + timedelta(days=self.settings.default_ttl_days)
 
-        # Generate embedding
-        embedding = await self.embeddings.embed(request.content)
+        # Step 1: Extract atomic facts using LLM
+        extracted_facts = await self.extractor.extract(request.content)
+        
+        if not extracted_facts:
+            # If no facts extracted, store raw content
+            extracted_facts = [request.content.strip()]
+        
+        log.debug("facts_extracted", count=len(extracted_facts))
+        
+        # Step 2 & 3: Process each fact with consolidation
+        stored_facts: list[str] = []
+        memory_id = None  # Track primary memory ID
+        
+        for fact in extracted_facts:
+            fact_result = await self._store_single_fact(
+                fact=fact,
+                user_id=request.user_id,
+                project_id=request.project_id,
+                metadata=request.metadata,
+                expires_at=expires_at,
+                now=now,
+            )
+            if fact_result:
+                stored_facts.append(fact_result["content"])
+                if memory_id is None:
+                    memory_id = fact_result["id"]
+        
+        # If nothing stored (all NOOPs), return minimal response
+        if not memory_id:
+            log.info("all_facts_skipped", user_id=request.user_id)
+            return StoreResponse(
+                id="",
+                extracted_facts=extracted_facts,
+                entities=[],
+            )
 
-        # For now, simple fact extraction (TODO: LLM-powered in Week 4)
-        extracted_facts = self._simple_fact_extraction(request.content)
+        log.info(
+            "memory_stored",
+            memory_id=memory_id,
+            facts_extracted=len(extracted_facts),
+            facts_stored=len(stored_facts),
+        )
 
-        # Create memory
-        memory = Memory(
-            user_id=request.user_id,
-            project_id=request.project_id,
-            content=request.content,
-            extracted_facts=extracted_facts,
+        return StoreResponse(
+            id=memory_id,
+            extracted_facts=stored_facts,
             entities=[],  # TODO: Entity extraction in Week 5
+        )
+    
+    async def _store_single_fact(
+        self,
+        fact: str,
+        user_id: str,
+        project_id: str,
+        metadata: dict[str, Any],
+        expires_at: datetime | None,
+        now: datetime,
+    ) -> dict[str, Any] | None:
+        """
+        Store a single fact with consolidation logic.
+        
+        Returns dict with id and content if stored, None if skipped.
+        """
+        # Generate embedding for this fact
+        embedding = await self.embeddings.embed(fact)
+        
+        # Search for similar existing memories
+        similar = await self.qdrant.search(
+            query_vector=embedding,
+            user_id=user_id,
+            project_id=project_id,
+            limit=5,
+            score_threshold=0.4,  # Lower threshold to find candidates
+        )
+        
+        # Convert to ExistingMemory objects
+        existing_memories = [
+            ExistingMemory(id=str(mid), content=payload.get("content", ""), score=score)
+            for mid, score, payload in similar
+        ]
+        
+        # Consolidate: decide ADD/UPDATE/DELETE/NOOP
+        result = await self.consolidator.consolidate(fact, existing_memories)
+        
+        if result.action == ConsolidationAction.NOOP:
+            log.debug("fact_skipped_noop", fact=fact[:50])
+            return None
+        
+        if result.action == ConsolidationAction.DELETE and result.target_id:
+            # Delete old memory, then add new
+            await self.qdrant.delete(result.target_id)
+            await self.db.delete_memory(result.target_id)
+            log.debug("old_memory_deleted", memory_id=result.target_id)
+        
+        if result.action == ConsolidationAction.UPDATE and result.target_id:
+            # Update existing memory with merged content
+            content = result.content or fact
+            # Delete old and insert new (simpler than true update)
+            await self.qdrant.delete(result.target_id)
+            await self.db.delete_memory(result.target_id)
+            log.debug("memory_updated", old_id=result.target_id)
+        else:
+            content = result.content or fact
+        
+        # Create and store the memory
+        memory = Memory(
+            user_id=user_id,
+            project_id=project_id,
+            content=content,
+            extracted_facts=[content],
+            entities=[],
             embedding=embedding,
-            metadata=request.metadata,
+            metadata=metadata,
             created_at=now,
             updated_at=now,
             expires_at=expires_at,
         )
-
-        # Store in Qdrant (vectors)
+        
         await self.qdrant.upsert(memory)
-
-        # Store metadata in SQLite
         await self.db.save_memory_metadata(
             memory_id=memory.id,
             user_id=memory.user_id,
@@ -150,14 +263,8 @@ class MemoryService:
             created_at=memory.created_at,
             expires_at=memory.expires_at,
         )
-
-        log.info("memory_stored", memory_id=memory.id, facts_count=len(extracted_facts))
-
-        return StoreResponse(
-            id=memory.id,
-            extracted_facts=extracted_facts,
-            entities=memory.entities,
-        )
+        
+        return {"id": memory.id, "content": content}
 
     def _simple_fact_extraction(self, content: str) -> list[str]:
         """

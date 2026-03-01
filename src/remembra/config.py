@@ -49,6 +49,22 @@ class Settings(BaseSettings):
     llm_base_url: str | None = None
 
     # -----------------------------------------------------------------------
+    # Intelligent Extraction (Week 4)
+    # -----------------------------------------------------------------------
+    smart_extraction_enabled: bool = Field(
+        True, 
+        description="Enable LLM-powered fact extraction"
+    )
+    extraction_model: str = Field(
+        "gpt-4o-mini",
+        description="Model for fact extraction and consolidation"
+    )
+    consolidation_threshold: float = Field(
+        0.5,
+        description="Similarity threshold for memory consolidation"
+    )
+
+    # -----------------------------------------------------------------------
     # Features
     # -----------------------------------------------------------------------
     enable_entity_resolution: bool = True
