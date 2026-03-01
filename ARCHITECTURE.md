@@ -1,5 +1,45 @@
 # Remembra - Technical Architecture
 
+## Competitive Research (March 2026)
+
+### Mem0 Analysis (Main Competitor)
+Based on their arxiv paper (2504.19413) and production system:
+
+| Metric | Mem0 vs Alternatives |
+|--------|---------------------|
+| Accuracy | **+26%** vs OpenAI Memory (LOCOMO benchmark) |
+| Latency | **91% faster** than full-context (p95) |
+| Token Cost | **90% cheaper** than full-context |
+| Graph Memory | **+2%** accuracy boost over base |
+
+**Their Architecture:**
+1. **Multi-Level Memory** - User, Session, Agent state
+2. **Graph Memory** - Entity relationships via graph DB
+3. **Rerankers** - Post-retrieval relevance scoring
+4. **Dynamic Extraction** - LLM extracts salient info automatically
+5. **Memory Consolidation** - Deduplication and merging
+
+**Query Types (LOCOMO Benchmark):**
+- Single-hop (direct recall)
+- Temporal (time-based queries)
+- Multi-hop (reasoning across memories)
+- Open-domain (general knowledge)
+
+**Their Weaknesses (Our Opportunity):**
+- Self-hosting docs are poor
+- Pricing jumps from $19 → $249 (no middle tier)
+- Enterprise-first, not developer-first
+- Complex deployment requirements
+
+### Our Differentiators
+1. **Self-host in 5 minutes** - Single `docker run` command
+2. **Fair pricing** - $0 → $29 → $99 (not $19 → $249)
+3. **Developer-first docs** - Actually usable
+4. **MIT license** - True open source
+5. **Lightweight** - Runs on a $5/mo VPS
+
+---
+
 ## System Overview
 
 ```
@@ -14,12 +54,12 @@
           ▼                ▼                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                        API LAYER (FastAPI)                       │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  Authentication  │  Rate Limiting  │  Request Logging   │    │
-│  └─────────────────────────────────────────────────────────┘    │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  /store  │  /recall  │  /update  │  /forget  │  /search │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  Authentication  │  Rate Limiting  │  Request Logging       ││
+│  └─────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  /store  │  /recall  │  /update  │  /forget  │  /search     ││
+│  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -29,9 +69,9 @@
 │  │   Extraction    │  │ Entity Resolution│  │   Retrieval     │  │
 │  │   Engine        │  │    Engine        │  │   Engine        │  │
 │  │                 │  │                  │  │                 │  │
-│  │ • Parse text    │  │ • Extract entities│ │ • Semantic search│ │
-│  │ • Extract facts │  │ • Match/link     │  │ • Graph traversal│ │
-│  │ • Categorize    │  │ • Confidence score│ │ • Ranking        │  │
+│  │ • LLM parsing   │  │ • Extract entities│ │ • Semantic search│ │
+│  │ • Fact extract  │  │ • Match/link     │  │ • Graph traversal│ │
+│  │ • Categorize    │  │ • Confidence     │  │ • Reranking ★   │  │
 │  └────────┬────────┘  └────────┬─────────┘  └────────┬────────┘  │
 └───────────┼────────────────────┼─────────────────────┼──────────┘
             │                    │                     │
@@ -40,23 +80,62 @@
 │                      STORAGE LAYER                               │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
 │  │   VECTOR STORE  │  │   GRAPH STORE   │  │ RELATIONAL STORE│  │
-│  │     (Qdrant)    │  │ (SQLite/Neo4j)  │  │   (PostgreSQL)  │  │
+│  │     (Qdrant)    │  │    (SQLite)     │  │   (SQLite)      │  │
 │  │                 │  │                 │  │                 │  │
 │  │ • Embeddings    │  │ • Entities      │  │ • Users         │  │
 │  │ • Semantic idx  │  │ • Relationships │  │ • Projects      │  │
-│  │ • Similarity    │  │ • Graph queries │  │ • API Keys      │  │
+│  │ • Similarity    │  │ • Graph queries │  │ • Metadata      │  │
 │  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     EMBEDDING LAYER                              │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  OpenAI Ada-002  │  Cohere Embed  │  Ollama (Local)     │    │
-│  │  (Default cloud) │  (Alternative) │  (Self-host)        │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  OpenAI         │  Cohere Embed    │  Ollama (Local)        ││
+│  │  text-embed-3   │  (Alternative)   │  nomic-embed-text      ││
+│  └─────────────────────────────────────────────────────────────┘│
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+---
+
+## Implementation Status
+
+### ✅ Completed (Week 1-2)
+
+| Component | File | Status |
+|-----------|------|--------|
+| FastAPI skeleton | `main.py` | ✅ Done |
+| Config management | `config.py` | ✅ Done |
+| Health checks | `core/health.py` | ✅ Done |
+| Memory models | `models/memory.py` | ✅ Done |
+| Qdrant integration | `storage/qdrant.py` | ✅ Done |
+| SQLite metadata | `storage/database.py` | ✅ Done |
+| Embedding service | `storage/embeddings.py` | ✅ Done |
+| Memory service | `services/memory.py` | ✅ Done |
+| API endpoints | `api/v1/memories.py` | ✅ Done |
+| Docker setup | `docker-compose.yml` | ✅ Done |
+| CI/CD pipeline | `.github/workflows/` | ✅ Done |
+| Test suite | `tests/` | ✅ Passing |
+
+### 🔄 In Progress (Week 3)
+
+| Component | File | Status |
+|-----------|------|--------|
+| Python SDK | `sdk/` | 🔄 Building |
+| PyPI packaging | `pyproject.toml` | 🔄 Next |
+
+### 📋 Planned (Week 4+)
+
+| Component | Priority | Notes |
+|-----------|----------|-------|
+| LLM-powered extraction | HIGH | Replace rule-based |
+| Entity resolution | HIGH | Graph memory (+2% accuracy) |
+| Reranking | MEDIUM | Post-retrieval scoring |
+| Memory consolidation | MEDIUM | Dedup/merge |
+| Temporal queries | MEDIUM | Time-aware recall |
+| Context synthesis | MEDIUM | LLM-powered summarization |
 
 ---
 
@@ -65,13 +144,13 @@
 ### Memory Object
 ```python
 class Memory:
-    id: str                    # UUID
+    id: str                    # ULID
     user_id: str               # Owner
-    project_id: str            # Project scope
+    project_id: str            # Project scope (default: "default")
     content: str               # Original text
     extracted_facts: List[str] # Parsed facts
-    entities: List[Entity]     # Linked entities
-    embedding: List[float]     # Vector representation
+    entities: List[EntityRef]  # Linked entities
+    embedding: List[float]     # Vector representation (excluded from API)
     metadata: dict             # Custom metadata
     created_at: datetime
     updated_at: datetime
@@ -83,10 +162,10 @@ class Memory:
 ### Entity Object
 ```python
 class Entity:
-    id: str                    # UUID
+    id: str                    # ULID
     canonical_name: str        # "Adam Smith"
     aliases: List[str]         # ["Adam", "Mr. Smith", "husband"]
-    type: str                  # "person", "company", "place"
+    type: str                  # "person", "company", "place", "concept"
     attributes: dict           # {"role": "CTO", "company": "Acme"}
     relationships: List[Rel]   # Links to other entities
     confidence: float          # 0.0 - 1.0
@@ -98,12 +177,12 @@ class Entity:
 ```python
 class Relationship:
     id: str
-    from_entity: str           # Entity ID
-    to_entity: str             # Entity ID
+    from_entity_id: str        # Entity ID
+    to_entity_id: str          # Entity ID
     type: str                  # "works_at", "knows", "married_to"
     properties: dict
     confidence: float
-    source_memory: str         # Which memory created this
+    source_memory_id: str      # Which memory created this
 ```
 
 ---
@@ -113,27 +192,26 @@ class Relationship:
 ### Store Memory
 ```http
 POST /api/v1/memories
-Authorization: Bearer <api_key>
 Content-Type: application/json
 
 {
   "user_id": "user_123",
   "content": "Had a meeting with John from Acme Corp. He's interested in our product.",
+  "project_id": "my_app",
   "metadata": {"source": "meeting_notes"},
   "ttl": "30d"
 }
 
-Response:
+Response (201 Created):
 {
-  "id": "mem_abc123",
+  "id": "01HQXYZ...",
   "extracted_facts": [
-    "User had a meeting with John",
-    "John works at Acme Corp",
-    "John is interested in our product"
+    "User had a meeting with John.",
+    "John works at Acme Corp.",
+    "John is interested in our product."
   ],
   "entities": [
-    {"name": "John", "type": "person", "confidence": 0.95},
-    {"name": "Acme Corp", "type": "company", "confidence": 0.98}
+    {"id": "...", "canonical_name": "John", "type": "person", "confidence": 0.95}
   ]
 }
 ```
@@ -141,50 +219,48 @@ Response:
 ### Recall Memories
 ```http
 POST /api/v1/memories/recall
-Authorization: Bearer <api_key>
 Content-Type: application/json
 
 {
   "user_id": "user_123",
   "query": "What do I know about John?",
+  "project_id": "my_app",
   "limit": 5,
   "threshold": 0.7
 }
 
-Response:
+Response (200 OK):
 {
-  "context": "John works at Acme Corp and is interested in your product. You had a meeting with him recently.",
+  "context": "John works at Acme Corp and is interested in your product.",
   "memories": [
-    {"id": "mem_abc123", "relevance": 0.92, "content": "..."}
+    {"id": "01HQXYZ...", "relevance": 0.92, "content": "...", "created_at": "..."}
   ],
   "entities": [
-    {"name": "John", "type": "person", "facts": ["works at Acme Corp", "interested in product"]}
+    {"id": "...", "canonical_name": "John", "type": "person", "confidence": 0.95}
   ]
 }
 ```
 
-### Update Memory
+### Get Memory by ID
 ```http
-PATCH /api/v1/memories/{memory_id}
+GET /api/v1/memories/{memory_id}
 
+Response (200 OK):
 {
-  "content": "John got promoted to CEO of Acme Corp"
-}
-
-Response:
-{
-  "id": "mem_abc123",
-  "updated_entities": [
-    {"name": "John", "attribute_changed": "role", "old": "unknown", "new": "CEO"}
-  ]
+  "id": "01HQXYZ...",
+  "content": "...",
+  "user_id": "user_123",
+  "created_at": "..."
 }
 ```
 
 ### Forget (Delete)
 ```http
-DELETE /api/v1/memories?entity=John
+DELETE /api/v1/memories?user_id=user_123
+DELETE /api/v1/memories?memory_id=01HQXYZ...
+DELETE /api/v1/memories?entity=John  (coming Week 5)
 
-Response:
+Response (200 OK):
 {
   "deleted_memories": 5,
   "deleted_entities": 1,
@@ -194,158 +270,134 @@ Response:
 
 ---
 
-## SDK Usage Examples
+## Python SDK (Week 3)
 
-### Python SDK
 ```python
 from remembra import Memory
 
-# Initialize
+# Initialize (self-hosted)
 memory = Memory(
-    api_key="rem_xxx",           # For cloud
-    base_url="http://localhost:8787",  # For self-host
+    base_url="http://localhost:8787",
     user_id="user_123",
     project="my_app"
 )
 
-# Store with automatic extraction
-memory.store("""
-    Just finished call with Sarah. She's the new VP of Engineering 
-    at TechCorp. Used to work with John at StartupXYZ. Interested 
-    in enterprise plan, budget around $50k/year. Follow up next Tuesday.
-""")
+# Initialize (cloud - future)
+memory = Memory(
+    api_key="rem_xxx",
+    user_id="user_123"
+)
 
-# Recall with natural query
-context = memory.recall("Who should I follow up with?")
-# Returns: "Sarah from TechCorp. She's VP of Engineering, interested 
-#           in enterprise plan (~$50k budget). Follow up Tuesday."
+# Store
+result = memory.store("John is the CTO at Acme Corp")
+print(result.id)  # "01HQXYZ..."
+print(result.extracted_facts)  # ["John is the CTO at Acme Corp."]
 
-# Get specific entity
-john = memory.get_entity("John")
-print(john.relationships)
-# [{"type": "worked_with", "entity": "Sarah", "context": "at StartupXYZ"}]
+# Recall
+result = memory.recall("Who is John?")
+print(result.context)  # "John is the CTO at Acme Corp."
+print(result.memories)  # [Memory(...)]
 
-# Forget everything about a person (GDPR)
-memory.forget(entity="Sarah")
-```
-
-### With LangChain
-```python
-from remembra.integrations import RemembraMemory
-from langchain.chat_models import ChatOpenAI
-from langchain.chains import ConversationChain
-
-memory = RemembraMemory(user_id="user_123")
-llm = ChatOpenAI()
-
-chain = ConversationChain(llm=llm, memory=memory)
-chain.run("My name is John and I work at Acme Corp")
-# Memory automatically stored
-
-chain.run("What's my name?")
-# Memory automatically recalled
-# Response: "Your name is John and you work at Acme Corp"
+# Forget
+memory.forget(user_id="user_123")  # Delete all
+memory.forget(memory_id="01HQXYZ...")  # Delete specific
 ```
 
 ---
 
 ## Self-Hosting
 
-### Minimal (SQLite, Local Embeddings)
+### Minimal (One Command)
 ```bash
-docker run -d \
-  -p 8787:8787 \
-  -v remembra_data:/data \
+docker run -d -p 8787:8787 \
+  -e REMEMBRA_OPENAI_API_KEY=sk-xxx \
   remembra/remembra:latest
 ```
 
-### Production (PostgreSQL, Qdrant)
-```yaml
-# docker-compose.yml
-version: '3.8'
-services:
-  remembra:
-    image: remembra/remembra:latest
-    ports:
-      - "8787:8787"
-    environment:
-      - DATABASE_URL=postgresql://user:pass@postgres:5432/remembra
-      - QDRANT_URL=http://qdrant:6333
-      - OPENAI_API_KEY=sk-xxx  # Or use local embeddings
-    depends_on:
-      - postgres
-      - qdrant
-  
-  postgres:
-    image: postgres:15
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    environment:
-      - POSTGRES_PASSWORD=pass
-      - POSTGRES_DB=remembra
-  
-  qdrant:
-    image: qdrant/qdrant
-    volumes:
-      - qdrant_data:/qdrant/storage
+### With Persistent Storage
+```bash
+docker run -d -p 8787:8787 \
+  -v remembra_data:/app/data \
+  -e REMEMBRA_OPENAI_API_KEY=sk-xxx \
+  remembra/remembra:latest
+```
 
-volumes:
-  pg_data:
-  qdrant_data:
+### Development (with Qdrant)
+```bash
+docker-compose up -d
 ```
 
 ---
 
-## Configuration
+## Configuration (Environment Variables)
 
-```python
-# remembra.config.py (or environment variables)
-
-REMEMBRA_CONFIG = {
-    # Storage
-    "database_url": "sqlite:///remembra.db",  # or postgresql://...
-    "vector_store": "qdrant",  # or "memory" for testing
-    "qdrant_url": "http://localhost:6333",
-    
-    # Embeddings
-    "embedding_provider": "openai",  # or "ollama", "cohere"
-    "embedding_model": "text-embedding-ada-002",
-    "ollama_url": "http://localhost:11434",  # for local
-    
-    # LLM (for extraction)
-    "llm_provider": "openai",
-    "llm_model": "gpt-4o-mini",
-    
-    # Features
-    "enable_entity_resolution": True,
-    "enable_temporal_decay": True,
-    "default_ttl": None,  # or "30d", "1y"
-    
-    # Performance
-    "max_memories_per_recall": 10,
-    "embedding_batch_size": 100,
-    "cache_embeddings": True,
-}
-```
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REMEMBRA_HOST` | `0.0.0.0` | Bind address |
+| `REMEMBRA_PORT` | `8787` | API port |
+| `REMEMBRA_DEBUG` | `false` | Debug mode |
+| `REMEMBRA_LOG_LEVEL` | `info` | Log level |
+| `REMEMBRA_QDRANT_URL` | `http://qdrant:6333` | Qdrant address |
+| `REMEMBRA_DATABASE_URL` | `sqlite:///remembra.db` | Metadata DB |
+| `REMEMBRA_EMBEDDING_PROVIDER` | `openai` | openai/ollama/cohere |
+| `REMEMBRA_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
+| `REMEMBRA_OPENAI_API_KEY` | - | OpenAI API key |
+| `REMEMBRA_OLLAMA_URL` | `http://localhost:11434` | Ollama address |
+| `REMEMBRA_LLM_MODEL` | `gpt-4o-mini` | LLM for extraction |
 
 ---
 
 ## Performance Targets
 
-| Metric | Target | Notes |
-|--------|--------|-------|
-| Store latency | <500ms | Including embedding |
-| Recall latency | <200ms | Semantic search |
-| Throughput | 100 req/s | Single instance |
-| Memory limit | 1M memories | Per instance |
-| Embedding size | 1536 dims | Ada-002 |
+| Metric | Target | Current |
+|--------|--------|---------|
+| Store latency | <500ms | TBD |
+| Recall latency | <200ms | TBD |
+| Throughput | 100 req/s | TBD |
+| Memory limit | 1M memories/instance | TBD |
+
+**Benchmark vs Mem0 (Target):**
+- Match or exceed their 91% latency improvement
+- Match or exceed their 90% token savings
+- Competitive accuracy on LOCOMO benchmark
 
 ---
 
-## Security Considerations
+## Security
 
-1. **API Keys**: Hashed storage, never logged
-2. **Data Isolation**: User data strictly separated
-3. **Encryption**: At-rest encryption option
-4. **GDPR**: Complete deletion via forget()
-5. **Audit Log**: Track all access (enterprise)
+1. **API Keys**: Planned for cloud tier
+2. **Data Isolation**: User data strictly scoped by user_id + project_id
+3. **GDPR**: Complete deletion via forget() endpoint
+4. **Self-hosted**: Your data never leaves your infrastructure
+
+---
+
+## File Structure
+
+```
+remembra/
+├── src/remembra/
+│   ├── __init__.py
+│   ├── main.py              # FastAPI app
+│   ├── config.py            # Settings
+│   ├── api/
+│   │   ├── router.py        # API router
+│   │   └── v1/
+│   │       └── memories.py  # Memory endpoints
+│   ├── core/
+│   │   ├── health.py        # Health checks
+│   │   └── logging.py       # Structured logging
+│   ├── models/
+│   │   └── memory.py        # Pydantic models
+│   ├── services/
+│   │   └── memory.py        # Business logic
+│   └── storage/
+│       ├── qdrant.py        # Vector store
+│       ├── database.py      # SQLite metadata
+│       └── embeddings.py    # Embedding providers
+├── tests/
+├── Dockerfile
+├── docker-compose.yml
+├── pyproject.toml
+└── README.md
+```
