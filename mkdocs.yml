@@ -1,0 +1,104 @@
+site_name: Remembra
+site_description: Persistent memory for AI applications. Self-host in 5 minutes.
+site_url: https://remembra.dev
+repo_url: https://github.com/remembra/remembra
+repo_name: remembra/remembra
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: purple
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: purple
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Inter
+    code: Fira Code
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+  icon:
+    repo: fontawesome/brands/github
+  logo: assets/logo.svg
+  favicon: assets/favicon.png
+
+plugins:
+  - search
+  - tags
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/remembra/remembra
+    - icon: fontawesome/brands/discord
+      link: https://discord.gg/remembra
+    - icon: fontawesome/brands/twitter
+      link: https://twitter.com/remembra_ai
+  analytics:
+    provider: google
+    property: G-XXXXXXXXXX
+  version:
+    provider: mike
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Quickstart: getting-started/quickstart.md
+    - Installation: getting-started/installation.md
+    - Docker: getting-started/docker.md
+  - Guides:
+    - Python SDK: guides/python-sdk.md
+    - REST API: guides/rest-api.md
+    - Entity Resolution: guides/entity-resolution.md
+    - Temporal Memory: guides/temporal.md
+    - Security: guides/security.md
+  - Concepts:
+    - How It Works: concepts/how-it-works.md
+    - Memory Model: concepts/memory-model.md
+    - Entity Graph: concepts/entity-graph.md
+  - Examples:
+    - Chatbot Memory: examples/chatbot.md
+    - RAG Pipeline: examples/rag-pipeline.md
+    - Multi-User App: examples/multi-user.md
+  - Reference:
+    - Configuration: reference/configuration.md
+    - API Reference: reference/api.md
+    - Changelog: reference/changelog.md
+
+copyright: Copyright &copy; 2026 DolphyTech

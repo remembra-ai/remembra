@@ -1,0 +1,71 @@
+# =============================================================================
+# Docker Ignore - Remembra
+# =============================================================================
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv
+ENV
+env
+.eggs
+*.egg-info
+*.egg
+dist
+build
+.pytest_cache
+.coverage
+htmlcov
+.mypy_cache
+.ruff_cache
+
+# Node
+node_modules
+dashboard/node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.docker
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Tests
+tests
+.pytest_cache
+
+# Development
+.env
+.env.local
+*.db
+*.sqlite
+coverage.xml
+
+# CI/CD
+.github
+.gitlab-ci.yml

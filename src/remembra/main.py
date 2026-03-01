@@ -178,6 +178,41 @@ def create_app() -> FastAPI:
     # -----------------------------------------------------------------------
     app.include_router(api_router)
 
+    # -----------------------------------------------------------------------
+    # Static files (Dashboard UI)
+    # -----------------------------------------------------------------------
+    static_dir = settings.static_dir
+    if static_dir:
+        from pathlib import Path
+        static_path = Path(static_dir)
+        if static_path.exists() and static_path.is_dir():
+            from fastapi.staticfiles import StaticFiles
+            from fastapi.responses import FileResponse
+            
+            # Serve static files at /static
+            app.mount("/static", StaticFiles(directory=static_path), name="static")
+            
+            # Serve index.html for SPA routes
+            @app.get("/{full_path:path}", include_in_schema=False)
+            async def serve_spa(full_path: str):
+                # Don't intercept API routes
+                if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("redoc") or full_path.startswith("openapi"):
+                    return JSONResponse({"error": "Not found"}, status_code=404)
+                
+                # Try to serve the file directly
+                file_path = static_path / full_path
+                if file_path.exists() and file_path.is_file():
+                    return FileResponse(file_path)
+                
+                # Fall back to index.html for SPA routing
+                index_path = static_path / "index.html"
+                if index_path.exists():
+                    return FileResponse(index_path)
+                
+                return JSONResponse({"error": "Not found"}, status_code=404)
+            
+            log.info("static_files_enabled", path=str(static_path))
+
     return app
 
 

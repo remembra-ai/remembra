@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     port: int = 8787
     debug: bool = False
     log_level: str = "info"
+    static_dir: str | None = Field(
+        None,
+        description="Directory for static files (dashboard UI). Set to enable serving."
+    )
 
     # -----------------------------------------------------------------------
     # Qdrant (vector store)

@@ -1,0 +1,12 @@
+{
+  "name": "remembra-landing",
+  "version": "1.0.0",
+  "description": "Remembra landing page",
+  "scripts": {
+    "dev": "npx serve .",
+    "build": "echo 'Static HTML - no build needed'"
+  },
+  "keywords": ["remembra", "ai", "memory"],
+  "author": "DolphyTech",
+  "license": "MIT"
+}

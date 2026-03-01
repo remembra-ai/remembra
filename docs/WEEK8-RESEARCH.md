@@ -1,309 +1,387 @@
 # Week 8 Research: Temporal Features
 
+**Date:** 2026-03-01
+**Goal:** Implement TTL, memory decay, and historical queries for Remembra
+
+---
+
 ## Executive Summary
 
-Temporal features transform Remembra from a static memory store into a **time-aware knowledge system**. This enables:
-- Memories that automatically expire (TTL)
-- Relevance decay over time (old memories rank lower)
-- Historical queries ("What did I know on Feb 15th?")
-- Fact versioning (track how information changes)
+Temporal features transform Remembra from a static memory store to a **living, evolving knowledge system** that mirrors human cognition. The key insight from research: **good memory systems need to forget effectively** — forgetting isn't a flaw, it's a feature.
 
 ---
 
-## 1. Industry Research
+## 1. TTL (Time-To-Live) Implementation
 
-### Zep/Graphiti (State of the Art)
-- **Paper:** "Zep: A Temporal Knowledge Graph Architecture for Agent Memory" (Jan 2025)
-- **Performance:** 94.8% on DMR benchmark (vs MemGPT's 93.4%)
-- **Key Innovation:** Temporally-aware knowledge graph that maintains historical relationships
-- **Dual-timestamp model:**
-  - `event_time` - When the fact was true
-  - `ingestion_time` - When we learned it
-- **Non-lossy updates:** New info doesn't delete old, creates new version with validity periods
+### Industry Approaches
 
-### CortexGraph (Human-like Forgetting)
-- Implements Ebbinghaus forgetting curves
-- Memories decay unless reinforced through retrieval
-- JSONL for short-term, Markdown for long-term
-- MCP server integration for Claude
+**MongoDB/Document DBs:**
+- TTL implemented via index on date field with `expireAfterSeconds`
+- Automatic cleanup without manual intervention
+- Example: `db.collection.createIndex({createdAt: 1}, {expireAfterSeconds: 86400})`
 
-### Kore (Local Memory with Decay)
-- Half-life based on importance:
-  - Casual notes: 7 days
-  - Critical info: 1 year
-- Auto-importance scoring (local, no LLM needed)
-- Memories fade unless retrieved
+**Vector DB Hygiene (Best Practices):**
+- Store: `expires_at`, `created_at`, `last_seen_at`, `last_accessed_at`
+- Different TTL policies by content type:
+  - Logs: days
+  - Docs: months
+  - User preferences: years (or never)
+  - Session data: hours
 
-### MemoryBank Paper
-- Ebbinghaus forgetting curve: `R = e^(-t/S)`
-  - R = retention
-  - t = time elapsed
-  - S = stability (how well it's learned)
+**Mem0's Approach:**
+- Decay mechanisms that remove irrelevant information over time
+- Priority scoring determines what stays vs. goes
+- Memory consolidation moves important info to long-term storage
+
+### Recommended Implementation for Remembra
+
+```python
+# Memory schema additions
+class Memory:
+    id: str
+    content: str
+    embedding: List[float]
+    
+    # Temporal fields
+    created_at: datetime
+    updated_at: datetime
+    last_accessed_at: datetime
+    access_count: int = 0
+    
+    # TTL config
+    ttl_seconds: Optional[int] = None  # None = never expires
+    expires_at: Optional[datetime] = None
+    
+    # Decay scoring
+    importance_score: float = 0.5  # 0-1 scale
+    decay_rate: float = 0.07  # Based on Ebbinghaus curve
+```
+
+### TTL Strategies
+
+| Memory Type | Default TTL | Rationale |
+|-------------|-------------|-----------|
+| Session context | 24 hours | Temporary, high churn |
+| Conversation summaries | 7 days | Medium retention |
+| User preferences | Never | Core personalization |
+| Facts/entities | 90 days | Refreshed on access |
+| Episodic memories | 30 days | Event-specific |
 
 ---
 
-## 2. Temporal Data Model
+## 2. Memory Decay Algorithm
 
-### Current Schema
-```sql
-memories (
-    id, user_id, project_id, content, 
-    created_at,  -- Only timestamp we have
-    ...
-)
+### The Science: Ebbinghaus Forgetting Curve
+
+**Exponential Decay Formula:**
+```
+R = e^(-t/S)
+
+Where:
+- R = probability of recall (retrievability)
+- t = time elapsed
+- S = memory stability (strength)
 ```
 
-### Proposed Schema Extensions
-```sql
--- Add temporal columns to memories
-ALTER TABLE memories ADD COLUMN updated_at TIMESTAMP;
-ALTER TABLE memories ADD COLUMN valid_from TIMESTAMP;  -- When fact became true
-ALTER TABLE memories ADD COLUMN valid_until TIMESTAMP; -- When fact stopped being true (NULL = still valid)
-ALTER TABLE memories ADD COLUMN expires_at TIMESTAMP;  -- TTL: when to auto-delete
-ALTER TABLE memories ADD COLUMN last_accessed_at TIMESTAMP; -- For decay calculation
-ALTER TABLE memories ADD COLUMN access_count INTEGER DEFAULT 0; -- Reinforcement
-ALTER TABLE memories ADD COLUMN decay_rate REAL DEFAULT 1.0; -- Custom decay speed
+**Power Law Alternative (for mixed memories):**
+```
+P(recall) = m(1 + ht)^-f
+
+Where:
+- m = degree of initial learning (probability at t=0)
+- h = scaling factor on time
+- f = exponential decay factor
 ```
 
-### Temporal Validity
+**SuperMemo's Formula:**
 ```
-Timeline:
-─────────────────────────────────────────────────►
-     |<---- valid_from      valid_until ---->|
-     [======= Memory is TRUE in this window =====]
+R = 0.9906 * power(interval, -0.07)
+
+Where:
+- 0.9906 = recall after one day
+- -0.07 = decay constant
 ```
 
----
+### Key Insight: Reinforcement Counteracts Decay
 
-## 3. Memory Decay Algorithm
+Each access/recall **strengthens** the memory:
+- Access increases `stability` (S)
+- Higher stability = slower decay
+- Mimics human spaced repetition learning
 
-### Ebbinghaus Forgetting Curve
+### Recommended Decay Implementation
+
 ```python
 import math
 from datetime import datetime, timedelta
 
-def calculate_retention(
-    created_at: datetime,
-    last_accessed_at: datetime,
-    access_count: int,
-    base_half_life_days: float = 30.0,
-) -> float:
+def calculate_relevance_score(memory: Memory) -> float:
     """
-    Calculate memory retention (0.0 to 1.0) using Ebbinghaus curve.
-    
-    Each access reinforces the memory, extending half-life.
+    Calculate current relevance based on decay + reinforcement.
+    Returns 0.0-1.0 where higher = more relevant.
     """
     now = datetime.utcnow()
     
     # Time since last access (in days)
-    time_since_access = (now - last_accessed_at).total_seconds() / 86400
+    time_elapsed = (now - memory.last_accessed_at).total_seconds() / 86400
     
-    # Reinforcement: each access doubles the half-life (up to a cap)
-    reinforced_half_life = base_half_life_days * (2 ** min(access_count, 5))
+    # Base decay (Ebbinghaus curve)
+    # Stability increases with access_count
+    stability = 1.0 + (memory.access_count * 0.5)
+    decay_factor = math.exp(-time_elapsed / stability)
     
-    # Exponential decay: R = e^(-t/half_life * ln(2))
-    decay_constant = math.log(2) / reinforced_half_life
-    retention = math.exp(-decay_constant * time_since_access)
+    # Combine with importance score
+    relevance = memory.importance_score * decay_factor
     
-    return max(0.0, min(1.0, retention))
+    # Boost for recent creation (new memories get a grace period)
+    days_since_creation = (now - memory.created_at).total_seconds() / 86400
+    if days_since_creation < 7:
+        newness_boost = 1.0 + (0.3 * (1 - days_since_creation / 7))
+        relevance *= newness_boost
+    
+    return min(1.0, max(0.0, relevance))
+
+
+def should_prune(memory: Memory, threshold: float = 0.1) -> bool:
+    """
+    Determine if memory should be pruned based on decay.
+    """
+    if memory.ttl_seconds is None:
+        # No TTL = check decay score only
+        return calculate_relevance_score(memory) < threshold
+    
+    # Has TTL = check expiration
+    if memory.expires_at and datetime.utcnow() > memory.expires_at:
+        return True
+    
+    return calculate_relevance_score(memory) < threshold
 ```
 
-### Decay Tiers (Kore-inspired)
-| Memory Type | Base Half-Life | Description |
-|-------------|----------------|-------------|
-| ephemeral | 1 day | Transient info, session context |
-| normal | 7 days | Standard memories |
-| important | 30 days | Key facts, decisions |
-| permanent | 365 days | Critical info, core knowledge |
+### Decay Tuning Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `base_decay_rate` | 0.07 | How fast memories fade (higher = faster) |
+| `access_stability_bonus` | 0.5 | Stability increase per access |
+| `importance_weight` | 0.6 | How much importance affects retention |
+| `prune_threshold` | 0.1 | Relevance below this = candidate for removal |
+| `newness_grace_days` | 7 | Days before decay fully kicks in |
 
 ---
 
-## 4. TTL (Time-to-Live) Implementation
+## 3. Historical Queries (as_of)
 
-### Auto-Expiration
+### Use Cases
+
+1. **Debugging:** "What did the agent know at time X?"
+2. **Audit:** "What was the user's preference before they changed it?"
+3. **Time travel:** "Answer this question as if it were last Tuesday"
+
+### Implementation Approaches
+
+**Option A: Soft Delete + Versioning**
+- Never hard delete memories
+- Mark as `superseded_at` when updated
+- Query with `WHERE superseded_at IS NULL OR superseded_at > as_of_time`
+
+**Option B: Event Sourcing**
+- Store all memory events (CREATE, UPDATE, DELETE)
+- Reconstruct state at any point in time
+- More storage, but complete history
+
+**Option C: Snapshots + Events (Recommended)**
+- Periodic snapshots (daily/weekly)
+- Events between snapshots
+- Best balance of performance and completeness
+
+### Recommended Schema
+
 ```python
-async def cleanup_expired_memories(db: Database) -> int:
-    """Delete memories past their expires_at timestamp."""
-    result = await db.execute("""
-        DELETE FROM memories 
-        WHERE expires_at IS NOT NULL 
-        AND expires_at < datetime('now')
-    """)
-    return result.rowcount
-```
-
-### Soft Delete Option
-Instead of hard delete, mark as expired:
-```sql
-UPDATE memories 
-SET valid_until = datetime('now'), is_expired = TRUE
-WHERE expires_at IS NOT NULL AND expires_at < datetime('now')
-```
-
-### TTL Configuration
-```
-REMEMBRA_DEFAULT_TTL_DAYS=null  # null = no expiration
-REMEMBRA_EPHEMERAL_TTL_HOURS=24
-REMEMBRA_ENABLE_AUTO_CLEANUP=true
-REMEMBRA_CLEANUP_INTERVAL_HOURS=1
-```
-
----
-
-## 5. Historical Queries (Time Travel)
-
-### Query Types
-
-**Point-in-Time Query:**
-```python
-# What did I know about "Project X" on Feb 15th?
-await memory.recall(
-    query="Project X",
-    as_of="2026-02-15T00:00:00Z"
-)
-```
-
-**Implementation:**
-```sql
-SELECT * FROM memories
-WHERE user_id = ?
-AND created_at <= ?  -- Existed by that date
-AND (valid_until IS NULL OR valid_until > ?)  -- Still valid then
-ORDER BY created_at DESC
-```
-
-**Temporal Range Query:**
-```python
-# How did my understanding of "budgets" change over time?
-await memory.recall(
-    query="budgets",
-    from_date="2026-01-01",
-    to_date="2026-03-01",
-    show_versions=True
-)
-```
-
----
-
-## 6. Relevance Scoring with Decay
-
-### Current Scoring (Week 6)
-```python
-score = (
-    semantic_weight * semantic_score +
-    recency_weight * recency_score +
-    entity_weight * entity_score +
-    keyword_weight * keyword_score
-)
-```
-
-### Enhanced with Decay
-```python
-def calculate_relevance(
-    semantic_score: float,
-    memory: Memory,
-    query_time: datetime = None,
-) -> float:
-    query_time = query_time or datetime.utcnow()
-    
-    # Calculate retention (0.0 to 1.0)
-    retention = calculate_retention(
-        created_at=memory.created_at,
-        last_accessed_at=memory.last_accessed_at,
-        access_count=memory.access_count,
-    )
-    
-    # Apply decay to relevance
-    base_score = semantic_score
-    decayed_score = base_score * retention
-    
-    # Floor to prevent total loss of important memories
-    min_retention = 0.1 if memory.importance == "permanent" else 0.01
-    
-    return max(decayed_score, base_score * min_retention)
-```
-
----
-
-## 7. Implementation Plan
-
-### Phase 1: Schema & TTL (3 hours)
-- Add temporal columns to memories table
-- Implement expires_at field
-- Background cleanup job for expired memories
-- Store endpoint accepts `ttl_hours` parameter
-
-### Phase 2: Access Tracking (2 hours)
-- Update last_accessed_at on recall
-- Increment access_count on retrieval
-- Track which memories are "hot" vs "cold"
-
-### Phase 3: Decay Algorithm (3 hours)
-- Implement Ebbinghaus-based retention calculation
-- Integrate decay into relevance ranking
-- Configurable decay rates per memory/user
-
-### Phase 4: Historical Queries (4 hours)
-- Add `as_of` parameter to recall
-- Implement valid_from/valid_until tracking
-- Support temporal range queries
-
-### Phase 5: Fact Versioning (3 hours)
-- When updating a fact, create new version
-- Link versions together (previous_version_id)
-- Query: "Show me how this fact changed"
-
-**Total: ~15 hours**
-
----
-
-## 8. Config Variables
-
-```
-# TTL
-REMEMBRA_DEFAULT_TTL_DAYS=null
-REMEMBRA_ENABLE_AUTO_CLEANUP=true
-REMEMBRA_CLEANUP_INTERVAL_HOURS=1
-
-# Decay
-REMEMBRA_ENABLE_DECAY=true
-REMEMBRA_BASE_HALF_LIFE_DAYS=30
-REMEMBRA_MIN_RETENTION=0.01
-REMEMBRA_MAX_REINFORCEMENT_MULTIPLIER=32
-
-# Historical
-REMEMBRA_ENABLE_VERSIONING=true
-REMEMBRA_KEEP_VERSIONS=10
-```
-
----
-
-## 9. API Changes
-
-### Store Endpoint
-```python
-class StoreRequest(BaseModel):
+class MemoryVersion:
+    memory_id: str
+    version: int
     content: str
-    user_id: str
-    ttl_hours: int | None = None  # NEW
-    importance: Literal["ephemeral", "normal", "important", "permanent"] = "normal"  # NEW
-    valid_from: datetime | None = None  # NEW: when this fact became true
+    embedding: List[float]
+    valid_from: datetime
+    valid_until: Optional[datetime]  # None = current version
+    change_type: str  # 'create', 'update', 'delete'
+    
+class MemoryEvent:
+    event_id: str
+    memory_id: str
+    event_type: str  # 'access', 'update', 'delete', 'decay_prune'
+    timestamp: datetime
+    metadata: dict  # What changed
 ```
 
-### Recall Endpoint
+### Query API
+
 ```python
-class RecallRequest(BaseModel):
-    query: str
-    user_id: str
-    as_of: datetime | None = None  # NEW: time-travel query
-    include_expired: bool = False  # NEW: include decayed memories
-    min_retention: float = 0.1  # NEW: filter out heavily decayed
+# Current state (default)
+memories = remembra.recall("user preferences")
+
+# Historical state
+memories = remembra.recall(
+    "user preferences",
+    as_of=datetime(2026, 2, 15, 12, 0, 0)
+)
+
+# With decay simulation at that time
+memories = remembra.recall(
+    "user preferences",
+    as_of=datetime(2026, 2, 15),
+    apply_decay_at_time=True  # Calculates relevance as if queried then
+)
 ```
+
+---
+
+## 4. Competitor Analysis: Mem0
+
+### What Mem0 Does Well
+
+1. **Dynamic Forgetting:** Decays low-relevance entries over time
+2. **Memory Consolidation:** Moves info between short/long-term based on usage
+3. **Priority Scoring:** Not all memories equally important
+4. **Cross-Session Continuity:** Maintains context across sessions
+
+### Gaps We Can Exploit
+
+1. **No explicit TTL configuration** — Users can't set custom expiry
+2. **Limited historical queries** — Can't query "as of" a specific time
+3. **Opaque decay algorithm** — Users don't control decay parameters
+4. **No decay visualization** — Can't see why memories were pruned
+
+### Remembra Differentiation
+
+| Feature | Mem0 | Remembra (Planned) |
+|---------|------|-------------------|
+| TTL Support | Implicit | Explicit per-memory |
+| Decay Algorithm | Proprietary | Configurable, transparent |
+| Historical Queries | ❌ | ✅ (as_of parameter) |
+| Decay Dashboard | ❌ | ✅ (visualize decay over time) |
+| Access Patterns | Limited | Full analytics |
+
+---
+
+## 5. Architecture Recommendations
+
+### Database Layer
+
+**Qdrant (Vector Store):**
+- Use payload fields for temporal metadata
+- Filter by `expires_at` during search
+- No native TTL, implement via background job
+
+**SQLite (Metadata + Versioning):**
+- Store `memory_versions` table for history
+- Store `memory_events` for audit trail
+- TTL cleanup via scheduled task
+
+### Background Jobs
+
+```python
+# Scheduled tasks (run every hour)
+async def temporal_maintenance():
+    """
+    1. Prune expired memories (hard TTL)
+    2. Mark decayed memories (soft decay)
+    3. Consolidate short-term → long-term
+    4. Update access statistics
+    """
+    
+    # 1. Hard TTL expiration
+    expired = await db.query(
+        "SELECT id FROM memories WHERE expires_at < NOW()"
+    )
+    for memory_id in expired:
+        await archive_memory(memory_id)  # Move to cold storage
+        await delete_from_qdrant(memory_id)
+    
+    # 2. Soft decay marking
+    all_memories = await get_all_memories()
+    for memory in all_memories:
+        score = calculate_relevance_score(memory)
+        if score < PRUNE_THRESHOLD:
+            await mark_for_review(memory)  # Don't auto-delete, flag for review
+    
+    # 3. Consolidation (move frequently accessed short-term to long-term)
+    # ... implementation
+```
+
+---
+
+## 6. Implementation Plan
+
+### Phase 1: Core Temporal Fields (Day 1-2)
+- [ ] Add temporal columns to memory schema
+- [ ] Update store() to set timestamps
+- [ ] Update recall() to track access
+- [ ] Write migrations
+
+### Phase 2: TTL Support (Day 2-3)
+- [ ] Add TTL parameter to store()
+- [ ] Implement expiration filtering in recall()
+- [ ] Create background cleanup job
+- [ ] Add TTL to dashboard
+
+### Phase 3: Decay Algorithm (Day 3-4)
+- [ ] Implement relevance scoring
+- [ ] Add decay to search ranking
+- [ ] Create decay configuration endpoints
+- [ ] Add decay visualization to dashboard
+
+### Phase 4: Historical Queries (Day 4-5)
+- [ ] Create memory_versions table
+- [ ] Implement versioning on update
+- [ ] Add as_of parameter to recall()
+- [ ] Test historical reconstruction
+
+### Phase 5: Testing & Polish (Day 5)
+- [ ] Unit tests for all temporal functions
+- [ ] Integration tests
+- [ ] Performance benchmarks
+- [ ] Documentation
+
+---
+
+## 7. Key Formulas Reference
+
+### Relevance Score
+```python
+relevance = importance * e^(-time_days / stability) * newness_boost
+```
+
+### Stability Increase (per access)
+```python
+new_stability = old_stability + (access_bonus * sqrt(access_count))
+```
+
+### Decay Threshold for Pruning
+```python
+should_prune = relevance < threshold AND days_since_access > grace_period
+```
+
+---
+
+## 8. Open Questions
+
+1. **Hard vs Soft Delete:** Archive decayed memories or truly delete?
+2. **User Override:** Let users "pin" memories to prevent decay?
+3. **Decay Notification:** Alert users before auto-pruning important memories?
+4. **Batch vs Realtime:** Calculate decay on-query or pre-compute?
 
 ---
 
 ## References
-- [Zep Paper](https://arxiv.org/abs/2501.13956) - Temporal Knowledge Graph Architecture
-- [CortexGraph](https://github.com/prefrontal-systems/cortexgraph) - Human-like forgetting
-- [Kore HN Discussion](https://news.ycombinator.com/item?id=47070979) - Ebbinghaus decay
-- [MemoryBank Paper](https://arxiv.org/pdf/2305.10250) - Forgetting curve formula
+
+1. Ebbinghaus, H. (1885). Memory: A Contribution to Experimental Psychology
+2. SuperMemo Algorithm SM-17 - supermemo.guru
+3. Wixted & Carpenter (2007). Forgetting Curve Formula
+4. Mem0 Documentation - mem0.ai/docs
+5. MongoDB TTL Indexes - docs.mongodb.com
+6. "Beyond Vector Databases" - Medium Article (2025)
+
+---
+
+*Research compiled by General 🎖️ for Remembra v0.6.0*

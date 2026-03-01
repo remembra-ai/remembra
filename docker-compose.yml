@@ -1,51 +1,112 @@
+# Remembra - Docker Compose
+# Self-host the complete AI memory stack
+#
+# Usage:
+#   docker compose up -d
+#
+# Access:
+#   - API: http://localhost:8787
+#   - Dashboard: http://localhost:8787 (served by API)
+#   - Qdrant: http://localhost:6333 (optional direct access)
+
 services:
-  # ---------------------------------------------------------------------------
-  # Remembra API
-  # ---------------------------------------------------------------------------
+  # ==========================================================================
+  # Remembra API + Dashboard
+  # ==========================================================================
   remembra:
     build:
       context: .
       dockerfile: Dockerfile
-    image: remembra:dev
+    image: remembra/remembra:latest
+    container_name: remembra
+    restart: unless-stopped
     ports:
-      - "8787:8787"
+      - "${REMEMBRA_PORT:-8787}:8787"
     environment:
-      REMEMBRA_QDRANT_URL: http://qdrant:6333
-      REMEMBRA_DEBUG: "true"
-      REMEMBRA_LOG_LEVEL: debug
-      # Override with your actual key:
-      # REMEMBRA_OPENAI_API_KEY: sk-xxx
+      # Server config
+      - REMEMBRA_HOST=0.0.0.0
+      - REMEMBRA_PORT=8787
+      
+      # Database (SQLite for metadata)
+      - REMEMBRA_DATABASE_URL=sqlite:////data/remembra.db
+      
+      # Vector database (Qdrant)
+      - REMEMBRA_QDRANT_URL=http://qdrant:6333
+      - REMEMBRA_QDRANT_COLLECTION=memories
+      
+      # Embedding model (default: local sentence-transformers)
+      - REMEMBRA_EMBEDDING_MODEL=${REMEMBRA_EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+      
+      # Optional: OpenAI embeddings
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      
+      # LLM for fact extraction (optional)
+      - REMEMBRA_LLM_PROVIDER=${REMEMBRA_LLM_PROVIDER:-}
+      - REMEMBRA_LLM_MODEL=${REMEMBRA_LLM_MODEL:-}
+      
+      # Security
+      - REMEMBRA_REQUIRE_API_KEY=${REMEMBRA_REQUIRE_API_KEY:-true}
+      - REMEMBRA_CORS_ORIGINS=${REMEMBRA_CORS_ORIGINS:-*}
+      
+      # Rate limiting
+      - REMEMBRA_RATE_LIMIT_STORE=${REMEMBRA_RATE_LIMIT_STORE:-30/minute}
+      - REMEMBRA_RATE_LIMIT_RECALL=${REMEMBRA_RATE_LIMIT_RECALL:-60/minute}
+      
+      # TTL defaults
+      - REMEMBRA_DEFAULT_TTL_DAYS=${REMEMBRA_DEFAULT_TTL_DAYS:-}
+      
+      # Logging
+      - REMEMBRA_LOG_LEVEL=${REMEMBRA_LOG_LEVEL:-INFO}
+    volumes:
+      - remembra_data:/data
     depends_on:
       qdrant:
         condition: service_healthy
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:8787/health')"]
+      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 10s
+    networks:
+      - remembra-network
 
-  # ---------------------------------------------------------------------------
-  # Qdrant – vector store
-  # ---------------------------------------------------------------------------
+  # ==========================================================================
+  # Qdrant - Vector Database
+  # ==========================================================================
   qdrant:
-    image: qdrant/qdrant:v1.13.0
+    image: qdrant/qdrant:v1.7.4
+    container_name: remembra-qdrant
+    restart: unless-stopped
     ports:
-      - "6333:6333"   # HTTP / gRPC
-      - "6334:6334"   # gRPC (alternate)
+      - "${QDRANT_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
     volumes:
       - qdrant_data:/qdrant/storage
-    environment:
-      QDRANT__LOG_LEVEL: INFO
-    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:6333/healthz || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - remembra-network
 
+# =============================================================================
+# Volumes
+# =============================================================================
 volumes:
+  remembra_data:
+    name: remembra_data
   qdrant_data:
+    name: remembra_qdrant_data
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  remembra-network:
+    name: remembra-network
+    driver: bridge

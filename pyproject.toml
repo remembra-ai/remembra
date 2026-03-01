@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "remembra"
-version = "0.6.0"
+version = "0.6.3"
 description = "Universal memory layer for AI applications. Self-host in 5 minutes."
 readme = "README.md"
 license = { text = "MIT" }
@@ -150,3 +150,9 @@ addopts = ["--cov=remembra", "--cov-report=term-missing", "--cov-report=xml"]
 [tool.coverage.run]
 source = ["src/remembra"]
 omit = ["*/tests/*"]
+
+[dependency-groups]
+dev = [
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.3",
+]

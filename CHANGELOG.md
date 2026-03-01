@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-03-01
+
+### Added
+- **Docker Support** (Week 11)
+  - Production-ready `Dockerfile` with multi-stage build
+  - `docker-compose.yml` for complete stack (API + Qdrant)
+  - `.env.example` with all configuration options
+  - `DOCKER.md` deployment guide
+  - Static file serving for dashboard UI
+  - Health checks for container orchestration
+- **Configuration**
+  - `REMEMBRA_STATIC_DIR` for serving dashboard
+
+### Changed
+- Dashboard UI now served by API server when `static_dir` is set
+
+## [0.6.2] - 2026-03-01
+
+### Added
+- **Entity API Endpoints** (Week 10)
+  - `GET /api/v1/entities` - List all entities with type counts
+  - `GET /api/v1/entities/{id}` - Get entity by ID
+  - `GET /api/v1/entities/{id}/relationships` - Get entity relationships
+  - `GET /api/v1/entities/{id}/memories` - Get memories linked to entity
+- **Dashboard Improvements**
+  - Entity graph visualization (force-directed layout)
+  - Memory editing support
+  - Graph tab with interactive canvas
+  - Entity detail modal with relationships and memories
+
+### Fixed
+- TypeScript strict mode compatibility in dashboard components
+
+## [0.6.1] - 2026-03-01
+
+### Added
+- **Temporal API Endpoints** - REST API for decay management
+  - `GET /api/v1/temporal/decay/report` - View memory health and decay scores
+  - `POST /api/v1/temporal/cleanup` - Run cleanup with dry-run support
+  - `GET /api/v1/temporal/memory/{id}/decay` - Single memory decay info
+- **Decay Module** (`remembra.temporal.decay`)
+  - Ebbinghaus forgetting curve implementation
+  - Configurable decay parameters (DecayConfig)
+  - `calculate_relevance_score()`, `should_prune()` functions
+- **TTL Module** (`remembra.temporal.ttl`)
+  - Parse TTL strings: "30d", "1y", "2w", "24h"
+  - TTL presets: session, conversation, short_term, long_term, permanent
+- **Cleanup Job** (`remembra.temporal.cleanup`)
+  - Background cleanup for expired/decayed memories
+  - Archive mode (soft delete) vs hard delete
+
+### Fixed
+- Temporal module properly exported from package
+
 ## [0.6.0] - 2026-03-01
 
 ### Added
