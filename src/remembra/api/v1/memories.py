@@ -95,7 +95,7 @@ async def recall_memories(
     - **max_tokens**: Maximum tokens in context output (optional, overrides server default)
     """
     try:
-        return await memory_service.recall(body, max_tokens=body.max_tokens)
+        return await memory_service.recall(body)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

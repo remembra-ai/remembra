@@ -146,38 +146,6 @@ class Settings(BaseSettings):
     )
 
     # -----------------------------------------------------------------------
-    # Advanced Retrieval (Week 6)
-    # -----------------------------------------------------------------------
-    hybrid_search_enabled: bool = Field(
-        True,
-        description="Enable hybrid BM25 + vector search"
-    )
-    hybrid_alpha: float = Field(
-        0.4,
-        description="Weight for keyword/BM25 search (1-alpha for semantic)"
-    )
-    rerank_enabled: bool = Field(
-        False,
-        description="Enable CrossEncoder reranking (requires sentence-transformers)"
-    )
-    rerank_model: str = Field(
-        "cross-encoder/ms-marco-MiniLM-L-6-v2",
-        description="CrossEncoder model for reranking"
-    )
-    default_max_tokens: int = Field(
-        4000,
-        description="Default max tokens for recall context"
-    )
-    graph_retrieval_enabled: bool = Field(
-        True,
-        description="Enable graph-aware entity retrieval"
-    )
-    graph_traversal_depth: int = Field(
-        2,
-        description="Max depth for entity relationship traversal"
-    )
-
-    # -----------------------------------------------------------------------
     # Features
     # -----------------------------------------------------------------------
     enable_temporal_decay: bool = True

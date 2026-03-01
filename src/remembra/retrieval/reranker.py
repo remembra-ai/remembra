@@ -133,9 +133,9 @@ class CrossEncoderReranker:
             return []
         
         if not self._ensure_model():
-            # Gracefully degrade: return documents as-is
+            # Gracefully degrade: return documents sorted by original score
             log.debug("reranker_unavailable_passthrough", count=len(documents))
-            return [
+            results = [
                 RerankedResult(
                     id=str(doc.get("id", "")),
                     content=doc.get(content_key, ""),
@@ -146,6 +146,11 @@ class CrossEncoderReranker:
                 )
                 for doc in documents
             ]
+            # Sort by score and apply top_k
+            results.sort(key=lambda r: r.final_score, reverse=True)
+            if top_k:
+                return results[:top_k]
+            return results
         
         # Build query-document pairs
         pairs = [
