@@ -171,4 +171,4 @@ class TestImports:
     def test_import_version(self):
         """Test version is accessible."""
         from remembra import __version__
-        assert __version__ == "0.1.0"
+        assert __version__ == "0.4.0"

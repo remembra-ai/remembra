@@ -33,6 +33,15 @@ CREATE INDEX IF NOT EXISTS idx_memories_user ON memories(user_id);
 CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(user_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
 
+-- FTS5 full-text search index for BM25 keyword matching
+CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
+    id UNINDEXED,
+    user_id UNINDEXED, 
+    project_id UNINDEXED,
+    content,
+    tokenize='porter unicode61'
+);
+
 -- Entities (people, places, things)
 CREATE TABLE IF NOT EXISTS entities (
     id TEXT PRIMARY KEY,
@@ -208,6 +217,97 @@ class Database:
             (datetime.utcnow().isoformat(), memory_id),
         )
         await self.conn.commit()
+
+    # -----------------------------------------------------------------------
+    # FTS5 Full-Text Search (BM25)
+    # -----------------------------------------------------------------------
+
+    async def index_memory_fts(
+        self,
+        memory_id: str,
+        user_id: str,
+        project_id: str,
+        content: str,
+    ) -> None:
+        """Index a memory in FTS5 for keyword search."""
+        # Delete existing entry first (upsert)
+        await self.conn.execute(
+            "DELETE FROM memories_fts WHERE id = ?",
+            (memory_id,),
+        )
+        await self.conn.execute(
+            """
+            INSERT INTO memories_fts (id, user_id, project_id, content)
+            VALUES (?, ?, ?, ?)
+            """,
+            (memory_id, user_id, project_id, content),
+        )
+        await self.conn.commit()
+
+    async def delete_memory_fts(self, memory_id: str) -> None:
+        """Remove a memory from FTS5 index."""
+        await self.conn.execute(
+            "DELETE FROM memories_fts WHERE id = ?",
+            (memory_id,),
+        )
+        await self.conn.commit()
+
+    async def search_fts(
+        self,
+        query: str,
+        user_id: str,
+        project_id: str = "default",
+        limit: int = 20,
+    ) -> list[tuple[str, float]]:
+        """
+        Perform FTS5 BM25 search.
+        
+        Returns list of (memory_id, bm25_score) tuples, sorted by relevance.
+        BM25 scores are negative (closer to 0 = more relevant).
+        """
+        # Escape special FTS5 characters
+        safe_query = query.replace('"', '""')
+        
+        cursor = await self.conn.execute(
+            """
+            SELECT id, bm25(memories_fts) as score
+            FROM memories_fts
+            WHERE user_id = ? AND project_id = ? 
+              AND memories_fts MATCH ?
+            ORDER BY score
+            LIMIT ?
+            """,
+            (user_id, project_id, safe_query, limit),
+        )
+        rows = await cursor.fetchall()
+        
+        # Convert negative BM25 scores to positive (negate them)
+        return [(row["id"], -row["score"]) for row in rows]
+
+    async def get_all_memory_content_for_user(
+        self,
+        user_id: str,
+        project_id: str = "default",
+    ) -> list[tuple[str, str]]:
+        """Get all (id, content) pairs for a user's memories."""
+        cursor = await self.conn.execute(
+            """
+            SELECT id, content FROM memories 
+            WHERE user_id = ? AND project_id = ?
+            """,
+            (user_id, project_id),
+        )
+        rows = await cursor.fetchall()
+        return [(row["id"], row["content"]) for row in rows]
+
+    async def rebuild_fts_index(self, user_id: str, project_id: str = "default") -> int:
+        """Rebuild FTS5 index for a user's memories. Returns count indexed."""
+        memories = await self.get_all_memory_content_for_user(user_id, project_id)
+        
+        for memory_id, content in memories:
+            await self.index_memory_fts(memory_id, user_id, project_id, content)
+        
+        return len(memories)
 
     # -----------------------------------------------------------------------
     # Entity operations

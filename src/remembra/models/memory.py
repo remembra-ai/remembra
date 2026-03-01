@@ -111,6 +111,26 @@ class RecallRequest(BaseModel):
     project_id: str = "default"
     limit: int = Field(default=5, ge=1, le=50)
     threshold: float = Field(default=0.40, ge=0.0, le=1.0)
+    max_tokens: int | None = Field(
+        default=None,
+        description="Maximum tokens for context output. Uses default if not specified.",
+        ge=100,
+        le=128000,
+    )
+    enable_hybrid: bool | None = Field(
+        default=None,
+        description="Enable hybrid BM25+vector search. Uses config default if not specified.",
+    )
+    enable_rerank: bool | None = Field(
+        default=None,
+        description="Enable CrossEncoder reranking. Uses config default if not specified.",
+    )
+    max_tokens: int | None = Field(
+        default=None,
+        description="Maximum tokens in context output. Overrides server default.",
+        ge=100,
+        le=100000,
+    )
 
 
 class RecallResult(BaseModel):

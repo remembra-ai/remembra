@@ -81,14 +81,21 @@ async def recall_memories(
     """
     Embed the query, perform semantic search, synthesise a context string.
     
+    Uses advanced retrieval (v0.4.0):
+    - Hybrid search (semantic + BM25 keyword matching)
+    - Graph-aware retrieval (entity relationships)
+    - Relevance ranking (recency, entity, keyword boosts)
+    - Context window optimization (smart truncation)
+    
     - **user_id**: User whose memories to search
     - **query**: Natural language query
     - **project_id**: Optional project namespace (default: "default")
     - **limit**: Maximum results to return (1-50, default: 5)
-    - **threshold**: Minimum relevance score (0.0-1.0, default: 0.70)
+    - **threshold**: Minimum relevance score (0.0-1.0, default: 0.40)
+    - **max_tokens**: Maximum tokens in context output (optional, overrides server default)
     """
     try:
-        return await memory_service.recall(body)
+        return await memory_service.recall(body, max_tokens=body.max_tokens)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

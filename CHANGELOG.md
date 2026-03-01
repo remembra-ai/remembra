@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-01
+
+### Added
+- **Hybrid Search** - Combines semantic (vector) and keyword (BM25) matching
+  - BM25 keyword index for exact term matching
+  - Score fusion with configurable weights (linear or RRF)
+  - Test: "David Kim merger" now finds "Mr. Kim mentioned acquisition"
+- **Graph-Aware Retrieval** - Uses entity relationships for smarter recall
+  - Traverses entity graph to find related memories
+  - Alias matching ("Mr. Kim" → "David Kim")
+  - Configurable traversal depth (default: 2 hops)
+- **Context Window Optimization** - Smart truncation for LLM context limits
+  - Token-aware truncation to fit context windows
+  - Relevance-based prioritization
+  - `max_tokens` parameter on `recall()` endpoint
+- **Advanced Relevance Ranking** - Multi-signal scoring
+  - Recency boost (newer memories score higher)
+  - Entity match boost (entities in query)
+  - Keyword match boost (from BM25)
+  - Configurable weights via environment variables
+- New `retrieval/` module with:
+  - `hybrid.py` - BM25Index, HybridSearcher
+  - `graph.py` - GraphRetriever for entity traversal
+  - `context.py` - ContextOptimizer for LLM output
+  - `ranking.py` - RelevanceRanker with configurable boosts
+- Comprehensive tests for all retrieval features
+
+### Configuration
+- `REMEMBRA_ENABLE_HYBRID_SEARCH` - Toggle hybrid search (default: true)
+- `REMEMBRA_HYBRID_SEMANTIC_WEIGHT` - Semantic weight in fusion (default: 0.7)
+- `REMEMBRA_HYBRID_KEYWORD_WEIGHT` - Keyword weight in fusion (default: 0.3)
+- `REMEMBRA_ENABLE_GRAPH_RETRIEVAL` - Toggle graph traversal (default: true)
+- `REMEMBRA_GRAPH_MAX_DEPTH` - Entity graph depth (default: 2)
+- `REMEMBRA_CONTEXT_MAX_TOKENS` - Max context tokens (default: 4000)
+- `REMEMBRA_RANKING_SEMANTIC_WEIGHT` - Ranking semantic weight (default: 0.6)
+- `REMEMBRA_RANKING_RECENCY_WEIGHT` - Ranking recency weight (default: 0.15)
+- `REMEMBRA_RANKING_ENTITY_WEIGHT` - Ranking entity weight (default: 0.15)
+- `REMEMBRA_RANKING_KEYWORD_WEIGHT` - Ranking keyword weight (default: 0.1)
+- `REMEMBRA_RANKING_RECENCY_DECAY_DAYS` - Recency half-life (default: 30)
+
+### Changed
+- `recall()` now uses advanced retrieval pipeline by default
+- Improved relevance scoring considers multiple signals
+- Context output optimized for LLM consumption
+
 ## [0.3.0] - 2026-03-01
 
 ### Added

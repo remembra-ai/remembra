@@ -28,6 +28,19 @@ from remembra.extraction.consolidator import (
 from remembra.extraction.entities import EntityExtractor, ExtractedEntity
 from remembra.extraction.matcher import EntityMatcher, ExistingEntity, MatchResult
 from remembra.models.memory import Entity, Relationship
+from remembra.retrieval import (
+    HybridSearcher,
+    HybridSearchConfig,
+    GraphRetriever,
+    ContextOptimizer,
+    RelevanceRanker,
+    CrossEncoderReranker,
+)
+# Advanced retrieval (Week 6)
+from remembra.retrieval.hybrid import HybridSearcher, HybridSearchConfig
+from remembra.retrieval.graph import GraphRetriever
+from remembra.retrieval.context import ContextOptimizer
+from remembra.retrieval.ranking import RelevanceRanker, RankingConfig
 
 log = structlog.get_logger(__name__)
 
@@ -115,6 +128,47 @@ class MemoryService:
             api_key=settings.openai_api_key,
             min_confidence=0.6,
         )
+        
+        # Initialize advanced retrieval (Week 6)
+        self.hybrid_searcher = HybridSearcher(
+            config=HybridSearchConfig(
+                semantic_weight=1.0 - settings.hybrid_alpha,
+                keyword_weight=settings.hybrid_alpha,
+            )
+        )
+        self.graph_retriever = GraphRetriever(
+            db=db,
+            max_depth=settings.graph_traversal_depth,
+        )
+        self.context_optimizer = ContextOptimizer(
+            max_tokens=settings.default_max_tokens,
+        )
+        self.relevance_ranker = RelevanceRanker()
+        self.reranker = CrossEncoderReranker(
+            model_name=settings.rerank_model,
+            enabled=settings.rerank_enabled,
+        )
+        
+        # Initialize advanced retrieval (Week 6)
+        self.hybrid_searcher = HybridSearcher(HybridSearchConfig(
+            semantic_weight=settings.hybrid_semantic_weight,
+            keyword_weight=settings.hybrid_keyword_weight,
+        ))
+        self.graph_retriever = GraphRetriever(
+            db=db,
+            max_depth=settings.graph_max_depth,
+        )
+        self.context_optimizer = ContextOptimizer(
+            max_tokens=settings.context_max_tokens,
+            include_metadata=settings.context_include_metadata,
+        )
+        self.relevance_ranker = RelevanceRanker(RankingConfig(
+            semantic_weight=settings.ranking_semantic_weight,
+            recency_weight=settings.ranking_recency_weight,
+            entity_weight=settings.ranking_entity_weight,
+            keyword_weight=settings.ranking_keyword_weight,
+            recency_decay_days=settings.ranking_recency_decay_days,
+        ))
 
     # -----------------------------------------------------------------------
     # Store
@@ -277,6 +331,18 @@ class MemoryService:
             created_at=memory.created_at,
             expires_at=memory.expires_at,
         )
+        
+        # Index in FTS5 for hybrid search (Week 6)
+        if self.settings.hybrid_search_enabled:
+            try:
+                await self.db.index_memory_fts(
+                    memory_id=memory.id,
+                    user_id=memory.user_id,
+                    project_id=memory.project_id,
+                    content=memory.content,
+                )
+            except Exception as e:
+                log.warning("fts_indexing_failed", error=str(e), memory_id=memory.id)
         
         # Extract and link entities (Week 5)
         if self.settings.enable_entity_resolution:
@@ -459,194 +525,326 @@ class MemoryService:
         return sentences[:10]  # Limit to 10 facts per memory
 
     # -----------------------------------------------------------------------
-    # Recall
+    # Recall (v0.4.0 - Advanced Retrieval)
     # -----------------------------------------------------------------------
 
     async def recall(self, request: RecallRequest) -> RecallResponse:
         """
-        Recall memories relevant to a query.
+        Recall memories relevant to a query using advanced retrieval.
         
-        Steps:
-        1. Embed the query
-        2. Semantic search in Qdrant
-        3. Entity-aware retrieval (find memories via entity graph)
-        4. Combine and deduplicate results
-        5. Synthesize context from results
+        v0.4.0 Features:
+        1. Hybrid search (semantic + keyword via FTS5/BM25)
+        2. Graph-aware retrieval (entity relationships)
+        3. CrossEncoder reranking (optional, reduces hallucinations)
+        4. Advanced relevance ranking (recency, entity, keyword boosts)
+        5. Context window optimization (smart truncation with tiktoken)
+        
+        Args:
+            request: RecallRequest with query, user_id, project_id, etc.
+            
+        Returns:
+            RecallResponse with context, memories, and entities
         """
+        # Resolve feature flags (request overrides config)
+        use_hybrid = (
+            request.enable_hybrid if request.enable_hybrid is not None 
+            else self.settings.hybrid_search_enabled
+        )
+        use_rerank = (
+            request.enable_rerank if request.enable_rerank is not None
+            else self.settings.rerank_enabled
+        )
+        max_tokens = request.max_tokens or self.settings.default_max_tokens
+        
         log.info(
-            "recalling_memories",
+            "recalling_memories_v2",
             user_id=request.user_id,
             project_id=request.project_id,
             query_length=len(request.query),
+            hybrid_enabled=use_hybrid,
+            graph_enabled=self.settings.graph_retrieval_enabled,
+            rerank_enabled=use_rerank,
+            max_tokens=max_tokens,
         )
 
-        # Embed query
+        # Step 1: Embed query for semantic search
         query_vector = await self.embeddings.embed(request.query)
 
-        # Search Qdrant (semantic search)
-        results = await self.qdrant.search(
+        # Step 2: Semantic search in Qdrant
+        semantic_results = await self.qdrant.search(
             query_vector=query_vector,
             user_id=request.user_id,
             project_id=request.project_id,
-            limit=request.limit,
+            limit=request.limit * 2,  # Get more for hybrid fusion
             score_threshold=request.threshold,
         )
         
-        # Entity-aware retrieval (Week 5)
-        entity_memory_ids: set[str] = set()
-        matched_entities: list[EntityRef] = []
+        log.debug("semantic_search_done", count=len(semantic_results))
         
-        if self.settings.enable_entity_resolution:
+        # Step 3: Graph-aware retrieval (entity relationships)
+        graph_memory_ids: set[str] = set()
+        matched_entities: list[EntityRef] = []
+        related_entities: list[EntityRef] = []
+        
+        if self.settings.graph_retrieval_enabled:
             try:
-                entity_results = await self._find_memories_by_entity(
+                graph_result = await self.graph_retriever.search(
                     query=request.query,
                     user_id=request.user_id,
                     project_id=request.project_id,
                 )
-                entity_memory_ids = entity_results["memory_ids"]
-                matched_entities = entity_results["entities"]
+                graph_memory_ids = graph_result.memory_ids
+                matched_entities = graph_result.matched_entities
+                related_entities = graph_result.related_entities
                 
                 log.debug(
-                    "entity_recall",
+                    "graph_retrieval_done",
                     matched_entities=len(matched_entities),
-                    memory_ids=len(entity_memory_ids),
+                    related_entities=len(related_entities),
+                    memory_ids=len(graph_memory_ids),
                 )
             except Exception as e:
-                log.warning("entity_recall_failed", error=str(e))
-
-        if not results and not entity_memory_ids:
+                log.warning("graph_retrieval_failed", error=str(e))
+        
+        # Step 4: Hybrid search (combine semantic + keyword via FTS5)
+        hybrid_results: list[dict[str, Any]] = []
+        
+        if use_hybrid and semantic_results:
+            try:
+                # Build payload map from semantic results
+                payload_map: dict[str, dict[str, Any]] = {}
+                for memory_id, score, payload in semantic_results:
+                    mid = str(memory_id)
+                    payload_map[mid] = {**payload, "semantic_score": score}
+                
+                # Add graph memories
+                for mem_id in graph_memory_ids:
+                    if mem_id not in payload_map:
+                        mem_data = await self.db.get_memory(mem_id)
+                        if mem_data:
+                            payload_map[mem_id] = {
+                                **mem_data, 
+                                "semantic_score": 0.4,  # Default for graph-only
+                            }
+                
+                # Try FTS5 search first (persistent, accurate BM25)
+                fts_results: list[tuple[str, float]] = []
+                try:
+                    fts_results = await self.db.search_fts(
+                        query=request.query,
+                        user_id=request.user_id,
+                        project_id=request.project_id,
+                        limit=request.limit * 2,
+                    )
+                    log.debug("fts5_search_done", count=len(fts_results))
+                except Exception as e:
+                    log.debug("fts5_search_failed_fallback_bm25", error=str(e))
+                
+                # Fall back to in-memory BM25 if FTS5 fails or returns nothing
+                if not fts_results:
+                    all_docs = [(mid, p.get("content", "")) for mid, p in payload_map.items()]
+                    self.hybrid_searcher.index_documents(all_docs)
+                    fused = await self.hybrid_searcher.search(
+                        query=request.query,
+                        semantic_results=semantic_results,
+                        limit=request.limit * 2,
+                    )
+                    for result in fused:
+                        hybrid_results.append({
+                            "id": result.id,
+                            "content": result.content,
+                            "semantic_score": result.semantic_score,
+                            "keyword_score": result.keyword_score,
+                            "relevance": result.combined_score,
+                            "created_at": payload_map.get(result.id, {}).get("created_at"),
+                            "matched_keywords": result.matched_terms,
+                            "payload": result.payload or payload_map.get(result.id, {}),
+                        })
+                else:
+                    # Fuse FTS5 results with semantic results
+                    # Normalize scores with min-max scaling
+                    semantic_scores = {str(mid): score for mid, score, _ in semantic_results}
+                    max_semantic = max(semantic_scores.values()) if semantic_scores else 1.0
+                    max_keyword = max(s for _, s in fts_results) if fts_results else 1.0
+                    
+                    keyword_scores = {mid: score for mid, score in fts_results}
+                    all_ids = set(semantic_scores.keys()) | set(keyword_scores.keys()) | set(payload_map.keys())
+                    
+                    alpha = self.settings.hybrid_alpha  # Keyword weight
+                    
+                    for mid in all_ids:
+                        sem = semantic_scores.get(mid, 0.0) / max_semantic if max_semantic > 0 else 0
+                        kw = keyword_scores.get(mid, 0.0) / max_keyword if max_keyword > 0 else 0
+                        combined = alpha * kw + (1 - alpha) * sem
+                        
+                        payload = payload_map.get(mid, {})
+                        hybrid_results.append({
+                            "id": mid,
+                            "content": payload.get("content", ""),
+                            "semantic_score": sem,
+                            "keyword_score": kw,
+                            "relevance": combined,
+                            "created_at": payload.get("created_at"),
+                            "payload": payload,
+                        })
+                    
+                    # Sort by combined score
+                    hybrid_results.sort(key=lambda x: x["relevance"], reverse=True)
+                
+                log.debug("hybrid_search_done", count=len(hybrid_results))
+                
+            except Exception as e:
+                log.warning("hybrid_search_failed", error=str(e))
+                # Fall back to semantic results
+                hybrid_results = [
+                    {
+                        "id": str(mid),
+                        "content": payload.get("content", ""),
+                        "relevance": score,
+                        "semantic_score": score,
+                        "keyword_score": 0.0,
+                        "created_at": payload.get("created_at"),
+                        "payload": payload,
+                    }
+                    for mid, score, payload in semantic_results
+                ]
+        else:
+            # No hybrid search - use semantic results directly
+            hybrid_results = [
+                {
+                    "id": str(mid),
+                    "content": payload.get("content", ""),
+                    "relevance": score,
+                    "semantic_score": score,
+                    "keyword_score": 0.0,
+                    "created_at": payload.get("created_at"),
+                    "payload": payload,
+                }
+                for mid, score, payload in semantic_results
+            ]
+        
+        # Add graph-only memories that weren't in hybrid results
+        seen_ids = {r["id"] for r in hybrid_results}
+        for mem_id in graph_memory_ids:
+            if mem_id not in seen_ids:
+                mem_data = await self.db.get_memory(mem_id)
+                if mem_data:
+                    hybrid_results.append({
+                        "id": mem_id,
+                        "content": mem_data.get("content", ""),
+                        "relevance": 0.5,  # Default for graph-only
+                        "semantic_score": 0.4,
+                        "keyword_score": 0.0,
+                        "created_at": mem_data.get("created_at"),
+                        "payload": mem_data,
+                    })
+        
+        if not hybrid_results:
             log.info("recall_no_results", user_id=request.user_id)
             return RecallResponse(context="", memories=[], entities=[])
-
-        # Track seen memory IDs to avoid duplicates
-        seen_memory_ids: set[str] = set()
         
-        # Build recall results from semantic search
+        # Step 5: CrossEncoder reranking (optional, reduces hallucinations)
+        if use_rerank and hybrid_results:
+            try:
+                reranked = self.reranker.rerank(
+                    query=request.query,
+                    documents=hybrid_results,
+                    top_k=request.limit * 2,
+                    content_key="content",
+                    score_key="relevance",
+                )
+                # Update hybrid_results with rerank scores
+                hybrid_results = [
+                    {
+                        **r.payload,
+                        "id": r.id,
+                        "content": r.content,
+                        "relevance": r.final_score,
+                        "rerank_score": r.rerank_score,
+                    }
+                    for r in reranked
+                ]
+                log.debug("reranking_done", count=len(hybrid_results))
+            except Exception as e:
+                log.warning("reranking_failed", error=str(e))
+        
+        # Step 6: Advanced relevance ranking (recency, entity, keyword boosts)
+        ranked = self.relevance_ranker.rank(
+            memories=hybrid_results,
+            query=request.query,
+            query_entities=matched_entities,
+        )
+        
+        log.debug(
+            "ranking_done",
+            count=len(ranked),
+            top_score=ranked[0].final_score if ranked else 0,
+        )
+        
+        # Step 7: Context window optimization with token budgeting
+        # Create optimizer with request-specific token limit
+        context_optimizer = ContextOptimizer(max_tokens=max_tokens)
+        
+        # Prepare memories for context optimizer
+        memories_for_context = [
+            {
+                "id": r.id,
+                "content": r.content,
+                "relevance": r.final_score,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in ranked
+        ]
+        
+        optimized = context_optimizer.optimize(
+            memories=memories_for_context,
+            sort_by_relevance=False,  # Already sorted by ranker
+        )
+        
+        log.debug(
+            "context_optimized",
+            total_tokens=optimized.total_tokens,
+            chunks=len(optimized.chunks),
+            truncated=optimized.truncated_count,
+            dropped=optimized.dropped_count,
+        )
+        
+        # Step 8: Build final response
+        # Use top N from ranked results (respecting limit)
+        final_ranked = ranked[:request.limit]
+        
         memories: list[RecallResult] = []
-        all_entities: list[EntityRef] = list(matched_entities)  # Start with matched entities
-        context_parts: list[str] = []
-
-        for memory_id, score, payload in results:
-            memory_id_str = str(memory_id)
-            if memory_id_str in seen_memory_ids:
-                continue
-            seen_memory_ids.add(memory_id_str)
-            
-            content = payload.get("content", "")
-            created_at_str = payload.get("created_at", datetime.utcnow().isoformat())
-
-            memories.append(
-                RecallResult(
-                    id=memory_id_str,
-                    relevance=score,
-                    content=content,
-                    created_at=datetime.fromisoformat(created_at_str),
-                )
-            )
-            context_parts.append(content)
-            await self.db.update_access(memory_id_str)
+        for r in final_ranked:
+            memories.append(RecallResult(
+                id=r.id,
+                relevance=r.final_score,
+                content=r.content,
+                created_at=r.created_at or datetime.utcnow(),
+            ))
+            # Update access tracking
+            await self.db.update_access(r.id)
         
-        # Add entity-linked memories that weren't in semantic results
-        for entity_mem_id in entity_memory_ids:
-            if entity_mem_id in seen_memory_ids:
-                continue
-            seen_memory_ids.add(entity_mem_id)
-            
-            # Fetch memory from database
-            mem_data = await self.db.get_memory(entity_mem_id)
-            if mem_data:
-                memories.append(
-                    RecallResult(
-                        id=entity_mem_id,
-                        relevance=0.5,  # Default relevance for entity matches
-                        content=mem_data.get("content", ""),
-                        created_at=datetime.fromisoformat(
-                            mem_data.get("created_at", datetime.utcnow().isoformat())
-                        ),
-                    )
-                )
-                context_parts.append(mem_data.get("content", ""))
-                await self.db.update_access(entity_mem_id)
-
-        # Synthesize context
-        context = " ".join(context_parts)
-
-        # Deduplicate entities by ID
-        seen_entity_ids: set[str] = set()
-        unique_entities: list[EntityRef] = []
-        for entity in all_entities:
+        # Combine all entities (matched + related)
+        all_entities = list(matched_entities)
+        seen_entity_ids = {e.id for e in all_entities}
+        for entity in related_entities:
             if entity.id not in seen_entity_ids:
+                all_entities.append(entity)
                 seen_entity_ids.add(entity.id)
-                unique_entities.append(entity)
-
+        
         log.info(
-            "recall_complete",
+            "recall_complete_v2",
             user_id=request.user_id,
             results_count=len(memories),
-            entities_count=len(unique_entities),
+            entities_count=len(all_entities),
+            context_tokens=optimized.total_tokens,
         )
 
         return RecallResponse(
-            context=context,
+            context=optimized.context,
             memories=memories,
-            entities=unique_entities,
+            entities=all_entities,
         )
-    
-    async def _find_memories_by_entity(
-        self,
-        query: str,
-        user_id: str,
-        project_id: str,
-    ) -> dict[str, Any]:
-        """
-        Find memories linked to entities mentioned in the query.
-        
-        Steps:
-        1. Extract entity mentions from query
-        2. Match to existing entities (including aliases)
-        3. Get all memories linked to matched entities
-        
-        Returns:
-            Dict with "memory_ids" (set) and "entities" (list of EntityRef)
-        """
-        # Simple entity matching: check if any entity name/alias appears in query
-        all_entities = await self.db.get_user_entities(user_id, project_id)
-        
-        matched_entities: list[EntityRef] = []
-        memory_ids: set[str] = set()
-        query_lower = query.lower()
-        
-        for entity in all_entities:
-            # Check canonical name
-            if entity.canonical_name.lower() in query_lower:
-                matched_entities.append(EntityRef(
-                    id=entity.id,
-                    canonical_name=entity.canonical_name,
-                    type=entity.type,
-                    confidence=1.0,
-                ))
-                # Get linked memories
-                linked = await self.db.get_memories_by_entity(entity.id)
-                memory_ids.update(linked)
-                continue
-            
-            # Check aliases
-            for alias in entity.aliases:
-                if alias.lower() in query_lower:
-                    matched_entities.append(EntityRef(
-                        id=entity.id,
-                        canonical_name=entity.canonical_name,
-                        type=entity.type,
-                        confidence=0.9,
-                    ))
-                    linked = await self.db.get_memories_by_entity(entity.id)
-                    memory_ids.update(linked)
-                    break
-        
-        return {
-            "memory_ids": memory_ids,
-            "entities": matched_entities,
-        }
 
     # -----------------------------------------------------------------------
     # Forget
@@ -673,6 +871,7 @@ class MemoryService:
         if memory_id:
             # Delete specific memory
             await self.qdrant.delete(memory_id)
+            await self.db.delete_memory_fts(memory_id)  # Clean FTS5 index
             if await self.db.delete_memory(memory_id):
                 deleted_memories = 1
             log.info("forgot_memory", memory_id=memory_id)
