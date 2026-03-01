@@ -459,8 +459,8 @@ memories = client.recall(
                         <li class="flex items-center gap-2"><span class="text-primary">✓</span> Priority support</li>
                         <li class="flex items-center gap-2"><span class="text-primary">✓</span> Auto-scaling</li>
                     </ul>
-                    <button disabled class="block w-full py-3 text-center bg-primary/50 rounded-xl font-medium cursor-not-allowed">
-                        Join Waitlist
+                    <button onclick="openWaitlistModal()" class="block w-full py-3 text-center bg-primary hover:bg-primary-dark rounded-xl font-medium transition">
+                        Join Waitlist →
                     </button>
                 </div>
                 
@@ -572,5 +572,115 @@ memories = client.recall(
             </div>
         </div>
     </footer>
+    <!-- Waitlist Modal -->
+    <div id="waitlistModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div class="bg-dark-card border border-white/10 rounded-2xl p-8 max-w-md w-full mx-4 relative">
+            <button onclick="closeWaitlistModal()" class="absolute top-4 right-4 text-gray-400 hover:text-white">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+            
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">🚀</div>
+                <h3 class="text-2xl font-bold mb-2">Join the Waitlist</h3>
+                <p class="text-gray-400">Be the first to know when Remembra Pro Cloud launches.</p>
+            </div>
+            
+            <form id="waitlistForm" action="https://formspree.io/f/mjkvoqnz" method="POST" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium mb-2">Email</label>
+                    <input type="email" name="email" required placeholder="you@company.com" 
+                           class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2">Name (optional)</label>
+                    <input type="text" name="name" placeholder="Your name"
+                           class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2">Company (optional)</label>
+                    <input type="text" name="company" placeholder="Your company"
+                           class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition">
+                </div>
+                <input type="hidden" name="_subject" value="New Remembra Waitlist Signup!">
+                <button type="submit" class="w-full py-4 bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl transition">
+                    Join Waitlist →
+                </button>
+            </form>
+            
+            <p class="text-center text-xs text-gray-500 mt-4">We'll never spam you. Unsubscribe anytime.</p>
+        </div>
+    </div>
+
+    <!-- Success Modal -->
+    <div id="successModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/80 backdrop-blur-sm">
+        <div class="bg-dark-card border border-white/10 rounded-2xl p-8 max-w-md w-full mx-4 text-center">
+            <div class="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">✓</div>
+            <h3 class="text-2xl font-bold mb-2">You're on the list!</h3>
+            <p class="text-gray-400 mb-6">We'll notify you when Remembra Pro Cloud is ready. Thanks for your interest!</p>
+            <button onclick="closeSuccessModal()" class="px-8 py-3 bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl transition">
+                Got it!
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Waitlist Modal
+        function openWaitlistModal() {
+            document.getElementById('waitlistModal').classList.remove('hidden');
+            document.getElementById('waitlistModal').classList.add('flex');
+            document.body.style.overflow = 'hidden';
+        }
+        
+        function closeWaitlistModal() {
+            document.getElementById('waitlistModal').classList.add('hidden');
+            document.getElementById('waitlistModal').classList.remove('flex');
+            document.body.style.overflow = '';
+        }
+        
+        function closeSuccessModal() {
+            document.getElementById('successModal').classList.add('hidden');
+            document.getElementById('successModal').classList.remove('flex');
+            document.body.style.overflow = '';
+        }
+        
+        // Close on backdrop click
+        document.getElementById('waitlistModal').addEventListener('click', function(e) {
+            if (e.target === this) closeWaitlistModal();
+        });
+        
+        // Handle form submission
+        document.getElementById('waitlistForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const form = e.target;
+            const data = new FormData(form);
+            
+            try {
+                const response = await fetch(form.action, {
+                    method: 'POST',
+                    body: data,
+                    headers: { 'Accept': 'application/json' }
+                });
+                
+                if (response.ok) {
+                    closeWaitlistModal();
+                    document.getElementById('successModal').classList.remove('hidden');
+                    document.getElementById('successModal').classList.add('flex');
+                    form.reset();
+                } else {
+                    alert('Something went wrong. Please try again.');
+                }
+            } catch (error) {
+                alert('Something went wrong. Please try again.');
+            }
+        });
+        
+        // Close on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeWaitlistModal();
+                closeSuccessModal();
+            }
+        });
+    </script>
 </body>
 </html>
