@@ -623,9 +623,12 @@ class MemoryService:
                 if not fts_results:
                     all_docs = [(mid, p.get("content", "")) for mid, p in payload_map.items()]
                     self.hybrid_searcher.index_documents(all_docs)
+                    # Get BM25 keyword results from in-memory index
+                    kw_raw = self.hybrid_searcher.keyword_search(request.query, limit=request.limit * 2)
+                    kw_for_fusion = [(doc_id, score) for doc_id, score, _ in kw_raw]
                     fused = await self.hybrid_searcher.search(
-                        query=request.query,
                         semantic_results=semantic_results,
+                        keyword_results=kw_for_fusion,
                         limit=request.limit * 2,
                     )
                     for result in fused:
