@@ -11,36 +11,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Hybrid Search** - Combines semantic (vector) and keyword (BM25) matching
-  - BM25 keyword index for exact term matching
-  - Score fusion with configurable weights (linear or RRF)
-  - Test: "David Kim merger" now finds "Mr. Kim mentioned acquisition"
+  - **SQLite FTS5** integration for persistent full-text indexing
+  - In-memory BM25 fallback when FTS5 unavailable
+  - Score normalization with min-max scaling
+  - Configurable alpha weight for keyword/semantic balance
+  - Reciprocal Rank Fusion (RRF) option for rank-based fusion
+  
+- **CrossEncoder Reranking** - Optional post-retrieval reranking (NEW)
+  - Uses `sentence-transformers` CrossEncoder models
+  - Reduces hallucinations by ~35% (per Databricks research)
+  - Default model: `cross-encoder/ms-marco-MiniLM-L-6-v2` (local, free)
+  - Graceful degradation when model unavailable
+  - Blends rerank scores with original scores
+  
 - **Graph-Aware Retrieval** - Uses entity relationships for smarter recall
   - Traverses entity graph to find related memories
   - Alias matching ("Mr. Kim" → "David Kim")
   - Configurable traversal depth (default: 2 hops)
+  - Entity neighborhood expansion
+  
 - **Context Window Optimization** - Smart truncation for LLM context limits
-  - Token-aware truncation to fit context windows
-  - Relevance-based prioritization
+  - **tiktoken integration** for accurate token counting (NEW)
+  - Character-based fallback estimation
   - `max_tokens` parameter on `recall()` endpoint
+  - Relevance-aware truncation at sentence boundaries
+  
 - **Advanced Relevance Ranking** - Multi-signal scoring
   - Recency boost (newer memories score higher)
   - Entity match boost (entities in query)
   - Keyword match boost (from BM25)
+  - Diversity-aware reranking (MMR) to reduce redundancy
   - Configurable weights via environment variables
+  
 - New `retrieval/` module with:
   - `hybrid.py` - BM25Index, HybridSearcher
   - `graph.py` - GraphRetriever for entity traversal
-  - `context.py` - ContextOptimizer for LLM output
+  - `context.py` - ContextOptimizer with tiktoken
   - `ranking.py` - RelevanceRanker with configurable boosts
+  - `reranker.py` - CrossEncoderReranker for quality improvement (NEW)
+  
+- FTS5 full-text search table in SQLite (`memories_fts`)
 - Comprehensive tests for all retrieval features
 
 ### Configuration
-- `REMEMBRA_ENABLE_HYBRID_SEARCH` - Toggle hybrid search (default: true)
-- `REMEMBRA_HYBRID_SEMANTIC_WEIGHT` - Semantic weight in fusion (default: 0.7)
-- `REMEMBRA_HYBRID_KEYWORD_WEIGHT` - Keyword weight in fusion (default: 0.3)
-- `REMEMBRA_ENABLE_GRAPH_RETRIEVAL` - Toggle graph traversal (default: true)
-- `REMEMBRA_GRAPH_MAX_DEPTH` - Entity graph depth (default: 2)
-- `REMEMBRA_CONTEXT_MAX_TOKENS` - Max context tokens (default: 4000)
+- `REMEMBRA_HYBRID_SEARCH_ENABLED` - Toggle hybrid search (default: true)
+- `REMEMBRA_HYBRID_ALPHA` - Keyword weight 0-1 (default: 0.4)
+- `REMEMBRA_RERANK_ENABLED` - Toggle CrossEncoder reranking (default: false)
+- `REMEMBRA_RERANK_MODEL` - CrossEncoder model name
+- `REMEMBRA_DEFAULT_MAX_TOKENS` - Max context tokens (default: 4000)
+- `REMEMBRA_GRAPH_RETRIEVAL_ENABLED` - Toggle graph traversal (default: true)
+- `REMEMBRA_GRAPH_TRAVERSAL_DEPTH` - Entity graph depth (default: 2)
 - `REMEMBRA_RANKING_SEMANTIC_WEIGHT` - Ranking semantic weight (default: 0.6)
 - `REMEMBRA_RANKING_RECENCY_WEIGHT` - Ranking recency weight (default: 0.15)
 - `REMEMBRA_RANKING_ENTITY_WEIGHT` - Ranking entity weight (default: 0.15)
@@ -49,8 +69,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `recall()` now uses advanced retrieval pipeline by default
+- `RecallRequest` accepts `max_tokens`, `enable_hybrid`, `enable_rerank` params
+- `store()` now indexes memories in FTS5 for keyword search
 - Improved relevance scoring considers multiple signals
 - Context output optimized for LLM consumption
+
+### Dependencies
+- Added `tiktoken>=0.7.0` to server extras
+- Added `sentence-transformers>=2.5.0` as optional `rerank` extra
 
 ## [0.3.0] - 2026-03-01
 

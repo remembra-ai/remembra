@@ -1,9 +1,12 @@
-"""Hybrid search combining semantic (vector) and keyword (BM25) matching.
+"""Hybrid search combining semantic (vector) and keyword (FTS5/BM25) matching.
 
-This module implements a hybrid search strategy that:
+This module implements industry-standard hybrid search that:
 1. Performs vector search via Qdrant for semantic similarity
-2. Performs BM25 keyword matching for exact term matches
-3. Fuses scores using configurable weights (RRF or linear combination)
+2. Performs BM25 keyword matching via SQLite FTS5 (primary)
+3. Falls back to in-memory BM25Index when FTS5 unavailable
+4. Normalizes and fuses scores with configurable alpha weight
+
+Based on research from Stack Overflow, Elastic, Zep, and InfinityFlow.
 """
 
 import math
@@ -18,42 +21,46 @@ log = structlog.get_logger(__name__)
 
 @dataclass
 class HybridSearchConfig:
-    """Configuration for hybrid search."""
+    """Configuration for hybrid search.
     
-    # Weight for semantic (vector) search scores (0-1)
-    semantic_weight: float = 0.7
-    # Weight for keyword (BM25) search scores (0-1)
-    keyword_weight: float = 0.3
-    # BM25 parameters
-    bm25_k1: float = 1.5  # Term frequency saturation
-    bm25_b: float = 0.75  # Document length normalization
-    # Use Reciprocal Rank Fusion instead of linear combination
-    use_rrf: bool = False
-    # RRF constant (only used if use_rrf=True)
-    rrf_k: int = 60
+    Research-backed defaults:
+    - alpha=0.4 gives good balance (keyword 40%, semantic 60%)
+    - Higher alpha = more weight to keyword/BM25 matches
+    """
+    
+    # Alpha: weight for keyword (BM25) scores
+    # Final = alpha * keyword + (1-alpha) * semantic
+    alpha: float = 0.4
+    
+    # Minimum score threshold for results
+    min_score: float = 0.1
+    
+    # Whether to include results that only appear in one search
+    include_partial: bool = True
 
 
 @dataclass
 class SearchResult:
-    """A single search result with combined scoring."""
+    """A single search result with hybrid scoring."""
     
     id: str
     content: str
-    # Individual scores
+    # Individual scores (normalized 0-1)
     semantic_score: float = 0.0
     keyword_score: float = 0.0
     # Combined/final score
     combined_score: float = 0.0
-    # Optional payload
+    # Source: 'both', 'semantic', 'keyword'
+    source: str = "both"
+    # Optional payload from vector store
     payload: dict[str, Any] = field(default_factory=dict)
-    # Debug info
-    matched_terms: list[str] = field(default_factory=list)
 
 
 class BM25Index:
     """
-    Simple BM25 index for keyword matching.
+    In-memory BM25 index for keyword matching.
     
+    Used as fallback when SQLite FTS5 is unavailable or for testing.
     BM25 (Best Matching 25) is a ranking function used for keyword search.
     It considers term frequency, document length, and inverse document frequency.
     """
@@ -74,13 +81,8 @@ class BM25Index:
     
     @staticmethod
     def tokenize(text: str) -> list[str]:
-        """
-        Tokenize text into lowercase words.
-        Removes punctuation and splits on whitespace.
-        """
-        # Convert to lowercase and extract word tokens
+        """Tokenize text into lowercase words."""
         text = text.lower()
-        # Remove punctuation but keep alphanumeric and spaces
         tokens = re.findall(r'\b[a-z0-9]+\b', text)
         return tokens
     
@@ -90,12 +92,10 @@ class BM25Index:
         self.documents[doc_id] = tokens
         self.doc_content[doc_id] = content
         
-        # Update document frequencies
         unique_tokens = set(tokens)
         for token in unique_tokens:
             self.doc_freq[token] = self.doc_freq.get(token, 0) + 1
         
-        # Recalculate average document length
         self.n_docs = len(self.documents)
         total_len = sum(len(toks) for toks in self.documents.values())
         self.avg_doc_len = total_len / self.n_docs if self.n_docs > 0 else 0.0
@@ -111,7 +111,6 @@ class BM25Index:
             for token in unique_tokens:
                 self.doc_freq[token] = self.doc_freq.get(token, 0) + 1
         
-        # Recalculate stats once at the end
         self.n_docs = len(self.documents)
         total_len = sum(len(toks) for toks in self.documents.values())
         self.avg_doc_len = total_len / self.n_docs if self.n_docs > 0 else 0.0
@@ -129,14 +128,10 @@ class BM25Index:
         df = self.doc_freq.get(term, 0)
         if df == 0:
             return 0.0
-        # Standard IDF formula with smoothing
         return math.log((self.n_docs - df + 0.5) / (df + 0.5) + 1.0)
     
     def _score_document(self, doc_id: str, query_tokens: list[str]) -> tuple[float, list[str]]:
-        """
-        Calculate BM25 score for a document against query tokens.
-        Returns (score, matched_terms).
-        """
+        """Calculate BM25 score for a document against query tokens."""
         doc_tokens = self.documents.get(doc_id, [])
         doc_len = len(doc_tokens)
         
@@ -146,7 +141,6 @@ class BM25Index:
         score = 0.0
         matched_terms: list[str] = []
         
-        # Count term frequencies in document
         term_freq: dict[str, int] = {}
         for token in doc_tokens:
             term_freq[token] = term_freq.get(token, 0) + 1
@@ -159,7 +153,6 @@ class BM25Index:
             matched_terms.append(term)
             idf = self._idf(term)
             
-            # BM25 term score
             numerator = tf * (self.k1 + 1)
             denominator = tf + self.k1 * (1 - self.b + self.b * (doc_len / self.avg_doc_len))
             term_score = idf * (numerator / denominator)
@@ -191,71 +184,72 @@ class BM25Index:
             if score > min_score:
                 results.append((doc_id, score, matched))
         
-        # Sort by score descending
         results.sort(key=lambda x: x[1], reverse=True)
-        
         return results[:limit]
+
+
+def min_max_normalize(scores: list[float]) -> list[float]:
+    """
+    Normalize scores to 0-1 range using min-max scaling.
+    
+    This is the standard approach recommended by Elastic and other
+    hybrid search implementations.
+    """
+    if not scores:
+        return []
+    
+    min_score = min(scores)
+    max_score = max(scores)
+    score_range = max_score - min_score
+    
+    if score_range == 0:
+        # All scores are the same
+        return [0.5] * len(scores)
+    
+    return [(s - min_score) / score_range for s in scores]
 
 
 class HybridSearcher:
     """
-    Hybrid searcher combining semantic and keyword search.
+    Hybrid searcher combining semantic (vector) and keyword (FTS5/BM25) search.
     
-    This class coordinates between vector search (from Qdrant) and
-    BM25 keyword search, fusing their results using configurable strategies.
+    Primary: SQLite FTS5 for persistent BM25 keyword matching
+    Fallback: In-memory BM25Index when FTS5 unavailable
+    
+    Score fusion formula: final = alpha * keyword + (1-alpha) * semantic
     """
     
     def __init__(self, config: HybridSearchConfig | None = None):
         self.config = config or HybridSearchConfig()
-        self.bm25_index = BM25Index(
-            k1=self.config.bm25_k1,
-            b=self.config.bm25_b,
-        )
+        # In-memory BM25 for fallback/testing
+        self._bm25_index = BM25Index()
     
     def index_documents(self, documents: list[tuple[str, str]]) -> None:
         """
-        Index documents for keyword search.
+        Index documents in the in-memory BM25 index.
+        
+        Use this when FTS5 is unavailable or for testing.
         
         Args:
             documents: List of (id, content) tuples
         """
-        self.bm25_index.clear()
-        self.bm25_index.add_documents(documents)
-        log.debug("bm25_indexed", count=len(documents))
+        self._bm25_index.clear()
+        self._bm25_index.add_documents(documents)
+        log.debug("bm25_indexed_inmemory", count=len(documents))
     
-    def keyword_search(
-        self,
-        query: str,
-        limit: int = 10,
-    ) -> list[SearchResult]:
+    def keyword_search(self, query: str, limit: int = 10) -> list[tuple[str, float, list[str]]]:
         """
-        Perform keyword-only search using BM25.
+        Perform keyword-only search using in-memory BM25.
         
-        Args:
-            query: Search query string
-            limit: Maximum results to return
-            
         Returns:
-            List of SearchResult objects with keyword_score populated
+            List of (doc_id, score, matched_terms) tuples
         """
-        bm25_results = self.bm25_index.search(query, limit=limit)
-        
-        results = []
-        for doc_id, score, matched_terms in bm25_results:
-            results.append(SearchResult(
-                id=doc_id,
-                content=self.bm25_index.doc_content.get(doc_id, ""),
-                keyword_score=score,
-                combined_score=score,
-                matched_terms=matched_terms,
-            ))
-        
-        return results
+        return self._bm25_index.search(query, limit=limit)
     
     def fuse_results(
         self,
         semantic_results: list[tuple[str, float, dict[str, Any]]],
-        keyword_results: list[tuple[str, float, list[str]]],
+        keyword_results: list[tuple[str, float]],
         limit: int = 10,
     ) -> list[SearchResult]:
         """
@@ -263,7 +257,7 @@ class HybridSearcher:
         
         Args:
             semantic_results: From Qdrant - list of (id, score, payload)
-            keyword_results: From BM25 - list of (id, score, matched_terms)
+            keyword_results: From FTS5 - list of (id, bm25_score)
             limit: Max results to return
             
         Returns:
@@ -273,50 +267,58 @@ class HybridSearcher:
         semantic_map: dict[str, tuple[float, dict[str, Any]]] = {
             str(r[0]): (r[1], r[2]) for r in semantic_results
         }
-        keyword_map: dict[str, tuple[float, list[str]]] = {
-            r[0]: (r[1], r[2]) for r in keyword_results
+        keyword_map: dict[str, float] = {
+            r[0]: r[1] for r in keyword_results
         }
         
         # Get all unique IDs
-        all_ids = set(semantic_map.keys()) | set(keyword_map.keys())
+        all_ids = set(semantic_map.keys())
+        if self.config.include_partial:
+            all_ids |= set(keyword_map.keys())
+        else:
+            # Only include IDs that appear in both
+            all_ids &= set(keyword_map.keys())
         
         if not all_ids:
             return []
         
-        # Normalize scores if using linear combination
-        if not self.config.use_rrf:
-            # Find max scores for normalization
-            max_semantic = max((s[0] for s in semantic_map.values()), default=1.0)
-            max_keyword = max((s[0] for s in keyword_map.values()), default=1.0)
-            
-            # Avoid division by zero
-            max_semantic = max(max_semantic, 0.001)
-            max_keyword = max(max_keyword, 0.001)
+        # Extract scores for normalization
+        semantic_scores = [semantic_map.get(id, (0.0, {}))[0] for id in all_ids]
+        keyword_scores = [keyword_map.get(id, 0.0) for id in all_ids]
+        
+        # Normalize to 0-1 range
+        norm_semantic = min_max_normalize(semantic_scores)
+        norm_keyword = min_max_normalize(keyword_scores)
         
         results: list[SearchResult] = []
         
-        for doc_id in all_ids:
+        for i, doc_id in enumerate(all_ids):
             sem_data = semantic_map.get(doc_id)
-            kw_data = keyword_map.get(doc_id)
+            kw_score_raw = keyword_map.get(doc_id, 0.0)
             
-            sem_score = sem_data[0] if sem_data else 0.0
+            sem_score = norm_semantic[i] if sem_data else 0.0
+            kw_score = norm_keyword[i] if kw_score_raw > 0 else 0.0
+            
             payload = sem_data[1] if sem_data else {}
-            kw_score = kw_data[0] if kw_data else 0.0
-            matched_terms = kw_data[1] if kw_data else []
+            content = payload.get("content", "")
             
-            content = payload.get("content", "") or self.bm25_index.doc_content.get(doc_id, "")
-            
-            if self.config.use_rrf:
-                # Reciprocal Rank Fusion
-                combined = self._rrf_score(doc_id, semantic_results, keyword_results)
+            # Determine source
+            if doc_id in semantic_map and doc_id in keyword_map:
+                source = "both"
+            elif doc_id in semantic_map:
+                source = "semantic"
             else:
-                # Linear combination with normalization
-                norm_sem = sem_score / max_semantic if sem_score > 0 else 0.0
-                norm_kw = kw_score / max_keyword if kw_score > 0 else 0.0
-                combined = (
-                    self.config.semantic_weight * norm_sem +
-                    self.config.keyword_weight * norm_kw
-                )
+                source = "keyword"
+            
+            # Hybrid fusion: alpha * keyword + (1-alpha) * semantic
+            combined = (
+                self.config.alpha * kw_score +
+                (1 - self.config.alpha) * sem_score
+            )
+            
+            # Apply minimum threshold
+            if combined < self.config.min_score and source != "both":
+                continue
             
             results.append(SearchResult(
                 id=doc_id,
@@ -324,74 +326,60 @@ class HybridSearcher:
                 semantic_score=sem_score,
                 keyword_score=kw_score,
                 combined_score=combined,
+                source=source,
                 payload=payload,
-                matched_terms=matched_terms,
             ))
         
         # Sort by combined score
         results.sort(key=lambda r: r.combined_score, reverse=True)
         
+        log.debug(
+            "hybrid_fusion_complete",
+            semantic_count=len(semantic_results),
+            keyword_count=len(keyword_results),
+            fused_count=len(results[:limit]),
+        )
+        
         return results[:limit]
-    
-    def _rrf_score(
-        self,
-        doc_id: str,
-        semantic_results: list[tuple[str, float, dict[str, Any]]],
-        keyword_results: list[tuple[str, float, list[str]]],
-    ) -> float:
-        """
-        Calculate Reciprocal Rank Fusion score.
-        
-        RRF formula: score = Σ (1 / (k + rank_i)) for each ranking
-        
-        This is rank-based rather than score-based, making it more robust
-        to score distribution differences between systems.
-        """
-        k = self.config.rrf_k
-        rrf_score = 0.0
-        
-        # Find rank in semantic results
-        for rank, (sid, _, _) in enumerate(semantic_results, start=1):
-            if str(sid) == doc_id:
-                rrf_score += self.config.semantic_weight / (k + rank)
-                break
-        
-        # Find rank in keyword results
-        for rank, (kid, _, _) in enumerate(keyword_results, start=1):
-            if kid == doc_id:
-                rrf_score += self.config.keyword_weight / (k + rank)
-                break
-        
-        return rrf_score
     
     async def search(
         self,
-        query: str,
         semantic_results: list[tuple[str, float, dict[str, Any]]],
+        keyword_results: list[tuple[str, float]],
         limit: int = 10,
     ) -> list[SearchResult]:
         """
-        Perform hybrid search combining provided semantic results with keyword search.
+        Perform hybrid search by fusing semantic and keyword results.
         
-        This method assumes documents have already been indexed via index_documents().
+        This is the main entry point. Call Qdrant and FTS5 externally,
+        then pass results here for fusion.
         
         Args:
-            query: Search query
-            semantic_results: Pre-computed semantic search results from Qdrant
+            semantic_results: From Qdrant.search() - (id, score, payload)
+            keyword_results: From Database.search_fts() - (id, bm25_score)
             limit: Maximum results to return
             
         Returns:
             List of SearchResult with fused scores
         """
-        # Perform keyword search
-        kw_raw = self.bm25_index.search(query, limit=limit * 2)  # Get more for fusion
+        return self.fuse_results(semantic_results, keyword_results, limit)
+
+
+# Convenience function for simple cases
+def fuse_scores(
+    semantic_score: float,
+    keyword_score: float,
+    alpha: float = 0.4,
+) -> float:
+    """
+    Fuse a single pair of scores.
+    
+    Args:
+        semantic_score: Normalized semantic similarity (0-1)
+        keyword_score: Normalized BM25 score (0-1)
+        alpha: Keyword weight (default: 0.4)
         
-        log.debug(
-            "hybrid_search",
-            query_len=len(query),
-            semantic_count=len(semantic_results),
-            keyword_count=len(kw_raw),
-        )
-        
-        # Fuse results
-        return self.fuse_results(semantic_results, kw_raw, limit=limit)
+    Returns:
+        Combined score (0-1)
+    """
+    return alpha * keyword_score + (1 - alpha) * semantic_score

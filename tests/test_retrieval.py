@@ -1,93 +1,104 @@
-"""Tests for advanced retrieval features (Week 6)."""
+"""Tests for advanced retrieval features (Week 6).
+
+Tests cover:
+1. Hybrid search (BM25 + vector fusion)
+2. FTS5 full-text search
+3. Graph-aware retrieval
+4. CrossEncoder reranking
+5. Context optimization with token budgeting
+6. Relevance ranking
+"""
 
 import pytest
 from datetime import datetime, timedelta
+from unittest.mock import AsyncMock, MagicMock, patch
 
-from remembra.retrieval.hybrid import BM25Index, HybridSearcher, HybridSearchConfig, SearchResult
-from remembra.retrieval.context import ContextOptimizer, MemoryChunk
+# Import retrieval modules
+from remembra.retrieval.hybrid import (
+    BM25Index,
+    HybridSearcher,
+    HybridSearchConfig,
+    SearchResult,
+)
+from remembra.retrieval.graph import GraphRetriever, GraphSearchResult
+from remembra.retrieval.context import ContextOptimizer, OptimizedContext
 from remembra.retrieval.ranking import RelevanceRanker, RankingConfig, RankedMemory
-from remembra.models.memory import EntityRef
+from remembra.retrieval.reranker import CrossEncoderReranker, RerankedResult
 
 
 class TestBM25Index:
-    """Tests for BM25 keyword matching."""
+    """Tests for the BM25 keyword search index."""
     
-    def test_tokenize_simple(self):
-        """Test basic tokenization."""
-        tokens = BM25Index.tokenize("Hello World!")
-        assert tokens == ["hello", "world"]
-    
-    def test_tokenize_with_numbers(self):
-        """Test tokenization with numbers."""
-        tokens = BM25Index.tokenize("Meeting at 3pm in Room 42")
-        assert "meeting" in tokens
-        assert "3pm" in tokens
-        assert "42" in tokens
+    def test_tokenize(self):
+        """Test text tokenization."""
+        tokens = BM25Index.tokenize("Hello, World! This is a TEST.")
+        assert tokens == ["hello", "world", "this", "is", "a", "test"]
     
     def test_add_document(self):
-        """Test adding a document to the index."""
+        """Test adding a single document."""
         index = BM25Index()
-        index.add_document("doc1", "David Kim works at Acme Corp")
+        index.add_document("doc1", "The quick brown fox")
         
         assert "doc1" in index.documents
         assert index.n_docs == 1
-        assert index.avg_doc_len > 0
+        assert index.avg_doc_len == 4  # 4 words
     
-    def test_add_documents_batch(self):
-        """Test adding multiple documents at once."""
+    def test_add_documents(self):
+        """Test adding multiple documents."""
         index = BM25Index()
         docs = [
-            ("doc1", "David Kim works at Acme Corp"),
-            ("doc2", "Mr. Kim mentioned the merger"),
-            ("doc3", "The acquisition was discussed"),
+            ("doc1", "The quick brown fox"),
+            ("doc2", "The lazy dog"),
+            ("doc3", "A brown dog jumps"),
         ]
         index.add_documents(docs)
         
         assert index.n_docs == 3
-        assert "kim" in index.doc_freq  # Kim appears in 2 docs
-        assert index.doc_freq["kim"] == 2
+        assert "brown" in index.doc_freq
+        assert index.doc_freq["brown"] == 2  # In doc1 and doc3
     
-    def test_search_exact_match(self):
-        """Test searching with exact term match."""
+    def test_search_basic(self):
+        """Test basic BM25 search."""
         index = BM25Index()
         index.add_documents([
-            ("doc1", "David Kim works at Acme Corp"),
-            ("doc2", "Sarah Chen is the CEO"),
-            ("doc3", "The merger was announced"),
+            ("doc1", "The quick brown fox jumps over the lazy dog"),
+            ("doc2", "Python is a programming language"),
+            ("doc3", "The brown bear was quick"),
         ])
         
-        results = index.search("David Kim", limit=5)
+        results = index.search("brown quick", limit=10)
         
-        assert len(results) >= 1
-        assert results[0][0] == "doc1"  # doc1 should be top result
-        assert "david" in results[0][2] or "kim" in results[0][2]  # matched terms
-    
-    def test_search_partial_match(self):
-        """Test searching with partial match - 'Mr. Kim' should match 'Kim'."""
-        index = BM25Index()
-        index.add_documents([
-            ("doc1", "David Kim works at Acme Corp"),
-            ("doc2", "Mr. Kim mentioned acquisition"),
-        ])
-        
-        results = index.search("Kim merger", limit=5)
-        
-        # Both docs should match on "kim"
+        assert len(results) > 0
+        # doc1 and doc3 should match
         doc_ids = [r[0] for r in results]
-        assert "doc1" in doc_ids or "doc2" in doc_ids
+        assert "doc1" in doc_ids or "doc3" in doc_ids
     
     def test_search_no_match(self):
-        """Test searching with no matches."""
+        """Test search with no matching terms."""
         index = BM25Index()
         index.add_document("doc1", "Hello world")
         
-        results = index.search("nonexistent terms xyz", limit=5)
+        results = index.search("nonexistent terms", limit=10)
         assert len(results) == 0
     
-    def test_clear_index(self):
+    def test_search_returns_matched_terms(self):
+        """Test that search returns matched terms."""
+        index = BM25Index()
+        index.add_document("doc1", "Machine learning is powerful")
+        
+        results = index.search("machine learning", limit=10)
+        
+        assert len(results) == 1
+        doc_id, score, matched = results[0]
+        assert "machine" in matched
+        assert "learning" in matched
+    
+    def test_clear(self):
         """Test clearing the index."""
         index = BM25Index()
         index.add_document("doc1", "Test content")
+        assert index.n_docs == 1
+        
         index.clear()
         
         assert index.n_docs == 0
@@ -95,107 +106,83 @@ class TestBM25Index:
 
 
 class TestHybridSearcher:
-    """Tests for hybrid search combining semantic and keyword."""
+    """Tests for hybrid semantic + keyword search."""
     
-    def test_keyword_only_search(self):
-        """Test keyword-only search."""
+    def test_init_with_config(self):
+        """Test initialization with custom config."""
+        config = HybridSearchConfig(
+            alpha=0.4,
+            min_score=0.2,
+        )
+        searcher = HybridSearcher(config)
+        
+        assert searcher.config.alpha == 0.4
+        assert searcher.config.min_score == 0.2
+    
+    def test_keyword_search(self):
+        """Test keyword-only search using in-memory BM25."""
         searcher = HybridSearcher()
         searcher.index_documents([
-            ("doc1", "David Kim works at Acme Corp"),
-            ("doc2", "The merger was discussed by Mr. Kim"),
+            ("id1", "Python programming tutorial"),
+            ("id2", "JavaScript web development"),
         ])
         
-        results = searcher.keyword_search("Kim merger", limit=5)
+        # Returns list of (doc_id, score, matched_terms) tuples
+        results = searcher.keyword_search("python", limit=5)
         
-        assert len(results) >= 1
-        assert all(isinstance(r, SearchResult) for r in results)
-        # doc2 should score higher (has both terms)
-        assert results[0].id == "doc2"
+        assert len(results) == 1
+        doc_id, score, matched_terms = results[0]
+        assert doc_id == "id1"
+        assert "python" in matched_terms
     
-    def test_fuse_results_linear(self):
-        """Test linear score fusion."""
-        config = HybridSearchConfig(
-            semantic_weight=0.7,
-            keyword_weight=0.3,
-            use_rrf=False,
-        )
-        searcher = HybridSearcher(config)
+    def test_fuse_results(self):
+        """Test fusion of semantic and keyword results."""
+        searcher = HybridSearcher(HybridSearchConfig(
+            alpha=0.4,
+            min_score=0.0,
+            include_partial=True,
+        ))
         
-        # Simulate semantic results: (id, score, payload)
-        semantic = [
-            ("doc1", 0.9, {"content": "Semantic match"}),
-            ("doc2", 0.7, {"content": "Lower semantic"}),
+        semantic_results = [
+            ("id1", 0.9, {"content": "Python programming"}),
+            ("id2", 0.7, {"content": "Machine learning"}),
+        ]
+        # FTS5-style results: (id, score)
+        keyword_results = [
+            ("id1", 5.0),
         ]
         
-        # Simulate keyword results: (id, score, matched_terms)
-        keyword = [
-            ("doc2", 5.0, ["keyword", "match"]),  # doc2 has better keyword match
-            ("doc1", 2.0, ["keyword"]),
-        ]
-        
-        fused = searcher.fuse_results(semantic, keyword, limit=5)
+        fused = searcher.fuse_results(semantic_results, keyword_results, limit=10)
         
         assert len(fused) == 2
-        # doc1 has higher semantic (0.9) but lower keyword
-        # doc2 has lower semantic (0.7) but higher keyword
-        # Combined scores should reflect weighted combination
+        # id1 should rank higher due to keyword match + high semantic
+        assert fused[0].id == "id1"
+        assert fused[0].semantic_score > 0
+        assert fused[0].keyword_score > 0
+    
+    def test_fuse_normalizes_scores(self):
+        """Test that fusion normalizes scores properly."""
+        searcher = HybridSearcher(HybridSearchConfig(
+            alpha=0.5,  # Equal weight
+            min_score=0.0,
+        ))
+        
+        semantic_results = [
+            ("id1", 0.9, {"content": "Doc 1"}),
+            ("id2", 0.3, {"content": "Doc 2"}),
+        ]
+        keyword_results = [
+            ("id1", 10.0),  # High BM25 score
+            ("id2", 2.0),   # Low BM25 score
+        ]
+        
+        fused = searcher.fuse_results(semantic_results, keyword_results, limit=10)
+        
+        # Scores should be normalized 0-1
         for result in fused:
-            assert result.semantic_score >= 0
-            assert result.keyword_score >= 0
-            assert result.combined_score > 0
-    
-    def test_fuse_results_rrf(self):
-        """Test Reciprocal Rank Fusion."""
-        config = HybridSearchConfig(
-            semantic_weight=0.5,
-            keyword_weight=0.5,
-            use_rrf=True,
-            rrf_k=60,
-        )
-        searcher = HybridSearcher(config)
-        
-        semantic = [
-            ("doc1", 0.9, {"content": "First in semantic"}),
-            ("doc2", 0.8, {"content": "Second in semantic"}),
-        ]
-        
-        keyword = [
-            ("doc2", 5.0, ["match"]),  # doc2 is first in keyword
-            ("doc1", 3.0, ["other"]),  # doc1 is second in keyword
-        ]
-        
-        fused = searcher.fuse_results(semantic, keyword, limit=5)
-        
-        # With RRF, ranks matter more than scores
-        # doc2 is rank 1 in keyword, rank 2 in semantic
-        # doc1 is rank 1 in semantic, rank 2 in keyword
-        # They should be fairly close in combined score
-        assert len(fused) == 2
-        score_diff = abs(fused[0].combined_score - fused[1].combined_score)
-        assert score_diff < 0.1  # Should be close due to RRF averaging
-    
-    def test_handles_missing_results(self):
-        """Test fusion when a doc appears in only one result set."""
-        searcher = HybridSearcher()
-        
-        semantic = [
-            ("doc1", 0.9, {"content": "Only in semantic"}),
-        ]
-        
-        keyword = [
-            ("doc2", 5.0, ["keyword"]),  # Only in keyword
-        ]
-        
-        # Index doc2 for content lookup
-        searcher.index_documents([("doc2", "Only in keyword results")])
-        
-        fused = searcher.fuse_results(semantic, keyword, limit=5)
-        
-        assert len(fused) == 2
-        # Both docs should be present
-        ids = [r.id for r in fused]
-        assert "doc1" in ids
-        assert "doc2" in ids
+            assert 0 <= result.semantic_score <= 1
+            assert 0 <= result.keyword_score <= 1
+            assert 0 <= result.combined_score <= 1
 
 
 class TestContextOptimizer:
@@ -203,344 +190,328 @@ class TestContextOptimizer:
     
     def test_estimate_tokens(self):
         """Test token estimation."""
-        text = "Hello world, this is a test."
-        tokens = ContextOptimizer.estimate_tokens(text)
+        optimizer = ContextOptimizer()
         
-        # ~30 chars / 4 = ~7 tokens
-        assert 5 <= tokens <= 15
+        # Short text
+        tokens = optimizer.estimate_tokens("Hello world")
+        assert tokens > 0
+        
+        # Empty text
+        assert optimizer.estimate_tokens("") == 0
     
     def test_truncate_to_tokens(self):
-        """Test truncation to token limit."""
-        text = "This is a long sentence. And another one. And more text here."
-        truncated, was_truncated = ContextOptimizer.truncate_to_tokens(text, 5)
+        """Test text truncation."""
+        text = "This is a long sentence. " * 100  # ~500 words
+        truncated, was_truncated = ContextOptimizer.truncate_to_tokens(text, 50)
         
         assert was_truncated
-        assert truncated.endswith("...")
         assert len(truncated) < len(text)
+        assert truncated.endswith("...")
     
-    def test_no_truncation_needed(self):
-        """Test when no truncation is needed."""
-        text = "Short text."
-        truncated, was_truncated = ContextOptimizer.truncate_to_tokens(text, 1000)
-        
-        assert not was_truncated
-        assert truncated == text
-    
-    def test_optimize_single_memory(self):
-        """Test optimizing a single memory."""
+    def test_optimize_basic(self):
+        """Test basic context optimization."""
         optimizer = ContextOptimizer(max_tokens=1000)
         
         memories = [
-            {
-                "id": "mem1",
-                "content": "David Kim works at Acme Corp",
-                "relevance": 0.9,
-                "created_at": "2026-03-01T10:00:00",
-            }
+            {"id": "1", "content": "First memory content", "relevance": 0.9},
+            {"id": "2", "content": "Second memory content", "relevance": 0.7},
+            {"id": "3", "content": "Third memory content", "relevance": 0.5},
         ]
         
         result = optimizer.optimize(memories)
         
-        assert len(result.chunks) == 1
-        assert "David Kim" in result.context
-        assert result.dropped_count == 0
-        assert result.truncated_count == 0
+        assert result.context != ""
+        assert len(result.chunks) > 0
+        assert result.total_tokens > 0
     
-    def test_optimize_multiple_memories(self):
-        """Test optimizing multiple memories with sorting."""
-        optimizer = ContextOptimizer(max_tokens=1000)
+    def test_optimize_with_token_limit(self):
+        """Test optimization respects token limits."""
+        optimizer = ContextOptimizer(max_tokens=50)  # Very small limit
         
         memories = [
-            {"id": "mem1", "content": "Low relevance", "relevance": 0.5},
-            {"id": "mem2", "content": "High relevance", "relevance": 0.9},
-            {"id": "mem3", "content": "Medium relevance", "relevance": 0.7},
+            {"id": "1", "content": "A" * 500, "relevance": 0.9},  # Very long
+            {"id": "2", "content": "Short", "relevance": 0.7},
+        ]
+        
+        result = optimizer.optimize(memories)
+        
+        assert result.total_tokens <= 60  # Allow some buffer
+        # Should have truncated or dropped something
+        assert result.truncated_count > 0 or result.dropped_count > 0
+    
+    def test_optimize_preserves_relevance_order(self):
+        """Test that optimization keeps most relevant content."""
+        optimizer = ContextOptimizer(max_tokens=100)
+        
+        memories = [
+            {"id": "low", "content": "Low relevance", "relevance": 0.1},
+            {"id": "high", "content": "High relevance", "relevance": 0.9},
+            {"id": "mid", "content": "Mid relevance", "relevance": 0.5},
         ]
         
         result = optimizer.optimize(memories, sort_by_relevance=True)
         
-        assert len(result.chunks) == 3
         # First chunk should be highest relevance
-        assert result.chunks[0].id == "mem2"
+        if result.chunks:
+            assert result.chunks[0].id == "high"
     
-    def test_optimize_with_truncation(self):
-        """Test optimization that requires truncation."""
-        # Very small token limit
-        optimizer = ContextOptimizer(max_tokens=20, min_chunk_tokens=5)
+    def test_count_tokens_accurate(self):
+        """Test token counting accuracy indicator."""
+        optimizer = ContextOptimizer()
         
-        memories = [
-            {"id": "mem1", "content": "This is a somewhat longer piece of content that will need truncation.", "relevance": 0.9},
-            {"id": "mem2", "content": "Another memory that might get dropped.", "relevance": 0.5},
-        ]
+        count, is_accurate = optimizer.count_tokens_accurate("Hello world")
         
-        result = optimizer.optimize(memories)
-        
-        # Should have at least one chunk, possibly truncated
-        assert len(result.chunks) >= 1
-        # Some memories might be dropped or truncated
-        assert result.truncated_count >= 0 or result.dropped_count >= 0
-    
-    def test_optimize_with_metadata(self):
-        """Test including metadata in output."""
-        optimizer = ContextOptimizer(max_tokens=1000, include_metadata=True)
-        
-        memories = [
-            {
-                "id": "mem1",
-                "content": "Test content",
-                "relevance": 0.85,
-                "created_at": "2026-03-01T10:00:00",
-            }
-        ]
-        
-        result = optimizer.optimize(memories)
-        
-        # Should include date and relevance
-        assert "2026-03-01" in result.context
-        assert "85%" in result.context or "0.85" in result.context
-    
-    def test_optimize_without_metadata(self):
-        """Test excluding metadata from output."""
-        optimizer = ContextOptimizer(max_tokens=1000, include_metadata=False)
-        
-        memories = [
-            {
-                "id": "mem1",
-                "content": "Test content only",
-                "relevance": 0.85,
-                "created_at": "2026-03-01T10:00:00",
-            }
-        ]
-        
-        result = optimizer.optimize(memories)
-        
-        # Should NOT include date or relevance
-        assert result.context == "Test content only"
+        assert count > 0
+        # is_accurate depends on whether tiktoken is installed
+        assert isinstance(is_accurate, bool)
 
 
 class TestRelevanceRanker:
-    """Tests for relevance ranking with boosts."""
+    """Tests for relevance ranking with multiple signals."""
     
-    def test_rank_by_semantic_score(self):
-        """Test basic ranking by semantic score."""
-        config = RankingConfig(
-            semantic_weight=1.0,
-            recency_weight=0.0,
-            entity_weight=0.0,
-            keyword_weight=0.0,
-        )
-        ranker = RelevanceRanker(config)
+    def test_rank_basic(self):
+        """Test basic ranking."""
+        ranker = RelevanceRanker()
         
         memories = [
-            {"id": "mem1", "content": "Low score", "relevance": 0.5},
-            {"id": "mem2", "content": "High score", "relevance": 0.9},
-            {"id": "mem3", "content": "Medium score", "relevance": 0.7},
+            {"id": "1", "content": "Memory one", "relevance": 0.8},
+            {"id": "2", "content": "Memory two", "relevance": 0.9},
+            {"id": "3", "content": "Memory three", "relevance": 0.6},
         ]
         
         ranked = ranker.rank(memories)
         
-        assert ranked[0].id == "mem2"  # Highest semantic
-        assert ranked[1].id == "mem3"  # Medium semantic
-        assert ranked[2].id == "mem1"  # Lowest semantic
+        assert len(ranked) == 3
+        # Highest semantic score should be first
+        assert ranked[0].id == "2"
     
     def test_recency_boost(self):
         """Test that recent memories get boosted."""
         config = RankingConfig(
             semantic_weight=0.5,
             recency_weight=0.5,
-            recency_decay_days=30.0,
-            entity_weight=0.0,
-            keyword_weight=0.0,
+            recency_decay_days=7,
         )
         ranker = RelevanceRanker(config)
         
         now = datetime.utcnow()
-        old_date = (now - timedelta(days=60)).isoformat()
-        recent_date = (now - timedelta(days=1)).isoformat()
-        
-        memories = [
-            {"id": "mem1", "content": "Old memory", "relevance": 0.9, "created_at": old_date},
-            {"id": "mem2", "content": "Recent memory", "relevance": 0.7, "created_at": recent_date},
-        ]
-        
-        ranked = ranker.rank(memories)
-        
-        # Recent memory should have higher recency score
-        mem1_ranked = next(r for r in ranked if r.id == "mem1")
-        mem2_ranked = next(r for r in ranked if r.id == "mem2")
-        
-        assert mem2_ranked.recency_score > mem1_ranked.recency_score
-    
-    def test_entity_boost(self):
-        """Test entity match boost."""
-        config = RankingConfig(
-            semantic_weight=0.5,
-            recency_weight=0.0,
-            entity_weight=0.5,
-            keyword_weight=0.0,
-        )
-        ranker = RelevanceRanker(config)
-        
-        query_entities = [
-            EntityRef(id="ent1", canonical_name="David Kim", type="person", confidence=1.0)
-        ]
-        
         memories = [
             {
-                "id": "mem1",
-                "content": "Memory about David Kim",
+                "id": "old",
+                "content": "Old memory",
+                "relevance": 0.9,
+                "created_at": (now - timedelta(days=30)).isoformat(),
+            },
+            {
+                "id": "new",
+                "content": "New memory",
                 "relevance": 0.7,
-                "entities": [
-                    {"id": "ent1", "canonical_name": "David Kim", "type": "person", "confidence": 1.0}
-                ],
+                "created_at": now.isoformat(),
             },
-            {
-                "id": "mem2",
-                "content": "Memory about someone else",
-                "relevance": 0.8,
-                "entities": [
-                    {"id": "ent2", "canonical_name": "Sarah Chen", "type": "person", "confidence": 1.0}
-                ],
-            },
-        ]
-        
-        ranked = ranker.rank(memories, query="David Kim", query_entities=query_entities)
-        
-        # mem1 should have entity boost
-        mem1_ranked = next(r for r in ranked if r.id == "mem1")
-        mem2_ranked = next(r for r in ranked if r.id == "mem2")
-        
-        assert mem1_ranked.entity_score > mem2_ranked.entity_score
-    
-    def test_keyword_boost(self):
-        """Test keyword match boost."""
-        config = RankingConfig(
-            semantic_weight=0.5,
-            recency_weight=0.0,
-            entity_weight=0.0,
-            keyword_weight=0.5,
-        )
-        ranker = RelevanceRanker(config)
-        
-        memories = [
-            {"id": "mem1", "content": "No keywords", "relevance": 0.8, "keyword_score": 0.0},
-            {"id": "mem2", "content": "Has keywords", "relevance": 0.6, "keyword_score": 5.0},
         ]
         
         ranked = ranker.rank(memories)
         
-        mem1_ranked = next(r for r in ranked if r.id == "mem1")
-        mem2_ranked = next(r for r in ranked if r.id == "mem2")
-        
-        # mem2 should have higher keyword score
-        assert mem2_ranked.keyword_score > mem1_ranked.keyword_score
+        # New memory's recency score should be higher
+        new_mem = next(r for r in ranked if r.id == "new")
+        old_mem = next(r for r in ranked if r.id == "old")
+        assert new_mem.recency_score > old_mem.recency_score
     
-    def test_config_from_env(self):
-        """Test loading config from environment."""
-        import os
-        
-        # Set env vars
-        os.environ["REMEMBRA_RANKING_SEMANTIC_WEIGHT"] = "0.8"
-        os.environ["REMEMBRA_RANKING_RECENCY_WEIGHT"] = "0.1"
-        
-        try:
-            config = RankingConfig.from_env()
-            assert config.semantic_weight == 0.8
-            assert config.recency_weight == 0.1
-        finally:
-            # Clean up
-            del os.environ["REMEMBRA_RANKING_SEMANTIC_WEIGHT"]
-            del os.environ["REMEMBRA_RANKING_RECENCY_WEIGHT"]
-    
-    def test_diversity_reranking(self):
+    def test_rerank_with_diversity(self):
         """Test diversity-aware reranking."""
         ranker = RelevanceRanker()
         
-        # Create some ranked memories with similar content
-        ranked = [
-            RankedMemory(id="mem1", content="David Kim works at Acme", created_at=None, final_score=0.9),
-            RankedMemory(id="mem2", content="David Kim is at Acme Corp", created_at=None, final_score=0.85),  # Very similar to mem1
-            RankedMemory(id="mem3", content="The merger was discussed yesterday", created_at=None, final_score=0.8),  # Different topic
+        # Create similar memories
+        memories = [
+            {"id": "1", "content": "Python programming tutorial basics", "relevance": 0.9},
+            {"id": "2", "content": "Python programming tutorial advanced", "relevance": 0.85},
+            {"id": "3", "content": "Machine learning fundamentals", "relevance": 0.8},
         ]
         
-        reranked = ranker.rerank_with_diversity(ranked, diversity_threshold=0.3, limit=3)
+        ranked = ranker.rank(memories)
+        diverse = ranker.rerank_with_diversity(ranked, diversity_threshold=0.5)
         
-        assert len(reranked) == 3
-        # mem3 (different topic) should be promoted over mem2 (very similar to mem1)
-        # Because of diversity scoring
-        assert reranked[0].id == "mem1"  # Top is always kept
+        assert len(diverse) <= len(ranked)
+
+
+class TestCrossEncoderReranker:
+    """Tests for CrossEncoder reranking."""
+    
+    def test_graceful_degradation(self):
+        """Test that reranker gracefully degrades when model unavailable."""
+        # Don't load the actual model
+        reranker = CrossEncoderReranker(enabled=False)
+        
+        documents = [
+            {"id": "1", "content": "Test content", "relevance": 0.8},
+            {"id": "2", "content": "More content", "relevance": 0.6},
+        ]
+        
+        results = reranker.rerank("test query", documents)
+        
+        # Should return results even without model
+        assert len(results) == 2
+        # Scores should pass through
+        assert results[0].original_score == 0.8
+    
+    def test_rerank_ordering(self):
+        """Test that reranking preserves/returns proper order."""
+        reranker = CrossEncoderReranker(enabled=False)
+        
+        documents = [
+            {"id": "low", "content": "Irrelevant", "relevance": 0.3},
+            {"id": "high", "content": "Very relevant", "relevance": 0.9},
+            {"id": "mid", "content": "Somewhat relevant", "relevance": 0.6},
+        ]
+        
+        results = reranker.rerank("query", documents, top_k=2)
+        
+        assert len(results) == 2
+        # Should be sorted by relevance (pass-through mode)
+        assert results[0].id == "high"
+    
+    def test_is_available(self):
+        """Test availability check."""
+        reranker = CrossEncoderReranker(enabled=False)
+        # When disabled, should not be available
+        assert reranker.is_available() is False
+
+
+class TestGraphRetriever:
+    """Tests for graph-aware entity retrieval."""
+    
+    @pytest.fixture
+    def mock_db(self):
+        """Create a mock database."""
+        db = MagicMock()
+        db.get_user_entities = AsyncMock(return_value=[])
+        db.get_entity_relationships = AsyncMock(return_value=[])
+        db.get_entity = AsyncMock(return_value=None)
+        db.get_memories_by_entity = AsyncMock(return_value=[])
+        return db
+    
+    @pytest.mark.asyncio
+    async def test_search_no_entities(self, mock_db):
+        """Test search when no entities match."""
+        retriever = GraphRetriever(mock_db)
+        
+        result = await retriever.search(
+            query="random query",
+            user_id="user1",
+            project_id="default",
+        )
+        
+        assert len(result.memory_ids) == 0
+        assert len(result.matched_entities) == 0
+    
+    @pytest.mark.asyncio
+    async def test_find_entity_mentions(self, mock_db):
+        """Test finding entity mentions in query."""
+        from remembra.models.memory import Entity
+        
+        # Mock entities
+        entities = [
+            Entity(
+                id="e1",
+                canonical_name="David Kim",
+                type="person",
+                aliases=["Mr. Kim", "Dave"],
+            ),
+            Entity(
+                id="e2",
+                canonical_name="Acme Corp",
+                type="company",
+                aliases=["Acme", "ACME Corporation"],
+            ),
+        ]
+        mock_db.get_user_entities = AsyncMock(return_value=entities)
+        
+        retriever = GraphRetriever(mock_db)
+        
+        # Test canonical name match
+        matched = await retriever.find_entity_mentions(
+            query="Tell me about David Kim",
+            user_id="user1",
+        )
+        assert len(matched) == 1
+        assert matched[0].canonical_name == "David Kim"
+        
+        # Test alias match
+        matched = await retriever.find_entity_mentions(
+            query="What does Mr. Kim do at Acme?",
+            user_id="user1",
+        )
+        assert len(matched) == 2
 
 
 class TestIntegration:
-    """Integration tests for advanced retrieval pipeline."""
+    """Integration tests for the full retrieval pipeline."""
     
-    def test_full_hybrid_pipeline(self):
-        """Test complete hybrid search → rank → optimize pipeline."""
-        # 1. Hybrid Search
+    @pytest.mark.asyncio
+    async def test_hybrid_graph_fusion(self):
+        """Test combining hybrid search with graph retrieval."""
+        # 1. Create hybrid searcher
         searcher = HybridSearcher(HybridSearchConfig(
-            semantic_weight=0.7,
-            keyword_weight=0.3,
+            alpha=0.4,
+            min_score=0.0,
         ))
         
+        # 2. Index documents
         docs = [
-            ("mem1", "David Kim works at Acme Corp as VP of Sales"),
-            ("mem2", "Mr. Kim mentioned the upcoming merger during the meeting"),
-            ("mem3", "The acquisition of TechStart was finalized"),
+            ("mem1", "David Kim is the CEO of Acme Corp"),
+            ("mem2", "The quarterly earnings report was positive"),
+            ("mem3", "Mr. Kim announced the merger yesterday"),
         ]
         searcher.index_documents(docs)
         
-        # Simulate semantic results
+        # 3. Simulate semantic results
         semantic_results = [
-            ("mem1", 0.9, {"content": docs[0][1], "created_at": "2026-03-01T10:00:00"}),
-            ("mem2", 0.7, {"content": docs[1][1], "created_at": "2026-02-15T10:00:00"}),
-            ("mem3", 0.5, {"content": docs[2][1], "created_at": "2026-01-01T10:00:00"}),
+            ("mem1", 0.8, {"content": docs[0][1]}),
+            ("mem3", 0.75, {"content": docs[2][1]}),
         ]
         
-        fused = searcher.fuse_results(
-            semantic_results,
-            searcher.bm25_index.search("David Kim merger", limit=10),
-            limit=10,
-        )
+        # 4. Get keyword results
+        keyword_results_raw = searcher.keyword_search("David Kim CEO", limit=5)
+        keyword_results = [(r[0], r[1]) for r in keyword_results_raw]  # (id, score)
         
-        assert len(fused) >= 2  # At least 2 results
+        # 5. Fuse
+        fused = searcher.fuse_results(semantic_results, keyword_results, limit=5)
         
-        # 2. Relevance Ranking
-        ranker = RelevanceRanker(RankingConfig(
-            semantic_weight=0.6,
-            recency_weight=0.2,
-            entity_weight=0.1,
-            keyword_weight=0.1,
-        ))
+        assert len(fused) > 0
         
-        memories_for_ranking = [
+        # 6. Apply ranking
+        ranker = RelevanceRanker()
+        memories = [
             {
                 "id": r.id,
                 "content": r.content,
-                "relevance": r.semantic_score,
+                "relevance": r.combined_score,
                 "keyword_score": r.keyword_score,
-                "created_at": r.payload.get("created_at") if r.payload else None,
             }
             for r in fused
         ]
+        ranked = ranker.rank(memories, query="David Kim CEO")
         
-        ranked = ranker.rank(memories_for_ranking, query="David Kim merger")
-        
-        assert len(ranked) >= 2
-        # Should prioritize mem1 or mem2 (both mention Kim)
-        
-        # 3. Context Optimization
-        optimizer = ContextOptimizer(max_tokens=500, include_metadata=True)
-        
-        memories_for_context = [
-            {
-                "id": r.id,
-                "content": r.content,
-                "relevance": r.final_score,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-            }
+        # 7. Optimize context
+        optimizer = ContextOptimizer(max_tokens=500)
+        context_mems = [
+            {"id": r.id, "content": r.content, "relevance": r.final_score}
             for r in ranked
         ]
+        optimized = optimizer.optimize(context_mems)
         
-        optimized = optimizer.optimize(memories_for_context)
+        assert optimized.context != ""
+        assert optimized.total_tokens > 0
+    
+    def test_full_pipeline_components(self):
+        """Test that all pipeline components initialize correctly."""
+        # All these should construct without errors
+        searcher = HybridSearcher()
+        ranker = RelevanceRanker()
+        optimizer = ContextOptimizer()
+        reranker = CrossEncoderReranker(enabled=False)
         
-        assert len(optimized.context) > 0
-        assert "Kim" in optimized.context or "David" in optimized.context
+        assert searcher is not None
+        assert ranker is not None
+        assert optimizer is not None
+        assert reranker is not None

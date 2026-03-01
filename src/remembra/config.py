@@ -79,18 +79,28 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     # Advanced Retrieval (Week 6)
     # -----------------------------------------------------------------------
-    # Hybrid Search
+    # Hybrid Search (FTS5 + Vector)
     enable_hybrid_search: bool = Field(
         True,
-        description="Enable BM25 keyword search alongside vector search"
+        description="Enable FTS5 BM25 keyword search alongside vector search"
     )
-    hybrid_semantic_weight: float = Field(
-        0.7,
-        description="Weight for semantic (vector) search in hybrid mode"
+    hybrid_alpha: float = Field(
+        0.4,
+        description="Weight for keyword (BM25) in hybrid fusion. Research default: 0.4"
     )
-    hybrid_keyword_weight: float = Field(
-        0.3,
-        description="Weight for keyword (BM25) search in hybrid mode"
+    
+    # Reranking (CrossEncoder)
+    enable_reranking: bool = Field(
+        True,
+        description="Enable CrossEncoder reranking for improved accuracy"
+    )
+    rerank_model: str = Field(
+        "cross-encoder/ms-marco-MiniLM-L-6-v2",
+        description="HuggingFace model for reranking"
+    )
+    rerank_top_k: int = Field(
+        20,
+        description="Rerank top K results from hybrid search"
     )
     
     # Graph-Aware Retrieval

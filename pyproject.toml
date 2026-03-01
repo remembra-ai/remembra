@@ -57,6 +57,12 @@ server = [
     "structlog>=24.4.0",
     "aiosqlite>=0.20.0",
     "openai>=1.0.0",
+    "tiktoken>=0.7.0",
+]
+
+# Advanced retrieval (optional reranking)
+rerank = [
+    "sentence-transformers>=2.5.0",
 ]
 
 # Development dependencies
@@ -70,9 +76,9 @@ dev = [
     "twine>=5.0.0",
 ]
 
-# All dependencies (SDK + Server)
+# All dependencies (SDK + Server + Rerank)
 all = [
-    "remembra[server]",
+    "remembra[server,rerank]",
 ]
 
 [project.urls]

@@ -8,7 +8,7 @@ Provides:
 - CrossEncoder reranking (optional, reduces hallucinations)
 """
 
-from remembra.retrieval.hybrid import HybridSearcher, SearchResult, HybridSearchConfig
+from remembra.retrieval.hybrid import HybridSearcher, SearchResult, HybridSearchConfig, BM25Index
 from remembra.retrieval.graph import GraphRetriever, GraphSearchResult
 from remembra.retrieval.context import ContextOptimizer, OptimizedContext
 from remembra.retrieval.ranking import RelevanceRanker, RankingConfig
@@ -19,6 +19,7 @@ __all__ = [
     "HybridSearcher",
     "SearchResult", 
     "HybridSearchConfig",
+    "BM25Index",
     # Graph retrieval
     "GraphRetriever",
     "GraphSearchResult",

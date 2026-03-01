@@ -28,19 +28,12 @@ from remembra.extraction.consolidator import (
 from remembra.extraction.entities import EntityExtractor, ExtractedEntity
 from remembra.extraction.matcher import EntityMatcher, ExistingEntity, MatchResult
 from remembra.models.memory import Entity, Relationship
-from remembra.retrieval import (
-    HybridSearcher,
-    HybridSearchConfig,
-    GraphRetriever,
-    ContextOptimizer,
-    RelevanceRanker,
-    CrossEncoderReranker,
-)
 # Advanced retrieval (Week 6)
 from remembra.retrieval.hybrid import HybridSearcher, HybridSearchConfig
 from remembra.retrieval.graph import GraphRetriever
 from remembra.retrieval.context import ContextOptimizer
 from remembra.retrieval.ranking import RelevanceRanker, RankingConfig
+from remembra.retrieval.reranker import CrossEncoderReranker
 
 log = structlog.get_logger(__name__)
 
@@ -130,38 +123,24 @@ class MemoryService:
         )
         
         # Initialize advanced retrieval (Week 6)
-        self.hybrid_searcher = HybridSearcher(
-            config=HybridSearchConfig(
-                semantic_weight=1.0 - settings.hybrid_alpha,
-                keyword_weight=settings.hybrid_alpha,
-            )
-        )
-        self.graph_retriever = GraphRetriever(
-            db=db,
-            max_depth=settings.graph_traversal_depth,
-        )
-        self.context_optimizer = ContextOptimizer(
-            max_tokens=settings.default_max_tokens,
-        )
-        self.relevance_ranker = RelevanceRanker()
-        self.reranker = CrossEncoderReranker(
-            model_name=settings.rerank_model,
-            enabled=settings.rerank_enabled,
-        )
-        
-        # Initialize advanced retrieval (Week 6)
+        # Hybrid search with FTS5 BM25 + vector fusion
         self.hybrid_searcher = HybridSearcher(HybridSearchConfig(
-            semantic_weight=settings.hybrid_semantic_weight,
-            keyword_weight=settings.hybrid_keyword_weight,
+            alpha=settings.hybrid_alpha,  # Research default: 0.4
         ))
+        
+        # Graph-aware retrieval using entity relationships
         self.graph_retriever = GraphRetriever(
             db=db,
             max_depth=settings.graph_max_depth,
         )
+        
+        # Context window optimization for LLM output
         self.context_optimizer = ContextOptimizer(
             max_tokens=settings.context_max_tokens,
             include_metadata=settings.context_include_metadata,
         )
+        
+        # Multi-signal relevance ranking
         self.relevance_ranker = RelevanceRanker(RankingConfig(
             semantic_weight=settings.ranking_semantic_weight,
             recency_weight=settings.ranking_recency_weight,
@@ -169,6 +148,12 @@ class MemoryService:
             keyword_weight=settings.ranking_keyword_weight,
             recency_decay_days=settings.ranking_recency_decay_days,
         ))
+        
+        # CrossEncoder reranking (optional, gracefully degrades)
+        self.reranker = CrossEncoderReranker(
+            model_name=settings.rerank_model,
+            enabled=settings.enable_reranking,
+        )
 
     # -----------------------------------------------------------------------
     # Store
@@ -333,7 +318,7 @@ class MemoryService:
         )
         
         # Index in FTS5 for hybrid search (Week 6)
-        if self.settings.hybrid_search_enabled:
+        if self.settings.enable_hybrid_search:
             try:
                 await self.db.index_memory_fts(
                     memory_id=memory.id,
@@ -545,16 +530,10 @@ class MemoryService:
         Returns:
             RecallResponse with context, memories, and entities
         """
-        # Resolve feature flags (request overrides config)
-        use_hybrid = (
-            request.enable_hybrid if request.enable_hybrid is not None 
-            else self.settings.hybrid_search_enabled
-        )
-        use_rerank = (
-            request.enable_rerank if request.enable_rerank is not None
-            else self.settings.rerank_enabled
-        )
-        max_tokens = request.max_tokens or self.settings.default_max_tokens
+        # Resolve feature flags
+        use_hybrid = self.settings.enable_hybrid_search
+        use_rerank = self.settings.enable_reranking
+        max_tokens = request.max_tokens or self.settings.context_max_tokens
         
         log.info(
             "recalling_memories_v2",
@@ -562,7 +541,7 @@ class MemoryService:
             project_id=request.project_id,
             query_length=len(request.query),
             hybrid_enabled=use_hybrid,
-            graph_enabled=self.settings.graph_retrieval_enabled,
+            graph_enabled=self.settings.enable_graph_retrieval,
             rerank_enabled=use_rerank,
             max_tokens=max_tokens,
         )
@@ -586,7 +565,7 @@ class MemoryService:
         matched_entities: list[EntityRef] = []
         related_entities: list[EntityRef] = []
         
-        if self.settings.graph_retrieval_enabled:
+        if self.settings.enable_graph_retrieval:
             try:
                 graph_result = await self.graph_retriever.search(
                     query=request.query,
