@@ -291,8 +291,8 @@ class ApiClient {
     return this.fetchApi<AnalyticsResponse>('/debug/analytics');
   }
 
-  async getEntityGraph(projectId: string = 'default'): Promise<EntityGraphResponse> {
-    return this.fetchApi<EntityGraphResponse>(`/debug/entities/graph?project_id=${projectId}`);
+  async getEntityGraph(projectId: string = 'default'): Promise<EntityGraphDataResponse> {
+    return this.fetchApi<EntityGraphDataResponse>(`/debug/entities/graph?project_id=${projectId}`);
   }
 
   async getMemoryTimeline(page: number = 1, pageSize: number = 50): Promise<MemoryTimelineResponse> {

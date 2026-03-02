@@ -3627,7 +3627,7 @@ wheels = [
 
 [[package]]
 name = "remembra"
-version = "0.6.7"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "bcrypt" },
@@ -3646,13 +3646,18 @@ all = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "python-multipart" },
     { name = "python-ulid" },
     { name = "qdrant-client" },
     { name = "sentence-transformers" },
     { name = "slowapi" },
+    { name = "stripe" },
     { name = "structlog" },
     { name = "tiktoken" },
     { name = "uvicorn", extra = ["standard"] },
+]
+cloud = [
+    { name = "stripe" },
 ]
 crewai = [
     { name = "crewai" },
@@ -3682,6 +3687,7 @@ server = [
     { name = "openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "python-multipart" },
     { name = "python-ulid" },
     { name = "qdrant-client" },
     { name = "slowapi" },
@@ -3714,19 +3720,21 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
+    { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9" },
     { name = "python-ulid", marker = "extra == 'server'", specifier = ">=3.0.0" },
     { name = "qdrant-client", marker = "extra == 'server'", specifier = ">=1.12.0,<2.0.0" },
-    { name = "remembra", extras = ["server", "rerank", "mcp", "langchain", "crewai"], marker = "extra == 'all'" },
+    { name = "remembra", extras = ["server", "rerank", "mcp", "langchain", "crewai", "cloud"], marker = "extra == 'all'" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=2.5.0" },
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "slowapi", marker = "extra == 'server'", specifier = ">=0.1.9" },
+    { name = "stripe", marker = "extra == 'cloud'", specifier = ">=8.0.0" },
     { name = "structlog", marker = "extra == 'server'", specifier = ">=24.4.0" },
     { name = "tiktoken", marker = "extra == 'server'", specifier = ">=0.7.0" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.32.0" },
 ]
-provides-extras = ["server", "mcp", "langchain", "crewai", "rerank", "dev", "all"]
+provides-extras = ["server", "mcp", "langchain", "crewai", "cloud", "rerank", "dev", "all"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -4176,6 +4184,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c4/68/79977123bb7be889ad680d79a40f339082c1978b5cfcf62c2d8d196873ac/starlette-0.52.1.tar.gz", hash = "sha256:834edd1b0a23167694292e94f597773bc3f89f362be6effee198165a35d62933", size = 2653702, upload-time = "2026-01-18T13:34:11.062Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/81/0d/13d1d239a25cbfb19e740db83143e95c772a1fe10202dda4b76792b114dd/starlette-0.52.1-py3-none-any.whl", hash = "sha256:0029d43eb3d273bc4f83a08720b4912ea4b071087a3b48db01b7c839f7954d74", size = 74272, upload-time = "2026-01-18T13:34:09.188Z" },
+]
+
+[[package]]
+name = "stripe"
+version = "14.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "requests" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/6a/ec/0f17cff3f7c91b0215266959c5a2a96b0bf9f45ac041c50b99ad8f9b5047/stripe-14.4.0.tar.gz", hash = "sha256:ddaa06f5e38a582bef7e93e06fc304ba8ae3b4c0c2aac43da02c84926f05fa0a", size = 1472370, upload-time = "2026-02-25T17:52:40.905Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/38/09/fcecad01d76dbe027015dd559ec1b6dccfc319c2540991dde4b1de81ba34/stripe-14.4.0-py3-none-any.whl", hash = "sha256:357151a816cd0bb012d6cb29f108fae50b9f6eece8530d7bc31dfa90c9ceb84c", size = 2115405, upload-time = "2026-02-25T17:52:39.128Z" },
 ]
 
 [[package]]
