@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up - Remembra Pro</title>
+    <meta name="description" content="Sign up for Remembra Pro Cloud. Get AI memory infrastructure in minutes.">
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    
+    <!-- Stripe -->
+    <script src="https://js.stripe.com/v3/"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#8B5CF6',
+                        'primary-dark': '#7C3AED',
+                        secondary: '#A78BFA',
+                        dark: '#0F0F0F',
+                        'dark-lighter': '#1A1A1A',
+                        'dark-card': '#1F1F1F',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .gradient-text {
+            background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 50%, #C4B5FD 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+    </style>
+</head>
+<body class="bg-dark text-white antialiased min-h-screen flex flex-col">
+    <!-- Navigation -->
+    <nav class="bg-dark/80 backdrop-blur-xl border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <a href="/" class="flex items-center gap-3">
+                    <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
+                    <span class="text-xl font-bold">Remembra</span>
+                </a>
+                <a href="/pricing.html" class="text-gray-300 hover:text-white transition">← Back to Pricing</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex items-center justify-center py-16 px-6">
+        <div class="max-w-md w-full">
+            <!-- Sign Up Card -->
+            <div class="bg-dark-card border border-white/10 rounded-2xl p-8">
+                <div class="text-center mb-8">
+                    <div class="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">🧠</div>
+                    <h1 class="text-2xl font-bold mb-2">Start Your Pro Trial</h1>
+                    <p class="text-gray-400">14-day free trial. Cancel anytime.</p>
+                </div>
+                
+                <!-- Plan Summary -->
+                <div class="bg-white/5 border border-white/10 rounded-xl p-4 mb-6">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="font-semibold">Remembra Pro</span>
+                        <span class="text-primary font-bold">$49/mo</span>
+                    </div>
+                    <ul class="text-sm text-gray-400 space-y-1">
+                        <li>✓ 100,000 memories</li>
+                        <li>✓ 500K API calls/month</li>
+                        <li>✓ 10 API keys</li>
+                        <li>✓ Priority support</li>
+                    </ul>
+                </div>
+                
+                <!-- Sign Up Form -->
+                <form id="signupForm" class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Email *</label>
+                        <input type="email" id="email" name="email" required 
+                            class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition"
+                            placeholder="you@company.com">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Full Name *</label>
+                        <input type="text" id="name" name="name" required 
+                            class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition"
+                            placeholder="John Doe">
+                    </div>
+                    
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Company (optional)</label>
+                        <input type="text" id="company" name="company" 
+                            class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition"
+                            placeholder="Acme Inc.">
+                    </div>
+                    
+                    <button type="submit" id="submitBtn"
+                        class="w-full py-4 bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl transition flex items-center justify-center gap-2">
+                        <span>Continue to Payment</span>
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+                        </svg>
+                    </button>
+                </form>
+                
+                <p class="text-center text-xs text-gray-500 mt-6">
+                    By signing up, you agree to our 
+                    <a href="/terms.html" class="text-primary hover:underline">Terms of Service</a> 
+                    and <a href="/privacy.html" class="text-primary hover:underline">Privacy Policy</a>.
+                </p>
+                
+                <!-- Trust Badges -->
+                <div class="flex items-center justify-center gap-6 mt-8 pt-6 border-t border-white/10">
+                    <div class="flex items-center gap-2 text-gray-400 text-sm">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                        </svg>
+                        Secure checkout
+                    </div>
+                    <div class="flex items-center gap-2 text-gray-400 text-sm">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z"/>
+                        </svg>
+                        Powered by Stripe
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Already have account -->
+            <p class="text-center text-gray-400 mt-6">
+                Already have an account? 
+                <a href="https://app.remembra.dev" class="text-primary hover:underline">Sign in</a>
+            </p>
+        </div>
+    </main>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-dark/90 backdrop-blur-sm z-50 hidden items-center justify-center">
+        <div class="text-center">
+            <div class="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p class="text-xl font-medium">Setting up your account...</p>
+            <p class="text-gray-400 mt-2">Redirecting to secure checkout</p>
+        </div>
+    </div>
+
+    <script>
+        const stripe = Stripe('pk_live_51T6Yu7Q3CqXwAZA7GDSQJUzrds3gemv7zyaYHL8w6l9xifjqcuvkRvW4P4tlcaBYRo3zB9v1TFO5CXfwdhcze5X400Ntw516m3');
+        const PRICE_ID = 'price_1T6ZDAQ3CqXwAZA7jUWCVVF0';
+        
+        // API endpoint for creating checkout sessions
+        // For MVP, we'll use Stripe's client-only checkout
+        const API_URL = 'https://app.remembra.dev/api/v1';
+        
+        document.getElementById('signupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const email = document.getElementById('email').value;
+            const name = document.getElementById('name').value;
+            const company = document.getElementById('company').value;
+            
+            const submitBtn = document.getElementById('submitBtn');
+            const loadingOverlay = document.getElementById('loadingOverlay');
+            
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span>Processing...</span>';
+            loadingOverlay.classList.remove('hidden');
+            loadingOverlay.classList.add('flex');
+            
+            try {
+                // Create checkout session via API
+                const response = await fetch(`${API_URL}/billing/checkout`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: email,
+                        name: name,
+                        company: company,
+                        price_id: PRICE_ID,
+                        success_url: window.location.origin + '/dashboard.html?checkout=success',
+                        cancel_url: window.location.origin + '/pricing.html?checkout=cancelled',
+                    }),
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to create checkout session');
+                }
+                
+                const { checkout_url } = await response.json();
+                
+                // Redirect to Stripe Checkout
+                window.location.href = checkout_url;
+                
+            } catch (error) {
+                console.error('Error:', error);
+                
+                // Fallback: Store info and show payment link
+                localStorage.setItem('remembra_signup', JSON.stringify({ email, name, company }));
+                
+                // For now, redirect to a payment link or show error
+                alert('We\'re setting up our payment system. Please email hello@remembra.dev to get started, or join the waitlist on our homepage.');
+                
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<span>Continue to Payment</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>';
+                loadingOverlay.classList.add('hidden');
+                loadingOverlay.classList.remove('flex');
+            }
+        });
+        
+        // Check URL params
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('plan') === 'pro') {
+            // Pre-selected pro plan from pricing page
+            console.log('Pro plan selected');
+        }
+    </script>
+</body>
+</html>

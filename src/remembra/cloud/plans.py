@@ -86,7 +86,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_sso=False,
         has_observability=True,
         has_priority_support=True,
-        stripe_price_id="price_pro_monthly",  # Replace with real Stripe price ID
+        stripe_price_id="price_1T6ZDAQ3CqXwAZA7jUWCVVF0",  # Remembra Pro $49/mo
     ),
     PlanTier.ENTERPRISE: PlanLimits(
         max_memories=10_000_000,

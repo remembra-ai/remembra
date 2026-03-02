@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pricing - Remembra | AI Memory That Works</title>
+    <meta name="description" content="Simple pricing for Remembra. Start free, upgrade when you need more.">
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    
+    <!-- Stripe -->
+    <script src="https://js.stripe.com/v3/"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#8B5CF6',
+                        'primary-dark': '#7C3AED',
+                        secondary: '#A78BFA',
+                        dark: '#0F0F0F',
+                        'dark-lighter': '#1A1A1A',
+                        'dark-card': '#1F1F1F',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .gradient-text {
+            background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 50%, #C4B5FD 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .glow { box-shadow: 0 0 60px rgba(139, 92, 246, 0.3); }
+    </style>
+</head>
+<body class="bg-dark text-white antialiased">
+    <!-- Navigation -->
+    <nav class="fixed top-0 left-0 right-0 z-50 bg-dark/80 backdrop-blur-xl border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <a href="/" class="flex items-center gap-3">
+                    <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
+                    <span class="text-xl font-bold">Remembra</span>
+                </a>
+                <div class="flex items-center gap-4">
+                    <a href="/about.html" class="hidden md:block text-gray-300 hover:text-white transition">About</a>
+                    <a href="https://docs.remembra.dev" class="text-gray-300 hover:text-white transition">Docs</a>
+                    <a href="/signup.html" class="px-5 py-2.5 bg-primary hover:bg-primary-dark text-white font-medium rounded-lg transition">
+                        Sign Up →
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="pt-32 pb-12 px-6">
+        <div class="max-w-4xl mx-auto text-center">
+            <h1 class="text-5xl md:text-6xl font-bold mb-6 leading-tight">
+                Simple, <span class="gradient-text">Transparent</span> Pricing
+            </h1>
+            <p class="text-xl text-gray-400">
+                Start free. Upgrade when you need more power.
+            </p>
+        </div>
+    </section>
+
+    <!-- Pricing Cards -->
+    <section class="py-12 px-6">
+        <div class="max-w-5xl mx-auto">
+            <div class="grid md:grid-cols-3 gap-8">
+                
+                <!-- Free Tier -->
+                <div class="bg-dark-card border border-white/10 rounded-2xl p-8 flex flex-col">
+                    <div class="mb-6">
+                        <h3 class="text-2xl font-bold mb-2">Open Source</h3>
+                        <div class="text-4xl font-bold mb-2">Free</div>
+                        <p class="text-gray-400">Self-host on your infrastructure</p>
+                    </div>
+                    
+                    <ul class="space-y-3 mb-8 flex-1">
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Unlimited memories
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> All features included
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Entity resolution
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Temporal memory
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Hybrid search
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Dashboard UI
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Community support
+                        </li>
+                    </ul>
+                    
+                    <a href="https://docs.remembra.dev/getting-started/quickstart" 
+                       class="block w-full py-3 text-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl font-medium transition">
+                        Deploy Now
+                    </a>
+                </div>
+                
+                <!-- Pro Tier -->
+                <div class="bg-dark-card border-2 border-primary rounded-2xl p-8 relative flex flex-col glow">
+                    <div class="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-primary rounded-full text-sm font-medium">
+                        Most Popular
+                    </div>
+                    
+                    <div class="mb-6">
+                        <h3 class="text-2xl font-bold mb-2">Pro Cloud</h3>
+                        <div class="flex items-baseline gap-1">
+                            <span class="text-4xl font-bold">$49</span>
+                            <span class="text-gray-400">/month</span>
+                        </div>
+                        <p class="text-gray-400 mt-2">Managed hosting, zero ops</p>
+                    </div>
+                    
+                    <ul class="space-y-3 mb-8 flex-1">
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> 100,000 memories
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> 500K API calls/month
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> 10 API keys
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> 5 team members
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Webhooks
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Usage analytics
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Priority support
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> 99.9% uptime SLA
+                        </li>
+                    </ul>
+                    
+                    <button onclick="subscribePro()" id="proButton"
+                       class="block w-full py-4 text-center bg-primary hover:bg-primary-dark rounded-xl font-semibold transition">
+                        Subscribe Now →
+                    </button>
+                </div>
+                
+                <!-- Enterprise Tier -->
+                <div class="bg-dark-card border border-white/10 rounded-2xl p-8 flex flex-col">
+                    <div class="mb-6">
+                        <h3 class="text-2xl font-bold mb-2">Enterprise</h3>
+                        <div class="text-4xl font-bold mb-2">Custom</div>
+                        <p class="text-gray-400">For large-scale deployments</p>
+                    </div>
+                    
+                    <ul class="space-y-3 mb-8 flex-1">
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Unlimited memories
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Unlimited API calls
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Dedicated infrastructure
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> SSO / SAML
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Custom SLA
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> SOC2 compliance
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> Dedicated support
+                        </li>
+                    </ul>
+                    
+                    <a href="/contact.html" 
+                       class="block w-full py-3 text-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl font-medium transition">
+                        Contact Sales
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- FAQ Section -->
+    <section class="py-16 px-6 bg-dark-lighter">
+        <div class="max-w-3xl mx-auto">
+            <h2 class="text-3xl font-bold text-center mb-12">Frequently Asked Questions</h2>
+            
+            <div class="space-y-6">
+                <div class="bg-dark-card border border-white/10 rounded-xl p-6">
+                    <h3 class="text-lg font-semibold mb-2">What's the difference between self-hosted and Pro Cloud?</h3>
+                    <p class="text-gray-400">Self-hosted runs on your own servers — you manage everything. Pro Cloud is fully managed by us — just sign up and start using the API. Same features, different ops burden.</p>
+                </div>
+                
+                <div class="bg-dark-card border border-white/10 rounded-xl p-6">
+                    <h3 class="text-lg font-semibold mb-2">Can I switch from self-hosted to Pro Cloud?</h3>
+                    <p class="text-gray-400">Yes! Use our import/export feature to migrate your memories. We provide migration guides in the docs.</p>
+                </div>
+                
+                <div class="bg-dark-card border border-white/10 rounded-xl p-6">
+                    <h3 class="text-lg font-semibold mb-2">What happens if I exceed my limits?</h3>
+                    <p class="text-gray-400">We'll notify you before you hit limits. If you exceed them, API calls will return a 429 error. You can upgrade anytime from your dashboard.</p>
+                </div>
+                
+                <div class="bg-dark-card border border-white/10 rounded-xl p-6">
+                    <h3 class="text-lg font-semibold mb-2">How do I cancel?</h3>
+                    <p class="text-gray-400">Cancel anytime from your dashboard. Your access continues until the end of your billing period. You can export all your data before canceling.</p>
+                </div>
+                
+                <div class="bg-dark-card border border-white/10 rounded-xl p-6">
+                    <h3 class="text-lg font-semibold mb-2">Do you offer refunds?</h3>
+                    <p class="text-gray-400">We offer a 14-day money-back guarantee. If you're not happy, contact us within 14 days of subscribing for a full refund.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="py-16 px-6">
+        <div class="max-w-4xl mx-auto text-center">
+            <h2 class="text-3xl font-bold mb-4">Ready to give your AI memory?</h2>
+            <p class="text-xl text-gray-400 mb-8">Start building with Remembra today.</p>
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+                <a href="/signup.html" class="px-8 py-4 bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl transition">
+                    Start Free Trial →
+                </a>
+                <a href="https://docs.remembra.dev" class="px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 font-semibold rounded-xl transition">
+                    Read the Docs
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-12 px-6 border-t border-white/5">
+        <div class="max-w-6xl mx-auto">
+            <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+                <div class="flex items-center gap-3">
+                    <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
+                    <span class="font-bold">Remembra</span>
+                </div>
+                <div class="flex items-center gap-6 text-sm text-gray-400">
+                    <a href="/about.html" class="hover:text-white transition">About</a>
+                    <a href="/contact.html" class="hover:text-white transition">Contact</a>
+                    <a href="/privacy.html" class="hover:text-white transition">Privacy</a>
+                    <a href="/terms.html" class="hover:text-white transition">Terms</a>
+                </div>
+                <p class="text-sm text-gray-500">© 2026 DolphyTech. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Stripe Checkout Script -->
+    <script>
+        const stripe = Stripe('pk_live_51T6Yu7Q3CqXwAZA7GDSQJUzrds3gemv7zyaYHL8w6l9xifjqcuvkRvW4P4tlcaBYRo3zB9v1TFO5CXfwdhcze5X400Ntw516m3');
+        
+        async function subscribePro() {
+            const button = document.getElementById('proButton');
+            button.textContent = 'Loading...';
+            button.disabled = true;
+            
+            try {
+                // For now, redirect to signup page where they'll enter email
+                // In production, this would create a checkout session via API
+                window.location.href = '/signup.html?plan=pro';
+            } catch (error) {
+                console.error('Error:', error);
+                button.textContent = 'Subscribe Now →';
+                button.disabled = false;
+                alert('Something went wrong. Please try again.');
+            }
+        }
+        
+        // Check for cancelled checkout
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('checkout') === 'cancelled') {
+            // Could show a message here
+            console.log('Checkout was cancelled');
+        }
+    </script>
+</body>
+</html>

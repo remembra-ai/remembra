@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Remembra</title>
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#8B5CF6',
+                        'primary-dark': '#7C3AED',
+                        dark: '#0F0F0F',
+                        'dark-lighter': '#1A1A1A',
+                        'dark-card': '#1F1F1F',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-dark text-white antialiased min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-dark/80 backdrop-blur-xl border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <a href="/" class="flex items-center gap-3">
+                    <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
+                    <span class="text-xl font-bold">Remembra</span>
+                </a>
+                <a href="https://docs.remembra.dev" class="text-gray-300 hover:text-white transition">Docs</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Success Message (after checkout) -->
+    <div id="successBanner" class="hidden bg-green-500/10 border-b border-green-500/20">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center gap-3">
+            <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span class="text-green-400 font-medium">Payment successful! Welcome to Remembra Pro. 🎉</span>
+        </div>
+    </div>
+
+    <!-- Main Content -->
+    <main class="max-w-4xl mx-auto px-6 py-16">
+        <div class="text-center mb-12">
+            <div class="w-20 h-20 bg-primary/20 rounded-full flex items-center justify-center text-4xl mx-auto mb-6">🎉</div>
+            <h1 class="text-4xl font-bold mb-4">Welcome to Remembra Pro!</h1>
+            <p class="text-xl text-gray-400">Your account is being set up. You'll receive your API key via email shortly.</p>
+        </div>
+
+        <!-- What's Next -->
+        <div class="bg-dark-card border border-white/10 rounded-2xl p-8 mb-8">
+            <h2 class="text-2xl font-bold mb-6">What's Next?</h2>
+            
+            <div class="space-y-6">
+                <div class="flex gap-4">
+                    <div class="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center text-lg flex-shrink-0">1</div>
+                    <div>
+                        <h3 class="font-semibold mb-1">Check your email</h3>
+                        <p class="text-gray-400">We'll send your API key to the email you used during checkout. Store it securely — it's only shown once.</p>
+                    </div>
+                </div>
+                
+                <div class="flex gap-4">
+                    <div class="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center text-lg flex-shrink-0">2</div>
+                    <div>
+                        <h3 class="font-semibold mb-1">Read the quickstart guide</h3>
+                        <p class="text-gray-400">Get up and running in 5 minutes with our <a href="https://docs.remembra.dev/getting-started/quickstart" class="text-primary hover:underline">quickstart guide</a>.</p>
+                    </div>
+                </div>
+                
+                <div class="flex gap-4">
+                    <div class="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center text-lg flex-shrink-0">3</div>
+                    <div>
+                        <h3 class="font-semibold mb-1">Start building</h3>
+                        <p class="text-gray-400">Use the Python SDK, JavaScript SDK, or REST API to add memory to your AI.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Links -->
+        <div class="grid md:grid-cols-3 gap-4">
+            <a href="https://docs.remembra.dev/getting-started/quickstart" class="bg-dark-card border border-white/10 rounded-xl p-6 hover:border-primary/50 transition group">
+                <div class="text-2xl mb-3">📖</div>
+                <h3 class="font-semibold group-hover:text-primary transition">Documentation</h3>
+                <p class="text-gray-400 text-sm mt-1">Guides and API reference</p>
+            </a>
+            
+            <a href="https://github.com/remembra-ai/remembra" class="bg-dark-card border border-white/10 rounded-xl p-6 hover:border-primary/50 transition group">
+                <div class="text-2xl mb-3">💻</div>
+                <h3 class="font-semibold group-hover:text-primary transition">GitHub</h3>
+                <p class="text-gray-400 text-sm mt-1">Source code and examples</p>
+            </a>
+            
+            <a href="https://discord.gg/remembra" class="bg-dark-card border border-white/10 rounded-xl p-6 hover:border-primary/50 transition group">
+                <div class="text-2xl mb-3">💬</div>
+                <h3 class="font-semibold group-hover:text-primary transition">Discord</h3>
+                <p class="text-gray-400 text-sm mt-1">Community and support</p>
+            </a>
+        </div>
+
+        <!-- Support -->
+        <div class="text-center mt-12 pt-8 border-t border-white/10">
+            <p class="text-gray-400">
+                Need help? Email us at <a href="mailto:support@remembra.dev" class="text-primary hover:underline">support@remembra.dev</a>
+            </p>
+        </div>
+    </main>
+
+    <script>
+        // Show success banner if coming from checkout
+        const urlParams = new URLSearchParams(window.location.search);
+        if (urlParams.get('checkout') === 'success') {
+            document.getElementById('successBanner').classList.remove('hidden');
+            // Clean URL
+            window.history.replaceState({}, '', '/dashboard.html');
+        }
+    </script>
+</body>
+</html>
