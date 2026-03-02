@@ -1,13 +1,14 @@
-import { Brain, Moon, Sun, LogOut } from 'lucide-react';
+import { Brain, Moon, Sun, LogOut, User } from 'lucide-react';
 
 interface HeaderProps {
   darkMode: boolean;
   onToggleDarkMode: () => void;
   isAuthenticated: boolean;
   onLogout: () => void;
+  userName?: string;
 }
 
-export function Header({ darkMode, onToggleDarkMode, isAuthenticated, onLogout }: HeaderProps) {
+export function Header({ darkMode, onToggleDarkMode, isAuthenticated, onLogout, userName }: HeaderProps) {
   return (
     <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -28,7 +29,17 @@ export function Header({ darkMode, onToggleDarkMode, isAuthenticated, onLogout }
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {/* User info */}
+            {isAuthenticated && userName && (
+              <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700">
+                <User className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                <span className="text-sm text-gray-700 dark:text-gray-300 max-w-[150px] truncate">
+                  {userName}
+                </span>
+              </div>
+            )}
+
             <button
               onClick={onToggleDarkMode}
               className="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"

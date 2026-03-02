@@ -1,6 +1,9 @@
 // API client for Remembra backend
 
-const API_BASE = '/api/v1';
+// Use environment variable for API URL, fallback to relative path for dev proxy
+const API_BASE = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api/v1`
+  : '/api/v1';
 
 export interface Memory {
   id: string;
@@ -78,9 +81,29 @@ export interface CleanupResponse {
 
 class ApiClient {
   private apiKey: string | null = null;
+  private jwtToken: string | null = null;
   private userId: string | null = null;
   private projectId: string | null = null;
 
+  // JWT Token methods
+  setJwtToken(token: string) {
+    this.jwtToken = token;
+    localStorage.setItem('remembra_jwt_token', token);
+  }
+
+  getJwtToken(): string | null {
+    if (!this.jwtToken) {
+      this.jwtToken = localStorage.getItem('remembra_jwt_token');
+    }
+    return this.jwtToken;
+  }
+
+  clearJwtToken() {
+    this.jwtToken = null;
+    localStorage.removeItem('remembra_jwt_token');
+  }
+
+  // API Key methods
   setApiKey(key: string) {
     this.apiKey = key;
     localStorage.setItem('remembra_api_key', key);
@@ -124,27 +147,49 @@ class ApiClient {
 
   clearAll() {
     this.apiKey = null;
+    this.jwtToken = null;
     this.userId = null;
     this.projectId = null;
     localStorage.removeItem('remembra_api_key');
+    localStorage.removeItem('remembra_jwt_token');
     localStorage.removeItem('remembra_user_id');
     localStorage.removeItem('remembra_project_id');
+    localStorage.removeItem('remembra_user');
+  }
+
+  private getAuthHeaders(): Record<string, string> {
+    // Prefer JWT token over API key
+    const jwtToken = this.getJwtToken();
+    if (jwtToken) {
+      return { 'Authorization': `Bearer ${jwtToken}` };
+    }
+    
+    const apiKey = this.getApiKey();
+    if (apiKey) {
+      return { 'X-API-Key': apiKey };
+    }
+    
+    return {};
+  }
+
+  isAuthenticated(): boolean {
+    return !!this.getJwtToken() || !!this.getApiKey();
   }
 
   private async fetchApi<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
-    const apiKey = this.getApiKey();
-    if (!apiKey) {
-      throw new Error('API key not set');
+    const authHeaders = this.getAuthHeaders();
+    if (Object.keys(authHeaders).length === 0) {
+      throw new Error('Not authenticated');
     }
 
     const response = await fetch(`${API_BASE}${endpoint}`, {
       ...options,
       headers: {
         'Content-Type': 'application/json',
-        'X-API-Key': apiKey,
+        ...authHeaders,
         ...options.headers,
       },
     });
@@ -307,6 +352,41 @@ class ApiClient {
   async getPlanInfo(): Promise<PlanInfoResponse> {
     return this.fetchApi<PlanInfoResponse>('/cloud/plan');
   }
+
+  async getDailyUsage(days: number = 30): Promise<DailyUsageResponse> {
+    return this.fetchApi<DailyUsageResponse>(`/cloud/usage/daily?days=${days}`);
+  }
+
+  async createCheckout(plan: string): Promise<CheckoutResponse> {
+    return this.fetchApi<CheckoutResponse>('/cloud/checkout', {
+      method: 'POST',
+      body: JSON.stringify({ plan }),
+    });
+  }
+
+  async createPortalSession(): Promise<PortalResponse> {
+    return this.fetchApi<PortalResponse>('/cloud/portal', {
+      method: 'POST',
+    });
+  }
+
+  // API Key Management methods
+  async listKeys(): Promise<ApiKeyListResponse> {
+    return this.fetchApi<ApiKeyListResponse>('/keys');
+  }
+
+  async createKey(name: string, permission: 'admin' | 'editor' | 'viewer'): Promise<CreateApiKeyResponse> {
+    return this.fetchApi<CreateApiKeyResponse>('/keys', {
+      method: 'POST',
+      body: JSON.stringify({ name, permission }),
+    });
+  }
+
+  async revokeKey(id: string): Promise<RevokeApiKeyResponse> {
+    return this.fetchApi<RevokeApiKeyResponse>(`/keys/${id}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 // Entity types
@@ -454,6 +534,59 @@ export interface PlanInfoResponse {
   limits: Record<string, unknown>;
   usage: Record<string, number>;
   limit_checks: Record<string, { allowed: boolean; reason?: string; limit?: number; current?: number }>;
+}
+
+export interface CheckoutResponse {
+  checkout_url: string;
+}
+
+export interface PortalResponse {
+  portal_url: string;
+}
+
+export interface DailyUsageItem {
+  date: string;
+  stores: number;
+  recalls: number;
+  deletes: number;
+}
+
+export interface DailyUsageResponse {
+  user_id: string;
+  days: DailyUsageItem[];
+}
+
+// API Key Management types
+export interface ApiKeyInfo {
+  id: string;
+  name: string;
+  key_preview: string;
+  permission: 'admin' | 'editor' | 'viewer';
+  created_at: string;
+  last_used_at: string | null;
+}
+
+export interface ApiKeyListResponse {
+  keys: ApiKeyInfo[];
+  total: number;
+}
+
+export interface CreateApiKeyRequest {
+  name: string;
+  permission: 'admin' | 'editor' | 'viewer';
+}
+
+export interface CreateApiKeyResponse {
+  id: string;
+  name: string;
+  key: string; // Full key - shown only once!
+  permission: 'admin' | 'editor' | 'viewer';
+  created_at: string;
+}
+
+export interface RevokeApiKeyResponse {
+  id: string;
+  revoked: boolean;
 }
 
 export const api = new ApiClient();

@@ -10,11 +10,13 @@ import { EntityGraph } from '../components/EntityGraph';
 import { QueryDebugger } from '../components/QueryDebugger';
 import { UsageAnalytics } from '../components/UsageAnalytics';
 import { MemoryTimeline } from '../components/MemoryTimeline';
+import { ApiKeyManager } from '../components/ApiKeyManager';
+import { Billing } from '../components/Billing';
 import { api, type Memory } from '../lib/api';
-import { RefreshCw, Database, TrendingDown, Users, Share2, Bug, BarChart3, History } from 'lucide-react';
+import { RefreshCw, Database, TrendingDown, Users, Share2, Bug, BarChart3, History, Key, CreditCard } from 'lucide-react';
 import clsx from 'clsx';
 
-type TabType = 'memories' | 'entities' | 'graph' | 'decay' | 'debugger' | 'analytics' | 'timeline';
+type TabType = 'memories' | 'entities' | 'graph' | 'decay' | 'debugger' | 'analytics' | 'timeline' | 'keys' | 'billing';
 
 export function Dashboard() {
   const { memories, loading, error, hasMore, refresh, loadMore } = useMemories();
@@ -148,6 +150,30 @@ export function Dashboard() {
             <History className="w-4 h-4" />
             Timeline
           </button>
+          <button
+            onClick={() => setActiveTab('keys')}
+            className={clsx(
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              activeTab === 'keys'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            )}
+          >
+            <Key className="w-4 h-4" />
+            API Keys
+          </button>
+          <button
+            onClick={() => setActiveTab('billing')}
+            className={clsx(
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              activeTab === 'billing'
+                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            )}
+          >
+            <CreditCard className="w-4 h-4" />
+            Billing
+          </button>
         </nav>
       </div>
 
@@ -246,6 +272,14 @@ export function Dashboard() {
 
       {activeTab === 'timeline' && (
         <MemoryTimeline />
+      )}
+
+      {activeTab === 'keys' && (
+        <ApiKeyManager />
+      )}
+
+      {activeTab === 'billing' && (
+        <Billing />
       )}
 
       {/* Floating Add Memory Button */}
