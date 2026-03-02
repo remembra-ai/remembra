@@ -2,6 +2,8 @@
 
 > Persistent memory for AI applications. Self-host in 5 minutes.
 
+<!-- mcp-name: io.github.remembra-ai/remembra -->
+
 [![PyPI](https://img.shields.io/pypi/v/remembra)](https://pypi.org/project/remembra/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)

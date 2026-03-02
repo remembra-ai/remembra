@@ -56,7 +56,11 @@ htmlcov/
 *.log
 logs/
 
+# MkDocs build output
+site/
+
 # Distribution
 *.tar.gz
 *.whl
 remembra.db
+.mcpregistry_*

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "remembra"
-version = "0.6.6"
+version = "0.6.7"
 description = "Universal memory layer for AI applications. Self-host in 5 minutes."
 readme = "README.md"
 license = { text = "MIT" }
@@ -71,6 +71,16 @@ mcp = [
     "mcp>=1.0.0",
 ]
 
+# LangChain integration
+langchain = [
+    "langchain-core>=0.3.0",
+]
+
+# CrewAI integration
+crewai = [
+    "crewai>=0.80.0",
+]
+
 # Advanced retrieval (optional reranking)
 rerank = [
     "sentence-transformers>=2.5.0",
@@ -87,9 +97,9 @@ dev = [
     "twine>=5.0.0",
 ]
 
-# All dependencies (SDK + Server + Rerank + MCP)
+# All dependencies (SDK + Server + Rerank + MCP + Integrations)
 all = [
-    "remembra[server,rerank,mcp]",
+    "remembra[server,rerank,mcp,langchain,crewai]",
 ]
 
 [project.urls]

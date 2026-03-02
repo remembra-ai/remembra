@@ -8,35 +8,62 @@
 
 Remembra is a universal memory layer for LLMs. It solves the fundamental problem that every AI forgets everything between sessions.
 
-```python
-from remembra import Memory
+=== "Python"
 
-memory = Memory(user_id="user_123")
+    ```python
+    from remembra import Memory
 
-# Store memories
-memory.store("User prefers dark mode and works at Acme Corp")
+    memory = Memory(user_id="user_123")
 
-# Recall with context
-context = memory.recall("What are user's preferences?")
-# Returns: "User prefers dark mode. Works at Acme Corp."
-```
+    # Store memories
+    memory.store("User prefers dark mode and works at Acme Corp")
+
+    # Recall with context
+    result = memory.recall("What are user's preferences?")
+    print(result.context)
+    # → "User prefers dark mode. Works at Acme Corp."
+    ```
+
+=== "JavaScript"
+
+    ```typescript
+    import { Remembra } from '@remembra/client';
+
+    const memory = new Remembra({ url: 'http://localhost:8787' });
+
+    // Store memories
+    await memory.store('User prefers dark mode and works at Acme Corp');
+
+    // Recall with context
+    const result = await memory.recall("What are user's preferences?");
+    console.log(result.context);
+    // → "User prefers dark mode. Works at Acme Corp."
+    ```
+
+=== "MCP (Claude Code)"
+
+    ```bash
+    # Install
+    pip install remembra[mcp]
+
+    # Add to Claude Code
+    claude mcp add remembra \
+      -e REMEMBRA_URL=http://localhost:8787 \
+      -- remembra-mcp
+
+    # Claude now has persistent memory across sessions!
+    ```
 
 ## Why Remembra?
 
 ### The Problem
 Every AI app needs memory. Developers hack together solutions using vector databases, embeddings, and custom retrieval logic. It's complex, fragmented, and everyone rebuilds the same thing.
 
-### Current Solutions
-- **Mem0**: $24M raised, but self-hosting docs are trash, pricing jumps from $19 to $249
-- **Zep**: Academic, complex to deploy
-- **Letta**: Not production-ready
-- **LangChain Memory**: Too basic, no persistence
-
 ### Our Approach
 - **Self-host in 5 minutes**: One Docker command, everything bundled
-- **Fair pricing**: $0 → $29 → $99 (not $19 → $249)
+- **MCP-native**: Works with Claude Code and Cursor out of the box
 - **Open source core**: MIT license, own your data
-- **Actually works**: Built because we need it ourselves
+- **Built for production**: Entity resolution, temporal decay, hybrid search
 
 ## Core Features
 
@@ -72,15 +99,17 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     Traverse relationships to find related memories across your knowledge graph.
 
--   :material-docker:{ .lg .middle } __Self-Host First__
+-   :material-connection:{ .lg .middle } __MCP Server__
 
     ---
 
-    One Docker command. All dependencies bundled. Your data stays yours.
+    Built-in Model Context Protocol server for Claude Code, Claude Desktop, and Cursor.
 
 </div>
 
 ## Quick Start
+
+### 1. Start the Server
 
 === "Docker (Recommended)"
 
@@ -88,48 +117,95 @@ Every AI app needs memory. Developers hack together solutions using vector datab
     docker run -d -p 8787:8787 remembra/remembra
     ```
 
-=== "Python Package"
+=== "From Source"
+
+    ```bash
+    git clone https://github.com/AskDolphy/remembra
+    cd remembra
+    pip install -e ".[server]"
+    remembra-server
+    ```
+
+### 2. Use an SDK
+
+=== "Python"
 
     ```bash
     pip install remembra
     ```
 
-=== "From Source"
+    ```python
+    from remembra import Memory
 
-    ```bash
-    git clone https://github.com/remembra/remembra
-    cd remembra
-    docker-compose up -d
+    memory = Memory(
+        base_url="http://localhost:8787",
+        user_id="user_123"
+    )
+
+    memory.store("User's name is John. He's a software engineer at Google.")
+    result = memory.recall("Who is the user?")
+    print(result.context)
+    # → "John is a software engineer at Google."
     ```
 
-Then use the Python SDK:
+=== "JavaScript"
 
-```python
-from remembra import Memory
+    ```bash
+    npm install @remembra/client
+    ```
 
-memory = Memory(
-    base_url="http://localhost:8787",
-    user_id="user_123"
-)
+    ```typescript
+    import { Remembra } from '@remembra/client';
 
-# Store a memory
-memory.store("User's name is John. He's a software engineer at Google.")
+    const memory = new Remembra({
+      url: 'http://localhost:8787',
+      userId: 'user_123',
+    });
 
-# Recall memories
-context = memory.recall("Who is the user?")
-print(context)  # "John is a software engineer at Google."
-```
+    await memory.store("User's name is John. He's a software engineer at Google.");
+    const result = await memory.recall('Who is the user?');
+    console.log(result.context);
+    // → "John is a software engineer at Google."
+    ```
+
+=== "MCP Server"
+
+    ```bash
+    pip install remembra[mcp]
+    claude mcp add remembra -e REMEMBRA_URL=http://localhost:8787 -- remembra-mcp
+    ```
+
+    Claude Code now has persistent memory. It will automatically store and recall context across sessions.
+
+    [MCP Setup Guide :material-arrow-right:](integrations/mcp-server.md){ .md-button }
+
+=== "REST API"
+
+    ```bash
+    # Store
+    curl -X POST http://localhost:8787/api/v1/memories \
+      -H "Content-Type: application/json" \
+      -d '{"content": "John is a software engineer at Google", "user_id": "user_123"}'
+
+    # Recall
+    curl -X POST http://localhost:8787/api/v1/memories/recall \
+      -H "Content-Type: application/json" \
+      -d '{"query": "Who is John?", "user_id": "user_123"}'
+    ```
 
 [Get Started :material-arrow-right:](getting-started/quickstart.md){ .md-button .md-button--primary }
-[View on GitHub :material-github:](https://github.com/remembra/remembra){ .md-button }
+[View on GitHub :material-github:](https://github.com/AskDolphy/remembra){ .md-button }
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Your Application                         │
-├─────────────────────────────────────────────────────────────┤
-│                   Remembra SDK / API                         │
+│              Your Application / AI Assistant                   │
+├──────────┬──────────────┬─────────────────────────────────────┤
+│ Python   │ JavaScript   │ MCP Server (Claude/Cursor)          │
+│ SDK      │ SDK          │ remembra-mcp                        │
+├──────────┴──────────────┴─────────────────────────────────────┤
+│                   Remembra REST API                           │
 ├──────────────┬──────────────┬───────────────┬───────────────┤
 │  Extraction  │   Entities   │    Retrieval  │   Temporal    │
 │  (LLM-based) │ (Resolution) │(Hybrid Search)│  (TTL/Decay)  │
@@ -141,6 +217,6 @@ print(context)  # "John is a software engineer at Google."
 
 ## License
 
-Remembra is open source under the [MIT License](https://github.com/remembra/remembra/blob/main/LICENSE).
+Remembra is open source under the [MIT License](https://github.com/AskDolphy/remembra/blob/main/LICENSE).
 
-Built with :heart: by [DolphyTech](https://dolphytech.com)
+Built with :heart: by [DolphyTech](https://dolphytech.com) | [remembra.dev](https://remembra.dev)

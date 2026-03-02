@@ -1,8 +1,8 @@
 site_name: Remembra
 site_description: Persistent memory for AI applications. Self-host in 5 minutes.
-site_url: https://remembra.dev
-repo_url: https://github.com/remembra/remembra
-repo_name: remembra/remembra
+site_url: https://docs.remembra.dev
+repo_url: https://github.com/AskDolphy/remembra
+repo_name: AskDolphy/remembra
 edit_uri: edit/main/docs/
 
 theme:
@@ -65,7 +65,7 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/remembra/remembra
+      link: https://github.com/AskDolphy/remembra
     - icon: fontawesome/brands/discord
       link: https://discord.gg/remembra
     - icon: fontawesome/brands/twitter
@@ -82,9 +82,13 @@ nav:
     - Quickstart: getting-started/quickstart.md
     - Installation: getting-started/installation.md
     - Docker: getting-started/docker.md
-  - Guides:
+  - SDKs:
     - Python SDK: guides/python-sdk.md
+    - JavaScript SDK: guides/javascript-sdk.md
     - REST API: guides/rest-api.md
+  - Integrations:
+    - MCP Server: integrations/mcp-server.md
+  - Guides:
     - Entity Resolution: guides/entity-resolution.md
     - Temporal Memory: guides/temporal.md
     - Security: guides/security.md
