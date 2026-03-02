@@ -1,8 +1,8 @@
 site_name: Remembra
 site_description: Persistent memory for AI applications. Self-host in 5 minutes.
 site_url: https://docs.remembra.dev
-repo_url: https://github.com/AskDolphy/remembra
-repo_name: AskDolphy/remembra
+repo_url: https://github.com/remembra-ai/remembra
+repo_name: remembra-ai/remembra
 edit_uri: edit/main/docs/
 
 theme:
@@ -91,6 +91,10 @@ nav:
   - Guides:
     - Entity Resolution: guides/entity-resolution.md
     - Temporal Memory: guides/temporal.md
+    - Webhooks: guides/webhooks.md
+    - RBAC & Permissions: guides/rbac.md
+    - Import & Export: guides/import-export.md
+    - Plugins: guides/plugins.md
     - Security: guides/security.md
   - Concepts:
     - How It Works: concepts/how-it-works.md

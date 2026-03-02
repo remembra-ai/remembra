@@ -194,7 +194,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
     ```
 
 [Get Started :material-arrow-right:](getting-started/quickstart.md){ .md-button .md-button--primary }
-[View on GitHub :material-github:](https://github.com/AskDolphy/remembra){ .md-button }
+[View on GitHub :material-github:](https://github.com/remembra-ai/remembra){ .md-button }
 
 ## Architecture
 

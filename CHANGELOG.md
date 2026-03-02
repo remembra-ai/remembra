@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-03-02
+
+### Added
+- **Enterprise Features**
+  - **Webhook System** - Event-driven integrations
+    - HMAC-SHA256 request signing for security
+    - Automatic retry delivery with exponential backoff
+    - Events: `memory.created`, `memory.updated`, `memory.deleted`, `entity.created`
+    - Webhook management API: create, list, delete, test
+  - **RBAC (Role-Based Access Control)**
+    - Three roles: `admin`, `editor`, `viewer`
+    - 12 granular permissions across memories, entities, webhooks, admin
+    - Scoped API keys with role assignment
+    - Permission middleware for all protected routes
+  - **Memory Conflict Detection**
+    - Detect contradictions in stored memories
+    - Configurable strategies: `update`, `version`, `flag`
+    - Conflict resolution API endpoints
+  - **Audit Logging**
+    - Complete audit trail of all operations
+    - Export to JSON or CSV format
+    - Role-protected admin endpoints
+
+- **Import/Export System**
+  - **Import from**:
+    - ChatGPT conversation exports
+    - Claude conversation exports
+    - Plain text files
+    - JSON, JSONL, CSV formats
+  - **Export to**:
+    - JSON (full fidelity)
+    - JSONL (streaming-friendly)
+    - CSV (spreadsheet-compatible)
+  - Bulk import API with progress tracking
+
+- **Cloud & Revenue (Phase 2)**
+  - **Stripe Billing Integration**
+    - Subscription management
+    - Usage-based metering
+    - Customer portal integration
+    - Webhook handlers for billing events
+  - **Plan Limits**
+    - Configurable limits per plan (memories, API calls, storage)
+    - Automatic enforcement with graceful degradation
+    - Usage dashboards and alerts
+  - **Spaces (Multi-tenancy)**
+    - Isolated memory spaces per organization
+    - Space-level settings and quotas
+    - Cross-space queries for admins
+
+- **Plugin System**
+  - Extensible plugin architecture
+  - Built-in plugins:
+    - `auto_tagger` - Automatic memory tagging
+    - `recall_logger` - Query analytics
+    - `slack_notifier` - Slack integration for events
+  - Custom plugin development guide
+
+- **API Expansion**
+  - 52 total API routes across 11 route groups
+  - New endpoints: `/admin/*`, `/webhooks/*`, `/transfer/*`, `/conflicts/*`
+  - OpenAPI schema updated
+
+### Changed
+- Embeddings API refactored for multi-provider support
+- Memory service expanded with conflict detection
+- Config updated with cloud/billing settings
+
+### Fixed
+- TypeScript type reference in dashboard api.ts
+
 ## [0.6.3] - 2026-03-01
 
 ### Added
