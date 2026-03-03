@@ -161,9 +161,11 @@ async def get_user_from_jwt_or_api_key(
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header[7:]  # Remove "Bearer " prefix
         try:
-            # Get user manager to verify JWT
-            user_manager = getattr(request.app.state, "user_manager", None)
-            if user_manager:
+            # Create UserManager to verify JWT
+            from remembra.auth.users import UserManager
+            db = getattr(request.app.state, "db", None)
+            if db and settings.jwt_secret:
+                user_manager = UserManager(db, settings.jwt_secret)
                 payload = user_manager.verify_jwt_token(token)
                 if payload:
                     return AuthenticatedUser(
