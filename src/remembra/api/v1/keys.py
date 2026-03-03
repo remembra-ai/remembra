@@ -10,6 +10,7 @@ from remembra.auth.keys import APIKeyManager
 from remembra.auth.middleware import (
     AuthenticatedUser,
     CurrentUser,
+    OptionalUser,
     get_client_ip,
 )
 from remembra.auth.rbac import Role, RoleManager
@@ -181,7 +182,7 @@ async def create_api_key(
     key_manager: APIKeyManagerDep,
     role_manager: RoleManagerDep,
     audit_logger: AuditLoggerDep,
-    current_user: CurrentUser = None,  # JWT auth (optional)
+    current_user: OptionalUser = None,  # JWT auth (optional)
     _limit: EnforceKeyLimit = None,
 ) -> CreateKeyResponse:
     """
