@@ -240,4 +240,4 @@ REMEMBRA_SLEEP_TIME_IDLE_THRESHOLD=60   # 1 min idle
 
 - [Conversation Ingestion](./conversation-ingestion.md) — Real-time extraction
 - [Entity Resolution](./entity-resolution.md) — How entities are linked
-- [Temporal Memory](./temporal-memory.md) — TTL and decay
+- [Security](./security.md) — PII detection and anomaly monitoring

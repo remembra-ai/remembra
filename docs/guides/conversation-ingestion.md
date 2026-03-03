@@ -177,6 +177,6 @@ Automatically skipped:
 
 ## Related
 
-- [Fact Extraction](./fact-extraction.md) — How facts are identified
 - [Entity Resolution](./entity-resolution.md) — How entities are linked
 - [Sleep-Time Compute](./sleep-time-compute.md) — Background deduplication
+- [Security](./security.md) — PII detection and anomaly monitoring

@@ -255,7 +255,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     Webhooks, RBAC, Import/Export, Audit Logging — all included in the open source version. No paywall.
 
-    [See all features →](guides/enterprise.md)
+    [See all features →](guides/webhooks.md)
 
 </div>
 
