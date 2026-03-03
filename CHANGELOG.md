@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-03-03
+
+### Fixed
+- **Security: CORS Configuration** — Removed `allow_origins=["*"]`, now configurable via `REMEMBRA_CORS_ORIGINS`
+- **API: PATCH /memories/{id}** — Full implementation (was returning 501)
+- **API: Batch Operations** — `/store/batch` and `/recall/batch` now functional
+- **Streaming: SSE Endpoint** — `/ingest/stream` for conversation ingestion
+- **Observability: OpenTelemetry** — Tracing module fully implemented
+- **Production: CORS Origins** — Added `app.remembra.dev` and `remembra.dev` to allowed origins
+- **Stripe: Environment Variables** — Accept both prefixed and non-prefixed Stripe env vars
+
+### Changed
+- Stub endpoints now return 503 Service Unavailable with helpful messages (was 501)
+- Improved error messages throughout API
+
+### Documentation
+- Added QA Remediation Results report
+- Updated MCP Server documentation for v0.7.0
+- Added feature comparison chart
+- Added Discord and Twitter links
+
 ## [0.7.0] - 2026-03-02
 
 ### Added
