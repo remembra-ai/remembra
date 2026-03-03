@@ -161,12 +161,8 @@
     </div>
 
     <script>
-        const stripe = Stripe('pk_live_51T6Yu7Q3CqXwAZA7GDSQJUzrds3gemv7zyaYHL8w6l9xifjqcuvkRvW4P4tlcaBYRo3zB9v1TFO5CXfwdhcze5X400Ntw516m3');
-        const PRICE_ID = 'price_1T6ZDAQ3CqXwAZA7jUWCVVF0';
-        
-        // API endpoint for creating checkout sessions
-        // For MVP, we'll use Stripe's client-only checkout
-        const API_URL = 'https://app.remembra.dev/api/v1';
+        // Stripe Payment Link - direct checkout, no backend needed
+        const PAYMENT_LINK = 'https://buy.stripe.com/5kQeVf7UH9SM7Xfd9ebV600';
         
         document.getElementById('signupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -183,53 +179,29 @@
             loadingOverlay.classList.remove('hidden');
             loadingOverlay.classList.add('flex');
             
-            try {
-                // Create checkout session via API
-                const response = await fetch(`${API_URL}/billing/checkout`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        email: email,
-                        name: name,
-                        company: company,
-                        price_id: PRICE_ID,
-                        success_url: window.location.origin + '/dashboard.html?checkout=success',
-                        cancel_url: window.location.origin + '/pricing.html?checkout=cancelled',
-                    }),
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Failed to create checkout session');
-                }
-                
-                const { checkout_url } = await response.json();
-                
-                // Redirect to Stripe Checkout
-                window.location.href = checkout_url;
-                
-            } catch (error) {
-                console.error('Error:', error);
-                
-                // Fallback: Store info and show payment link
-                localStorage.setItem('remembra_signup', JSON.stringify({ email, name, company }));
-                
-                // For now, redirect to a payment link or show error
-                alert('We\'re setting up our payment system. Please email hello@remembra.dev to get started, or join the waitlist on our homepage.');
-                
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = '<span>Continue to Payment</span><svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>';
-                loadingOverlay.classList.add('hidden');
-                loadingOverlay.classList.remove('flex');
-            }
+            // Store signup info locally for after payment
+            localStorage.setItem('remembra_signup', JSON.stringify({ email, name, company, timestamp: Date.now() }));
+            
+            // Redirect to Stripe Payment Link with prefilled email
+            const checkoutUrl = `${PAYMENT_LINK}?prefilled_email=${encodeURIComponent(email)}`;
+            window.location.href = checkoutUrl;
         });
         
-        // Check URL params
+        // Check for successful payment return
         const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('plan') === 'pro') {
-            // Pre-selected pro plan from pricing page
-            console.log('Pro plan selected');
+        if (urlParams.get('success') === 'true') {
+            document.body.innerHTML = `
+                <div class="min-h-screen bg-dark flex items-center justify-center p-6">
+                    <div class="bg-dark-card border border-white/10 rounded-2xl p-8 max-w-md text-center">
+                        <div class="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center text-5xl mx-auto mb-6">✓</div>
+                        <h1 class="text-3xl font-bold mb-4">Welcome to Remembra Pro!</h1>
+                        <p class="text-gray-400 mb-6">Your subscription is active. Check your email for your API key and getting started guide.</p>
+                        <a href="https://docs.remembra.dev/getting-started/quickstart" class="block w-full py-4 bg-primary hover:bg-primary-dark rounded-xl font-semibold transition">
+                            Get Started →
+                        </a>
+                    </div>
+                </div>
+            `;
         }
     </script>
 </body>
