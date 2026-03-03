@@ -78,6 +78,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     configure_logging(settings.log_level)
     
+    # Initialize OpenTelemetry tracing (soft dependency)
+    from remembra.core.tracing import setup_tracing
+    setup_tracing(settings)
+    
     # CRITICAL: Force unique JWT secret in production (OWASP compliance)
     if not settings.debug:
         default_secrets = [
@@ -299,11 +303,15 @@ def create_app() -> FastAPI:
 
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Instrument app for OpenTelemetry tracing (if enabled)
+    from remembra.core.tracing import instrument_app
+    instrument_app(app)
 
     # -----------------------------------------------------------------------
     # Health endpoints (outside versioned prefix for easy probe config)

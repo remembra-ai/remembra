@@ -26,8 +26,8 @@ def get_plugin_manager(request: Request) -> PluginManager:
     manager = getattr(request.app.state, "plugin_manager", None)
     if manager is None:
         raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Plugin system is not enabled",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Plugin system is not enabled. Set REMEMBRA_ENABLE_PLUGINS=true to enable.",
         )
     return manager
 

@@ -16,6 +16,11 @@ from remembra.cloud.limits import (
 from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
 from remembra.models.memory import (
+    BatchRecallRequest,
+    BatchRecallResponse,
+    BatchStoreRequest,
+    BatchStoreResponse,
+    BatchStoreResult,
     ForgetResponse,
     RecallRequest,
     RecallResponse,
@@ -173,6 +178,132 @@ async def store_memory(
 
 
 # ---------------------------------------------------------------------------
+# Batch Store
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/batch",
+    response_model=BatchStoreResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Store multiple memories in one request",
+)
+@limiter.limit("5/minute")
+async def batch_store(
+    request: Request,
+    body: BatchStoreRequest,
+    memory_service: MemoryServiceDep,
+    audit_logger: AuditLoggerDep,
+    sanitizer: SanitizerDep,
+    current_user: CurrentUser,
+) -> BatchStoreResponse:
+    """
+    Store up to 100 memories in a single request.
+    
+    Partial success is supported - failed items don't block successful ones.
+    Each item is processed independently with its own result.
+    
+    **Request:**
+    ```json
+    {
+      "items": [
+        {"content": "Memory 1", "project_id": "default"},
+        {"content": "Memory 2", "metadata": {"key": "value"}}
+      ]
+    }
+    ```
+    
+    **Response includes:**
+    - `results`: Per-item success/failure with responses or errors
+    - `total`: Total items requested
+    - `succeeded`: Count of successful stores
+    - `failed`: Count of failed stores
+    
+    Rate limit: 5 requests/minute.
+    """
+    results: list[BatchStoreResult] = []
+    succeeded = 0
+    
+    for i, item in enumerate(body.items):
+        try:
+            # Enforce authenticated user
+            item.user_id = current_user.user_id
+            
+            resp = await memory_service.store(item)
+            results.append(BatchStoreResult(index=i, success=True, response=resp))
+            succeeded += 1
+        except Exception as e:
+            results.append(BatchStoreResult(index=i, success=False, error=str(e)))
+    
+    await audit_logger.log_memory_store(
+        user_id=current_user.user_id,
+        memory_id=f"batch:{succeeded}/{len(body.items)}",
+        api_key_id=current_user.api_key_id,
+        ip_address=get_client_ip(request),
+        success=True,
+    )
+    
+    return BatchStoreResponse(
+        results=results,
+        total=len(body.items),
+        succeeded=succeeded,
+        failed=len(body.items) - succeeded,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Batch Recall
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/batch/recall",
+    response_model=BatchRecallResponse,
+    summary="Recall for multiple queries in one request",
+)
+@limiter.limit("10/minute")
+async def batch_recall(
+    request: Request,
+    body: BatchRecallRequest,
+    memory_service: MemoryServiceDep,
+    current_user: CurrentUser,
+) -> BatchRecallResponse:
+    """
+    Execute up to 20 recall queries in a single request.
+    
+    Useful for:
+    - Fetching context for multiple topics at once
+    - Parallel memory lookups
+    - Reducing API call overhead
+    
+    **Request:**
+    ```json
+    {
+      "queries": [
+        {"query": "What do we know about project X?"},
+        {"query": "Recent conversations with client Y", "limit": 10}
+      ]
+    }
+    ```
+    
+    Rate limit: 10 requests/minute.
+    """
+    results: list[RecallResponse] = []
+    
+    for query in body.queries:
+        # Enforce authenticated user
+        query.user_id = current_user.user_id
+        
+        resp = await memory_service.recall(query)
+        results.append(resp)
+    
+    return BatchRecallResponse(
+        results=results,
+        total=len(body.queries),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Recall
 # ---------------------------------------------------------------------------
 
@@ -300,22 +431,60 @@ async def get_memory(
     response_model=UpdateResponse,
     summary="Update an existing memory",
 )
+@limiter.limit("20/minute")
 async def update_memory(
+    request: Request,
     memory_id: str,
     body: UpdateRequest,
     memory_service: MemoryServiceDep,
+    audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
 ) -> UpdateResponse:
     """
     Re-extract facts from updated content and merge entity graph.
-
-    Full implementation arrives in Week 4.
+    
+    - **content**: New text content for the memory
+    - **metadata**: Optional metadata to merge with existing
+    
+    The endpoint will:
+    1. Re-extract facts from the new content
+    2. Re-generate embeddings
+    3. Update the vector store and database
+    4. Re-extract and link entities
+    
+    Rate limit: 20 requests/minute.
     """
-    # TODO(week-4): fetch, re-embed, merge entity diff
-    raise HTTPException(
-        status_code=status.HTTP_501_NOT_IMPLEMENTED,
-        detail="Update endpoint coming in Week 4",
-    )
+    try:
+        result = await memory_service.update(
+            memory_id=memory_id,
+            user_id=current_user.user_id,
+            new_content=body.content,
+            new_metadata=body.metadata,
+        )
+        await audit_logger.log(
+            "memory_updated",
+            user_id=current_user.user_id,
+            resource_id=memory_id,
+            success=True,
+        )
+        return result
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory {memory_id} not found",
+        )
+    except Exception as e:
+        await audit_logger.log(
+            "memory_updated",
+            user_id=current_user.user_id,
+            resource_id=memory_id,
+            success=False,
+            error_message=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update memory",
+        )
 
 
 # ---------------------------------------------------------------------------

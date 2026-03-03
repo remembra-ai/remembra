@@ -94,6 +94,14 @@ rerank = [
     "sentence-transformers>=2.5.0",
 ]
 
+# OpenTelemetry tracing (optional, for production observability)
+tracing = [
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.40b0",
+]
+
 # Development dependencies
 dev = [
     "pytest>=8.3.0",

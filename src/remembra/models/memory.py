@@ -165,6 +165,48 @@ class ForgetResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Batch Operations Models
+# ---------------------------------------------------------------------------
+
+
+class BatchStoreRequest(BaseModel):
+    """Request to store multiple memories in one call."""
+    
+    items: list[StoreRequest] = Field(..., min_length=1, max_length=100)
+
+
+class BatchStoreResult(BaseModel):
+    """Result for a single item in a batch store operation."""
+    
+    index: int
+    success: bool
+    response: StoreResponse | None = None
+    error: str | None = None
+
+
+class BatchStoreResponse(BaseModel):
+    """Response from batch store operation."""
+    
+    results: list[BatchStoreResult]
+    total: int
+    succeeded: int
+    failed: int
+
+
+class BatchRecallRequest(BaseModel):
+    """Request to recall for multiple queries in one call."""
+    
+    queries: list[RecallRequest] = Field(..., min_length=1, max_length=20)
+
+
+class BatchRecallResponse(BaseModel):
+    """Response from batch recall operation."""
+    
+    results: list[RecallResponse]
+    total: int
+
+
+# ---------------------------------------------------------------------------
 # Conversation Ingestion Models (Phase 1)
 # ---------------------------------------------------------------------------
 

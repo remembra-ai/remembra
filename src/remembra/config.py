@@ -24,6 +24,12 @@ class Settings(BaseSettings):
         description="Directory for static files (dashboard UI). Set to enable serving."
     )
 
+    # CORS
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:3000", "http://localhost:8787"],
+        description="Allowed CORS origins. Set to ['*'] only for development.",
+    )
+
     # -----------------------------------------------------------------------
     # Qdrant (vector store)
     # -----------------------------------------------------------------------
@@ -307,6 +313,22 @@ class Settings(BaseSettings):
     anomaly_rate_threshold: int = Field(
         100,
         description="Max memories per hour before flagging anomaly",
+    )
+
+    # -----------------------------------------------------------------------
+    # Tracing (OpenTelemetry)
+    # -----------------------------------------------------------------------
+    tracing_enabled: bool = Field(
+        False,
+        description="Enable OpenTelemetry tracing (requires opentelemetry packages)",
+    )
+    tracing_endpoint: str = Field(
+        "http://localhost:4317",
+        description="OTLP gRPC endpoint for trace export",
+    )
+    tracing_service_name: str = Field(
+        "remembra",
+        description="Service name in traces",
     )
 
     # -----------------------------------------------------------------------

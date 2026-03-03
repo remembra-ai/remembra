@@ -291,6 +291,53 @@ class Database:
             return None
         return dict(row)
 
+    async def update_memory(
+        self,
+        memory_id: str,
+        content: str,
+        extracted_facts: list[str],
+        metadata: dict[str, Any],
+    ) -> None:
+        """Update memory content, facts, and metadata."""
+        await self.conn.execute(
+            """
+            UPDATE memories 
+            SET content = ?, extracted_facts = ?, metadata = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                content,
+                json.dumps(extracted_facts),
+                json.dumps(metadata),
+                datetime.utcnow().isoformat(),
+                memory_id,
+            ),
+        )
+        # Update FTS index
+        await self.conn.execute(
+            "DELETE FROM memories_fts WHERE id = ?",
+            (memory_id,),
+        )
+        # Re-fetch to get user_id and project_id for FTS
+        mem = await self.get_memory(memory_id)
+        if mem:
+            await self.conn.execute(
+                """
+                INSERT INTO memories_fts (id, user_id, project_id, content)
+                VALUES (?, ?, ?, ?)
+                """,
+                (memory_id, mem["user_id"], mem["project_id"], content),
+            )
+        await self.conn.commit()
+
+    async def delete_memory_entities(self, memory_id: str) -> None:
+        """Delete all entity links for a memory."""
+        await self.conn.execute(
+            "DELETE FROM memory_entities WHERE memory_id = ?",
+            (memory_id,),
+        )
+        await self.conn.commit()
+
     async def delete_memory(self, memory_id: str) -> bool:
         """Delete a memory and its associations.
         

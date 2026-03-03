@@ -1,8 +1,11 @@
 """Ingestion endpoints - import external data sources into memories."""
 
+import json
+import time
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from remembra.auth.middleware import CurrentUser, get_client_ip
@@ -361,3 +364,104 @@ async def ingest_conversation(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Conversation ingestion failed: {str(e)}",
         )
+
+
+# ---------------------------------------------------------------------------
+# Conversation Ingestion with SSE Streaming
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/conversation/stream",
+    summary="Ingest conversation with real-time SSE progress",
+)
+@limiter.limit("20/minute")
+async def ingest_conversation_stream(
+    request: Request,
+    body: ConversationIngestRequest,
+    conversation_ingest: ConversationIngestDep,
+    audit_logger: AuditLoggerDep,
+    sanitizer: SanitizerDep,
+    current_user: CurrentUser,
+    settings: SettingsDep,
+) -> StreamingResponse:
+    """
+    Stream extraction progress as Server-Sent Events.
+    
+    Same functionality as POST /conversation but with real-time progress updates.
+    Useful for large conversations where the client needs feedback during processing.
+    
+    **Event format:**
+    ```
+    data: {"phase": "parsing", "progress": 0}
+    data: {"phase": "extracting_facts", "progress": 20}
+    data: {"phase": "storing", "progress": 80}
+    data: {"phase": "complete", "progress": 100, "result": {...}}
+    ```
+    
+    **Phases:**
+    - `parsing`: Initial message parsing
+    - `extracting_facts`: LLM fact extraction
+    - `storing`: Writing to vector store
+    - `complete`: Done with full result
+    - `error`: Processing failed
+    
+    Rate limit: 20 requests/minute.
+    """
+    # Override user_id with authenticated user
+    body.user_id = current_user.user_id
+    
+    # Pre-sanitize message content
+    if settings.sanitization_enabled:
+        for msg in body.messages:
+            sanitization = sanitizer.analyze(msg.content, source="conversation_ingest")
+            if sanitization.trust_score < 0.3:
+                async def error_generator():
+                    yield f'data: {json.dumps({"phase": "error", "error": f"Message content failed security check: {sanitization.warnings}"})}\n\n'
+                return StreamingResponse(
+                    error_generator(),
+                    media_type="text/event-stream",
+                )
+    
+    async def event_generator():
+        start = time.time()
+        try:
+            # Phase 1: Parsing
+            yield f'data: {json.dumps({"phase": "parsing", "progress": 0})}\n\n'
+            
+            # Phase 2: Extraction
+            yield f'data: {json.dumps({"phase": "extracting_facts", "progress": 20})}\n\n'
+            
+            # Run the actual ingestion
+            result = await conversation_ingest.ingest(body)
+            
+            # Phase 3: Storing
+            yield f'data: {json.dumps({"phase": "storing", "progress": 80})}\n\n'
+            
+            # Final result
+            elapsed = int((time.time() - start) * 1000)
+            result_dict = result.model_dump(mode="json")
+            result_dict["processing_time_ms"] = elapsed
+            
+            yield f'data: {json.dumps({"phase": "complete", "progress": 100, "result": result_dict})}\n\n'
+            
+            # Audit log
+            await audit_logger.log_memory_store(
+                user_id=current_user.user_id,
+                memory_id=f"conversation_stream:{result.stats.facts_stored}_facts",
+                api_key_id=current_user.api_key_id,
+                ip_address=get_client_ip(request),
+                success=result.status in ["ok", "partial"],
+            )
+            
+        except Exception as e:
+            yield f'data: {json.dumps({"phase": "error", "error": str(e)})}\n\n'
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        },
+    )

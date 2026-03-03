@@ -32,6 +32,7 @@ from remembra.models.memory import (
     Relationship,
     StoreRequest,
     StoreResponse,
+    UpdateResponse,
 )
 from remembra.retrieval.context import ContextOptimizer
 from remembra.retrieval.graph import GraphRetriever
@@ -1079,6 +1080,126 @@ class MemoryService:
             memories=final_memories,
             entities=own_result.entities or [],
         )
+
+    # -----------------------------------------------------------------------
+    # Update
+    # -----------------------------------------------------------------------
+
+    async def update(
+        self,
+        memory_id: str,
+        user_id: str,
+        new_content: str,
+        new_metadata: dict[str, Any] | None = None,
+    ) -> UpdateResponse:
+        """
+        Update memory content, re-extract facts/entities, re-embed.
+        
+        Steps:
+        1. Fetch existing memory and verify ownership
+        2. Re-extract facts from new content
+        3. Re-extract entities from new content  
+        4. Generate new embedding
+        5. Update vector in Qdrant
+        6. Update metadata in SQLite
+        7. Update entities (delete old links, create new ones)
+        
+        Args:
+            memory_id: ID of memory to update
+            user_id: User ID (must match memory owner)
+            new_content: New content text
+            new_metadata: Optional metadata to merge
+            
+        Returns:
+            UpdateResponse with updated entity refs
+        """
+        log.info("updating_memory", memory_id=memory_id, user_id=user_id)
+        
+        # 1. Fetch existing memory from database
+        existing = await self.db.get_memory(memory_id)
+        if not existing or existing.get("user_id") != user_id:
+            raise ValueError(f"Memory {memory_id} not found")
+        
+        project_id = existing.get("project_id", "default")
+        
+        # 2. Re-extract facts from new content
+        extracted_facts = await self.extractor.extract(new_content)
+        if not extracted_facts:
+            extracted_facts = [new_content.strip()]
+        
+        # 3. Generate new embedding
+        embedding = await self.embeddings.embed(new_content)
+        
+        # 4. Update vector in Qdrant
+        from remembra.models.memory import Memory
+        memory = Memory(
+            id=memory_id,
+            user_id=user_id,
+            project_id=project_id,
+            content=new_content,
+            extracted_facts=extracted_facts,
+            entities=[],
+            embedding=embedding,
+            metadata=existing.get("metadata") or {},
+        )
+        await self.qdrant.upsert(memory)
+        
+        # 5. Update metadata in SQLite
+        existing_meta = {}
+        if existing.get("metadata"):
+            import json
+            existing_meta = json.loads(existing["metadata"]) if isinstance(existing["metadata"], str) else existing["metadata"]
+        merged_metadata = {**existing_meta, **(new_metadata or {})}
+        
+        await self.db.update_memory(
+            memory_id=memory_id,
+            content=new_content,
+            extracted_facts=extracted_facts,
+            metadata=merged_metadata,
+        )
+        
+        # 6. Update entities (delete old links, create new ones)
+        await self.db.delete_memory_entities(memory_id)
+        
+        entity_refs: list[EntityRef] = []
+        if self.settings.enable_entity_resolution:
+            try:
+                entity_refs = await self._process_entities_for_memory(
+                    memory_id=memory_id,
+                    content=new_content,
+                    user_id=user_id,
+                    project_id=project_id,
+                )
+            except Exception as e:
+                log.warning("entity_update_failed", error=str(e), memory_id=memory_id)
+        
+        # 7. Handle conflict detection if enabled
+        if self.conflict_manager:
+            try:
+                from remembra.extraction.conflicts import MemoryConflict, ConflictStatus
+                conflict = MemoryConflict(
+                    user_id=user_id,
+                    project_id=project_id,
+                    new_fact=new_content,
+                    existing_memory_id=memory_id,
+                    existing_content=existing.get("content", ""),
+                    similarity_score=1.0,
+                    reason="Memory updated via PATCH",
+                    strategy_applied=self.conflict_manager.default_strategy,
+                    status=ConflictStatus.RESOLVED,
+                )
+                await self.conflict_manager.record(conflict)
+            except Exception as e:
+                log.warning("conflict_recording_failed", error=str(e))
+        
+        log.info(
+            "memory_updated",
+            memory_id=memory_id,
+            facts_count=len(extracted_facts),
+            entities_count=len(entity_refs),
+        )
+        
+        return UpdateResponse(id=memory_id, updated_entities=entity_refs)
 
     # -----------------------------------------------------------------------
     # Forget

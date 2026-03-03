@@ -29,8 +29,8 @@ def get_space_manager(request: Request) -> SpaceManager:
     manager = getattr(request.app.state, "space_manager", None)
     if manager is None:
         raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Memory spaces are not enabled on this server",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Memory spaces are not enabled. Set REMEMBRA_ENABLE_SPACES=true to enable.",
         )
     return manager
 

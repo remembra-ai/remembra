@@ -35,8 +35,8 @@ def get_reindex_manager(request: Request) -> ReindexManager:
     manager = getattr(request.app.state, "reindex_manager", None)
     if manager is None:
         raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Re-indexing is not available",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Re-indexing service is not available. Check server configuration.",
         )
     return manager
 
