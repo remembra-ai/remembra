@@ -9,12 +9,11 @@ from pydantic import BaseModel, Field
 from remembra.auth.middleware import CurrentUser
 from remembra.core.limiter import limiter
 from remembra.services.memory import MemoryService
+from remembra.temporal.cleanup import TemporalCleanupJob
 from remembra.temporal.decay import (
     DecayConfig,
     calculate_memory_decay_info,
-    rank_by_relevance,
 )
-from remembra.temporal.cleanup import TemporalCleanupJob
 
 router = APIRouter(prefix="/temporal", tags=["temporal"])
 
@@ -179,7 +178,6 @@ async def run_cleanup(
     
     ⚠️ WARNING: Setting dry_run=false will permanently delete memories!
     """
-    from datetime import datetime
     
     start_time = datetime.utcnow()
     

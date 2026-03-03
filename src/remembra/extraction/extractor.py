@@ -5,8 +5,9 @@ Transforms messy conversations into clean, atomic facts.
 """
 
 import json
+from dataclasses import dataclass
+
 import structlog
-from dataclasses import dataclass, field
 from openai import AsyncOpenAI
 
 log = structlog.get_logger()

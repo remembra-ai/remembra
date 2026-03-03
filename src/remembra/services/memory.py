@@ -7,40 +7,42 @@ from typing import Any
 import structlog
 
 from remembra.config import Settings
+from remembra.extraction.conflicts import (
+    ConflictManager,
+    ConflictStatus,
+    ConflictStrategy,
+    MemoryConflict,
+)
+from remembra.extraction.consolidator import (
+    ConsolidationAction,
+    ExistingMemory,
+    MemoryConsolidator,
+)
+from remembra.extraction.entities import EntityExtractor
+from remembra.extraction.extractor import ExtractionConfig, FactExtractor
+from remembra.extraction.matcher import EntityMatcher, ExistingEntity
 from remembra.models.memory import (
+    Entity,
     EntityRef,
     ForgetResponse,
     Memory,
     RecallRequest,
     RecallResponse,
     RecallResult,
+    Relationship,
     StoreRequest,
     StoreResponse,
 )
+from remembra.retrieval.context import ContextOptimizer
+from remembra.retrieval.graph import GraphRetriever
+
+# Advanced retrieval (Week 6)
+from remembra.retrieval.hybrid import HybridSearchConfig, HybridSearcher
+from remembra.retrieval.ranking import RankingConfig, RelevanceRanker
+from remembra.retrieval.reranker import CrossEncoderReranker
 from remembra.storage.database import Database
 from remembra.storage.embeddings import EmbeddingService
 from remembra.storage.qdrant import QdrantStore
-from remembra.extraction.extractor import FactExtractor, ExtractionConfig
-from remembra.extraction.consolidator import (
-    MemoryConsolidator,
-    ConsolidationAction,
-    ExistingMemory,
-)
-from remembra.extraction.conflicts import (
-    ConflictManager,
-    ConflictStrategy,
-    ConflictStatus,
-    MemoryConflict,
-)
-from remembra.extraction.entities import EntityExtractor, ExtractedEntity
-from remembra.extraction.matcher import EntityMatcher, ExistingEntity, MatchResult
-from remembra.models.memory import Entity, Relationship
-# Advanced retrieval (Week 6)
-from remembra.retrieval.hybrid import HybridSearcher, HybridSearchConfig
-from remembra.retrieval.graph import GraphRetriever
-from remembra.retrieval.context import ContextOptimizer
-from remembra.retrieval.ranking import RelevanceRanker, RankingConfig
-from remembra.retrieval.reranker import CrossEncoderReranker
 
 log = structlog.get_logger(__name__)
 
@@ -1236,7 +1238,7 @@ class MemoryService:
             return RecallResponse(context="", memories=[], entities=[])
         
         # Embed query and find most relevant among historical
-        query_vector = await self.embeddings.embed(query)
+        await self.embeddings.embed(query)
         
         # Re-embed historical memories for comparison
         # (In production, we'd store embeddings - this is for correctness)

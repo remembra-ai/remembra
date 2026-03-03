@@ -13,12 +13,14 @@ Based on the Hystrix pattern.
 """
 
 import asyncio
-import structlog
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
 from functools import wraps
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
+
+import structlog
 
 log = structlog.get_logger(__name__)
 
@@ -165,7 +167,7 @@ class CircuitBreaker:
             await self._on_success()
             return result
             
-        except asyncio.TimeoutError:
+        except TimeoutError:
             await self._on_failure(TimeoutError(f"Call timed out after {self.config.call_timeout}s"))
             raise
             

@@ -32,7 +32,8 @@ Requires: pip install remembra langchain-core
 from __future__ import annotations
 
 import json
-from typing import Any, Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from langchain_core.chat_history import BaseChatMessageHistory
 from langchain_core.messages import (

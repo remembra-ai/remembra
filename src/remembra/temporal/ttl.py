@@ -2,7 +2,6 @@
 
 import re
 from datetime import datetime, timedelta
-from typing import Optional
 
 # TTL format: <number><unit> where unit is s/m/h/d/w/M/y
 TTL_PATTERN = re.compile(r'^(\d+)([smhdwMy])$')
@@ -71,10 +70,10 @@ def parse_ttl(ttl_string: str) -> timedelta:
 
 
 def calculate_expires_at(
-    ttl_string: Optional[str] = None,
-    ttl_delta: Optional[timedelta] = None,
-    from_time: Optional[datetime] = None,
-) -> Optional[datetime]:
+    ttl_string: str | None = None,
+    ttl_delta: timedelta | None = None,
+    from_time: datetime | None = None,
+) -> datetime | None:
     """
     Calculate expiration datetime from TTL.
     
@@ -150,7 +149,7 @@ TTL_PRESETS = {
 }
 
 
-def get_preset_ttl(preset_name: str) -> Optional[str]:
+def get_preset_ttl(preset_name: str) -> str | None:
     """
     Get a TTL preset by name.
     

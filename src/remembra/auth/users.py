@@ -2,7 +2,7 @@
 
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import bcrypt
@@ -74,8 +74,8 @@ class UserManager:
         payload = {
             "sub": user_id,
             "email": email,
-            "iat": datetime.now(timezone.utc),
-            "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS),
+            "iat": datetime.now(UTC),
+            "exp": datetime.now(UTC) + timedelta(hours=JWT_EXPIRATION_HOURS),
             "type": "access",
         }
         return jwt.encode(payload, self.jwt_secret, algorithm=JWT_ALGORITHM)
@@ -116,7 +116,7 @@ class UserManager:
         
         user_id = self.generate_user_id()
         password_hash = self.hash_password(password)
-        created_at = datetime.now(timezone.utc)
+        created_at = datetime.now(UTC)
         
         await self.db.create_user(
             user_id=user_id,
@@ -208,7 +208,7 @@ class UserManager:
             return None, None  # Return None for both - frontend shows generic message
         
         reset_token = self.generate_reset_token()
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=PASSWORD_RESET_EXPIRATION_HOURS)
+        expires_at = datetime.now(UTC) + timedelta(hours=PASSWORD_RESET_EXPIRATION_HOURS)
         
         # Hash the reset token before storing
         token_hash = self.hash_password(reset_token)
@@ -248,7 +248,7 @@ class UserManager:
         
         # Check expiration
         expires_at = datetime.fromisoformat(reset_record["expires_at"]) if isinstance(reset_record["expires_at"], str) else reset_record["expires_at"]
-        if expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        if expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
             await self.db.delete_password_reset_token(user_data["id"])
             return False, "Reset token has expired"
         
@@ -282,7 +282,7 @@ class UserManager:
         await self.db.add_token_to_blacklist(
             token_hash=self.hash_password(token),
             user_id=user_id,
-            expires_at=datetime.fromtimestamp(payload["exp"], tz=timezone.utc),
+            expires_at=datetime.fromtimestamp(payload["exp"], tz=UTC),
         )
         
         log.info("user_logged_out", user_id=user_id)

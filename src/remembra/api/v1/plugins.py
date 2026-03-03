@@ -240,5 +240,5 @@ def _resolve_plugin_class(name: str) -> type | None:
     try:
         module = importlib.import_module(module_path)
         return getattr(module, class_name)
-    except (ImportError, AttributeError) as e:
+    except (ImportError, AttributeError):
         return None

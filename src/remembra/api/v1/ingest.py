@@ -1,6 +1,6 @@
 """Ingestion endpoints - import external data sources into memories."""
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -16,8 +16,8 @@ from remembra.models.memory import (
 )
 from remembra.security.audit import AuditLogger
 from remembra.security.sanitizer import ContentSanitizer
-from remembra.services.memory import MemoryService
 from remembra.services.conversation_ingest import ConversationIngestService
+from remembra.services.memory import MemoryService
 
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
@@ -185,7 +185,6 @@ async def ingest_changelog(
     
     # Store each release as a memory
     memory_ids: list[str] = []
-    project_prefix = f"{body.project_name}: " if body.project_name else ""
     
     for release in releases:
         try:

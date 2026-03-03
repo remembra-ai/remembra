@@ -11,11 +11,12 @@ Use cases:
 
 import asyncio
 import hashlib
-import structlog
 from collections import OrderedDict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Generic, TypeVar
+
+import structlog
 
 log = structlog.get_logger(__name__)
 

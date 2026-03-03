@@ -11,7 +11,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from remembra.cloud.email import EmailService, EmailProvider
+from remembra.cloud.email import EmailProvider, EmailService
 
 logger = logging.getLogger(__name__)
 

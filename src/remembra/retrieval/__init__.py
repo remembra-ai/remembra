@@ -8,10 +8,10 @@ Provides:
 - CrossEncoder reranking (optional, reduces hallucinations)
 """
 
-from remembra.retrieval.hybrid import HybridSearcher, SearchResult, HybridSearchConfig, BM25Index
-from remembra.retrieval.graph import GraphRetriever, GraphSearchResult
 from remembra.retrieval.context import ContextOptimizer, OptimizedContext
-from remembra.retrieval.ranking import RelevanceRanker, RankingConfig
+from remembra.retrieval.graph import GraphRetriever, GraphSearchResult
+from remembra.retrieval.hybrid import BM25Index, HybridSearchConfig, HybridSearcher, SearchResult
+from remembra.retrieval.ranking import RankingConfig, RelevanceRanker
 from remembra.retrieval.reranker import CrossEncoderReranker, RerankedResult, get_reranker
 
 __all__ = [

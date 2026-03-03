@@ -8,7 +8,7 @@ Memories are linked to spaces via the memory_space_membership table.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -96,7 +96,7 @@ class SpaceManager:
         The creator automatically gets admin access.
         """
         space_id = f"space_{uuid4().hex[:16]}"
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
 
         # Check for duplicate name
         cursor = await self._db.conn.execute(
@@ -239,7 +239,7 @@ class SpaceManager:
         if not await self._has_permission(space_id, granted_by, "admin"):
             raise PermissionError("Admin access required to grant permissions")
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         await self._db.conn.execute(
             """
             INSERT INTO space_access (space_id, agent_id, permission, granted_by, granted_at)
@@ -313,7 +313,7 @@ class SpaceManager:
         if not await self._has_permission(space_id, added_by, "write"):
             raise PermissionError("Write access required to add memories to a space")
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         try:
             await self._db.conn.execute(
                 """

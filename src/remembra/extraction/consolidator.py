@@ -5,9 +5,10 @@ Prevents duplicates, handles updates, resolves contradictions.
 """
 
 import json
-import structlog
-from enum import Enum
 from dataclasses import dataclass
+from enum import Enum
+
+import structlog
 from openai import AsyncOpenAI
 
 log = structlog.get_logger()

@@ -26,8 +26,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
 
 from remembra.io.importers import ImportedMemory
 
@@ -76,7 +75,7 @@ def parse_chatgpt_export(data: str | bytes) -> list[ImportedMemory]:
             ts = None
             if create_time:
                 try:
-                    ts = datetime.fromtimestamp(create_time, tz=timezone.utc).isoformat()
+                    ts = datetime.fromtimestamp(create_time, tz=UTC).isoformat()
                 except (ValueError, OSError):
                     pass
 

@@ -12,10 +12,11 @@ Checks:
 - Content anomalies (topic shifts, suspicious patterns)
 """
 
-import structlog
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+
+import structlog
 
 log = structlog.get_logger(__name__)
 

@@ -10,11 +10,11 @@ Modes:
 - block: Reject content containing PII
 """
 
-import re
 import hashlib
-import structlog
+import re
 from dataclasses import dataclass, field
-from typing import Any
+
+import structlog
 
 log = structlog.get_logger(__name__)
 

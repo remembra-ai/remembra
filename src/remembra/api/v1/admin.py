@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, get_client_ip
+from remembra.auth.middleware import CurrentUser
 from remembra.auth.rbac import Permission, Role, RoleManager
 from remembra.auth.scopes import RequireAdmin, RequireAuditExport
 from remembra.core.limiter import limiter

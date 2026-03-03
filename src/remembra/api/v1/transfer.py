@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFil
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, get_client_ip
+from remembra.auth.middleware import CurrentUser
 from remembra.core.limiter import limiter
 from remembra.io.export import export_csv, export_json, export_jsonl
 from remembra.io.importers import SUPPORTED_FORMATS, ImportedMemory
@@ -20,8 +20,8 @@ from remembra.io.importers.plaintext import (
     parse_jsonl,
     parse_plaintext,
 )
-from remembra.services.memory import MemoryService
 from remembra.models.memory import StoreRequest
+from remembra.services.memory import MemoryService
 
 router = APIRouter(prefix="/transfer", tags=["import/export"])
 

@@ -156,9 +156,10 @@ class SMTPBackend(EmailBackend):
     async def send(self, message: EmailMessage) -> EmailResult:
         """Send email via SMTP."""
         try:
-            import aiosmtplib
             from email.mime.multipart import MIMEMultipart
             from email.mime.text import MIMEText
+
+            import aiosmtplib
 
             # Create message
             msg = MIMEMultipart("alternative")

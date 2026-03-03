@@ -8,7 +8,6 @@ This module enables finding memories by traversing the entity graph:
 """
 
 from dataclasses import dataclass, field
-from typing import Any
 
 import structlog
 

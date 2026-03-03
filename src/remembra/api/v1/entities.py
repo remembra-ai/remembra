@@ -3,7 +3,7 @@
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from remembra.auth.middleware import CurrentUser
 from remembra.core.limiter import limiter

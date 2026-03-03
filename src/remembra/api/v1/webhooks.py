@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, get_client_ip
+from remembra.auth.middleware import CurrentUser
 from remembra.core.limiter import limiter
 from remembra.webhooks.events import ALL_EVENT_TYPES
 from remembra.webhooks.manager import WebhookManager

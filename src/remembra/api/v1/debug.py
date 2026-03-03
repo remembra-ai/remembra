@@ -11,16 +11,16 @@ These endpoints are gated behind cloud plan checks (has_observability).
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, get_client_ip
+from remembra.auth.middleware import CurrentUser
 from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
-from remembra.models.memory import EntityRef, RecallRequest
+from remembra.models.memory import RecallRequest
 from remembra.services.memory import MemoryService
 
 router = APIRouter(prefix="/debug", tags=["debug"])
@@ -207,14 +207,14 @@ async def debug_recall(
     elapsed_ms = (time.monotonic() - start) * 1000
 
     # Build scoring breakdowns from the recall results
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     breakdowns: list[ScoringBreakdown] = []
 
     for mem in result.memories:
         age_days = None
         recency_score = 0.0
         if mem.created_at:
-            age_td = now - mem.created_at.replace(tzinfo=timezone.utc) if mem.created_at.tzinfo is None else now - mem.created_at
+            age_td = now - mem.created_at.replace(tzinfo=UTC) if mem.created_at.tzinfo is None else now - mem.created_at
             age_days = age_td.total_seconds() / 86400
             # Approximate recency from config half-life
             import math
@@ -360,7 +360,7 @@ async def get_analytics(
     # Recent activity from cloud usage tables (if available)
     stores_today = recalls_today = 0
     try:
-        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_str = datetime.now(UTC).strftime("%Y-%m-%d")
         cursor = await db.conn.execute(
             "SELECT stores, recalls FROM cloud_usage_daily WHERE user_id = ? AND date = ?",
             (current_user.user_id, today_str),

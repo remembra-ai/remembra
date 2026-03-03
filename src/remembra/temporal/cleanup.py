@@ -9,15 +9,14 @@ This module provides scheduled tasks for:
 
 import asyncio
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 
 import structlog
 
 from remembra.temporal.decay import (
-    DecayConfig,
     DEFAULT_CONFIG,
+    DecayConfig,
     calculate_memory_decay_info,
-    should_prune,
 )
 
 log = structlog.get_logger(__name__)
@@ -38,7 +37,7 @@ class TemporalCleanupJob:
         self,
         database,  # Database instance
         qdrant_store,  # QdrantStore instance
-        config: Optional[DecayConfig] = None,
+        config: DecayConfig | None = None,
         auto_delete_expired: bool = True,
         auto_prune_decayed: bool = False,  # Conservative default
         prune_to_archive: bool = True,  # Archive instead of delete
@@ -62,15 +61,15 @@ class TemporalCleanupJob:
         self.prune_to_archive = prune_to_archive
         
         # Metrics
-        self._last_run: Optional[datetime] = None
+        self._last_run: datetime | None = None
         self._total_expired_deleted: int = 0
         self._total_decayed_pruned: int = 0
         self._run_count: int = 0
     
     async def run_cleanup(
         self,
-        user_id: Optional[str] = None,
-        project_id: Optional[str] = None,
+        user_id: str | None = None,
+        project_id: str | None = None,
         dry_run: bool = False,
     ) -> dict[str, Any]:
         """
@@ -149,8 +148,8 @@ class TemporalCleanupJob:
     
     async def _cleanup_expired(
         self,
-        user_id: Optional[str],
-        project_id: Optional[str],
+        user_id: str | None,
+        project_id: str | None,
         dry_run: bool,
     ) -> dict[str, Any]:
         """Delete memories past their TTL expiration."""
@@ -197,8 +196,8 @@ class TemporalCleanupJob:
     
     async def _cleanup_decayed(
         self,
-        user_id: Optional[str],
-        project_id: Optional[str],
+        user_id: str | None,
+        project_id: str | None,
         dry_run: bool,
     ) -> dict[str, Any]:
         """Handle memories that have decayed below threshold."""

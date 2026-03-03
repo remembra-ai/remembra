@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 # Import email service if available
 try:
-    from remembra.cloud.email import EmailService
+    from remembra.cloud.email import EmailService  # noqa: F401
     EMAIL_AVAILABLE = True
 except ImportError:
     EMAIL_AVAILABLE = False

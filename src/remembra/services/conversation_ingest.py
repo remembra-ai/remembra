@@ -13,34 +13,32 @@ This is the #1 feature gap vs Mem0 - automatic conversation ingestion.
 
 import json
 import time
-import structlog
 from datetime import datetime
 from typing import Any
-from uuid import uuid4
 
+import structlog
 from openai import AsyncOpenAI
 
 from remembra.config import Settings
+from remembra.extraction.prompts.conversation import (
+    CONVERSATION_EXTRACTION_SYSTEM_PROMPT,
+    CONVERSATION_EXTRACTION_USER_PROMPT,
+    DEDUP_DECISION_FUNCTIONS,
+    DEDUP_DECISION_PROMPT,
+    format_existing_memories,
+    format_messages_for_extraction,
+)
 from remembra.models.memory import (
     ConversationIngestRequest,
     ConversationIngestResponse,
     ConversationMessage,
     DedupeResult,
-    ExtractedFact,
     ExtractedEntityResult,
+    ExtractedFact,
     IngestOptions,
     IngestStats,
     StoreRequest,
 )
-from remembra.extraction.prompts.conversation import (
-    CONVERSATION_EXTRACTION_SYSTEM_PROMPT,
-    CONVERSATION_EXTRACTION_USER_PROMPT,
-    DEDUP_DECISION_PROMPT,
-    DEDUP_DECISION_FUNCTIONS,
-    format_messages_for_extraction,
-    format_existing_memories,
-)
-from remembra.extraction.consolidator import ExistingMemory
 
 log = structlog.get_logger(__name__)
 

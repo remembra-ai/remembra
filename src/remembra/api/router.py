@@ -2,7 +2,23 @@
 
 from fastapi import APIRouter
 
-from remembra.api.v1 import admin, auth, cloud, conflicts, debug, embeddings, keys, memories, ingest, plugins, spaces, temporal, entities, transfer, webhooks
+from remembra.api.v1 import (
+    admin,
+    auth,
+    cloud,
+    conflicts,
+    debug,
+    embeddings,
+    entities,
+    ingest,
+    keys,
+    memories,
+    plugins,
+    spaces,
+    temporal,
+    transfer,
+    webhooks,
+)
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.router, prefix="/v1")

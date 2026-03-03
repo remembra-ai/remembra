@@ -19,9 +19,9 @@ References:
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 
 
 @dataclass
@@ -58,7 +58,7 @@ DEFAULT_CONFIG = DecayConfig()
 def calculate_stability(
     access_count: int,
     base_importance: float = 0.5,
-    config: Optional[DecayConfig] = None,
+    config: DecayConfig | None = None,
 ) -> float:
     """
     Calculate memory stability based on access patterns.
@@ -90,7 +90,7 @@ def calculate_stability(
 def calculate_decay_factor(
     time_elapsed: timedelta,
     stability: float,
-    config: Optional[DecayConfig] = None,
+    config: DecayConfig | None = None,
 ) -> float:
     """
     Calculate decay factor using exponential decay formula.
@@ -122,11 +122,11 @@ def calculate_decay_factor(
 
 def calculate_relevance_score(
     created_at: datetime,
-    last_accessed: Optional[datetime],
+    last_accessed: datetime | None,
     access_count: int = 0,
     importance_score: float = 0.5,
-    config: Optional[DecayConfig] = None,
-    as_of: Optional[datetime] = None,
+    config: DecayConfig | None = None,
+    as_of: datetime | None = None,
 ) -> float:
     """
     Calculate current relevance score for a memory.
@@ -195,12 +195,12 @@ def calculate_relevance_score(
 
 def should_prune(
     created_at: datetime,
-    last_accessed: Optional[datetime],
+    last_accessed: datetime | None,
     access_count: int = 0,
     importance_score: float = 0.5,
-    expires_at: Optional[datetime] = None,
-    config: Optional[DecayConfig] = None,
-    as_of: Optional[datetime] = None,
+    expires_at: datetime | None = None,
+    config: DecayConfig | None = None,
+    as_of: datetime | None = None,
 ) -> bool:
     """
     Determine if a memory should be pruned.
@@ -241,7 +241,7 @@ def should_prune(
     return relevance < cfg.prune_threshold
 
 
-def calculate_memory_decay_info(memory_data: dict[str, Any], config: Optional[DecayConfig] = None) -> dict[str, Any]:
+def calculate_memory_decay_info(memory_data: dict[str, Any], config: DecayConfig | None = None) -> dict[str, Any]:
     """
     Calculate decay information for a memory dict.
     
@@ -316,7 +316,7 @@ def calculate_memory_decay_info(memory_data: dict[str, Any], config: Optional[De
 
 def rank_by_relevance(
     memories: list[dict[str, Any]],
-    config: Optional[DecayConfig] = None,
+    config: DecayConfig | None = None,
 ) -> list[dict[str, Any]]:
     """
     Rank memories by relevance score (highest first).

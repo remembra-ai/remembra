@@ -8,7 +8,7 @@ via HTTP POST with retry logic.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -99,7 +99,7 @@ class WebhookManager:
                 )
 
         webhook_id = str(uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         events_str = ",".join(events)
 
         await self._db.conn.execute(
@@ -185,7 +185,7 @@ class WebhookManager:
         if existing is None:
             return None
 
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         updates: list[str] = ["updated_at = ?"]
         params: list[Any] = [now]
 
@@ -243,7 +243,7 @@ class WebhookManager:
 
             # Create delivery record
             delivery_id = str(uuid4())
-            now = datetime.now(timezone.utc).isoformat()
+            now = datetime.now(UTC).isoformat()
             await self._db.conn.execute(
                 """
                 INSERT INTO webhook_deliveries

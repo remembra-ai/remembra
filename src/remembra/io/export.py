@@ -10,8 +10,8 @@ import csv
 import io
 import json
 import logging
-from datetime import datetime, timezone
-from typing import Any, AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ async def export_json(
     """Export memories as a formatted JSON string."""
     export_data = {
         "version": "1.0",
-        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "exported_at": datetime.now(UTC).isoformat(),
         "total": len(memories),
         "memories": _prepare_memories(memories, include_metadata),
     }

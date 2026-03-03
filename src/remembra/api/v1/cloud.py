@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, RequireMasterKey, get_client_ip
+from remembra.auth.middleware import CurrentUser, RequireMasterKey
 from remembra.cloud.metering import UsageMeter
 from remembra.cloud.plans import PlanTier, get_plan
 from remembra.config import Settings, get_settings
@@ -116,7 +116,6 @@ async def signup(
 
     Returns the API key — it is only shown once.
     """
-    from remembra.auth.keys import APIKeyManager
     from remembra.cloud.provisioning import TenantProvisioner
 
     key_manager = request.app.state.api_key_manager

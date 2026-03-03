@@ -10,7 +10,7 @@ This module provides post-retrieval ranking that considers:
 
 import math
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -139,8 +139,7 @@ class RelevanceRanker:
         try:
             # Handle timezone-aware datetimes
             if created_at.tzinfo is not None:
-                from datetime import timezone
-                now = now.replace(tzinfo=timezone.utc)
+                now = now.replace(tzinfo=UTC)
             
             age_days = (now - created_at).total_seconds() / 86400
             

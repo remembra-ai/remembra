@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -128,7 +128,7 @@ class ReindexManager:
             new_model=new_model,
             total_memories=total,
             status="running",
-            started_at=datetime.now(timezone.utc).isoformat(),
+            started_at=datetime.now(UTC).isoformat(),
         )
         self._current_job = job
         self._cancel_requested = False
@@ -252,12 +252,12 @@ class ReindexManager:
 
             if job.status != "cancelled":
                 job.status = "completed"
-            job.completed_at = datetime.now(timezone.utc).isoformat()
+            job.completed_at = datetime.now(UTC).isoformat()
 
         except Exception as e:
             job.status = "failed"
             job.error = str(e)
-            job.completed_at = datetime.now(timezone.utc).isoformat()
+            job.completed_at = datetime.now(UTC).isoformat()
             logger.error("Reindex job failed: %s", e)
 
         finally:

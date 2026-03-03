@@ -8,7 +8,6 @@ from slowapi import Limiter
 
 from remembra.auth.keys import APIKeyManager
 from remembra.auth.middleware import (
-    AuthenticatedUser,
     CurrentUser,
     JWTOrAPIKeyUser,
     get_client_ip,

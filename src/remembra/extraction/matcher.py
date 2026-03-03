@@ -5,8 +5,9 @@ Determines if "John", "Mr. Smith", and "the CEO" refer to the same entity.
 """
 
 import json
-import structlog
 from dataclasses import dataclass
+
+import structlog
 from openai import AsyncOpenAI
 
 from remembra.extraction.entities import ExtractedEntity

@@ -4,9 +4,9 @@ Remembra Intelligent Extraction Module
 LLM-powered fact extraction, memory consolidation, and entity resolution.
 """
 
-from .extractor import FactExtractor, ExtractionConfig
-from .consolidator import MemoryConsolidator, ConsolidationAction, ExistingMemory
+from .consolidator import ConsolidationAction, ExistingMemory, MemoryConsolidator
 from .entities import EntityExtractor, ExtractedEntity, ExtractedRelationship, ExtractionResult
+from .extractor import ExtractionConfig, FactExtractor
 from .matcher import EntityMatcher, ExistingEntity, MatchResult
 
 __all__ = [

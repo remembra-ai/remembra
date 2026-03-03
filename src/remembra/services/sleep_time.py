@@ -15,19 +15,17 @@ This runs between conversations to improve memory quality
 without impacting real-time performance.
 """
 
-import asyncio
-import structlog
 from datetime import datetime, timedelta
 from typing import Any
 
+import structlog
+
 from remembra.config import Settings
-from remembra.models.memory import ConsolidationReport
 from remembra.extraction.consolidator import (
-    MemoryConsolidator,
     ConsolidationAction,
     ExistingMemory,
 )
-from remembra.extraction.matcher import EntityMatcher
+from remembra.models.memory import ConsolidationReport
 
 log = structlog.get_logger(__name__)
 
@@ -439,7 +437,6 @@ class SleepTimeWorker:
         unused memories that can be cleaned up.
         """
         cleaned_count = 0
-        decay_threshold = 0.1  # Remove memories with <10% strength
         
         try:
             # Get very old memories with low access

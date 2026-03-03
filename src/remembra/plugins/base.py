@@ -28,7 +28,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Event data classes — immutable snapshots passed to hooks
 # ---------------------------------------------------------------------------

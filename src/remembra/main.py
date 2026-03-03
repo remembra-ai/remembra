@@ -9,9 +9,8 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 
 from remembra import __version__
 from remembra.api.router import api_router
@@ -19,20 +18,20 @@ from remembra.auth.keys import APIKeyManager
 from remembra.auth.rbac import RoleManager
 from remembra.cloud.metering import UsageMeter
 from remembra.config import get_settings
-from remembra.extraction.conflicts import ConflictManager, ConflictStrategy
-from remembra.plugins.manager import PluginManager
-from remembra.spaces.manager import SpaceManager
-from remembra.storage.reindex import ReindexManager
-from remembra.webhooks.delivery import WebhookDelivery
-from remembra.webhooks.manager import WebhookManager
 from remembra.core.health import build_health_response, check_qdrant
 from remembra.core.logging import configure_logging
+from remembra.extraction.conflicts import ConflictManager, ConflictStrategy
+from remembra.plugins.manager import PluginManager
 from remembra.security.audit import AuditLogger
 from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.memory import MemoryService
+from remembra.spaces.manager import SpaceManager
 from remembra.storage.database import Database
 from remembra.storage.embeddings import EmbeddingService
 from remembra.storage.qdrant import QdrantStore
+from remembra.storage.reindex import ReindexManager
+from remembra.webhooks.delivery import WebhookDelivery
+from remembra.webhooks.manager import WebhookManager
 
 log = structlog.get_logger(__name__)
 
@@ -44,7 +43,6 @@ log = structlog.get_logger(__name__)
 
 # Import limiter from core module to avoid circular imports
 from remembra.core.limiter import limiter
-
 
 # ---------------------------------------------------------------------------
 # Application State
@@ -202,9 +200,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Plugin system
     app.state.plugin_manager = PluginManager()
     # Register built-in plugin classes in the marketplace
-    from remembra.plugins.builtin.slack_notifier import SlackNotifierPlugin
     from remembra.plugins.builtin.auto_tagger import AutoTaggerPlugin
     from remembra.plugins.builtin.recall_logger import RecallLoggerPlugin
+    from remembra.plugins.builtin.slack_notifier import SlackNotifierPlugin
     app.state.plugin_manager.register_class(SlackNotifierPlugin)
     app.state.plugin_manager.register_class(AutoTaggerPlugin)
     app.state.plugin_manager.register_class(RecallLoggerPlugin)
@@ -340,8 +338,8 @@ def create_app() -> FastAPI:
         from pathlib import Path
         static_path = Path(static_dir)
         if static_path.exists() and static_path.is_dir():
-            from fastapi.staticfiles import StaticFiles
             from fastapi.responses import FileResponse
+            from fastapi.staticfiles import StaticFiles
             
             # Serve static files at /static
             app.mount("/static", StaticFiles(directory=static_path), name="static")

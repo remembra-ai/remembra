@@ -5,8 +5,9 @@ Extracts people, organizations, locations, and their relationships.
 """
 
 import json
-import structlog
 from dataclasses import dataclass
+
+import structlog
 from openai import AsyncOpenAI
 
 log = structlog.get_logger()

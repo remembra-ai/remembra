@@ -64,3 +64,4 @@ site/
 *.whl
 remembra.db
 .mcpregistry_*
+sdk/typescript/node_modules/

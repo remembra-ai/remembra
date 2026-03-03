@@ -14,9 +14,9 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, get_client_ip
+from remembra.auth.middleware import CurrentUser
 from remembra.core.limiter import limiter
-from remembra.storage.embeddings import EmbeddingService, MODEL_DIMENSIONS, EmbeddingProvider
+from remembra.storage.embeddings import MODEL_DIMENSIONS, EmbeddingService
 from remembra.storage.reindex import ReindexManager
 
 router = APIRouter(prefix="/embeddings", tags=["embeddings"])

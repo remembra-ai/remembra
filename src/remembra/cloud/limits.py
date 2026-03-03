@@ -20,9 +20,12 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 
-from remembra.auth.middleware import AuthenticatedUser, get_current_user, get_user_from_jwt_or_api_key
+from remembra.auth.middleware import (
+    AuthenticatedUser,
+    get_current_user,
+    get_user_from_jwt_or_api_key,
+)
 from remembra.cloud.metering import UsageMeter
-from remembra.config import get_settings
 
 logger = logging.getLogger(__name__)
 

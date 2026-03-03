@@ -10,7 +10,7 @@ Data is stored in SQLite alongside the main database.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from remembra.cloud.plans import PlanTier, UsageSnapshot
@@ -69,7 +69,7 @@ class UsageMeter:
         stripe_subscription_id: str | None = None,
     ) -> None:
         """Register a new tenant or update existing."""
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         await self._db.conn.execute(
             """
             INSERT INTO cloud_tenants (
@@ -111,7 +111,7 @@ class UsageMeter:
         stripe_subscription_id: str | None = None,
     ) -> None:
         """Update a tenant's plan (e.g., after Stripe webhook)."""
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         await self._db.conn.execute(
             """
             UPDATE cloud_tenants
@@ -141,7 +141,7 @@ class UsageMeter:
 
     async def _increment(self, user_id: str, column: str) -> None:
         """Increment a daily usage counter."""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
         await self._db.conn.execute(
             f"""
             INSERT INTO cloud_usage_daily (user_id, date, {column})
@@ -177,7 +177,7 @@ class UsageMeter:
         memories_stored = row[0] if row else 0
 
         # This month's usage
-        month_start = datetime.now(timezone.utc).strftime("%Y-%m-01")
+        month_start = datetime.now(UTC).strftime("%Y-%m-01")
         cursor = await self._db.conn.execute(
             """
             SELECT
@@ -219,7 +219,7 @@ class UsageMeter:
 
         Defaults to current month if year/month not provided.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         year = year or now.year
         month = month or now.month
         month_start = f"{year:04d}-{month:02d}-01"

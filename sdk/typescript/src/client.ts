@@ -145,7 +145,7 @@ export class Remembra {
         }
 
         // Handle errors
-        const errorBody = await response.json().catch(() => ({}));
+        const errorBody = await response.json().catch(() => ({})) as { detail?: string };
         const errorMessage = errorBody.detail || response.statusText;
 
         switch (response.status) {

@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from remembra.auth.middleware import AuthenticatedUser, CurrentUser, get_client_ip
+from remembra.auth.middleware import CurrentUser, get_client_ip
 from remembra.cloud.limits import (
     EnforceRecallLimit,
     EnforceStoreLimit,

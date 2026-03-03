@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -61,7 +61,7 @@ class MemoryConflict:
     status: ConflictStatus = ConflictStatus.OPEN
     resolved_memory_id: str | None = None
     created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+        default_factory=lambda: datetime.now(UTC).isoformat()
     )
     resolved_at: str | None = None
 
@@ -229,7 +229,7 @@ class ConflictManager:
         resolved_memory_id: str | None = None,
     ) -> dict[str, Any] | None:
         """Mark a conflict as resolved."""
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         cursor = await self._db.conn.execute(
             """
             UPDATE memory_conflicts
@@ -253,7 +253,7 @@ class ConflictManager:
         self, conflict_id: str, user_id: str
     ) -> dict[str, Any] | None:
         """Dismiss a conflict (mark as not needing resolution)."""
-        now = datetime.now(timezone.utc).isoformat()
+        now = datetime.now(UTC).isoformat()
         cursor = await self._db.conn.execute(
             """
             UPDATE memory_conflicts
