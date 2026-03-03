@@ -1,0 +1,120 @@
+# Remembra - Production Docker Compose
+# 
+# This configuration is optimized for production deployment:
+# - Qdrant ports NOT exposed externally (security)
+# - Health checks enabled
+# - Restart policies configured
+# - Named volumes for data persistence
+#
+# Deploy via Coolify or run directly:
+#   docker compose -f docker-compose.prod.yml up -d
+
+services:
+  # ==========================================================================
+  # Remembra API + Dashboard
+  # ==========================================================================
+  remembra:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: remembra/remembra:latest
+    container_name: remembra
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    environment:
+      # Server config
+      - REMEMBRA_HOST=0.0.0.0
+      - REMEMBRA_PORT=8787
+      - REMEMBRA_DEBUG=false
+      
+      # Database (SQLite for metadata)
+      - REMEMBRA_DATABASE_URL=sqlite+aiosqlite:////data/remembra.db
+      
+      # Vector database (internal Docker network only)
+      - REMEMBRA_QDRANT_URL=http://qdrant:6333
+      - REMEMBRA_QDRANT_COLLECTION=memories
+      
+      # Security (MUST SET IN PRODUCTION)
+      - REMEMBRA_JWT_SECRET=${REMEMBRA_JWT_SECRET:?JWT_SECRET is required}
+      - REMEMBRA_AUTH_MASTER_KEY=${REMEMBRA_AUTH_MASTER_KEY}
+      - REMEMBRA_AUTH_ENABLED=true
+      - REMEMBRA_CORS_ORIGINS=${REMEMBRA_CORS_ORIGINS:-["https://app.remembra.dev"]}
+      
+      # Embedding provider
+      - REMEMBRA_EMBEDDING_PROVIDER=${REMEMBRA_EMBEDDING_PROVIDER:-openai}
+      - REMEMBRA_EMBEDDING_MODEL=${REMEMBRA_EMBEDDING_MODEL:-text-embedding-3-small}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?OPENAI_API_KEY is required}
+      
+      # LLM for extraction
+      - REMEMBRA_LLM_PROVIDER=${REMEMBRA_LLM_PROVIDER:-openai}
+      - REMEMBRA_LLM_MODEL=${REMEMBRA_LLM_MODEL:-gpt-4o-mini}
+      
+      # Features
+      - REMEMBRA_PII_DETECTION_ENABLED=true
+      - REMEMBRA_PII_MODE=redact
+      - REMEMBRA_ANOMALY_DETECTION_ENABLED=true
+      - REMEMBRA_ENABLE_HYBRID_SEARCH=true
+      - REMEMBRA_ENABLE_RERANKING=true
+      - REMEMBRA_ENABLE_GRAPH_RETRIEVAL=true
+      - REMEMBRA_SLEEP_TIME_ENABLED=true
+      
+      # Rate limiting
+      - REMEMBRA_RATE_LIMIT_ENABLED=true
+      
+      # Static files (dashboard)
+      - REMEMBRA_STATIC_DIR=/app/static
+      
+      # Logging
+      - REMEMBRA_LOG_LEVEL=${REMEMBRA_LOG_LEVEL:-info}
+    volumes:
+      - remembra_data:/data
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - remembra-network
+
+  # ==========================================================================
+  # Qdrant - Vector Database (INTERNAL ONLY)
+  # ==========================================================================
+  qdrant:
+    image: qdrant/qdrant:v1.7.4
+    container_name: remembra-qdrant
+    restart: unless-stopped
+    # NOTE: No ports exposed - only accessible via Docker network
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - remembra-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  remembra_data:
+    name: remembra_data
+  qdrant_data:
+    name: remembra_qdrant_data
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  remembra-network:
+    name: remembra-network
+    driver: bridge
