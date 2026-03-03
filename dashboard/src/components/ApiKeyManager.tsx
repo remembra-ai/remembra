@@ -499,35 +499,38 @@ function NewKeyResultModal({ keyData, onClose }: NewKeyResultModalProps) {
               <label className="block text-sm font-medium text-gray-500 dark:text-gray-400 mb-1">
                 API Key
               </label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 w-full">
                 <code className={clsx(
-                  'flex-1 px-3 py-2 rounded-lg font-mono text-sm',
+                  'flex-1 min-w-0 px-3 py-2 rounded-lg font-mono text-sm',
                   'bg-gray-100 dark:bg-gray-900',
                   'border border-gray-200 dark:border-gray-700',
                   'text-gray-900 dark:text-white',
+                  'overflow-hidden text-ellipsis whitespace-nowrap',
                   !showKey && 'tracking-wider'
                 )}>
-                  {showKey ? keyData.key : '•'.repeat(keyData.key.length)}
+                  {showKey ? keyData.key : '•'.repeat(Math.min(keyData.key.length, 40))}
                 </code>
-                <button
-                  onClick={() => setShowKey(!showKey)}
-                  className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500"
-                  title={showKey ? 'Hide key' : 'Show key'}
-                >
-                  {showKey ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                </button>
-                <button
-                  onClick={handleCopy}
-                  className={clsx(
-                    'p-2 rounded-lg transition-colors',
-                    copied
-                      ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
-                      : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500'
-                  )}
-                  title={copied ? 'Copied!' : 'Copy key'}
-                >
-                  {copied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
-                </button>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={() => setShowKey(!showKey)}
+                    className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500 flex-shrink-0"
+                    title={showKey ? 'Hide key' : 'Show key'}
+                  >
+                    {showKey ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                  <button
+                    onClick={handleCopy}
+                    className={clsx(
+                      'p-2 rounded-lg transition-colors flex-shrink-0',
+                      copied
+                        ? 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'
+                        : 'hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-500'
+                    )}
+                    title={copied ? 'Copied!' : 'Copy key'}
+                  >
+                    {copied ? <Check className="w-5 h-5" /> : <Copy className="w-5 h-5" />}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

@@ -68,13 +68,13 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Tabs */}
-      <div className="border-b border-gray-200 dark:border-gray-700 mb-6">
-        <nav className="flex space-x-8">
+      {/* Tabs - Scrollable on mobile */}
+      <div className="border-b border-gray-200 dark:border-gray-700 mb-6 -mx-4 px-4 sm:mx-0 sm:px-0">
+        <nav className="flex space-x-4 sm:space-x-8 overflow-x-auto scrollbar-hide pb-px" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
           <button
             onClick={() => setActiveTab('memories')}
             className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
               activeTab === 'memories'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
@@ -86,7 +86,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <button
             onClick={() => setActiveTab('entities')}
             className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
               activeTab === 'entities'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
@@ -98,7 +98,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <button
             onClick={() => setActiveTab('graph')}
             className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
               activeTab === 'graph'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
@@ -110,7 +110,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <button
             onClick={() => setActiveTab('decay')}
             className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
               activeTab === 'decay'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
@@ -122,7 +122,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <button
             onClick={() => setActiveTab('debugger')}
             className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
               activeTab === 'debugger'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
@@ -134,7 +134,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <button
             onClick={() => setActiveTab('analytics')}
             className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
               activeTab === 'analytics'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
@@ -146,7 +146,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <button
             onClick={() => setActiveTab('timeline')}
             className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
               activeTab === 'timeline'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
@@ -158,7 +158,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <button
             onClick={() => setActiveTab('keys')}
             className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
               activeTab === 'keys'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
@@ -170,7 +170,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <button
             onClick={() => setActiveTab('billing')}
             className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
               activeTab === 'billing'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
@@ -182,7 +182,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
           <button
             onClick={() => setActiveTab('settings')}
             className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
               activeTab === 'settings'
                 ? 'border-blue-500 text-blue-600 dark:text-blue-400'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
