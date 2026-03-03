@@ -131,19 +131,63 @@ async def get_optional_user(
     
     if not api_key:
         return None
+
+
+async def get_user_from_jwt_or_api_key(
+    request: Request,
+    api_key: Annotated[str | None, Security(api_key_header)],
+) -> AuthenticatedUser | None:
+    """
+    Dependency that validates either JWT Bearer token OR API key.
     
-    key_manager = await get_api_key_manager(request)
-    key_info = await key_manager.validate_key(api_key)
+    Checks in order:
+    1. Authorization: Bearer <jwt_token>
+    2. X-API-Key header
     
-    if not key_info:
-        return None
+    Returns None if neither provided (instead of raising 401).
+    Used for endpoints that accept both auth methods.
+    """
+    settings = get_settings()
     
-    return AuthenticatedUser(
-        user_id=key_info["user_id"],
-        api_key_id=key_info["id"],
-        rate_limit_tier=key_info.get("rate_limit_tier", "standard"),
-        name=key_info.get("name"),
-    )
+    if not settings.auth_enabled:
+        return AuthenticatedUser(
+            user_id="default_user",
+            api_key_id="dev_key",
+            rate_limit_tier="standard",
+        )
+    
+    # Check for JWT Bearer token first
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        try:
+            # Get user manager to verify JWT
+            user_manager = getattr(request.app.state, "user_manager", None)
+            if user_manager:
+                payload = user_manager.verify_jwt_token(token)
+                if payload:
+                    return AuthenticatedUser(
+                        user_id=payload.get("sub"),
+                        api_key_id="jwt_auth",
+                        rate_limit_tier="standard",
+                        name=payload.get("email"),
+                    )
+        except Exception as e:
+            log.debug("jwt_verification_failed", error=str(e))
+    
+    # Fall back to API key
+    if api_key:
+        key_manager = await get_api_key_manager(request)
+        key_info = await key_manager.validate_key(api_key)
+        if key_info:
+            return AuthenticatedUser(
+                user_id=key_info["user_id"],
+                api_key_id=key_info["id"],
+                rate_limit_tier=key_info.get("rate_limit_tier", "standard"),
+                name=key_info.get("name"),
+            )
+    
+    return None
 
 
 async def require_master_key(
@@ -189,4 +233,5 @@ async def require_master_key(
 # Type aliases for FastAPI Depends
 CurrentUser = Annotated[AuthenticatedUser, Depends(get_current_user)]
 OptionalUser = Annotated[AuthenticatedUser | None, Depends(get_optional_user)]
+JWTOrAPIKeyUser = Annotated[AuthenticatedUser | None, Depends(get_user_from_jwt_or_api_key)]
 RequireMasterKey = Annotated[None, Depends(require_master_key)]
