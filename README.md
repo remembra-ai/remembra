@@ -24,7 +24,7 @@
   <a href="#quick-start">Quick Start</a> •
   <a href="#why-remembra">Why Remembra?</a> •
   <a href="https://twitter.com/remembradev">Twitter</a> •
-  <a href="https://discord.gg/remembra">Discord</a>
+  <a href="https://discord.gg/Bzv3JshRa3">Discord</a>
 </p>
 
 ---
@@ -238,5 +238,5 @@ If Remembra helps you, please star the repo! It helps others discover the projec
 
 <p align="center">
   Built with ❤️ by <a href="https://dolphytech.com">DolphyTech</a><br>
-  <a href="https://remembra.dev">remembra.dev</a> • <a href="https://docs.remembra.dev">docs</a> • <a href="https://twitter.com/remembradev">twitter</a> • <a href="https://discord.gg/remembra">discord</a>
+  <a href="https://remembra.dev">remembra.dev</a> • <a href="https://docs.remembra.dev">docs</a> • <a href="https://twitter.com/remembradev">twitter</a> • <a href="https://discord.gg/Bzv3JshRa3">discord</a>
 </p>
