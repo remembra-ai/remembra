@@ -241,10 +241,15 @@ class BillingManager:
             plan = data.get("metadata", {}).get("plan", "pro")
             subscription_id = data.get("subscription")
             customer_id = data.get("customer")
+            
+            # For payment link flow: no user_id, but we have customer email
+            customer_email = data.get("customer_email") or data.get("customer_details", {}).get("email")
+            customer_name = data.get("customer_details", {}).get("name")
 
             logger.info(
-                "Checkout completed: user=%s plan=%s sub=%s",
+                "Checkout completed: user=%s email=%s plan=%s sub=%s",
                 user_id,
+                customer_email,
                 plan,
                 subscription_id,
             )
@@ -254,6 +259,8 @@ class BillingManager:
                 plan=PlanTier(plan),
                 stripe_customer_id=customer_id,
                 stripe_subscription_id=subscription_id,
+                customer_email=customer_email,
+                customer_name=customer_name,
             )
 
         if event_type == "customer.subscription.updated":
@@ -317,6 +324,8 @@ class WebhookResult:
         stripe_customer_id: str | None = None,
         stripe_subscription_id: str | None = None,
         event_type: str | None = None,
+        customer_email: str | None = None,
+        customer_name: str | None = None,
     ) -> None:
         self.action = action
         self.user_id = user_id
@@ -324,6 +333,8 @@ class WebhookResult:
         self.stripe_customer_id = stripe_customer_id
         self.stripe_subscription_id = stripe_subscription_id
         self.event_type = event_type
+        self.customer_email = customer_email
+        self.customer_name = customer_name
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"action": self.action}
@@ -333,4 +344,6 @@ class WebhookResult:
             d["plan"] = self.plan.value
         if self.event_type:
             d["event_type"] = self.event_type
+        if self.customer_email:
+            d["customer_email"] = self.customer_email
         return d

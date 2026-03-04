@@ -447,12 +447,42 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
 
     # Apply the result to our system
     if result.action == "activate_subscription":
-        await meter.register_tenant(
-            user_id=result.user_id,
-            plan=result.plan or PlanTier.PRO,
-            stripe_customer_id=result.stripe_customer_id,
-            stripe_subscription_id=result.stripe_subscription_id,
-        )
+        user_id = result.user_id
+        
+        # Payment link flow: no existing user, create from email
+        if not user_id and result.customer_email:
+            from remembra.cloud.provisioning import TenantProvisioner
+            
+            key_manager = request.app.state.api_key_manager
+            provisioner = TenantProvisioner(meter=meter, key_manager=key_manager)
+            
+            # Provision new account with their paid plan
+            provision_result = await provisioner.provision(
+                email=result.customer_email,
+                name=result.customer_name,
+                plan=result.plan or PlanTier.PRO,
+                stripe_customer_id=result.stripe_customer_id,
+            )
+            user_id = provision_result.user_id
+            
+            # Send welcome email with API key
+            # TODO: Integrate with email service to send credentials
+            import logging
+            logging.getLogger(__name__).info(
+                "New paid customer provisioned: email=%s user_id=%s plan=%s api_key=%s",
+                result.customer_email,
+                user_id,
+                result.plan.value if result.plan else "pro",
+                provision_result.api_key[:8] + "...",  # Log partial key for debugging
+            )
+        
+        if user_id:
+            await meter.register_tenant(
+                user_id=user_id,
+                plan=result.plan or PlanTier.PRO,
+                stripe_customer_id=result.stripe_customer_id,
+                stripe_subscription_id=result.stripe_subscription_id,
+            )
 
     elif result.action == "update_subscription":
         if result.user_id:
