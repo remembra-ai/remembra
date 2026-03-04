@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Sign Up - Remembra Pro</title>
-    <meta name="description" content="Sign up for Remembra Pro Cloud. Get AI memory infrastructure in minutes.">
+    <title>Sign Up - Remembra</title>
+    <meta name="description" content="Sign up for Remembra Cloud. Get AI memory infrastructure in minutes.">
     
     <!-- Favicons -->
     <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
@@ -58,7 +58,7 @@
                     <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
                     <span class="text-xl font-bold">Remembra</span>
                 </a>
-                <a href="/pricing.html" class="text-gray-300 hover:text-white transition">← Back to Pricing</a>
+                <a href="/#pricing" class="text-gray-300 hover:text-white transition">← Back to Pricing</a>
             </div>
         </div>
     </nav>
@@ -70,21 +70,21 @@
             <div class="bg-dark-card border border-white/10 rounded-2xl p-8">
                 <div class="text-center mb-8">
                     <div class="w-16 h-16 bg-primary/20 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">🧠</div>
-                    <h1 class="text-2xl font-bold mb-2">Start Your Pro Trial</h1>
-                    <p class="text-gray-400">14-day free trial. Cancel anytime.</p>
+                    <h1 class="text-2xl font-bold mb-2" id="pageTitle">Start Your Free Account</h1>
+                    <p class="text-gray-400" id="pageSubtitle">No credit card required.</p>
                 </div>
                 
                 <!-- Plan Summary -->
-                <div class="bg-white/5 border border-white/10 rounded-xl p-4 mb-6">
+                <div class="bg-white/5 border border-white/10 rounded-xl p-4 mb-6" id="planSummary">
                     <div class="flex justify-between items-center mb-2">
-                        <span class="font-semibold" id="planName">Remembra Pro</span>
-                        <span class="text-primary font-bold" id="planPrice">$29/mo</span>
+                        <span class="font-semibold" id="planName">Remembra Free</span>
+                        <span class="text-primary font-bold" id="planPrice">$0/mo</span>
                     </div>
                     <ul class="text-sm text-gray-400 space-y-1" id="planFeatures">
-                        <li>✓ 500,000 memories</li>
-                        <li>✓ 1M API calls/month</li>
-                        <li>✓ 10 API keys</li>
-                        <li>✓ 5 projects</li>
+                        <li>✓ 50,000 memories</li>
+                        <li>✓ 100K API calls/month</li>
+                        <li>✓ 1 project</li>
+                        <li>✓ Hybrid search</li>
                     </ul>
                 </div>
                 
@@ -104,7 +104,7 @@
                             placeholder="John Doe">
                     </div>
                     
-                    <div>
+                    <div id="companyField">
                         <label class="block text-sm font-medium mb-2">Company (optional)</label>
                         <input type="text" id="company" name="company" 
                             class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition"
@@ -113,7 +113,7 @@
                     
                     <button type="submit" id="submitBtn"
                         class="w-full py-4 bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl transition flex items-center justify-center gap-2">
-                        <span>Continue to Payment</span>
+                        <span id="submitText">Create Free Account</span>
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
                         </svg>
@@ -127,14 +127,14 @@
                 </p>
                 
                 <!-- Trust Badges -->
-                <div class="flex items-center justify-center gap-6 mt-8 pt-6 border-t border-white/10">
+                <div class="flex items-center justify-center gap-6 mt-8 pt-6 border-t border-white/10" id="trustBadges">
                     <div class="flex items-center gap-2 text-gray-400 text-sm">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
                         </svg>
                         Secure checkout
                     </div>
-                    <div class="flex items-center gap-2 text-gray-400 text-sm">
+                    <div class="flex items-center gap-2 text-gray-400 text-sm" id="stripeBadge">
                         <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                             <path d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.591-7.305z"/>
                         </svg>
@@ -155,15 +155,97 @@
     <div id="loadingOverlay" class="fixed inset-0 bg-dark/90 backdrop-blur-sm z-50 hidden items-center justify-center">
         <div class="text-center">
             <div class="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p class="text-xl font-medium">Setting up your account...</p>
-            <p class="text-gray-400 mt-2">Redirecting to secure checkout</p>
+            <p class="text-xl font-medium" id="loadingText">Setting up your account...</p>
+            <p class="text-gray-400 mt-2" id="loadingSubtext">Redirecting to secure checkout</p>
         </div>
     </div>
 
     <script>
-        // Stripe Payment Link - direct checkout, no backend needed
-        const PAYMENT_LINK = 'https://buy.stripe.com/5kQeVf7UH9SM7Xfd9ebV600';
+        // Plan configurations
+        const PLANS = {
+            free: {
+                name: 'Remembra Free',
+                price: '$0/mo',
+                title: 'Start Your Free Account',
+                subtitle: 'No credit card required.',
+                buttonText: 'Create Free Account',
+                features: [
+                    '✓ 50,000 memories',
+                    '✓ 100K API calls/month',
+                    '✓ 1 project',
+                    '✓ Hybrid search',
+                    '✓ Community support'
+                ],
+                paymentLink: null, // No payment, direct to dashboard
+                loadingText: 'Creating your account...',
+                loadingSubtext: 'Redirecting to dashboard'
+            },
+            pro: {
+                name: 'Remembra Pro',
+                price: '$29/mo',
+                title: 'Start Your Pro Trial',
+                subtitle: '14-day free trial. Cancel anytime.',
+                buttonText: 'Continue to Payment',
+                features: [
+                    '✓ 500,000 memories',
+                    '✓ 1M API calls/month',
+                    '✓ 5 projects',
+                    '✓ 10 API keys',
+                    '✓ Webhooks',
+                    '✓ Email support'
+                ],
+                paymentLink: 'https://buy.stripe.com/5kQeVf7UH9SM7Xfd9ebV600',
+                loadingText: 'Setting up your account...',
+                loadingSubtext: 'Redirecting to secure checkout'
+            },
+            team: {
+                name: 'Remembra Team',
+                price: '$99/mo',
+                title: 'Start Your Team Plan',
+                subtitle: '14-day free trial. Cancel anytime.',
+                buttonText: 'Continue to Payment',
+                features: [
+                    '✓ 2M memories',
+                    '✓ 5M API calls/month',
+                    '✓ 100 projects',
+                    '✓ Unlimited API keys',
+                    '✓ Priority support',
+                    '✓ 99.9% SLA'
+                ],
+                // TODO: Create Team Stripe product and add link here
+                paymentLink: 'https://buy.stripe.com/5kQeVf7UH9SM7Xfd9ebV600', // Placeholder - using Pro link for now
+                loadingText: 'Setting up your account...',
+                loadingSubtext: 'Redirecting to secure checkout'
+            }
+        };
+
+        // Get plan from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const planKey = urlParams.get('plan') || 'free';
+        const plan = PLANS[planKey] || PLANS.free;
+
+        // Update page content based on plan
+        document.getElementById('pageTitle').textContent = plan.title;
+        document.getElementById('pageSubtitle').textContent = plan.subtitle;
+        document.getElementById('planName').textContent = plan.name;
+        document.getElementById('planPrice').textContent = plan.price;
+        document.getElementById('submitText').textContent = plan.buttonText;
+        document.getElementById('loadingText').textContent = plan.loadingText;
+        document.getElementById('loadingSubtext').textContent = plan.loadingSubtext;
         
+        // Update features list
+        const featuresEl = document.getElementById('planFeatures');
+        featuresEl.innerHTML = plan.features.map(f => `<li>${f}</li>`).join('');
+
+        // Update page title
+        document.title = `Sign Up - ${plan.name}`;
+
+        // Hide Stripe badge for free plan
+        if (planKey === 'free') {
+            document.getElementById('stripeBadge').style.display = 'none';
+        }
+
+        // Form submission handler
         document.getElementById('signupForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -175,29 +257,43 @@
             const loadingOverlay = document.getElementById('loadingOverlay');
             
             submitBtn.disabled = true;
-            submitBtn.innerHTML = '<span>Processing...</span>';
+            document.getElementById('submitText').textContent = 'Processing...';
             loadingOverlay.classList.remove('hidden');
             loadingOverlay.classList.add('flex');
             
-            // Store signup info locally for after payment
-            localStorage.setItem('remembra_signup', JSON.stringify({ email, name, company, timestamp: Date.now() }));
+            // Store signup info locally
+            localStorage.setItem('remembra_signup', JSON.stringify({ 
+                email, 
+                name, 
+                company, 
+                plan: planKey,
+                timestamp: Date.now() 
+            }));
             
-            // Redirect to Stripe Payment Link with prefilled email
-            const checkoutUrl = `${PAYMENT_LINK}?prefilled_email=${encodeURIComponent(email)}`;
-            window.location.href = checkoutUrl;
+            if (plan.paymentLink) {
+                // Paid plan - redirect to Stripe
+                const checkoutUrl = `${plan.paymentLink}?prefilled_email=${encodeURIComponent(email)}`;
+                window.location.href = checkoutUrl;
+            } else {
+                // Free plan - redirect to dashboard signup
+                const dashboardSignup = `https://app.remembra.dev?signup=true&email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`;
+                window.location.href = dashboardSignup;
+            }
         });
         
         // Check for successful payment return
-        const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.get('success') === 'true') {
             document.body.innerHTML = `
                 <div class="min-h-screen bg-dark flex items-center justify-center p-6">
                     <div class="bg-dark-card border border-white/10 rounded-2xl p-8 max-w-md text-center">
                         <div class="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center text-5xl mx-auto mb-6">✓</div>
-                        <h1 class="text-3xl font-bold mb-4">Welcome to Remembra Pro!</h1>
+                        <h1 class="text-3xl font-bold mb-4">Welcome to Remembra!</h1>
                         <p class="text-gray-400 mb-6">Your subscription is active. Check your email for your API key and getting started guide.</p>
-                        <a href="https://docs.remembra.dev/getting-started/quickstart" class="block w-full py-4 bg-primary hover:bg-primary-dark rounded-xl font-semibold transition">
-                            Get Started →
+                        <a href="https://app.remembra.dev" class="block w-full py-4 bg-primary hover:bg-primary-dark rounded-xl font-semibold transition mb-3">
+                            Open Dashboard →
+                        </a>
+                        <a href="https://docs.remembra.dev/getting-started/quickstart" class="block w-full py-4 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl font-semibold transition">
+                            Read Quick Start Guide
                         </a>
                     </div>
                 </div>
