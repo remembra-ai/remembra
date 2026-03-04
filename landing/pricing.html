@@ -84,71 +84,74 @@
 
     <!-- Pricing Cards -->
     <section class="py-12 px-6">
-        <div class="max-w-5xl mx-auto">
-            <div class="grid md:grid-cols-3 gap-8">
+        <div class="max-w-6xl mx-auto">
+            <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
                 
                 <!-- Free Tier -->
-                <div class="bg-dark-card border border-white/10 rounded-2xl p-8 flex flex-col">
+                <div class="bg-dark-card border border-white/10 rounded-2xl p-6 flex flex-col">
                     <div class="mb-6">
-                        <h3 class="text-2xl font-bold mb-2">Open Source</h3>
-                        <div class="text-4xl font-bold mb-2">Free</div>
-                        <p class="text-gray-400">Self-host on your infrastructure</p>
+                        <h3 class="text-xl font-bold mb-2">Free</h3>
+                        <div class="text-3xl font-bold mb-2">$0</div>
+                        <p class="text-gray-400 text-sm">For indie devs & testing</p>
                     </div>
                     
-                    <ul class="space-y-3 mb-8 flex-1">
+                    <ul class="space-y-2 mb-6 flex-1 text-sm">
                         <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Unlimited memories
+                            <span class="text-primary">✓</span> 50,000 memories
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> All features included
+                            <span class="text-primary">✓</span> 100K API calls/month
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Entity resolution
+                            <span class="text-primary">✓</span> 3 API keys
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Temporal memory
+                            <span class="text-primary">✓</span> 1 project
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
                             <span class="text-primary">✓</span> Hybrid search
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Dashboard UI
+                            <span class="text-primary">✓</span> Entity resolution
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
                             <span class="text-primary">✓</span> Community support
                         </li>
                     </ul>
                     
-                    <a href="https://docs.remembra.dev/getting-started/quickstart" 
+                    <a href="/signup.html" 
                        class="block w-full py-3 text-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl font-medium transition">
-                        Deploy Now
+                        Start Free
                     </a>
                 </div>
                 
                 <!-- Pro Tier -->
-                <div class="bg-dark-card border-2 border-primary rounded-2xl p-8 relative flex flex-col glow">
-                    <div class="absolute -top-4 left-1/2 -translate-x-1/2 px-4 py-1 bg-primary rounded-full text-sm font-medium">
+                <div class="bg-dark-card border-2 border-primary rounded-2xl p-6 relative flex flex-col glow">
+                    <div class="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-primary rounded-full text-xs font-medium">
                         Most Popular
                     </div>
                     
                     <div class="mb-6">
-                        <h3 class="text-2xl font-bold mb-2">Pro Cloud</h3>
+                        <h3 class="text-xl font-bold mb-2">Pro</h3>
                         <div class="flex items-baseline gap-1">
-                            <span class="text-4xl font-bold">$49</span>
-                            <span class="text-gray-400">/month</span>
+                            <span class="text-3xl font-bold">$29</span>
+                            <span class="text-gray-400 text-sm">/month</span>
                         </div>
-                        <p class="text-gray-400 mt-2">Managed hosting, zero ops</p>
+                        <p class="text-gray-400 text-sm mt-1">For startups & side projects</p>
                     </div>
                     
-                    <ul class="space-y-3 mb-8 flex-1">
+                    <ul class="space-y-2 mb-6 flex-1 text-sm">
                         <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 100,000 memories
+                            <span class="text-primary">✓</span> 500,000 memories
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 500K API calls/month
+                            <span class="text-primary">✓</span> 1M API calls/month
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
                             <span class="text-primary">✓</span> 10 API keys
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-primary">✓</span> 5 projects
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
                             <span class="text-primary">✓</span> 5 team members
@@ -159,57 +162,100 @@
                         <li class="flex items-center gap-2 text-gray-300">
                             <span class="text-primary">✓</span> Usage analytics
                         </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Priority support
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 99.9% uptime SLA
-                        </li>
                     </ul>
                     
                     <button onclick="subscribePro()" id="proButton"
-                       class="block w-full py-4 text-center bg-primary hover:bg-primary-dark rounded-xl font-semibold transition">
-                        Subscribe Now →
+                       class="block w-full py-3 text-center bg-primary hover:bg-primary-dark rounded-xl font-semibold transition">
+                        Subscribe →
+                    </button>
+                </div>
+                
+                <!-- Team Tier -->
+                <div class="bg-dark-card border border-purple-500/50 rounded-2xl p-6 flex flex-col">
+                    <div class="mb-6">
+                        <h3 class="text-xl font-bold mb-2">Team</h3>
+                        <div class="flex items-baseline gap-1">
+                            <span class="text-3xl font-bold">$99</span>
+                            <span class="text-gray-400 text-sm">/month</span>
+                        </div>
+                        <p class="text-gray-400 text-sm mt-1">For growing companies</p>
+                    </div>
+                    
+                    <ul class="space-y-2 mb-6 flex-1 text-sm">
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-purple-400">✓</span> 2,000,000 memories
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-purple-400">✓</span> 5M API calls/month
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-purple-400">✓</span> 50 API keys
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-purple-400">✓</span> 100 projects
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-purple-400">✓</span> 25 team members
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-purple-400">✓</span> Priority support
+                        </li>
+                        <li class="flex items-center gap-2 text-gray-300">
+                            <span class="text-purple-400">✓</span> 99.9% uptime SLA
+                        </li>
+                    </ul>
+                    
+                    <button onclick="subscribeTeam()" id="teamButton"
+                       class="block w-full py-3 text-center bg-purple-600 hover:bg-purple-700 rounded-xl font-semibold transition">
+                        Subscribe →
                     </button>
                 </div>
                 
                 <!-- Enterprise Tier -->
-                <div class="bg-dark-card border border-white/10 rounded-2xl p-8 flex flex-col">
+                <div class="bg-dark-card border border-white/10 rounded-2xl p-6 flex flex-col">
                     <div class="mb-6">
-                        <h3 class="text-2xl font-bold mb-2">Enterprise</h3>
-                        <div class="text-4xl font-bold mb-2">Custom</div>
-                        <p class="text-gray-400">For large-scale deployments</p>
+                        <h3 class="text-xl font-bold mb-2">Enterprise</h3>
+                        <div class="text-3xl font-bold mb-2">Custom</div>
+                        <p class="text-gray-400 text-sm">For large deployments</p>
                     </div>
                     
-                    <ul class="space-y-3 mb-8 flex-1">
+                    <ul class="space-y-2 mb-6 flex-1 text-sm">
                         <li class="flex items-center gap-2 text-gray-300">
                             <span class="text-primary">✓</span> Unlimited memories
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Unlimited API calls
+                            <span class="text-primary">✓</span> 50M+ API calls
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Dedicated infrastructure
+                            <span class="text-primary">✓</span> 100 API keys
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
                             <span class="text-primary">✓</span> SSO / SAML
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Custom SLA
+                            <span class="text-primary">✓</span> Dedicated infra
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> SOC2 compliance
+                            <span class="text-primary">✓</span> Custom SLA
                         </li>
                         <li class="flex items-center gap-2 text-gray-300">
                             <span class="text-primary">✓</span> Dedicated support
                         </li>
                     </ul>
                     
-                    <a href="/contact.html" 
+                    <a href="mailto:sales@dolphytech.com?subject=Remembra Enterprise" 
                        class="block w-full py-3 text-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl font-medium transition">
                         Contact Sales
                     </a>
                 </div>
+            </div>
+            
+            <!-- Self-hosted callout -->
+            <div class="mt-8 p-6 bg-dark-card border border-white/10 rounded-xl text-center">
+                <p class="text-gray-300">
+                    🔧 <strong>Self-hosting?</strong> Remembra is <a href="https://github.com/remembra-ai/remembra" class="text-primary hover:underline">open source (MIT)</a>. 
+                    Deploy on your own infrastructure for free with unlimited memories.
+                </p>
             </div>
         </div>
     </section>
@@ -293,12 +339,25 @@
             button.disabled = true;
             
             try {
-                // For now, redirect to signup page where they'll enter email
-                // In production, this would create a checkout session via API
                 window.location.href = '/signup.html?plan=pro';
             } catch (error) {
                 console.error('Error:', error);
-                button.textContent = 'Subscribe Now →';
+                button.textContent = 'Subscribe →';
+                button.disabled = false;
+                alert('Something went wrong. Please try again.');
+            }
+        }
+        
+        async function subscribeTeam() {
+            const button = document.getElementById('teamButton');
+            button.textContent = 'Loading...';
+            button.disabled = true;
+            
+            try {
+                window.location.href = '/signup.html?plan=team';
+            } catch (error) {
+                console.error('Error:', error);
+                button.textContent = 'Subscribe →';
                 button.disabled = false;
                 alert('Something went wrong. Please try again.');
             }
@@ -307,7 +366,6 @@
         // Check for cancelled checkout
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.get('checkout') === 'cancelled') {
-            // Could show a message here
             console.log('Checkout was cancelled');
         }
     </script>
