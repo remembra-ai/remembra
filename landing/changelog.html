@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Changelog - Remembra | AI Memory That Works</title>
+    <meta name="description" content="What's new in Remembra. Release notes, updates, and improvements to the AI memory layer.">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="Changelog - Remembra">
+    <meta property="og:description" content="What's new in Remembra. Release notes, updates, and improvements.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://remembra.dev/changelog">
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#8B5CF6',
+                        'primary-dark': '#7C3AED',
+                        secondary: '#A78BFA',
+                        dark: '#0F0F0F',
+                        'dark-lighter': '#1A1A1A',
+                        'dark-card': '#1F1F1F',
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .gradient-text {
+            background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 50%, #C4B5FD 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        .timeline-line {
+            background: linear-gradient(180deg, #8B5CF6 0%, transparent 100%);
+        }
+        .version-dot {
+            box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.2);
+        }
+        .tag-added { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+        .tag-fixed { background: rgba(59, 130, 246, 0.15); color: #3b82f6; }
+        .tag-changed { background: rgba(234, 179, 8, 0.15); color: #eab308; }
+        .tag-security { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+    </style>
+</head>
+<body class="bg-dark text-white antialiased">
+    <!-- Navigation -->
+    <nav class="fixed top-0 left-0 right-0 z-50 bg-dark/80 backdrop-blur-xl border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-6 py-4">
+            <div class="flex items-center justify-between">
+                <a href="/" class="flex items-center gap-3">
+                    <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
+                    <span class="text-xl font-bold">Remembra</span>
+                </a>
+                <div class="flex items-center gap-4">
+                    <a href="/pricing.html" class="hidden md:block text-gray-300 hover:text-white transition">Pricing</a>
+                    <a href="https://docs.remembra.dev" class="text-gray-300 hover:text-white transition">Docs</a>
+                    <a href="https://github.com/remembra-ai/remembra" class="text-gray-300 hover:text-white transition">
+                        <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                    </a>
+                    <a href="/signup.html" class="px-5 py-2.5 bg-primary hover:bg-primary-dark text-white font-medium rounded-lg transition">
+                        Get Started
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="pt-32 pb-16 px-6">
+        <div class="max-w-4xl mx-auto">
+            <h1 class="text-5xl md:text-6xl font-bold mb-6 leading-tight">
+                <span class="gradient-text">Changelog</span>
+            </h1>
+            <p class="text-xl text-gray-400 max-w-2xl">
+                New features, improvements, and fixes. Follow our progress as we build the best AI memory layer.
+            </p>
+        </div>
+    </section>
+
+    <!-- Changelog Timeline -->
+    <section class="pb-24 px-6">
+        <div class="max-w-4xl mx-auto">
+            <div class="relative">
+                <!-- Timeline line -->
+                <div class="absolute left-0 md:left-8 top-0 bottom-0 w-px bg-gradient-to-b from-primary via-primary/50 to-transparent"></div>
+
+                <!-- v0.7.1 -->
+                <article class="relative pl-8 md:pl-24 pb-16">
+                    <div class="absolute left-0 md:left-8 top-0 w-4 h-4 -translate-x-1/2 rounded-full bg-primary version-dot"></div>
+                    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 mb-4">
+                        <time class="text-sm text-gray-500 font-medium">March 3, 2026</time>
+                        <span class="px-3 py-1 bg-primary/20 text-primary rounded-full text-sm font-semibold w-fit">v0.7.1</span>
+                    </div>
+                    
+                    <h2 class="text-2xl font-bold mb-4">Security & API Fixes</h2>
+                    <p class="text-gray-400 mb-6">Critical security fixes and API completeness improvements.</p>
+                    
+                    <div class="space-y-4">
+                        <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="tag-fixed px-2 py-0.5 rounded text-xs font-medium">Fixed</span>
+                            </div>
+                            <ul class="space-y-2 text-gray-300 text-sm">
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Security: CORS Configuration</strong> — Removed <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">allow_origins=["*"]</code>, now configurable via environment</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>API: PATCH /memories/{id}</strong> — Full implementation (was returning 501)</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>API: Batch Operations</strong> — <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">/store/batch</code> and <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">/recall/batch</code> now functional</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Streaming: SSE Endpoint</strong> — <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">/ingest/stream</code> for conversation ingestion</span></li>
+                            </ul>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- v0.7.0 -->
+                <article class="relative pl-8 md:pl-24 pb-16">
+                    <div class="absolute left-0 md:left-8 top-0 w-4 h-4 -translate-x-1/2 rounded-full bg-primary version-dot"></div>
+                    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 mb-4">
+                        <time class="text-sm text-gray-500 font-medium">March 2, 2026</time>
+                        <span class="px-3 py-1 bg-primary/20 text-primary rounded-full text-sm font-semibold w-fit">v0.7.0</span>
+                        <span class="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-medium w-fit">Major Release</span>
+                    </div>
+                    
+                    <h2 class="text-2xl font-bold mb-4">Enterprise Features & Cloud Revenue</h2>
+                    <p class="text-gray-400 mb-6">Webhooks, RBAC, Stripe billing, and plugin system for production deployments.</p>
+                    
+                    <div class="space-y-4">
+                        <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="tag-added px-2 py-0.5 rounded text-xs font-medium">Added</span>
+                                <span class="text-sm text-gray-500">Enterprise Features</span>
+                            </div>
+                            <ul class="space-y-2 text-gray-300 text-sm">
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Webhook System</strong> — Event-driven integrations with HMAC-SHA256 signing and automatic retry</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>RBAC</strong> — Three roles (admin, editor, viewer) with 12 granular permissions</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Memory Conflict Detection</strong> — Detect contradictions with configurable resolution strategies</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Audit Logging</strong> — Complete audit trail with JSON/CSV export</span></li>
+                            </ul>
+                        </div>
+                        
+                        <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="tag-added px-2 py-0.5 rounded text-xs font-medium">Added</span>
+                                <span class="text-sm text-gray-500">Cloud & Billing</span>
+                            </div>
+                            <ul class="space-y-2 text-gray-300 text-sm">
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Stripe Integration</strong> — Subscription management, usage metering, customer portal</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Plan Limits</strong> — Configurable limits per plan with automatic enforcement</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Spaces (Multi-tenancy)</strong> — Isolated memory spaces per organization</span></li>
+                            </ul>
+                        </div>
+                        
+                        <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="tag-added px-2 py-0.5 rounded text-xs font-medium">Added</span>
+                                <span class="text-sm text-gray-500">Import/Export & Plugins</span>
+                            </div>
+                            <ul class="space-y-2 text-gray-300 text-sm">
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Import from</strong> — ChatGPT, Claude, plain text, JSON, JSONL, CSV</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Export to</strong> — JSON, JSONL, CSV formats</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Plugin System</strong> — auto_tagger, recall_logger, slack_notifier built-in</span></li>
+                            </ul>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- v0.6.x -->
+                <article class="relative pl-8 md:pl-24 pb-16">
+                    <div class="absolute left-0 md:left-8 top-0 w-4 h-4 -translate-x-1/2 rounded-full bg-gray-600"></div>
+                    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 mb-4">
+                        <time class="text-sm text-gray-500 font-medium">March 1, 2026</time>
+                        <span class="px-3 py-1 bg-white/10 text-gray-300 rounded-full text-sm font-semibold w-fit">v0.6.0 – v0.6.3</span>
+                    </div>
+                    
+                    <h2 class="text-2xl font-bold mb-4">Temporal Memory & Docker</h2>
+                    <p class="text-gray-400 mb-6">Time-aware memory with TTL, decay algorithms, and production-ready Docker deployment.</p>
+                    
+                    <div class="space-y-4">
+                        <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="tag-added px-2 py-0.5 rounded text-xs font-medium">Added</span>
+                            </div>
+                            <ul class="space-y-2 text-gray-300 text-sm">
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>TTL (Time-to-Live)</strong> — Memories can now expire automatically with <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">ttl="30d"</code></span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Memory Decay Algorithm</strong> — Ebbinghaus forgetting curve with access boost</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Historical Queries</strong> — <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">as_of</code> parameter for time-travel recall</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Entity API</strong> — Full CRUD endpoints for entities and relationships</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Docker Support</strong> — Production Dockerfile with docker-compose stack</span></li>
+                            </ul>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- v0.5.0 -->
+                <article class="relative pl-8 md:pl-24 pb-16">
+                    <div class="absolute left-0 md:left-8 top-0 w-4 h-4 -translate-x-1/2 rounded-full bg-gray-600"></div>
+                    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 mb-4">
+                        <time class="text-sm text-gray-500 font-medium">March 1, 2026</time>
+                        <span class="px-3 py-1 bg-white/10 text-gray-300 rounded-full text-sm font-semibold w-fit">v0.5.0</span>
+                    </div>
+                    
+                    <h2 class="text-2xl font-bold mb-4">Security Layer</h2>
+                    <p class="text-gray-400 mb-6">API key authentication, rate limiting, and defense against memory injection (MINJA).</p>
+                    
+                    <div class="space-y-4">
+                        <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="tag-security px-2 py-0.5 rounded text-xs font-medium">Security</span>
+                            </div>
+                            <ul class="space-y-2 text-gray-300 text-sm">
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>API Key Authentication</strong> — <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">rem_</code> prefixed keys with bcrypt hashing</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Rate Limiting</strong> — Per-endpoint limits with Redis or in-memory backend</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Memory Protection</strong> — Input sanitization, trust scoring, provenance tracking</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Audit Logging</strong> — Security events with user/IP tracking (content-free)</span></li>
+                            </ul>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- v0.4.0 -->
+                <article class="relative pl-8 md:pl-24 pb-16">
+                    <div class="absolute left-0 md:left-8 top-0 w-4 h-4 -translate-x-1/2 rounded-full bg-gray-600"></div>
+                    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 mb-4">
+                        <time class="text-sm text-gray-500 font-medium">March 1, 2026</time>
+                        <span class="px-3 py-1 bg-white/10 text-gray-300 rounded-full text-sm font-semibold w-fit">v0.4.0</span>
+                    </div>
+                    
+                    <h2 class="text-2xl font-bold mb-4">Advanced Retrieval</h2>
+                    <p class="text-gray-400 mb-6">Hybrid search, CrossEncoder reranking, and graph-aware recall.</p>
+                    
+                    <div class="space-y-4">
+                        <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="tag-added px-2 py-0.5 rounded text-xs font-medium">Added</span>
+                            </div>
+                            <ul class="space-y-2 text-gray-300 text-sm">
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Hybrid Search</strong> — Combines BM25 keyword + vector semantic matching</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>CrossEncoder Reranking</strong> — Reduces hallucinations by ~35%</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Graph-Aware Retrieval</strong> — Entity relationship traversal for smarter recall</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Context Optimization</strong> — tiktoken integration for accurate token counting</span></li>
+                            </ul>
+                        </div>
+                    </div>
+                </article>
+
+                <!-- v0.3.0 -->
+                <article class="relative pl-8 md:pl-24 pb-16">
+                    <div class="absolute left-0 md:left-8 top-0 w-4 h-4 -translate-x-1/2 rounded-full bg-gray-600"></div>
+                    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 mb-4">
+                        <time class="text-sm text-gray-500 font-medium">March 1, 2026</time>
+                        <span class="px-3 py-1 bg-white/10 text-gray-300 rounded-full text-sm font-semibold w-fit">v0.3.0</span>
+                    </div>
+                    
+                    <h2 class="text-2xl font-bold mb-4">Entity Resolution</h2>
+                    <p class="text-gray-400 mb-6">Automatic entity extraction, alias matching, and relationship storage.</p>
+                    
+                    <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                        <ul class="space-y-2 text-gray-300 text-sm">
+                            <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Entity Extraction</strong> — LLM extracts PERSON, ORG, LOCATION entities</span></li>
+                            <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Alias Matching</strong> — "Mr. Kim" → "David Kim", "NYC" → "New York City"</span></li>
+                            <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Relationship Storage</strong> — WORKS_AT, SPOUSE_OF, KNOWS, etc.</span></li>
+                        </ul>
+                    </div>
+                </article>
+
+                <!-- v0.2.0 & v0.1.0 -->
+                <article class="relative pl-8 md:pl-24 pb-8">
+                    <div class="absolute left-0 md:left-8 top-0 w-4 h-4 -translate-x-1/2 rounded-full bg-gray-600"></div>
+                    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 mb-4">
+                        <time class="text-sm text-gray-500 font-medium">March 1, 2026</time>
+                        <span class="px-3 py-1 bg-white/10 text-gray-300 rounded-full text-sm font-semibold w-fit">v0.1.0 – v0.2.0</span>
+                        <span class="px-2 py-0.5 bg-purple-500/20 text-purple-400 rounded text-xs font-medium w-fit">Initial Release</span>
+                    </div>
+                    
+                    <h2 class="text-2xl font-bold mb-4">Foundation</h2>
+                    <p class="text-gray-400 mb-6">Core memory operations, smart extraction, and consolidation.</p>
+                    
+                    <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                        <ul class="space-y-2 text-gray-300 text-sm">
+                            <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>store()</strong> — Store memories with automatic fact extraction</span></li>
+                            <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>recall()</strong> — Semantic search across memories</span></li>
+                            <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>forget()</strong> — GDPR-compliant deletion</span></li>
+                            <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Smart Extraction</strong> — LLM transforms messy text into atomic facts</span></li>
+                            <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Consolidation</strong> — ADD/UPDATE/DELETE/NOOP prevents duplicates</span></li>
+                        </ul>
+                    </div>
+                </article>
+            </div>
+        </div>
+    </section>
+
+    <!-- Subscribe CTA -->
+    <section class="py-16 px-6 bg-dark-lighter border-t border-white/5">
+        <div class="max-w-4xl mx-auto text-center">
+            <h2 class="text-2xl font-bold mb-4">Stay Updated</h2>
+            <p class="text-gray-400 mb-6">Follow us for the latest updates and release announcements.</p>
+            <div class="flex items-center justify-center gap-4">
+                <a href="https://github.com/remembra-ai/remembra" class="flex items-center gap-2 px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl font-medium transition">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+                    Star on GitHub
+                </a>
+                <a href="https://twitter.com/remembradev" class="flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary-dark rounded-xl font-medium transition">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                    Follow @remembradev
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-12 px-6 border-t border-white/5">
+        <div class="max-w-6xl mx-auto">
+            <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+                <div class="flex items-center gap-3">
+                    <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
+                    <span class="font-bold">Remembra</span>
+                </div>
+                <div class="flex items-center gap-6 text-sm text-gray-400">
+                    <a href="/pricing.html" class="hover:text-white transition">Pricing</a>
+                    <a href="/changelog.html" class="hover:text-white transition text-white">Changelog</a>
+                    <a href="/about.html" class="hover:text-white transition">About</a>
+                    <a href="/contact.html" class="hover:text-white transition">Contact</a>
+                    <a href="/privacy.html" class="hover:text-white transition">Privacy</a>
+                    <a href="/terms.html" class="hover:text-white transition">Terms</a>
+                </div>
+                <p class="text-sm text-gray-500">© 2026 DolphyTech. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>
