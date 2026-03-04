@@ -65,7 +65,7 @@ markdown_extensions:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/AskDolphy/remembra
+      link: https://github.com/remembra-ai/remembra
     - icon: fontawesome/brands/discord
       link: https://discord.gg/remembra
     - icon: fontawesome/brands/twitter
