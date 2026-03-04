@@ -1,6 +1,8 @@
 """Application settings resolved from environment variables."""
 
-from pydantic import AliasChoices, Field
+import warnings
+
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -362,6 +364,20 @@ class Settings(BaseSettings):
         None,
         description="Model for background consolidation (uses cheaper model if set)",
     )
+
+    @model_validator(mode='after')
+    def check_security_settings(self) -> 'Settings':
+        """Warn about insecure settings in production."""
+        if self.auth_enabled and not self.debug:
+            # Check JWT secret
+            if self.jwt_secret == "remembra-jwt-secret-change-in-production":
+                warnings.warn(
+                    "⚠️  SECURITY WARNING: Using default JWT secret in production! "
+                    "Set REMEMBRA_JWT_SECRET environment variable.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+        return self
 
 
 _settings: Settings | None = None
