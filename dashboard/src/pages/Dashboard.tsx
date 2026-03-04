@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMemories, useSearch } from '../hooks/useMemories';
 import { SearchBar } from '../components/SearchBar';
 import { MemoryList } from '../components/MemoryList';
@@ -13,22 +13,48 @@ import { MemoryTimeline } from '../components/MemoryTimeline';
 import { ApiKeyManager } from '../components/ApiKeyManager';
 import { Billing } from '../components/Billing';
 import { Settings } from './Settings';
-import { api, type Memory } from '../lib/api';
-import { RefreshCw, Database, TrendingDown, Users, Share2, Bug, BarChart3, History, Key, CreditCard, Settings as SettingsIcon } from 'lucide-react';
+import { StatsOverview } from '../components/StatsOverview';
+import { EmptyState } from '../components/EmptyState';
+import { type Memory } from '../lib/api';
+import { RefreshCw, Plus } from 'lucide-react';
 import clsx from 'clsx';
 
-type TabType = 'memories' | 'entities' | 'graph' | 'decay' | 'debugger' | 'analytics' | 'timeline' | 'keys' | 'billing' | 'settings';
+export type TabType = 'memories' | 'entities' | 'graph' | 'decay' | 'debugger' | 'analytics' | 'timeline' | 'keys' | 'billing' | 'settings';
 
 interface DashboardProps {
+  activeTab: TabType;
   onLogout?: () => void;
 }
 
-export function Dashboard({ onLogout }: DashboardProps) {
+export function Dashboard({ activeTab, onLogout }: DashboardProps) {
   const { memories, loading, error, hasMore, refresh, loadMore } = useMemories();
   const { results, loading: searchLoading, error: searchError, search, clear } = useSearch();
   const [selectedMemory, setSelectedMemory] = useState<Memory | null>(null);
   const [isSearching, setIsSearching] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabType>('memories');
+  const [showNewMemory, setShowNewMemory] = useState(false);
+
+  // Stats (placeholder - would come from API in real implementation)
+  const [stats, setStats] = useState({
+    memoryCount: 0,
+    entityCount: 0,
+    storageUsed: '0 MB',
+    apiCalls: 0,
+  });
+
+  // Update stats when memories change
+  useEffect(() => {
+    if (memories.length > 0) {
+      const uniqueEntities = new Set<string>();
+      memories.forEach(m => m.entities?.forEach(e => uniqueEntities.add(e)));
+      
+      setStats({
+        memoryCount: memories.length + (hasMore ? 100 : 0), // Estimate if more
+        entityCount: uniqueEntities.size,
+        storageUsed: `${(memories.length * 0.5).toFixed(1)} KB`, // Rough estimate
+        apiCalls: Math.floor(Math.random() * 10000) + 1000, // Placeholder
+      });
+    }
+  }, [memories, hasMore]);
 
   const handleSearch = (query: string) => {
     setIsSearching(true);
@@ -62,251 +88,204 @@ export function Dashboard({ onLogout }: DashboardProps) {
     );
   }
 
+  // New memory modal
+  if (showNewMemory) {
+    return (
+      <div>
+        <button
+          onClick={() => setShowNewMemory(false)}
+          className="mb-4 text-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
+        >
+          ← Back to memories
+        </button>
+        <StoreMemory onStored={() => {
+          setShowNewMemory(false);
+          refresh();
+        }} />
+      </div>
+    );
+  }
+
   const displayMemories = isSearching && results ? results.memories : memories;
   const displayLoading = isSearching ? searchLoading : loading;
   const displayError = isSearching ? searchError : error;
 
-  return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      {/* Tabs - Scrollable on mobile */}
-      <div className="border-b border-[hsl(var(--border))] mb-6 -mx-4 px-4 sm:mx-0 sm:px-0">
-        <nav className="flex space-x-4 sm:space-x-8 overflow-x-auto scrollbar-hide pb-px" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-          <button
-            onClick={() => setActiveTab('memories')}
-            className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
-              activeTab === 'memories'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            )}
-          >
-            <Database className="w-4 h-4" />
-            Memories
-          </button>
-          <button
-            onClick={() => setActiveTab('entities')}
-            className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
-              activeTab === 'entities'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            )}
-          >
-            <Users className="w-4 h-4" />
-            Entities
-          </button>
-          <button
-            onClick={() => setActiveTab('graph')}
-            className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
-              activeTab === 'graph'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            )}
-          >
-            <Share2 className="w-4 h-4" />
-            Graph
-          </button>
-          <button
-            onClick={() => setActiveTab('decay')}
-            className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
-              activeTab === 'decay'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            )}
-          >
-            <TrendingDown className="w-4 h-4" />
-            Decay
-          </button>
-          <button
-            onClick={() => setActiveTab('debugger')}
-            className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
-              activeTab === 'debugger'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            )}
-          >
-            <Bug className="w-4 h-4" />
-            Debugger
-          </button>
-          <button
-            onClick={() => setActiveTab('analytics')}
-            className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
-              activeTab === 'analytics'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            )}
-          >
-            <BarChart3 className="w-4 h-4" />
-            Analytics
-          </button>
-          <button
-            onClick={() => setActiveTab('timeline')}
-            className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
-              activeTab === 'timeline'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            )}
-          >
-            <History className="w-4 h-4" />
-            Timeline
-          </button>
-          <button
-            onClick={() => setActiveTab('keys')}
-            className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
-              activeTab === 'keys'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            )}
-          >
-            <Key className="w-4 h-4" />
-            API Keys
-          </button>
-          <button
-            onClick={() => setActiveTab('billing')}
-            className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
-              activeTab === 'billing'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            )}
-          >
-            <CreditCard className="w-4 h-4" />
-            Billing
-          </button>
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={clsx(
-              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors whitespace-nowrap flex-shrink-0',
-              activeTab === 'settings'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
-                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
-            )}
-          >
-            <SettingsIcon className="w-4 h-4" />
-            Settings
-          </button>
-        </nav>
-      </div>
-
-      {/* Tab Content */}
-      {activeTab === 'memories' && (
-        <>
-          {/* Search */}
-          <div className="mb-6">
-            <SearchBar
-              onSearch={handleSearch}
-              onClear={handleClearSearch}
-              loading={searchLoading}
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'memories':
+        return (
+          <>
+            {/* Stats Overview */}
+            <StatsOverview
+              memoryCount={stats.memoryCount}
+              entityCount={stats.entityCount}
+              storageUsed={stats.storageUsed}
+              apiCalls={stats.apiCalls}
+              loading={loading && memories.length === 0}
             />
-          </div>
 
-          {/* Header */}
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              {isSearching && results ? (
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {results.memories.length} result{results.memories.length !== 1 ? 's' : ''} for "{results.query}"
-                </h2>
-              ) : (
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                  All Memories
-                  {memories.length > 0 && (
-                    <span className="ml-2 text-sm font-normal text-gray-500">
-                      ({memories.length}{hasMore ? '+' : ''})
-                    </span>
+            {/* Search & Actions Bar */}
+            <div className="flex flex-col sm:flex-row gap-4 mb-6">
+              <div className="flex-1">
+                <SearchBar
+                  onSearch={handleSearch}
+                  onClear={handleClearSearch}
+                  loading={searchLoading}
+                />
+              </div>
+              
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowNewMemory(true)}
+                  className={clsx(
+                    'inline-flex items-center gap-2 px-4 py-2.5 rounded-lg',
+                    'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white',
+                    'font-medium text-sm transition-colors',
+                    'shadow-lg shadow-purple-500/20'
                   )}
-                </h2>
-              )}
+                >
+                  <Plus className="w-4 h-4" />
+                  New Memory
+                </button>
+                
+                <button
+                  onClick={refresh}
+                  disabled={loading}
+                  className={clsx(
+                    'p-2.5 rounded-lg',
+                    'bg-[hsl(var(--muted))] hover:bg-[hsl(var(--muted))]/80',
+                    'text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]',
+                    'transition-colors',
+                    loading && 'opacity-50 cursor-not-allowed'
+                  )}
+                  title="Refresh"
+                >
+                  <RefreshCw className={clsx('w-5 h-5', loading && 'animate-spin')} />
+                </button>
+              </div>
             </div>
 
-            {!isSearching && (
-              <button
-                onClick={refresh}
-                disabled={loading}
-                className={clsx(
-                  'p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200',
-                  'hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors',
-                  loading && 'opacity-50 cursor-not-allowed'
+            {/* Results Header */}
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                {isSearching && results ? (
+                  <h2 className="text-lg font-semibold text-[hsl(var(--foreground))]">
+                    {results.memories.length} result{results.memories.length !== 1 ? 's' : ''} 
+                    <span className="font-normal text-[hsl(var(--muted-foreground))]"> for "{results.query}"</span>
+                  </h2>
+                ) : (
+                  <h2 className="text-lg font-semibold text-[hsl(var(--foreground))]">
+                    All Memories
+                    {memories.length > 0 && (
+                      <span className="ml-2 text-sm font-normal text-[hsl(var(--muted-foreground))]">
+                        ({memories.length}{hasMore ? '+' : ''})
+                      </span>
+                    )}
+                  </h2>
                 )}
-                title="Refresh"
-              >
-                <RefreshCw className={clsx('w-5 h-5', loading && 'animate-spin')} />
-              </button>
-            )}
-          </div>
-
-          {/* Context (for search results) */}
-          {isSearching && results?.context && (
-            <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
-              <h3 className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2">
-                Context Summary
-              </h3>
-              <p className="text-sm text-#7C3AED dark:text-[#A78BFA] whitespace-pre-wrap">
-                {results.context}
-              </p>
+              </div>
             </div>
-          )}
 
-          {/* Memory List */}
-          <MemoryList
-            memories={displayMemories}
-            loading={displayLoading}
-            error={displayError}
-            hasMore={!isSearching && hasMore}
-            onLoadMore={!isSearching ? loadMore : undefined}
-            onSelectMemory={handleSelectMemory}
-            showRelevance={isSearching}
-            emptyMessage={isSearching ? 'No memories match your search' : 'No memories yet. Start by storing some!'}
-          />
-        </>
-      )}
+            {/* Context (for search results) */}
+            {isSearching && results?.context && (
+              <div className={clsx(
+                'mb-6 p-4 rounded-xl',
+                'bg-[#8B5CF6]/10 border border-[#8B5CF6]/20'
+              )}>
+                <h3 className="text-sm font-medium text-[#A78BFA] mb-2">
+                  Context Summary
+                </h3>
+                <p className="text-sm text-[hsl(var(--foreground))]">
+                  {results.context}
+                </p>
+              </div>
+            )}
 
-      {activeTab === 'entities' && (
-        <EntityList projectId={api.getProjectId()} />
-      )}
+            {/* Error State */}
+            {displayError && (
+              <div className={clsx(
+                'mb-6 p-4 rounded-xl',
+                'bg-red-500/10 border border-red-500/20',
+                'text-red-400'
+              )}>
+                {displayError}
+              </div>
+            )}
 
-      {activeTab === 'graph' && (
-        <EntityGraph projectId={api.getProjectId()} />
-      )}
+            {/* Memory List or Empty State */}
+            {displayMemories.length > 0 ? (
+              <MemoryList
+                memories={displayMemories}
+                loading={displayLoading}
+                error={displayError}
+                onSelectMemory={handleSelectMemory}
+                showRelevance={isSearching}
+              />
+            ) : !displayLoading ? (
+              <EmptyState 
+                type={isSearching ? 'search' : 'memories'}
+                searchQuery={isSearching ? results?.query : undefined}
+                onAction={isSearching ? undefined : () => setShowNewMemory(true)}
+                actionLabel={isSearching ? undefined : 'Store First Memory'}
+              />
+            ) : null}
 
-      {activeTab === 'decay' && (
-        <DecayReport projectId={api.getProjectId()} />
-      )}
+            {/* Load More */}
+            {!isSearching && hasMore && memories.length > 0 && (
+              <div className="mt-6 text-center">
+                <button
+                  onClick={loadMore}
+                  disabled={loading}
+                  className={clsx(
+                    'px-6 py-2.5 rounded-lg',
+                    'bg-[hsl(var(--muted))] hover:bg-[hsl(var(--muted))]/80',
+                    'text-[hsl(var(--foreground))] font-medium text-sm',
+                    'transition-colors',
+                    loading && 'opacity-50 cursor-not-allowed'
+                  )}
+                >
+                  {loading ? 'Loading...' : 'Load More'}
+                </button>
+              </div>
+            )}
+          </>
+        );
 
-      {activeTab === 'debugger' && (
-        <QueryDebugger />
-      )}
+      case 'entities':
+        return <EntityList />;
 
-      {activeTab === 'analytics' && (
-        <UsageAnalytics />
-      )}
+      case 'graph':
+        return <EntityGraph />;
 
-      {activeTab === 'timeline' && (
-        <MemoryTimeline />
-      )}
+      case 'decay':
+        return <DecayReport />;
 
-      {activeTab === 'keys' && (
-        <ApiKeyManager />
-      )}
+      case 'debugger':
+        return <QueryDebugger />;
 
-      {activeTab === 'billing' && (
-        <Billing />
-      )}
+      case 'analytics':
+        return <UsageAnalytics />;
 
-      {activeTab === 'settings' && onLogout && (
-        <Settings onLogout={onLogout} />
-      )}
+      case 'timeline':
+        return <MemoryTimeline />;
 
-      {/* Floating Add Memory Button */}
-      {activeTab === 'memories' && (
-        <StoreMemory onStored={refresh} projectId={api.getProjectId()} />
-      )}
+      case 'keys':
+        return <ApiKeyManager />;
+
+      case 'billing':
+        return <Billing />;
+
+      case 'settings':
+        return <Settings onLogout={onLogout || (() => {})} />;
+
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="min-h-full">
+      {renderContent()}
     </div>
   );
 }

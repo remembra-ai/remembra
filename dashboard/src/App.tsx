@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Header } from './components/Header';
+import { AppLayout } from './components/AppLayout';
 import { ApiKeyForm } from './components/ApiKeyForm';
-import { Dashboard } from './pages/Dashboard';
+import { Dashboard, type TabType } from './pages/Dashboard';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { ForgotPassword } from './pages/ForgotPassword';
@@ -28,6 +28,16 @@ function App() {
     const saved = localStorage.getItem('remembra_user');
     return saved ? JSON.parse(saved) : null;
   });
+
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    const saved = localStorage.getItem('activeTab');
+    return (saved as TabType) || 'memories';
+  });
+
+  // Save active tab
+  useEffect(() => {
+    localStorage.setItem('activeTab', activeTab);
+  }, [activeTab]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
@@ -113,6 +123,17 @@ function App() {
     setAuthMode('login');
   };
 
+  const handleSearch = () => {
+    // Focus on search in memories tab
+    setActiveTab('memories');
+    // TODO: Open search modal or focus search input
+  };
+
+  const handleNewMemory = () => {
+    setActiveTab('memories');
+    // TODO: Open new memory modal
+  };
+
   // Not authenticated - show auth screens
   if (!isAuthenticated) {
     return (
@@ -164,21 +185,22 @@ function App() {
     );
   }
 
-  // Authenticated - show dashboard
+  // Authenticated - show dashboard with new layout
   return (
     <div className={darkMode ? 'dark' : ''}>
-      <div className="min-h-screen bg-[hsl(var(--background))]">
-        <Header
-          darkMode={darkMode}
-          onToggleDarkMode={handleToggleDarkMode}
-          isAuthenticated={isAuthenticated}
-          onLogout={handleLogout}
-          userName={currentUser?.name || currentUser?.email}
-        />
-        <main>
-          <Dashboard onLogout={handleLogout} />
-        </main>
-      </div>
+      <AppLayout
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        darkMode={darkMode}
+        onToggleDarkMode={handleToggleDarkMode}
+        isAuthenticated={isAuthenticated}
+        onLogout={handleLogout}
+        userName={currentUser?.name || currentUser?.email}
+        onNewMemory={handleNewMemory}
+        onSearch={handleSearch}
+      >
+        <Dashboard activeTab={activeTab} onLogout={handleLogout} />
+      </AppLayout>
     </div>
   );
 }
