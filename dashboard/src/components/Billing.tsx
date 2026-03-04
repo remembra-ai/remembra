@@ -24,15 +24,7 @@ interface PlanFeature {
   enterprise: string | boolean;
 }
 
-interface PlanFeatureRow {
-  name: string;
-  free: string | boolean;
-  pro: string | boolean;
-  team: string | boolean;
-  enterprise: string | boolean;
-}
-
-const PLAN_FEATURES: PlanFeatureRow[] = [
+const PLAN_FEATURES: PlanFeature[] = [
   { name: 'Memories', free: '50,000', pro: '500,000', team: '2,000,000', enterprise: 'Unlimited' },
   { name: 'API Calls/month', free: '100,000', pro: '1,000,000', team: '5,000,000', enterprise: '50M+' },
   { name: 'API Keys', free: '3', pro: '10', team: '50', enterprise: '100' },
