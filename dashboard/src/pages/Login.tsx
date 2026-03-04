@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { LogIn, Loader2, Eye, EyeOff, Brain } from 'lucide-react';
+import { API_V1 } from '../config';
 
 interface LoginProps {
   onLogin: (token: string, user: { id: string; email: string; name?: string }) => void;
@@ -26,7 +27,7 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProp
     setError(null);
 
     try {
-      const response = await fetch('/api/v1/auth/login', {
+      const response = await fetch(`${API_V1}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

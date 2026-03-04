@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Mail, Loader2, ArrowLeft, Brain, Check, Eye, EyeOff, X } from 'lucide-react';
+import { API_V1 } from '../config';
 
 interface ForgotPasswordProps {
   onBackToLogin: () => void;
@@ -38,7 +39,7 @@ export function ForgotPassword({ onBackToLogin }: ForgotPasswordProps) {
     setError(null);
 
     try {
-      const response = await fetch('/api/v1/auth/forgot-password', {
+      const response = await fetch(`${API_V1}/auth/forgot-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -78,7 +79,7 @@ export function ForgotPassword({ onBackToLogin }: ForgotPasswordProps) {
     setError(null);
 
     try {
-      const response = await fetch('/api/v1/auth/reset-password', {
+      const response = await fetch(`${API_V1}/auth/reset-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

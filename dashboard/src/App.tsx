@@ -6,6 +6,7 @@ import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { ForgotPassword } from './pages/ForgotPassword';
 import { api } from './lib/api';
+import { API_V1 } from './config';
 
 type AuthMode = 'login' | 'signup' | 'forgot-password' | 'api-key';
 
@@ -39,7 +40,7 @@ function App() {
       if (!token) return;
 
       try {
-        const response = await fetch('/api/v1/auth/me', {
+        const response = await fetch(`${API_V1}/auth/me`, {
           headers: {
             'Authorization': `Bearer ${token}`,
           },
@@ -91,7 +92,7 @@ function App() {
     // Call logout endpoint if we have a JWT token
     if (token) {
       try {
-        await fetch('/api/v1/auth/logout', {
+        await fetch(`${API_V1}/auth/logout`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,

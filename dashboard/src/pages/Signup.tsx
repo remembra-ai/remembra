@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { UserPlus, Loader2, Eye, EyeOff, Brain, Check, X } from 'lucide-react';
+import { API_V1 } from '../config';
 
 interface SignupProps {
   onSignup: (user: { id: string; email: string; name?: string }) => void;
@@ -40,7 +41,7 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
     setError(null);
 
     try {
-      const response = await fetch('/api/v1/auth/signup', {
+      const response = await fetch(`${API_V1}/auth/signup`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

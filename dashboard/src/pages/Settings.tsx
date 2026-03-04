@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { User, Lock, AlertTriangle, Loader2 } from 'lucide-react';
 import clsx from 'clsx';
 import { api } from '../lib/api';
+import { API_V1 } from '../config';
 import type { UserResponse } from '../lib/api';
 
 type SettingsTab = 'profile' | 'password' | 'account';
@@ -24,7 +25,7 @@ export function Settings({ onLogout }: SettingsProps) {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('/api/v1/auth/me', {
+      const response = await fetch(`${API_V1}/auth/me`, {
         headers: {
           'Authorization': `Bearer ${api.getJwtToken()}`,
         },
