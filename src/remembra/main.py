@@ -373,7 +373,7 @@ def create_app() -> FastAPI:
             async def serve_spa(full_path: str):
                 # Don't intercept API routes
                 if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("redoc") or full_path.startswith("openapi"):
-                    return JSONResponse({"error": "Not found"}, status_code=404)
+                    return JSONResponse({"detail": "Not found"}, status_code=404)
                 
                 # Try to serve the file directly
                 file_path = static_path / full_path
@@ -385,7 +385,7 @@ def create_app() -> FastAPI:
                 if index_path.exists():
                     return FileResponse(index_path)
                 
-                return JSONResponse({"error": "Not found"}, status_code=404)
+                return JSONResponse({"detail": "Not found"}, status_code=404)
             
             log.info("static_files_enabled", path=str(static_path))
 

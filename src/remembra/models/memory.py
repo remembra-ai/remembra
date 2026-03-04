@@ -81,9 +81,12 @@ class Memory(BaseModel):
 
 
 class StoreRequest(BaseModel):
-    user_id: str
     content: str
     project_id: str = "default"
+    user_id: str | None = Field(
+        default=None,
+        description="Deprecated: user_id is determined from API key. This field is ignored.",
+    )
 
     @field_validator("content")
     @classmethod
@@ -106,9 +109,12 @@ class StoreResponse(BaseModel):
 
 
 class RecallRequest(BaseModel):
-    user_id: str
     query: str
     project_id: str = "default"
+    user_id: str | None = Field(
+        default=None,
+        description="Deprecated: user_id is determined from API key. This field is ignored.",
+    )
     limit: int = Field(default=5, ge=1, le=50)
     threshold: float = Field(default=0.40, ge=0.0, le=1.0)
     max_tokens: int | None = Field(
@@ -253,9 +259,12 @@ class ConversationIngestRequest(BaseModel):
     """Request to ingest a conversation."""
 
     messages: list[ConversationMessage] = Field(..., min_length=1, max_length=200)
-    user_id: str
     session_id: str | None = Field(default=None, description="Conversation session ID")
     project_id: str = "default"
+    user_id: str | None = Field(
+        default=None,
+        description="Deprecated: user_id is determined from API key. This field is ignored.",
+    )
     context: dict[str, Any] | None = Field(
         default=None,
         description="Context metadata (channel, timezone, etc.)",

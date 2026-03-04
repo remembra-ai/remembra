@@ -1,11 +1,12 @@
 """Authentication API endpoints for user signup, login, and password management."""
 
+from datetime import datetime
 from typing import Annotated
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from remembra.auth.users import UserManager
 from remembra.config import get_settings
@@ -29,6 +30,21 @@ class SignupRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, description="Password must be at least 8 characters")
     name: str | None = Field(None, max_length=100, description="User's display name")
+    
+    @field_validator("name")
+    @classmethod
+    def sanitize_name(cls, v: str | None) -> str | None:
+        """Strip HTML/script tags from name to prevent XSS."""
+        if v is None:
+            return None
+        import re
+        # Remove HTML tags
+        clean = re.sub(r'<[^>]+>', '', v)
+        # Remove common script patterns
+        clean = re.sub(r'javascript:', '', clean, flags=re.IGNORECASE)
+        clean = re.sub(r'on\w+\s*=', '', clean, flags=re.IGNORECASE)
+        # Trim and limit
+        return clean.strip()[:100] if clean.strip() else None
 
 
 class SignupResponse(BaseModel):
@@ -102,7 +118,18 @@ class ErrorResponse(BaseModel):
 async def get_user_manager(request: Request) -> UserManager:
     """Get UserManager from app state."""
     settings = get_settings()
-    return UserManager(request.app.state.db, settings.jwt_secret)
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database not initialized",
+        )
+    if not settings.jwt_secret:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="JWT secret not configured",
+        )
+    return UserManager(db, settings.jwt_secret)
 
 
 async def get_current_user_from_jwt(
@@ -360,23 +387,32 @@ async def get_me(
     
     Requires a valid Bearer token in the Authorization header.
     """
-    user_manager = await get_user_manager(request)
-    
-    user = await user_manager.get_user_by_id(current_user["id"])
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
+    try:
+        user_manager = await get_user_manager(request)
+        
+        user = await user_manager.get_user_by_id(current_user["id"])
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User not found",
+            )
+        
+        return UserResponse(
+            id=user.id,
+            email=user.email,
+            name=user.name,
+            email_verified=bool(user.email_verified),  # Ensure boolean
+            is_active=bool(user.is_active),  # Ensure boolean
+            created_at=user.created_at.isoformat() if user.created_at else datetime.utcnow().isoformat(),
         )
-    
-    return UserResponse(
-        id=user.id,
-        email=user.email,
-        name=user.name,
-        email_verified=user.email_verified,
-        is_active=user.is_active,
-        created_at=user.created_at.isoformat(),
-    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        log.error("get_me_failed", user_id=current_user.get("id"), error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve user profile: {str(e)}",
+        )
 
 
 class UpdateProfileRequest(BaseModel):
