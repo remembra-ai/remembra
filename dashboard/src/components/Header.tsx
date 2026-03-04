@@ -16,9 +16,9 @@ export function Header({ darkMode, onToggleDarkMode, isAuthenticated, onLogout, 
           {/* Logo */}
           <div className="flex items-center gap-3">
             <img 
-              src="/logo-icon.jpg" 
+              src="/logo.jpg" 
               alt="Remembra" 
-              className="w-10 h-10 rounded-lg"
+              className="w-10 h-10 rounded-lg object-cover"
             />
             <div>
               <h1 className="text-xl font-bold text-[hsl(var(--foreground))]">

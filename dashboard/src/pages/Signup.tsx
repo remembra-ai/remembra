@@ -79,7 +79,7 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
           <img 
-            src="/logo-icon.jpg" 
+            src="/logo.jpg" 
             alt="Remembra" 
             className="w-16 h-16 rounded-2xl mx-auto mb-4"
           />
