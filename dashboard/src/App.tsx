@@ -23,7 +23,13 @@ function App() {
     return !!localStorage.getItem('remembra_jwt_token') || !!api.getApiKey();
   });
   
-  const [authMode, setAuthMode] = useState<AuthMode>('login');
+  const [authMode, setAuthMode] = useState<AuthMode>(() => {
+    // Check URL path to determine initial auth mode
+    const path = window.location.pathname;
+    if (path === '/signup') return 'signup';
+    if (path === '/forgot-password') return 'forgot-password';
+    return 'login';
+  });
   const [currentUser, setCurrentUser] = useState<{ id: string; email: string; name?: string } | null>(() => {
     const saved = localStorage.getItem('remembra_user');
     return saved ? JSON.parse(saved) : null;
