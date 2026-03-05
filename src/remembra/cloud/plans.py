@@ -106,7 +106,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_sso=False,
         has_observability=True,
         has_priority_support=True,
-        stripe_price_id="price_1T7CdNQ3CqXwAZA7scUmw5XO",  # $99/mo
+        stripe_price_id="price_1T7huSQ3CqXwAZA7p9Bc081i",  # $99/mo (Team product)
     ),
     # Enterprise: Large orgs, custom pricing
     PlanTier.ENTERPRISE: PlanLimits(
