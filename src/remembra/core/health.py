@@ -8,7 +8,10 @@ log = structlog.get_logger(__name__)
 
 
 async def check_qdrant(qdrant_url: str) -> dict[str, Any]:
-    """Ping Qdrant and return status details."""
+    """Ping Qdrant and return status details.
+    
+    Note: Internal URLs are not exposed in the response for security.
+    """
     import httpx
 
     try:
@@ -19,7 +22,8 @@ async def check_qdrant(qdrant_url: str) -> dict[str, Any]:
         log.warning("qdrant_health_check_failed", error=str(exc))
         ok = False
 
-    return {"status": "ok" if ok else "degraded", "url": qdrant_url}
+    # Don't expose internal service URLs - security best practice
+    return {"status": "ok" if ok else "degraded"}
 
 
 def build_health_response(
