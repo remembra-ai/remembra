@@ -367,7 +367,7 @@ class EmailService:
             user_id=user_id,
             plan=plan,
             dashboard_url="https://app.remembra.dev",
-            docs_url="https://remembra.dev/docs",
+            docs_url="https://docs.remembra.dev",
         )
 
     async def send_usage_warning_email(

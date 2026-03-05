@@ -3,7 +3,7 @@ Plan definitions and limit enforcement for Remembra Cloud.
 
 Plans:
   - free:       50K memories, 1 project, community support
-  - pro:        $29/mo — 500K memories, 5 projects, email support
+  - pro:        $49/mo — 500K memories, 5 projects, email support
   - team:       $99/mo — 2M memories, unlimited projects, priority support
   - enterprise: Custom pricing — unlimited everything, SLA, SSO
 """
@@ -76,7 +76,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_priority_support=False,
         stripe_price_id=None,
     ),
-    # Pro $29/mo: Startups, side projects
+    # Pro $49/mo: Startups, side projects
     PlanTier.PRO: PlanLimits(
         max_memories=500_000,       # 500K memories (research spec)
         max_storage_mb=5_000,
@@ -90,7 +90,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_sso=False,
         has_observability=True,
         has_priority_support=False,
-        stripe_price_id="price_1T7CdNQ3CqXwAZA7Ef32k0CZ",  # $49/mo
+        stripe_price_id="price_1T6ZDAQ3CqXwAZA7jUWCVVF0",  # $49/mo (correct)
     ),
     # Team $99/mo: Growing companies
     PlanTier.TEAM: PlanLimits(
