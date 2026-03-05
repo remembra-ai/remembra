@@ -336,17 +336,16 @@
             const button = document.getElementById('proButton');
             button.textContent = 'Loading...';
             button.disabled = true;
-            // Redirect to dashboard signup with plan parameter
-            // User creates account, then upgrades from Billing page
-            window.location.href = 'https://buy.stripe.com/3cI5kF0sfghaelDd9ebV601';
+            // Redirect to dashboard signup - user creates account, then upgrades from Billing page
+            window.location.href = 'https://app.remembra.dev/signup?plan=pro';
         }
         
         async function subscribeTeam() {
             const button = document.getElementById('teamButton');
             button.textContent = 'Loading...';
             button.disabled = true;
-            // Redirect to dashboard signup with plan parameter
-            window.location.href = 'https://buy.stripe.com/6oU9AVgrd1mga5nb16bV602';
+            // Redirect to dashboard signup - user creates account, then upgrades from Billing page
+            window.location.href = 'https://app.remembra.dev/signup?plan=team';
         }
         
         // Check for cancelled checkout
