@@ -196,7 +196,17 @@ class ApiClient {
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.detail || `API error: ${response.status}`);
+      // Handle both string errors and Pydantic validation arrays
+      let message = `API error: ${response.status}`;
+      if (typeof error.detail === 'string') {
+        message = error.detail;
+      } else if (Array.isArray(error.detail) && error.detail.length > 0) {
+        // Pydantic validation errors are arrays of objects with 'msg' field
+        message = error.detail.map((e: { msg?: string }) => e.msg || 'Validation error').join(', ');
+      } else if (error.message) {
+        message = error.message;
+      }
+      throw new Error(message);
     }
 
     return response.json();
