@@ -25,9 +25,9 @@ interface PlanFeature {
 }
 
 const PLAN_FEATURES: PlanFeature[] = [
-  { name: 'Memories', free: '50,000', pro: '500,000', team: '2,000,000', enterprise: 'Unlimited' },
-  { name: 'API Calls/month', free: '100,000', pro: '1,000,000', team: '5,000,000', enterprise: '50M+' },
-  { name: 'API Keys', free: '3', pro: '10', team: '50', enterprise: '100' },
+  { name: 'Memories', free: '25,000', pro: '500,000', team: '2,000,000', enterprise: 'Unlimited' },
+  { name: 'API Calls/month', free: '50,000', pro: '1,000,000', team: '5,000,000', enterprise: '50M+' },
+  { name: 'API Keys', free: '2', pro: '10', team: '50', enterprise: '100' },
   { name: 'Projects', free: '1', pro: '5', team: '100', enterprise: '1,000' },
   { name: 'Team Members', free: '1', pro: '5', team: '25', enterprise: '1,000' },
   { name: 'Webhooks', free: false, pro: true, team: true, enterprise: true },
@@ -369,9 +369,9 @@ export function Billing() {
               price="Free"
               description="For indie devs and testing"
               features={[
-                '50,000 memories',
-                '100K API calls/month',
-                '3 API keys',
+                '25,000 memories',
+                '50K API calls/month',
+                '2 API keys',
                 '1 project',
                 'Hybrid search',
                 'Entity resolution',

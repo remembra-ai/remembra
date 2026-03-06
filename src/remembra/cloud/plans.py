@@ -60,15 +60,15 @@ class PlanLimits:
 # ---------------------------------------------------------------------------
 
 PLANS: dict[PlanTier, PlanLimits] = {
-    # Free: Indie devs, students
+    # Free: Indie devs, students (tightened limits to encourage Pro upgrades)
     PlanTier.FREE: PlanLimits(
-        max_memories=50_000,        # 50K memories (research spec)
-        max_storage_mb=500,
-        max_recalls_per_month=100_000,
-        max_stores_per_month=50_000,
-        max_api_keys=3,
+        max_memories=25_000,        # 25K memories (tightened from 50K)
+        max_storage_mb=250,
+        max_recalls_per_month=50_000,   # 50K/mo (tightened from 100K)
+        max_stores_per_month=25_000,    # 25K/mo (tightened from 50K)
+        max_api_keys=2,             # 2 keys (tightened from 3)
         max_users=1,
-        max_projects=1,             # 1 project (research spec)
+        max_projects=1,             # 1 project
         retention_days=None,        # unlimited
         has_webhooks=False,
         has_sso=False,
@@ -164,7 +164,7 @@ class UsageSnapshot:
                     reason=f"Memory limit reached ({limits.max_memories:,} memories)",
                     limit=limits.max_memories,
                     current=self.memories_stored,
-                    upgrade_hint="Upgrade to Pro for 500K memories" if self.plan == PlanTier.FREE else None,
+                    upgrade_hint="Upgrade to Pro for 500K memories (20x more!)" if self.plan == PlanTier.FREE else None,
                 )
             if self.stores_this_month >= limits.max_stores_per_month:
                 return LimitCheckResult(
