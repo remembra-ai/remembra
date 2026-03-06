@@ -573,8 +573,9 @@ async def forget_memories(
             detail="Provide at least one of: memory_id, entity, all_memories=true",
         )
 
-    # Always scope to authenticated user (security: prevent cross-user deletion)
-    user_id = current_user.user_id if all_memories else None
+    # SECURITY FIX: ALWAYS pass user_id to prevent IDOR (cross-user deletion)
+    # This ensures users can only delete their own memories
+    user_id = current_user.user_id
 
     try:
         result = await memory_service.forget(

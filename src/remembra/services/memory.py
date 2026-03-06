@@ -1224,12 +1224,22 @@ class MemoryService:
         deleted_relationships = 0
 
         if memory_id:
-            # Delete specific memory
+            # SECURITY: Verify ownership before deleting (prevent IDOR)
+            if user_id:
+                memory = await self.db.get_memory(memory_id)
+                if not memory:
+                    log.warning("forget_memory_not_found", memory_id=memory_id)
+                    return ForgetResponse(deleted_memories=0, deleted_entities=0, deleted_relationships=0)
+                if memory.get("user_id") != user_id:
+                    log.warning("forget_memory_unauthorized", memory_id=memory_id, user_id=user_id)
+                    return ForgetResponse(deleted_memories=0, deleted_entities=0, deleted_relationships=0)
+            
+            # Delete specific memory (ownership verified)
             await self.qdrant.delete(memory_id)
             await self.db.delete_memory_fts(memory_id)  # Clean FTS5 index
             if await self.db.delete_memory(memory_id):
                 deleted_memories = 1
-            log.info("forgot_memory", memory_id=memory_id)
+            log.info("forgot_memory", memory_id=memory_id, user_id=user_id)
 
         elif user_id:
             # Delete all user data
