@@ -33,7 +33,7 @@ const TYPE_COLORS: Record<string, string> = {
   concept: '#eab308',      // yellow
 };
 
-export function EntityGraph({ projectId = 'default' }: EntityGraphProps) {
+export function EntityGraph({ projectId }: EntityGraphProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [nodes, setNodes] = useState<Node[]>([]);
   const [edges, setEdges] = useState<Edge[]>([]);

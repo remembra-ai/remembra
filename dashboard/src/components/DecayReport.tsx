@@ -8,7 +8,7 @@ interface DecayReportProps {
   projectId?: string;
 }
 
-export function DecayReport({ projectId = 'default' }: DecayReportProps) {
+export function DecayReport({ projectId }: DecayReportProps) {
   const [report, setReport] = useState<DecayReportResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

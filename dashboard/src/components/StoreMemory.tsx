@@ -17,7 +17,7 @@ const TTL_OPTIONS = [
   { label: '1 year', value: '1y' },
 ];
 
-export function StoreMemory({ onStored, projectId = 'default' }: StoreMemoryProps) {
+export function StoreMemory({ onStored, projectId }: StoreMemoryProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [content, setContent] = useState('');
   const [ttl, setTtl] = useState('');

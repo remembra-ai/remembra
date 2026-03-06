@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from '../lib/api';
-import type { EntityResponse, RelationshipResponse } from '../lib/api';
+import { api, type EntityResponse, type RelationshipResponse } from '../lib/api';
 import { User, Building2, MapPin, Lightbulb, RefreshCw, Link2, ChevronRight, FileText } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -26,7 +25,9 @@ const ENTITY_COLORS: Record<string, string> = {
   concept: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 border-yellow-200 dark:border-yellow-800',
 };
 
-export function EntityList({ projectId = 'default' }: EntityListProps) {
+export function EntityList({ projectId }: EntityListProps) {
+  // Use API client's project ID if not explicitly provided
+  const effectiveProjectId = projectId || api.getProjectId();
   const [entities, setEntities] = useState<EntityResponse[]>([]);
   const [byType, setByType] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -39,7 +40,7 @@ export function EntityList({ projectId = 'default' }: EntityListProps) {
     setLoading(true);
     setError(null);
     try {
-      const response = await api.listEntities(projectId, undefined, 200);
+      const response = await api.listEntities(effectiveProjectId, undefined, 200);
       setEntities(response.entities);
       setByType(response.by_type);
     } catch (err) {
@@ -64,7 +65,7 @@ export function EntityList({ projectId = 'default' }: EntityListProps) {
 
   useEffect(() => {
     fetchEntities();
-  }, [projectId]);
+  }, [effectiveProjectId]);
 
   useEffect(() => {
     if (selectedEntity) {
