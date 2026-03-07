@@ -265,6 +265,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     log.info("remembra_shutdown")
     if app.state.plugin_manager:
         await app.state.plugin_manager.shutdown()
+    # Close persistent HTTP clients
+    if hasattr(app.state, "embeddings"):
+        await app.state.embeddings.close()
+    if hasattr(app.state, "webhook_manager") and app.state.webhook_manager:
+        if hasattr(app.state.webhook_manager, "_delivery"):
+            await app.state.webhook_manager._delivery.close()
     await app.state.db.close()
     await app.state.qdrant.close()
 

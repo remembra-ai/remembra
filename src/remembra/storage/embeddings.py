@@ -64,6 +64,10 @@ class BaseEmbedder(ABC):
         """Generate embeddings for multiple texts."""
         ...
 
+    async def close(self) -> None:
+        """Close any persistent HTTP clients. Override in subclasses."""
+        pass
+
     @property
     def provider_name(self) -> str:
         return self.__class__.__name__
@@ -87,6 +91,13 @@ class OpenAIEmbedder(BaseEmbedder):
         self.model = model
         self.dimensions = dimensions
         self.base_url = "https://api.openai.com/v1"
+        self._client = httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+        )
 
     async def embed(self, text: str) -> list[float]:
         results = await self.embed_batch([text])
@@ -101,20 +112,18 @@ class OpenAIEmbedder(BaseEmbedder):
         if self.dimensions and self.model.startswith("text-embedding-3"):
             payload["dimensions"] = self.dimensions
 
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{self.base_url}/embeddings",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(
+            f"{self.base_url}/embeddings",
+            json=payload,
+        )
+        response.raise_for_status()
+        data = response.json()
 
         embeddings = sorted(data["data"], key=lambda x: x["index"])
         return [e["embedding"] for e in embeddings]
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +149,13 @@ class AzureOpenAIEmbedder(BaseEmbedder):
         self.endpoint = endpoint.rstrip("/")
         self.deployment = deployment
         self.api_version = api_version
+        self._client = httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "api-key": self.api_key,
+                "Content-Type": "application/json",
+            },
+        )
 
     async def embed(self, text: str) -> list[float]:
         results = await self.embed_batch([text])
@@ -150,20 +166,18 @@ class AzureOpenAIEmbedder(BaseEmbedder):
             f"{self.endpoint}/openai/deployments/{self.deployment}"
             f"/embeddings?api-version={self.api_version}"
         )
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                url,
-                headers={
-                    "api-key": self.api_key,
-                    "Content-Type": "application/json",
-                },
-                json={"input": texts},
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(
+            url,
+            json={"input": texts},
+        )
+        response.raise_for_status()
+        data = response.json()
 
         embeddings = sorted(data["data"], key=lambda x: x["index"])
         return [e["embedding"] for e in embeddings]
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -177,18 +191,18 @@ class OllamaEmbedder(BaseEmbedder):
     def __init__(self, base_url: str = "http://localhost:11434", model: str = "nomic-embed-text"):
         self.base_url = base_url.rstrip("/")
         self.model = model
+        self._client = httpx.AsyncClient(timeout=60.0)
 
     async def embed(self, text: str) -> list[float]:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                f"{self.base_url}/api/embeddings",
-                json={
-                    "model": self.model,
-                    "prompt": text,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(
+            f"{self.base_url}/api/embeddings",
+            json={
+                "model": self.model,
+                "prompt": text,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
 
         return data["embedding"]
 
@@ -198,6 +212,9 @@ class OllamaEmbedder(BaseEmbedder):
             embedding = await self.embed(text)
             results.append(embedding)
         return results
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -212,29 +229,34 @@ class CohereEmbedder(BaseEmbedder):
         self.api_key = api_key
         self.model = model
         self.base_url = "https://api.cohere.ai/v1"
+        self._client = httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+        )
 
     async def embed(self, text: str) -> list[float]:
         results = await self.embed_batch([text])
         return results[0]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{self.base_url}/embed",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "texts": texts,
-                    "input_type": "search_document",
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(
+            f"{self.base_url}/embed",
+            json={
+                "model": self.model,
+                "texts": texts,
+                "input_type": "search_document",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
 
         return data["embeddings"]
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -253,30 +275,35 @@ class VoyageEmbedder(BaseEmbedder):
         self.api_key = api_key
         self.model = model
         self.base_url = "https://api.voyageai.com/v1"
+        self._client = httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+        )
 
     async def embed(self, text: str) -> list[float]:
         results = await self.embed_batch([text])
         return results[0]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{self.base_url}/embeddings",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "input": texts,
-                    "input_type": "document",
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(
+            f"{self.base_url}/embeddings",
+            json={
+                "model": self.model,
+                "input": texts,
+                "input_type": "document",
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
 
         embeddings = sorted(data["data"], key=lambda x: x["index"])
         return [e["embedding"] for e in embeddings]
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -295,29 +322,34 @@ class JinaEmbedder(BaseEmbedder):
         self.api_key = api_key
         self.model = model
         self.base_url = "https://api.jina.ai/v1"
+        self._client = httpx.AsyncClient(
+            timeout=30.0,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+        )
 
     async def embed(self, text: str) -> list[float]:
         results = await self.embed_batch([text])
         return results[0]
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(
-                f"{self.base_url}/embeddings",
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "input": texts,
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(
+            f"{self.base_url}/embeddings",
+            json={
+                "model": self.model,
+                "input": texts,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
 
         embeddings = sorted(data["data"], key=lambda x: x["index"])
         return [e["embedding"] for e in embeddings]
+
+    async def close(self) -> None:
+        await self._client.aclose()
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +443,12 @@ class EmbeddingService:
 
         return self._embedder
 
+    async def close(self) -> None:
+        """Close the current embedder's HTTP client."""
+        if self._embedder is not None:
+            await self._embedder.close()
+            self._embedder = None
+
     def switch_provider(
         self,
         provider: str,
@@ -423,6 +461,9 @@ class EmbeddingService:
         After switching, call ``reindex_all()`` on the ReindexManager to
         re-embed all stored memories with the new model.
 
+        Note: The old embedder's HTTP client will be closed lazily on next
+        ``_get_embedder()`` call. For immediate cleanup, call ``close()`` first.
+
         Args:
             provider: New provider name (openai, voyage, jina, etc.)
             model: Model name (uses provider default if omitted)
@@ -433,6 +474,8 @@ class EmbeddingService:
         self._current_provider = provider.lower()
         if model:
             self._current_model = model
+        # Note: old embedder's client will be garbage collected.
+        # For explicit cleanup, call close() before switch_provider().
         self._embedder = None  # Force re-init on next embed call
 
         # Store API key override if provided

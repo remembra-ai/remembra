@@ -84,8 +84,15 @@
             --white: #ffffff;
             --purple: #8b5cf6;
             --purple-light: #a78bfa;
+            --purple-glow: rgba(139, 92, 246, 0.5);
             --green: #22c55e;
+            --green-light: #4ade80;
+            --green-glow: rgba(34, 197, 94, 0.4);
+            --blue: #3b82f6;
+            --cyan: #06b6d4;
+            --cyan-glow: rgba(6, 182, 212, 0.5);
             --red: #ef4444;
+            --red-light: #f87171;
             --yellow: #eab308;
         }
         
@@ -230,6 +237,13 @@
             margin-bottom: 24px;
         }
         
+        .hero-title .highlight {
+            background: linear-gradient(135deg, var(--purple-light) 0%, var(--cyan) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
         .hero-subtitle {
             font-size: 18px;
             color: var(--gray-400);
@@ -238,7 +252,104 @@
             line-height: 1.7;
         }
         
-        .hero-actions { display: flex; gap: 16px; margin-bottom: 60px; flex-wrap: wrap; justify-content: center; }
+        .hero-actions { display: flex; gap: 16px; margin-bottom: 40px; flex-wrap: wrap; justify-content: center; }
+        
+        /* Interactive Demo */
+        .timeline-indicator { text-align: center; margin-bottom: 24px; }
+        .timeline-badge {
+            display: inline-flex; align-items: center; gap: 10px; padding: 10px 20px;
+            background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 100px; font-size: 15px; color: var(--gray-400);
+        }
+        .timeline-badge svg { width: 18px; height: 18px; }
+        .timeline-badge .session-num { color: var(--white); font-weight: 600; }
+        
+        .demo-container {
+            display: grid; grid-template-columns: 1fr 100px 1.3fr; max-width: 1400px; margin: 0 auto;
+            background: var(--gray-900); border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px; overflow: hidden; box-shadow: 0 25px 80px -20px rgba(0,0,0,0.6);
+        }
+        
+        .panel { display: flex; flex-direction: column; }
+        .panel-header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 18px 24px; border-bottom: 1px solid rgba(255,255,255,0.06);
+            background: rgba(255,255,255,0.02);
+        }
+        .panel-label { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+        .panel-label.bad { color: var(--red-light); }
+        .panel-label.good { color: var(--green-light); }
+        .panel-label svg { width: 16px; height: 16px; }
+        .panel-dots { display: flex; gap: 8px; }
+        .panel-dots span { width: 12px; height: 12px; border-radius: 50%; }
+        .panel-dots .red { background: #ff5f57; }
+        .panel-dots .yellow { background: #febc2e; }
+        .panel-dots .green { background: #28c840; }
+        .panel-body { flex: 1; padding: 28px; min-height: 380px; }
+        .panel.without { border-right: 1px solid rgba(255,255,255,0.04); }
+        .panel.with { border-left: 1px solid rgba(255,255,255,0.04); background: rgba(34, 197, 94, 0.02); display: grid; grid-template-columns: 1fr 200px; grid-template-rows: auto 1fr; }
+        .panel.with .panel-header { grid-column: 1 / -1; }
+        .panel.with .panel-body { border-right: 1px solid rgba(255,255,255,0.06); }
+        
+        .memory-sidebar { padding: 20px; background: rgba(0,0,0,0.2); display: flex; flex-direction: column; }
+        .memory-sidebar-header { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--purple-light); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+        .memory-sidebar-header svg { width: 16px; height: 16px; }
+        .memory-list { display: flex; flex-direction: column; gap: 12px; flex: 1; }
+        .memory-item { background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.15); border-radius: 10px; padding: 14px; opacity: 0; transform: translateX(20px); }
+        .memory-item.visible { animation: memSlideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes memSlideIn { to { opacity: 1; transform: translateX(0); } }
+        .memory-item.active { border-color: var(--cyan); box-shadow: 0 0 20px var(--cyan-glow); background: rgba(6, 182, 212, 0.1); }
+        .memory-item-text { font-size: 13px; color: var(--gray-300); line-height: 1.4; margin-bottom: 10px; }
+        .memory-item-meta { display: flex; align-items: center; justify-content: space-between; }
+        .memory-item-tag { font-size: 10px; font-weight: 600; text-transform: uppercase; padding: 4px 8px; border-radius: 4px; background: rgba(139, 92, 246, 0.2); color: var(--purple-light); }
+        .memory-item-time { font-size: 10px; color: var(--gray-600); }
+        
+        .chat-messages { display: flex; flex-direction: column; gap: 18px; }
+        .chat-message { display: flex; gap: 14px; opacity: 0; transform: translateY(15px); }
+        .chat-message.visible { animation: msgIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes msgIn { to { opacity: 1; transform: translateY(0); } }
+        .chat-avatar { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0; }
+        .chat-avatar.user { background: linear-gradient(135deg, var(--purple) 0%, var(--blue) 100%); }
+        .chat-avatar.ai { background: linear-gradient(135deg, var(--gray-600) 0%, var(--gray-700) 100%); }
+        .panel.with .chat-avatar.ai { background: linear-gradient(135deg, var(--green) 0%, var(--cyan) 100%); }
+        .chat-content { flex: 1; }
+        .chat-name { font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--gray-500); }
+        .chat-bubble { background: rgba(255,255,255,0.05); border-radius: 14px; border-top-left-radius: 4px; padding: 14px 18px; font-size: 15px; color: var(--gray-300); line-height: 1.6; }
+        .chat-bubble .keyword { color: var(--cyan); font-weight: 500; }
+        .chat-bubble.frustrated { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.15); }
+        .chat-bubble.ai-good { background: rgba(34, 197, 94, 0.08); border: 1px solid rgba(34, 197, 94, 0.15); }
+        .status-badge { font-size: 12px; margin-top: 8px; opacity: 0; }
+        .status-badge.frustrated { color: var(--red-light); }
+        .status-badge.satisfied { color: var(--green-light); }
+        .status-badge.visible { animation: fadeInBadge 0.3s ease forwards; }
+        @keyframes fadeInBadge { to { opacity: 1; } }
+        
+        .connection-zone { display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg, rgba(139,92,246,0.05) 0%, rgba(6,182,212,0.05) 100%); position: relative; overflow: hidden; }
+        .flow-line { position: absolute; left: 50%; top: 0; bottom: 0; width: 3px; background: linear-gradient(180deg, transparent 0%, rgba(139,92,246,0.4) 20%, rgba(6,182,212,0.6) 50%, rgba(139,92,246,0.4) 80%, transparent 100%); transform: translateX(-50%); }
+        .brain-container { position: relative; z-index: 10; }
+        .brain-icon { width: 60px; height: 60px; background: var(--gray-900); border: 2px solid rgba(139,92,246,0.4); border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
+        .brain-icon svg { width: 28px; height: 28px; color: var(--purple-light); transition: all 0.3s ease; }
+        .brain-icon.active { border-color: var(--cyan); box-shadow: 0 0 40px var(--cyan-glow); }
+        .brain-icon.active svg { color: var(--cyan); animation: brainPulse 0.5s ease; }
+        @keyframes brainPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.2); } }
+        .pulse-ring { position: absolute; top: 50%; left: 50%; width: 60px; height: 60px; border: 2px solid var(--purple); border-radius: 50%; transform: translate(-50%, -50%); opacity: 0; pointer-events: none; }
+        .pulse-ring.active { animation: ringPulse 1.5s ease-out forwards; }
+        @keyframes ringPulse { 0% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; } 100% { transform: translate(-50%, -50%) scale(2.5); opacity: 0; } }
+        .particle-container { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+        .particle { position: absolute; width: 8px; height: 8px; background: var(--cyan); border-radius: 50%; left: 50%; transform: translateX(-50%); box-shadow: 0 0 10px var(--cyan-glow), 0 0 20px var(--cyan-glow); opacity: 0; }
+        .particle.down { animation: particleDown 1.4s ease-out forwards; }
+        @keyframes particleDown { 0% { top: 8%; opacity: 0; transform: translateX(-50%) scale(0.5); } 15% { opacity: 1; transform: translateX(-50%) scale(1); } 85% { opacity: 1; } 100% { top: 92%; opacity: 0; transform: translateX(-50%) scale(0.5); } }
+        .data-stream { position: absolute; left: 50%; width: 4px; height: 30px; background: linear-gradient(180deg, var(--cyan), transparent); transform: translateX(-50%); opacity: 0; border-radius: 2px; }
+        .data-stream.active { animation: streamDown 0.7s ease-out forwards; }
+        @keyframes streamDown { 0% { top: 15%; opacity: 0; } 20% { opacity: 1; } 100% { top: 85%; opacity: 0; } }
+        .connection-label { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--gray-600); white-space: nowrap; opacity: 0; transition: all 0.3s ease; }
+        .connection-label.visible { opacity: 1; color: var(--cyan); }
+        
+        .nav-dots { display: flex; justify-content: center; gap: 10px; margin-top: 20px; }
+        .nav-dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.2); cursor: pointer; transition: all 0.3s ease; border: none; padding: 0; }
+        .nav-dot:hover { background: rgba(255,255,255,0.4); }
+        .nav-dot.active { background: var(--cyan); box-shadow: 0 0 10px var(--cyan-glow); }
+        .pause-hint { text-align: center; font-size: 11px; color: var(--gray-600); margin-top: 10px; margin-bottom: 20px; }
         
         /* Code Block */
         .code-block {
@@ -953,6 +1064,18 @@
         }
         
         /* Mobile */
+        @media (max-width: 1100px) {
+            .demo-container { grid-template-columns: 1fr; }
+            .connection-zone { height: 100px; flex-direction: row; }
+            .flow-line { width: 100%; height: 3px; left: 0; top: 50%; transform: translateY(-50%); background: linear-gradient(90deg, transparent, rgba(139,92,246,0.4), rgba(6,182,212,0.6), rgba(139,92,246,0.4), transparent); }
+            .panel.without, .panel.with { border: none; }
+            .panel.with { grid-template-columns: 1fr; }
+            .memory-sidebar { border-top: 1px solid rgba(255,255,255,0.06); flex-direction: row; flex-wrap: wrap; gap: 12px; }
+            .memory-sidebar-header { width: 100%; }
+            .memory-list { flex-direction: row; flex-wrap: wrap; }
+            .memory-item { flex: 1; min-width: 200px; }
+        }
+        
         @media (max-width: 900px) {
             .nav-links { display: none; }
             .mcp-grid { grid-template-columns: 1fr; gap: 40px; }
@@ -1009,47 +1132,82 @@
     <section class="hero">
         <div class="hero-badge">
             <span class="dot"></span>
-            Open Source • Self-Hosted • Production Ready
+            Open Source • Self-Hosted • MCP Native
         </div>
         
         <h1 class="hero-title">
-            Give your AI<br>a memory that works
+            AI Agents Forget.<br><span class="highlight">Remembra Remembers.</span>
         </h1>
         
         <p class="hero-subtitle">
-            Persistent memory layer with entity resolution, temporal features, and graph-aware recall. 
-            Self-host in 5 minutes. No vendor lock-in.
+            See the difference persistent memory makes. Same user, same AI — completely different experience.
         </p>
+        
+        <div class="timeline-indicator">
+            <div class="timeline-badge">
+                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                <span class="session-num" id="sessionLabel">Session 2</span> — The next day
+            </div>
+        </div>
+        
+        <div class="demo-container" id="demoContainer">
+            <div class="panel without">
+                <div class="panel-header">
+                    <div class="panel-label bad">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                        Without Memory
+                    </div>
+                    <div class="panel-dots"><span class="red"></span><span class="yellow"></span><span class="green"></span></div>
+                </div>
+                <div class="panel-body">
+                    <div class="chat-messages" id="chatWithout"></div>
+                </div>
+            </div>
+            
+            <div class="connection-zone">
+                <div class="flow-line"></div>
+                <div class="particle-container" id="particleContainer"></div>
+                <div class="brain-container">
+                    <div class="pulse-ring" id="pulseRing1"></div>
+                    <div class="pulse-ring" id="pulseRing2"></div>
+                    <div class="brain-icon" id="brainIcon">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                    </div>
+                </div>
+                <div class="connection-label" id="connectionLabel">Memory Flow</div>
+            </div>
+            
+            <div class="panel with">
+                <div class="panel-header">
+                    <div class="panel-label good">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        With Remembra
+                    </div>
+                    <div class="panel-dots"><span class="red"></span><span class="yellow"></span><span class="green"></span></div>
+                </div>
+                <div class="panel-body">
+                    <div class="chat-messages" id="chatWith"></div>
+                </div>
+                <div class="memory-sidebar">
+                    <div class="memory-sidebar-header">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+                        Recalled Memories
+                    </div>
+                    <div class="memory-list" id="memoryList"></div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="nav-dots" id="navDots">
+            <button class="nav-dot active" data-index="0"></button>
+            <button class="nav-dot" data-index="1"></button>
+            <button class="nav-dot" data-index="2"></button>
+        </div>
+        <div class="pause-hint">Hover to pause</div>
         
         <div class="hero-actions">
             <a href="https://app.remembra.dev/signup" class="btn btn-primary">Start Building Free →</a>
             <a href="https://docs.remembra.dev" class="btn btn-outline">Read the Docs</a>
-        </div>
-        
-        <div class="code-block reveal">
-            <div class="code-header">
-                <span class="code-dot red"></span>
-                <span class="code-dot yellow"></span>
-                <span class="code-dot green"></span>
-                <span class="code-title">quickstart.py</span>
-            </div>
-            <pre class="code-body"><span class="kw">from</span> remembra <span class="kw">import</span> Remembra
-
-<span class="cmt"># Initialize client</span>
-client = Remembra(api_key=<span class="str">"your-key"</span>)
-
-<span class="cmt"># Store a memory with entity extraction</span>
-client.<span class="fn">store</span>(
-    content=<span class="str">"John met Sarah at the AI conference in NYC"</span>,
-    user_id=<span class="str">"user-123"</span>
-)
-
-<span class="cmt"># Recall with semantic + entity search</span>
-memories = client.<span class="fn">recall</span>(
-    query=<span class="str">"Who did John meet?"</span>,
-    user_id=<span class="str">"user-123"</span>
-)
-<span class="cmt"># → Returns: John met Sarah at the AI conference</span></pre>
         </div>
     </section>
 
@@ -1806,6 +1964,225 @@ memories = client.<span class="fn">recall</span>(
                 closeSuccessModal();
             }
         });
+        
+        // ========== HERO DEMO ==========
+        const chatWithout = document.getElementById('chatWithout');
+        const chatWith = document.getElementById('chatWith');
+        const memoryList = document.getElementById('memoryList');
+        const sessionLabel = document.getElementById('sessionLabel');
+        const brainIcon = document.getElementById('brainIcon');
+        const pulseRing1 = document.getElementById('pulseRing1');
+        const pulseRing2 = document.getElementById('pulseRing2');
+        const particleContainer = document.getElementById('particleContainer');
+        const connectionLabel = document.getElementById('connectionLabel');
+        const demoContainer = document.getElementById('demoContainer');
+        
+        const scenarios = [
+            {
+                session: 'Session 2',
+                without: [
+                    { role: 'user', name: 'You', text: "Let's continue working on my project" },
+                    { role: 'ai', name: 'AI', text: "I'd be happy to help! What project are you working on?", delay: 700 },
+                    { role: 'user', name: 'You', text: "...the one we discussed yesterday?", frustrated: true },
+                    { role: 'ai', name: 'AI', text: "I apologize, but I don't have any memory of our previous conversations.", delay: 700 },
+                ],
+                with: [
+                    { role: 'user', name: 'You', text: "Let's continue working on my project" },
+                    { role: 'ai', name: 'AI', text: "Ready to continue on <span class='keyword'>your e-commerce app</span>! Last time you were setting up <span class='keyword'>user authentication</span>.", good: true, delay: 800 },
+                    { role: 'user', name: 'You', text: "Perfect, let's do that", satisfied: true },
+                    { role: 'ai', name: 'AI', text: "Since you prefer <span class='keyword'>React</span>, I'll use the auth pattern we discussed.", good: true, delay: 600 },
+                ],
+                memories: [
+                    { text: 'Building e-commerce application', tag: 'PROJECT', time: '2 days ago' },
+                    { text: 'Prefers React + TypeScript', tag: 'TECH', time: '2 days ago' },
+                    { text: 'Working on user authentication', tag: 'CONTEXT', time: 'Yesterday' },
+                ]
+            },
+            {
+                session: 'Session 5',
+                without: [
+                    { role: 'user', name: 'You', text: "Can you review my API code?" },
+                    { role: 'ai', name: 'AI', text: "Sure! What language and framework are you using?", delay: 600 },
+                    { role: 'user', name: 'You', text: "I've told you this multiple times now...", frustrated: true },
+                    { role: 'ai', name: 'AI', text: "I apologize. I don't retain information between sessions.", delay: 700 },
+                ],
+                with: [
+                    { role: 'user', name: 'You', text: "Can you review my API code?" },
+                    { role: 'ai', name: 'AI', text: "Looking at your <span class='keyword'>Node.js</span> API. I see you're following the <span class='keyword'>REST patterns</span> we established.", good: true, delay: 800 },
+                    { role: 'user', name: 'You', text: "You actually remember everything 🙌", satisfied: true },
+                    { role: 'ai', name: 'AI', text: "Of course! Using <span class='keyword'>async/await</span> as you prefer. Here are my suggestions...", good: true, delay: 600 },
+                ],
+                memories: [
+                    { text: 'Backend: Node.js + Express', tag: 'TECH', time: '1 week ago' },
+                    { text: 'Prefers async/await patterns', tag: 'PREFERENCE', time: '5 days ago' },
+                    { text: 'REST API architecture', tag: 'CONTEXT', time: '3 days ago' },
+                ]
+            },
+            {
+                session: 'Session 10',
+                without: [
+                    { role: 'user', name: 'You', text: "Deploy to production" },
+                    { role: 'ai', name: 'AI', text: "I'd be happy to help! Where would you like to deploy?", delay: 600 },
+                    { role: 'user', name: 'You', text: "We've deployed together 5 times already!", frustrated: true },
+                    { role: 'ai', name: 'AI', text: "Each conversation starts fresh. Please share the deployment target.", delay: 700 },
+                ],
+                with: [
+                    { role: 'user', name: 'You', text: "Deploy to production" },
+                    { role: 'ai', name: 'AI', text: "Deploying to <span class='keyword'>your cloud server</span> with <span class='keyword'>Docker</span>. Using your standard config.", good: true, delay: 900 },
+                    { role: 'user', name: 'You', text: "This is what AI should be ✨", satisfied: true },
+                    { role: 'ai', name: 'AI', text: "Deployment complete! Sent notification to <span class='keyword'>your Slack</span> as usual.", good: true, delay: 600 },
+                ],
+                memories: [
+                    { text: 'Deploys via Docker containers', tag: 'INFRA', time: '2 weeks ago' },
+                    { text: 'Production server configured', tag: 'INFRA', time: '1 week ago' },
+                    { text: 'Notifications via Slack', tag: 'PREFERENCE', time: '5 days ago' },
+                ]
+            }
+        ];
+        
+        let currentScenario = 0;
+        
+        function createMessage(msg) {
+            const div = document.createElement('div');
+            div.className = 'chat-message';
+            const bubbleClass = msg.frustrated ? 'frustrated' : (msg.good ? 'ai-good' : '');
+            const badgeClass = msg.frustrated ? 'frustrated' : (msg.satisfied ? 'satisfied' : '');
+            const badgeText = msg.frustrated ? '😤 Repeating context again...' : (msg.satisfied ? '✨ No repetition needed' : '');
+            div.innerHTML = '<div class="chat-avatar ' + msg.role + '">' + (msg.role === 'user' ? 'Y' : 'A') + '</div><div class="chat-content"><div class="chat-name">' + msg.name + '</div><div class="chat-bubble ' + bubbleClass + '">' + msg.text + '</div>' + (badgeText ? '<div class="status-badge ' + badgeClass + '">' + badgeText + '</div>' : '') + '</div>';
+            return div;
+        }
+        
+        function createMemoryItem(mem) {
+            const div = document.createElement('div');
+            div.className = 'memory-item';
+            div.innerHTML = '<div class="memory-item-text">' + mem.text + '</div><div class="memory-item-meta"><span class="memory-item-tag">' + mem.tag + '</span><span class="memory-item-time">' + mem.time + '</span></div>';
+            return div;
+        }
+        
+        function spawnParticle() {
+            const p = document.createElement('div');
+            p.className = 'particle';
+            particleContainer.appendChild(p);
+            setTimeout(function() { p.classList.add('down'); }, 10);
+            setTimeout(function() { p.remove(); }, 1400);
+        }
+        
+        function spawnStream() {
+            const s = document.createElement('div');
+            s.className = 'data-stream';
+            s.style.top = '15%';
+            particleContainer.appendChild(s);
+            setTimeout(function() { s.classList.add('active'); }, 10);
+            setTimeout(function() { s.remove(); }, 700);
+        }
+        
+        function triggerPulse(ring) {
+            ring.classList.remove('active');
+            void ring.offsetWidth;
+            ring.classList.add('active');
+        }
+        
+        function runScenario(scenario) {
+            chatWithout.innerHTML = '';
+            chatWith.innerHTML = '';
+            memoryList.innerHTML = '';
+            brainIcon.classList.remove('active');
+            connectionLabel.classList.remove('visible');
+            sessionLabel.textContent = scenario.session;
+            
+            var wDelay = 0;
+            scenario.without.forEach(function(msg, i) {
+                var el = createMessage(msg);
+                chatWithout.appendChild(el);
+                wDelay += msg.delay || 400;
+                setTimeout(function() {
+                    el.classList.add('visible');
+                    if (msg.frustrated) setTimeout(function() { var b = el.querySelector('.status-badge'); if(b) b.classList.add('visible'); }, 300);
+                }, wDelay);
+                wDelay += 500;
+            });
+            
+            setTimeout(function() {
+                brainIcon.classList.add('active');
+                connectionLabel.classList.add('visible');
+                triggerPulse(pulseRing1);
+                setTimeout(function() { triggerPulse(pulseRing2); }, 250);
+                for (var i = 0; i < 8; i++) {
+                    (function(idx) {
+                        setTimeout(function() {
+                            spawnParticle();
+                            if (idx % 2 === 0) spawnStream();
+                        }, idx * 120);
+                    })(i);
+                }
+                setTimeout(function() {
+                    scenario.memories.forEach(function(mem, i) {
+                        var item = createMemoryItem(mem);
+                        memoryList.appendChild(item);
+                        setTimeout(function() {
+                            item.classList.add('visible');
+                            item.classList.add('active');
+                            spawnParticle();
+                            setTimeout(function() { item.classList.remove('active'); }, 500);
+                        }, i * 250);
+                    });
+                }, 300);
+                setTimeout(function() { brainIcon.classList.remove('active'); }, 1200);
+            }, 400);
+            
+            var withDelay = 0;
+            scenario.with.forEach(function(msg, i) {
+                var el = createMessage(msg);
+                chatWith.appendChild(el);
+                withDelay += msg.delay || 400;
+                setTimeout(function() {
+                    el.classList.add('visible');
+                    if (msg.satisfied) setTimeout(function() { var b = el.querySelector('.status-badge'); if(b) b.classList.add('visible'); }, 300);
+                }, withDelay + 900);
+                withDelay += 500;
+            });
+        }
+        
+        // Navigation dots
+        var navDots = document.querySelectorAll('.nav-dot');
+        function updateDots() {
+            navDots.forEach(function(dot, i) {
+                dot.classList.toggle('active', i === currentScenario);
+            });
+        }
+        navDots.forEach(function(dot) {
+            dot.addEventListener('click', function() {
+                var index = parseInt(dot.dataset.index);
+                currentScenario = index;
+                runScenario(scenarios[currentScenario]);
+                updateDots();
+                resetAutoPlay();
+            });
+        });
+        
+        // Pause on hover
+        var isPaused = false;
+        var autoPlayInterval;
+        demoContainer.addEventListener('mouseenter', function() { isPaused = true; });
+        demoContainer.addEventListener('mouseleave', function() { isPaused = false; });
+        
+        function autoPlay() {
+            if (!isPaused) {
+                currentScenario = (currentScenario + 1) % scenarios.length;
+                runScenario(scenarios[currentScenario]);
+                updateDots();
+            }
+        }
+        function resetAutoPlay() {
+            clearInterval(autoPlayInterval);
+            autoPlayInterval = setInterval(autoPlay, 15000);
+        }
+        
+        setTimeout(function() {
+            runScenario(scenarios[0]);
+            updateDots();
+            autoPlayInterval = setInterval(autoPlay, 15000);
+        }, 500);
     </script>
 </body>
 </html>

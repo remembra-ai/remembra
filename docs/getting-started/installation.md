@@ -2,9 +2,29 @@
 
 Multiple ways to install and run Remembra.
 
-## Docker (Recommended)
+## Quick Start (Recommended)
 
-The easiest way to get started. Everything is bundled.
+Get Remembra running with a single command. No API keys needed -- this installs Remembra, Qdrant, and Ollama via Docker Compose for a fully local setup.
+
+```bash
+curl -sSL https://get.remembra.dev/quickstart.sh | bash
+```
+
+This sets up everything automatically: Remembra server on port 8787, Qdrant for vector storage, and Ollama for local embeddings and entity extraction.
+
+## Docker Compose (Zero Config)
+
+If you already have Docker Compose and prefer to run it directly:
+
+```bash
+docker compose -f docker-compose.quickstart.yml up -d
+```
+
+This starts the same stack as the quick start script (Remembra + Qdrant + Ollama) with no API keys required.
+
+## Docker
+
+Run the Remembra container standalone. Requires an API key for embeddings.
 
 ```bash
 docker run -d \
@@ -78,12 +98,17 @@ python -m remembra.server
 
 - **Python 3.10+**
 - **Qdrant** - Vector database (bundled in Docker, or run separately)
-- **OpenAI API key** - For embeddings and extraction
+- **Embedding provider** - One of:
+    - **Ollama** (local, no API key needed) -- used automatically with the quick start
+    - **OpenAI API key** -- for cloud-based embeddings and extraction
 
 ### Optional
 
-- **Ollama** - Local embeddings (no API costs)
+- **Ollama** - Local embeddings and extraction (no API costs, no API key needed)
 - **Cohere** - Alternative embeddings
+- **Anthropic** - For entity extraction via Claude
+- **Voyage** - Alternative embeddings
+- **Jina** - Alternative embeddings
 - **Redis** - For rate limiting at scale
 
 ## Embedding Providers
@@ -103,7 +128,7 @@ Remembra supports multiple embedding providers:
     ```bash
     # Start Ollama first
     ollama pull nomic-embed-text
-    
+
     export REMEMBRA_EMBEDDING_PROVIDER=ollama
     export REMEMBRA_EMBEDDING_MODEL=nomic-embed-text
     export OLLAMA_BASE_URL=http://localhost:11434
@@ -115,6 +140,49 @@ Remembra supports multiple embedding providers:
     export COHERE_API_KEY=your-key
     export REMEMBRA_EMBEDDING_PROVIDER=cohere
     export REMEMBRA_EMBEDDING_MODEL=embed-english-v3.0
+    ```
+
+=== "Voyage"
+
+    ```bash
+    export VOYAGE_API_KEY=your-key
+    export REMEMBRA_EMBEDDING_PROVIDER=voyage
+    export REMEMBRA_EMBEDDING_MODEL=voyage-3
+    ```
+
+=== "Jina"
+
+    ```bash
+    export JINA_API_KEY=your-key
+    export REMEMBRA_EMBEDDING_PROVIDER=jina
+    export REMEMBRA_EMBEDDING_MODEL=jina-embeddings-v3
+    ```
+
+## LLM Providers (Entity Extraction)
+
+Remembra uses an LLM for entity extraction. Supported providers:
+
+=== "OpenAI (Default)"
+
+    ```bash
+    export REMEMBRA_LLM_PROVIDER=openai
+    export OPENAI_API_KEY=sk-your-key
+    ```
+
+=== "Ollama (Local)"
+
+    ```bash
+    # No API key needed -- runs locally
+    export REMEMBRA_LLM_PROVIDER=ollama
+    export OLLAMA_BASE_URL=http://localhost:11434
+    ```
+
+=== "Anthropic"
+
+    ```bash
+    # Anthropic (for entity extraction)
+    export REMEMBRA_LLM_PROVIDER=anthropic
+    export ANTHROPIC_API_KEY=your-key
     ```
 
 ## Verifying Installation
@@ -130,7 +198,7 @@ Expected response:
 ```json
 {
   "status": "healthy",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "qdrant": "connected",
   "database": "connected"
 }
@@ -165,11 +233,13 @@ docker logs remembra  # Check for errors
 
 ### "API key not set" error
 
-Set your OpenAI API key:
+If using OpenAI, set your API key:
 
 ```bash
 export OPENAI_API_KEY=sk-your-key
 ```
+
+If you don't have an API key, use the zero-config quick start which uses Ollama locally and requires no API keys.
 
 ### Qdrant connection issues
 

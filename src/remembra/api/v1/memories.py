@@ -150,6 +150,11 @@ async def store_memory(
             ),
         )
 
+        # Attach usage warning if set by cloud limit enforcement
+        usage_warning = getattr(request.state, "usage_warning", None)
+        if usage_warning is not None:
+            result.usage_warning = usage_warning
+
         return result
 
     except ValueError as e:
@@ -367,6 +372,11 @@ async def recall_memories(
                 project_id=body.project_id or "default",
             ),
         )
+
+        # Attach usage warning if set by cloud limit enforcement
+        usage_warning = getattr(request.state, "usage_warning", None)
+        if usage_warning is not None:
+            result.usage_warning = usage_warning
 
         return result
 

@@ -163,6 +163,25 @@ wheels = [
 ]
 
 [[package]]
+name = "anthropic"
+version = "0.84.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
+    { name = "docstring-parser" },
+    { name = "httpx" },
+    { name = "jiter" },
+    { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/04/ea/0869d6df9ef83dcf393aeefc12dd81677d091c6ffc86f783e51cf44062f2/anthropic-0.84.0.tar.gz", hash = "sha256:72f5f90e5aebe62dca316cb013629cfa24996b0f5a4593b8c3d712bc03c43c37", size = 539457, upload-time = "2026-02-25T05:22:38.54Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/ca/218fa25002a332c0aa149ba18ffc0543175998b1f65de63f6d106689a345/anthropic-0.84.0-py3-none-any.whl", hash = "sha256:861c4c50f91ca45f942e091d83b60530ad6d4f98733bfe648065364da05d29e7", size = 455156, upload-time = "2026-02-25T05:22:40.468Z" },
+]
+
+[[package]]
 name = "anyio"
 version = "4.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3753,7 +3772,7 @@ wheels = [
 
 [[package]]
 name = "remembra"
-version = "0.7.2"
+version = "0.8.0"
 source = { editable = "." }
 dependencies = [
     { name = "bcrypt" },
@@ -3764,6 +3783,7 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "aiosqlite" },
+    { name = "anthropic" },
     { name = "bcrypt" },
     { name = "crewai" },
     { name = "email-validator" },
@@ -3786,6 +3806,9 @@ all = [
     { name = "structlog" },
     { name = "tiktoken" },
     { name = "uvicorn", extra = ["standard"] },
+]
+anthropic = [
+    { name = "anthropic" },
 ]
 cloud = [
     { name = "resend" },
@@ -3847,6 +3870,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiosqlite", marker = "extra == 'server'", specifier = ">=0.20.0" },
+    { name = "anthropic", marker = "extra == 'anthropic'", specifier = ">=0.39.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },
     { name = "bcrypt", marker = "extra == 'server'", specifier = ">=4.0.0" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.0.0" },
@@ -3873,7 +3897,7 @@ requires-dist = [
     { name = "python-ulid", marker = "extra == 'server'", specifier = ">=3.0.0" },
     { name = "qdrant-client", marker = "extra == 'server'", specifier = ">=1.12.0,<2.0.0" },
     { name = "qrcode", extras = ["pil"], marker = "extra == 'server'", specifier = ">=7.4.0" },
-    { name = "remembra", extras = ["server", "rerank", "mcp", "langchain", "crewai", "cloud"], marker = "extra == 'all'" },
+    { name = "remembra", extras = ["server", "rerank", "mcp", "langchain", "crewai", "cloud", "anthropic"], marker = "extra == 'all'" },
     { name = "resend", marker = "extra == 'cloud'", specifier = ">=0.7.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
     { name = "sentence-transformers", marker = "extra == 'rerank'", specifier = ">=2.5.0" },
@@ -3885,7 +3909,7 @@ requires-dist = [
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5.0.0" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'server'", specifier = ">=0.32.0" },
 ]
-provides-extras = ["server", "mcp", "langchain", "crewai", "cloud", "rerank", "tracing", "dev", "all"]
+provides-extras = ["server", "mcp", "langchain", "crewai", "anthropic", "cloud", "rerank", "tracing", "dev", "all"]
 
 [package.metadata.requires-dev]
 dev = [

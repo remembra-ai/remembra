@@ -1,6 +1,6 @@
 # Conversation Ingestion
 
-**NEW in v0.7.2** — Automatically extract memories from chat conversations.
+**NEW in v0.8.0** — Automatically extract memories from chat conversations.
 
 This is Remembra's answer to Mem0's conversation parsing — but with full control over extraction and deduplication.
 

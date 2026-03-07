@@ -13,6 +13,38 @@ docker run -d \
   remembra/remembra
 ```
 
+## Zero-Config Quick Start
+
+The fastest way to try Remembra — no API keys required. This uses Ollama for local embeddings and entity extraction.
+
+**One-line install:**
+
+```bash
+curl -sSL https://get.remembra.dev/quickstart.sh | bash
+```
+
+This pulls and starts [`docker-compose.quickstart.yml`](https://github.com/remembra-dev/remembra/blob/main/docker-compose.quickstart.yml), which runs 3 services:
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| **qdrant** | `6333` | Vector database for semantic search |
+| **ollama** | `11434` | Local embeddings and LLM (no API key needed) |
+| **remembra** | `8787` | Memory server |
+
+Once running, connect your MCP client to `http://localhost:8787` and start storing memories immediately.
+
+> **Note:** The quickstart configuration uses Ollama for both embeddings and entity extraction, so no external API keys are required. For production use, see the standard or production compose files below.
+
+### Docker Compose Profiles
+
+Remembra ships with 3 compose files for different use cases:
+
+| File | Use Case | Description |
+|------|----------|-------------|
+| `docker-compose.quickstart.yml` | Learning / Evaluation | Zero-config setup with Ollama — no API keys needed |
+| `docker-compose.yml` | Standard Development | Configurable providers, external API keys supported |
+| `docker-compose.prod.yml` | Production | Hardened security, auth enabled, rate limiting, health checks |
+
 ## Docker Compose (Recommended)
 
 For production, use Docker Compose with persistent storage:
@@ -82,6 +114,14 @@ docker-compose up -d
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `OPENAI_API_KEY` | OpenAI API key for embeddings | `sk-...` |
+
+### Providers
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REMEMBRA_EMBEDDING_PROVIDER` | `openai` | Embedding provider (`openai`, `ollama`, `cohere`, `voyage`, `jina`, `azure`) |
+| `REMEMBRA_LLM_PROVIDER` | `openai` | LLM for entity extraction (`openai`, `anthropic`, `ollama`) |
+| `ANTHROPIC_API_KEY` | - | API key for Anthropic entity extraction |
 
 ### Storage
 

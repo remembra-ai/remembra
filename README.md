@@ -70,34 +70,94 @@ print(result.context)
 
 ---
 
-## ⚡ Quick Start
+## ⚡ Quick Start (2 Minutes)
 
-### Option 1: Docker (Recommended)
+### One Command Install
 
 ```bash
-# Start the server
-docker run -d -p 8787:8787 remembra/remembra
-
-# Install SDK
-pip install remembra
-
-# Use it
-python -c "from remembra import Memory; m = Memory(); m.store('Hello world')"
+curl -sSL https://get.remembra.dev/quickstart.sh | bash
 ```
 
-### Option 2: MCP Server (Claude Code / Cursor)
+That's it. Remembra + Qdrant + Ollama start locally. No API keys needed.
+
+**Or with Docker Compose directly:**
 
 ```bash
-# Install
-pip install remembra[mcp]
+git clone https://github.com/remembra-ai/remembra && cd remembra
+docker compose -f docker-compose.quickstart.yml up -d
+```
 
-# Add to Claude Code
+**Try it:**
+
+```bash
+# Store a memory
+curl -X POST http://localhost:8787/api/v1/memories/store \
+  -H "Content-Type: application/json" \
+  -d '{"content": "Alice is CEO of Acme Corp", "user_id": "demo"}'
+
+# Recall it
+curl -X POST http://localhost:8787/api/v1/memories/recall \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Who runs Acme?", "user_id": "demo"}'
+```
+
+### Connect to Claude (MCP)
+
+**Claude Desktop** — add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "remembra": {
+      "command": "remembra-mcp",
+      "env": {
+        "REMEMBRA_URL": "http://localhost:8787",
+        "REMEMBRA_USER_ID": "default"
+      }
+    }
+  }
+}
+```
+
+**Claude Code:**
+
+```bash
 claude mcp add remembra -e REMEMBRA_URL=http://localhost:8787 -- remembra-mcp
-
-# Now Claude has persistent memory across all sessions!
 ```
 
-### Option 3: TypeScript / JavaScript
+**Cursor** — add to `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "remembra": {
+      "command": "remembra-mcp",
+      "env": {
+        "REMEMBRA_URL": "http://localhost:8787"
+      }
+    }
+  }
+}
+```
+
+Now ask Claude: *"Remember that Alice is CEO of Acme Corp"* — then later: *"Who runs Acme?"*
+
+### Python SDK
+
+```bash
+pip install remembra
+```
+
+```python
+from remembra import Memory
+
+memory = Memory(user_id="user_123")
+memory.store("Had a meeting with Sarah from Acme Corp. She prefers email over Slack.")
+result = memory.recall("How should I contact Sarah?")
+print(result.context)  # "Sarah from Acme Corp prefers email over Slack."
+```
+
+### TypeScript SDK
 
 ```bash
 npm install remembra
@@ -117,18 +177,21 @@ const result = await memory.recall('preferences');
 
 ### Feature Comparison
 
-| Feature | Remembra | Mem0 | Zep | Letta |
-|---------|----------|------|-----|-------|
-| **Self-host in 5 min** | ✅ One command | ❌ Complex | ⚠️ Moderate | ❌ Research |
-| **Entity Resolution** | ✅ Free | 💰 $249/mo | ✅ | ❌ |
-| **Temporal Features** | ✅ TTL + Decay | ❌ | ✅ | ✅ |
-| **Conversation Ingestion** | ✅ v0.7 | ✅ | ❌ | ❌ |
-| **Sleep-Time Compute** | ✅ v0.7 | ❌ | ❌ | ✅ |
-| **PII Detection** | ✅ Built-in | ❌ | ❌ | ❌ |
-| **MCP Server** | ✅ Native | ✅ | ✅ | ❌ |
-| **TypeScript SDK** | ✅ | ✅ | ✅ | ❌ |
-| **Pricing** | Free / $29 / $99 | $19 → $249 | $25+ | Free |
-| **License** | MIT | Apache 2.0 | Apache 2.0 | Apache 2.0 |
+| Feature | Remembra | Mem0 | Zep/Graphiti | Letta | Engram |
+|---------|----------|------|-------------|-------|--------|
+| **One-Command Install** | ✅ `curl \| bash` | ✅ pip | ✅ pip | ⚠️ Complex | ✅ brew |
+| **Entity Resolution** | ✅ Free | 💰 $249/mo | ✅ | ❌ | ❌ |
+| **Conflict Detection** | ✅ Unique | ❌ | ❌ | ❌ | ❌ |
+| **PII Detection** | ✅ Built-in | ❌ | ❌ | ❌ | ❌ |
+| **Hybrid Search** | ✅ BM25+Vector | ❌ | ✅ | ❌ | ❌ |
+| **6 Embedding Providers** | ✅ Hot-swap | ❌ (1-2) | ❌ (1) | ❌ | ❌ |
+| **Plugin System** | ✅ | ❌ | ❌ | ✅ | ❌ |
+| **Sleep-Time Compute** | ✅ | ❌ | ❌ | ✅ | ❌ |
+| **Self-Host + Billing** | ✅ Stripe | ❌ | ❌ | ❌ | ❌ |
+| **Memory Spaces** | ✅ Multi-tenant | ❌ | ❌ | ❌ | ❌ |
+| **MCP Server** | ✅ Native | ✅ | ❌ | ❌ | ✅ |
+| **Pricing** | Free / $49 / $99 | $19 → $249 | $25+ | Free | Free |
+| **License** | MIT | Apache 2.0 | Apache 2.0 | Apache 2.0 | MIT |
 
 ### Core Features
 

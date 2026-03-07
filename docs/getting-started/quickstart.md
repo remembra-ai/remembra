@@ -2,14 +2,37 @@
 
 Get Remembra running in 5 minutes.
 
-## Prerequisites
+## Zero-Config Quick Start
+
+The fastest way to get started. One command installs Remembra, Qdrant, and Ollama via Docker Compose -- no API keys needed.
+
+```bash
+curl -sSL https://get.remembra.dev/quickstart.sh | bash
+```
+
+This script will:
+
+- Pull and start **Remembra**, **Qdrant** (vector database), and **Ollama** (local embeddings/extraction) containers
+- Configure everything to work together automatically
+- Start the Remembra server on `http://localhost:8787`
+
+No OpenAI or other API keys are required. Ollama runs entirely locally for both embeddings and entity extraction.
+
+!!! tip "Already running?"
+    Skip ahead to [Step 2: Verify It's Running](#step-2-verify-its-running) once the script completes.
+
+---
+
+## Step 1: Start Remembra (Manual Setup)
+
+If you prefer to configure things yourself, choose one of the options below.
+
+### Prerequisites
 
 - Docker (recommended) or Python 3.10+
-- OpenAI API key (for embeddings/extraction)
+- OpenAI API key (for embeddings/extraction), or Ollama for a fully local setup
 
-## Step 1: Start Remembra
-
-=== "Docker (Recommended)"
+=== "Docker"
 
     ```bash
     docker run -d \
@@ -22,7 +45,7 @@ Get Remembra running in 5 minutes.
 === "Docker Compose"
 
     Create `docker-compose.yml`:
-    
+
     ```yaml
     version: '3.8'
     services:
@@ -34,13 +57,13 @@ Get Remembra running in 5 minutes.
           - OPENAI_API_KEY=${OPENAI_API_KEY}
         volumes:
           - remembra-data:/app/data
-    
+
     volumes:
       remembra-data:
     ```
-    
+
     Then run:
-    
+
     ```bash
     docker-compose up -d
     ```
@@ -51,7 +74,7 @@ Get Remembra running in 5 minutes.
     git clone https://github.com/remembra/remembra
     cd remembra
     pip install -e ".[server]"
-    
+
     export OPENAI_API_KEY=sk-your-key
     python -m remembra.server
     ```
@@ -60,7 +83,7 @@ Get Remembra running in 5 minutes.
 
 ```bash
 curl http://localhost:8787/health
-# {"status":"healthy","version":"0.7.2"}
+# {"status":"healthy","version":"0.8.0"}
 ```
 
 Or open the dashboard: [http://localhost:8787](http://localhost:8787)

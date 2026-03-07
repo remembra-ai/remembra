@@ -3,8 +3,8 @@
 **Persistent memory for AI applications. Self-host in 5 minutes.**
 
 <div class="admonition tip" markdown>
-<p class="admonition-title">🚀 v0.7.2 Released!</p>
-<p>Now with <strong>EntityGraph Performance Fix</strong>, <strong>Admin rebuild-vectors endpoint</strong>, <strong>Troubleshooting Guide</strong>, and <strong>Setup Checklist</strong>. <a href="#whats-new-in-v072">See what's new →</a></p>
+<p class="admonition-title">🚀 v0.8.0 Released!</p>
+<p>Now with <strong>One-Command Quick Start</strong>, <strong>Multi-Provider Entity Extraction</strong>, <strong>Performance Boost (httpx connection reuse)</strong>, and <strong>Usage Warnings</strong>. <a href="#whats-new-in-v080">See what's new →</a></p>
 </div>
 
 ---
@@ -116,6 +116,12 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
 ### 1. Start the Server
 
+=== "Quick Start (One Command)"
+
+    ```bash
+    curl -sSL https://get.remembra.dev/quickstart.sh | bash
+    ```
+
 === "Docker (Recommended)"
 
     ```bash
@@ -201,7 +207,49 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 [Get Started :material-arrow-right:](getting-started/quickstart.md){ .md-button .md-button--primary }
 [View on GitHub :material-github:](https://github.com/remembra-ai/remembra){ .md-button }
 
-## What's New in v0.7.2
+## What's New in v0.8.0
+
+<div class="grid cards" markdown>
+
+-   :material-console:{ .lg .middle } __One-Command Install__
+
+    ---
+
+    `curl -sSL https://get.remembra.dev/quickstart.sh | bash` — Zero-config setup with Ollama embeddings.
+
+-   :material-robot-outline:{ .lg .middle } __Multi-Provider Extraction__
+
+    ---
+
+    Entity extraction now works with OpenAI, Anthropic Claude, and Ollama. Choose the provider that fits your stack.
+
+-   :material-lightning-bolt:{ .lg .middle } __Performance Boost__
+
+    ---
+
+    Persistent HTTP connections via httpx connection reuse reduce latency by 100-300ms per operation.
+
+-   :material-bell-alert:{ .lg .middle } __Usage Warnings__
+
+    ---
+
+    API responses include usage thresholds at 60/80/95% to drive Pro upgrades. Stay informed before hitting limits.
+
+-   :material-docker:{ .lg .middle } __Docker Compose Quickstart__
+
+    ---
+
+    New zero-config compose with Qdrant + Ollama + Remembra. One file, all services, ready to go.
+
+-   :material-test-tube:{ .lg .middle } __125 New Tests__
+
+    ---
+
+    Comprehensive test coverage for embeddings, entities, conflicts, spaces, and plugins.
+
+</div>
+
+### Previous Release (v0.7.2)
 
 <div class="grid cards" markdown>
 
@@ -247,42 +295,6 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
 </div>
 
-### Previous Release (v0.7.1)
-
-<div class="grid cards" markdown>
-
--   :material-chat-processing:{ .lg .middle } __Conversation Ingestion__
-
-    ---
-
-    Automatically extract memories from chat conversations.
-
-    [Learn more →](guides/conversation-ingestion.md)
-
--   :material-sleep:{ .lg .middle } __Sleep-Time Compute__
-
-    ---
-
-    Background consolidation during idle time.
-
-    [Learn more →](guides/sleep-time-compute.md)
-
--   :material-shield-check:{ .lg .middle } __PII Detection__
-
-    ---
-
-    OWASP ASI06 compliant sensitive data handling.
-
-    [Learn more →](guides/security.md#pii-detection)
-
--   :material-language-typescript:{ .lg .middle } __TypeScript SDK__
-
-    ---
-
-    First-class JavaScript/TypeScript support.
-
-</div>
-
 ## Architecture
 
 ```
@@ -298,7 +310,9 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 │  (LLM-based) │ (Resolution) │(Hybrid Search)│  (TTL/Decay)  │
 ├──────────────┼──────────────┼───────────────┼───────────────┤
 │  Ingestion   │  Sleep-Time  │  PII Detect   │   Anomaly     │
-│  (v0.7.2)    │  Compute     │  (OWASP)      │   Detection   │
+│              │  Compute     │  (OWASP)      │   Detection   │
+├──────────────┼──────────────┼───────────────┼───────────────┤
+│  Plugins     │ Spaces (RBAC)│               │               │
 ├──────────────┴──────────────┴───────────────┴───────────────┤
 │                      Storage Layer                           │
 │         Qdrant (vectors) + SQLite (metadata/graph)          │

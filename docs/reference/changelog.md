@@ -2,7 +2,7 @@
 
 See [CHANGELOG.md](https://github.com/remembra-ai/remembra/blob/main/CHANGELOG.md) for the full version history.
 
-## Latest: v0.7.2 (March 2026)
+## Latest: v0.8.0 (March 2026)
 
 ### Fixed
 - **Security: CORS Configuration** — Removed `allow_origins=["*"]`, now configurable via `REMEMBRA_CORS_ORIGINS`

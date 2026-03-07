@@ -90,7 +90,13 @@ class Memory:
         }
         if api_key:
             self._headers["X-API-Key"] = api_key
-    
+
+        # Persistent HTTP client (reuses TCP connections)
+        self._client = httpx.Client(
+            timeout=self.timeout,
+            headers=self._headers,
+        )
+
     def _request(
         self,
         method: str,
@@ -100,16 +106,14 @@ class Memory:
     ) -> dict[str, Any]:
         """Make an HTTP request to the Remembra server."""
         url = f"{self.base_url}{path}"
-        
-        with httpx.Client(timeout=self.timeout) as client:
-            response = client.request(
-                method=method,
-                url=url,
-                headers=self._headers,
-                json=json,
-                params=params,
-            )
-        
+
+        response = self._client.request(
+            method=method,
+            url=url,
+            json=json,
+            params=params,
+        )
+
         if response.status_code >= 400:
             try:
                 error_detail = response.json().get("detail", response.text)
@@ -481,5 +485,15 @@ class Memory:
             stats=stats,
         )
     
+    def close(self) -> None:
+        """Close the persistent HTTP client."""
+        self._client.close()
+
+    def __enter__(self) -> "Memory":
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        self.close()
+
     def __repr__(self) -> str:
         return f"Memory(base_url='{self.base_url}', user_id='{self.user_id}', project='{self.project}')"

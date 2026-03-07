@@ -152,7 +152,7 @@ curl -s -X POST "$API/memories" \
 - Other dashboard features work fine
 
 ### Why It Happens
-In versions before 0.7.2, the EntityGraph component made separate API calls for each entity to fetch relationships. With 50+ entities, this caused:
+In versions before 0.8.0, the EntityGraph component made separate API calls for each entity to fetch relationships. With 50+ entities, this caused:
 - **Rate limiting**: Too many requests per minute
 - **Slow loading**: 50 sequential requests = 50x latency
 - **Browser throttling**: Browsers limit concurrent requests
@@ -171,7 +171,7 @@ Open browser developer tools (F12) → Network tab → Reload the graph page.
 ### How to Fix It
 
 **If using hosted dashboard:**
-Update to v0.7.2 or later - the fix is included.
+Update to v0.8.0 or later - the fix is included.
 
 **If self-hosting the dashboard:**
 
@@ -471,4 +471,4 @@ When reporting issues, include:
 
 ---
 
-*Last updated: March 6, 2026 | Remembra v0.7.2*
+*Last updated: March 6, 2026 | Remembra v0.8.0*

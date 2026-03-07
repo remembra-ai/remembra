@@ -1,6 +1,6 @@
 {
   "name": "remembra",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "TypeScript/JavaScript SDK for Remembra - AI Memory Layer",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

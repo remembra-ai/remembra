@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "remembra"
-version = "0.7.2"
+version = "0.8.0"
 description = "Universal memory layer for AI applications. Self-host in 5 minutes."
 readme = "README.md"
 license = { text = "MIT" }
@@ -86,6 +86,11 @@ crewai = [
     "crewai>=0.80.0",
 ]
 
+# Anthropic Claude integration (entity extraction, LLM provider)
+anthropic = [
+    "anthropic>=0.39.0",
+]
+
 # Cloud / SaaS dependencies (billing, metering)
 cloud = [
     "stripe>=8.0.0",
@@ -118,7 +123,7 @@ dev = [
 
 # All dependencies (SDK + Server + Rerank + MCP + Integrations + Cloud)
 all = [
-    "remembra[server,rerank,mcp,langchain,crewai,cloud]",
+    "remembra[server,rerank,mcp,langchain,crewai,cloud,anthropic]",
 ]
 
 [project.urls]

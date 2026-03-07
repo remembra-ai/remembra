@@ -308,79 +308,56 @@ def ingest_conversation(
     Returns:
         JSON string with extracted facts, entities, deduplication results, and stats.
     """
-    import httpx
-
     try:
         client = _get_client()
 
-        # Build request payload
-        payload = {
-            "messages": messages,
-            "user_id": client.user_id,
-            "session_id": session_id,
-            "project_id": client.project,
-            "options": {
-                "extract_from": extract_from,
-                "min_importance": min_importance,
-                "dedupe": True,
-                "store": store,
-                "infer": True,
-            },
-        }
+        # Use the SDK's ingest_conversation method (reuses persistent HTTP client)
+        result = client.ingest_conversation(
+            messages=messages,
+            session_id=session_id,
+            min_importance=min_importance,
+            extract_from=extract_from,
+            store=store,
+        )
 
-        # Call the conversation ingestion endpoint
-        with httpx.Client(timeout=120.0) as http_client:
-            headers = {}
-            if client.api_key:
-                headers["X-API-Key"] = client.api_key
-
-            response = http_client.post(
-                f"{client.base_url}/api/v1/ingest/conversation",
-                json=payload,
-                headers=headers,
-            )
-
-            if response.status_code == 201:
-                result = response.json()
-                return json.dumps(
+        return json.dumps(
+            {
+                "status": result.status,
+                "session_id": result.session_id,
+                "facts_extracted": result.stats.facts_extracted,
+                "facts_stored": result.stats.facts_stored,
+                "facts_deduped": result.stats.facts_deduped,
+                "entities_found": result.stats.entities_found,
+                "processing_time_ms": result.stats.processing_time_ms,
+                "facts": [
                     {
-                        "status": result.get("status", "ok"),
-                        "session_id": result.get("session_id"),
-                        "facts_extracted": result.get("stats", {}).get("facts_extracted", 0),
-                        "facts_stored": result.get("stats", {}).get("facts_stored", 0),
-                        "facts_deduped": result.get("stats", {}).get("facts_deduped", 0),
-                        "entities_found": result.get("stats", {}).get("entities_found", 0),
-                        "processing_time_ms": result.get("stats", {}).get("processing_time_ms", 0),
-                        "facts": [
-                            {
-                                "content": f.get("content"),
-                                "importance": f.get("importance"),
-                                "speaker": f.get("speaker"),
-                                "action": f.get("action"),
-                                "stored": f.get("stored"),
-                            }
-                            for f in result.get("facts", [])
-                        ],
-                        "entities": [
-                            {
-                                "name": e.get("name"),
-                                "type": e.get("type"),
-                            }
-                            for e in result.get("entities", [])
-                        ],
-                    },
-                    indent=2,
-                )
-            else:
-                error_detail = response.json().get("detail", response.text)
-                return json.dumps(
-                    {
-                        "status": "error",
-                        "code": response.status_code,
-                        "error": error_detail,
+                        "content": f.content,
+                        "importance": f.importance,
+                        "speaker": f.speaker,
+                        "action": f.action,
+                        "stored": f.stored,
                     }
-                )
+                    for f in result.facts
+                ],
+                "entities": [
+                    {
+                        "name": e.name,
+                        "type": e.type,
+                    }
+                    for e in result.entities
+                ],
+            },
+            indent=2,
+        )
 
+    except MemoryError as e:
+        return json.dumps(
+            {
+                "status": "error",
+                "code": e.status_code,
+                "error": str(e),
+            }
+        )
     except Exception as e:
         return json.dumps({"status": "error", "error": str(e)})
 

@@ -42,6 +42,7 @@ class WebhookDelivery:
         self._timeout = timeout
         self._max_retries = max_retries
         self._user_agent = user_agent
+        self._client = httpx.AsyncClient(timeout=timeout)
 
     async def deliver(
         self,
@@ -82,8 +83,7 @@ class WebhookDelivery:
         last_error: Exception | None = None
         for attempt in range(1, self._max_retries + 1):
             try:
-                async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    response = await client.post(url, content=body, headers=headers)
+                response = await self._client.post(url, content=body, headers=headers)
 
                 if 200 <= response.status_code < 300:
                     logger.info(
@@ -125,6 +125,10 @@ class WebhookDelivery:
             str(last_error),
         )
         return False
+
+    async def close(self) -> None:
+        """Close the persistent HTTP client."""
+        await self._client.aclose()
 
     @staticmethod
     def verify_signature(

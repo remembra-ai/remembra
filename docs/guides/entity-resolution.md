@@ -16,6 +16,58 @@ Storage:
   - Entity linked to memory
 ```
 
+## Extraction Providers
+
+Entity extraction supports multiple LLM providers. Configure which provider to use via the `REMEMBRA_LLM_PROVIDER` environment variable.
+
+!!! note "New in v0.8.0"
+    Previously entity extraction was limited to OpenAI. Now you can use Anthropic or local Ollama models.
+
+### OpenAI (default)
+
+```bash
+REMEMBRA_LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
+OpenAI is the default provider. Set your `OPENAI_API_KEY` and entity extraction works out of the box.
+
+### Anthropic Claude
+
+```bash
+REMEMBRA_LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Use Anthropic Claude for entity extraction. Requires an `ANTHROPIC_API_KEY`.
+
+### Ollama (local)
+
+```bash
+REMEMBRA_LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434  # default
+```
+
+Run entity extraction entirely locally with Ollama. No API key needed -- just a running Ollama instance with a compatible model.
+
+### Provider Selection
+
+The system uses a factory pattern to automatically create the right extractor based on your configuration. Simply set `REMEMBRA_LLM_PROVIDER` to your desired provider and the correct implementation is instantiated at startup. No additional code changes are required.
+
+```
+┌──────────────────┐
+│  EntityExtractor │  (factory)
+│    Factory       │
+└────────┬─────────┘
+         │
+    ┌────┴─────┬──────────────┐
+    ▼          ▼              ▼
+┌────────┐ ┌──────────┐ ┌────────┐
+│ OpenAI │ │ Anthropic│ │ Ollama │
+│Extractor│ │ Extractor│ │Extractor│
+└────────┘ └──────────┘ └────────┘
+```
+
 ## Entity Types
 
 | Type | Examples |

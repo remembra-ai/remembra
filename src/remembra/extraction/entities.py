@@ -2,13 +2,21 @@
 LLM-powered entity extraction from text.
 
 Extracts people, organizations, locations, and their relationships.
+Supports OpenAI, Anthropic, and Ollama providers.
 """
 
+from __future__ import annotations
+
 import json
+import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import structlog
 from openai import AsyncOpenAI
+
+if TYPE_CHECKING:
+    from remembra.config import Settings
 
 log = structlog.get_logger()
 
@@ -233,6 +241,234 @@ class EntityExtractor:
 
 
 # ============================================================================
+# Shared JSON Parsing Helper
+# ============================================================================
+
+def _parse_extraction_json(raw_text: str) -> ExtractionResult:
+    """
+    Parse an LLM response into an ExtractionResult.
+
+    Handles both clean JSON and JSON wrapped in markdown fences.
+    Returns an empty result on any parse failure.
+    """
+    # Strip markdown code fences (```json ... ```) if present
+    cleaned = raw_text.strip()
+    fence_match = re.search(r"```(?:json)?\s*\n?(.*?)```", cleaned, re.DOTALL)
+    if fence_match:
+        cleaned = fence_match.group(1).strip()
+
+    data = json.loads(cleaned)
+
+    # Parse entities
+    entities: list[ExtractedEntity] = []
+    for e in data.get("entities", []):
+        if isinstance(e, dict) and e.get("name"):
+            entities.append(ExtractedEntity(
+                name=e.get("name", ""),
+                type=e.get("type", "CONCEPT"),
+                description=e.get("description", ""),
+                aliases=e.get("aliases", []),
+            ))
+
+    # Parse relationships
+    relationships: list[ExtractedRelationship] = []
+    for r in data.get("relationships", []):
+        if isinstance(r, dict) and r.get("subject") and r.get("object"):
+            relationships.append(ExtractedRelationship(
+                subject=r.get("subject", ""),
+                predicate=r.get("predicate", "RELATED_TO"),
+                object=r.get("object", ""),
+            ))
+
+    return ExtractionResult(entities=entities, relationships=relationships)
+
+
+# ============================================================================
+# Anthropic Entity Extractor
+# ============================================================================
+
+class AnthropicEntityExtractor:
+    """Entity extraction using Anthropic Claude."""
+
+    def __init__(self, model: str = "claude-sonnet-4-5", api_key: str | None = None):
+        import anthropic
+
+        self._client = anthropic.AsyncAnthropic(api_key=api_key)
+        self.model = model
+        log.info("anthropic_entity_extractor_initialized", model=self.model)
+
+    async def extract(self, content: str) -> ExtractionResult:
+        """
+        Extract entities and relationships from content.
+
+        Args:
+            content: Text to extract entities from
+
+        Returns:
+            ExtractionResult with entities and relationships
+        """
+        if not content.strip() or len(content.strip()) < 10:
+            return ExtractionResult(entities=[], relationships=[])
+
+        try:
+            log.debug("extracting_entities", provider="anthropic", content_length=len(content))
+
+            response = await self._client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                temperature=0.1,
+                system=ENTITY_EXTRACTION_PROMPT,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": f"Extract entities and relationships from:\n\n{content}",
+                    },
+                ],
+            )
+
+            # Claude returns content blocks; concatenate text blocks
+            result_text = "".join(
+                block.text for block in response.content if block.type == "text"
+            )
+            if not result_text:
+                return ExtractionResult(entities=[], relationships=[])
+
+            result = _parse_extraction_json(result_text)
+
+            log.info(
+                "entities_extracted",
+                provider="anthropic",
+                entity_count=len(result.entities),
+                relationship_count=len(result.relationships),
+            )
+            return result
+
+        except json.JSONDecodeError as e:
+            log.error("entity_extraction_json_error", provider="anthropic", error=str(e))
+            return ExtractionResult(entities=[], relationships=[])
+        except Exception as e:
+            log.error("entity_extraction_error", provider="anthropic", error=str(e))
+            return ExtractionResult(entities=[], relationships=[])
+
+
+# ============================================================================
+# Ollama Entity Extractor
+# ============================================================================
+
+class OllamaEntityExtractor:
+    """Entity extraction using local Ollama models."""
+
+    def __init__(
+        self,
+        model: str = "llama3.1",
+        base_url: str = "http://localhost:11434",
+    ):
+        import httpx
+
+        self._base_url = base_url.rstrip("/")
+        self.model = model
+        self._client = httpx.AsyncClient(timeout=120.0)
+        log.info(
+            "ollama_entity_extractor_initialized",
+            model=self.model,
+            base_url=self._base_url,
+        )
+
+    async def extract(self, content: str) -> ExtractionResult:
+        """
+        Extract entities and relationships from content.
+
+        Args:
+            content: Text to extract entities from
+
+        Returns:
+            ExtractionResult with entities and relationships
+        """
+        if not content.strip() or len(content.strip()) < 10:
+            return ExtractionResult(entities=[], relationships=[])
+
+        try:
+            log.debug("extracting_entities", provider="ollama", content_length=len(content))
+
+            response = await self._client.post(
+                f"{self._base_url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": ENTITY_EXTRACTION_PROMPT},
+                        {
+                            "role": "user",
+                            "content": (
+                                f"Extract entities and relationships from:\n\n{content}"
+                            ),
+                        },
+                    ],
+                    "format": "json",
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.1,
+                    },
+                },
+            )
+            response.raise_for_status()
+
+            data = response.json()
+            result_text = data.get("message", {}).get("content", "")
+            if not result_text:
+                return ExtractionResult(entities=[], relationships=[])
+
+            result = _parse_extraction_json(result_text)
+
+            log.info(
+                "entities_extracted",
+                provider="ollama",
+                entity_count=len(result.entities),
+                relationship_count=len(result.relationships),
+            )
+            return result
+
+        except json.JSONDecodeError as e:
+            log.error("entity_extraction_json_error", provider="ollama", error=str(e))
+            return ExtractionResult(entities=[], relationships=[])
+        except Exception as e:
+            log.error("entity_extraction_error", provider="ollama", error=str(e))
+            return ExtractionResult(entities=[], relationships=[])
+
+
+# ============================================================================
+# Factory
+# ============================================================================
+
+def create_entity_extractor(
+    settings: Settings,
+) -> EntityExtractor | AnthropicEntityExtractor | OllamaEntityExtractor:
+    """Create the appropriate entity extractor based on config.
+
+    Reads ``settings.llm_provider`` to decide which backend to use and
+    passes through the relevant model / API-key / URL settings.
+    """
+    provider = getattr(settings, "llm_provider", "openai").lower()
+
+    if provider == "anthropic":
+        return AnthropicEntityExtractor(
+            model=getattr(settings, "extraction_model", "claude-sonnet-4-5"),
+            api_key=getattr(settings, "anthropic_api_key", None),
+        )
+
+    if provider == "ollama":
+        return OllamaEntityExtractor(
+            model=getattr(settings, "extraction_model", "llama3.1"),
+            base_url=getattr(settings, "ollama_url", "http://localhost:11434"),
+        )
+
+    # Default: OpenAI
+    return EntityExtractor(
+        model=getattr(settings, "extraction_model", "gpt-4o-mini"),
+        api_key=getattr(settings, "openai_api_key", None),
+    )
+
+
+# ============================================================================
 # Convenience function
 # ============================================================================
 
@@ -242,7 +478,7 @@ async def extract_entities(
 ) -> ExtractionResult:
     """
     Extract entities and relationships from content.
-    
+
     Convenience function for one-off extraction.
     """
     extractor = EntityExtractor(model=model)

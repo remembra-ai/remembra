@@ -18,7 +18,7 @@ from remembra.extraction.consolidator import (
     ExistingMemory,
     MemoryConsolidator,
 )
-from remembra.extraction.entities import EntityExtractor
+from remembra.extraction.entities import EntityExtractor, create_entity_extractor
 from remembra.extraction.extractor import ExtractionConfig, FactExtractor
 from remembra.extraction.matcher import EntityMatcher, ExistingEntity
 from remembra.models.memory import (
@@ -127,10 +127,7 @@ class MemoryService:
         )
         
         # Initialize entity resolution (Week 5)
-        self.entity_extractor = EntityExtractor(
-            model=settings.extraction_model,
-            api_key=settings.openai_api_key,
-        )
+        self.entity_extractor = create_entity_extractor(settings)
         self.entity_matcher = EntityMatcher(
             model=settings.extraction_model,
             api_key=settings.openai_api_key,

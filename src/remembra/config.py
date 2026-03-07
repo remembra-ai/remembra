@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     llm_provider: str = Field("openai", description="openai | ollama | anthropic")
     llm_model: str = "gpt-4o-mini"
     llm_base_url: str | None = None
+    anthropic_api_key: str | None = None
 
     # -----------------------------------------------------------------------
     # Intelligent Extraction (Week 4)

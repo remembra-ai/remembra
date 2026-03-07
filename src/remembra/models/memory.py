@@ -111,6 +111,10 @@ class StoreResponse(BaseModel):
     id: str
     extracted_facts: list[str]
     entities: list[EntityRef]
+    usage_warning: dict[str, Any] | None = Field(
+        default=None,
+        description="Usage warning when approaching plan limits (cloud only).",
+    )
 
 
 class RecallRequest(BaseModel):
@@ -157,6 +161,10 @@ class RecallResponse(BaseModel):
     context: str
     memories: list[RecallResult]
     entities: list[EntityRef]
+    usage_warning: dict[str, Any] | None = Field(
+        default=None,
+        description="Usage warning when approaching plan limits (cloud only).",
+    )
 
 
 class UpdateRequest(BaseModel):

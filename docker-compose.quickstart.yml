@@ -1,0 +1,108 @@
+# ============================================================================
+# Remembra Quick Start — Zero-Config Docker Compose
+#
+# Usage: docker compose -f docker-compose.quickstart.yml up -d
+#
+# Services:
+#   - qdrant:    Vector database (port 6333)
+#   - ollama:    Local embedding model (port 11434) — no API key needed
+#   - remembra:  Memory server (port 8787)
+#
+# This quickstart config disables auth and uses Ollama for embeddings,
+# so you can start storing memories with zero API keys.
+# ============================================================================
+
+services:
+  # --------------------------------------------------------------------------
+  # Qdrant — Vector Database
+  # --------------------------------------------------------------------------
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - remembra_qs_qdrant:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6333/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  # --------------------------------------------------------------------------
+  # Ollama — Local Embeddings (no API key needed)
+  # --------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - remembra_qs_ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+
+  # --------------------------------------------------------------------------
+  # Remembra — AI Memory Server
+  # --------------------------------------------------------------------------
+  remembra:
+    image: remembra/remembra:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8787:8787"
+    volumes:
+      - remembra_qs_data:/data
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+    environment:
+      # Server
+      REMEMBRA_HOST: "0.0.0.0"
+      REMEMBRA_PORT: "8787"
+      REMEMBRA_DEBUG: "true"
+
+      # Auth — DISABLED for quickstart (enable for production!)
+      REMEMBRA_AUTH_ENABLED: "false"
+
+      # Rate limiting — disabled for quickstart
+      REMEMBRA_RATE_LIMIT_ENABLED: "false"
+
+      # Qdrant connection
+      REMEMBRA_QDRANT_URL: "http://qdrant:6333"
+      REMEMBRA_QDRANT_COLLECTION: "remembra_memories"
+
+      # Embeddings — Ollama (local, no API key needed)
+      REMEMBRA_EMBEDDING_PROVIDER: "ollama"
+      REMEMBRA_EMBEDDING_MODEL: "nomic-embed-text"
+      REMEMBRA_EMBEDDING_DIMENSIONS: "768"
+      REMEMBRA_OLLAMA_URL: "http://ollama:11434"
+
+      # Database
+      REMEMBRA_DATABASE_URL: "sqlite+aiosqlite:///data/remembra.db"
+
+      # Entity extraction — disabled by default (requires LLM API key)
+      # Uncomment and set your OpenAI key to enable:
+      # REMEMBRA_OPENAI_API_KEY: "sk-..."
+      # REMEMBRA_EXTRACTION_MODEL: "gpt-4o-mini"
+
+      # JWT secret (not needed when auth is disabled)
+      REMEMBRA_JWT_SECRET: "quickstart-dev-only-not-for-production"
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8787/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+
+volumes:
+  remembra_qs_qdrant:
+  remembra_qs_ollama:
+  remembra_qs_data:

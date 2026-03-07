@@ -4,8 +4,8 @@ Use Remembra as persistent memory for AI assistants via the [Model Context Proto
 
 Works with **Claude Code**, **Claude Desktop**, **Cursor**, and any MCP-compatible client.
 
-!!! tip "v0.7.2 Features"
-    The MCP server now includes `ingest_conversation` for automatic conversation memory extraction!
+!!! tip "v0.8.0 Features"
+    New in v0.8.0: One-command quick start (`curl -sSL https://get.remembra.dev/quickstart.sh | bash`), multi-provider entity extraction (OpenAI + Anthropic + Ollama), and persistent HTTP connections for faster performance.
 
 ## Installation
 
@@ -208,7 +208,7 @@ Result:
   "server": "http://localhost:8787",
   "health": {
     "status": "healthy",
-    "version": "0.7.2",
+    "version": "0.8.0",
     "qdrant": "connected",
     "database": "connected"
   }
@@ -217,7 +217,7 @@ Result:
 
 ---
 
-### ingest_conversation <span class="md-tag">v0.7.2</span>
+### ingest_conversation <span class="md-tag">v0.8.0</span>
 
 Automatically extract memories from a conversation. This is the **primary method** for agents to add context to memory.
 
@@ -292,7 +292,7 @@ Returns server status and configuration.
   "server": "http://localhost:8787",
   "user_id": "user_123",
   "project": "default",
-  "health": {"status": "healthy", "version": "0.7.2"}
+  "health": {"status": "healthy", "version": "0.8.0"}
 }
 ```
 

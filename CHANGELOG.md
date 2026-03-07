@@ -5,6 +5,25 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-03-07
+
+### Added
+- **One-Command Quick Start** — `curl -sSL https://get.remembra.dev/quickstart.sh | bash` sets up Remembra + Qdrant + Ollama with zero API keys required
+- **Multi-Provider Entity Extraction** — Entity extraction now works with Anthropic Claude and Ollama, not just OpenAI. New `create_entity_extractor()` factory dispatches based on `REMEMBRA_LLM_PROVIDER`
+- **Usage Warning Banners** — API responses include usage percentage headers (`X-Remembra-Usage-Percent`, `X-Remembra-Plan`) and `usage_warning` field at 60/80/95% thresholds
+- **Docker Compose Quickstart** — New `docker-compose.quickstart.yml` with 3 services (Qdrant, Ollama, Remembra), health checks, zero config
+- **125 New Tests** — Test coverage for embeddings (6 providers), entity extraction (3 providers), conflict resolution, memory spaces (RBAC), and plugin system (pipeline dispatch)
+- **Shared Test Fixtures** — New `tests/conftest.py` with reusable fixtures for all test files
+
+### Changed
+- **httpx Connection Reuse** — All 6 embedding providers, webhook delivery, Python SDK client, and MCP server now use persistent HTTP clients. Reduces latency by 100-300ms per operation
+- **MCP Server Ingestion** — `ingest_conversation` refactored to use SDK's `Memory.ingest_conversation()`
+- **Python SDK** — `Memory` client now supports context manager and has explicit `close()` method
+- **App Lifespan Cleanup** — Proper shutdown of all persistent HTTP clients on server stop
+
+### Fixed
+- **Connection Churn** — Eliminated 13 locations creating new TCP+TLS connections per request
+
 ## [0.7.2] - 2026-03-06
 
 ### Fixed
