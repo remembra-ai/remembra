@@ -110,5 +110,8 @@ nav:
     - Configuration: reference/configuration.md
     - API Reference: reference/api.md
     - Changelog: reference/changelog.md
+  - Support:
+    - Troubleshooting: TROUBLESHOOTING.md
+    - Setup Checklist: SETUP-CHECKLIST.md
 
 copyright: Copyright &copy; 2026 DolphyTech
