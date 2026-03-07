@@ -5,7 +5,7 @@ See [CHANGELOG.md](https://github.com/remembra-ai/remembra/blob/main/CHANGELOG.m
 ## Latest: v0.8.0 (March 2026)
 
 ### Added
-- **One-Command Quick Start** — `curl -sSL https://get.remembra.dev/quickstart.sh | bash` zero-config setup with Ollama embeddings
+- **One-Command Quick Start** — `curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash` zero-config setup with Ollama embeddings
 - **Multi-Provider Entity Extraction** — OpenAI, Anthropic Claude, and Ollama support for entity extraction
 - **Usage Warning Banners** — API responses include usage thresholds at 60/80/95% to drive Pro upgrades
 - **Docker Compose Quickstart** — Zero-config compose with Qdrant + Ollama + Remembra in one file

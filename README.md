@@ -76,7 +76,7 @@ print(result.context)
 ### One Command Install
 
 ```bash
-curl -sSL https://get.remembra.dev/quickstart.sh | bash
+curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash
 ```
 
 That's it. Remembra + Qdrant + Ollama start locally. No API keys needed.

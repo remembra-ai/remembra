@@ -7,7 +7,7 @@ Multiple ways to install and run Remembra.
 Get Remembra running with a single command. No API keys needed -- this installs Remembra, Qdrant, and Ollama via Docker Compose for a fully local setup.
 
 ```bash
-curl -sSL https://get.remembra.dev/quickstart.sh | bash
+curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash
 ```
 
 This sets up everything automatically: Remembra server on port 8787, Qdrant for vector storage, and Ollama for local embeddings and entity extraction.

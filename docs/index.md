@@ -119,7 +119,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 === "Quick Start (One Command)"
 
     ```bash
-    curl -sSL https://get.remembra.dev/quickstart.sh | bash
+    curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash
     ```
 
 === "Docker (Recommended)"
@@ -215,7 +215,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    `curl -sSL https://get.remembra.dev/quickstart.sh | bash` — Zero-config setup with Ollama embeddings.
+    `curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash` — Zero-config setup with Ollama embeddings.
 
 -   :material-robot-outline:{ .lg .middle } __Multi-Provider Extraction__
 

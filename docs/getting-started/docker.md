@@ -20,7 +20,7 @@ The fastest way to try Remembra — no API keys required. This uses Ollama for l
 **One-line install:**
 
 ```bash
-curl -sSL https://get.remembra.dev/quickstart.sh | bash
+curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash
 ```
 
 This pulls and starts [`docker-compose.quickstart.yml`](https://github.com/remembra-ai/remembra/blob/main/docker-compose.quickstart.yml), which runs 3 services:

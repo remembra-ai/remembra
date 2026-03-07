@@ -7,7 +7,7 @@ Get Remembra running in 5 minutes.
 The fastest way to get started. One command installs Remembra, Qdrant, and Ollama via Docker Compose -- no API keys needed.
 
 ```bash
-curl -sSL https://get.remembra.dev/quickstart.sh | bash
+curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash
 ```
 
 This script will:

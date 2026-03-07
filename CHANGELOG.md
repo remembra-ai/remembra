@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.8.0] - 2026-03-07
 
 ### Added
-- **One-Command Quick Start** — `curl -sSL https://get.remembra.dev/quickstart.sh | bash` sets up Remembra + Qdrant + Ollama with zero API keys required
+- **One-Command Quick Start** — `curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash` sets up Remembra + Qdrant + Ollama with zero API keys required
 - **Multi-Provider Entity Extraction** — Entity extraction now works with Anthropic Claude and Ollama, not just OpenAI. New `create_entity_extractor()` factory dispatches based on `REMEMBRA_LLM_PROVIDER`
 - **Usage Warning Banners** — API responses include usage percentage headers (`X-Remembra-Usage-Percent`, `X-Remembra-Plan`) and `usage_warning` field at 60/80/95% thresholds
 - **Docker Compose Quickstart** — New `docker-compose.quickstart.yml` with 3 services (Qdrant, Ollama, Remembra), health checks, zero config
