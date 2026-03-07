@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "remembra"
 version = "0.8.2"
-description = "Universal memory layer for AI applications. Self-host in 5 minutes."
+description = "Universal memory layer for AI applications. Self-host in minutes."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"

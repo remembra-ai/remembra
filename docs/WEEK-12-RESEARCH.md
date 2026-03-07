@@ -54,7 +54,7 @@ docs/
 
 1. **Hero Section**
    - Clear headline: "AI Memory That Actually Works"
-   - Subheadline: "Self-host in 5 minutes. Remember everything."
+   - Subheadline: "Self-host in minutes. Remember everything."
    - CTA: "Get Started" / "View on GitHub"
    - Code snippet preview
 

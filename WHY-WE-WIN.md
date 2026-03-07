@@ -100,7 +100,7 @@ AGPL scares enterprises. MIT is permissive - use it however you want.
 
 ## Our Positioning
 
-**One-liner:** "Memory for AI. Self-host in 5 minutes."
+**One-liner:** "Memory for AI. Self-host in minutes."
 
 **For developers who:**
 - Are building AI applications that need persistence

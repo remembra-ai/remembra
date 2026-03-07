@@ -1,6 +1,6 @@
 # Quickstart
 
-Get Remembra running in 5 minutes.
+Get Remembra running in minutes.
 
 ## Zero-Config Quick Start
 

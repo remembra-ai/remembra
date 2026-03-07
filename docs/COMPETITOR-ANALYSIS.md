@@ -177,7 +177,7 @@
 ### Must Have
 1. Hero with clear value prop
 2. Feature comparison table (vs competitors)
-3. "Self-host in 5 minutes" demo
+3. "Self-host in minutes" demo
 4. MCP integration highlight
 5. Pricing section (clear, competitive)
 6. Quick start code snippets

@@ -7,7 +7,7 @@
 <p align="center">
   <strong>The memory layer for AI that actually works.</strong><br>
   Persistent memory with entity resolution, temporal decay, and graph-aware recall.<br>
-  Self-host in 5 minutes. No vendor lock-in.
+  Self-host in minutes. No vendor lock-in.
 </p>
 
 <p align="center">
@@ -216,7 +216,7 @@ const result = await memory.recall('preferences');
 
 | Resource | Description |
 |----------|-------------|
-| [Quick Start](https://docs.remembra.dev/getting-started/quickstart/) | Get running in 5 minutes |
+| [Quick Start](https://docs.remembra.dev/getting-started/quickstart/) | Get running in minutes |
 | [Python SDK](https://docs.remembra.dev/guides/python-sdk/) | Full Python reference |
 | [TypeScript SDK](https://docs.remembra.dev/guides/javascript-sdk/) | JavaScript/TypeScript guide |
 | [MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Claude Code / Cursor setup |

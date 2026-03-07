@@ -1,6 +1,6 @@
 # Remembra
 
-**Persistent memory for AI applications. Self-host in 5 minutes.**
+**Persistent memory for AI applications. Self-host in minutes.**
 
 <div class="admonition tip" markdown>
 <p class="admonition-title">🚀 v0.8.2 Released!</p>
@@ -65,7 +65,7 @@ Remembra is a universal memory layer for LLMs. It solves the fundamental problem
 Every AI app needs memory. Developers hack together solutions using vector databases, embeddings, and custom retrieval logic. It's complex, fragmented, and everyone rebuilds the same thing.
 
 ### Our Approach
-- **Self-host in 5 minutes**: One Docker command, everything bundled
+- **Self-host in minutes**: One Docker command, everything bundled
 - **MCP-native**: Works with Claude Code and Cursor out of the box
 - **Open source core**: MIT license, own your data
 - **Built for production**: Entity resolution, temporal decay, hybrid search

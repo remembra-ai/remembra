@@ -120,7 +120,7 @@ Record these for b-roll (QuickTime or Loom):
 
 **Closing:**
 - remembra.dev
-- "Deploy in 5 minutes"
+- "Deploy in minutes"
 - GitHub stars badge
 
 ---

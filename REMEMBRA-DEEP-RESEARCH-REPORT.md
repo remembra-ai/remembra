@@ -11,7 +11,7 @@ Remembra is entering a **$90B+ AI infrastructure market** growing at 24% annuall
 
 **Your positioning is PERFECT:**
 - Mem0's $19→$249 pricing gap = your $29→$99 sweet spot
-- Self-host in 5 minutes = massive differentiator (competitors fumble here)
+- Self-host in minutes = massive differentiator (competitors fumble here)
 - MCP-native = rides the Claude Code/Cursor wave
 - MIT license = enterprise-friendly (vs AGPL fears)
 
@@ -203,7 +203,7 @@ The hardest problem in memory: knowing "Adam" = "Adam Smith" = "Mr. Smith" = "my
 2. **Content marketing:**
    - "How to give Claude Code memory"
    - "Mem0 vs Remembra: Honest comparison"
-   - "Self-host AI memory in 5 minutes"
+   - "Self-host AI memory in minutes"
 
 3. **Integration guides:**
    - Cursor setup
@@ -228,7 +228,7 @@ The hardest problem in memory: knowing "Adam" = "Adam Smith" = "Mr. Smith" = "my
 ## 🎯 POSITIONING STATEMENTS
 
 ### One-Liner Options
-1. "Memory for AI. Self-host in 5 minutes."
+1. "Memory for AI. Self-host in minutes."
 2. "Give your AI a brain. Finally."
 3. "The memory layer Mem0 should have been."
 4. "Persistent memory for LLMs — fair pricing, no gotchas."

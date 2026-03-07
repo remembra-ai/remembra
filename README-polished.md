@@ -7,7 +7,7 @@
 <p align="center">
   <strong>AI memory that actually works.</strong><br>
   Your AI forgets everything. Remembra fixes that.<br>
-  Self-host in 5 minutes. No vendor lock-in. MIT licensed.
+  Self-host in minutes. No vendor lock-in. MIT licensed.
 </p>
 
 <p align="center">
@@ -143,7 +143,7 @@ const result = await memory.recall('preferences');
 
 | Guide | Description |
 |-------|-------------|
-| [🚀 Quick Start](https://docs.remembra.dev/getting-started/quickstart/) | Running in 5 minutes |
+| [🚀 Quick Start](https://docs.remembra.dev/getting-started/quickstart/) | Running in minutes |
 | [🐍 Python SDK](https://docs.remembra.dev/guides/python-sdk/) | Full Python reference |
 | [📘 TypeScript SDK](https://docs.remembra.dev/guides/javascript-sdk/) | JavaScript/TypeScript guide |
 | [🤖 MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Claude Code / Cursor setup |

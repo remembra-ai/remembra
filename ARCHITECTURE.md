@@ -32,7 +32,7 @@ Based on their arxiv paper (2504.19413) and production system:
 - Complex deployment requirements
 
 ### Our Differentiators
-1. **Self-host in 5 minutes** - Single `docker run` command
+1. **Self-host in minutes** - Single `docker run` command
 2. **Fair pricing** - $0 → $29 → $99 (not $19 → $249)
 3. **Developer-first docs** - Actually usable
 4. **MIT license** - True open source

@@ -1,6 +1,6 @@
 # Docker Deployment Guide
 
-Self-host Remembra in 5 minutes with Docker.
+Self-host Remembra in minutes with Docker.
 
 ## Quick Start
 

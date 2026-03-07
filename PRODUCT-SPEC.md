@@ -26,7 +26,7 @@ context = memory.recall("What are user's preferences?")
 ```
 
 **Why We Win:**
-- **Self-host in 5 minutes** (competitors prioritize SaaS, neglect self-hosting)
+- **Self-host in minutes** (competitors prioritize SaaS, neglect self-hosting)
 - **Fair pricing** ($0 → $29 → $99, not $19 → $249 like Mem0)
 - **Open source core** (MIT license, not AGPL restrictions)
 - **Hybrid storage** (vector + graph + relational in one system)
@@ -361,10 +361,10 @@ docker run -d -p 8787:8787 remembra/remembra
 **Tagline options:**
 - "Memory for AI. Finally."
 - "Give your AI a brain."
-- "Persistent memory for LLMs, self-hosted in 5 minutes."
+- "Persistent memory for LLMs, self-hosted in minutes."
 
 **Key messages:**
-1. Self-host in 5 minutes (vs. complex Mem0/Zep setup)
+1. Self-host in minutes (vs. complex Mem0/Zep setup)
 2. Fair pricing that doesn't jump 10x
 3. Open source, own your data
 4. Built by developers, for developers
