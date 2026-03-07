@@ -5,6 +5,34 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-03-07
+
+### Added
+- **AES-256-GCM Field Encryption** — Encrypt memory content at rest
+  - PBKDF2-HMAC-SHA256 key derivation with 480,000 iterations (OWASP 2023)
+  - Transparent encrypt/decrypt for memory content and metadata
+  - Passthrough mode for zero-config development
+  - Set `REMEMBRA_ENCRYPTION_KEY` to enable in production
+- **Encryption Test Suite** — Comprehensive tests for encryption module
+- **Security Features Documentation** — Full guide for encryption, PII detection, anomaly detection
+
+### Changed
+- Unified security features for enterprise deployments
+- Enhanced documentation for self-hosters
+
+## [0.8.1] - 2026-03-06
+
+### Added
+- **MCP Registry Published** — Now discoverable as `io.github.remembra-ai/remembra` in Claude Desktop and other MCP clients
+- **TypeScript SDK v0.8.1** — Synced with Python SDK features
+- **Encryption Documentation** — Added encryption guide to docs
+
+### Fixed
+- Synced `__version__` across all modules
+- Standardized GitHub URLs throughout documentation
+- Fixed stale version references
+- Corrected license to MIT in all files
+
 ## [0.8.0] - 2026-03-07
 
 ### Added

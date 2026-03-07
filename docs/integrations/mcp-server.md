@@ -4,8 +4,8 @@ Use Remembra as persistent memory for AI assistants via the [Model Context Proto
 
 Works with **Claude Code**, **Claude Desktop**, **Cursor**, and any MCP-compatible client.
 
-!!! tip "v0.8.0 Features"
-    New in v0.8.0: One-command quick start (`curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash`), multi-provider entity extraction (OpenAI + Anthropic + Ollama), and persistent HTTP connections for faster performance.
+!!! tip "v0.8.2 Features"
+    New in v0.8.2: AES-256-GCM encryption at rest, MCP Registry published (`io.github.remembra-ai/remembra`), PII detection & redaction, one-command quick start, multi-provider entity extraction (OpenAI + Anthropic + Ollama), and persistent HTTP connections for faster performance.
 
 ## Installation
 
@@ -208,7 +208,7 @@ Result:
   "server": "http://localhost:8787",
   "health": {
     "status": "healthy",
-    "version": "0.8.0",
+    "version": "0.8.2",
     "qdrant": "connected",
     "database": "connected"
   }

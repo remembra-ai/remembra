@@ -3,7 +3,7 @@
 **Persistent memory for AI applications. Self-host in 5 minutes.**
 
 <div class="admonition tip" markdown>
-<p class="admonition-title">🚀 v0.8.0 Released!</p>
+<p class="admonition-title">🚀 v0.8.2 Released!</p>
 <p>Now with <strong>One-Command Quick Start</strong>, <strong>Multi-Provider Entity Extraction</strong>, <strong>Performance Boost (httpx connection reuse)</strong>, and <strong>Usage Warnings</strong>. <a href="#whats-new-in-v080">See what's new →</a></p>
 </div>
 
@@ -207,33 +207,33 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 [Get Started :material-arrow-right:](getting-started/quickstart.md){ .md-button .md-button--primary }
 [View on GitHub :material-github:](https://github.com/remembra-ai/remembra){ .md-button }
 
-## What's New in v0.8.0
+## What's New in v0.8.2
 
 <div class="grid cards" markdown>
 
--   :material-console:{ .lg .middle } __One-Command Install__
+-   :material-shield-lock:{ .lg .middle } __AES-256-GCM Encryption__
 
     ---
 
-    `curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash` — Zero-config setup with Ollama embeddings.
+    Encrypt memory content at rest with OWASP 2023-compliant key derivation. Set `REMEMBRA_ENCRYPTION_KEY` to enable.
 
--   :material-robot-outline:{ .lg .middle } __Multi-Provider Extraction__
-
-    ---
-
-    Entity extraction now works with OpenAI, Anthropic Claude, and Ollama. Choose the provider that fits your stack.
-
--   :material-lightning-bolt:{ .lg .middle } __Performance Boost__
+-   :material-eye-off:{ .lg .middle } __PII Detection & Redaction__
 
     ---
 
-    Persistent HTTP connections via httpx connection reuse reduce latency by 100-300ms per operation.
+    Automatically detect and redact SSNs, credit cards, API keys, and more. Configure detect/redact/block modes.
 
--   :material-bell-alert:{ .lg .middle } __Usage Warnings__
+-   :material-cube-outline:{ .lg .middle } __MCP Registry Published__
 
     ---
 
-    API responses include usage thresholds at 60/80/95% to drive Pro upgrades. Stay informed before hitting limits.
+    Discoverable as `io.github.remembra-ai/remembra` in Claude Desktop, Cursor, and other MCP-compatible clients.
+
+-   :material-lightning-bolt:{ .lg .middle } __Performance + Security__
+
+    ---
+
+    Persistent HTTP connections, rate limiting, API key auth, full audit logging, and anomaly detection built-in.
 
 -   :material-docker:{ .lg .middle } __Docker Compose Quickstart__
 

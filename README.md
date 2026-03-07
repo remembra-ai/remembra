@@ -31,14 +31,14 @@
 
 ---
 
-## 🚀 What's New in v0.8.0
+## 🚀 What's New in v0.8.2
 
-- **One-Command Quick Start** — `curl | bash` zero-config setup with Ollama embeddings
-- **Multi-Provider Entity Extraction** — OpenAI, Anthropic Claude, and Ollama support
-- **Performance Boost** — httpx connection reuse reduces latency by 100-300ms per operation
-- **Usage Warning Banners** — API responses include usage thresholds at 60/80/95%
-- **Docker Compose Quickstart** — Zero-config compose with Qdrant + Ollama + Remembra
-- **125 New Tests** — Comprehensive coverage for embeddings, entities, conflicts, spaces, and plugins
+- **🔐 AES-256-GCM Field Encryption** — Encrypt memory content at rest with OWASP-compliant key derivation
+- **🛡️ Enterprise Security Suite** — PII detection, anomaly monitoring, audit logging
+- **📦 MCP Registry Published** — Discoverable as `io.github.remembra-ai/remembra` in Claude Desktop
+- **⚡ One-Command Quick Start** — `curl | bash` zero-config setup with Ollama embeddings
+- **🔌 Multi-Provider Support** — OpenAI, Anthropic Claude, Ollama for embeddings & entity extraction
+- **📊 Usage Warning Banners** — API responses include usage thresholds at 60/80/95%
 
 ---
 
