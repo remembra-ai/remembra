@@ -393,6 +393,26 @@
   
 
       
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../TROUBLESHOOTING/" class="md-tabs__link">
+          
+  
+  
+  Support
+
+        </a>
+      </li>
+    
+  
+
+      
     </ul>
   </div>
 </nav>
@@ -616,10 +636,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#docker-recommended" class="md-nav__link">
+  <a href="#quick-start-recommended" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Docker (Recommended)
+        Quick Start (Recommended)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-compose-zero-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Compose (Zero Config)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker
       
     </span>
   </a>
@@ -731,6 +773,17 @@
     <span class="md-ellipsis">
       
         Embedding Providers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#llm-providers-entity-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM Providers (Entity Extraction)
       
     </span>
   </a>
@@ -1863,6 +1916,123 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Support
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SETUP-CHECKLIST/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup Checklist
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -1890,10 +2060,32 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#docker-recommended" class="md-nav__link">
+  <a href="#quick-start-recommended" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Docker (Recommended)
+        Quick Start (Recommended)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker-compose-zero-config" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker Compose (Zero Config)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#docker" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Docker
       
     </span>
   </a>
@@ -2005,6 +2197,17 @@
     <span class="md-ellipsis">
       
         Embedding Providers
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#llm-providers-entity-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        LLM Providers (Entity Extraction)
       
     </span>
   </a>
@@ -2133,130 +2336,183 @@
 
 <h1 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h1>
 <p>Multiple ways to install and run Remembra.</p>
-<h2 id="docker-recommended">Docker (Recommended)<a class="headerlink" href="#docker-recommended" title="Permanent link">&para;</a></h2>
-<p>The easiest way to get started. Everything is bundled.</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="w">  </span>--name<span class="w"> </span>remembra<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">8787</span>:8787<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>-e<span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-your-key<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">  </span>-v<span class="w"> </span>remembra-data:/app/data<span class="w"> </span><span class="se">\</span>
-</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span>remembra/remembra
+<h2 id="quick-start-recommended">Quick Start (Recommended)<a class="headerlink" href="#quick-start-recommended" title="Permanent link">&para;</a></h2>
+<p>Get Remembra running with a single command. No API keys needed -- this installs Remembra, Qdrant, and Ollama via Docker Compose for a fully local setup.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>curl<span class="w"> </span>-sSL<span class="w"> </span>https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh<span class="w"> </span><span class="p">|</span><span class="w"> </span>bash
+</span></code></pre></div>
+<p>This sets up everything automatically: Remembra server on port 8787, Qdrant for vector storage, and Ollama for local embeddings and entity extraction.</p>
+<h2 id="docker-compose-zero-config">Docker Compose (Zero Config)<a class="headerlink" href="#docker-compose-zero-config" title="Permanent link">&para;</a></h2>
+<p>If you already have Docker Compose and prefer to run it directly:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>docker<span class="w"> </span>compose<span class="w"> </span>-f<span class="w"> </span>docker-compose.quickstart.yml<span class="w"> </span>up<span class="w"> </span>-d
+</span></code></pre></div>
+<p>This starts the same stack as the quick start script (Remembra + Qdrant + Ollama) with no API keys required.</p>
+<h2 id="docker">Docker<a class="headerlink" href="#docker" title="Permanent link">&para;</a></h2>
+<p>Run the Remembra container standalone. Requires an API key for embeddings.</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>docker<span class="w"> </span>run<span class="w"> </span>-d<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span>--name<span class="w"> </span>remembra<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">  </span>-p<span class="w"> </span><span class="m">8787</span>:8787<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="w">  </span>-e<span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-your-key<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="w">  </span>-v<span class="w"> </span>remembra-data:/app/data<span class="w"> </span><span class="se">\</span>
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="w">  </span>remembra/remembra
 </span></code></pre></div>
 <p>See <a href="../docker/">Docker Guide</a> for production configuration.</p>
 <h2 id="python-package">Python Package<a class="headerlink" href="#python-package" title="Permanent link">&para;</a></h2>
 <h3 id="sdk-only-client">SDK Only (Client)<a class="headerlink" href="#sdk-only-client" title="Permanent link">&para;</a></h3>
 <p>If you just need the client SDK to connect to an existing Remembra server:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>pip<span class="w"> </span>install<span class="w"> </span>remembra
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>pip<span class="w"> </span>install<span class="w"> </span>remembra
 </span></code></pre></div>
 <h3 id="full-server">Full Server<a class="headerlink" href="#full-server" title="Permanent link">&para;</a></h3>
 <p>To run your own Remembra server:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;remembra[server]&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;remembra[server]&quot;</span>
 </span></code></pre></div>
 <p>Then start it:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-your-key
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>python<span class="w"> </span>-m<span class="w"> </span>remembra.server
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-your-key
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>python<span class="w"> </span>-m<span class="w"> </span>remembra.server
 </span></code></pre></div>
 <h3 id="with-reranking-optional">With Reranking (Optional)<a class="headerlink" href="#with-reranking-optional" title="Permanent link">&para;</a></h3>
 <p>For better recall quality with CrossEncoder reranking:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;remembra[server,rerank]&quot;</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;remembra[server,rerank]&quot;</span>
 </span></code></pre></div>
 <h2 id="from-source">From Source<a class="headerlink" href="#from-source" title="Permanent link">&para;</a></h2>
 <p>For development or customization:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Clone the repo</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/remembra/remembra
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="nb">cd</span><span class="w"> </span>remembra
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># Install with uv (recommended)</span>
-</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras
-</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>
-</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="c1"># Or with pip</span>
-</span><span id="__span-5-9"><a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[server,rerank,dev]&quot;</span>
-</span><span id="__span-5-10"><a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>
-</span><span id="__span-5-11"><a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="c1"># Run tests</span>
-</span><span id="__span-5-12"><a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>pytest
-</span><span id="__span-5-13"><a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>
-</span><span id="__span-5-14"><a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="c1"># Start the server</span>
-</span><span id="__span-5-15"><a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>python<span class="w"> </span>-m<span class="w"> </span>remembra.server
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Clone the repo</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/remembra-ai/remembra
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="nb">cd</span><span class="w"> </span>remembra
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># Install with uv (recommended)</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>uv<span class="w"> </span>sync<span class="w"> </span>--all-extras
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>
+</span><span id="__span-7-8"><a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="c1"># Or with pip</span>
+</span><span id="__span-7-9"><a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">&quot;.[server,rerank,dev]&quot;</span>
+</span><span id="__span-7-10"><a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a>
+</span><span id="__span-7-11"><a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="c1"># Run tests</span>
+</span><span id="__span-7-12"><a id="__codelineno-7-12" name="__codelineno-7-12" href="#__codelineno-7-12"></a>pytest
+</span><span id="__span-7-13"><a id="__codelineno-7-13" name="__codelineno-7-13" href="#__codelineno-7-13"></a>
+</span><span id="__span-7-14"><a id="__codelineno-7-14" name="__codelineno-7-14" href="#__codelineno-7-14"></a><span class="c1"># Start the server</span>
+</span><span id="__span-7-15"><a id="__codelineno-7-15" name="__codelineno-7-15" href="#__codelineno-7-15"></a>python<span class="w"> </span>-m<span class="w"> </span>remembra.server
 </span></code></pre></div>
 <h2 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h2>
 <h3 id="required">Required<a class="headerlink" href="#required" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>Python 3.10+</strong></li>
 <li><strong>Qdrant</strong> - Vector database (bundled in Docker, or run separately)</li>
-<li><strong>OpenAI API key</strong> - For embeddings and extraction</li>
+<li><strong>Embedding provider</strong> - One of:<ul>
+<li><strong>Ollama</strong> (local, no API key needed) -- used automatically with the quick start</li>
+<li><strong>OpenAI API key</strong> -- for cloud-based embeddings and extraction</li>
+</ul>
+</li>
 </ul>
 <h3 id="optional">Optional<a class="headerlink" href="#optional" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Ollama</strong> - Local embeddings (no API costs)</li>
+<li><strong>Ollama</strong> - Local embeddings and extraction (no API costs, no API key needed)</li>
 <li><strong>Cohere</strong> - Alternative embeddings</li>
+<li><strong>Anthropic</strong> - For entity extraction via Claude</li>
+<li><strong>Voyage</strong> - Alternative embeddings</li>
+<li><strong>Jina</strong> - Alternative embeddings</li>
 <li><strong>Redis</strong> - For rate limiting at scale</li>
 </ul>
 <h2 id="embedding-providers">Embedding Providers<a class="headerlink" href="#embedding-providers" title="Permanent link">&para;</a></h2>
 <p>Remembra supports multiple embedding providers:</p>
-<div class="tabbed-set tabbed-alternate" data-tabs="1:3"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">OpenAI (Default)</label><label for="__tabbed_1_2">Ollama (Local)</label><label for="__tabbed_1_3">Cohere</label></div>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:5"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><input id="__tabbed_1_3" name="__tabbed_1" type="radio" /><input id="__tabbed_1_4" name="__tabbed_1" type="radio" /><input id="__tabbed_1_5" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">OpenAI (Default)</label><label for="__tabbed_1_2">Ollama (Local)</label><label for="__tabbed_1_3">Cohere</label><label for="__tabbed_1_4">Voyage</label><label for="__tabbed_1_5">Jina</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-your-key
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_PROVIDER</span><span class="o">=</span>openai
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_MODEL</span><span class="o">=</span>text-embedding-3-small
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-your-key
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_PROVIDER</span><span class="o">=</span>openai
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_MODEL</span><span class="o">=</span>text-embedding-3-small
 </span></code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Start Ollama first</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>ollama<span class="w"> </span>pull<span class="w"> </span>nomic-embed-text
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_PROVIDER</span><span class="o">=</span>ollama
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_MODEL</span><span class="o">=</span>nomic-embed-text
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OLLAMA_BASE_URL</span><span class="o">=</span>http://localhost:11434
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># Start Ollama first</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a>ollama<span class="w"> </span>pull<span class="w"> </span>nomic-embed-text
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_PROVIDER</span><span class="o">=</span>ollama
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_MODEL</span><span class="o">=</span>nomic-embed-text
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OLLAMA_BASE_URL</span><span class="o">=</span>http://localhost:11434
 </span></code></pre></div>
 </div>
 <div class="tabbed-block">
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">COHERE_API_KEY</span><span class="o">=</span>your-key
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_PROVIDER</span><span class="o">=</span>cohere
-</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_MODEL</span><span class="o">=</span>embed-english-v3.0
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">COHERE_API_KEY</span><span class="o">=</span>your-key
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_PROVIDER</span><span class="o">=</span>cohere
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_MODEL</span><span class="o">=</span>embed-english-v3.0
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">VOYAGE_API_KEY</span><span class="o">=</span>your-key
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_PROVIDER</span><span class="o">=</span>voyage
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_MODEL</span><span class="o">=</span>voyage-3
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">JINA_API_KEY</span><span class="o">=</span>your-key
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_PROVIDER</span><span class="o">=</span>jina
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_EMBEDDING_MODEL</span><span class="o">=</span>jina-embeddings-v3
+</span></code></pre></div>
+</div>
+</div>
+</div>
+<h2 id="llm-providers-entity-extraction">LLM Providers (Entity Extraction)<a class="headerlink" href="#llm-providers-entity-extraction" title="Permanent link">&para;</a></h2>
+<p>Remembra uses an LLM for entity extraction. Supported providers:</p>
+<div class="tabbed-set tabbed-alternate" data-tabs="2:3"><input checked="checked" id="__tabbed_2_1" name="__tabbed_2" type="radio" /><input id="__tabbed_2_2" name="__tabbed_2" type="radio" /><input id="__tabbed_2_3" name="__tabbed_2" type="radio" /><div class="tabbed-labels"><label for="__tabbed_2_1">OpenAI (Default)</label><label for="__tabbed_2_2">Ollama (Local)</label><label for="__tabbed_2_3">Anthropic</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_LLM_PROVIDER</span><span class="o">=</span>openai
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-your-key
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># No API key needed -- runs locally</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_LLM_PROVIDER</span><span class="o">=</span>ollama
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OLLAMA_BASE_URL</span><span class="o">=</span>http://localhost:11434
+</span></code></pre></div>
+</div>
+<div class="tabbed-block">
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Anthropic (for entity extraction)</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_LLM_PROVIDER</span><span class="o">=</span>anthropic
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>your-key
 </span></code></pre></div>
 </div>
 </div>
 </div>
 <h2 id="verifying-installation">Verifying Installation<a class="headerlink" href="#verifying-installation" title="Permanent link">&para;</a></h2>
 <h3 id="check-server-health">Check Server Health<a class="headerlink" href="#check-server-health" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>curl<span class="w"> </span>http://localhost:8787/health
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>curl<span class="w"> </span>http://localhost:8787/health
 </span></code></pre></div>
 <p>Expected response:</p>
-<div class="language-json highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="p">{</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">  </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;healthy&quot;</span><span class="p">,</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">  </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.7.2&quot;</span><span class="p">,</span>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="w">  </span><span class="nt">&quot;qdrant&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;connected&quot;</span><span class="p">,</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="w">  </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;connected&quot;</span>
-</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="p">}</span>
+<div class="language-json highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="p">{</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="w">  </span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;healthy&quot;</span><span class="p">,</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="w">  </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.8.0&quot;</span><span class="p">,</span>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="w">  </span><span class="nt">&quot;qdrant&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;connected&quot;</span><span class="p">,</span>
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">  </span><span class="nt">&quot;database&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;connected&quot;</span>
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="p">}</span>
 </span></code></pre></div>
 <h3 id="test-the-sdk">Test the SDK<a class="headerlink" href="#test-the-sdk" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">remembra</span><span class="w"> </span><span class="kn">import</span> <span class="n">Memory</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">memory</span> <span class="o">=</span> <span class="n">Memory</span><span class="p">(</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>    <span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8787&quot;</span><span class="p">,</span>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>    <span class="n">user_id</span><span class="o">=</span><span class="s2">&quot;test&quot;</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="p">)</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
-</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="c1"># Store and recall</span>
-</span><span id="__span-11-9"><a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Test memory&quot;</span><span class="p">)</span>
-</span><span id="__span-11-10"><a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="n">result</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">recall</span><span class="p">(</span><span class="s2">&quot;test&quot;</span><span class="p">)</span>
-</span><span id="__span-11-11"><a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>  <span class="c1"># Should return the test memory</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">remembra</span><span class="w"> </span><span class="kn">import</span> <span class="n">Memory</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="n">memory</span> <span class="o">=</span> <span class="n">Memory</span><span class="p">(</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>    <span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;http://localhost:8787&quot;</span><span class="p">,</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>    <span class="n">user_id</span><span class="o">=</span><span class="s2">&quot;test&quot;</span>
+</span><span id="__span-18-6"><a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="p">)</span>
+</span><span id="__span-18-7"><a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a>
+</span><span id="__span-18-8"><a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="c1"># Store and recall</span>
+</span><span id="__span-18-9"><a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Test memory&quot;</span><span class="p">)</span>
+</span><span id="__span-18-10"><a id="__codelineno-18-10" name="__codelineno-18-10" href="#__codelineno-18-10"></a><span class="n">result</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">recall</span><span class="p">(</span><span class="s2">&quot;test&quot;</span><span class="p">)</span>
+</span><span id="__span-18-11"><a id="__codelineno-18-11" name="__codelineno-18-11" href="#__codelineno-18-11"></a><span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>  <span class="c1"># Should return the test memory</span>
 </span></code></pre></div>
 <h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
 <h3 id="connection-refused-error">"Connection refused" error<a class="headerlink" href="#connection-refused-error" title="Permanent link">&para;</a></h3>
 <p>Make sure the server is running:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>docker<span class="w"> </span>ps<span class="w">  </span><span class="c1"># Check if container is running</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>docker<span class="w"> </span>logs<span class="w"> </span>remembra<span class="w">  </span><span class="c1"># Check for errors</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>docker<span class="w"> </span>ps<span class="w">  </span><span class="c1"># Check if container is running</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>docker<span class="w"> </span>logs<span class="w"> </span>remembra<span class="w">  </span><span class="c1"># Check for errors</span>
 </span></code></pre></div>
 <h3 id="api-key-not-set-error">"API key not set" error<a class="headerlink" href="#api-key-not-set-error" title="Permanent link">&para;</a></h3>
-<p>Set your OpenAI API key:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-your-key
+<p>If using OpenAI, set your API key:</p>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-your-key
 </span></code></pre></div>
+<p>If you don't have an API key, use the zero-config quick start which uses Ollama locally and requires no API keys.</p>
 <h3 id="qdrant-connection-issues">Qdrant connection issues<a class="headerlink" href="#qdrant-connection-issues" title="Permanent link">&para;</a></h3>
 <p>If running Qdrant separately, ensure it's accessible:</p>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">QDRANT_HOST</span><span class="o">=</span>localhost
-</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">QDRANT_PORT</span><span class="o">=</span><span class="m">6333</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">QDRANT_HOST</span><span class="o">=</span>localhost
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="nb">export</span><span class="w"> </span><span class="nv">QDRANT_PORT</span><span class="o">=</span><span class="m">6333</span>
 </span></code></pre></div>
 <h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
 <ul>

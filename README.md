@@ -27,6 +27,8 @@
   <a href="https://discord.gg/Bzv3JshRa3">Discord</a>
 </p>
 
+<!-- mcp-name: io.github.remembra-ai/remembra -->
+
 ---
 
 ## 🚀 What's New in v0.8.0

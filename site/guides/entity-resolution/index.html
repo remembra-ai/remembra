@@ -393,6 +393,26 @@
   
 
       
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../TROUBLESHOOTING/" class="md-tabs__link">
+          
+  
+  
+  Support
+
+        </a>
+      </li>
+    
+  
+
+      
     </ul>
   </div>
 </nav>
@@ -1030,6 +1050,67 @@
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extraction-providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extraction Providers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Extraction Providers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#openai-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenAI (default)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#anthropic-claude" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Anthropic Claude
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ollama-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ollama (local)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#provider-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider Selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1913,6 +1994,123 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Support
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SETUP-CHECKLIST/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup Checklist
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -1947,6 +2145,67 @@
       
     </span>
   </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#extraction-providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Extraction Providers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Extraction Providers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#openai-default" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        OpenAI (default)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#anthropic-claude" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Anthropic Claude
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ollama-local" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Ollama (local)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#provider-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Provider Selection
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2244,6 +2503,41 @@
 </span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>  - Memory: &quot;Adam Smith is starting a new job&quot;
 </span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  - Entity linked to memory
 </span></code></pre></div>
+<h2 id="extraction-providers">Extraction Providers<a class="headerlink" href="#extraction-providers" title="Permanent link">&para;</a></h2>
+<p>Entity extraction supports multiple LLM providers. Configure which provider to use via the <code>REMEMBRA_LLM_PROVIDER</code> environment variable.</p>
+<div class="admonition note">
+<p class="admonition-title">New in v0.8.0</p>
+<p>Previously entity extraction was limited to OpenAI. Now you can use Anthropic or local Ollama models.</p>
+</div>
+<h3 id="openai-default">OpenAI (default)<a class="headerlink" href="#openai-default" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nv">REMEMBRA_LLM_PROVIDER</span><span class="o">=</span>openai
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-...
+</span></code></pre></div>
+<p>OpenAI is the default provider. Set your <code>OPENAI_API_KEY</code> and entity extraction works out of the box.</p>
+<h3 id="anthropic-claude">Anthropic Claude<a class="headerlink" href="#anthropic-claude" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nv">REMEMBRA_LLM_PROVIDER</span><span class="o">=</span>anthropic
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>sk-ant-...
+</span></code></pre></div>
+<p>Use Anthropic Claude for entity extraction. Requires an <code>ANTHROPIC_API_KEY</code>.</p>
+<h3 id="ollama-local">Ollama (local)<a class="headerlink" href="#ollama-local" title="Permanent link">&para;</a></h3>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="nv">REMEMBRA_LLM_PROVIDER</span><span class="o">=</span>ollama
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nv">OLLAMA_BASE_URL</span><span class="o">=</span>http://localhost:11434<span class="w">  </span><span class="c1"># default</span>
+</span></code></pre></div>
+<p>Run entity extraction entirely locally with Ollama. No API key needed -- just a running Ollama instance with a compatible model.</p>
+<h3 id="provider-selection">Provider Selection<a class="headerlink" href="#provider-selection" title="Permanent link">&para;</a></h3>
+<p>The system uses a factory pattern to automatically create the right extractor based on your configuration. Simply set <code>REMEMBRA_LLM_PROVIDER</code> to your desired provider and the correct implementation is instantiated at startup. No additional code changes are required.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>┌──────────────────┐
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>│  EntityExtractor │  (factory)
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>│    Factory       │
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>└────────┬─────────┘
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>         │
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    ┌────┴─────┬──────────────┐
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>    ▼          ▼              ▼
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>┌────────┐ ┌──────────┐ ┌────────┐
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>│ OpenAI │ │ Anthropic│ │ Ollama │
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>│Extractor│ │ Extractor│ │Extractor│
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>└────────┘ └──────────┘ └────────┘
+</span></code></pre></div>
 <h2 id="entity-types">Entity Types<a class="headerlink" href="#entity-types" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2277,11 +2571,11 @@
 </table>
 <h2 id="alias-detection">Alias Detection<a class="headerlink" href="#alias-detection" title="Permanent link">&para;</a></h2>
 <p>Remembra automatically detects when different names refer to the same entity:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Met with David Kim from Acme today&quot;</span><span class="p">)</span>
-</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Mr. Kim said the deal is approved&quot;</span><span class="p">)</span>
-</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;David mentioned they need the contract by Friday&quot;</span><span class="p">)</span>
-</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="c1"># All three are linked to the same entity: David Kim</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Met with David Kim from Acme today&quot;</span><span class="p">)</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Mr. Kim said the deal is approved&quot;</span><span class="p">)</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;David mentioned they need the contract by Friday&quot;</span><span class="p">)</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="c1"># All three are linked to the same entity: David Kim</span>
 </span></code></pre></div>
 <h3 id="matching-strategies">Matching Strategies<a class="headerlink" href="#matching-strategies" title="Permanent link">&para;</a></h3>
 <ol>
@@ -2328,60 +2622,60 @@
 </tbody>
 </table>
 <h3 id="example-graph">Example Graph<a class="headerlink" href="#example-graph" title="Permanent link">&para;</a></h3>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>    [John Smith]
-</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>        │
-</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>    WORKS_AT
-</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>        │
-</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>        ▼
-</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>    [Google] ◄── LOCATED_IN ── [Mountain View]
-</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>        │
-</span><span id="__span-2-8"><a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>    PART_OF
-</span><span id="__span-2-9"><a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>        │
-</span><span id="__span-2-10"><a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>        ▼
-</span><span id="__span-2-11"><a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>    [Alphabet]
+<div class="language-text highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>    [John Smith]
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>        │
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    WORKS_AT
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>        │
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>        ▼
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>    [Google] ◄── LOCATED_IN ── [Mountain View]
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>        │
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>    PART_OF
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>        │
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>        ▼
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>    [Alphabet]
 </span></code></pre></div>
 <h2 id="querying-with-entities">Querying with Entities<a class="headerlink" href="#querying-with-entities" title="Permanent link">&para;</a></h2>
 <h3 id="find-related-memories">Find Related Memories<a class="headerlink" href="#find-related-memories" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Query mentions &quot;the company&quot; - finds Google memories</span>
-</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">context</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">recall</span><span class="p">(</span><span class="s2">&quot;What do I know about the company John works for?&quot;</span><span class="p">)</span>
-</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># Returns memories about Google, even if &quot;Google&quot; wasn&#39;t in the query</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Query mentions &quot;the company&quot; - finds Google memories</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">context</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">recall</span><span class="p">(</span><span class="s2">&quot;What do I know about the company John works for?&quot;</span><span class="p">)</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="c1"># Returns memories about Google, even if &quot;Google&quot; wasn&#39;t in the query</span>
 </span></code></pre></div>
 <h3 id="graph-aware-retrieval">Graph-Aware Retrieval<a class="headerlink" href="#graph-aware-retrieval" title="Permanent link">&para;</a></h3>
 <p>When enabled, recall traverses the entity graph:</p>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Direct query about John</span>
-</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="n">context</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">recall</span><span class="p">(</span><span class="s2">&quot;What&#39;s John working on?&quot;</span><span class="p">)</span>
-</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># Graph expands to find:</span>
-</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="c1"># - Memories about John directly</span>
-</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="c1"># - Memories about Google (where John works)</span>
-</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># - Memories about projects at Google</span>
-</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="c1"># - Memories about John&#39;s team members</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Direct query about John</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">context</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">recall</span><span class="p">(</span><span class="s2">&quot;What&#39;s John working on?&quot;</span><span class="p">)</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="c1"># Graph expands to find:</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="c1"># - Memories about John directly</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="c1"># - Memories about Google (where John works)</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="c1"># - Memories about projects at Google</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="c1"># - Memories about John&#39;s team members</span>
 </span></code></pre></div>
 <h3 id="configuring-traversal">Configuring Traversal<a class="headerlink" href="#configuring-traversal" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># How many hops to traverse</span>
-</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nv">REMEMBRA_GRAPH_TRAVERSAL_DEPTH</span><span class="o">=</span><span class="m">2</span><span class="w">  </span><span class="c1"># Default</span>
-</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
-</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Disable graph retrieval</span>
-</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="nv">REMEMBRA_GRAPH_RETRIEVAL_ENABLED</span><span class="o">=</span><span class="nb">false</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># How many hops to traverse</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nv">REMEMBRA_GRAPH_TRAVERSAL_DEPTH</span><span class="o">=</span><span class="m">2</span><span class="w">  </span><span class="c1"># Default</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># Disable graph retrieval</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="nv">REMEMBRA_GRAPH_RETRIEVAL_ENABLED</span><span class="o">=</span><span class="nb">false</span>
 </span></code></pre></div>
 <h2 id="entity-api">Entity API<a class="headerlink" href="#entity-api" title="Permanent link">&para;</a></h2>
 <h3 id="list-entities">List Entities<a class="headerlink" href="#list-entities" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="n">entities</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">get_entities</span><span class="p">()</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">entities</span><span class="p">:</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">e</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">e</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">): </span><span class="si">{</span><span class="n">e</span><span class="p">[</span><span class="s1">&#39;aliases&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="n">entities</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">get_entities</span><span class="p">()</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">entities</span><span class="p">:</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">e</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">e</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">): </span><span class="si">{</span><span class="n">e</span><span class="p">[</span><span class="s1">&#39;aliases&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="get-relationships">Get Relationships<a class="headerlink" href="#get-relationships" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># Get all relationships for an entity</span>
-</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">rels</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">get_entity_relationships</span><span class="p">(</span><span class="n">entity_id</span><span class="o">=</span><span class="s2">&quot;ent_123&quot;</span><span class="p">)</span>
-</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
-</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># Output:</span>
-</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="c1"># John Smith --WORKS_AT--&gt; Google</span>
-</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="c1"># John Smith --KNOWS--&gt; Sarah Chen</span>
-</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="c1"># John Smith --REPORTS_TO--&gt; Mike Johnson</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Get all relationships for an entity</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">rels</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">get_entity_relationships</span><span class="p">(</span><span class="n">entity_id</span><span class="o">=</span><span class="s2">&quot;ent_123&quot;</span><span class="p">)</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="c1"># Output:</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="c1"># John Smith --WORKS_AT--&gt; Google</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="c1"># John Smith --KNOWS--&gt; Sarah Chen</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="c1"># John Smith --REPORTS_TO--&gt; Mike Johnson</span>
 </span></code></pre></div>
 <h3 id="get-entity-memories">Get Entity Memories<a class="headerlink" href="#get-entity-memories" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># Find all memories mentioning an entity</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">memories</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">get_entity_memories</span><span class="p">(</span><span class="n">entity_id</span><span class="o">=</span><span class="s2">&quot;ent_123&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># Find all memories mentioning an entity</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">memories</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">get_entity_memories</span><span class="p">(</span><span class="n">entity_id</span><span class="o">=</span><span class="s2">&quot;ent_123&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="dashboard-visualization">Dashboard Visualization<a class="headerlink" href="#dashboard-visualization" title="Permanent link">&para;</a></h2>
 <p>The Remembra dashboard includes an interactive entity graph:</p>
@@ -2393,44 +2687,44 @@
 </ul>
 <h2 id="best-practices">Best Practices<a class="headerlink" href="#best-practices" title="Permanent link">&para;</a></h2>
 <h3 id="1-introduce-entities-clearly">1. Introduce Entities Clearly<a class="headerlink" href="#1-introduce-entities-clearly" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># ✅ Good - Clear introduction</span>
-</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;John Smith is our new VP of Engineering at Google&quot;</span><span class="p">)</span>
-</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
-</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="c1"># ❌ Vague - Hard to resolve later</span>
-</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;He said the project is delayed&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># ✅ Good - Clear introduction</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;John Smith is our new VP of Engineering at Google&quot;</span><span class="p">)</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># ❌ Vague - Hard to resolve later</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;He said the project is delayed&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="2-include-context-for-resolution">2. Include Context for Resolution<a class="headerlink" href="#2-include-context-for-resolution" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># ✅ Good - Context helps matching</span>
-</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Meeting with John (from the sales team)&quot;</span><span class="p">)</span>
-</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a>
-</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="c1"># ❌ Ambiguous - Which John?</span>
-</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Meeting with John&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># ✅ Good - Context helps matching</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Meeting with John (from the sales team)&quot;</span><span class="p">)</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="c1"># ❌ Ambiguous - Which John?</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Meeting with John&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="3-use-consistent-naming">3. Use Consistent Naming<a class="headerlink" href="#3-use-consistent-naming" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># ✅ Pick one and stick with it</span>
-</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;David mentioned...&quot;</span><span class="p">)</span>
-</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;David confirmed...&quot;</span><span class="p">)</span>
-</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>
-</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="c1"># ❌ Avoid switching without context</span>
-</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Dave said...&quot;</span><span class="p">)</span>
-</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Mr. Kim replied...&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># ✅ Pick one and stick with it</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;David mentioned...&quot;</span><span class="p">)</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;David confirmed...&quot;</span><span class="p">)</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="c1"># ❌ Avoid switching without context</span>
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Dave said...&quot;</span><span class="p">)</span>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Mr. Kim replied...&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h3 id="4-explicitly-state-relationships">4. Explicitly State Relationships<a class="headerlink" href="#4-explicitly-state-relationships" title="Permanent link">&para;</a></h3>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="c1"># ✅ Clear relationship</span>
-</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Sarah Chen is John&#39;s manager&quot;</span><span class="p">)</span>
-</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="c1"># ❌ Implicit - harder to extract</span>
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Talked to Sarah about John&#39;s performance review&quot;</span><span class="p">)</span>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># ✅ Clear relationship</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Sarah Chen is John&#39;s manager&quot;</span><span class="p">)</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># ❌ Implicit - harder to extract</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Talked to Sarah about John&#39;s performance review&quot;</span><span class="p">)</span>
 </span></code></pre></div>
 <h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Enable/disable entity extraction</span>
-</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="nv">REMEMBRA_ENTITY_EXTRACTION_ENABLED</span><span class="o">=</span><span class="nb">true</span>
-</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
-</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># Matching threshold (0-1, higher = stricter)</span>
-</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="nv">REMEMBRA_ENTITY_MATCHING_THRESHOLD</span><span class="o">=</span><span class="m">0</span>.85
-</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>
-</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="c1"># Graph traversal depth</span>
-</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="nv">REMEMBRA_GRAPH_TRAVERSAL_DEPTH</span><span class="o">=</span><span class="m">2</span>
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Enable/disable entity extraction</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="nv">REMEMBRA_ENTITY_EXTRACTION_ENABLED</span><span class="o">=</span><span class="nb">true</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="c1"># Matching threshold (0-1, higher = stricter)</span>
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="nv">REMEMBRA_ENTITY_MATCHING_THRESHOLD</span><span class="o">=</span><span class="m">0</span>.85
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>
+</span><span id="__span-17-7"><a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="c1"># Graph traversal depth</span>
+</span><span id="__span-17-8"><a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="nv">REMEMBRA_GRAPH_TRAVERSAL_DEPTH</span><span class="o">=</span><span class="m">2</span>
 </span></code></pre></div>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>

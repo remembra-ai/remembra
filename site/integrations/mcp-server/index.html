@@ -393,6 +393,26 @@
   
 
       
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../TROUBLESHOOTING/" class="md-tabs__link">
+          
+  
+  
+  Support
+
+        </a>
+      </li>
+    
+  
+
+      
     </ul>
   </div>
 </nav>
@@ -956,10 +976,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#ingest_conversation-v072" class="md-nav__link">
+  <a href="#ingest_conversation-v080" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ingest_conversation v0.7.2
+        ingest_conversation v0.8.0
       
     </span>
   </a>
@@ -1979,6 +1999,123 @@
   
 
     
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_9" >
+        
+          
+          <label class="md-nav__link" for="__nav_9" id="__nav_9_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Support
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_9_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_9">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Support
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../TROUBLESHOOTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Troubleshooting
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../SETUP-CHECKLIST/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Setup Checklist
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
   </ul>
 </nav>
                   </div>
@@ -2084,10 +2221,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#ingest_conversation-v072" class="md-nav__link">
+  <a href="#ingest_conversation-v080" class="md-nav__link">
     <span class="md-ellipsis">
       
-        ingest_conversation v0.7.2
+        ingest_conversation v0.8.0
       
     </span>
   </a>
@@ -2367,8 +2504,8 @@
 <p>Use Remembra as persistent memory for AI assistants via the <a href="https://modelcontextprotocol.io">Model Context Protocol</a>.</p>
 <p>Works with <strong>Claude Code</strong>, <strong>Claude Desktop</strong>, <strong>Cursor</strong>, and any MCP-compatible client.</p>
 <div class="admonition tip">
-<p class="admonition-title">v0.7.2 Features</p>
-<p>The MCP server now includes <code>ingest_conversation</code> for automatic conversation memory extraction!</p>
+<p class="admonition-title">v0.8.0 Features</p>
+<p>New in v0.8.0: One-command quick start (<code>curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash</code>), multi-provider entity extraction (OpenAI + Anthropic + Ollama), and persistent HTTP connections for faster performance.</p>
 </div>
 <h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>pip<span class="w"> </span>install<span class="w"> </span>remembra<span class="o">[</span>mcp<span class="o">]</span>
@@ -2627,14 +2764,14 @@
 </span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>  &quot;server&quot;: &quot;http://localhost:8787&quot;,
 </span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>  &quot;health&quot;: {
 </span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>    &quot;status&quot;: &quot;healthy&quot;,
-</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    &quot;version&quot;: &quot;0.7.2&quot;,
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>    &quot;version&quot;: &quot;0.8.0&quot;,
 </span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a>    &quot;qdrant&quot;: &quot;connected&quot;,
 </span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>    &quot;database&quot;: &quot;connected&quot;
 </span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>  }
 </span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>}
 </span></code></pre></div></p>
 <hr />
-<h3 id="ingest_conversation-v072">ingest_conversation <span class="md-tag">v0.7.2</span><a class="headerlink" href="#ingest_conversation-v072" title="Permanent link">&para;</a></h3>
+<h3 id="ingest_conversation-v080">ingest_conversation <span class="md-tag">v0.8.0</span><a class="headerlink" href="#ingest_conversation-v080" title="Permanent link">&para;</a></h3>
 <p>Automatically extract memories from a conversation. This is the <strong>primary method</strong> for agents to add context to memory.</p>
 <table>
 <thead>
@@ -2735,7 +2872,7 @@
 </span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="w">  </span><span class="nt">&quot;server&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;http://localhost:8787&quot;</span><span class="p">,</span>
 </span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="w">  </span><span class="nt">&quot;user_id&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;user_123&quot;</span><span class="p">,</span>
 </span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="w">  </span><span class="nt">&quot;project&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;default&quot;</span><span class="p">,</span>
-</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">  </span><span class="nt">&quot;health&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;healthy&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.7.2&quot;</span><span class="p">}</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="w">  </span><span class="nt">&quot;health&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="nt">&quot;status&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;healthy&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;version&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;0.8.0&quot;</span><span class="p">}</span>
 </span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="p">}</span>
 </span></code></pre></div>
 <hr />
