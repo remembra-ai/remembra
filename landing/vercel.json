@@ -2,6 +2,8 @@
   "buildCommand": null,
   "outputDirectory": ".",
   "framework": null,
+  "cleanUrls": true,
+  "trailingSlash": false,
   "redirects": [
     {
       "source": "/docs",
@@ -12,6 +14,21 @@
       "source": "/docs/:path*",
       "destination": "https://docs.remembra.dev/:path*",
       "permanent": true
+    },
+    {
+      "source": "/changelog/:slug",
+      "destination": "/changelog",
+      "permanent": false
+    },
+    {
+      "source": "/blog",
+      "destination": "/changelog",
+      "permanent": false
+    },
+    {
+      "source": "/blog/:slug",
+      "destination": "/changelog",
+      "permanent": false
     }
   ]
 }

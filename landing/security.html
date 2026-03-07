@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security - Remembra</title>
+    <meta name="description" content="Remembra security practices, data protection, and compliance information.">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="Security - Remembra">
+    <meta property="og:description" content="Learn about Remembra's security practices and data protection.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://remembra.dev/security">
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    
+    <!-- Inter Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        :root {
+            --black: #000000;
+            --gray-900: #111111;
+            --gray-800: #1a1a1a;
+            --gray-600: #404040;
+            --gray-500: #525252;
+            --gray-400: #737373;
+            --gray-300: #a3a3a3;
+            --white: #ffffff;
+            --purple: #8b5cf6;
+            --purple-light: #a78bfa;
+            --green: #22c55e;
+        }
+        
+        html { scroll-behavior: smooth; }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--black);
+            color: var(--white);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+        
+        a { color: var(--purple-light); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        
+        .container { max-width: 800px; margin: 0 auto; padding: 0 24px; }
+        
+        /* Header */
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 100;
+            background: rgba(0, 0, 0, 0.9);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        
+        .header-inner {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 24px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 18px;
+            color: var(--white);
+        }
+        
+        .logo img { width: 28px; height: 28px; border-radius: 8px; }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            background: var(--white);
+            color: var(--black);
+        }
+        
+        .btn:hover { background: rgba(255,255,255,0.9); }
+        
+        /* Content */
+        .content {
+            padding: 120px 24px 80px;
+        }
+        
+        .page-title {
+            font-size: 48px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            letter-spacing: -0.02em;
+        }
+        
+        .page-subtitle {
+            font-size: 18px;
+            color: var(--gray-400);
+            margin-bottom: 48px;
+        }
+        
+        .section {
+            margin-bottom: 48px;
+        }
+        
+        .section h2 {
+            font-size: 24px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--white);
+        }
+        
+        .section p {
+            color: var(--gray-300);
+            margin-bottom: 16px;
+            line-height: 1.8;
+        }
+        
+        .section ul {
+            list-style: none;
+            margin-bottom: 16px;
+        }
+        
+        .section ul li {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 8px 0;
+            color: var(--gray-300);
+        }
+        
+        .section ul li svg {
+            width: 20px;
+            height: 20px;
+            color: var(--green);
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: rgba(34,197,94,0.1);
+            border: 1px solid rgba(34,197,94,0.2);
+            border-radius: 100px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--green);
+            margin-bottom: 24px;
+        }
+        
+        .card {
+            background: var(--gray-900);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 16px;
+        }
+        
+        .card h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+        
+        .card p {
+            color: var(--gray-400);
+            font-size: 14px;
+        }
+        
+        /* Footer */
+        .footer {
+            padding: 40px 24px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            text-align: center;
+        }
+        
+        .footer p {
+            font-size: 13px;
+            color: var(--gray-600);
+        }
+        
+        .footer-links {
+            display: flex;
+            justify-content: center;
+            gap: 24px;
+            margin-bottom: 16px;
+        }
+        
+        .footer-links a {
+            font-size: 14px;
+            color: var(--gray-500);
+        }
+    </style>
+</head>
+<body>
+    <header class="header">
+        <div class="header-inner">
+            <a href="/" class="logo">
+                <img src="/logo.jpg" alt="Remembra">
+                Remembra
+            </a>
+            <a href="https://app.remembra.dev/signup" class="btn">Get Started</a>
+        </div>
+    </header>
+
+    <main class="content">
+        <div class="container">
+            <span class="badge">🔒 Security First</span>
+            <h1 class="page-title">Security</h1>
+            <p class="page-subtitle">How we protect your data and maintain trust.</p>
+
+            <div class="section">
+                <h2>Our Security Philosophy</h2>
+                <p>Remembra is built with security as a first-class citizen. We believe that AI memory systems must be trustworthy, and that starts with robust security practices.</p>
+            </div>
+
+            <div class="section">
+                <h2>Data Protection</h2>
+                <ul>
+                    <li>
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span><strong>Encryption at Rest:</strong> All stored memories are encrypted using AES-256.</span>
+                    </li>
+                    <li>
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span><strong>Encryption in Transit:</strong> All API communications use TLS 1.3.</span>
+                    </li>
+                    <li>
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span><strong>User Scoping:</strong> Memories are strictly scoped to user IDs, preventing cross-user data leakage.</span>
+                    </li>
+                    <li>
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span><strong>PII Detection:</strong> Built-in detection and optional redaction of sensitive data.</span>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>Authentication & Access Control</h2>
+                <ul>
+                    <li>
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span><strong>API Key Authentication:</strong> Secure, scoped API keys with granular permissions.</span>
+                    </li>
+                    <li>
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span><strong>RBAC:</strong> Role-based access control with Admin, Editor, and Viewer roles.</span>
+                    </li>
+                    <li>
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span><strong>Rate Limiting:</strong> Protection against abuse with configurable rate limits.</span>
+                    </li>
+                    <li>
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span><strong>Audit Logging:</strong> Full audit trail of all API operations.</span>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>Infrastructure</h2>
+                <div class="card">
+                    <h3>Self-Hosted Option</h3>
+                    <p>Deploy Remembra on your own infrastructure with full control over your data. No data ever leaves your network.</p>
+                </div>
+                <div class="card">
+                    <h3>Cloud Hosting</h3>
+                    <p>Our managed cloud service runs on secure, SOC 2 compliant infrastructure with regular security audits.</p>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2>Compliance & Privacy</h2>
+                <ul>
+                    <li>
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span><strong>GDPR Ready:</strong> Full support for data export and deletion (right to be forgotten).</span>
+                    </li>
+                    <li>
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span><strong>Data Portability:</strong> Export all your memories in JSON, CSV, or JSONL format.</span>
+                    </li>
+                    <li>
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        <span><strong>No Training on Your Data:</strong> Your memories are never used to train AI models.</span>
+                    </li>
+                </ul>
+            </div>
+
+            <div class="section">
+                <h2>Responsible Disclosure</h2>
+                <p>We take security vulnerabilities seriously. If you discover a security issue, please report it responsibly:</p>
+                <p>Email: <a href="mailto:security@dolphytech.com">security@dolphytech.com</a></p>
+                <p>We aim to respond within 48 hours and will work with you to understand and address the issue.</p>
+            </div>
+
+            <div class="section">
+                <h2>Questions?</h2>
+                <p>For security-related questions or to request our security documentation, please <a href="/contact">contact us</a>.</p>
+            </div>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="footer-links">
+            <a href="/privacy">Privacy</a>
+            <a href="/terms">Terms</a>
+            <a href="/contact">Contact</a>
+        </div>
+        <p>&copy; 2026 DolphyTech. All rights reserved.</p>
+    </footer>
+</body>
+</html>
