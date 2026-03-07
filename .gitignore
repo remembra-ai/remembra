@@ -57,7 +57,7 @@ htmlcov/
 logs/
 
 # MkDocs build output
-site/
+# site/ - Now tracked for Coolify deployment
 
 # Distribution
 *.tar.gz
