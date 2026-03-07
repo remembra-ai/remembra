@@ -17,7 +17,7 @@ Quick Start:
     print(result.context)  # "John works at Acme Corp as CTO."
 """
 
-__version__ = "0.8.1"
+__version__ = "0.8.2"
 
 # SDK exports (client-side)
 from remembra.client.memory import Memory, MemoryError
