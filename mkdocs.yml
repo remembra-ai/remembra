@@ -118,6 +118,7 @@ nav:
   - Reference:
     - Configuration: reference/configuration.md
     - API Reference: reference/api.md
+    - Benchmarks: benchmarks.md
     - Changelog: reference/changelog.md
   - Support:
     - Troubleshooting: TROUBLESHOOTING.md
