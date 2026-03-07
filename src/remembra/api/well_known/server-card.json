@@ -1,0 +1,139 @@
+{
+  "serverInfo": {
+    "name": "Remembra",
+    "version": "0.8.2"
+  },
+  "authentication": {
+    "required": true,
+    "schemes": ["apiKey"]
+  },
+  "tools": [
+    {
+      "name": "store_memory",
+      "description": "Store information in persistent memory. Automatically extracts entities (people, organizations, locations) and facts from the content.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The text content to memorize. Can be facts, context, decisions, meeting notes, preferences, etc."
+          },
+          "metadata": {
+            "type": "object",
+            "description": "Optional key-value metadata to attach (e.g., {\"source\": \"meeting\", \"date\": \"2024-01-15\"})"
+          },
+          "ttl": {
+            "type": "string",
+            "description": "Optional time-to-live. Examples: \"24h\", \"7d\", \"30d\", \"1y\", or omit for permanent storage."
+          }
+        },
+        "required": ["content"]
+      }
+    },
+    {
+      "name": "recall_memories",
+      "description": "Search persistent memory for relevant information using hybrid search (semantic + keyword). Use this BEFORE answering questions about past decisions, context, people, or projects.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural language query. Can be a question or keywords."
+          },
+          "limit": {
+            "type": "integer",
+            "description": "Maximum number of memories to return (1-50, default: 5)",
+            "default": 5
+          },
+          "threshold": {
+            "type": "number",
+            "description": "Minimum relevance score 0.0-1.0 (default: 0.4)",
+            "default": 0.4
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "forget_memories",
+      "description": "Delete memories from persistent storage. GDPR-compliant deletion. Provide exactly one of: memory_id, entity, or all_memories.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "memory_id": {
+            "type": "string",
+            "description": "Delete a specific memory by its ID"
+          },
+          "entity": {
+            "type": "string",
+            "description": "Delete all memories about a specific entity (person, org, etc)"
+          },
+          "all_memories": {
+            "type": "boolean",
+            "description": "Set to true to delete ALL memories. Use with extreme caution!"
+          }
+        }
+      }
+    },
+    {
+      "name": "health_check",
+      "description": "Check Remembra server health and connection status. Returns server version, status, and component health.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "ingest_conversation",
+      "description": "Ingest a conversation and automatically extract memories. Processes messages and intelligently extracts facts worth remembering long-term.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "messages": {
+            "type": "array",
+            "description": "List of message dicts with 'role' and 'content'. Optional: 'name', 'timestamp'.",
+            "items": {
+              "type": "object",
+              "properties": {
+                "role": {"type": "string"},
+                "content": {"type": "string"},
+                "name": {"type": "string"},
+                "timestamp": {"type": "string"}
+              },
+              "required": ["role", "content"]
+            }
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Optional session ID for grouping related conversations"
+          },
+          "min_importance": {
+            "type": "number",
+            "description": "Minimum importance threshold (0.0-1.0, default: 0.5)",
+            "default": 0.5
+          },
+          "extract_from": {
+            "type": "string",
+            "enum": ["user", "assistant", "both"],
+            "description": "Which messages to extract from",
+            "default": "both"
+          },
+          "store": {
+            "type": "boolean",
+            "description": "If false, returns extraction results without storing (dry run)",
+            "default": true
+          }
+        },
+        "required": ["messages"]
+      }
+    }
+  ],
+  "resources": [
+    {
+      "uri": "memory://recent",
+      "name": "Recent Memories",
+      "description": "Returns the 10 most recently stored memories for quick context"
+    }
+  ],
+  "prompts": []
+}

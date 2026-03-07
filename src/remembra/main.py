@@ -363,6 +363,36 @@ def create_app() -> FastAPI:
         return {"name": "remembra", "version": __version__, "docs": "/docs"}
 
     # -----------------------------------------------------------------------
+    # Well-Known endpoints (MCP server card for Smithery)
+    # -----------------------------------------------------------------------
+    @app.get("/.well-known/mcp/server-card.json", tags=["ops"], include_in_schema=False)
+    async def mcp_server_card() -> JSONResponse:
+        """Return MCP server card for Smithery and other registries."""
+        import json
+        from pathlib import Path
+        
+        # Try to load from file first
+        card_path = Path(__file__).parent / "api" / "well_known" / "server-card.json"
+        if card_path.exists():
+            with open(card_path) as f:
+                return JSONResponse(content=json.load(f))
+        
+        # Fallback inline card
+        return JSONResponse(content={
+            "serverInfo": {"name": "Remembra", "version": __version__},
+            "authentication": {"required": True, "schemes": ["apiKey"]},
+            "tools": [
+                {"name": "store_memory", "description": "Store information in persistent memory"},
+                {"name": "recall_memories", "description": "Search persistent memory for relevant information"},
+                {"name": "forget_memories", "description": "Delete memories from persistent storage"},
+                {"name": "health_check", "description": "Check Remembra server health"},
+                {"name": "ingest_conversation", "description": "Ingest a conversation and extract memories"},
+            ],
+            "resources": [{"uri": "memory://recent", "name": "Recent Memories"}],
+            "prompts": [],
+        })
+
+    # -----------------------------------------------------------------------
     # Versioned API routes
     # -----------------------------------------------------------------------
     app.include_router(api_router)
