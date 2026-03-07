@@ -12,6 +12,7 @@
 
 <p align="center">
   <a href="https://pypi.org/project/remembra/"><img src="https://img.shields.io/pypi/v/remembra?color=blue&label=PyPI" alt="PyPI"></a>
+  <a href="https://www.npmjs.com/package/remembra"><img src="https://img.shields.io/npm/v/remembra?color=green&label=npm" alt="npm"></a>
   <a href="https://github.com/remembra-ai/remembra/stargazers"><img src="https://img.shields.io/github/stars/remembra-ai/remembra?style=social" alt="GitHub Stars"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
   <a href="https://docs.remembra.dev"><img src="https://img.shields.io/badge/docs-remembra.dev-blue" alt="Documentation"></a>
