@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-03-07T04:03:46.203588Z",
+  "remembra_url": "https://api.remembra.dev",
+  "judge_model": "gpt-4o-mini",
+  "scoring_method": "llm-judge",
+  "conversations_ingested": 1,
+  "total_questions": 199,
+  "overall_accuracy": 76.38,
+  "overall_accuracy_excl_adversarial": 100.0,
+  "ingestion_time_s": 631.6,
+  "evaluation_time_s": 263.8,
+  "categories": {
+    "multi-hop": {
+      "category_id": 1,
+      "count": 32,
+      "accuracy": 100.0,
+      "avg_latency_ms": 883.5
+    },
+    "single-hop": {
+      "category_id": 2,
+      "count": 37,
+      "accuracy": 100.0,
+      "avg_latency_ms": 885.0
+    },
+    "temporal": {
+      "category_id": 3,
+      "count": 13,
+      "accuracy": 100.0,
+      "avg_latency_ms": 870.4
+    },
+    "open-domain": {
+      "category_id": 4,
+      "count": 70,
+      "accuracy": 100.0,
+      "avg_latency_ms": 867.7
+    },
+    "adversarial": {
+      "category_id": 5,
+      "count": 47,
+      "accuracy": 0.0,
+      "avg_latency_ms": 883.4
+    }
+  }
+}

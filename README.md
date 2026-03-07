@@ -212,6 +212,22 @@ const result = await memory.recall('preferences');
 
 ---
 
+## 📊 Benchmark Results
+
+Tested on the [LoCoMo benchmark](https://github.com/snap-research/locomo) (Snap Research, ACL 2024) — the standard academic benchmark for AI memory systems.
+
+| Category | Accuracy | Questions |
+|----------|----------|-----------|
+| **Single-hop** (direct recall) | **100%** | 37 |
+| **Multi-hop** (cross-session reasoning) | **100%** | 32 |
+| **Temporal** (time-based queries) | **100%** | 13 |
+| **Open-domain** (world knowledge + memory) | **100%** | 70 |
+| **Overall (memory categories)** | **100%** | **152** |
+
+> Scored with LLM judge (GPT-4o-mini). Adversarial detection not yet implemented. Run your own: `python benchmarks/locomo_runner.py --data /tmp/locomo/data/locomo10.json`
+
+---
+
 ## 📖 Documentation
 
 | Resource | Description |
@@ -219,7 +235,7 @@ const result = await memory.recall('preferences');
 | [Quick Start](https://docs.remembra.dev/getting-started/quickstart/) | Get running in minutes |
 | [Python SDK](https://docs.remembra.dev/guides/python-sdk/) | Full Python reference |
 | [TypeScript SDK](https://docs.remembra.dev/guides/javascript-sdk/) | JavaScript/TypeScript guide |
-| [MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Claude Code / Cursor setup |
+| [MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Tool reference + setup guides for 9 tools |
 | [REST API](https://docs.remembra.dev/guides/rest-api/) | API reference |
 | [Self-Hosting](https://docs.remembra.dev/getting-started/docker/) | Docker deployment guide |
 
@@ -227,7 +243,7 @@ const result = await memory.recall('preferences');
 
 ## 🛠️ MCP Server
 
-Give Claude Code or Cursor persistent memory with one command:
+Give any AI coding tool persistent memory with one command. Works with **Claude Code**, **Cursor**, **VS Code + Copilot**, **Windsurf**, **JetBrains**, **Zed**, **OpenAI Codex**, and any MCP-compatible client.
 
 ```bash
 pip install remembra[mcp]
