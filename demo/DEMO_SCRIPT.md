@@ -46,7 +46,7 @@ Show Claude Desktop with Remembra MCP connected
 **Voiceover:** "Works with Claude Desktop via MCP. Your AI finally remembers."
 
 ## CTA (5 sec)
-- GitHub: github.com/anthropics/remembra (or actual URL)
+- GitHub: github.com/remembra-ai/remembra
 - "Star us. Ship memory."
 
 ---

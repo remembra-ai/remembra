@@ -131,7 +131,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 === "From Source"
 
     ```bash
-    git clone https://github.com/AskDolphy/remembra
+    git clone https://github.com/remembra-ai/remembra
     cd remembra
     pip install -e ".[server]"
     remembra-server
@@ -271,7 +271,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     Comprehensive diagnosis and fix guide for common issues. Step-by-step instructions for self-hosters.
 
-    [View Guide →](docs/TROUBLESHOOTING.md)
+    [View Guide →](TROUBLESHOOTING.md)
 
 -   :material-clipboard-check:{ .lg .middle } __Setup Checklist__
 
@@ -279,7 +279,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     10-step verification checklist ensures your Remembra instance is production-ready.
 
-    [View Checklist →](docs/SETUP-CHECKLIST.md)
+    [View Checklist →](SETUP-CHECKLIST.md)
 
 -   :material-bug-check:{ .lg .middle } __Error Display Fix__
 
@@ -321,6 +321,6 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
 ## License
 
-Remembra is open source under the [MIT License](https://github.com/AskDolphy/remembra/blob/main/LICENSE).
+Remembra is open source under the [MIT License](https://github.com/remembra-ai/remembra/blob/main/LICENSE).
 
 Built with :heart: by [DolphyTech](https://dolphytech.com) | [remembra.dev](https://remembra.dev)

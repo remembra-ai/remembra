@@ -29,13 +29,14 @@
 
 ---
 
-## 🚀 What's New in v0.7.0
+## 🚀 What's New in v0.8.0
 
-- **Conversation Ingestion** — Auto-extract memories from chat history
-- **Sleep-Time Compute** — Background consolidation during idle time
-- **PII Detection** — Automatic redaction of sensitive data
-- **Anomaly Detection** — Protection against memory poisoning
-- **TypeScript SDK** — First-class JavaScript support
+- **One-Command Quick Start** — `curl | bash` zero-config setup with Ollama embeddings
+- **Multi-Provider Entity Extraction** — OpenAI, Anthropic Claude, and Ollama support
+- **Performance Boost** — httpx connection reuse reduces latency by 100-300ms per operation
+- **Usage Warning Banners** — API responses include usage thresholds at 60/80/95%
+- **Docker Compose Quickstart** — Zero-config compose with Qdrant + Ollama + Remembra
+- **125 New Tests** — Comprehensive coverage for embeddings, entities, conflicts, spaces, and plugins
 
 ---
 

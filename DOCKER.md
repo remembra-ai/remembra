@@ -6,7 +6,7 @@ Self-host Remembra in 5 minutes with Docker.
 
 ```bash
 # Clone the repo
-git clone https://github.com/remembra/remembra.git
+git clone https://github.com/remembra-ai/remembra.git
 cd remembra
 
 # Start all services

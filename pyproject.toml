@@ -127,11 +127,11 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/AskDolphy/remembra"
-Documentation = "https://github.com/AskDolphy/remembra#readme"
-Repository = "https://github.com/AskDolphy/remembra.git"
-Issues = "https://github.com/AskDolphy/remembra/issues"
-Changelog = "https://github.com/AskDolphy/remembra/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/remembra-ai/remembra"
+Documentation = "https://github.com/remembra-ai/remembra#readme"
+Repository = "https://github.com/remembra-ai/remembra.git"
+Issues = "https://github.com/remembra-ai/remembra/issues"
+Changelog = "https://github.com/remembra-ai/remembra/blob/main/CHANGELOG.md"
 
 [project.scripts]
 remembra = "remembra.main:run"

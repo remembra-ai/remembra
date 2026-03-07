@@ -233,7 +233,7 @@ Expected healthy response:
 ```json
 {
   "status": "ok",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "dependencies": {
     "qdrant": {
       "status": "ok"
@@ -461,7 +461,7 @@ Higher tiers have higher rate limits.
 1. **Check logs**: `docker logs remembra 2>&1 | tail -100`
 2. **Enable debug mode**: Set `REMEMBRA_LOG_LEVEL=debug` and restart
 3. **Join Discord**: https://discord.gg/Bzv3JshRa3
-4. **Open an issue**: https://github.com/remembradev/remembra/issues
+4. **Open an issue**: https://github.com/remembra-ai/remembra/issues
 
 When reporting issues, include:
 - Remembra version (`/health` endpoint shows it)

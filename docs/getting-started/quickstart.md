@@ -71,7 +71,7 @@ If you prefer to configure things yourself, choose one of the options below.
 === "From Source"
 
     ```bash
-    git clone https://github.com/remembra/remembra
+    git clone https://github.com/remembra-ai/remembra
     cd remembra
     pip install -e ".[server]"
 

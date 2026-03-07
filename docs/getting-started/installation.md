@@ -76,7 +76,7 @@ For development or customization:
 
 ```bash
 # Clone the repo
-git clone https://github.com/remembra/remembra
+git clone https://github.com/remembra-ai/remembra
 cd remembra
 
 # Install with uv (recommended)

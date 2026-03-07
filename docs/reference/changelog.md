@@ -4,6 +4,22 @@ See [CHANGELOG.md](https://github.com/remembra-ai/remembra/blob/main/CHANGELOG.m
 
 ## Latest: v0.8.0 (March 2026)
 
+### Added
+- **One-Command Quick Start** — `curl -sSL https://get.remembra.dev/quickstart.sh | bash` zero-config setup with Ollama embeddings
+- **Multi-Provider Entity Extraction** — OpenAI, Anthropic Claude, and Ollama support for entity extraction
+- **Usage Warning Banners** — API responses include usage thresholds at 60/80/95% to drive Pro upgrades
+- **Docker Compose Quickstart** — Zero-config compose with Qdrant + Ollama + Remembra in one file
+- **125 New Tests** — Comprehensive test coverage for embeddings, entities, conflicts, spaces, and plugins
+
+### Changed
+- **httpx Connection Reuse** — Persistent connections across all 6 embedding providers for reduced latency
+- **App Lifespan Cleanup** — Proper resource management during application startup and shutdown
+
+### Fixed
+- **Connection Churn** — Fixed 13 locations creating per-request httpx clients, now using shared persistent connections
+
+## v0.7.2 (March 2026)
+
 ### Fixed
 - **Security: CORS Configuration** — Removed `allow_origins=["*"]`, now configurable via `REMEMBRA_CORS_ORIGINS`
 - **API: PATCH /memories/{id}** — Full implementation (was returning 501)
@@ -15,6 +31,11 @@ See [CHANGELOG.md](https://github.com/remembra-ai/remembra/blob/main/CHANGELOG.m
 ### Changed
 - Stub endpoints now return 503 Service Unavailable with helpful messages (was 501)
 - Improved error messages throughout API
+
+## v0.7.1 (March 2026)
+
+### Fixed
+- Minor bug fixes and stability improvements
 
 ## v0.7.0 (March 2026)
 

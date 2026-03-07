@@ -23,7 +23,7 @@ The fastest way to try Remembra — no API keys required. This uses Ollama for l
 curl -sSL https://get.remembra.dev/quickstart.sh | bash
 ```
 
-This pulls and starts [`docker-compose.quickstart.yml`](https://github.com/remembra-dev/remembra/blob/main/docker-compose.quickstart.yml), which runs 3 services:
+This pulls and starts [`docker-compose.quickstart.yml`](https://github.com/remembra-ai/remembra/blob/main/docker-compose.quickstart.yml), which runs 3 services:
 
 | Service | Port | Purpose |
 |---------|------|---------|

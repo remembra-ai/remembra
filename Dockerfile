@@ -45,7 +45,7 @@ FROM python:3.11-slim AS production
 
 LABEL org.opencontainers.image.title="Remembra"
 LABEL org.opencontainers.image.description="AI Memory Layer - Self-hosted"
-LABEL org.opencontainers.image.url="https://github.com/remembra/remembra"
+LABEL org.opencontainers.image.url="https://github.com/remembra-ai/remembra"
 LABEL org.opencontainers.image.vendor="Remembra"
 
 # Create non-root user

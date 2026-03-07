@@ -110,7 +110,7 @@ def main():
     
     pause(1)
     print("\n" + "="*50)
-    print("⭐ github.com/YOUR_ORG/remembra")
+    print("⭐ github.com/remembra-ai/remembra")
     print("🧠 Memory for AI. Finally.")
     print("="*50 + "\n")
 
