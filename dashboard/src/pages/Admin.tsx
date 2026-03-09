@@ -477,7 +477,7 @@ export function Admin() {
                     <option value="" disabled>Change plan...</option>
                     <option value="free">Free</option>
                     <option value="pro">Pro ($49/mo)</option>
-                    <option value="team">Team ($99/mo)</option>
+                    <option value="team">Team ($199/mo)</option>
                     <option value="enterprise">Enterprise</option>
                   </select>
                 </div>

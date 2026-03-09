@@ -194,7 +194,7 @@ const result = await memory.recall('preferences');
 | **Self-Host + Billing** | ✅ Stripe | ❌ | ❌ | ❌ | ❌ |
 | **Memory Spaces** | ✅ Multi-tenant | ❌ | ❌ | ❌ | ❌ |
 | **MCP Server** | ✅ 11 Tools | ✅ | ❌ | ❌ | ✅ |
-| **Pricing** | Free / $49 / $99 | $19 → $249 | $25+ | Free | Free |
+| **Pricing** | Free / $49 / $199 | $19 → $249 | $25+ | Free | Free |
 | **License** | MIT | Apache 2.0 | Apache 2.0 | Apache 2.0 | MIT |
 
 ### Core Features

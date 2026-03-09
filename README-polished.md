@@ -157,8 +157,8 @@ const result = await memory.recall('preferences');
 | Plan | Price | Memories | API Calls |
 |------|-------|----------|-----------|
 | **Free** | $0 | 1,000 | 10K/mo |
-| **Pro** | $29/mo | 50,000 | 500K/mo |
-| **Team** | $99/mo | 500,000 | 5M/mo |
+| **Pro** | $49/mo | 50,000 | 500K/mo |
+| **Team** | $199/mo | 500,000 | 5M/mo |
 | **Enterprise** | Custom | Unlimited | Unlimited |
 
 Self-hosted is always **free and unlimited**.

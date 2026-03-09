@@ -399,7 +399,7 @@ export function Billing() {
             
             <PricingCard
               name="Team"
-              price="$99"
+              price="$199"
               description="For growing companies"
               features={[
                 '2,000,000 memories',
@@ -447,7 +447,7 @@ export function Billing() {
                 Pro $49
               </th>
               <th className="px-4 py-4 text-center text-sm font-semibold text-purple-600 dark:text-purple-400">
-                Team $99
+                Team $199
               </th>
               <th className="px-4 py-4 text-center text-sm font-semibold text-gray-900 dark:text-white">
                 Enterprise

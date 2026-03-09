@@ -33,7 +33,7 @@ Based on their arxiv paper (2504.19413) and production system:
 
 ### Our Differentiators
 1. **Self-host in minutes** - Single `docker run` command
-2. **Fair pricing** - $0 → $29 → $99 (not $19 → $249)
+2. **Fair pricing** - $0 → $49 → $199 (not $19 → $249)
 3. **Developer-first docs** - Actually usable
 4. **MIT license** - True open source
 5. **Lightweight** - Runs on a $5/mo VPS
