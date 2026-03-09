@@ -171,7 +171,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
 ignore = ["ANN101", "ANN102", "ANN401"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["ANN"]  # Don't require type annotations in tests
+"tests/**/*.py" = ["ANN", "I"]  # Don't require type annotations or import sorting in tests
 
 [tool.ruff.lint.isort]
 known-first-party = ["remembra"]
