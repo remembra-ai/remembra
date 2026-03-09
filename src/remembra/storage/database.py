@@ -167,6 +167,72 @@ CREATE TABLE IF NOT EXISTS memory_entities (
     FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE,
     FOREIGN KEY (entity_id) REFERENCES entities(id) ON DELETE CASCADE
 );
+
+-- Teams (collaborative workspaces)
+CREATE TABLE IF NOT EXISTS teams (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    slug TEXT UNIQUE NOT NULL,
+    description TEXT DEFAULT '',
+    owner_id TEXT NOT NULL,
+    plan TEXT NOT NULL DEFAULT 'free',
+    max_seats INTEGER NOT NULL DEFAULT 5,
+    used_seats INTEGER NOT NULL DEFAULT 1,
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (owner_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_teams_slug ON teams(slug);
+CREATE INDEX IF NOT EXISTS idx_teams_owner ON teams(owner_id);
+
+-- Team members
+CREATE TABLE IF NOT EXISTS team_members (
+    team_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member',
+    invited_by TEXT,
+    joined_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (team_id, user_id),
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
+
+-- Team invites
+CREATE TABLE IF NOT EXISTS team_invites (
+    id TEXT PRIMARY KEY,
+    team_id TEXT NOT NULL,
+    email TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'member',
+    invited_by TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    token_hash TEXT UNIQUE NOT NULL,
+    expires_at TEXT NOT NULL,
+    accepted_at TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_invites_token ON team_invites(token_hash);
+CREATE INDEX IF NOT EXISTS idx_team_invites_email ON team_invites(email);
+CREATE INDEX IF NOT EXISTS idx_team_invites_status ON team_invites(team_id, status);
+
+-- Team spaces junction (link spaces to teams)
+CREATE TABLE IF NOT EXISTS team_spaces (
+    team_id TEXT NOT NULL,
+    space_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    created_by TEXT NOT NULL,
+    PRIMARY KEY (team_id, space_id),
+    FOREIGN KEY (team_id) REFERENCES teams(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_team_spaces_space ON team_spaces(space_id);
 """
 
 

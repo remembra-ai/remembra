@@ -501,3 +501,34 @@ class EmailService:
             dashboard_url="https://app.remembra.dev",
             support_email="support@remembra.dev",
         )
+
+    async def send_team_invite_email(
+        self,
+        to: str,
+        team_name: str,
+        inviter_email: str,
+        role: str,
+        invite_url: str,
+        expires_at: str,
+    ) -> EmailResult:
+        """Send team invite email.
+        
+        Args:
+            to: Invitee's email address
+            team_name: Name of the team
+            inviter_email: Email of person who sent the invite
+            role: Role being granted (admin, member, viewer)
+            invite_url: Full URL to accept the invite
+            expires_at: Expiration timestamp
+        """
+        return await self.send_email(
+            to=to,
+            subject=f"You've been invited to join {team_name} on Remembra",
+            template_name="team_invite",
+            team_name=team_name,
+            inviter_email=inviter_email,
+            role=role,
+            invite_url=invite_url,
+            expires_at=expires_at,
+            dashboard_url="https://app.remembra.dev",
+        )

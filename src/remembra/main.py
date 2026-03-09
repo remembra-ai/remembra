@@ -27,6 +27,7 @@ from remembra.security.audit import AuditLogger
 from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.memory import MemoryService
 from remembra.spaces.manager import SpaceManager
+from remembra.teams.manager import TeamManager
 from remembra.storage.database import Database
 from remembra.storage.embeddings import EmbeddingService
 from remembra.storage.qdrant import QdrantStore
@@ -65,6 +66,7 @@ class AppState:
     conflict_manager: ConflictManager | None
     role_manager: RoleManager | None
     space_manager: SpaceManager | None
+    team_manager: TeamManager | None
     reindex_manager: ReindexManager | None
     plugin_manager: PluginManager | None
 
@@ -194,6 +196,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await app.state.space_manager.init_schema()
     app.state.memory_service.space_manager = app.state.space_manager
     log.info("memory_spaces_enabled")
+
+    # Team collaboration
+    app.state.team_manager = TeamManager(app.state.db)
+    await app.state.team_manager.init_schema()
+    log.info("team_collaboration_enabled")
 
     # Re-indexing manager (embedding model migration)
     app.state.reindex_manager = ReindexManager(

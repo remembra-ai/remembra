@@ -15,6 +15,7 @@ from remembra.api.v1 import (
     memories,
     plugins,
     spaces,
+    teams,
     temporal,
     transfer,
     webhooks,
@@ -34,5 +35,6 @@ api_router.include_router(conflicts.router, prefix="/v1")
 api_router.include_router(admin.router, prefix="/v1")
 api_router.include_router(transfer.router, prefix="/v1")
 api_router.include_router(spaces.router, prefix="/v1")
+api_router.include_router(teams.router, prefix="/v1")
 api_router.include_router(embeddings.router, prefix="/v1")
 api_router.include_router(plugins.router, prefix="/v1")
