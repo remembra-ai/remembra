@@ -70,6 +70,9 @@ function App() {
           const user = await response.json();
           setCurrentUser({ id: user.id, email: user.email, name: user.name });
           localStorage.setItem('remembra_user', JSON.stringify(user));
+          // Set user ID in API client for API calls
+          api.setUserId(user.id);
+          api.setJwtToken(token);
           setIsAuthenticated(true);
         }
       } catch {

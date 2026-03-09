@@ -128,7 +128,20 @@ class ApiClient {
 
   getUserId(): string {
     if (!this.userId) {
-      this.userId = localStorage.getItem('remembra_user_id') || 'default_user';
+      // Try dedicated user_id first, then extract from user object
+      this.userId = localStorage.getItem('remembra_user_id');
+      if (!this.userId) {
+        const userJson = localStorage.getItem('remembra_user');
+        if (userJson) {
+          try {
+            const user = JSON.parse(userJson);
+            this.userId = user.id;
+          } catch {
+            // Invalid JSON, ignore
+          }
+        }
+      }
+      this.userId = this.userId || 'default_user';
     }
     return this.userId;
   }
