@@ -31,7 +31,7 @@
 
 ---
 
-## 🚀 What's New in v0.8.2
+## 🚀 What's New in v0.8.4
 
 - **🔐 AES-256-GCM Field Encryption** — Encrypt memory content at rest with OWASP-compliant key derivation
 - **🛡️ Enterprise Security Suite** — PII detection, anomaly monitoring, audit logging
