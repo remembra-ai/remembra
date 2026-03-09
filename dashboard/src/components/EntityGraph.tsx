@@ -548,12 +548,17 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
           ctx.fill();
         }}
         linkCanvasObject={paintLink}
+        linkDirectionalParticles={2}
+        linkDirectionalParticleWidth={2}
+        linkDirectionalParticleSpeed={0.005}
+        linkDirectionalParticleColor={() => 'rgba(168, 85, 247, 0.8)'}
         onNodeHover={handleNodeHover as any}
         onNodeClick={handleNodeClick as any}
-        cooldownTicks={100}
-        d3AlphaDecay={0.02}
-        d3VelocityDecay={0.3}
-        warmupTicks={50}
+        cooldownTicks={Infinity}
+        d3AlphaDecay={0.008}
+        d3VelocityDecay={0.2}
+        warmupTicks={100}
+        d3AlphaMin={0.001}
         onEngineStop={() => graphRef.current?.zoomToFit(400, 50)}
         enableNodeDrag={true}
         enableZoomInteraction={true}

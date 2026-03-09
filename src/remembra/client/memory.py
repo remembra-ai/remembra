@@ -180,6 +180,53 @@ class Memory:
             entities=entities,
         )
     
+    def update(
+        self,
+        memory_id: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Update an existing memory's content.
+        
+        Re-extracts facts and entities from the new content.
+        
+        Args:
+            memory_id: ID of the memory to update
+            content: New content for the memory
+            metadata: Optional metadata to update
+            
+        Returns:
+            Dict with updated memory info including re-extracted entities
+            
+        Example:
+            >>> result = memory.update("01HQXYZ...", "John is now CTO of Acme Corp")
+        """
+        payload: dict[str, Any] = {"content": content}
+        if metadata is not None:
+            payload["metadata"] = metadata
+        return self._request("PATCH", f"/api/v1/memories/{memory_id}", json=payload)
+    
+    def list_entities(
+        self,
+        entity_type: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        """
+        List entities from the knowledge graph.
+        
+        Args:
+            entity_type: Filter by type (person/company/location/concept)
+            limit: Maximum entities to return
+            
+        Returns:
+            Dict with list of entities and their relationships
+        """
+        params: dict[str, Any] = {"limit": limit}
+        if entity_type:
+            params["entity_type"] = entity_type
+        return self._request("GET", "/api/v1/entities", params=params)
+    
     def recall(
         self,
         query: str,

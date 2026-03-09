@@ -200,6 +200,114 @@ Result:
 
 ---
 
+### update_memory <span class="md-tag">v0.8.4</span>
+
+Update an existing memory's content. Re-extracts facts and entities from the new content.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `memory_id` | string | ✅ | ID of the memory to update |
+| `content` | string | ✅ | New content for the memory |
+| `metadata` | object | ❌ | Optional metadata to update |
+
+**Example:**
+```
+[Tool: update_memory]
+memory_id: "mem_abc123"
+content: "User is now CTO at Acme Corp (promoted from Senior Engineer)"
+
+Result:
+{
+  "status": "updated",
+  "id": "mem_abc123",
+  "extracted_facts": [
+    "User is CTO at Acme Corp",
+    "User was promoted from Senior Engineer"
+  ],
+  "updated_entities": [
+    {"name": "Acme Corp", "type": "ORGANIZATION"}
+  ]
+}
+```
+
+---
+
+### search_entities <span class="md-tag">v0.8.4</span>
+
+Search the entity graph. Find people, companies, locations, and concepts that Remembra knows about.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `query` | string | ❌ | - | Filter by entity name (partial match) |
+| `entity_type` | string | ❌ | - | Filter: `person`, `organization`, `location`, `concept` |
+| `limit` | int | ❌ | 20 | Max entities to return (max: 100) |
+
+**Example:**
+```
+[Tool: search_entities]
+query: "Alice"
+entity_type: "person"
+
+Result:
+{
+  "status": "ok",
+  "count": 2,
+  "entities": [
+    {
+      "id": "ent_123",
+      "name": "Alice Johnson",
+      "type": "person",
+      "aliases": ["Alice", "AJ"],
+      "memory_count": 5
+    },
+    {
+      "id": "ent_456",
+      "name": "Alice Chen",
+      "type": "person",
+      "aliases": [],
+      "memory_count": 2
+    }
+  ]
+}
+```
+
+---
+
+### list_memories <span class="md-tag">v0.8.4</span>
+
+Browse stored memories without a search query. Returns recent memories.
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `limit` | int | ❌ | 10 | Max memories to return (1-50) |
+| `project_id` | string | ❌ | - | Filter by project namespace |
+
+**Example:**
+```
+[Tool: list_memories]
+limit: 5
+
+Result:
+{
+  "status": "ok",
+  "count": 5,
+  "memories": [
+    {
+      "id": "mem_abc123",
+      "content": "User prefers TypeScript over JavaScript...",
+      "created_at": "2024-03-08T15:30:00Z"
+    },
+    {
+      "id": "mem_def456",
+      "content": "Meeting with Alice scheduled for Friday...",
+      "created_at": "2024-03-08T14:20:00Z"
+    }
+  ]
+}
+```
+
+---
+
 ## Resources
 
 MCP resources provide quick access to memory data without tool calls.

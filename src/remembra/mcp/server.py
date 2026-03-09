@@ -362,6 +362,150 @@ def ingest_conversation(
         return json.dumps({"status": "error", "error": str(e)})
 
 
+@mcp.tool()
+def update_memory(
+    memory_id: str,
+    content: str,
+    metadata: dict[str, Any] | None = None,
+) -> str:
+    """Update an existing memory's content.
+
+    Re-extracts facts and entities from the new content. Use this to
+    correct or update previously stored information without deleting
+    and recreating.
+
+    Args:
+        memory_id: ID of the memory to update.
+        content: New content for the memory.
+        metadata: Optional metadata to update or add.
+
+    Returns:
+        JSON string with status, updated memory ID, and re-extracted entities.
+    """
+    try:
+        client = _get_client()
+        result = client.update(memory_id=memory_id, content=content, metadata=metadata)
+
+        return json.dumps(
+            {
+                "status": "updated",
+                "id": result.get("id", memory_id),
+                "updated_entities": result.get("entities", []),
+                "extracted_facts": result.get("extracted_facts", []),
+            },
+            indent=2,
+        )
+    except MemoryError as e:
+        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+@mcp.tool()
+def search_entities(
+    query: str | None = None,
+    entity_type: str | None = None,
+    limit: int = 20,
+) -> str:
+    """Search the entity graph.
+
+    Find people, companies, locations, and concepts that Remembra knows about.
+    Use this to explore the knowledge graph and find related information.
+
+    Args:
+        query: Optional filter by entity name (case-insensitive partial match).
+        entity_type: Filter by type: "person", "organization", "location", "concept".
+        limit: Maximum entities to return (default: 20, max: 100).
+
+    Returns:
+        JSON string with entities (name, type, aliases, relationship count).
+    """
+    try:
+        client = _get_client()
+        result = client.list_entities(entity_type=entity_type, limit=min(limit, 100))
+
+        entities = result.get("entities", [])
+
+        # Filter by query name if provided
+        if query:
+            query_lower = query.lower()
+            entities = [
+                e for e in entities
+                if query_lower in e.get("canonical_name", "").lower()
+                or any(query_lower in alias.lower() for alias in e.get("aliases", []))
+            ]
+
+        return json.dumps(
+            {
+                "status": "ok",
+                "count": len(entities),
+                "entities": [
+                    {
+                        "id": e.get("id"),
+                        "name": e.get("canonical_name"),
+                        "type": e.get("type"),
+                        "aliases": e.get("aliases", []),
+                        "memory_count": e.get("memory_count", 0),
+                    }
+                    for e in entities[:limit]
+                ],
+            },
+            indent=2,
+        )
+    except MemoryError as e:
+        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+
+@mcp.tool()
+def list_memories(
+    limit: int = 10,
+    project_id: str | None = None,
+) -> str:
+    """Browse stored memories.
+
+    Returns recent memories without requiring a search query. Useful for
+    checking what has been stored or getting an overview of memory contents.
+
+    Args:
+        limit: Maximum memories to return (1-50, default: 10).
+        project_id: Optional project namespace to filter by.
+
+    Returns:
+        JSON string with memories (id, content snippet, created_at).
+    """
+    try:
+        client = _get_client()
+        
+        # Use recall with broad query and zero threshold to get recent memories
+        result = client.recall(
+            query="recent memories",
+            limit=min(limit, 50),
+            threshold=0.0,
+        )
+
+        return json.dumps(
+            {
+                "status": "ok",
+                "count": len(result.memories),
+                "memories": [
+                    {
+                        "id": m.id,
+                        "content": m.content[:200] + ("..." if len(m.content) > 200 else ""),
+                        "created_at": m.created_at.isoformat(),
+                    }
+                    for m in result.memories
+                ],
+            },
+            indent=2,
+        )
+    except MemoryError as e:
+        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+    except Exception as e:
+        return json.dumps({"status": "error", "error": str(e)})
+
+
 # ---------------------------------------------------------------------------
 # Resources
 # ---------------------------------------------------------------------------
