@@ -44,7 +44,7 @@ export function useMemories(limit = 20) {
   }, [fetchMemories, loading, hasMore]);
 
   useEffect(() => {
-    if (api.getApiKey()) {
+    if (api.isAuthenticated()) {
       fetchMemories(true);
     }
   }, []);
