@@ -511,6 +511,8 @@ async def create_checkout(
         await meter.register_tenant(
             user_id=current_user.user_id,
             stripe_customer_id=customer_id,
+            email=user_email,
+            name=current_user.name,
         )
 
     url = await billing.create_checkout_session(

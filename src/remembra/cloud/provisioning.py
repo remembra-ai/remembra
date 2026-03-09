@@ -110,12 +110,14 @@ class TenantProvisioner:
         if existing:
             raise ValueError(f"Tenant {user_id} already exists")
 
-        # Register tenant
+        # Register tenant (with email for Stripe billing)
         await self._meter.register_tenant(
             user_id=user_id,
             plan=plan,
             stripe_customer_id=stripe_customer_id,
             stripe_subscription_id=stripe_subscription_id,
+            email=email,
+            name=name,
         )
 
         # Create initial API key

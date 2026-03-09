@@ -37,6 +37,8 @@ class UsageMeter:
         await self._db.conn.executescript("""
             CREATE TABLE IF NOT EXISTS cloud_tenants (
                 user_id TEXT PRIMARY KEY,
+                email TEXT,
+                name TEXT,
                 plan TEXT NOT NULL DEFAULT 'free',
                 stripe_customer_id TEXT,
                 stripe_subscription_id TEXT,
@@ -57,6 +59,26 @@ class UsageMeter:
                 ON cloud_usage_daily(user_id, date);
         """)
         await self._db.conn.commit()
+        
+        # Migration: Add email and name columns if they don't exist
+        # This handles existing databases created before these columns were added
+        try:
+            await self._db.conn.execute(
+                "ALTER TABLE cloud_tenants ADD COLUMN email TEXT"
+            )
+            await self._db.conn.commit()
+            logger.info("Added email column to cloud_tenants")
+        except Exception:
+            pass  # Column already exists
+        
+        try:
+            await self._db.conn.execute(
+                "ALTER TABLE cloud_tenants ADD COLUMN name TEXT"
+            )
+            await self._db.conn.commit()
+            logger.info("Added name column to cloud_tenants")
+        except Exception:
+            pass  # Column already exists
 
     # -----------------------------------------------------------------------
     # Tenant management
@@ -68,22 +90,26 @@ class UsageMeter:
         plan: PlanTier = PlanTier.FREE,
         stripe_customer_id: str | None = None,
         stripe_subscription_id: str | None = None,
+        email: str | None = None,
+        name: str | None = None,
     ) -> None:
         """Register a new tenant or update existing."""
         now = datetime.now(UTC).isoformat()
         await self._db.conn.execute(
             """
             INSERT INTO cloud_tenants (
-                user_id, plan, stripe_customer_id, stripe_subscription_id,
+                user_id, email, name, plan, stripe_customer_id, stripe_subscription_id,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 plan = excluded.plan,
+                email = COALESCE(excluded.email, cloud_tenants.email),
+                name = COALESCE(excluded.name, cloud_tenants.name),
                 stripe_customer_id = COALESCE(excluded.stripe_customer_id, cloud_tenants.stripe_customer_id),
                 stripe_subscription_id = COALESCE(excluded.stripe_subscription_id, cloud_tenants.stripe_subscription_id),
                 updated_at = excluded.updated_at
             """,
-            (user_id, plan.value, stripe_customer_id, stripe_subscription_id, now, now),
+            (user_id, email, name, plan.value, stripe_customer_id, stripe_subscription_id, now, now),
         )
         await self._db.conn.commit()
 
@@ -99,13 +125,27 @@ class UsageMeter:
         return dict(row)
 
     async def get_user_email(self, user_id: str) -> str | None:
-        """Get user's email from user_id."""
+        """Get user's email from user_id.
+        
+        Checks both the users table (auth signup) and cloud_tenants table
+        (API key signup) since users can come from either flow.
+        """
+        # Try users table first (auth signup flow)
         cursor = await self._db.conn.execute(
             "SELECT email FROM users WHERE id = ?",
             (user_id,),
         )
         row = await cursor.fetchone()
-        return row[0] if row else None
+        if row and row[0]:
+            return row[0]
+        
+        # Fall back to cloud_tenants table (API key signup flow)
+        cursor = await self._db.conn.execute(
+            "SELECT email FROM cloud_tenants WHERE user_id = ?",
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        return row[0] if row and row[0] else None
 
     async def get_tenant_plan(self, user_id: str) -> PlanTier:
         """Get the plan tier for a user. Returns FREE if not registered.
