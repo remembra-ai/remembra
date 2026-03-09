@@ -30,12 +30,18 @@ CREATE TABLE IF NOT EXISTS memories (
     -- Memory provenance columns (Week 7 - Security)
     source TEXT DEFAULT 'user_input',  -- user_input, agent_generated, external_api
     trust_score REAL DEFAULT 1.0,  -- 0.0-1.0 confidence rating
-    checksum TEXT  -- SHA-256 hash for integrity verification
+    checksum TEXT,  -- SHA-256 hash for integrity verification
+    -- Visibility control for team collaboration (Layer 3)
+    visibility TEXT DEFAULT 'personal',  -- personal, project, team
+    space_id TEXT,  -- Link to memory_spaces for project visibility
+    team_id TEXT  -- Team ID for team-wide visibility
 );
 
 CREATE INDEX IF NOT EXISTS idx_memories_user ON memories(user_id);
 CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(user_id, project_id);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
+CREATE INDEX IF NOT EXISTS idx_memories_visibility ON memories(visibility);
+CREATE INDEX IF NOT EXISTS idx_memories_team ON memories(team_id);
 
 -- API Keys table (Week 7 - Authentication)
 CREATE TABLE IF NOT EXISTS api_keys (
@@ -295,6 +301,10 @@ class Database:
             "ALTER TABLE relationships ADD COLUMN valid_from TEXT DEFAULT (datetime('now'))",
             "ALTER TABLE relationships ADD COLUMN valid_to TEXT",
             "ALTER TABLE relationships ADD COLUMN superseded_by TEXT",
+            # Visibility control for team collaboration (Layer 3)
+            "ALTER TABLE memories ADD COLUMN visibility TEXT DEFAULT 'personal'",
+            "ALTER TABLE memories ADD COLUMN space_id TEXT",
+            "ALTER TABLE memories ADD COLUMN team_id TEXT",
         ]
         
         for migration in migrations:
@@ -329,14 +339,17 @@ class Database:
         source: str = "user_input",
         trust_score: float = 1.0,
         checksum: str | None = None,
+        visibility: str = "personal",
+        space_id: str | None = None,
+        team_id: str | None = None,
     ) -> None:
         """Save memory metadata to SQLite."""
         await self.conn.execute(
             """
             INSERT INTO memories (id, user_id, project_id, content, extracted_facts, 
                                   metadata, created_at, updated_at, expires_at,
-                                  source, trust_score, checksum)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  source, trust_score, checksum, visibility, space_id, team_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 content = excluded.content,
                 extracted_facts = excluded.extracted_facts,
@@ -345,7 +358,10 @@ class Database:
                 expires_at = excluded.expires_at,
                 source = excluded.source,
                 trust_score = excluded.trust_score,
-                checksum = excluded.checksum
+                checksum = excluded.checksum,
+                visibility = excluded.visibility,
+                space_id = excluded.space_id,
+                team_id = excluded.team_id
             """,
             (
                 memory_id,
@@ -360,6 +376,9 @@ class Database:
                 source,
                 trust_score,
                 checksum,
+                visibility,
+                space_id,
+                team_id,
             ),
         )
         await self.conn.commit()

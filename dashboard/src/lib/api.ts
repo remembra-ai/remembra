@@ -274,14 +274,30 @@ class ApiClient {
     });
   }
 
-  async storeMemory(content: string, projectId?: string, ttl?: string): Promise<Memory> {
-    const body: Record<string, string> = {
+  async storeMemory(
+    content: string, 
+    projectId?: string, 
+    ttl?: string,
+    visibility?: 'personal' | 'project' | 'team',
+    spaceId?: string,
+    teamId?: string,
+  ): Promise<Memory> {
+    const body: Record<string, string | undefined> = {
       content,
       project_id: projectId || this.getProjectId() || 'default',
       user_id: this.getUserId(),
     };
     if (ttl) {
       body.ttl = ttl;
+    }
+    if (visibility) {
+      body.visibility = visibility;
+    }
+    if (spaceId) {
+      body.space_id = spaceId;
+    }
+    if (teamId) {
+      body.team_id = teamId;
     }
     return this.fetchApi<Memory>('/memories', {
       method: 'POST',

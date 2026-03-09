@@ -124,6 +124,19 @@ class StoreRequest(BaseModel):
         default=None,
         description="Deprecated: user_id is determined from API key. This field is ignored.",
     )
+    # Visibility control for team collaboration
+    visibility: str = Field(
+        default="personal",
+        description="Memory visibility: 'personal' (only you), 'project' (project members), 'team' (all team members)",
+    )
+    space_id: str | None = Field(
+        default=None,
+        description="Space/project ID to link this memory to (required when visibility='project')",
+    )
+    team_id: str | None = Field(
+        default=None,
+        description="Team ID for team-visible memories (auto-detected from user's team if not provided)",
+    )
 
     @field_validator("content")
     @classmethod
@@ -136,6 +149,15 @@ class StoreRequest(BaseModel):
         import re
         v = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', v)
         return v.strip()
+
+    @field_validator("visibility")
+    @classmethod
+    def validate_visibility(cls, v: str) -> str:
+        valid = {"personal", "project", "team"}
+        if v not in valid:
+            raise ValueError(f"visibility must be one of: {', '.join(valid)}")
+        return v
+
     metadata: dict[str, Any] = Field(default_factory=dict)
     ttl: str | None = Field(
         default=None,

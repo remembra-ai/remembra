@@ -236,6 +236,9 @@ class MemoryService:
                 source=source,
                 trust_score=trust_score,
                 checksum=checksum,
+                visibility=request.visibility,
+                space_id=request.space_id,
+                team_id=request.team_id,
             )
             if fact_result:
                 stored_facts.append(fact_result["content"])
@@ -275,6 +278,9 @@ class MemoryService:
         source: str = "user_input",
         trust_score: float = 1.0,
         checksum: str | None = None,
+        visibility: str = "personal",
+        space_id: str | None = None,
+        team_id: str | None = None,
     ) -> dict[str, Any] | None:
         """
         Store a single fact with consolidation logic.
@@ -291,6 +297,9 @@ class MemoryService:
             source: Content provenance (user_input, agent_generated, external_api)
             trust_score: Security trust score (0.0-1.0)
             checksum: SHA-256 hash for integrity verification
+            visibility: Memory visibility (personal, project, team)
+            space_id: Space/project ID for project visibility
+            team_id: Team ID for team visibility
         """
         # Generate embedding for this fact
         embedding = await self.embeddings.embed(fact)
@@ -415,6 +424,9 @@ class MemoryService:
             source=source,
             trust_score=trust_score,
             checksum=checksum,
+            visibility=visibility,
+            space_id=space_id,
+            team_id=team_id,
         )
         
         # Index in FTS5 for hybrid search (Week 6)

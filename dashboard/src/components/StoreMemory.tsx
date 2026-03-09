@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { api } from '../lib/api';
-import { Plus, Send, X, Clock, Loader2 } from 'lucide-react';
+import { Plus, Send, X, Clock, Loader2, Eye, Users, Lock } from 'lucide-react';
 import clsx from 'clsx';
 
 interface StoreMemoryProps {
@@ -17,10 +17,19 @@ const TTL_OPTIONS = [
   { label: '1 year', value: '1y' },
 ];
 
+const VISIBILITY_OPTIONS = [
+  { label: 'Personal', value: 'personal', icon: Lock, description: 'Only you can see this' },
+  { label: 'Project', value: 'project', icon: Eye, description: 'Project members can see this' },
+  { label: 'Team', value: 'team', icon: Users, description: 'All team members can see this' },
+];
+
+type Visibility = 'personal' | 'project' | 'team';
+
 export function StoreMemory({ onStored, projectId }: StoreMemoryProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [content, setContent] = useState('');
   const [ttl, setTtl] = useState('');
+  const [visibility, setVisibility] = useState<Visibility>('personal');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -34,10 +43,16 @@ export function StoreMemory({ onStored, projectId }: StoreMemoryProps) {
     setSuccess(false);
 
     try {
-      await api.storeMemory(content.trim(), projectId, ttl || undefined);
+      await api.storeMemory(
+        content.trim(), 
+        projectId, 
+        ttl || undefined,
+        visibility,
+      );
       setSuccess(true);
       setContent('');
       setTtl('');
+      setVisibility('personal');
       setTimeout(() => {
         setSuccess(false);
         setIsOpen(false);
@@ -54,6 +69,7 @@ export function StoreMemory({ onStored, projectId }: StoreMemoryProps) {
     setIsOpen(false);
     setContent('');
     setTtl('');
+    setVisibility('personal');
     setError(null);
     setSuccess(false);
   };
@@ -116,6 +132,40 @@ export function StoreMemory({ onStored, projectId }: StoreMemoryProps) {
             />
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               Facts will be automatically extracted and indexed
+            </p>
+          </div>
+
+          {/* Visibility Selector */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              <Eye className="w-4 h-4 inline mr-1" />
+              Visibility
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              {VISIBILITY_OPTIONS.map((opt) => {
+                const Icon = opt.icon;
+                const isSelected = visibility === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setVisibility(opt.value as Visibility)}
+                    disabled={loading}
+                    className={clsx(
+                      'flex flex-col items-center p-3 rounded-lg border-2 transition-all',
+                      isSelected
+                        ? 'border-[#8B5CF6] bg-[#8B5CF6]/10 text-[#8B5CF6]'
+                        : 'border-gray-200 dark:border-gray-700 hover:border-[#8B5CF6]/50 text-gray-600 dark:text-gray-400'
+                    )}
+                  >
+                    <Icon className="w-5 h-5 mb-1" />
+                    <span className="text-xs font-medium">{opt.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              {VISIBILITY_OPTIONS.find(o => o.value === visibility)?.description}
             </p>
           </div>
 
