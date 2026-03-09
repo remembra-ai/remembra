@@ -46,9 +46,9 @@
 
 Every AI app needs memory. Your chatbot forgets users between sessions. Your agent can't recall decisions from yesterday. Your assistant asks the same questions over and over.
 
-**The current solutions suck:**
-- Mem0: $249/mo for graph features, self-hosting docs are trash
-- Zep: Academic, complex to deploy
+**Existing solutions have tradeoffs:**
+- Mem0: Graph features require $249/mo plan; limited self-hosting documentation
+- Zep: Academic approach, complex deployment
 - Letta: Research-grade, not production-ready
 - LangChain Memory: Too basic, no persistence
 
