@@ -69,7 +69,7 @@ extra:
     - icon: fontawesome/brands/discord
       link: https://discord.gg/remembra
     - icon: fontawesome/brands/twitter
-      link: https://twitter.com/remembra_ai
+      link: https://twitter.com/remembradev
   analytics:
     provider: google
     property: G-XXXXXXXXXX
