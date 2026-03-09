@@ -34,9 +34,9 @@ def main():
     from remembra import Memory
     pause(0.5)
     
-    slow_print('>>> memory = Memory(base_url="http://178.156.226.84:8787", api_key="...", user_id="demo")')
+    slow_print('>>> memory = Memory(base_url="https://api.remembra.dev", api_key="...", user_id="demo")')
     memory = Memory(
-        base_url="http://178.156.226.84:8787",
+        base_url="https://api.remembra.dev",
         api_key=os.getenv("REMEMBRA_API_KEY", "YOUR_API_KEY_HERE"),
         user_id="demo_video",
         project="demo"

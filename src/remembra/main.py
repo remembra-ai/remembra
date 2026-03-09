@@ -87,6 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if not settings.debug:
         default_secrets = [
             "remembra-jwt-secret-change-in-production",
+            "quickstart-dev-only-not-for-production",
             "changeme",
             "secret",
             "your-secret-key",

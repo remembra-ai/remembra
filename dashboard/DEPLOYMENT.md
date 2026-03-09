@@ -14,7 +14,7 @@ The Remembra Dashboard is a React SPA that needs to be deployed to `app.remembra
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        Coolify (178.156.226.84)                  │
+│                        Coolify (<your-server-ip>)                  │
 ├─────────────────────────────────────────────────────────────────┤
 │  remembra.dev        → Landing page (static HTML)               │
 │  app.remembra.dev    → Dashboard (React SPA) ← THIS DEPLOYMENT  │
@@ -28,8 +28,8 @@ The Remembra Dashboard is a React SPA that needs to be deployed to `app.remembra
 
 Add these A records:
 ```
-app.remembra.dev  →  178.156.226.84
-api.remembra.dev  →  178.156.226.84
+app.remembra.dev  →  <your-server-ip>
+api.remembra.dev  →  <your-server-ip>
 ```
 
 ### 2. Backend API Deployment
@@ -139,8 +139,8 @@ curl -H "Origin: https://app.remembra.dev" \
 
 ## Quick Deploy Checklist
 
-- [ ] DNS: `app.remembra.dev` → `178.156.226.84`
-- [ ] DNS: `api.remembra.dev` → `178.156.226.84`
+- [ ] DNS: `app.remembra.dev` → `<your-server-ip>`
+- [ ] DNS: `api.remembra.dev` → `<your-server-ip>`
 - [ ] Backend deployed to `api.remembra.dev`
 - [ ] Backend CORS allows `https://app.remembra.dev`
 - [ ] Dashboard built with `VITE_API_URL=https://api.remembra.dev`

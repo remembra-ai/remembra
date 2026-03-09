@@ -32,7 +32,7 @@ def main():
     print('>>> memory = Memory(base_url="...", user_id="demo")')
     
     memory = Memory(
-        base_url="http://178.156.226.84:8787",
+        base_url="https://api.remembra.dev",
         api_key=os.getenv("REMEMBRA_API_KEY", "YOUR_API_KEY_HERE"),
         user_id="demo_video",
         project="demo"
