@@ -31,14 +31,14 @@
 
 ---
 
-## 🚀 What's New in v0.8.4
+## 🚀 What's New in v0.9.9
 
+- **⏳ Temporal Knowledge Graph** — Bi-temporal relationships with `valid_from`, `valid_to`, and point-in-time queries. Ask "Where did Alice work in January 2022?"
+- **🛠️ 11 MCP Tools** — 6 new tools: `update_memory`, `search_entities`, `list_memories`, `share_memory`, `timeline`, `relationships_at`
+- **📊 Entity Graph Visualization** — Interactive force-directed graph with flowing particle effects on relationship edges
+- **🔄 Contradiction Detection** — New relationships automatically supersede old ones with full history preserved
 - **🔐 AES-256-GCM Field Encryption** — Encrypt memory content at rest with OWASP-compliant key derivation
 - **🛡️ Enterprise Security Suite** — PII detection, anomaly monitoring, audit logging
-- **📦 MCP Registry Published** — Discoverable as `io.github.remembra-ai/remembra` in Claude Desktop
-- **⚡ One-Command Quick Start** — `curl | bash` zero-config setup with Ollama embeddings
-- **🔌 Multi-Provider Support** — OpenAI, Anthropic Claude, Ollama for embeddings & entity extraction
-- **📊 Usage Warning Banners** — API responses include usage thresholds at 60/80/95%
 
 ---
 
@@ -183,8 +183,9 @@ const result = await memory.recall('preferences');
 | Feature | Remembra | Mem0 | Zep/Graphiti | Letta | Engram |
 |---------|----------|------|-------------|-------|--------|
 | **One-Command Install** | ✅ `curl \| bash` | ✅ pip | ✅ pip | ⚠️ Complex | ✅ brew |
+| **Bi-Temporal Relationships** | ✅ Point-in-time | ❌ | ⚠️ Basic | ❌ | ❌ |
 | **Entity Resolution** | ✅ Free | 💰 $249/mo | ✅ | ❌ | ❌ |
-| **Conflict Detection** | ✅ Unique | ❌ | ❌ | ❌ | ❌ |
+| **Conflict Detection** | ✅ Auto-supersede | ❌ | ❌ | ❌ | ❌ |
 | **PII Detection** | ✅ Built-in | ❌ | ❌ | ❌ | ❌ |
 | **Hybrid Search** | ✅ BM25+Vector | ❌ | ✅ | ❌ | ❌ |
 | **6 Embedding Providers** | ✅ Hot-swap | ❌ (1-2) | ❌ (1) | ❌ | ❌ |
@@ -192,7 +193,7 @@ const result = await memory.recall('preferences');
 | **Sleep-Time Compute** | ✅ | ❌ | ❌ | ✅ | ❌ |
 | **Self-Host + Billing** | ✅ Stripe | ❌ | ❌ | ❌ | ❌ |
 | **Memory Spaces** | ✅ Multi-tenant | ❌ | ❌ | ❌ | ❌ |
-| **MCP Server** | ✅ Native | ✅ | ❌ | ❌ | ✅ |
+| **MCP Server** | ✅ 11 Tools | ✅ | ❌ | ❌ | ✅ |
 | **Pricing** | Free / $49 / $99 | $19 → $249 | $25+ | Free | Free |
 | **License** | MIT | Apache 2.0 | Apache 2.0 | Apache 2.0 | MIT |
 
@@ -235,7 +236,7 @@ Tested on the [LoCoMo benchmark](https://github.com/snap-research/locomo) (Snap 
 | [Quick Start](https://docs.remembra.dev/getting-started/quickstart/) | Get running in minutes |
 | [Python SDK](https://docs.remembra.dev/guides/python-sdk/) | Full Python reference |
 | [TypeScript SDK](https://docs.remembra.dev/guides/javascript-sdk/) | JavaScript/TypeScript guide |
-| [MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Tool reference + setup guides for 9 tools |
+| [MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Tool reference + setup guides for 11 tools |
 | [REST API](https://docs.remembra.dev/guides/rest-api/) | API reference |
 | [Self-Hosting](https://docs.remembra.dev/getting-started/docker/) | Docker deployment guide |
 
@@ -250,13 +251,19 @@ pip install remembra[mcp]
 claude mcp add remembra -e REMEMBRA_URL=http://localhost:8787 -- remembra-mcp
 ```
 
-**Available Tools:**
+**Available Tools (11 total):**
 
 | Tool | Description |
 |------|-------------|
 | `store_memory` | Save facts, decisions, context |
 | `recall_memories` | Semantic search across memories |
+| `update_memory` | Update content without delete+recreate |
 | `forget_memories` | GDPR-compliant deletion |
+| `list_memories` | Browse stored memories |
+| `search_entities` | Search the entity graph |
+| `share_memory` | Cross-agent memory sharing via Spaces |
+| `timeline` | Temporal browsing by entity and date |
+| `relationships_at` | Point-in-time relationship queries |
 | `ingest_conversation` | Auto-extract from chat history |
 | `health_check` | Verify connection |
 

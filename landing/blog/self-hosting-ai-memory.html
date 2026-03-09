@@ -112,7 +112,7 @@
                 
                 <h3>Verify It's Working</h3>
                 <pre><code>curl http://localhost:8787/health
-# {"status":"ok","version":"0.8.2"}</code></pre>
+# {"status":"ok","version":"0.9.9"}</code></pre>
                 
                 <h3>Connect Your AI Tools</h3>
                 <p>For Claude Code:</p>
@@ -156,7 +156,7 @@
 
 services:
   remembra:
-    image: remembra/remembra:0.8.2
+    image: remembra/remembra:0.9.9
     container_name: remembra
     restart: unless-stopped
     ports:
@@ -260,7 +260,7 @@ spec:
     spec:
       containers:
       - name: remembra
-        image: remembra/remembra:0.8.2
+        image: remembra/remembra:0.9.9
         ports:
         - containerPort: 8787
         volumeMounts:
@@ -321,7 +321,7 @@ find $BACKUP_DIR -name "*.tar.gz" -mtime +7 -delete</code></pre>
 
 {
   "status": "ok",
-  "version": "0.8.2",
+  "version": "0.9.9",
   "memories": 1247,
   "entities": 89,
   "uptime": 86400

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remembra v0.9.9 - Temporal Knowledge Graph & 11 MCP Tools</title>
+    <meta name="description" content="Remembra v0.9.9 brings bi-temporal knowledge graph with point-in-time queries, 6 new MCP tools (11 total), entity graph visualization, and contradiction detection.">
+    <meta name="keywords" content="Remembra, AI memory, changelog, v0.9.9, temporal, knowledge graph, MCP, entity resolution">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="Remembra v0.9.9 Released">
+    <meta property="og:description" content="Temporal Knowledge Graph with point-in-time queries, 11 MCP tools, entity graph visualization.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://remembra.dev/changelog/v0.9.9">
+    
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Remembra v0.9.9 Released",
+      "datePublished": "2026-03-09",
+      "author": {"@type": "Organization", "name": "DolphyTech"},
+      "publisher": {"@type": "Organization", "name": "Remembra"}
+    }
+    </script>
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: { extend: { colors: { primary: '#8B5CF6', dark: '#0F0F0F', 'dark-card': '#1F1F1F' } } }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-dark text-white">
+    <nav class="fixed top-0 left-0 right-0 z-50 bg-dark/80 backdrop-blur-xl border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <a href="/" class="flex items-center gap-3">
+                <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
+                <span class="text-xl font-bold">Remembra</span>
+            </a>
+            <a href="/changelog.html" class="text-gray-300 hover:text-white">← All Releases</a>
+        </div>
+    </nav>
+
+    <main class="pt-32 pb-24 px-6">
+        <article class="max-w-3xl mx-auto">
+            <div class="mb-8">
+                <time class="text-gray-500">March 9, 2026</time>
+                <h1 class="text-4xl md:text-5xl font-bold mt-2 mb-4">Remembra v0.9.9</h1>
+                <p class="text-xl text-gray-400">Temporal Knowledge Graph & 11 MCP Tools</p>
+            </div>
+
+            <div class="prose prose-invert max-w-none">
+                <section class="mb-10">
+                    <h2 class="text-2xl font-bold text-green-400 mb-4">✨ Added</h2>
+                    <div class="bg-dark-card border border-white/10 rounded-xl p-6 space-y-4">
+                        <div>
+                            <h3 class="font-semibold text-lg">⏳ Temporal Knowledge Graph</h3>
+                            <p class="text-gray-400">Bi-temporal relationship model for tracking relationship history.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li>Relationships track <code class="bg-white/10 px-1 rounded">valid_from</code>, <code class="bg-white/10 px-1 rounded">valid_to</code>, and <code class="bg-white/10 px-1 rounded">superseded_by</code></li>
+                                <li>Point-in-time queries: "Where did Alice work in January 2022?"</li>
+                                <li>Contradiction detection: new relationships auto-supersede old ones</li>
+                                <li>Full relationship history preserved</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">🛠️ 6 New MCP Tools (11 Total)</h3>
+                            <p class="text-gray-400">Expanded MCP server from 5 tools to 11 tools.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li><code class="bg-white/10 px-1 rounded">update_memory</code> — Update content without delete+recreate</li>
+                                <li><code class="bg-white/10 px-1 rounded">search_entities</code> — Search the entity graph by name, type, or alias</li>
+                                <li><code class="bg-white/10 px-1 rounded">list_memories</code> — Browse stored memories without search query</li>
+                                <li><code class="bg-white/10 px-1 rounded">share_memory</code> — Cross-agent memory sharing via Spaces</li>
+                                <li><code class="bg-white/10 px-1 rounded">timeline</code> — Temporal browsing filtered by entity and date range</li>
+                                <li><code class="bg-white/10 px-1 rounded">relationships_at</code> — Query entity relationships at a specific point in time</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">📊 Entity Graph Visualization</h3>
+                            <p class="text-gray-400">Interactive force-directed graph with react-force-graph.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li>Flowing particle effects on relationship edges</li>
+                                <li>Entity nodes colored by type</li>
+                                <li>Click-to-explore entity neighborhoods</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">🔄 Contradiction Detection</h3>
+                            <p class="text-gray-400">Automatic relationship supersession with full history preservation.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li>Exclusive relationship types (WORKS_AT, SPOUSE_OF) detect contradictions</li>
+                                <li>"Alice works at Meta" automatically supersedes "Alice works at Google"</li>
+                                <li><code class="bg-white/10 px-1 rounded">find_contradicting_relationships()</code> for conflict queries</li>
+                                <li><code class="bg-white/10 px-1 rounded">get_relationship_history()</code> for full timeline</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">📦 SDK Client Methods</h3>
+                            <p class="text-gray-400">Python SDK expanded with new methods.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li><code class="bg-white/10 px-1 rounded">memory.update(memory_id, content, metadata)</code> — Calls PATCH endpoint</li>
+                                <li><code class="bg-white/10 px-1 rounded">memory.list_entities(entity_type, limit)</code> — Calls entity list endpoint</li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="mb-10">
+                    <h2 class="text-2xl font-bold text-blue-400 mb-4">🔄 Changed</h2>
+                    <div class="bg-dark-card border border-white/10 rounded-xl p-6 space-y-2">
+                        <p class="text-gray-300">• MCP server instructions updated to reflect 11 available tools</p>
+                        <p class="text-gray-300">• Entity graph retrieval now supports temporal filtering</p>
+                        <p class="text-gray-300">• Extraction prompt now extracts WHEN relationships started/ended</p>
+                    </div>
+                </section>
+
+                <div class="flex gap-4 mt-10">
+                    <a href="https://github.com/remembra-ai/remembra/releases/tag/v0.9.9" class="px-6 py-3 bg-primary hover:bg-primary/80 rounded-lg font-medium">View on GitHub</a>
+                    <a href="https://docs.remembra.dev" class="px-6 py-3 border border-white/20 hover:border-white/40 rounded-lg">Documentation</a>
+                </div>
+            </div>
+        </article>
+    </main>
+
+    <footer class="border-t border-white/10 py-8 text-center text-gray-500 text-sm">
+        <p>© 2026 DolphyTech. <a href="/" class="hover:text-white">remembra.dev</a></p>
+    </footer>
+</body>
+</html>

@@ -104,6 +104,53 @@
                 <!-- Timeline line -->
                 <div class="absolute left-0 md:left-8 top-0 bottom-0 w-px bg-gradient-to-b from-primary via-primary/50 to-transparent"></div>
 
+                <!-- v0.9.9 -->
+                <article class="relative pl-8 md:pl-24 pb-16">
+                    <div class="absolute left-0 md:left-8 top-0 w-4 h-4 -translate-x-1/2 rounded-full bg-primary version-dot"></div>
+                    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 mb-4">
+                        <time class="text-sm text-gray-500 font-medium">March 9, 2026</time>
+                        <span class="px-3 py-1 bg-primary/20 text-primary rounded-full text-sm font-semibold w-fit">v0.9.9</span>
+                        <span class="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-medium w-fit">Latest</span>
+                    </div>
+                    
+                    <h2 class="text-2xl font-bold mb-4">Temporal Knowledge Graph & 11 MCP Tools</h2>
+                    <p class="text-gray-400 mb-6">Bi-temporal relationships with point-in-time queries, 6 new MCP tools, entity graph visualization, and contradiction detection.</p>
+                    
+                    <div class="space-y-4">
+                        <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="tag-added px-2 py-0.5 rounded text-xs font-medium">Added</span>
+                                <span class="text-sm text-gray-500">Temporal Knowledge Graph</span>
+                            </div>
+                            <ul class="space-y-2 text-gray-300 text-sm">
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Bi-Temporal Relationships</strong> — Track <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">valid_from</code>, <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">valid_to</code>, and <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">superseded_by</code></span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Point-in-Time Queries</strong> — Ask "Where did Alice work in January 2022?"</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Contradiction Detection</strong> — New relationships auto-supersede old ones with history preserved</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Entity Graph Visualization</strong> — Interactive force-directed graph with flowing particle effects</span></li>
+                            </ul>
+                        </div>
+                        
+                        <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="tag-added px-2 py-0.5 rounded text-xs font-medium">Added</span>
+                                <span class="text-sm text-gray-500">6 New MCP Tools (11 Total)</span>
+                            </div>
+                            <ul class="space-y-2 text-gray-300 text-sm">
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">update_memory</code> — Update content without delete+recreate</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">search_entities</code> — Search the entity graph by name, type, or alias</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">list_memories</code> — Browse stored memories without search query</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">share_memory</code> — Cross-agent memory sharing via Spaces</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">timeline</code> — Temporal browsing filtered by entity and date range</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">relationships_at</code> — Query entity relationships at a specific point in time</span></li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <a href="/changelog/v0.9.9" class="inline-flex items-center gap-2 text-primary hover:text-primary-dark mt-4 text-sm font-medium">
+                        Full release notes →
+                    </a>
+                </article>
+
                 <!-- v0.7.1 -->
                 <article class="relative pl-8 md:pl-24 pb-16">
                     <div class="absolute left-0 md:left-8 top-0 w-4 h-4 -translate-x-1/2 rounded-full bg-primary version-dot"></div>
