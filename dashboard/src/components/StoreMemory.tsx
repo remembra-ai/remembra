@@ -6,6 +6,7 @@ import clsx from 'clsx';
 interface StoreMemoryProps {
   onStored?: () => void;
   projectId?: string;
+  startOpen?: boolean;  // Auto-open the modal
 }
 
 const TTL_OPTIONS = [
@@ -25,8 +26,8 @@ const VISIBILITY_OPTIONS = [
 
 type Visibility = 'personal' | 'project' | 'team';
 
-export function StoreMemory({ onStored, projectId }: StoreMemoryProps) {
-  const [isOpen, setIsOpen] = useState(false);
+export function StoreMemory({ onStored, projectId, startOpen = false }: StoreMemoryProps) {
+  const [isOpen, setIsOpen] = useState(startOpen);
   const [content, setContent] = useState('');
   const [ttl, setTtl] = useState('');
   const [visibility, setVisibility] = useState<Visibility>('personal');

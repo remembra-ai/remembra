@@ -26,8 +26,9 @@ const ENTITY_COLORS: Record<string, string> = {
 };
 
 export function EntityList({ projectId }: EntityListProps) {
-  // Use API client's project ID if not explicitly provided, fallback to 'default'
-  const effectiveProjectId = projectId || api.getProjectId() || 'default';
+  // Pass undefined to get ALL entities across all projects (API default behavior)
+  // Only filter by project if explicitly provided
+  const effectiveProjectId = projectId || undefined;
   const [entities, setEntities] = useState<EntityResponse[]>([]);
   const [byType, setByType] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);

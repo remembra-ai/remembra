@@ -101,10 +101,13 @@ export function Dashboard({ activeTab, onLogout }: DashboardProps) {
         >
           ← Back to memories
         </button>
-        <StoreMemory onStored={() => {
-          setShowNewMemory(false);
-          refresh();
-        }} />
+        <StoreMemory 
+          startOpen={true}
+          onStored={() => {
+            setShowNewMemory(false);
+            refresh();
+          }} 
+        />
       </div>
     );
   }

@@ -143,7 +143,11 @@ class FieldEncryptor:
             return plaintext
         except Exception as e:
             log.error("encryption_failed", error=str(e))
-            # Fail open in non-strict mode — store unencrypted rather than lose data
+            # In production, fail closed - don't store unencrypted sensitive data
+            import os
+            if os.getenv("REMEMBRA_ENCRYPTION_STRICT", "true").lower() == "true":
+                raise RuntimeError(f"Encryption failed: {e}. Set REMEMBRA_ENCRYPTION_STRICT=false to fail open.")
+            # Fail open only if explicitly disabled — store unencrypted rather than lose data
             return plaintext
 
     def decrypt(self, ciphertext: str) -> str:
@@ -198,7 +202,12 @@ class FieldEncryptor:
             return ciphertext
         except Exception as e:
             log.error("decryption_failed", error=str(e))
-            return ciphertext  # Return raw on failure rather than crash
+            # In production, fail closed - don't expose raw encrypted data
+            import os
+            if os.getenv("REMEMBRA_ENCRYPTION_STRICT", "true").lower() == "true":
+                raise RuntimeError(f"Decryption failed: {e}. Data may be corrupted or key changed.")
+            # Fail open only if explicitly disabled
+            return ciphertext
 
     def encrypt_dict(self, data: dict[str, Any] | None) -> dict[str, Any] | None:
         """

@@ -332,11 +332,15 @@ class ApiClient {
 
   // Entity methods
   async listEntities(
-    projectId: string = 'default',
+    projectId?: string,
     entityType?: string,
     limit: number = 100
   ): Promise<EntitiesListResponse> {
-    let url = `/entities?project_id=${projectId}&limit=${limit}`;
+    // Build URL - omit project_id to get all projects (API default)
+    let url = `/entities?limit=${limit}`;
+    if (projectId) {
+      url += `&project_id=${projectId}`;
+    }
     if (entityType) {
       url += `&entity_type=${entityType}`;
     }

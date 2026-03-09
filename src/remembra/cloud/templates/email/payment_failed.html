@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Failed</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #0F0F0F;">
+    <table role="presentation" style="width: 100%; border-collapse: collapse; background-color: #0F0F0F;">
+        <tr>
+            <td align="center" style="padding: 40px 20px;">
+                <table role="presentation" style="max-width: 600px; width: 100%; border-collapse: collapse; background-color: #1A1A1A; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);">
+                    <!-- Header -->
+                    <tr>
+                        <td style="padding: 40px 40px 20px; text-align: center; border-bottom: 3px solid #EF4444;">
+                            <h1 style="margin: 0; font-size: 32px; font-weight: 700; color: #8B5CF6;">
+                                🧠 Remembra
+                            </h1>
+                        </td>
+                    </tr>
+
+                    <!-- Body -->
+                    <tr>
+                        <td style="padding: 40px;">
+                            <h2 style="margin: 0 0 20px; font-size: 26px; font-weight: 700; color: #FFFFFF;">
+                                ⚠️ Payment Failed
+                            </h2>
+                            
+                            <p style="margin: 0 0 20px; font-size: 16px; line-height: 1.8; color: #D0D0D0;">
+                                We couldn't process your payment for your <strong style="color: #FFFFFF;">{plan}</strong> subscription. Don't worry — your account is still active while we retry.
+                            </p>
+
+                            <!-- Warning Box -->
+                            <div style="background-color: #7F1D1D; border-left: 4px solid #EF4444; padding: 20px; margin: 30px 0; border-radius: 4px;">
+                                <p style="margin: 0 0 10px; font-size: 16px; font-weight: 600; color: #FECACA;">
+                                    Action Required
+                                </p>
+                                <p style="margin: 0; font-size: 15px; color: #FCA5A5; line-height: 1.6;">
+                                    Please update your payment method within the next 7 days to avoid service interruption.
+                                </p>
+                            </div>
+
+                            <h3 style="margin: 30px 0 15px; font-size: 20px; font-weight: 600; color: #FFFFFF;">
+                                What Happens Next?
+                            </h3>
+
+                            <div style="margin: 20px 0;">
+                                <!-- Step 1 -->
+                                <div style="background-color: #252525; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
+                                    <p style="margin: 0 0 8px; font-size: 16px; font-weight: 600; color: #FFFFFF;">
+                                        🔄 Automatic Retries
+                                    </p>
+                                    <p style="margin: 0; font-size: 15px; color: #D0D0D0; line-height: 1.6;">
+                                        We'll automatically retry the payment a few times over the next few days.
+                                    </p>
+                                </div>
+
+                                <!-- Step 2 -->
+                                <div style="background-color: #252525; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
+                                    <p style="margin: 0 0 8px; font-size: 16px; font-weight: 600; color: #FFFFFF;">
+                                        💳 Update Payment Method
+                                    </p>
+                                    <p style="margin: 0; font-size: 15px; color: #D0D0D0; line-height: 1.6;">
+                                        If the issue persists, please update your card details in the billing portal.
+                                    </p>
+                                </div>
+
+                                <!-- Step 3 -->
+                                <div style="background-color: #252525; border-radius: 8px; padding: 20px;">
+                                    <p style="margin: 0 0 8px; font-size: 16px; font-weight: 600; color: #FFFFFF;">
+                                        ⏰ Grace Period
+                                    </p>
+                                    <p style="margin: 0; font-size: 15px; color: #D0D0D0; line-height: 1.6;">
+                                        You have 7 days to resolve this before your subscription is paused.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <!-- CTA Button -->
+                            <div style="text-align: center; margin: 40px 0;">
+                                <a href="{billing_url}" style="display: inline-block; background: linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%); color: #FFFFFF; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-weight: 600; font-size: 16px; box-shadow: 0 4px 15px rgba(139, 92, 246, 0.4);">
+                                    Update Payment Method →
+                                </a>
+                            </div>
+
+                            <!-- Help Box -->
+                            <div style="background: linear-gradient(135deg, #252525 0%, #1A1A1A 100%); border-left: 4px solid #8B5CF6; padding: 20px; margin: 30px 0; border-radius: 8px;">
+                                <p style="margin: 0 0 10px; font-size: 16px; font-weight: 600; color: #FFFFFF;">
+                                    Need Help?
+                                </p>
+                                <p style="margin: 0; font-size: 15px; color: #D0D0D0; line-height: 1.6;">
+                                    If you're having trouble, reply to this email or contact us at <a href="mailto:support@remembra.dev" style="color: #8B5CF6;">support@remembra.dev</a>.
+                                </p>
+                            </div>
+
+                            <div style="text-align: center; margin: 20px 0;">
+                                <a href="{dashboard_url}" style="color: #8B5CF6; text-decoration: none; font-size: 15px;">
+                                    View Dashboard →
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td style="padding: 30px 40px; background-color: #0F0F0F; border-top: 1px solid #333;">
+                            <p style="margin: 0 0 10px; font-size: 14px; color: #666; line-height: 1.6;">
+                                This is an automated message about your Remembra subscription.
+                            </p>
+                            <p style="margin: 0; font-size: 13px; color: #555;">
+                                Remembra &copy; 2026 | 
+                                <a href="https://app.remembra.dev/settings" style="color: #666; text-decoration: none;">Settings</a> | 
+                                <a href="mailto:support@remembra.dev" style="color: #666; text-decoration: none;">Contact Support</a>
+                            </p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
