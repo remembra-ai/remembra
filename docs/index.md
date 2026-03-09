@@ -249,49 +249,45 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
 </div>
 
-### Previous Release (v0.7.2)
+### Previous Release (v0.8.x)
 
 <div class="grid cards" markdown>
 
--   :material-lightning-bolt:{ .lg .middle } __EntityGraph Performance__
+-   :material-shield-lock:{ .lg .middle } __AES-256-GCM Encryption__
 
     ---
 
-    Eliminated N+1 API calls. Single `/debug/entities/graph` endpoint replaces 50+ individual calls for blazing fast graph loading.
+    Encrypt memory content at rest with OWASP-compliant key derivation (480K PBKDF2 iterations). Set `REMEMBRA_ENCRYPTION_KEY` to enable.
 
--   :material-database-refresh:{ .lg .middle } __Admin: rebuild-vectors__
-
-    ---
-
-    New `POST /admin/rebuild-vectors` endpoint to fix memories missing from Qdrant. Self-heal vector sync issues without data loss.
-
--   :material-book-open-page-variant:{ .lg .middle } __Troubleshooting Guide__
+-   :material-eye-off:{ .lg .middle } __PII Detection & Redaction__
 
     ---
 
-    Comprehensive diagnosis and fix guide for common issues. Step-by-step instructions for self-hosters.
+    Automatically detect and redact SSNs, credit cards, API keys, and more. Configure detect/redact/block modes.
 
-    [View Guide →](TROUBLESHOOTING.md)
-
--   :material-clipboard-check:{ .lg .middle } __Setup Checklist__
+-   :material-cube-outline:{ .lg .middle } __MCP Registry Published__
 
     ---
 
-    10-step verification checklist ensures your Remembra instance is production-ready.
+    Discoverable as `io.github.remembra-ai/remembra` in Claude Desktop, Cursor, and other MCP-compatible clients.
 
-    [View Checklist →](SETUP-CHECKLIST.md)
-
--   :material-bug-check:{ .lg .middle } __Error Display Fix__
+-   :material-docker:{ .lg .middle } __One-Command Quick Start__
 
     ---
 
-    Dashboard now shows actual error messages instead of `[object Object]`. Pydantic validation errors properly parsed.
+    `curl | bash` zero-config setup with Ollama embeddings. Docker Compose with Qdrant + Ollama + Remembra in one file.
 
--   :material-filter:{ .lg .middle } __Project Filtering Fix__
+-   :material-swap-horizontal:{ .lg .middle } __Multi-Provider Extraction__
 
     ---
 
-    Fixed recall defaulting to wrong project_id. Memories now correctly filtered by project scope.
+    Entity extraction now works with OpenAI, Anthropic Claude, and Ollama. Hot-swap providers without code changes.
+
+-   :material-test-tube:{ .lg .middle } __272 Tests Passing__
+
+    ---
+
+    Comprehensive test coverage for embeddings, entities, conflicts, spaces, plugins, and encryption.
 
 </div>
 

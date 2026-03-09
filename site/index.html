@@ -634,10 +634,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#previous-release-v072" class="md-nav__link">
+  <a href="#previous-release-v08x" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Previous Release (v0.7.2)
+        Previous Release (v0.8.x)
       
     </span>
   </a>
@@ -2342,10 +2342,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#previous-release-v072" class="md-nav__link">
+  <a href="#previous-release-v08x" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Previous Release (v0.7.2)
+        Previous Release (v0.8.x)
       
     </span>
   </a>
@@ -2611,40 +2611,38 @@
 </li>
 </ul>
 </div>
-<h3 id="previous-release-v072">Previous Release (v0.7.2)<a class="headerlink" href="#previous-release-v072" title="Permanent link">&para;</a></h3>
+<h3 id="previous-release-v08x">Previous Release (v0.8.x)<a class="headerlink" href="#previous-release-v08x" title="Permanent link">&para;</a></h3>
 <div class="grid cards">
 <ul>
 <li>
-<p>:material-lightning-bolt:{ .lg .middle } <strong>EntityGraph Performance</strong></p>
+<p>:material-shield-lock:{ .lg .middle } <strong>AES-256-GCM Encryption</strong></p>
 <hr />
-<p>Eliminated N+1 API calls. Single <code>/debug/entities/graph</code> endpoint replaces 50+ individual calls for blazing fast graph loading.</p>
+<p>Encrypt memory content at rest with OWASP-compliant key derivation (480K PBKDF2 iterations). Set <code>REMEMBRA_ENCRYPTION_KEY</code> to enable.</p>
 </li>
 <li>
-<p>:material-database-refresh:{ .lg .middle } <strong>Admin: rebuild-vectors</strong></p>
+<p>:material-eye-off:{ .lg .middle } <strong>PII Detection &amp; Redaction</strong></p>
 <hr />
-<p>New <code>POST /admin/rebuild-vectors</code> endpoint to fix memories missing from Qdrant. Self-heal vector sync issues without data loss.</p>
+<p>Automatically detect and redact SSNs, credit cards, API keys, and more. Configure detect/redact/block modes.</p>
 </li>
 <li>
-<p>:material-book-open-page-variant:{ .lg .middle } <strong>Troubleshooting Guide</strong></p>
+<p>:material-cube-outline:{ .lg .middle } <strong>MCP Registry Published</strong></p>
 <hr />
-<p>Comprehensive diagnosis and fix guide for common issues. Step-by-step instructions for self-hosters.</p>
-<p><a href="TROUBLESHOOTING/">View Guide →</a></p>
+<p>Discoverable as <code>io.github.remembra-ai/remembra</code> in Claude Desktop, Cursor, and other MCP-compatible clients.</p>
 </li>
 <li>
-<p>:material-clipboard-check:{ .lg .middle } <strong>Setup Checklist</strong></p>
+<p>:material-docker:{ .lg .middle } <strong>One-Command Quick Start</strong></p>
 <hr />
-<p>10-step verification checklist ensures your Remembra instance is production-ready.</p>
-<p><a href="SETUP-CHECKLIST/">View Checklist →</a></p>
+<p><code>curl | bash</code> zero-config setup with Ollama embeddings. Docker Compose with Qdrant + Ollama + Remembra in one file.</p>
 </li>
 <li>
-<p>:material-bug-check:{ .lg .middle } <strong>Error Display Fix</strong></p>
+<p>:material-swap-horizontal:{ .lg .middle } <strong>Multi-Provider Extraction</strong></p>
 <hr />
-<p>Dashboard now shows actual error messages instead of <code>[object Object]</code>. Pydantic validation errors properly parsed.</p>
+<p>Entity extraction now works with OpenAI, Anthropic Claude, and Ollama. Hot-swap providers without code changes.</p>
 </li>
 <li>
-<p>:material-filter:{ .lg .middle } <strong>Project Filtering Fix</strong></p>
+<p>:material-test-tube:{ .lg .middle } <strong>272 Tests Passing</strong></p>
 <hr />
-<p>Fixed recall defaulting to wrong project_id. Memories now correctly filtered by project scope.</p>
+<p>Comprehensive test coverage for embeddings, entities, conflicts, spaces, plugins, and encryption.</p>
 </li>
 </ul>
 </div>
