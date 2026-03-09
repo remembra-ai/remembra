@@ -373,6 +373,10 @@ class ApiClient {
     return this.fetchApi<PlanInfoResponse>('/cloud/plan');
   }
 
+  async getBillingContext(): Promise<BillingContextResponse> {
+    return this.fetchApi<BillingContextResponse>('/cloud/context');
+  }
+
   async getDailyUsage(days: number = 30): Promise<DailyUsageResponse> {
     return this.fetchApi<DailyUsageResponse>(`/cloud/usage/daily?days=${days}`);
   }
@@ -609,6 +613,23 @@ export interface DailyUsageItem {
 export interface DailyUsageResponse {
   user_id: string;
   days: DailyUsageItem[];
+}
+
+// Billing Context (determines personal vs team view)
+export interface BillingContextResponse {
+  context: 'personal' | 'team';
+  // Personal context
+  plan?: string;
+  // Team context
+  team_id?: string;
+  team_name?: string;
+  team_plan?: string;
+  role?: string;
+  can_manage_billing: boolean;
+  owner_email?: string;
+  // Common
+  limits: Record<string, unknown>;
+  usage: Record<string, number>;
 }
 
 // API Key Management types

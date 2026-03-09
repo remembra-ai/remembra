@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -12,6 +12,7 @@ from remembra.cloud.metering import UsageMeter
 from remembra.cloud.plans import PlanTier, get_plan
 from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
+from remembra.teams.manager import TeamManager
 
 router = APIRouter(prefix="/cloud", tags=["cloud"])
 
@@ -35,6 +36,14 @@ def get_usage_meter(request: Request) -> UsageMeter:
 
 
 UsageMeterDep = Annotated[UsageMeter, Depends(get_usage_meter)]
+
+
+def get_team_manager(request: Request) -> TeamManager | None:
+    """Dependency to get TeamManager from app state (optional)."""
+    return getattr(request.app.state, "team_manager", None)
+
+
+TeamManagerDep = Annotated[TeamManager | None, Depends(get_team_manager)]
 
 
 # ---------------------------------------------------------------------------
@@ -89,6 +98,36 @@ class SignupResponse(BaseModel):
     api_key_id: str
     plan: str
     message: str
+
+
+class BillingContextResponse(BaseModel):
+    """Billing context for determining what the user should see.
+    
+    Following industry standards (Claude Teams, Slack, Linear, GitHub):
+    - Team members see team context, not individual billing
+    - Only owners can manage billing
+    - Members see "You're on X plan via Team Y"
+    """
+    context: Literal["personal", "team"] = Field(
+        description="Whether user is viewing personal or team billing context"
+    )
+    # Personal context fields
+    plan: str | None = Field(None, description="Plan tier (free/pro/team/enterprise)")
+    # Team context fields
+    team_id: str | None = Field(None, description="Team ID if in team context")
+    team_name: str | None = Field(None, description="Team name for display")
+    team_plan: str | None = Field(None, description="Team's plan tier")
+    role: str | None = Field(None, description="User's role in team (owner/admin/member/viewer)")
+    can_manage_billing: bool = Field(
+        False, description="Whether user can access billing management"
+    )
+    owner_email: str | None = Field(
+        None, description="Team owner's email (for 'contact admin' messaging)"
+    )
+    # Limits (from team plan or personal plan)
+    limits: dict[str, Any] = Field(default_factory=dict)
+    # Usage (personal contribution or team aggregate)
+    usage: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -277,6 +316,121 @@ async def get_plan_info(
             "store": store_check.to_dict(),
             "recall": recall_check.to_dict(),
             "create_key": key_check.to_dict(),
+        },
+    )
+
+
+@router.get(
+    "/context",
+    response_model=BillingContextResponse,
+    summary="Get billing context (personal vs team)",
+)
+@limiter.limit("60/minute")
+async def get_billing_context(
+    request: Request,
+    current_user: CurrentUser,
+    meter: UsageMeterDep,
+    team_manager: TeamManagerDep,
+) -> BillingContextResponse:
+    """Get the user's billing context — determines what they should see.
+    
+    Following industry standards (Claude Teams, Slack, Linear, Figma, GitHub):
+    - If user is on a team: Show team context, hide billing management for non-owners
+    - If user is not on a team: Show personal plan and billing
+    
+    This endpoint should be called before rendering the billing page to
+    determine which view to show.
+    """
+    # Check if user is on any team
+    teams = []
+    if team_manager:
+        try:
+            teams = await team_manager.list_user_teams(current_user.user_id)
+        except Exception:
+            teams = []
+    
+    if teams:
+        # User is on at least one team — use primary team (first one)
+        team = teams[0]
+        team_plan = team.get("plan", "pro")
+        role = team.get("role", "member")
+        
+        # Only owners can manage billing (industry standard)
+        can_manage = role == "owner"
+        
+        # Get team plan limits
+        try:
+            plan_limits = get_plan(PlanTier(team_plan))
+        except ValueError:
+            plan_limits = get_plan(PlanTier.PRO)
+        
+        # Get owner email for "contact admin" messaging
+        owner_email = None
+        if not can_manage:
+            try:
+                # Fetch owner info
+                owner_id = team.get("owner_id")
+                if owner_id:
+                    tenant = await meter.get_tenant(owner_id)
+                    if tenant:
+                        owner_email = tenant.get("email")
+            except Exception:
+                pass
+        
+        # Get user's personal usage (their contribution to team)
+        try:
+            monthly = await meter.get_monthly_usage(current_user.user_id)
+            usage = {
+                "stores_this_month": monthly.get("stores", 0),
+                "recalls_this_month": monthly.get("recalls", 0),
+            }
+        except Exception:
+            usage = {}
+        
+        return BillingContextResponse(
+            context="team",
+            team_id=team["id"],
+            team_name=team["name"],
+            team_plan=team_plan,
+            role=role,
+            can_manage_billing=can_manage,
+            owner_email=owner_email,
+            limits={
+                "max_memories": plan_limits.max_memories,
+                "max_stores_per_month": plan_limits.max_stores_per_month,
+                "max_recalls_per_month": plan_limits.max_recalls_per_month,
+                "max_api_keys": plan_limits.max_api_keys,
+                "max_users": plan_limits.max_users,
+                "max_projects": plan_limits.max_projects,
+                "has_webhooks": plan_limits.has_webhooks,
+                "has_sso": plan_limits.has_sso,
+            },
+            usage=usage,
+        )
+    
+    # No team — personal context
+    snapshot = await meter.get_usage_snapshot(current_user.user_id)
+    plan_limits = get_plan(snapshot.plan)
+    
+    return BillingContextResponse(
+        context="personal",
+        plan=snapshot.plan.value,
+        can_manage_billing=True,  # Personal accounts always manage their own billing
+        limits={
+            "max_memories": plan_limits.max_memories,
+            "max_stores_per_month": plan_limits.max_stores_per_month,
+            "max_recalls_per_month": plan_limits.max_recalls_per_month,
+            "max_api_keys": plan_limits.max_api_keys,
+            "max_users": plan_limits.max_users,
+            "max_projects": plan_limits.max_projects,
+            "has_webhooks": plan_limits.has_webhooks,
+            "has_sso": plan_limits.has_sso,
+        },
+        usage={
+            "memories_stored": snapshot.memories_stored,
+            "stores_this_month": snapshot.stores_this_month,
+            "recalls_this_month": snapshot.recalls_this_month,
+            "api_keys_active": snapshot.api_keys_active,
         },
     )
 

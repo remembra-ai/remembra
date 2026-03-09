@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
-import type { PlanInfoResponse, UsageResponse, DailyUsageResponse } from '../lib/api';
+import type { PlanInfoResponse, UsageResponse, DailyUsageResponse, BillingContextResponse } from '../lib/api';
 import { 
   CreditCard, 
   Zap, 
@@ -12,7 +12,10 @@ import {
   Loader2,
   TrendingUp,
   AlertCircle,
-  Crown
+  Crown,
+  Users,
+  Mail,
+  Shield
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -184,7 +187,144 @@ function PricingCard({
   );
 }
 
+// Team Billing View - shown to team members who are NOT owners
+// Following industry standards: members see team context, not individual billing
+function TeamBillingView({ context }: { context: BillingContextResponse }) {
+  const planDisplayName = (context.team_plan || 'pro').charAt(0).toUpperCase() + 
+    (context.team_plan || 'pro').slice(1);
+  
+  const roleDisplayName = (context.role || 'member').charAt(0).toUpperCase() + 
+    (context.role || 'member').slice(1);
+
+  return (
+    <div className="space-y-8">
+      {/* Team Plan Banner */}
+      <div className="p-6 rounded-xl border-2 border-[#8B5CF6] bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20">
+        <div className="flex items-center gap-4">
+          <div className="p-3 rounded-full bg-gradient-to-r from-[#8B5CF6] to-purple-500">
+            <Users className="w-6 h-6 text-white" />
+          </div>
+          <div>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">
+              {planDisplayName} Plan
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-400">
+              via <span className="font-semibold">{context.team_name}</span>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Role & Access Info */}
+      <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+        <div className="flex items-center gap-2 mb-4">
+          <Shield className="w-5 h-5 text-[#8B5CF6]" />
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Your Access</h3>
+        </div>
+        
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+            <span className="text-sm text-gray-600 dark:text-gray-400">Your Role</span>
+            <span className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              {context.role === 'owner' && <Crown className="w-4 h-4 text-yellow-500" />}
+              {context.role === 'admin' && <Shield className="w-4 h-4 text-purple-500" />}
+              {roleDisplayName}
+            </span>
+          </div>
+          
+          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+            <span className="text-sm text-gray-600 dark:text-gray-400">Team Plan</span>
+            <span className="text-sm font-semibold text-[#8B5CF6]">
+              {planDisplayName}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Team Plan Features */}
+      <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
+        <div className="flex items-center gap-2 mb-4">
+          <Zap className="w-5 h-5 text-[#8B5CF6]" />
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Team Features</h3>
+        </div>
+        
+        <div className="grid grid-cols-2 gap-4">
+          {context.limits.max_memories && (
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+              <div className="text-xs text-gray-500 dark:text-gray-400">Memories</div>
+              <div className="text-lg font-bold text-gray-900 dark:text-white">
+                {Number(context.limits.max_memories).toLocaleString()}
+              </div>
+            </div>
+          )}
+          {context.limits.max_users && (
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+              <div className="text-xs text-gray-500 dark:text-gray-400">Team Members</div>
+              <div className="text-lg font-bold text-gray-900 dark:text-white">
+                {Number(context.limits.max_users).toLocaleString()}
+              </div>
+            </div>
+          )}
+          {context.limits.max_projects && (
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+              <div className="text-xs text-gray-500 dark:text-gray-400">Projects</div>
+              <div className="text-lg font-bold text-gray-900 dark:text-white">
+                {Number(context.limits.max_projects).toLocaleString()}
+              </div>
+            </div>
+          )}
+          {context.limits.max_api_keys && (
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+              <div className="text-xs text-gray-500 dark:text-gray-400">API Keys</div>
+              <div className="text-lg font-bold text-gray-900 dark:text-white">
+                {Number(context.limits.max_api_keys).toLocaleString()}
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <div className="mt-4 flex flex-wrap gap-2">
+          {context.limits.has_webhooks && (
+            <span className="px-2 py-1 text-xs rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
+              ✓ Webhooks
+            </span>
+          )}
+          {context.limits.has_sso && (
+            <span className="px-2 py-1 text-xs rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
+              ✓ SSO
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Billing Contact Info */}
+      <div className="p-6 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20">
+        <div className="flex items-start gap-3">
+          <Mail className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" />
+          <div>
+            <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+              Billing is managed by your team admin
+            </h3>
+            <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+              {context.owner_email ? (
+                <>
+                  Contact <a href={`mailto:${context.owner_email}`} className="underline font-medium">
+                    {context.owner_email}
+                  </a> for billing questions or plan changes.
+                </>
+              ) : (
+                'Contact your team owner for billing questions or plan changes.'
+              )}
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Billing() {
+  const [billingContext, setBillingContext] = useState<BillingContextResponse | null>(null);
   const [planInfo, setPlanInfo] = useState<PlanInfoResponse | null>(null);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [_dailyUsage, setDailyUsage] = useState<DailyUsageResponse | null>(null);
@@ -201,14 +341,22 @@ export function Billing() {
     setLoading(true);
     setError(null);
     try {
-      const [planData, usageData, dailyData] = await Promise.all([
-        api.getPlanInfo().catch(() => null),
-        api.getUsage().catch(() => null),
-        api.getDailyUsage(7).catch(() => null),
-      ]);
-      setPlanInfo(planData);
-      setUsage(usageData);
-      setDailyUsage(dailyData);
+      // First, get billing context to determine what view to show
+      const contextData = await api.getBillingContext().catch(() => null);
+      setBillingContext(contextData);
+      
+      // Only load detailed billing data if user can manage billing
+      // or if we're in personal context
+      if (!contextData || contextData.context === 'personal' || contextData.can_manage_billing) {
+        const [planData, usageData, dailyData] = await Promise.all([
+          api.getPlanInfo().catch(() => null),
+          api.getUsage().catch(() => null),
+          api.getDailyUsage(7).catch(() => null),
+        ]);
+        setPlanInfo(planData);
+        setUsage(usageData);
+        setDailyUsage(dailyData);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load billing data');
     } finally {
@@ -248,7 +396,16 @@ export function Billing() {
     );
   }
 
-  const currentPlan = planInfo?.plan || 'free';
+  // Industry-standard behavior: Team members who are NOT owners see team context
+  // They cannot manage billing - only see their team plan and contact info
+  if (billingContext?.context === 'team' && !billingContext.can_manage_billing) {
+    return <TeamBillingView context={billingContext} />;
+  }
+
+  // For personal accounts OR team owners: show full billing management
+  const currentPlan = billingContext?.context === 'team' 
+    ? (billingContext.team_plan || 'pro')
+    : (planInfo?.plan || 'free');
   const isPro = currentPlan === 'pro';
   const isTeam = currentPlan === 'team';
   const isEnterprise = currentPlan === 'enterprise';
