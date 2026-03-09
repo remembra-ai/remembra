@@ -1,0 +1,90 @@
+#!/bin/bash
+#
+# REMEMBRA PRE-COMMIT HOOK
+# Prevents committing unprofessional content
+# This is a HARD GATE - cannot be bypassed without removing the hook
+#
+# Install: ./scripts/install-hooks.sh
+#
+
+set -e
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo -e "${YELLOW}🔍 Running Remembra pre-commit checks...${NC}"
+
+ERRORS=0
+
+# ============================================
+# CHECK 1: Banned words in staged .md files
+# ============================================
+BANNED_WORDS="suck|trash|garbage|shit|crap"
+STAGED_MD_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.md$' || true)
+
+if [ -n "$STAGED_MD_FILES" ]; then
+    echo "Checking markdown files for unprofessional content..."
+    
+    for file in $STAGED_MD_FILES; do
+        # Get the staged content (not the working copy)
+        MATCHES=$(git show ":$file" 2>/dev/null | grep -inE "\b($BANNED_WORDS)\b" || true)
+        
+        if [ -n "$MATCHES" ]; then
+            echo -e "${RED}❌ BLOCKED: Found banned words in $file${NC}"
+            echo "$MATCHES" | while read -r line; do
+                echo -e "   ${RED}→ $line${NC}"
+            done
+            ERRORS=1
+        fi
+    done
+fi
+
+# ============================================
+# CHECK 2: pyproject.toml maintainer check
+# ============================================
+if git diff --cached --name-only | grep -q "pyproject.toml"; then
+    echo "Checking pyproject.toml maintainer..."
+    
+    PYPROJECT_CONTENT=$(git show ":pyproject.toml" 2>/dev/null || cat pyproject.toml)
+    
+    # Check for "Williams" in maintainer field
+    if echo "$PYPROJECT_CONTENT" | grep -iE 'maintainers.*=.*\[' -A 10 | grep -qi "williams"; then
+        echo -e "${RED}❌ BLOCKED: pyproject.toml maintainer contains 'Williams' instead of 'Dolphy'${NC}"
+        ERRORS=1
+    fi
+    
+    # Also check authors field
+    if echo "$PYPROJECT_CONTENT" | grep -iE 'authors.*=.*\[' -A 10 | grep -qi "williams"; then
+        echo -e "${RED}❌ BLOCKED: pyproject.toml authors contains 'Williams' instead of 'Dolphy'${NC}"
+        ERRORS=1
+    fi
+fi
+
+# Also always check current pyproject.toml state (not just when staged)
+if [ -f "pyproject.toml" ]; then
+    if grep -qiE "williams" pyproject.toml; then
+        echo -e "${RED}❌ BLOCKED: pyproject.toml contains 'Williams' - must use 'Dolphy'${NC}"
+        echo -e "   ${YELLOW}Fix: Replace 'Williams' with 'Dolphy' in pyproject.toml${NC}"
+        ERRORS=1
+    fi
+fi
+
+# ============================================
+# FINAL RESULT
+# ============================================
+if [ $ERRORS -eq 1 ]; then
+    echo ""
+    echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${RED}  COMMIT BLOCKED - Fix the issues above before committing  ${NC}"
+    echo -e "${RED}═══════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${YELLOW}Banned words: suck, trash, garbage, shit, crap${NC}"
+    echo -e "${YELLOW}Maintainer must be 'Dolphy' not 'Williams'${NC}"
+    echo ""
+    exit 1
+fi
+
+echo -e "${GREEN}✅ All pre-commit checks passed!${NC}"
+exit 0
