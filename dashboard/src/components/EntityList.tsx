@@ -26,8 +26,8 @@ const ENTITY_COLORS: Record<string, string> = {
 };
 
 export function EntityList({ projectId }: EntityListProps) {
-  // Use API client's project ID if not explicitly provided
-  const effectiveProjectId = projectId || api.getProjectId() || undefined;
+  // Use API client's project ID if not explicitly provided, fallback to 'default'
+  const effectiveProjectId = projectId || api.getProjectId() || 'default';
   const [entities, setEntities] = useState<EntityResponse[]>([]);
   const [byType, setByType] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);

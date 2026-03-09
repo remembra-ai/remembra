@@ -179,7 +179,9 @@ function ResultCard({
         <div className="flex-1 min-w-0">
           <p className="text-sm text-gray-900 dark:text-white truncate">{mem.content}</p>
           {mem.age_days != null && (
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{mem.age_days.toFixed(0)} days ago</p>
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              {mem.age_days < 0 ? 'Just now' : mem.age_days < 1 ? 'Today' : `${mem.age_days.toFixed(0)} days ago`}
+            </p>
           )}
         </div>
         <span className={clsx('text-sm font-bold', scoreColor(mem.final_score))}>

@@ -43,6 +43,8 @@ export function MemoryTimeline() {
     const diff = now.getTime() - d.getTime();
     const days = Math.floor(diff / 86400000);
 
+    // Handle edge case where server time is slightly ahead (negative diff)
+    if (days < 0) return 'Just now';
     if (days === 0) return 'Today';
     if (days === 1) return 'Yesterday';
     if (days < 7) return `${days} days ago`;

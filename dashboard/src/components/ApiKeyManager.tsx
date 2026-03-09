@@ -81,6 +81,8 @@ export function ApiKeyManager() {
     const diffMs = now.getTime() - date.getTime();
     const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     
+    // Handle edge case where server time is slightly ahead (negative diff)
+    if (diffDays < 0) return 'Just now';
     if (diffDays === 0) return 'Today';
     if (diffDays === 1) return 'Yesterday';
     if (diffDays < 7) return `${diffDays} days ago`;
