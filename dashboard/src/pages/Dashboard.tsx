@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useMemories, useSearch } from '../hooks/useMemories';
 import { SearchBar } from '../components/SearchBar';
 import { MemoryList } from '../components/MemoryList';
@@ -18,7 +18,7 @@ import { Settings } from './Settings';
 import { Admin } from './Admin';
 import { StatsOverview } from '../components/StatsOverview';
 import { EmptyState } from '../components/EmptyState';
-import { type Memory } from '../lib/api';
+import { type Memory, api } from '../lib/api';
 import { RefreshCw, Plus } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -36,28 +36,55 @@ export function Dashboard({ activeTab, onLogout }: DashboardProps) {
   const [isSearching, setIsSearching] = useState(false);
   const [showNewMemory, setShowNewMemory] = useState(false);
 
-  // Stats (placeholder - would come from API in real implementation)
+  // Stats from API
   const [stats, setStats] = useState({
     memoryCount: 0,
     entityCount: 0,
     storageUsed: '0 MB',
     apiCalls: 0,
   });
+  const [statsLoading, setStatsLoading] = useState(true);
 
-  // Update stats when memories change
-  useEffect(() => {
-    if (memories.length > 0) {
-      const uniqueEntities = new Set<string>();
-      memories.forEach(m => m.entities?.forEach(e => uniqueEntities.add(e)));
+  // Fetch real stats from API
+  const fetchStats = useCallback(async () => {
+    try {
+      setStatsLoading(true);
+      const analytics = await api.getAnalytics();
+      
+      // Estimate storage based on memory count (avg ~2KB per memory)
+      const estimatedKB = analytics.total_memories * 2;
+      const storageStr = estimatedKB >= 1024 
+        ? `${(estimatedKB / 1024).toFixed(1)} MB`
+        : `${estimatedKB.toFixed(1)} KB`;
       
       setStats({
-        memoryCount: memories.length + (hasMore ? 100 : 0), // Estimate if more
-        entityCount: uniqueEntities.size,
-        storageUsed: `${(memories.length * 0.5).toFixed(1)} KB`, // Rough estimate
-        apiCalls: Math.floor(Math.random() * 10000) + 1000, // Placeholder
+        memoryCount: analytics.total_memories,
+        entityCount: analytics.total_entities,
+        storageUsed: storageStr,
+        apiCalls: analytics.stores_today + analytics.recalls_today,
       });
+    } catch (err) {
+      console.error('Failed to fetch stats:', err);
+      // Fallback to local calculation if API fails
+      if (memories.length > 0) {
+        const uniqueEntities = new Set<string>();
+        memories.forEach(m => m.entities?.forEach(e => uniqueEntities.add(e)));
+        setStats({
+          memoryCount: memories.length + (hasMore ? 100 : 0),
+          entityCount: uniqueEntities.size,
+          storageUsed: `${(memories.length * 0.5).toFixed(1)} KB`,
+          apiCalls: 0,
+        });
+      }
+    } finally {
+      setStatsLoading(false);
     }
   }, [memories, hasMore]);
+
+  // Fetch stats on mount and when memories refresh
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
   const handleSearch = (query: string) => {
     setIsSearching(true);
@@ -127,7 +154,7 @@ export function Dashboard({ activeTab, onLogout }: DashboardProps) {
               entityCount={stats.entityCount}
               storageUsed={stats.storageUsed}
               apiCalls={stats.apiCalls}
-              loading={loading && memories.length === 0}
+              loading={statsLoading}
             />
 
             {/* Search & Actions Bar */}
