@@ -38,7 +38,9 @@ export function MemoryTimeline() {
   const totalPages = data ? Math.ceil(data.total / data.page_size) : 0;
 
   const formatDate = (iso: string) => {
-    const d = new Date(iso);
+    // Ensure UTC interpretation by appending 'Z' if not present
+    const utcIso = iso.endsWith('Z') ? iso : iso + 'Z';
+    const d = new Date(utcIso);
     const now = new Date();
     const diff = now.getTime() - d.getTime();
     const days = Math.floor(diff / 86400000);
@@ -48,11 +50,22 @@ export function MemoryTimeline() {
     if (days === 0) return 'Today';
     if (days === 1) return 'Yesterday';
     if (days < 7) return `${days} days ago`;
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    return d.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric',
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+    });
   };
 
   const formatTime = (iso: string) => {
-    return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    // Ensure UTC interpretation by appending 'Z' if not present
+    const utcIso = iso.endsWith('Z') ? iso : iso + 'Z';
+    return new Date(utcIso).toLocaleTimeString('en-US', { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone // Explicit local timezone
+    });
   };
 
   if (error) {

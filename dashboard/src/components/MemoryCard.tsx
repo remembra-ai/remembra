@@ -11,7 +11,9 @@ interface MemoryCardProps {
 
 export function MemoryCard({ memory, onClick, showRelevance = false, compact = false }: MemoryCardProps) {
   const formatDate = (dateStr: string) => {
-    const date = new Date(dateStr);
+    // Ensure UTC interpretation by appending 'Z' if not present
+    const utcDate = dateStr.endsWith('Z') ? dateStr : dateStr + 'Z';
+    const date = new Date(utcDate);
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
@@ -26,6 +28,7 @@ export function MemoryCard({ memory, onClick, showRelevance = false, compact = f
     return date.toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
+      timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
     });
   };
 
