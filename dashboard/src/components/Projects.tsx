@@ -226,14 +226,21 @@ export function Projects() {
   const revokeAccess = async (agentId: string) => {
     if (!selectedSpace) return;
     
+    if (!confirm(`Revoke access for ${agentId}?`)) return;
+    
     try {
-      const response = await fetch(`${API_V1}/spaces/${selectedSpace.id}/access/${agentId}`, {
+      const response = await fetch(`${API_V1}/spaces/${selectedSpace.id}/access`, {
         method: 'DELETE',
-        headers: getAuthHeaders(),
+        headers: {
+          ...getAuthHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ agent_id: agentId }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to revoke access');
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || 'Failed to revoke access');
       }
 
       setMembers(members.filter(m => m.agent_id !== agentId));
