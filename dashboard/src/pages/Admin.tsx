@@ -236,7 +236,7 @@ export function Admin() {
 
   const deleteUser = async (userId: string, email: string) => {
     const confirmText = prompt(`Type "${email}" to confirm permanent deletion:`);
-    if (confirmText !== email) {
+    if (!confirmText || confirmText.trim().toLowerCase() !== email.trim().toLowerCase()) {
       setActionError('Deletion cancelled - email did not match');
       return;
     }
