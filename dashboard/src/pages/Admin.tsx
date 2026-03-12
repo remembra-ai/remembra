@@ -73,6 +73,8 @@ export function Admin() {
   const [selectedUser, setSelectedUser] = useState<UserDetail | null>(null);
   const [showUserModal, setShowUserModal] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   const getAuthHeaders = () => {
     const token = localStorage.getItem('remembra_jwt_token');
@@ -124,6 +126,10 @@ export function Admin() {
 
   const fetchUserDetail = async (userId: string) => {
     try {
+      // Clear previous action messages
+      setActionError(null);
+      setActionSuccess(null);
+      
       const response = await fetch(`${API_V1}/admin/users/${userId}`, {
         headers: getAuthHeaders(),
       });
@@ -170,6 +176,8 @@ export function Admin() {
     }
 
     setActionLoading(true);
+    setActionError(null);
+    setActionSuccess(null);
     try {
       const response = await fetch(`${API_V1}/admin/users/${userId}/reset-password`, {
         method: 'POST',
@@ -177,13 +185,16 @@ export function Admin() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to reset password');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Failed to reset password (${response.status})`);
       }
 
       const data = await response.json();
-      alert(`Password reset!\n\nTemporary password: ${data.temporary_password}\n\nShare this securely with the user.`);
+      setActionSuccess(`Password reset! Temporary password: ${data.temporary_password}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      setActionError(errorMsg);
+      console.error('Reset password error:', err);
     } finally {
       setActionLoading(false);
     }
@@ -196,6 +207,8 @@ export function Admin() {
     }
 
     setActionLoading(true);
+    setActionError(null);
+    setActionSuccess(null);
     try {
       const response = await fetch(`${API_V1}/admin/users/${userId}/activate?active=${active}`, {
         method: 'POST',
@@ -203,15 +216,19 @@ export function Admin() {
       });
 
       if (!response.ok) {
-        throw new Error(`Failed to ${action} user`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Failed to ${action} user (${response.status})`);
       }
 
+      setActionSuccess(`User ${action}d successfully`);
       await fetchUsers();
       if (selectedUser) {
         await fetchUserDetail(userId);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      setActionError(errorMsg);
+      console.error('Toggle user active error:', err);
     } finally {
       setActionLoading(false);
     }
@@ -220,11 +237,13 @@ export function Admin() {
   const deleteUser = async (userId: string, email: string) => {
     const confirmText = prompt(`Type "${email}" to confirm permanent deletion:`);
     if (confirmText !== email) {
-      alert('Deletion cancelled - email did not match');
+      setActionError('Deletion cancelled - email did not match');
       return;
     }
 
     setActionLoading(true);
+    setActionError(null);
+    setActionSuccess(null);
     try {
       const response = await fetch(`${API_V1}/admin/users/${userId}?confirm=true`, {
         method: 'DELETE',
@@ -232,15 +251,19 @@ export function Admin() {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to delete user');
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Failed to delete user (${response.status})`);
       }
 
       setShowUserModal(false);
       setSelectedUser(null);
+      setActionSuccess(`User ${email} deleted successfully`);
       await fetchUsers();
       await fetchStats();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+      setActionError(errorMsg);
+      console.error('Delete user error:', err);
     } finally {
       setActionLoading(false);
     }
@@ -546,30 +569,46 @@ export function Admin() {
               {/* Actions */}
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
                 <h3 className="font-medium text-gray-900 dark:text-white mb-3">Actions</h3>
+                
+                {/* Action feedback messages */}
+                {actionError && (
+                  <div className="mb-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm text-red-600 dark:text-red-400">{actionError}</p>
+                  </div>
+                )}
+                {actionSuccess && (
+                  <div className="mb-3 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg">
+                    <p className="text-sm text-green-600 dark:text-green-400">{actionSuccess}</p>
+                  </div>
+                )}
+                
                 <div className="flex flex-wrap gap-3">
                   <button
                     onClick={() => resetUserPassword(selectedUser.id)}
                     disabled={actionLoading}
-                    className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-medium disabled:opacity-50"
+                    className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white rounded-lg font-medium disabled:opacity-50 flex items-center gap-2"
                   >
+                    {actionLoading && <span className="animate-spin">⏳</span>}
                     Reset Password
                   </button>
                   <button
                     onClick={() => toggleUserActive(selectedUser.id, !selectedUser.is_active)}
                     disabled={actionLoading}
-                    className={`px-4 py-2 rounded-lg font-medium disabled:opacity-50 ${
+                    className={`px-4 py-2 rounded-lg font-medium disabled:opacity-50 flex items-center gap-2 ${
                       selectedUser.is_active
                         ? 'bg-orange-500 hover:bg-orange-600 text-white'
                         : 'bg-green-500 hover:bg-green-600 text-white'
                     }`}
                   >
+                    {actionLoading && <span className="animate-spin">⏳</span>}
                     {selectedUser.is_active ? 'Deactivate' : 'Activate'}
                   </button>
                   <button
                     onClick={() => deleteUser(selectedUser.id, selectedUser.email)}
                     disabled={actionLoading}
-                    className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium disabled:opacity-50"
+                    className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg font-medium disabled:opacity-50 flex items-center gap-2"
                   >
+                    {actionLoading && <span className="animate-spin">⏳</span>}
                     Delete User
                   </button>
                 </div>
