@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { User, Lock, AlertTriangle, Loader2 } from 'lucide-react';
+import { User, Lock, AlertTriangle, Loader2, Shield, Smartphone, CheckCircle, XCircle } from 'lucide-react';
 import clsx from 'clsx';
 import { api } from '../lib/api';
 import { API_V1 } from '../config';
 import type { UserResponse } from '../lib/api';
 
-type SettingsTab = 'profile' | 'password' | 'account';
+type SettingsTab = 'profile' | 'password' | 'security' | 'account';
 
 interface SettingsProps {
   onLogout: () => void;
@@ -100,6 +100,18 @@ export function Settings({ onLogout }: SettingsProps) {
             Password
           </button>
           <button
+            onClick={() => setActiveTab('security')}
+            className={clsx(
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              activeTab === 'security'
+                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            )}
+          >
+            <Shield className="w-4 h-4" />
+            Security
+          </button>
+          <button
             onClick={() => setActiveTab('account')}
             className={clsx(
               'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
@@ -120,6 +132,9 @@ export function Settings({ onLogout }: SettingsProps) {
       )}
       {activeTab === 'password' && (
         <PasswordSettings />
+      )}
+      {activeTab === 'security' && (
+        <SecuritySettings />
       )}
       {activeTab === 'account' && user && (
         <AccountSettings user={user} onLogout={onLogout} />
@@ -539,5 +554,379 @@ function AccountSettings({ user: _user, onLogout }: { user: UserResponse; onLogo
         </div>
       )}
     </>
+  );
+}
+
+// Security Settings Component (2FA/MFA)
+function SecuritySettings() {
+  const [totpEnabled, setTotpEnabled] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  
+  // Setup state
+  const [showSetup, setShowSetup] = useState(false);
+  const [qrCode, setQrCode] = useState<string | null>(null);
+  const [secret, setSecret] = useState<string | null>(null);
+  const [verifyCode, setVerifyCode] = useState('');
+  
+  // Disable state
+  const [showDisable, setShowDisable] = useState(false);
+  const [disablePassword, setDisablePassword] = useState('');
+
+  useEffect(() => {
+    checkTotpStatus();
+  }, []);
+
+  const checkTotpStatus = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch(`${API_V1}/auth/2fa/status`, {
+        headers: {
+          'Authorization': `Bearer ${api.getJwtToken()}`,
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setTotpEnabled(data.enabled);
+      }
+    } catch (err) {
+      console.error('Failed to check 2FA status:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startSetup = async () => {
+    setActionLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_V1}/auth/2fa/setup`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${api.getJwtToken()}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Failed to start 2FA setup');
+      }
+      
+      const data = await response.json();
+      setQrCode(data.qr_code);
+      setSecret(data.secret);
+      setShowSetup(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start 2FA setup');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const enableTotp = async () => {
+    if (verifyCode.length !== 6) {
+      setError('Please enter a 6-digit code');
+      return;
+    }
+    
+    setActionLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_V1}/auth/2fa/enable`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${api.getJwtToken()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ code: verifyCode }),
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Invalid verification code');
+      }
+      
+      setTotpEnabled(true);
+      setShowSetup(false);
+      setQrCode(null);
+      setSecret(null);
+      setVerifyCode('');
+      setSuccess('Two-factor authentication enabled successfully!');
+      setTimeout(() => setSuccess(null), 5000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to enable 2FA');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const disableTotp = async () => {
+    if (!disablePassword) {
+      setError('Please enter your password');
+      return;
+    }
+    
+    setActionLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_V1}/auth/2fa/disable`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${api.getJwtToken()}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ password: disablePassword }),
+      });
+      
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.detail || 'Failed to disable 2FA');
+      }
+      
+      setTotpEnabled(false);
+      setShowDisable(false);
+      setDisablePassword('');
+      setSuccess('Two-factor authentication disabled');
+      setTimeout(() => setSuccess(null), 5000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to disable 2FA');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-6 h-6 animate-spin text-[#8B5CF6]" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Success Message */}
+      {success && (
+        <div className="p-4 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 flex items-center gap-2">
+          <CheckCircle className="w-5 h-5" />
+          {success}
+        </div>
+      )}
+
+      {/* Error Message */}
+      {error && (
+        <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 flex items-center gap-2">
+          <XCircle className="w-5 h-5" />
+          {error}
+        </div>
+      )}
+
+      {/* 2FA Card */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-start justify-between">
+          <div className="flex items-start gap-4">
+            <div className={clsx(
+              'p-3 rounded-lg',
+              totpEnabled ? 'bg-green-100 dark:bg-green-900/30' : 'bg-gray-100 dark:bg-gray-700'
+            )}>
+              <Smartphone className={clsx(
+                'w-6 h-6',
+                totpEnabled ? 'text-green-600 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'
+              )} />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Two-Factor Authentication
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                Add an extra layer of security to your account using an authenticator app.
+              </p>
+              <div className={clsx(
+                'inline-flex items-center gap-1.5 mt-3 px-2.5 py-1 rounded-full text-xs font-medium',
+                totpEnabled
+                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                  : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400'
+              )}>
+                {totpEnabled ? (
+                  <>
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    Enabled
+                  </>
+                ) : (
+                  <>
+                    <XCircle className="w-3.5 h-3.5" />
+                    Not enabled
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+          
+          {!showSetup && !showDisable && (
+            <button
+              onClick={totpEnabled ? () => setShowDisable(true) : startSetup}
+              disabled={actionLoading}
+              className={clsx(
+                'px-4 py-2 rounded-lg font-medium text-sm transition-colors',
+                totpEnabled
+                  ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50'
+                  : 'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white',
+                actionLoading && 'opacity-50 cursor-not-allowed'
+              )}
+            >
+              {actionLoading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : totpEnabled ? (
+                'Disable'
+              ) : (
+                'Enable'
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Setup Flow */}
+        {showSetup && (
+          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+            <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+              Set up authenticator app
+            </h4>
+            
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                1. Scan this QR code with your authenticator app (Google Authenticator, Authy, etc.)
+              </p>
+              
+              {qrCode && (
+                <div className="flex justify-center p-4 bg-white rounded-lg">
+                  <img src={qrCode} alt="2FA QR Code" className="w-48 h-48" />
+                </div>
+              )}
+              
+              {secret && (
+                <div className="text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                    Or enter this code manually:
+                  </p>
+                  <code className="px-3 py-1.5 bg-gray-100 dark:bg-gray-900 rounded text-sm font-mono text-gray-800 dark:text-gray-200">
+                    {secret}
+                  </code>
+                </div>
+              )}
+              
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                2. Enter the 6-digit code from your app to verify:
+              </p>
+              
+              <input
+                type="text"
+                value={verifyCode}
+                onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                placeholder="000000"
+                maxLength={6}
+                className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white text-center text-2xl font-mono tracking-widest placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+              />
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowSetup(false);
+                    setQrCode(null);
+                    setSecret(null);
+                    setVerifyCode('');
+                    setError(null);
+                  }}
+                  className="flex-1 px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={enableTotp}
+                  disabled={actionLoading || verifyCode.length !== 6}
+                  className={clsx(
+                    'flex-1 px-4 py-2 rounded-lg font-medium transition-colors',
+                    'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white',
+                    (actionLoading || verifyCode.length !== 6) && 'opacity-50 cursor-not-allowed'
+                  )}
+                >
+                  {actionLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                  ) : (
+                    'Verify & Enable'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Disable Flow */}
+        {showDisable && (
+          <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+            <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+              Disable two-factor authentication
+            </h4>
+            
+            <div className="space-y-4">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                Enter your password to disable 2FA. This will make your account less secure.
+              </p>
+              
+              <input
+                type="password"
+                value={disablePassword}
+                onChange={(e) => setDisablePassword(e.target.value)}
+                placeholder="Enter your password"
+                className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+              />
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setShowDisable(false);
+                    setDisablePassword('');
+                    setError(null);
+                  }}
+                  className="flex-1 px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={disableTotp}
+                  disabled={actionLoading || !disablePassword}
+                  className={clsx(
+                    'flex-1 px-4 py-2 rounded-lg font-medium transition-colors',
+                    'bg-red-600 hover:bg-red-700 text-white',
+                    (actionLoading || !disablePassword) && 'opacity-50 cursor-not-allowed'
+                  )}
+                >
+                  {actionLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+                  ) : (
+                    'Disable 2FA'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Security Tips */}
+      <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800 p-4">
+        <h4 className="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-2">
+          Security Tips
+        </h4>
+        <ul className="text-sm text-blue-700 dark:text-blue-400 space-y-1">
+          <li>• Use a strong, unique password for your account</li>
+          <li>• Enable 2FA for an extra layer of protection</li>
+          <li>• Never share your API keys or passwords</li>
+          <li>• Regularly review your active sessions</li>
+        </ul>
+      </div>
+    </div>
   );
 }
