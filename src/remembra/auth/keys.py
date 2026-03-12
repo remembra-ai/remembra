@@ -1,8 +1,11 @@
 """API key generation and management."""
 
+import hashlib
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
+from functools import lru_cache
+from typing import Any
 
 import bcrypt
 import structlog
@@ -10,6 +13,11 @@ import structlog
 from remembra.storage.database import Database
 
 log = structlog.get_logger(__name__)
+
+# Cache for validated keys (key_hash -> key_data)
+# TTL is managed by clearing on key changes
+_key_cache: dict[str, dict[str, Any]] = {}
+_KEY_CACHE_MAX_SIZE = 1000
 
 # Key format: rem_<32 bytes base64> = rem_abc123...
 KEY_PREFIX = "rem_"
@@ -126,18 +134,38 @@ class APIKeyManager:
         """
         Validate an API key and return key info if valid.
         
-        This is O(n) where n is number of active keys - we check each hash.
-        For production with many keys, consider a key lookup table or cache.
+        Uses a SHA256 cache key for fast repeated lookups, falling back to
+        O(n) bcrypt verification for uncached keys.
         
         Returns key record dict if valid, None otherwise.
         """
+        global _key_cache
+        
         if not raw_key.startswith(KEY_PREFIX):
             log.debug("api_key_invalid_format", key_preview=raw_key[:8] if raw_key else "empty")
             return None
         
-        # Get all active keys and check against each hash
-        # Note: This is not ideal for large numbers of keys
-        # A better approach would be to store a key prefix hash for faster lookup
+        # Use SHA256 hash of the key as cache lookup (fast, constant time)
+        cache_key = hashlib.sha256(raw_key.encode()).hexdigest()
+        
+        # Check cache first (O(1) lookup)
+        if cache_key in _key_cache:
+            cached = _key_cache[cache_key]
+            # Verify the key is still active in DB
+            cursor = await self.db.conn.execute(
+                "SELECT active FROM api_keys WHERE id = ?",
+                (cached["id"],)
+            )
+            row = await cursor.fetchone()
+            if row and row[0]:
+                await self.db.update_api_key_last_used(cached["id"])
+                log.debug("api_key_validated_cached", key_id=cached["id"])
+                return cached
+            else:
+                # Key was deactivated, remove from cache
+                del _key_cache[cache_key]
+        
+        # Cache miss - fall back to O(n) bcrypt check
         cursor = await self.db.conn.execute(
             "SELECT * FROM api_keys WHERE active = TRUE"
         )
@@ -148,6 +176,13 @@ class APIKeyManager:
             if self.verify_key(raw_key, key_data["key_hash"]):
                 # Update last_used timestamp
                 await self.db.update_api_key_last_used(key_data["id"])
+                
+                # Cache the result (limit cache size)
+                if len(_key_cache) >= _KEY_CACHE_MAX_SIZE:
+                    # Remove oldest entry (simple eviction)
+                    _key_cache.pop(next(iter(_key_cache)))
+                _key_cache[cache_key] = key_data
+                
                 log.debug("api_key_validated", key_id=key_data["id"], user_id=key_data["user_id"])
                 return key_data
         
@@ -176,9 +211,13 @@ class APIKeyManager:
         
         The user_id is required to ensure users can only revoke their own keys.
         """
+        global _key_cache
+        
         success = await self.db.revoke_api_key(key_id, user_id)
         
         if success:
+            # Invalidate cache entries for this key
+            _key_cache = {k: v for k, v in _key_cache.items() if v.get("id") != key_id}
             log.info("api_key_revoked", key_id=key_id, user_id=user_id)
         else:
             log.warning("api_key_revoke_failed", key_id=key_id, user_id=user_id)
