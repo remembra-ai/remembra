@@ -385,7 +385,7 @@ def create_app() -> FastAPI:
     # -----------------------------------------------------------------------
 
     @app.get("/health", tags=["ops"], include_in_schema=False)
-    @limiter.limit("120/minute")
+    # No rate limit on health - load balancers and orchestrators need unrestricted access
     async def health(request: Request) -> JSONResponse:
         cfg = get_settings()
         qdrant_status = await check_qdrant(cfg.qdrant_url)
