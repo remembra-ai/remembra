@@ -342,13 +342,12 @@ def require_permission(permission: str):
     return Depends(check_permission)
 
 
-# Permission dependency aliases (aligned with remembra.auth.rbac.Permission)
-RequireMemoryCreate = require_permission("memory:store")  # Store = Create
-RequireMemoryRead = require_permission("memory:recall")   # Recall = Read
-RequireMemoryUpdate = require_permission("memory:store")  # Update requires store permission
-RequireMemoryDelete = require_permission("memory:delete")
-RequireEntityRead = require_permission("entity:read")
-RequireEntityMerge = require_permission("entity:merge")   # Admin only
-RequireWebhookManage = require_permission("webhook:manage")
-RequireAuditRead = require_permission("admin:audit")
-RequireUserManage = require_permission("admin:users")
+# Permission dependency factories (aligned with remembra.auth.rbac.Permission)
+def require_memory_store(): return require_permission("memory:store")
+def require_memory_recall(): return require_permission("memory:recall")
+def require_memory_delete(): return require_permission("memory:delete")
+def require_entity_read(): return require_permission("entity:read")
+def require_entity_merge(): return require_permission("entity:merge")
+def require_webhook_manage(): return require_permission("webhook:manage")
+def require_audit_read(): return require_permission("admin:audit")
+def require_user_manage(): return require_permission("admin:users")

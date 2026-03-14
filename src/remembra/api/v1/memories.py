@@ -8,10 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from remembra.auth.middleware import (
     CurrentUser,
     get_client_ip,
-    RequireMemoryCreate,
-    RequireMemoryRead,
-    RequireMemoryUpdate,
-    RequireMemoryDelete,
+    has_permission,
 )
 from remembra.cloud.limits import (
     EnforceRecallLimit,
@@ -104,7 +101,6 @@ async def store_memory(
     sanitizer: SanitizerDep,
     current_user: CurrentUser,
     settings: SettingsDep,
-    _perm: RequireMemoryCreate = None,  # RBAC: Require memory:create permission
     _limit: EnforceStoreLimit = None,
 ) -> StoreResponse:
     """
@@ -118,6 +114,13 @@ async def store_memory(
     Note: user_id is determined by API key (cannot be overridden).
     Rate limit: 30 requests/minute.
     """
+    # RBAC: Check permission
+    if not has_permission(current_user, "memory:store"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: memory:store required",
+        )
+    
     # Override user_id with authenticated user (security: prevent user spoofing)
     body.user_id = current_user.user_id
     
@@ -209,10 +212,11 @@ async def batch_store(
     audit_logger: AuditLoggerDep,
     sanitizer: SanitizerDep,
     current_user: CurrentUser,
-    _perm: RequireMemoryCreate = None,  # RBAC: Require memory:create permission
 ) -> BatchStoreResponse:
     """
     Store up to 100 memories in a single request.
+    
+    Requires memory:store permission.
     
     Partial success is supported - failed items don't block successful ones.
     Each item is processed independently with its own result.
@@ -235,6 +239,13 @@ async def batch_store(
     
     Rate limit: 5 requests/minute.
     """
+    # RBAC: Check permission
+    if not has_permission(current_user, "memory:store"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: memory:store required",
+        )
+    
     results: list[BatchStoreResult] = []
     succeeded = 0
     
@@ -281,7 +292,6 @@ async def batch_recall(
     body: BatchRecallRequest,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
-    _perm: RequireMemoryRead = None,  # RBAC: Require memory:read permission
 ) -> BatchRecallResponse:
     """
     Execute up to 20 recall queries in a single request.
@@ -303,6 +313,13 @@ async def batch_recall(
     
     Rate limit: 10 requests/minute.
     """
+    # RBAC: Check permission
+    if not has_permission(current_user, "memory:recall"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: memory:recall required",
+        )
+    
     results: list[RecallResponse] = []
     
     for query in body.queries:
@@ -335,7 +352,6 @@ async def recall_memories(
     memory_service: MemoryServiceDep,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
-    _perm: RequireMemoryRead = None,  # RBAC: Require memory:read permission
     _limit: EnforceRecallLimit = None,
 ) -> RecallResponse:
     """
@@ -356,6 +372,13 @@ async def recall_memories(
     Note: user_id is determined by API key (cannot be overridden).
     Rate limit: 60 requests/minute.
     """
+    # RBAC: Check permission
+    if not has_permission(current_user, "memory:recall"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: memory:recall required",
+        )
+    
     # Override user_id with authenticated user
     body.user_id = current_user.user_id
     
@@ -419,13 +442,19 @@ async def get_memory(
     memory_id: str,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
-    _perm: RequireMemoryRead = None,  # RBAC: Require memory:read permission
 ) -> dict:
     """
     Retrieve a specific memory by its ID.
     
     Note: Can only access memories belonging to the authenticated user.
     """
+    # RBAC: Check permission
+    if not has_permission(current_user, "memory:recall"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: memory:recall required",
+        )
+    
     result = await memory_service.get(memory_id)
     if not result:
         raise HTTPException(
@@ -461,7 +490,6 @@ async def update_memory(
     memory_service: MemoryServiceDep,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
-    _perm: RequireMemoryUpdate = None,  # RBAC: Require memory:update permission
 ) -> UpdateResponse:
     """
     Re-extract facts from updated content and merge entity graph.
@@ -477,6 +505,13 @@ async def update_memory(
     
     Rate limit: 20 requests/minute.
     """
+    # RBAC: Check permission (update requires store permission)
+    if not has_permission(current_user, "memory:store"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: memory:store required",
+        )
+    
     try:
         result = await memory_service.update(
             memory_id=memory_id,
@@ -530,7 +565,6 @@ async def cleanup_expired(
     memory_service: MemoryServiceDep,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
-    _perm: RequireMemoryDelete = None,  # RBAC: Require memory:delete permission
 ) -> dict:
     """
     Delete all expired memories (TTL-based cleanup).
@@ -540,6 +574,13 @@ async def cleanup_expired(
     
     Rate limit: 5 requests/minute.
     """
+    # RBAC: Check permission
+    if not has_permission(current_user, "memory:delete"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: memory:delete required",
+        )
+    
     try:
         deleted = await memory_service.cleanup_expired(
             user_id=current_user.user_id,
@@ -573,7 +614,6 @@ async def forget_memories(
     memory_service: MemoryServiceDep,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
-    _perm: RequireMemoryDelete = None,  # RBAC: Require memory:delete permission
     memory_id: Annotated[
         str | None, Query(description="Delete a specific memory by ID")
     ] = None,
@@ -592,6 +632,13 @@ async def forget_memories(
     Note: Can only delete your own memories.
     Rate limit: 10 requests/minute.
     """
+    # RBAC: Check permission
+    if not has_permission(current_user, "memory:delete"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: memory:delete required",
+        )
+    
     if not any([memory_id, entity, all_memories]):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
