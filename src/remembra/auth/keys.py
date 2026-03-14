@@ -166,8 +166,14 @@ class APIKeyManager:
                 del _key_cache[cache_key]
         
         # Cache miss - fall back to O(n) bcrypt check
+        # Join with api_key_roles to get the role
         cursor = await self.db.conn.execute(
-            "SELECT * FROM api_keys WHERE active = TRUE"
+            """
+            SELECT k.*, COALESCE(r.role, 'editor') as role, r.scopes
+            FROM api_keys k
+            LEFT JOIN api_key_roles r ON k.id = r.api_key_id
+            WHERE k.active = TRUE
+            """
         )
         rows = await cursor.fetchall()
         
@@ -177,13 +183,19 @@ class APIKeyManager:
                 # Update last_used timestamp
                 await self.db.update_api_key_last_used(key_data["id"])
                 
+                # Parse scopes from comma-separated string
+                if key_data.get("scopes"):
+                    key_data["scopes"] = [s for s in key_data["scopes"].split(",") if s]
+                else:
+                    key_data["scopes"] = None
+                
                 # Cache the result (limit cache size)
                 if len(_key_cache) >= _KEY_CACHE_MAX_SIZE:
                     # Remove oldest entry (simple eviction)
                     _key_cache.pop(next(iter(_key_cache)))
                 _key_cache[cache_key] = key_data
                 
-                log.debug("api_key_validated", key_id=key_data["id"], user_id=key_data["user_id"])
+                log.debug("api_key_validated", key_id=key_data["id"], user_id=key_data["user_id"], role=key_data.get("role"))
                 return key_data
         
         log.warning("api_key_validation_failed", key_preview=raw_key[:12] + "...")

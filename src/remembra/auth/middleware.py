@@ -120,6 +120,8 @@ async def get_current_user(
                 api_key_id=key_info["id"],
                 rate_limit_tier=key_info.get("rate_limit_tier", "standard"),
                 name=key_info.get("name"),
+                role=key_info.get("role", "editor"),  # RBAC FIX: Extract role from key
+                scopes=key_info.get("scopes"),
             )
         else:
             log.warning(
@@ -275,3 +277,78 @@ CurrentUser = Annotated[AuthenticatedUser, Depends(get_current_user)]
 OptionalUser = Annotated[AuthenticatedUser | None, Depends(get_optional_user)]
 JWTOrAPIKeyUser = Annotated[AuthenticatedUser | None, Depends(get_user_from_jwt_or_api_key)]
 RequireMasterKey = Annotated[None, Depends(require_master_key)]
+
+
+# ---------------------------------------------------------------------------
+# RBAC Permission Checking
+# ---------------------------------------------------------------------------
+
+# Role hierarchy: admin > editor > viewer
+# Permission names aligned with remembra.auth.rbac.Permission
+ROLE_PERMISSIONS = {
+    "admin": {
+        "memory:store", "memory:recall", "memory:delete",
+        "entity:read", "entity:merge",
+        "webhook:manage", "admin:audit", "admin:users", "key:create", "key:list", "key:revoke",
+    },
+    "editor": {
+        "memory:store", "memory:recall", "memory:delete",
+        "entity:read", "key:list", "webhook:manage", "conflict:manage",
+    },
+    "viewer": {
+        "memory:recall",
+        "entity:read", "key:list",
+    },
+}
+
+
+def has_permission(user: AuthenticatedUser, permission: str) -> bool:
+    """Check if user has a specific permission based on their role."""
+    role_perms = ROLE_PERMISSIONS.get(user.role, set())
+    
+    # If user has explicit scopes, use those instead of role defaults
+    if user.scopes:
+        return permission in user.scopes
+    
+    return permission in role_perms
+
+
+def require_permission(permission: str):
+    """
+    Dependency factory that requires a specific permission.
+    
+    Usage:
+        @router.post("/memories")
+        async def store_memory(
+            _perm: RequirePermission("memory:create"),
+            current_user: CurrentUser,
+        ):
+            ...
+    """
+    async def check_permission(current_user: CurrentUser):
+        if not has_permission(current_user, permission):
+            log.warning(
+                "permission_denied",
+                user_id=current_user.user_id,
+                role=current_user.role,
+                required_permission=permission,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permission denied: {permission} required",
+            )
+        return None
+    
+    return Depends(check_permission)
+
+
+# Permission dependency aliases (aligned with remembra.auth.rbac.Permission)
+RequireMemoryCreate = require_permission("memory:store")  # Store = Create
+RequireMemoryRead = require_permission("memory:recall")   # Recall = Read
+RequireMemoryUpdate = require_permission("memory:store")  # Update requires store permission
+RequireMemoryDelete = require_permission("memory:delete")
+RequireEntityRead = require_permission("entity:read")
+RequireEntityMerge = require_permission("entity:merge")   # Admin only
+RequireWebhookManage = require_permission("webhook:manage")
+RequireAuditRead = require_permission("admin:audit")
+RequireUserManage = require_permission("admin:users")

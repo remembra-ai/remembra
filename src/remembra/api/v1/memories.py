@@ -5,7 +5,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from remembra.auth.middleware import CurrentUser, get_client_ip
+from remembra.auth.middleware import (
+    CurrentUser,
+    get_client_ip,
+    RequireMemoryCreate,
+    RequireMemoryRead,
+    RequireMemoryUpdate,
+    RequireMemoryDelete,
+)
 from remembra.cloud.limits import (
     EnforceRecallLimit,
     EnforceStoreLimit,
@@ -97,6 +104,7 @@ async def store_memory(
     sanitizer: SanitizerDep,
     current_user: CurrentUser,
     settings: SettingsDep,
+    _perm: RequireMemoryCreate = None,  # RBAC: Require memory:create permission
     _limit: EnforceStoreLimit = None,
 ) -> StoreResponse:
     """
@@ -201,6 +209,7 @@ async def batch_store(
     audit_logger: AuditLoggerDep,
     sanitizer: SanitizerDep,
     current_user: CurrentUser,
+    _perm: RequireMemoryCreate = None,  # RBAC: Require memory:create permission
 ) -> BatchStoreResponse:
     """
     Store up to 100 memories in a single request.
@@ -272,6 +281,7 @@ async def batch_recall(
     body: BatchRecallRequest,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
+    _perm: RequireMemoryRead = None,  # RBAC: Require memory:read permission
 ) -> BatchRecallResponse:
     """
     Execute up to 20 recall queries in a single request.
@@ -325,6 +335,7 @@ async def recall_memories(
     memory_service: MemoryServiceDep,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
+    _perm: RequireMemoryRead = None,  # RBAC: Require memory:read permission
     _limit: EnforceRecallLimit = None,
 ) -> RecallResponse:
     """
@@ -408,6 +419,7 @@ async def get_memory(
     memory_id: str,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
+    _perm: RequireMemoryRead = None,  # RBAC: Require memory:read permission
 ) -> dict:
     """
     Retrieve a specific memory by its ID.
@@ -449,6 +461,7 @@ async def update_memory(
     memory_service: MemoryServiceDep,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
+    _perm: RequireMemoryUpdate = None,  # RBAC: Require memory:update permission
 ) -> UpdateResponse:
     """
     Re-extract facts from updated content and merge entity graph.
@@ -517,6 +530,7 @@ async def cleanup_expired(
     memory_service: MemoryServiceDep,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
+    _perm: RequireMemoryDelete = None,  # RBAC: Require memory:delete permission
 ) -> dict:
     """
     Delete all expired memories (TTL-based cleanup).
@@ -559,6 +573,7 @@ async def forget_memories(
     memory_service: MemoryServiceDep,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
+    _perm: RequireMemoryDelete = None,  # RBAC: Require memory:delete permission
     memory_id: Annotated[
         str | None, Query(description="Delete a specific memory by ID")
     ] = None,
