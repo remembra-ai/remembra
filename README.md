@@ -31,12 +31,13 @@
 
 ---
 
-## 🚀 What's New in v0.10.0
+## 🚀 What's New in v0.10.1
 
 - **🤖 Universal Agent Installer** — One command configures ALL your AI tools: `remembra-install --all`
 - **🔍 Setup Diagnostics** — `remembra-doctor` pinpoints connection issues with clear failure labels
 - **🌉 Local Bridge** — `remembra-bridge` proxy for sandboxed agents (Codex CLI)
-- **🛡️ Security Hardening** — RBAC on all endpoints, error sanitization, SSRF protection
+- **🔑 Centralized Credentials** — API keys stored in `~/.remembra/credentials` (chmod 600)
+- **⚡ Slim Recall Mode** — `recall(query, slim=True)` returns 90% smaller payloads
 
 ### Supported Agents (6+)
 Claude Desktop • Claude Code • Codex CLI • Cursor • Windsurf • Gemini
