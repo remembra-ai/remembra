@@ -44,12 +44,12 @@ export function ApiKeyManager() {
   const [showDeleteModal, setShowDeleteModal] = useState<ApiKey | null>(null);
   const [newKeyResult, setNewKeyResult] = useState<CreateKeyResponse | null>(null);
 
-  // Fetch keys from API
+  // Fetch keys from API (active keys only by default)
   const fetchKeys = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await api.listKeys();
+      const response = await api.listKeys(true); // Only active keys
       setKeys(response.keys);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load API keys');
@@ -163,21 +163,26 @@ export function ApiKeyManager() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-3 mb-2">
                     <h3 className="font-medium text-gray-900 dark:text-white truncate">
-                      {key.name}
+                      {key.name || 'Unnamed Key'}
                     </h3>
                     <span className={clsx(
                       'px-2 py-0.5 rounded text-xs font-medium',
-                      PERMISSION_STYLES[key.permission]
+                      PERMISSION_STYLES[key.permission || key.role || 'editor']
                     )}>
-                      {PERMISSION_LABELS[key.permission]}
+                      {PERMISSION_LABELS[key.permission || key.role || 'editor']}
                     </span>
                   </div>
                   
                   {/* Key preview */}
                   <div className="flex items-center gap-2 mb-3">
                     <code className="px-2 py-1 rounded bg-gray-100 dark:bg-gray-900 text-sm font-mono text-gray-600 dark:text-gray-400">
-                      rem_{key.key_preview}
+                      rem_{key.key_preview}...
                     </code>
+                    {!key.active && (
+                      <span className="px-2 py-0.5 rounded text-xs font-medium bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">
+                        Revoked
+                      </span>
+                    )}
                   </div>
 
                   {/* Metadata */}

@@ -56,11 +56,14 @@ class KeyInfo(BaseModel):
     id: str
     user_id: str
     name: str | None
+    key_preview: str = Field(..., description="First 8 chars of key ID for display")
     created_at: str
     last_used_at: str | None
     active: bool
     rate_limit_tier: str
     role: str = Field("editor", description="Key role: admin, editor, or viewer")
+    # Alias for frontend compatibility
+    permission: str = Field("editor", description="Alias for role (frontend compatibility)")
 
 
 class ListKeysResponse(BaseModel):
@@ -138,6 +141,14 @@ def validate_role(role_str: str) -> Role:
         )
 
 
+def generate_key_preview(key_id: str) -> str:
+    """Generate a display preview from key ID (e.g., 'ErBdukTD')."""
+    # Extract the random part after 'key_' and take first 8 chars
+    if key_id.startswith("key_"):
+        return key_id[4:12]
+    return key_id[:8]
+
+
 async def get_key_with_role(
     key_manager: APIKeyManager,
     role_manager: RoleManager,
@@ -150,16 +161,19 @@ async def get_key_with_role(
     
     # Get role from RBAC
     key_role = await role_manager.get_role(key_id)
+    role_value = key_role.role.value
     
     return KeyInfo(
         id=key_info.id,
         user_id=key_info.user_id,
         name=key_info.name,
+        key_preview=generate_key_preview(key_info.id),
         created_at=key_info.created_at,
         last_used_at=key_info.last_used_at,
         active=key_info.active,
         rate_limit_tier=key_info.rate_limit_tier,
-        role=key_role.role.value,
+        role=role_value,
+        permission=role_value,  # Alias for frontend compatibility
     )
 
 
@@ -276,11 +290,15 @@ async def list_api_keys(
     key_manager: APIKeyManagerDep,
     role_manager: RoleManagerDep,
     current_user: JWTOrAPIKeyUser,
+    active_only: bool = False,
 ) -> ListKeysResponse:
     """
     List all API keys for the authenticated user.
     
     Supports both JWT Bearer token and API key authentication.
+    
+    **Query Parameters:**
+    - `active_only` (bool): If true, only return active (non-revoked) keys
     
     Note: The actual key values are never shown (only metadata).
     """
@@ -292,20 +310,27 @@ async def list_api_keys(
     
     keys = await key_manager.list_keys(current_user.user_id)
     
-    # Enrich with roles
+    # Filter by active status if requested
+    if active_only:
+        keys = [k for k in keys if k.active]
+    
+    # Enrich with roles and additional fields
     enriched_keys = []
     for k in keys:
         key_role = await role_manager.get_role(k.id)
+        role_value = key_role.role.value
         enriched_keys.append(
             KeyInfo(
                 id=k.id,
                 user_id=k.user_id,
                 name=k.name,
+                key_preview=generate_key_preview(k.id),
                 created_at=k.created_at,
                 last_used_at=k.last_used_at,
                 active=k.active,
                 rate_limit_tier=k.rate_limit_tier,
-                role=key_role.role.value,
+                role=role_value,
+                permission=role_value,  # Alias for frontend compatibility
             )
         )
     

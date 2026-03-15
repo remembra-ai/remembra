@@ -415,8 +415,9 @@ class ApiClient {
   }
 
   // API Key Management methods
-  async listKeys(): Promise<ApiKeyListResponse> {
-    return this.fetchApi<ApiKeyListResponse>('/keys');
+  async listKeys(activeOnly: boolean = false): Promise<ApiKeyListResponse> {
+    const params = activeOnly ? '?active_only=true' : '';
+    return this.fetchApi<ApiKeyListResponse>(`/keys${params}`);
   }
 
   async createKey(name: string, permission: 'admin' | 'editor' | 'viewer'): Promise<CreateApiKeyResponse> {
@@ -655,16 +656,20 @@ export interface BillingContextResponse {
 // API Key Management types
 export interface ApiKeyInfo {
   id: string;
-  name: string;
+  user_id: string;
+  name: string | null;
   key_preview: string;
-  permission: 'admin' | 'editor' | 'viewer';
   created_at: string;
   last_used_at: string | null;
+  active: boolean;
+  rate_limit_tier: string;
+  role: 'admin' | 'editor' | 'viewer';
+  permission: 'admin' | 'editor' | 'viewer';  // Alias for role (frontend compatibility)
 }
 
 export interface ApiKeyListResponse {
   keys: ApiKeyInfo[];
-  total: number;
+  count: number;
 }
 
 export interface CreateApiKeyRequest {
@@ -674,15 +679,18 @@ export interface CreateApiKeyRequest {
 
 export interface CreateApiKeyResponse {
   id: string;
-  name: string;
+  name: string | null;
   key: string; // Full key - shown only once!
-  permission: 'admin' | 'editor' | 'viewer';
-  created_at: string;
+  user_id: string;
+  rate_limit_tier: string;
+  role: 'admin' | 'editor' | 'viewer';
+  permission?: 'admin' | 'editor' | 'viewer';  // Alias
+  message?: string;
 }
 
 export interface RevokeApiKeyResponse {
-  id: string;
-  revoked: boolean;
+  success: boolean;
+  message: string;
 }
 
 export const api = new ApiClient();

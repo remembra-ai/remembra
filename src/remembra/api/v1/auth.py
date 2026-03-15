@@ -854,3 +854,75 @@ async def get_totp_status(
         enabled=enabled,
         message="2FA is enabled" if enabled else "2FA is not enabled",
     )
+
+
+# ---------------------------------------------------------------------------
+# API Key Verification Endpoint
+# ---------------------------------------------------------------------------
+
+
+class VerifyKeyResponse(BaseModel):
+    """Response for API key verification."""
+    valid: bool
+    key_id: str | None = None
+    user_id: str | None = None
+    role: str | None = None
+    rate_limit_tier: str | None = None
+    message: str
+
+
+@router.get(
+    "/verify",
+    response_model=VerifyKeyResponse,
+    summary="Verify API key validity",
+)
+async def verify_api_key(
+    request: Request,
+) -> VerifyKeyResponse:
+    """
+    Verify if the provided API key is valid and active.
+    
+    Provide the API key in the `X-API-Key` header.
+    
+    This endpoint:
+    - Confirms the key is valid and not revoked
+    - Returns key metadata (role, rate limit tier)
+    - Does NOT update last_used_at (test only)
+    
+    Use this to test if a key works before using it in production.
+    """
+    from remembra.auth.keys import APIKeyManager
+    from remembra.auth.rbac import RoleManager
+    
+    api_key = request.headers.get("X-API-Key")
+    
+    if not api_key:
+        return VerifyKeyResponse(
+            valid=False,
+            message="No API key provided. Use X-API-Key header.",
+        )
+    
+    # Get API key manager from app state
+    key_manager: APIKeyManager = request.app.state.api_key_manager
+    role_manager: RoleManager = request.app.state.role_manager
+    
+    # Validate the key (this also updates last_used_at as a side effect)
+    key_info = await key_manager.validate_key(api_key)
+    
+    if not key_info:
+        return VerifyKeyResponse(
+            valid=False,
+            message="Invalid or revoked API key.",
+        )
+    
+    # Get role info
+    key_role = await role_manager.get_role(key_info["id"])
+    
+    return VerifyKeyResponse(
+        valid=True,
+        key_id=key_info["id"],
+        user_id=key_info["user_id"],
+        role=key_role.role.value,
+        rate_limit_tier=key_info.get("rate_limit_tier", "standard"),
+        message="API key is valid and active.",
+    )
