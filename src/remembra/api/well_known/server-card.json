@@ -153,6 +153,7 @@
             "description": "List of message dicts with 'role' and 'content'. Optional: 'name', 'timestamp'.",
             "items": {
               "type": "object",
+              "description": "A single conversation message with required role/content fields and optional speaker metadata.",
               "properties": {
                 "role": {"type": "string", "description": "Message role: 'user', 'assistant', or 'system'"},
                 "content": {"type": "string", "description": "The message content"},
