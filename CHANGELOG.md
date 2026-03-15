@@ -14,13 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `remembra-install --detect` lists installed agents
   - Supports: Claude Desktop, Claude Code, Codex CLI, Gemini, Cursor, Windsurf
   - Safe config merging — preserves existing MCP configurations
-  - Centralized credentials in `~/.remembra/credentials`
+  - **Centralized credentials** in `~/.remembra/credentials` (chmod 600)
+    - API key saved on first install, auto-loaded for future installs
+    - No need to pass `--api-key` every time after first setup
 
 - **Setup Diagnostics** — `remembra-doctor` command for troubleshooting
   - `remembra-doctor all` scans all detected agents
   - `remembra-doctor <agent>` diagnoses specific agent
   - Checks: config loading, command resolution, health probe, recall test
   - Clear failure labels: `dns_failure`, `sandbox_blocked`, `auth_failure`, `timeout`
+
+- **Slim Recall Mode** — 90% smaller payload for token-constrained agents
+  - `recall_memories(query, slim=True)` returns only synthesized context
+  - Full mode still available with `slim=False` (default)
+  - Reduces recall response from ~2KB to ~200 bytes
 
 - **Local Bridge** — Proxy for sandboxed agents (Codex CLI)
   - `remembra-bridge` runs local HTTP proxy on 127.0.0.1:8765

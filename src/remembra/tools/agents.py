@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -17,8 +19,73 @@ AGENT_CONFIGS = {
     "windsurf": Path.home() / ".windsurf" / "mcp_config.json",
 }
 
+# Centralized credentials
+REMEMBRA_HOME = Path.home() / ".remembra"
+CREDENTIALS_FILE = REMEMBRA_HOME / "credentials"
+
 DEFAULT_REMEMBRA_URL = "https://api.remembra.dev"
 DEFAULT_REMEMBRA_COMMAND = "remembra-mcp"
+
+
+def write_credentials(
+    api_key: str,
+    project: str = "default",
+    user_id: str = "default",
+    url: str = DEFAULT_REMEMBRA_URL,
+) -> Path:
+    """Write credentials to ~/.remembra/credentials with secure permissions.
+    
+    Returns the path to the credentials file.
+    """
+    REMEMBRA_HOME.mkdir(parents=True, exist_ok=True)
+    
+    credentials = {
+        "api_key": api_key,
+        "project": project,
+        "user_id": user_id,
+        "url": url,
+    }
+    
+    # Write credentials
+    CREDENTIALS_FILE.write_text(json.dumps(credentials, indent=2))
+    
+    # Secure with chmod 600 (owner read/write only)
+    os.chmod(CREDENTIALS_FILE, stat.S_IRUSR | stat.S_IWUSR)
+    
+    return CREDENTIALS_FILE
+
+
+def read_credentials() -> dict[str, str] | None:
+    """Read credentials from ~/.remembra/credentials.
+    
+    Returns None if file doesn't exist or is invalid.
+    """
+    if not CREDENTIALS_FILE.exists():
+        return None
+    
+    try:
+        return json.loads(CREDENTIALS_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def get_api_key(cli_api_key: str | None = None) -> str | None:
+    """Get API key from CLI argument, env var, or credentials file.
+    
+    Priority: CLI arg > env var > credentials file
+    """
+    if cli_api_key:
+        return cli_api_key
+    
+    env_key = os.environ.get("REMEMBRA_API_KEY")
+    if env_key:
+        return env_key
+    
+    creds = read_credentials()
+    if creds and creds.get("api_key"):
+        return creds["api_key"]
+    
+    return None
 
 
 @dataclass(slots=True)
@@ -271,16 +338,37 @@ def main() -> None:
             print("No agents detected.")
         return
 
-    # Installation requires API key
-    if not args.api_key:
-        parser.error("--api-key is required for installation")
+    # Get API key from CLI, env var, or credentials file
+    api_key = get_api_key(args.api_key)
+    
+    if not api_key:
+        # Check if credentials file exists for better error message
+        if CREDENTIALS_FILE.exists():
+            parser.error(
+                f"Credentials file exists at {CREDENTIALS_FILE} but contains no API key. "
+                "Pass --api-key or set REMEMBRA_API_KEY environment variable."
+            )
+        else:
+            parser.error(
+                "--api-key is required for installation. "
+                "You can also set REMEMBRA_API_KEY environment variable."
+            )
+    
+    # Save credentials for future use
+    creds_path = write_credentials(
+        api_key=api_key,
+        project=args.project,
+        user_id=args.user_id,
+        url=args.url,
+    )
+    print(f"📁 Credentials saved to {creds_path}")
 
     if args.all:
         print("🧠 Remembra Universal Agent Installer")
         print("=" * 50)
         
         results = install_all_agents(
-            api_key=args.api_key,
+            api_key=api_key,
             project=args.project,
             user_id=args.user_id,
             url=args.url,
@@ -301,7 +389,7 @@ def main() -> None:
     else:
         result = install_agent_config(
             args.agent,
-            api_key=args.api_key,
+            api_key=api_key,
             project=args.project,
             user_id=args.user_id,
             url=args.url,

@@ -131,6 +131,7 @@ def recall_memories(
     query: str,
     limit: int = 5,
     threshold: float = 0.4,
+    slim: bool = False,
 ) -> str:
     """Search persistent memory for relevant information.
 
@@ -145,14 +146,29 @@ def recall_memories(
         limit: Maximum number of memories to return (1-50, default: 5).
         threshold: Minimum relevance score 0.0-1.0 (default: 0.4).
                    Lower = more results but less relevant.
+        slim: If True, returns only the synthesized context string (90% smaller payload).
+              Use slim=True when you only need the context, not individual memories.
 
     Returns:
         JSON string with synthesized context, matching memories, and entities.
+        In slim mode, returns only: {"status": "ok", "context": "...", "count": N}
     """
     try:
         client = _get_client()
         result = client.recall(query=query, limit=limit, threshold=threshold)
 
+        # Slim mode: return just context (90% payload reduction)
+        if slim:
+            return json.dumps(
+                {
+                    "status": "ok",
+                    "context": result.context,
+                    "count": len(result.memories),
+                },
+                indent=2,
+            )
+
+        # Full mode: return everything
         return json.dumps(
             {
                 "status": "ok",
