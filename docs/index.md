@@ -3,8 +3,8 @@
 **Persistent memory for AI applications. Self-host in minutes.**
 
 <div class="admonition tip" markdown>
-<p class="admonition-title">🚀 v0.10.0 Released!</p>
-<p>Now with <strong>Universal Agent Installer</strong>, <strong>Setup Diagnostics</strong>, and <strong>Local Bridge</strong>. One command configures all your AI tools. <a href="getting-started/agent-setup/">Agent Setup Guide →</a></p>
+<p class="admonition-title">🚀 v0.10.1 Released!</p>
+<p>Now with <strong>Universal Agent Installer</strong>, <strong>Setup Diagnostics</strong>, <strong>Local Bridge</strong>, and <strong>Slim Recall Mode</strong>. One command configures all your AI tools. <a href="getting-started/agent-setup/">Agent Setup Guide →</a></p>
 </div>
 
 ---
@@ -206,6 +206,50 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
 [Get Started :material-arrow-right:](getting-started/quickstart.md){ .md-button .md-button--primary }
 [View on GitHub :material-github:](https://github.com/remembra-ai/remembra){ .md-button }
+
+## What's New in v0.10.x
+
+<div class="grid cards" markdown>
+
+-   :material-robot:{ .lg .middle } __Universal Agent Installer__
+
+    ---
+
+    `remembra-install --all` auto-detects and configures Claude, Codex, Cursor, Gemini, Windsurf in one command.
+
+-   :material-stethoscope:{ .lg .middle } __Setup Diagnostics__
+
+    ---
+
+    `remembra-doctor <agent>` diagnoses connection issues with clear failure labels: `dns_failure`, `sandbox_blocked`, `auth_failure`.
+
+-   :material-bridge:{ .lg .middle } __Local Bridge__
+
+    ---
+
+    `remembra-bridge` tunnels sandboxed agents (Codex, Claude Code) to your local/remote Remembra server.
+
+-   :material-key:{ .lg .middle } __Centralized Credentials__
+
+    ---
+
+    API keys stored securely in `~/.remembra/credentials` (chmod 600). No more repeating `--api-key` on every command.
+
+-   :material-lightning-bolt:{ .lg .middle } __Slim Recall Mode__
+
+    ---
+
+    `recall(query, slim=True)` returns 90% smaller payloads—just the context string, no metadata bloat.
+
+-   :material-shield-check:{ .lg .middle } __Security Hardening__
+
+    ---
+
+    RBAC enforcement, error sanitization, SSRF protection, and safer defaults across the board.
+
+</div>
+
+---
 
 ## What's New in v0.9.0
 
