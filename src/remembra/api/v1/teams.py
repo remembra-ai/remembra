@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from remembra.auth.middleware import CurrentUser
@@ -301,6 +301,8 @@ async def update_team(
 @router.delete(
     "/{team_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
     summary="Delete team",
     description="Delete the team. Owner only.",
 )
@@ -379,6 +381,8 @@ async def update_member_role(
 @router.delete(
     "/{team_id}/members/{member_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
     summary="Remove member",
     description="Remove a member from the team. Admin or owner only.",
 )
@@ -403,6 +407,8 @@ async def remove_member(
 @router.post(
     "/{team_id}/leave",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
     summary="Leave team",
     description="Leave the team. Owners cannot leave.",
 )
@@ -505,6 +511,8 @@ async def list_invites(
 @router.delete(
     "/{team_id}/invites/{invite_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
     summary="Revoke invite",
     description="Revoke a pending invite. Admin or owner only.",
 )
@@ -593,6 +601,8 @@ async def list_team_spaces(
 @router.delete(
     "/{team_id}/spaces/{space_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    response_model=None,
     summary="Unlink space from team",
     description="Unlink a space from the team. Admin or owner only.",
 )

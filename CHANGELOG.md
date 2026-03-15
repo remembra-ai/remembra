@@ -5,6 +5,46 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-03-15
+
+### Added
+- **Universal Agent Installer** — One command to configure ALL your AI tools
+  - `remembra-install --all` auto-detects and configures installed agents
+  - `remembra-install --agent <name>` for specific agent setup
+  - `remembra-install --detect` lists installed agents
+  - Supports: Claude Desktop, Claude Code, Codex CLI, Gemini, Cursor, Windsurf
+  - Safe config merging — preserves existing MCP configurations
+  - Centralized credentials in `~/.remembra/credentials`
+
+- **Setup Diagnostics** — `remembra-doctor` command for troubleshooting
+  - `remembra-doctor all` scans all detected agents
+  - `remembra-doctor <agent>` diagnoses specific agent
+  - Checks: config loading, command resolution, health probe, recall test
+  - Clear failure labels: `dns_failure`, `sandbox_blocked`, `auth_failure`, `timeout`
+
+- **Local Bridge** — Proxy for sandboxed agents (Codex CLI)
+  - `remembra-bridge` runs local HTTP proxy on 127.0.0.1:8765
+  - Forwards requests to remote Remembra API
+  - Auto-configured by installer for sandboxed environments
+
+- **Security Hardening**
+  - RBAC permissions enforced on all memory endpoints
+  - Generic exception handler sanitizes error responses
+  - API key caching for reduced latency
+  - Webhook SSRF protection
+  - 2FA/MFA settings UI in dashboard
+
+### Fixed
+- Rate limit removed from `/health` endpoint (was blocking monitoring)
+- RBAC inline permission checks instead of Depends()
+
+### Documentation
+- New Agent Setup guide at docs.remembra.dev/getting-started/agent-setup
+- Updated quickstart with universal installer
+- Landing page comparison table updated with multi-agent features
+
+---
+
 ## [0.9.0] - 2026-03-09
 
 ### Added
