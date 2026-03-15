@@ -7,6 +7,30 @@
     "required": true,
     "schemes": ["apiKey"]
   },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "apiKey": {
+        "type": "string",
+        "title": "API Key",
+        "description": "Remembra API key for authentication. Get one at remembra.dev/dashboard",
+        "x-from": { "header": "x-remembra-api-key" }
+      },
+      "userId": {
+        "type": "string",
+        "title": "User ID",
+        "description": "User ID for memory isolation. Each user has separate memories.",
+        "default": "default"
+      },
+      "project": {
+        "type": "string",
+        "title": "Project",
+        "description": "Project namespace for organizing memories. Useful for multi-project setups.",
+        "default": "default"
+      }
+    },
+    "required": ["apiKey"]
+  },
   "tools": [
     {
       "name": "store_memory",
