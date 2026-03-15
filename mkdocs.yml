@@ -80,6 +80,7 @@ nav:
   - Home: index.md
   - Getting Started:
     - Quickstart: getting-started/quickstart.md
+    - Agent Setup: getting-started/agent-setup.md
     - Installation: getting-started/installation.md
     - Docker: getting-started/docker.md
   - SDKs:

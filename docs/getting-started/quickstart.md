@@ -23,6 +23,18 @@ No OpenAI or other API keys are required. Ollama runs entirely locally for both 
 
 ---
 
+## Configure Your AI Agents
+
+Once Remembra is running, configure all your AI agents to use it:
+
+```bash
+npx remembra setup --all
+```
+
+This auto-detects Claude, Codex, Cursor, and other AI tools, then configures them to share memory. See [Agent Setup](agent-setup.md) for details.
+
+---
+
 ## Step 1: Start Remembra (Manual Setup)
 
 If you prefer to configure things yourself, choose one of the options below.
@@ -137,6 +149,7 @@ print(context)
 
 ## Next Steps
 
+- [Agent Setup](agent-setup.md) - Configure all your AI agents with one command
 - [Installation Guide](installation.md) - All installation options
 - [Docker Deployment](docker.md) - Production Docker setup
 - [Python SDK Guide](../guides/python-sdk.md) - Full SDK reference
