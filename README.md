@@ -31,14 +31,21 @@
 
 ---
 
-## 🚀 What's New in v0.9.0
+## 🚀 What's New in v0.10.0
 
-- **⏳ Temporal Knowledge Graph** — Bi-temporal relationships with `valid_from`, `valid_to`, and point-in-time queries. Ask "Where did Alice work in January 2022?"
-- **🛠️ 11 MCP Tools** — 6 new tools: `update_memory`, `search_entities`, `list_memories`, `share_memory`, `timeline`, `relationships_at`
-- **📊 Entity Graph Visualization** — Interactive force-directed graph with flowing particle effects on relationship edges
-- **🔄 Contradiction Detection** — New relationships automatically supersede old ones with full history preserved
-- **🔐 AES-256-GCM Field Encryption** — Encrypt memory content at rest with OWASP-compliant key derivation
-- **🛡️ Enterprise Security Suite** — PII detection, anomaly monitoring, audit logging
+- **🤖 Universal Agent Installer** — One command configures ALL your AI tools: `remembra-install --all`
+- **🔍 Setup Diagnostics** — `remembra-doctor` pinpoints connection issues with clear failure labels
+- **🌉 Local Bridge** — `remembra-bridge` proxy for sandboxed agents (Codex CLI)
+- **🛡️ Security Hardening** — RBAC on all endpoints, error sanitization, SSRF protection
+
+### Supported Agents (6+)
+Claude Desktop • Claude Code • Codex CLI • Cursor • Windsurf • Gemini
+
+### Previous (v0.9.0)
+- ⏳ Temporal Knowledge Graph with point-in-time queries
+- 🛠️ 11 MCP Tools including `timeline` and `relationships_at`
+- 📊 Entity Graph Visualization
+- 🔐 AES-256-GCM Field Encryption
 
 ---
 
@@ -104,7 +111,25 @@ curl -X POST http://localhost:8787/api/v1/memories/recall \
   -d '{"query": "Who runs Acme?", "user_id": "demo"}'
 ```
 
-### Connect to Claude (MCP)
+### Connect ALL Your AI Agents (NEW in v0.10.0)
+
+**One command configures everything:**
+
+```bash
+pip install remembra
+remembra-install --all --url http://localhost:8787
+```
+
+This auto-detects and configures: Claude Desktop, Claude Code, Codex CLI, Cursor, Windsurf, Gemini.
+
+**Verify setup:**
+
+```bash
+remembra-doctor all
+```
+
+<details>
+<summary>Manual MCP Config (if needed)</summary>
 
 **Claude Desktop** — add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
@@ -121,6 +146,7 @@ curl -X POST http://localhost:8787/api/v1/memories/recall \
   }
 }
 ```
+</details>
 
 **Claude Code:**
 
