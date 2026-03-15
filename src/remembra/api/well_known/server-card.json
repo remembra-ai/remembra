@@ -29,7 +29,7 @@
         "default": "default"
       }
     },
-    "required": ["apiKey"]
+    "required": []
   },
   "tools": [
     {
