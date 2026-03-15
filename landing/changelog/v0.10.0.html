@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remembra v0.10.0 - Universal Agent Installer & Setup Diagnostics</title>
+    <meta name="description" content="Remembra v0.10.0 brings one-command agent setup for 6+ AI tools, remembra-doctor diagnostics, local bridge for sandboxed agents, and security hardening.">
+    <meta name="keywords" content="Remembra, AI memory, changelog, v0.10.0, agent installer, MCP, Claude, Codex, Cursor, multi-agent">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="Remembra v0.10.0 Released">
+    <meta property="og:description" content="Universal Agent Installer, Setup Diagnostics, and Local Bridge for sandboxed agents.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://remembra.dev/changelog/v0.10.0">
+    
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Remembra v0.10.0 Released",
+      "datePublished": "2026-03-15",
+      "author": {"@type": "Organization", "name": "DolphyTech"},
+      "publisher": {"@type": "Organization", "name": "Remembra"}
+    }
+    </script>
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: { extend: { colors: { primary: '#8B5CF6', dark: '#0F0F0F', 'dark-card': '#1F1F1F' } } }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-dark text-white">
+    <nav class="fixed top-0 left-0 right-0 z-50 bg-dark/80 backdrop-blur-xl border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <a href="/" class="flex items-center gap-3">
+                <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
+                <span class="text-xl font-bold">Remembra</span>
+            </a>
+            <a href="/changelog.html" class="text-gray-300 hover:text-white">← All Releases</a>
+        </div>
+    </nav>
+
+    <main class="pt-32 pb-24 px-6">
+        <article class="max-w-3xl mx-auto">
+            <div class="mb-8">
+                <time class="text-gray-500">March 15, 2026</time>
+                <h1 class="text-4xl md:text-5xl font-bold mt-2 mb-4">Remembra v0.10.0</h1>
+                <p class="text-xl text-gray-400">Universal Agent Installer & Setup Diagnostics</p>
+            </div>
+
+            <div class="prose prose-invert max-w-none">
+                <section class="mb-10">
+                    <h2 class="text-2xl font-bold text-green-400 mb-4">✨ Added</h2>
+                    <div class="bg-dark-card border border-white/10 rounded-xl p-6 space-y-4">
+                        <div>
+                            <h3 class="font-semibold text-lg">🤖 Universal Agent Installer</h3>
+                            <p class="text-gray-400">One command configures ALL your AI tools.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li><code class="bg-white/10 px-1 rounded">remembra-install --all</code> — Auto-detect and configure all agents</li>
+                                <li><code class="bg-white/10 px-1 rounded">remembra-install --agent claude-desktop</code> — Configure specific agent</li>
+                                <li><code class="bg-white/10 px-1 rounded">remembra-install --detect</code> — List installed agents</li>
+                                <li>Safe config merging — preserves existing MCP configurations</li>
+                                <li>Centralized credentials in <code class="bg-white/10 px-1 rounded">~/.remembra/credentials</code></li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">🔍 Setup Diagnostics</h3>
+                            <p class="text-gray-400">Troubleshoot connection issues with clear failure labels.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li><code class="bg-white/10 px-1 rounded">remembra-doctor all</code> — Scan all detected agents</li>
+                                <li><code class="bg-white/10 px-1 rounded">remembra-doctor codex</code> — Diagnose specific agent</li>
+                                <li>Clear failure labels: <code class="bg-white/10 px-1 rounded">dns_failure</code>, <code class="bg-white/10 px-1 rounded">sandbox_blocked</code>, <code class="bg-white/10 px-1 rounded">auth_failure</code>, <code class="bg-white/10 px-1 rounded">timeout</code></li>
+                                <li>Health probe + recall test for end-to-end verification</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">🌉 Local Bridge</h3>
+                            <p class="text-gray-400">HTTP proxy for sandboxed agents that can't reach external URLs.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li><code class="bg-white/10 px-1 rounded">remembra-bridge</code> — Start local proxy on 127.0.0.1:8765</li>
+                                <li>Forwards requests to remote Remembra API</li>
+                                <li>API key injection for authentication</li>
+                                <li>Auto-configured by installer for Codex CLI</li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold text-lg">🛡️ Security Hardening</h3>
+                            <p class="text-gray-400">Enterprise-grade security improvements.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li>RBAC permissions enforced on all memory endpoints</li>
+                                <li>Generic exception handler — no stack traces leaked</li>
+                                <li>API key caching for reduced latency</li>
+                                <li>Webhook SSRF protection</li>
+                                <li>2FA/MFA settings UI in dashboard</li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="mb-10">
+                    <h2 class="text-2xl font-bold text-blue-400 mb-4">🔧 Supported Agents</h2>
+                    <div class="bg-dark-card border border-white/10 rounded-xl p-6">
+                        <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                            <div class="flex items-center gap-2">
+                                <span class="text-green-400">✓</span>
+                                <span>Claude Desktop</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-green-400">✓</span>
+                                <span>Claude Code</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-green-400">✓</span>
+                                <span>Codex CLI</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-green-400">✓</span>
+                                <span>Cursor</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-green-400">✓</span>
+                                <span>Windsurf</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-green-400">✓</span>
+                                <span>Gemini</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="mb-10">
+                    <h2 class="text-2xl font-bold text-yellow-400 mb-4">🐛 Fixed</h2>
+                    <div class="bg-dark-card border border-white/10 rounded-xl p-6">
+                        <ul class="text-gray-300 space-y-2 list-disc list-inside">
+                            <li>Rate limit removed from <code class="bg-white/10 px-1 rounded">/health</code> endpoint (was blocking monitoring)</li>
+                            <li>RBAC now uses inline permission checks instead of <code class="bg-white/10 px-1 rounded">Depends()</code></li>
+                        </ul>
+                    </div>
+                </section>
+
+                <section class="mb-10">
+                    <h2 class="text-2xl font-bold text-purple-400 mb-4">📦 Installation</h2>
+                    <div class="bg-dark-card border border-white/10 rounded-xl p-6 space-y-4">
+                        <div>
+                            <h3 class="font-semibold mb-2">Upgrade pip</h3>
+                            <pre class="bg-black/50 rounded-lg p-4 overflow-x-auto"><code>pip install --upgrade remembra</code></pre>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold mb-2">Configure All Agents</h3>
+                            <pre class="bg-black/50 rounded-lg p-4 overflow-x-auto"><code>remembra-install --all --api-key rem_xxx</code></pre>
+                        </div>
+                        <div>
+                            <h3 class="font-semibold mb-2">Upgrade Docker</h3>
+                            <pre class="bg-black/50 rounded-lg p-4 overflow-x-auto"><code>docker pull remembra/remembra:0.10.0</code></pre>
+                        </div>
+                    </div>
+                </section>
+
+                <section>
+                    <h2 class="text-2xl font-bold text-gray-400 mb-4">📋 Full Changelog</h2>
+                    <p class="text-gray-400">
+                        See the full diff on GitHub: 
+                        <a href="https://github.com/remembra-ai/remembra/compare/v0.9.0...v0.10.0" class="text-primary hover:underline">v0.9.0...v0.10.0</a>
+                    </p>
+                </section>
+            </div>
+        </article>
+    </main>
+
+    <footer class="border-t border-white/5 py-8 px-6 text-center text-gray-500">
+        <p>© 2026 DolphyTech. Remembra is open source under MIT license.</p>
+    </footer>
+</body>
+</html>
