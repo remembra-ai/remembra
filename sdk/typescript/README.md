@@ -2,6 +2,17 @@
 
 TypeScript/JavaScript SDK for [Remembra](https://remembra.dev) - the AI Memory Layer.
 
+[![npm version](https://badge.fury.io/js/remembra.svg)](https://www.npmjs.com/package/remembra)
+[![PyPI version](https://badge.fury.io/py/remembra.svg)](https://pypi.org/project/remembra/)
+
+## What's New in v0.10.1
+
+- **Slim Recall Mode** — `recall(query, { slim: true })` returns 90% smaller payloads
+- **Better Error Messages** — Clear failure labels for debugging
+- **Full Python CLI** — `remembra-install`, `remembra-doctor`, `remembra-bridge` for setup
+
+> **Note:** The TypeScript SDK is for client-side usage. For AI agent setup (Claude, Codex, Cursor), use the Python package: `pip install remembra && remembra-install --all`
+
 ## Installation
 
 ```bash
@@ -94,11 +105,19 @@ Recall relevant memories.
 const result = await memory.recall('Who is John?', {
   limit: 10,
   threshold: 0.5,
+  slim: false,  // Set true for 90% smaller response (context only)
 });
 
 console.log(result.context);   // Synthesized context
-console.log(result.memories);  // Individual memories
-console.log(result.entities);  // Related entities
+console.log(result.memories);  // Individual memories (omitted if slim=true)
+console.log(result.entities);  // Related entities (omitted if slim=true)
+```
+
+**Slim mode** (v0.10.1+): For token-constrained environments, use `slim: true` to get only the context string:
+
+```typescript
+const result = await memory.recall('Who is John?', { slim: true });
+// Returns just: { context: "John is the CEO of Acme Corp." }
 ```
 
 #### `ingestConversation(messages, options?)`
