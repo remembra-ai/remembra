@@ -23,6 +23,8 @@ WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    libffi-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/venv
@@ -31,9 +33,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY pyproject.toml README.md ./
 COPY src/ ./src/
 
-# Install with cloud extras (stripe, etc.)
+# Install with cloud + encryption extras
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir ".[server,cloud]"
+    pip install --no-cache-dir ".[server,cloud,encryption]"
 
 # =============================================================================
 # Stage 3: Production Image
@@ -48,8 +50,10 @@ LABEL org.opencontainers.image.vendor="Remembra"
 # Create non-root user
 RUN groupadd -r remembra && useradd -r -g remembra remembra
 
-# Install curl for health checks
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+# Install curl for health checks + libssl for cryptography
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
