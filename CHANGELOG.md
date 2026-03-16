@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.1] - 2026-03-15
 
+### Production Validated ✅
+- **api.remembra.dev** — Live and verified with proper health response
+- **Encryption** — AES-256-GCM confirmed working in production
+- **Qdrant** — Vector store healthy and operational
+- **All agents** — Claude, Codex, Cursor, Gemini, Windsurf integration tested
+
 ### Added
 - **Centralized Credentials** — `~/.remembra/credentials` with chmod 600
   - API key saved on first install, auto-loaded for future installs
@@ -18,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `remembra-bridge --status` checks if bridge is running and healthy
   - Port-in-use detection with clear error messages
   - Health check after startup
+
+### Fixed
+- **Encryption Key Format** — Production deployment now requires `base64:` prefix for `REMEMBRA_ENCRYPTION_KEY`
 
 ---
 
