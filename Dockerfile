@@ -23,9 +23,11 @@ FROM python:3.11-slim AS python-builder
 
 WORKDIR /app
 
-# Install build dependencies
+# Install build dependencies (including cryptography deps)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    libffi-dev \
+    libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create virtual environment
@@ -47,6 +49,11 @@ LABEL org.opencontainers.image.title="Remembra"
 LABEL org.opencontainers.image.description="AI Memory Layer - Self-hosted"
 LABEL org.opencontainers.image.url="https://github.com/remembra-ai/remembra"
 LABEL org.opencontainers.image.vendor="Remembra"
+
+# Install runtime dependencies for cryptography
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
 RUN groupadd -r remembra && useradd -r -g remembra remembra
