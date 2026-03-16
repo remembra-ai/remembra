@@ -5,6 +5,17 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-03-16
+
+### Deployment Marker
+- **Forced backend rebuild** to ensure production matches `main`
+- **Live smoke suite identified deploy drift** on scoped API keys and memory listing
+
+### Fixed
+- **Project-scoped API keys** — response models include `project_ids`, auth chain carries project restrictions, and restricted keys enforce project boundaries
+- **Memory listing endpoint** — `GET /api/v1/memories` restored for dashboard browse/search surfaces
+- **Production verification** — health, analytics, graph, timeline, spaces, and team-space flows rechecked against the deployed API
+
 ## [0.10.1] - 2026-03-15
 
 ### Production Validated ✅
