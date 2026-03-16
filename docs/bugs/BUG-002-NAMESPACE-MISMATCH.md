@@ -4,7 +4,24 @@
 **Severity:** Critical  
 **Discovered:** 2026-03-16  
 **Status:** Needs Fix  
-**Priority:** P0  
+**Priority:** P0 — Near-term, not backlog
+
+---
+
+## Prioritization (per Mani)
+
+**Approach:** Option A first (auto-detection). Defer architecture merge questions until UX and discovery path are stable.
+
+**Reasoning:**
+- Option A fixes user-facing failure quickly without locking into model decision too early
+- Option B is a product simplification decision, not an incident fix
+- Option C alone improves visibility but doesn't prevent the bug
+
+**Implementation Order:**
+1. Backend namespace discovery endpoint
+2. Dashboard create-space flow (dropdown defaulting to active/populated namespace)
+3. Projects mismatch banner + relink workflow
+4. Tests for namespace-aware creation and empty-state prevention  
 
 ---
 
