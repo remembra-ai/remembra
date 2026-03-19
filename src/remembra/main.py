@@ -23,17 +23,17 @@ from remembra.core.health import build_health_response, check_qdrant
 from remembra.core.logging import configure_logging
 from remembra.extraction.conflicts import ConflictManager, ConflictStrategy
 from remembra.plugins.manager import PluginManager
-from remembra.security.audit import AuditLogger
 from remembra.security.anomaly_detector import AnomalyDetector
+from remembra.security.audit import AuditLogger
 from remembra.security.pii_detector import PIIDetector
 from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.memory import MemoryService
 from remembra.spaces.manager import SpaceManager
-from remembra.teams.manager import TeamManager
 from remembra.storage.database import Database
 from remembra.storage.embeddings import EmbeddingService
 from remembra.storage.qdrant import QdrantStore
 from remembra.storage.reindex import ReindexManager
+from remembra.teams.manager import TeamManager
 from remembra.webhooks.delivery import WebhookDelivery
 from remembra.webhooks.manager import WebhookManager
 
