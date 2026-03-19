@@ -150,7 +150,7 @@ async def list_memories(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list memories: {str(e)}",
-        )
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +261,10 @@ async def store_memory(
                 "memory_id": result.id,
                 "user_id": current_user.user_id,
                 "facts": result.extracted_facts or [],
-                "entities": [e.model_dump() if hasattr(e, 'model_dump') else e for e in (result.entities or [])],
+                "entities": [
+                    e.model_dump() if hasattr(e, 'model_dump') else e
+                    for e in (result.entities or [])
+                ],
             },
             project_id=body.project_id or "default",
         )
@@ -282,7 +285,10 @@ async def store_memory(
             success=False,
             error=str(e),
         )
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
     except Exception as e:
         await audit_logger.log_memory_store(
             user_id=current_user.user_id,
@@ -295,7 +301,7 @@ async def store_memory(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to store memory: {str(e)}",
-        )
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -548,7 +554,7 @@ async def recall_memories(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to recall memories: {str(e)}",
-        )
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -579,7 +585,7 @@ async def get_memory(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Memory {memory_id} not found",
-        )
+        ) from None
     
     # RBAC: Check permission
     if not has_permission(current_user, "memory:recall"):
@@ -688,7 +694,7 @@ async def update_memory(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Memory {memory_id} not found",
-        )
+        ) from None
     except Exception as e:
         await audit_logger.log(
             "memory_updated",
@@ -700,7 +706,7 @@ async def update_memory(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update memory",
-        )
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -760,7 +766,7 @@ async def cleanup_expired(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to cleanup expired memories: {str(e)}",
-        )
+        ) from e
 
 
 @router.delete(
@@ -812,7 +818,10 @@ async def forget_memories(
     if current_user.project_ids and (entity or all_memories):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Project-scoped API keys must delete by memory_id until project-scoped bulk delete is implemented.",
+            detail=(
+                "Project-scoped API keys must delete by memory_id "
+                "until project-scoped bulk delete is implemented."
+            ),
         )
 
     if memory_id:
@@ -880,4 +889,4 @@ async def forget_memories(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to forget memories: {str(e)}",
-        )
+        ) from e

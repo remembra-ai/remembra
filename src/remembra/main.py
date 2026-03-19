@@ -8,10 +8,11 @@ import structlog
 import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from starlette.types import RequestResponseEndpoint
 
 from remembra import __version__
 from remembra.api.router import api_router
@@ -46,7 +47,7 @@ log = structlog.get_logger(__name__)
 
 
 # Import limiter from core module to avoid circular imports
-from remembra.core.limiter import limiter
+from remembra.core.limiter import limiter  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Application State
@@ -100,8 +101,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         ]
         if settings.jwt_secret in default_secrets:
             raise RuntimeError(
-                "CRITICAL SECURITY ERROR: You must set REMEMBRA_JWT_SECRET to a unique value in production.\n"
-                "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(64))\""
+                "CRITICAL SECURITY ERROR: You must set REMEMBRA_JWT_SECRET "
+                "to a unique value in production.\n"
+                "Generate one with: "
+                "python -c \"import secrets; print(secrets.token_urlsafe(64))\""
             )
         if len(settings.jwt_secret) < 32:
             raise RuntimeError(
@@ -270,7 +273,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         
         # Schedule automatic runs if interval mode
         if settings.sleep_time_trigger == "interval":
-            async def scheduled_consolidation():
+            async def scheduled_consolidation() -> None:
                 """Background task for scheduled consolidation."""
                 import asyncio
                 while True:
@@ -303,9 +306,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Close persistent HTTP clients
     if hasattr(app.state, "embeddings"):
         await app.state.embeddings.close()
-    if hasattr(app.state, "webhook_manager") and app.state.webhook_manager:
-        if hasattr(app.state.webhook_manager, "_delivery"):
-            await app.state.webhook_manager._delivery.close()
+    if (
+        hasattr(app.state, "webhook_manager")
+        and app.state.webhook_manager
+        and hasattr(app.state.webhook_manager, "_delivery")
+    ):
+        await app.state.webhook_manager._delivery.close()
     await app.state.db.close()
     await app.state.qdrant.close()
 
@@ -383,7 +389,9 @@ def create_app() -> FastAPI:
     from starlette.middleware.base import BaseHTTPMiddleware
     
     class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request, call_next):
+        async def dispatch(
+            self, request: Request, call_next: RequestResponseEndpoint
+        ) -> Response:
             response = await call_next(request)
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["X-Frame-Options"] = "DENY"
@@ -397,7 +405,9 @@ def create_app() -> FastAPI:
                 "form-action 'none'"
             )
             if not settings.debug:
-                response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+                response.headers["Strict-Transport-Security"] = (
+                    "max-age=31536000; includeSubDomains"
+                )
             return response
     
     app.add_middleware(SecurityHeadersMiddleware)
@@ -447,11 +457,11 @@ def create_app() -> FastAPI:
             "serverInfo": {"name": "Remembra", "version": __version__},
             "authentication": {"required": True, "schemes": ["apiKey"]},
             "tools": [
-                {"name": "store_memory", "description": "Store information in persistent memory"},
-                {"name": "recall_memories", "description": "Search persistent memory for relevant information"},
-                {"name": "forget_memories", "description": "Delete memories from persistent storage"},
-                {"name": "health_check", "description": "Check Remembra server health"},
-                {"name": "ingest_conversation", "description": "Ingest a conversation and extract memories"},
+                {"name": "store_memory", "description": "Store in memory"},
+                {"name": "recall_memories", "description": "Search memories"},
+                {"name": "forget_memories", "description": "Delete memories"},
+                {"name": "health_check", "description": "Check server health"},
+                {"name": "ingest_conversation", "description": "Ingest conversation"},
             ],
             "resources": [{"uri": "memory://recent", "name": "Recent Memories"}],
             "prompts": [],
@@ -484,9 +494,10 @@ def create_app() -> FastAPI:
             
             # Serve index.html for SPA routes
             @app.get("/{full_path:path}", include_in_schema=False)
-            async def serve_spa(full_path: str):
+            async def serve_spa(full_path: str) -> Response:
                 # Don't intercept API routes
-                if full_path.startswith("api/") or full_path.startswith("docs") or full_path.startswith("redoc") or full_path.startswith("openapi"):
+                api_paths = ("api/", "docs", "redoc", "openapi")
+                if any(full_path.startswith(p) for p in api_paths):
                     return JSONResponse({"detail": "Not found"}, status_code=404)
                 
                 # Try to serve the file directly

@@ -2,6 +2,7 @@
 
 import json
 import time
+from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -169,16 +170,16 @@ async def ingest_changelog(
             releases = parser.parse_file(body.file_path)
         else:
             releases = parser.parse(body.content)
-    except FileNotFoundError:
+    except FileNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Changelog file not found: {body.file_path}",
-        )
+        ) from e
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to parse changelog: {str(e)}",
-        )
+        ) from e
     
     if not releases:
         return ChangelogIngestResponse(
@@ -357,7 +358,7 @@ async def ingest_conversation(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(e),
-        )
+        ) from e
     except Exception as e:
         # Log error and return partial result if possible
         await audit_logger.log_memory_store(
@@ -371,7 +372,7 @@ async def ingest_conversation(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Conversation ingestion failed: {str(e)}",
-        )
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -425,14 +426,18 @@ async def ingest_conversation_stream(
         for msg in body.messages:
             sanitization = sanitizer.analyze(msg.content, source="conversation_ingest")
             if sanitization.trust_score < 0.3:
-                async def error_generator():
-                    yield f'data: {json.dumps({"phase": "error", "error": f"Message content failed security check: {sanitization.warnings}"})}\n\n'
+                async def error_generator(
+                    warnings: list = sanitization.warnings,
+                ) -> AsyncGenerator[str, None]:
+                    error_msg = f"Message content failed security check: {warnings}"
+                    yield f'data: {json.dumps({"phase": "error", "error": error_msg})}\n\n'
+
                 return StreamingResponse(
                     error_generator(),
                     media_type="text/event-stream",
                 )
     
-    async def event_generator():
+    async def event_generator() -> AsyncGenerator[str, None]:
         start = time.time()
         try:
             # Phase 1: Parsing
@@ -452,7 +457,8 @@ async def ingest_conversation_stream(
             result_dict = result.model_dump(mode="json")
             result_dict["processing_time_ms"] = elapsed
             
-            yield f'data: {json.dumps({"phase": "complete", "progress": 100, "result": result_dict})}\n\n'
+            complete_data = {"phase": "complete", "progress": 100, "result": result_dict}
+            yield f'data: {json.dumps(complete_data)}\n\n'
             
             # Audit log
             await audit_logger.log_memory_store(
