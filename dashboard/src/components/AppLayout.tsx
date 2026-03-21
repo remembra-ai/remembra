@@ -296,7 +296,7 @@ export function AppLayout({
         </header>
 
         {/* Page Content */}
-        <main className="relative z-0 flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto">
           <div key={activeTab} className={contentShellClass}>
             {children}
           </div>
