@@ -187,6 +187,15 @@ class Settings(BaseSettings):
     )
 
     # -----------------------------------------------------------------------
+    # Email (Resend)
+    # -----------------------------------------------------------------------
+    resend_api_key: str | None = Field(
+        None,
+        description="Resend API key for sending emails (welcome, password reset, etc.)",
+        validation_alias=AliasChoices("REMEMBRA_RESEND_API_KEY", "RESEND_API_KEY"),
+    )
+
+    # -----------------------------------------------------------------------
     # Webhooks
     # -----------------------------------------------------------------------
     webhooks_enabled: bool = Field(
