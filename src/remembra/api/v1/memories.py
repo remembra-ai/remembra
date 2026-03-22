@@ -6,6 +6,8 @@ from typing import Annotated
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
+log = structlog.get_logger(__name__)
+
 from remembra.auth.middleware import (
     CurrentUser,
     get_client_ip,
