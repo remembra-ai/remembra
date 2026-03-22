@@ -15,7 +15,7 @@ from remembra.core.limiter import limiter
 
 # Email imports (optional - only if cloud module available)
 try:
-    from remembra.cloud.email import EmailService
+    from remembra.cloud.email import EmailProvider, EmailService
 
     EMAIL_AVAILABLE = True
 except ImportError:
@@ -347,7 +347,7 @@ async def signup(
                     name="Default Key",
                 )
 
-                email_service = EmailService()
+                email_service = EmailService.create(provider=EmailProvider.RESEND)
                 asyncio.create_task(
                     email_service.send_welcome_email(
                         to=user.email,
