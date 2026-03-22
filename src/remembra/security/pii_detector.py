@@ -35,7 +35,13 @@ PII_PATTERNS: dict[str, re.Pattern] = {
     # International Phone (generic)
     "phone_intl": re.compile(r"\b\+\d{1,3}[-.\s]?\d{6,14}\b"),
     # API Keys / Secrets (common patterns)
-    "api_key": re.compile(r"\b(?:sk|pk|api|key|token|secret|password)[-_][A-Za-z0-9]{16,}\b", re.IGNORECASE),
+    "api_key": re.compile(r"\b(?:sk|pk|api|key|token|secret)[-_][A-Za-z0-9]{16,}\b", re.IGNORECASE),
+    # Password values after common labels (Password: xxx, password=xxx, **Password:** xxx)
+    # Matches the full pattern; password value is in group 1
+    "password": re.compile(
+        r"(?:password|passwd|pwd)\s*[:\=\*]+\s*(\S{6,})",
+        re.IGNORECASE
+    ),
     # AWS Access Keys
     "aws_key": re.compile(r"\b(?:AKIA|ABIA|ACCA|ASIA)[A-Z0-9]{16}\b"),
     # IP Addresses (v4)
@@ -56,6 +62,7 @@ PII_SEVERITY: dict[str, str] = {
     "credit_card": "critical",
     "api_key": "critical",
     "aws_key": "critical",
+    "password": "critical",
     "passport_us": "high",
     "bank_account": "high",
     "drivers_license": "high",
@@ -161,15 +168,26 @@ class PIIDetector:
         # Scan for each PII pattern
         for pii_type, pattern in self.patterns.items():
             for match in pattern.finditer(content):
-                original = match.group()
+                # For password pattern, extract just the password value (group 1)
+                if pii_type == "password" and match.lastindex and match.lastindex >= 1:
+                    original = match.group(1)
+                    # Calculate start/end for just the password value
+                    full_match = match.group()
+                    pw_start = match.start() + full_match.index(original)
+                    pw_end = pw_start + len(original)
+                    start, end = pw_start, pw_end
+                else:
+                    original = match.group()
+                    start, end = match.start(), match.end()
+                
                 severity = PII_SEVERITY.get(pii_type, "medium")
 
                 matches.append(
                     PIIMatch(
                         type=pii_type,
                         severity=severity,
-                        start=match.start(),
-                        end=match.end(),
+                        start=start,
+                        end=end,
                         original=original,
                         redacted=self._redact_value(original, pii_type),
                     )
