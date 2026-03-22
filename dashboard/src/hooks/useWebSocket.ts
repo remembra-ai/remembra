@@ -24,6 +24,8 @@ export interface UseWebSocketOptions {
   projectId?: string;
   /** API key for authentication */
   apiKey?: string;
+  /** JWT token for authentication (alternative to apiKey) */
+  token?: string;
   /** Auto-reconnect on disconnect */
   autoReconnect?: boolean;
   /** Reconnect delay in ms */
@@ -55,6 +57,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     namespace = 'default',
     projectId,
     apiKey,
+    token,
     autoReconnect = true,
     reconnectDelay = 3000,
     onMemoryEvent,
@@ -91,9 +94,12 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     if (apiKey) {
       params.set('api_key', apiKey);
     }
+    if (token) {
+      params.set('token', token);
+    }
 
     return `${base}/ws?${params.toString()}`;
-  }, [baseUrl, apiKey]);
+  }, [baseUrl, apiKey, token]);
 
   const connect = useCallback(() => {
     // Clean up existing connection

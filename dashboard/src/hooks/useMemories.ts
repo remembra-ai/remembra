@@ -65,10 +65,13 @@ export function useMemories(limit = 20, projectId?: string) {
   }, [refresh]);
 
   // WebSocket connection for real-time updates
+  // Pass either API key or JWT token for authentication
+  const authToken = api.getApiKey() || api.getJwtToken() || undefined;
   const { connected } = useWebSocket({
     namespace: projectId || 'default',
     projectId,
     apiKey: api.getApiKey() || undefined,
+    token: api.getJwtToken() || undefined,
     onMemoryEvent: handleMemoryEvent,
     onConnectionChange: setWsConnected,
     autoReconnect: true,

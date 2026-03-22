@@ -141,6 +141,7 @@ async def websocket_endpoint(
     namespace: str = Query("default", description="Namespace to subscribe to"),
     project_id: str | None = Query(None, description="Optional project ID filter"),
     api_key: str | None = Query(None, description="API key for authentication"),
+    token: str | None = Query(None, description="JWT token for authentication"),
 ) -> None:
     """
     WebSocket endpoint for real-time memory updates.
@@ -155,15 +156,17 @@ async def websocket_endpoint(
     - namespace: Subscribe to a specific namespace (default: "default")
     - project_id: Filter events to a specific project
     - api_key: API key for authentication (optional based on settings)
+    - token: JWT token for authentication (alternative to api_key)
     """
     settings = get_settings()
 
-    # Validate API key if auth is enabled
-    if settings.auth_enabled and not settings.debug and not api_key:
-        await websocket.close(code=4001, reason="API key required")
+    # Validate authentication if auth is enabled
+    has_auth = api_key or token
+    if settings.auth_enabled and not settings.debug and not has_auth:
+        await websocket.close(code=4001, reason="Authentication required (api_key or token)")
         return
         # Note: Full validation would require async DB lookup
-        # For MVP, we accept presence of key; production should validate
+        # For MVP, we accept presence of credentials; production should validate
 
     await connection_manager.connect(websocket, namespace, project_id)
 
