@@ -1,5 +1,6 @@
 """Authentication API endpoints for user signup, login, and password management."""
 
+import asyncio
 from datetime import datetime
 from typing import Annotated
 
@@ -11,6 +12,13 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 from remembra.auth.users import UserManager
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
+
+# Email imports (optional - only if cloud module available)
+try:
+    from remembra.cloud.email import EmailService
+    EMAIL_AVAILABLE = True
+except ImportError:
+    EMAIL_AVAILABLE = False
 
 log = structlog.get_logger(__name__)
 
@@ -309,6 +317,32 @@ async def signup(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error,
         )
+    
+    # Send welcome email with API key (fire-and-forget, don't block signup)
+    if EMAIL_AVAILABLE:
+        try:
+            settings = get_settings()
+            if settings.resend_api_key:
+                # Create an API key for the new user
+                key_manager = request.app.state.api_key_manager
+                api_key = await key_manager.create_key(
+                    user_id=user.id,
+                    name="Default Key",
+                )
+                
+                email_service = EmailService()
+                asyncio.create_task(
+                    email_service.send_welcome_email(
+                        to=user.email,
+                        api_key=api_key,
+                        user_id=user.id,
+                        plan="Free",
+                    )
+                )
+                log.info("welcome_email_queued", email=user.email)
+        except Exception as e:
+            # Don't fail signup if email fails
+            log.warning("welcome_email_failed", email=user.email, error=str(e))
     
     return SignupResponse(
         id=user.id,
