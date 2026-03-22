@@ -238,7 +238,9 @@ async def create_team(
     summary="List my teams",
     description="List all teams you're a member of.",
 )
+@limiter.limit("30/minute")
 async def list_teams(
+    request: Request,
     manager: TeamManagerDep,
     user: CurrentUser,
 ) -> list[TeamSummary]:
@@ -252,7 +254,9 @@ async def list_teams(
     summary="Get team",
     description="Get team details. Must be a team member.",
 )
+@limiter.limit("30/minute")
 async def get_team(
+    request: Request,
     team_id: str,
     manager: TeamManagerDep,
     user: CurrentUser,
@@ -305,7 +309,9 @@ async def update_team(
     summary="Delete team",
     description="Delete the team. Owner only.",
 )
+@limiter.limit("5/minute")
 async def delete_team(
+    request: Request,
     team_id: str,
     manager: TeamManagerDep,
     user: CurrentUser,
@@ -329,7 +335,9 @@ async def delete_team(
     summary="List members",
     description="List all team members.",
 )
+@limiter.limit("30/minute")
 async def list_members(
+    request: Request,
     team_id: str,
     manager: TeamManagerDep,
     user: CurrentUser,
@@ -349,7 +357,9 @@ async def list_members(
     summary="Update member role",
     description="Change a member's role. Admin or owner only.",
 )
+@limiter.limit("10/minute")
 async def update_member_role(
+    request: Request,
     team_id: str,
     member_id: str,
     body: UpdateRoleRequest,
@@ -385,7 +395,9 @@ async def update_member_role(
     summary="Remove member",
     description="Remove a member from the team. Admin or owner only.",
 )
+@limiter.limit("10/minute")
 async def remove_member(
+    request: Request,
     team_id: str,
     member_id: str,
     manager: TeamManagerDep,
@@ -411,7 +423,9 @@ async def remove_member(
     summary="Leave team",
     description="Leave the team. Owners cannot leave.",
 )
+@limiter.limit("10/minute")
 async def leave_team(
+    request: Request,
     team_id: str,
     manager: TeamManagerDep,
     user: CurrentUser,
@@ -494,7 +508,9 @@ async def invite_member(
     summary="List pending invites",
     description="List pending team invites. Admin or owner only.",
 )
+@limiter.limit("30/minute")
 async def list_invites(
+    request: Request,
     team_id: str,
     manager: TeamManagerDep,
     user: CurrentUser,
@@ -516,7 +532,9 @@ async def list_invites(
     summary="Revoke invite",
     description="Revoke a pending invite. Admin or owner only.",
 )
+@limiter.limit("10/minute")
 async def revoke_invite(
+    request: Request,
     team_id: str,
     invite_id: str,
     manager: TeamManagerDep,
@@ -536,7 +554,9 @@ async def revoke_invite(
     summary="Accept invite",
     description="Accept a team invite using the token from the email.",
 )
+@limiter.limit("10/minute")
 async def accept_invite(
+    request: Request,
     body: AcceptInviteRequest,
     manager: TeamManagerDep,
     user: CurrentUser,
@@ -562,7 +582,9 @@ async def accept_invite(
     summary="Link space to team",
     description="Link a memory space to the team. Admin or owner only.",
 )
+@limiter.limit("20/minute")
 async def link_space(
+    request: Request,
     team_id: str,
     body: LinkSpaceRequest,
     manager: TeamManagerDep,
@@ -585,7 +607,9 @@ async def link_space(
     summary="List team spaces",
     description="List all space IDs linked to the team.",
 )
+@limiter.limit("30/minute")
 async def list_team_spaces(
+    request: Request,
     team_id: str,
     manager: TeamManagerDep,
     user: CurrentUser,
@@ -606,7 +630,9 @@ async def list_team_spaces(
     summary="Unlink space from team",
     description="Unlink a space from the team. Admin or owner only.",
 )
+@limiter.limit("10/minute")
 async def unlink_space(
+    request: Request,
     team_id: str,
     space_id: str,
     manager: TeamManagerDep,

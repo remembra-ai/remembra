@@ -483,7 +483,8 @@ async def forgot_password(
 
     # Send password reset email if token was generated
     if reset_token:
-        log.info("password_reset_token_generated", email=body.email, token_preview=reset_token[:8] + "...")
+        # SECURITY: Never log reset tokens - they grant account access
+        log.info("password_reset_token_generated", email=body.email)
 
         # Send the password reset email
         try:

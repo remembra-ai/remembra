@@ -389,6 +389,7 @@ async def remove_role(
     "/permissions",
     summary="List all available permissions",
 )
+@limiter.limit("60/minute")
 async def list_permissions(request: Request) -> dict[str, Any]:
     """List all available permissions and default role mappings."""
     return {
@@ -485,6 +486,7 @@ async def trigger_consolidation(
     "/sleep-time/status",
     summary="Get sleep-time consolidation status",
 )
+@limiter.limit("30/minute")
 async def consolidation_status(
     request: Request,
     current_user: CurrentUser,

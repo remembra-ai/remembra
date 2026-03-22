@@ -220,7 +220,7 @@ class Settings(BaseSettings):
         "remembra-jwt-secret-change-in-production", description="Secret key for JWT token signing (MUST change in production)"
     )
     jwt_expiration_hours: int = Field(
-        168,  # 7 days
+        24,  # 24 hours (OWASP recommendation: 1 day max for web sessions)
         description="JWT token expiration in hours",
     )
 

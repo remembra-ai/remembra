@@ -223,6 +223,7 @@ async def get_deliveries(
     "/events/types",
     summary="List available event types",
 )
+@limiter.limit("60/minute")
 async def list_event_types(request: Request) -> dict[str, list[str]]:
     """List all available webhook event types."""
     return {"event_types": ALL_EVENT_TYPES}

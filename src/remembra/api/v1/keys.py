@@ -302,6 +302,7 @@ async def create_api_key(
     response_model=ListKeysResponse,
     summary="List your API keys",
 )
+@limiter.limit("30/minute")
 async def list_api_keys(
     request: Request,
     key_manager: APIKeyManagerDep,
@@ -368,7 +369,9 @@ async def list_api_keys(
     response_model=KeyInfo,
     summary="Get API key info",
 )
+@limiter.limit("30/minute")
 async def get_api_key_info(
+    request: Request,
     key_id: str,
     key_manager: APIKeyManagerDep,
     role_manager: RoleManagerDep,
