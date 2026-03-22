@@ -10,7 +10,7 @@ import { InviteAccept } from './pages/InviteAccept';
 import { api } from './lib/api';
 import { API_V1 } from './config';
 
-type AuthMode = 'login' | 'signup' | 'forgot-password' | 'api-key' | 'invite';
+type AuthMode = 'login' | 'signup' | 'forgot-password' | 'reset-password' | 'api-key' | 'invite';
 
 function App() {
   const [darkMode, setDarkMode] = useState(() => {
@@ -38,6 +38,7 @@ function App() {
     if (path.startsWith('/invite/')) return 'invite';
     if (path === '/signup') return 'signup';
     if (path === '/forgot-password') return 'forgot-password';
+    if (path === '/reset-password') return 'reset-password';
     return 'login';
   });
   const [currentUser, setCurrentUser] = useState<{ id: string; email: string; name?: string } | null>(() => {
@@ -218,6 +219,12 @@ function App() {
         {authMode === 'forgot-password' && (
           <ForgotPassword
             onBackToLogin={() => setAuthMode('login')}
+          />
+        )}
+        {authMode === 'reset-password' && (
+          <ForgotPassword
+            onBackToLogin={() => setAuthMode('login')}
+            initialStep="reset"
           />
         )}
         {authMode === 'api-key' && (

@@ -4,14 +4,20 @@ import { API_V1 } from '../config';
 
 interface ForgotPasswordProps {
   onBackToLogin: () => void;
+  initialStep?: 'request' | 'reset';
 }
 
 type Step = 'request' | 'reset' | 'success';
 
-export function ForgotPassword({ onBackToLogin }: ForgotPasswordProps) {
-  const [step, setStep] = useState<Step>('request');
-  const [email, setEmail] = useState('');
-  const [token, setToken] = useState('');
+export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordProps) {
+  // Parse URL params for reset-password flow
+  const urlParams = new URLSearchParams(window.location.search);
+  const urlToken = urlParams.get('token') || '';
+  const urlEmail = urlParams.get('email') || '';
+  
+  const [step, setStep] = useState<Step>(initialStep || 'request');
+  const [email, setEmail] = useState(urlEmail);
+  const [token, setToken] = useState(urlToken);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
