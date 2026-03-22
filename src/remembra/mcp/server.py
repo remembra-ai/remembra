@@ -28,6 +28,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 from remembra.client.memory import Memory, MemoryError
+from remembra.security.error_sanitizer import sanitize_error_message
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -130,9 +131,9 @@ def store_memory(
             indent=2,
         )
     except MemoryError as e:
-        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e)})
 
 
 @mcp.tool(
@@ -211,9 +212,9 @@ def recall_memories(
             indent=2,
         )
     except MemoryError as e:
-        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e)})
 
 
 @mcp.tool(
@@ -273,9 +274,9 @@ def forget_memories(
             indent=2,
         )
     except MemoryError as e:
-        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e)})
 
 
 @mcp.tool(
@@ -313,7 +314,7 @@ def health_check() -> str:
             {
                 "status": "error",
                 "server": REMEMBRA_URL,
-                "error": str(e),
+                "error": sanitize_error_message(e),
                 "code": e.status_code,
             }
         )
@@ -322,7 +323,7 @@ def health_check() -> str:
             {
                 "status": "error",
                 "server": REMEMBRA_URL,
-                "error": str(e),
+                "error": sanitize_error_message(e),
             }
         )
 
@@ -412,11 +413,11 @@ def ingest_conversation(
             {
                 "status": "error",
                 "code": e.status_code,
-                "error": str(e),
+                "error": sanitize_error_message(e),
             }
         )
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e)})
 
 
 @mcp.tool(
@@ -461,9 +462,9 @@ def update_memory(
             indent=2,
         )
     except MemoryError as e:
-        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e)})
 
 
 @mcp.tool(
@@ -527,9 +528,9 @@ def search_entities(
             indent=2,
         )
     except MemoryError as e:
-        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e)})
 
 
 @mcp.tool(
@@ -583,9 +584,9 @@ def list_memories(
             indent=2,
         )
     except MemoryError as e:
-        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e)})
 
 
 @mcp.tool(
@@ -633,9 +634,9 @@ def share_memory(
             indent=2,
         )
     except MemoryError as e:
-        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e)})
 
 
 @mcp.tool(
@@ -707,9 +708,9 @@ def timeline(
             indent=2,
         )
     except MemoryError as e:
-        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e)})
 
 
 @mcp.tool(
@@ -788,9 +789,9 @@ def relationships_at(
             indent=2,
         )
     except MemoryError as e:
-        return json.dumps({"status": "error", "error": str(e), "code": e.status_code})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
-        return json.dumps({"status": "error", "error": str(e)})
+        return json.dumps({"status": "error", "error": sanitize_error_message(e)})
 
 
 # ---------------------------------------------------------------------------
@@ -886,7 +887,7 @@ def recent_memories() -> str:
             indent=2,
         )
     except Exception as e:
-        return json.dumps({"error": str(e)})
+        return json.dumps({"error": sanitize_error_message(e)})
 
 
 @mcp.resource("memory://status")
