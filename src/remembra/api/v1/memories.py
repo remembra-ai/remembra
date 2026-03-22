@@ -713,8 +713,8 @@ async def update_memory(
             new_metadata=body.metadata,
         )
         await audit_logger.log(
-            "memory_updated",
             user_id=current_user.user_id,
+            action="memory_updated",
             resource_id=memory_id,
             success=True,
         )
@@ -739,8 +739,8 @@ async def update_memory(
         ) from None
     except Exception as e:
         await audit_logger.log(
-            "memory_updated",
             user_id=current_user.user_id,
+            action="memory_updated",
             resource_id=memory_id,
             success=False,
             error_message=str(e),
