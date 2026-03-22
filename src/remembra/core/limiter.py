@@ -32,4 +32,5 @@ limiter = Limiter(
     key_func=get_key_func,
     enabled=settings.rate_limit_enabled,
     storage_uri=settings.rate_limit_storage if settings.rate_limit_storage != "memory" else None,
+    headers_enabled=True,  # Expose X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset
 )

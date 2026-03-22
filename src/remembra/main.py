@@ -7,6 +7,7 @@ from typing import Any
 import structlog
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from slowapi import _rate_limit_exceeded_handler
@@ -26,6 +27,7 @@ from remembra.extraction.conflicts import ConflictManager, ConflictStrategy
 from remembra.plugins.manager import PluginManager
 from remembra.security.anomaly_detector import AnomalyDetector
 from remembra.security.audit import AuditLogger
+from remembra.security.error_sanitizer import sanitize_error_message
 from remembra.security.pii_detector import PIIDetector
 from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.memory import MemoryService
@@ -348,6 +350,37 @@ def create_app() -> FastAPI:
 
     # Add rate limit exception handler
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+    # Validation error handler - sanitize validation messages
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """
+        Handle validation errors with sanitized messages.
+        Prevents leaking internal details in validation error responses.
+        """
+        # Build sanitized error details
+        errors = []
+        for error in exc.errors():
+            # Keep field location and type, sanitize the message
+            sanitized_error = {
+                "loc": error.get("loc"),
+                "type": error.get("type"),
+                "msg": sanitize_error_message(error.get("msg", "Validation error")),
+            }
+            errors.append(sanitized_error)
+
+        log.warning(
+            "validation_error",
+            path=request.url.path,
+            errors=len(errors),
+        )
+
+        return JSONResponse(
+            status_code=422,
+            content={"detail": errors},
+        )
 
     # Generic exception handler to sanitize error messages
     @app.exception_handler(Exception)

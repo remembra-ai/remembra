@@ -915,7 +915,7 @@ def memory_status() -> str:
                 "server": REMEMBRA_URL,
                 "user_id": REMEMBRA_USER_ID,
                 "project": REMEMBRA_PROJECT,
-                "error": str(e),
+                "error": sanitize_error_message(e),
             }
         )
 

@@ -22,18 +22,25 @@ log = structlog.get_logger(__name__)
 
 # Patterns for sensitive information that should be stripped from errors
 SENSITIVE_PATTERNS = [
-    # URLs (OpenAI, internal services, etc.)
-    (r"https?://[^\s\"'<>]+", "[REDACTED_URL]"),
+    # URLs with protocol (OpenAI, internal services, etc.)
+    (r"https?://[^\s\"'<>\]]+", "[REDACTED_URL]"),
+    # Hostnames without protocol (api.openai.com, service.internal.net)
+    (r"[a-zA-Z0-9\-]+\.(openai|azure|anthropic|cohere|voyageai|jina)\.[a-z]+", "[REDACTED_SERVICE]"),
+    # Generic API-like hostnames
+    (r"api\.[a-zA-Z0-9\-]+\.[a-z]+(?::\d+)?", "[REDACTED_ENDPOINT]"),
     # File paths
     (r"/[a-zA-Z0-9_\-./]+\.py", "[REDACTED_PATH]"),
     (r"/[a-zA-Z0-9_\-./]+/[a-zA-Z0-9_\-./]+", "[REDACTED_PATH]"),
-    # API keys (common patterns)
-    (r"sk-[a-zA-Z0-9]{20,}", "[REDACTED_API_KEY]"),
+    # API keys (common patterns) - be aggressive, catch partial keys too
+    (r"sk-[a-zA-Z0-9\-_.]+", "[REDACTED_API_KEY]"),
+    (r"pk-[a-zA-Z0-9\-_.]+", "[REDACTED_API_KEY]"),
     (r"Bearer\s+[a-zA-Z0-9\-_\.]+", "[REDACTED_TOKEN]"),
     # Connection strings
     (r"(?:postgres|mysql|redis|mongodb)://[^\s\"']+", "[REDACTED_CONNECTION]"),
     # IP addresses with ports
     (r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}:\d+", "[REDACTED_ENDPOINT]"),
+    # Server hostnames with port (hostname:443, localhost:5432)
+    (r"[a-zA-Z0-9\-_.]+:\d{2,5}", "[REDACTED_ENDPOINT]"),
     # Stack trace indicators
     (r"Traceback \(most recent call last\):.*", "[REDACTED_TRACEBACK]"),
     (r'File "[^"]+", line \d+', "[REDACTED_LOCATION]"),
@@ -43,6 +50,7 @@ SENSITIVE_PATTERNS = [
 _COMPILED_PATTERNS = [(re.compile(pattern, re.IGNORECASE | re.DOTALL), replacement) for pattern, replacement in SENSITIVE_PATTERNS]
 
 # Known safe error messages (can be passed through)
+# NOTE: These are EXACT safe messages, not prefixes that might contain sensitive data
 SAFE_ERROR_PREFIXES = [
     "query must not be empty",
     "content must not be empty",
@@ -50,7 +58,10 @@ SAFE_ERROR_PREFIXES = [
     "Authentication required",
     "Permission denied",
     "Memory not found",
-    "Invalid",
+    "Invalid request",
+    "Invalid memory ID",
+    "Invalid user ID",
+    "Invalid project ID",
     "Rate limit exceeded",
     "Request validation failed",
 ]
@@ -68,31 +79,22 @@ def sanitize_error_message(error: str | Exception) -> str:
 
     Examples:
         >>> sanitize_error_message("Connection to https://api.openai.com/v1 failed")
-        'Service connection failed'
+        'An internal error occurred. Please try again or contact support.'
 
         >>> sanitize_error_message("File /app/src/service.py not found")
-        'Internal error occurred'
+        'An internal error occurred. Please try again or contact support.'
     """
     error_str = str(error) if isinstance(error, Exception) else error
 
-    # Check if it's a known safe error
-    for prefix in SAFE_ERROR_PREFIXES:
-        if error_str.startswith(prefix):
-            return error_str
-
-    # Log the original error internally
-    log.debug("sanitizing_error_message", original_error=error_str[:200])
-
-    # Check if error contains any sensitive patterns
+    # ALWAYS check for sensitive patterns FIRST, before allowing safe prefixes
+    # This prevents attacks like "Invalid API key: sk-xxx" from leaking
     contains_sensitive = False
-    sanitized = error_str
-
-    for pattern, replacement in _COMPILED_PATTERNS:
-        if pattern.search(sanitized):
+    for pattern, _ in _COMPILED_PATTERNS:
+        if pattern.search(error_str):
             contains_sensitive = True
-            sanitized = pattern.sub(replacement, sanitized)
+            break
 
-    # If sensitive data was found, return a generic message
+    # If sensitive data was found, return a generic message immediately
     if contains_sensitive:
         log.warning(
             "sensitive_data_in_error",
@@ -101,11 +103,19 @@ def sanitize_error_message(error: str | Exception) -> str:
         )
         return "An internal error occurred. Please try again or contact support."
 
-    # Truncate very long error messages
-    if len(sanitized) > 500:
-        sanitized = sanitized[:500] + "..."
+    # Only check safe prefixes AFTER confirming no sensitive data
+    for prefix in SAFE_ERROR_PREFIXES:
+        if error_str.startswith(prefix):
+            return error_str
 
-    return sanitized
+    # Log for monitoring
+    log.debug("sanitizing_error_message", original_error=error_str[:200])
+
+    # Truncate very long error messages
+    if len(error_str) > 500:
+        error_str = error_str[:500] + "..."
+
+    return error_str
 
 
 def create_safe_error_response(

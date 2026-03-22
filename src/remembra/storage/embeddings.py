@@ -572,7 +572,20 @@ class EmbeddingService:
         log.info("embedding_provider_switched", old=old, new=new)
 
     async def embed(self, text: str) -> list[float]:
-        """Generate embedding for a single text."""
+        """Generate embedding for a single text.
+
+        Args:
+            text: Non-empty text to embed
+
+        Returns:
+            Embedding vector
+
+        Raises:
+            ValueError: If text is empty or whitespace-only
+        """
+        # Defensive check: prevent empty strings from reaching external APIs
+        if not text or not text.strip():
+            raise ValueError("Cannot embed empty text")
         embedder = self._get_embedder()
         return await embedder.embed(text)
 
