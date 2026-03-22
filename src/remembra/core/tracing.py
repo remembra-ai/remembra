@@ -15,8 +15,9 @@ Install tracing packages with:
 
 from __future__ import annotations
 
-import structlog
 from typing import TYPE_CHECKING
+
+import structlog
 
 if TYPE_CHECKING:
     from remembra.config import Settings
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 logger = structlog.get_logger()
 
 
-def setup_tracing(settings: "Settings") -> None:
+def setup_tracing(settings: Settings) -> None:
     """Initialize OpenTelemetry tracing if enabled and packages available.
     
     This function:
@@ -41,10 +42,10 @@ def setup_tracing(settings: "Settings") -> None:
     
     try:
         from opentelemetry import trace
-        from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
         from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
         from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
         
         resource = Resource.create({"service.name": settings.tracing_service_name})
         provider = TracerProvider(resource=resource)

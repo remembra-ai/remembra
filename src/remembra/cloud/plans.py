@@ -11,11 +11,11 @@ Plans:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class PlanTier(str, Enum):
+class PlanTier(StrEnum):
     FREE = "free"
     PRO = "pro"
     TEAM = "team"

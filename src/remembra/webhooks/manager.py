@@ -67,7 +67,7 @@ def validate_webhook_url(url: str) -> tuple[bool, str | None]:
         # Get all IP addresses for the hostname
         ips = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
         
-        for family, _, _, _, sockaddr in ips:
+        for _family, _, _, _, sockaddr in ips:
             ip_str = sockaddr[0]
             try:
                 ip = ipaddress.ip_address(ip_str)

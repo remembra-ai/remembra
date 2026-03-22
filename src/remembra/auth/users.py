@@ -174,11 +174,17 @@ class UserManager:
         # Update last login
         await self.db.update_user_last_login(user_data["id"])
         
+        created_at_raw = user_data["created_at"]
+        created_at = (
+            datetime.fromisoformat(created_at_raw)
+            if isinstance(created_at_raw, str)
+            else created_at_raw
+        )
         user = User(
             id=user_data["id"],
             email=user_data["email"],
             name=user_data.get("name"),
-            created_at=datetime.fromisoformat(user_data["created_at"]) if isinstance(user_data["created_at"], str) else user_data["created_at"],
+            created_at=created_at,
             email_verified=user_data.get("email_verified", False),
             is_active=user_data.get("is_active", True),
         )
@@ -195,11 +201,17 @@ class UserManager:
         if not user_data:
             return None
         
+        created_at_raw = user_data["created_at"]
+        created_at = (
+            datetime.fromisoformat(created_at_raw)
+            if isinstance(created_at_raw, str)
+            else created_at_raw
+        )
         return User(
             id=user_data["id"],
             email=user_data["email"],
             name=user_data.get("name"),
-            created_at=datetime.fromisoformat(user_data["created_at"]) if isinstance(user_data["created_at"], str) else user_data["created_at"],
+            created_at=created_at,
             email_verified=user_data.get("email_verified", False),
             is_active=user_data.get("is_active", True),
         )
@@ -257,7 +269,10 @@ class UserManager:
             return False, "Invalid or expired reset token"
         
         # Check expiration
-        expires_at = datetime.fromisoformat(reset_record["expires_at"]) if isinstance(reset_record["expires_at"], str) else reset_record["expires_at"]
+        expires_raw = reset_record["expires_at"]
+        expires_at = (
+            datetime.fromisoformat(expires_raw) if isinstance(expires_raw, str) else expires_raw
+        )
         if expires_at.replace(tzinfo=UTC) < datetime.now(UTC):
             await self.db.delete_password_reset_token(user_data["id"])
             return False, "Reset token has expired"

@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class ConflictStrategy(str, Enum):
+class ConflictStrategy(StrEnum):
     """How to resolve a detected conflict."""
 
     UPDATE = "update"
@@ -37,7 +37,7 @@ class ConflictStrategy(str, Enum):
     FLAG = "flag"
 
 
-class ConflictStatus(str, Enum):
+class ConflictStatus(StrEnum):
     """Lifecycle status of a recorded conflict."""
 
     OPEN = "open"
@@ -202,7 +202,7 @@ class ConflictManager:
         cursor = await self._db.conn.execute(query, params)
         rows = await cursor.fetchall()
         cols = [d[0] for d in cursor.description]
-        return [dict(zip(cols, row)) for row in rows]
+        return [dict(zip(cols, row, strict=False)) for row in rows]
 
     async def get_conflict(
         self, conflict_id: str, user_id: str
@@ -216,7 +216,7 @@ class ConflictManager:
         if row is None:
             return None
         cols = [d[0] for d in cursor.description]
-        return dict(zip(cols, row))
+        return dict(zip(cols, row, strict=False))
 
     # -----------------------------------------------------------------------
     # Resolve / dismiss

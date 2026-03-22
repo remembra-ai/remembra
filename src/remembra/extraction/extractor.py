@@ -88,7 +88,7 @@ class FactExtractor:
         # Returns: ["John is the CEO of Acme Corp"]
     """
     
-    def __init__(self, config: ExtractionConfig | None = None):
+    def __init__(self, config: ExtractionConfig | None = None) -> None:
         self.config = config or ExtractionConfig()
         self._client: AsyncOpenAI | None = None
     

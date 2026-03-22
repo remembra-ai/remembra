@@ -41,7 +41,7 @@ class TemporalCleanupJob:
         auto_delete_expired: bool = True,
         auto_prune_decayed: bool = False,  # Conservative default
         prune_to_archive: bool = True,  # Archive instead of delete
-    ):
+    ) -> None:
         """
         Initialize cleanup job.
         
@@ -364,7 +364,7 @@ class TemporalCleanupJob:
 async def run_cleanup_loop(
     cleanup_job: TemporalCleanupJob,
     interval_seconds: int = 3600,  # Default: hourly
-):
+) -> None:
     """
     Run cleanup job in a loop (for background task).
     

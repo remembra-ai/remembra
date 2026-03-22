@@ -4,6 +4,7 @@ Changelog Parser - Extract structured releases from CHANGELOG.md files.
 Supports the Keep a Changelog format (https://keepachangelog.com/).
 """
 
+import contextlib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -113,10 +114,8 @@ class ChangelogParser:
             # Parse date if present
             release_date = None
             if date_str:
-                try:
+                with contextlib.suppress(ValueError):
                     release_date = datetime.strptime(date_str, "%Y-%m-%d")
-                except ValueError:
-                    pass
             
             # Extract content between this version and the next
             start = match.end()

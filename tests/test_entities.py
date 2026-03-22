@@ -10,8 +10,6 @@ from remembra.extraction.entities import (
     AnthropicEntityExtractor,
     OllamaEntityExtractor,
     ExtractionResult,
-    ExtractedEntity,
-    ExtractedRelationship,
     _parse_extraction_json,
     create_entity_extractor,
 )

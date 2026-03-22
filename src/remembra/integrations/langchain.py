@@ -31,6 +31,7 @@ Requires: pip install remembra langchain-core
 
 from __future__ import annotations
 
+import contextlib
 import json
 from collections.abc import Sequence
 from typing import Any
@@ -180,10 +181,8 @@ class RemembraChatMessageHistory(BaseChatMessageHistory):
         Uses Remembra's forget API to delete all memories
         associated with this session.
         """
-        try:
+        with contextlib.suppress(MemoryError):
             self._client.forget(user_id=self._user_id)
-        except MemoryError:
-            pass
         self._message_count = 0
 
 

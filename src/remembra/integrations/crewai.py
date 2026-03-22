@@ -27,6 +27,7 @@ Requires: pip install remembra crewai
 
 from __future__ import annotations
 
+import contextlib
 import json
 from datetime import datetime
 from typing import Any
@@ -154,10 +155,8 @@ class RemembraStorage:
 
     def reset(self) -> None:
         """Clear all memories of this type."""
-        try:
+        with contextlib.suppress(MemoryError):
             self._client.forget(user_id=self._client.user_id)
-        except MemoryError:
-            pass
 
 
 def _extract_content(value: Any) -> tuple[str, dict[str, Any]]:

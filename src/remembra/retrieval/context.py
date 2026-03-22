@@ -99,7 +99,7 @@ class ContextOptimizer:
         min_chunk_tokens: int = 50,
         separator: str = "\n---\n",
         include_metadata: bool = True,
-    ):
+    ) -> None:
         """
         Initialize the context optimizer.
         

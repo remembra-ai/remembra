@@ -23,7 +23,6 @@ allows zero-config development while enforcing encryption in production.
 
 import base64
 import hashlib
-import json
 import os
 from typing import Any
 
@@ -77,7 +76,7 @@ class FieldEncryptor:
     Thread-safe: each encrypt() call generates a fresh random nonce.
     """
 
-    def __init__(self, key: str | None = None):
+    def __init__(self, key: str | None = None) -> None:
         """
         Initialize the encryptor.
 

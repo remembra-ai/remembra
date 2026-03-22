@@ -297,10 +297,7 @@ class UsageMeter:
         year = year or now.year
         month = month or now.month
         month_start = f"{year:04d}-{month:02d}-01"
-        if month == 12:
-            month_end = f"{year + 1:04d}-01-01"
-        else:
-            month_end = f"{year:04d}-{month + 1:02d}-01"
+        month_end = f"{year + 1:04d}-01-01" if month == 12 else f"{year:04d}-{month + 1:02d}-01"
 
         cursor = await self._db.conn.execute(
             """

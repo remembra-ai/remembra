@@ -36,7 +36,10 @@ bearer_scheme = HTTPBearer(auto_error=False)
 class SignupRequest(BaseModel):
     """Request body for user signup."""
     email: EmailStr
-    password: str = Field(min_length=8, description="Password must be at least 8 characters with uppercase, lowercase, number, and special character")
+    password: str = Field(
+        min_length=8,
+        description="Password must be at least 8 chars: uppercase, lowercase, number, special char"
+    )
     name: str | None = Field(None, max_length=100, description="User's display name")
     
     @field_validator("password")
@@ -466,7 +469,7 @@ async def forgot_password(
         
         # Send the password reset email
         try:
-            from remembra.cloud.email import EmailService, EmailProvider
+            from remembra.cloud.email import EmailProvider, EmailService
             
             email_service = EmailService.create(provider=EmailProvider.RESEND)
             reset_url = f"https://app.remembra.dev/reset-password?token={reset_token}&email={body.email}"

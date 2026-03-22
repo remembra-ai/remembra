@@ -6,11 +6,11 @@ Enables multi-user collaboration with shared memory spaces.
 import os
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from remembra.auth.middleware import CurrentUser
-from remembra.cloud.email import EmailMessage, EmailProvider, EmailService
+from remembra.cloud.email import EmailProvider, EmailService
 from remembra.core.limiter import limiter
 from remembra.teams.manager import TeamManager
 

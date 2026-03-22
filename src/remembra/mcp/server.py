@@ -616,7 +616,7 @@ def share_memory(
         client = _get_client()
         
         # Call the spaces API to add memory
-        result = client._request(
+        client._request(
             "POST",
             f"/api/v1/spaces/{space_id}/memories",
             json={"memory_id": memory_id},
@@ -627,7 +627,7 @@ def share_memory(
                 "status": "shared",
                 "memory_id": memory_id,
                 "space_id": space_id,
-                "message": f"Memory shared to space successfully",
+                "message": "Memory shared to space successfully",
             },
             indent=2,
         )

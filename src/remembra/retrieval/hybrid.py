@@ -65,7 +65,7 @@ class BM25Index:
     It considers term frequency, document length, and inverse document frequency.
     """
     
-    def __init__(self, k1: float = 1.5, b: float = 0.75):
+    def __init__(self, k1: float = 1.5, b: float = 0.75) -> None:
         self.k1 = k1
         self.b = b
         # Document storage: id -> tokenized content
@@ -219,7 +219,7 @@ class HybridSearcher:
     Score fusion formula: final = alpha * keyword + (1-alpha) * semantic
     """
     
-    def __init__(self, config: HybridSearchConfig | None = None):
+    def __init__(self, config: HybridSearchConfig | None = None) -> None:
         self.config = config or HybridSearchConfig()
         # In-memory BM25 for fallback/testing
         self._bm25_index = BM25Index()

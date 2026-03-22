@@ -9,6 +9,6 @@ Provides:
   - Promotional codes (trials, discounts)
 """
 
-from remembra.cloud.promocodes import PromoCodeManager, PromoCode, PromoType
+from remembra.cloud.promocodes import PromoCode, PromoCodeManager, PromoType
 
 __all__ = ["PromoCodeManager", "PromoCode", "PromoType"]

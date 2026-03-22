@@ -266,7 +266,7 @@ class Database:
     - Memory-entity associations
     """
 
-    def __init__(self, db_path: str = "remembra.db"):
+    def __init__(self, db_path: str = "remembra.db") -> None:
         # Extract path from connection string if needed
         if db_path.startswith("sqlite"):
             db_path = db_path.split("///")[-1]

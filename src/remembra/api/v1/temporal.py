@@ -121,7 +121,11 @@ async def get_decay_report(
         
         memory_reports.append(MemoryDecayInfo(
             id=memory["id"],
-            content_preview=memory.get("content", "")[:100] + "..." if len(memory.get("content", "")) > 100 else memory.get("content", ""),
+            content_preview=(
+                memory.get("content", "")[:100] + "..."
+                if len(memory.get("content", "")) > 100
+                else memory.get("content", "")
+            ),
             relevance_score=decay_info["relevance_score"],
             stability=decay_info["stability"],
             days_since_access=decay_info["days_since_access"],

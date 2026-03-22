@@ -8,7 +8,6 @@ from slowapi import Limiter
 
 from remembra.auth.keys import APIKeyManager
 from remembra.auth.middleware import (
-    CurrentUser,
     JWTOrAPIKeyUser,
     get_client_ip,
 )
@@ -28,7 +27,9 @@ router = APIRouter(prefix="/keys", tags=["api-keys"])
 class CreateKeyRequest(BaseModel):
     """Request to create a new API key."""
     
-    user_id: str | None = Field(None, description="User ID to create key for (required for master key auth, ignored for JWT auth)")
+    user_id: str | None = Field(
+        None, description="User ID to create key for (required for master key, ignored for JWT)"
+    )
     name: str | None = Field(None, description="Human-readable name for the key")
     rate_limit_tier: str = Field("standard", description="Rate limit tier: standard or premium")
     role: str = Field("editor", description="Role: admin, editor, or viewer")
@@ -554,12 +555,10 @@ async def revoke_api_key(
         # Permanently delete the key
         success = await key_manager.delete_key_permanently(key_id, current_user.user_id)
         action = "key_deleted_permanently"
-        message = f"API key {key_id} has been permanently deleted"
     else:
         # Soft revoke (existing behavior)
         success = await key_manager.revoke_key(key_id, current_user.user_id)
         action = "key_revoked"
-        message = f"API key {key_id} has been revoked"
     
     if not success:
         raise HTTPException(

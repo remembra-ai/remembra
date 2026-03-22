@@ -18,7 +18,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from remembra.models.memory import (
     ConversationIngestRequest,
-    ConversationIngestResponse,
     ConversationMessage,
     ExtractedFact,
     IngestOptions,

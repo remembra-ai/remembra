@@ -78,7 +78,7 @@ class MemoryCache(Generic[T]):
         max_size: int = 1000,
         ttl_seconds: int = 300,
         name: str = "default",
-    ):
+    ) -> None:
         self.max_size = max_size
         self.ttl_seconds = ttl_seconds
         self.name = name

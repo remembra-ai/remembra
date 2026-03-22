@@ -97,10 +97,7 @@ def calculate_expires_at(
     
     base_time = from_time or datetime.utcnow()
     
-    if ttl_string:
-        delta = parse_ttl(ttl_string)
-    else:
-        delta = ttl_delta
+    delta = parse_ttl(ttl_string) if ttl_string else ttl_delta
     
     return base_time + delta
 

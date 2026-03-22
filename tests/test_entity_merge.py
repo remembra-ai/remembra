@@ -10,8 +10,6 @@ Operation Circuit Breaker (March 19, 2026):
 import asyncio
 import pytest
 import aiosqlite
-from datetime import datetime
-from unittest.mock import AsyncMock, MagicMock
 
 # Test that merge handles relationships correctly
 @pytest.mark.asyncio

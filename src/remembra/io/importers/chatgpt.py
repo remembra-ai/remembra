@@ -24,6 +24,7 @@ with conversation context in metadata.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from datetime import UTC, datetime
@@ -74,10 +75,8 @@ def parse_chatgpt_export(data: str | bytes) -> list[ImportedMemory]:
             create_time = msg.get("create_time")
             ts = None
             if create_time:
-                try:
+                with contextlib.suppress(ValueError, OSError):
                     ts = datetime.fromtimestamp(create_time, tz=UTC).isoformat()
-                except (ValueError, OSError):
-                    pass
 
             memories.append(
                 ImportedMemory(

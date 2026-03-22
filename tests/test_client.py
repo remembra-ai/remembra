@@ -2,7 +2,6 @@
 
 import pytest
 from unittest.mock import patch, MagicMock
-from datetime import datetime
 
 from remembra import Memory, MemoryError
 from remembra.client.types import StoreResult, RecallResult, ForgetResult

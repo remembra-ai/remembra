@@ -67,9 +67,7 @@ class Relationship(BaseModel):
         """Check if this relationship was valid at a specific point in time."""
         if point_in_time < self.valid_from:
             return False
-        if self.valid_to is not None and point_in_time >= self.valid_to:
-            return False
-        return True
+        return not (self.valid_to is not None and point_in_time >= self.valid_to)
 
 
 class Entity(BaseModel):

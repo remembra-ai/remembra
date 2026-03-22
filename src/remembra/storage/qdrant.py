@@ -33,7 +33,7 @@ class QdrantStore:
     - Transparent AES-256-GCM encryption of content fields
     """
 
-    def __init__(self, settings: Settings, encryptor: FieldEncryptor | None = None):
+    def __init__(self, settings: Settings, encryptor: FieldEncryptor | None = None) -> None:
         self.settings = settings
         self.collection_name = settings.qdrant_collection
         self._client: AsyncQdrantClient | None = None

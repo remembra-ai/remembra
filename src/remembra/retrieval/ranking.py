@@ -114,7 +114,7 @@ class RelevanceRanker:
     boosts for recency, entity matches, etc.
     """
     
-    def __init__(self, config: RankingConfig | None = None):
+    def __init__(self, config: RankingConfig | None = None) -> None:
         """
         Initialize the ranker.
         
@@ -259,19 +259,18 @@ class RelevanceRanker:
             
             # Get entity refs if available
             memory_entities: list[EntityRef] | None = None
-            if memory.get("entities"):
-                if isinstance(memory["entities"], list):
-                    memory_entities = []
-                    for e in memory["entities"]:
-                        if isinstance(e, EntityRef):
-                            memory_entities.append(e)
-                        elif isinstance(e, dict):
-                            memory_entities.append(EntityRef(
-                                id=e.get("id", ""),
-                                canonical_name=e.get("canonical_name", ""),
-                                type=e.get("type", "unknown"),
-                                confidence=e.get("confidence", 1.0),
-                            ))
+            if memory.get("entities") and isinstance(memory["entities"], list):
+                memory_entities = []
+                for e in memory["entities"]:
+                    if isinstance(e, EntityRef):
+                        memory_entities.append(e)
+                    elif isinstance(e, dict):
+                        memory_entities.append(EntityRef(
+                            id=e.get("id", ""),
+                            canonical_name=e.get("canonical_name", ""),
+                            type=e.get("type", "unknown"),
+                            confidence=e.get("confidence", 1.0),
+                        ))
             
             # Compute component scores
             raw_semantic = memory.get("relevance", memory.get("semantic_score", 0))

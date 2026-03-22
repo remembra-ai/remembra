@@ -20,7 +20,7 @@ from remembra.extraction.consolidator import (
     ExistingMemory,
     MemoryConsolidator,
 )
-from remembra.extraction.entities import EntityExtractor, create_entity_extractor
+from remembra.extraction.entities import create_entity_extractor
 from remembra.extraction.extractor import ExtractionConfig, FactExtractor
 from remembra.extraction.matcher import EntityMatcher, ExistingEntity
 from remembra.models.memory import (
@@ -107,7 +107,7 @@ class MemoryService:
         embeddings: EmbeddingService,
         conflict_manager: ConflictManager | None = None,
         space_manager: Any | None = None,
-    ):
+    ) -> None:
         self.settings = settings
         self.qdrant = qdrant
         self.db = db
@@ -1079,7 +1079,11 @@ class MemoryService:
                     id=mem_id,
                     content=mem_data.get("content", ""),
                     relevance=sim,
-                    created_at=datetime.fromisoformat(mem_data["created_at"]) if mem_data.get("created_at") else datetime.utcnow(),
+                    created_at=(
+                        datetime.fromisoformat(mem_data["created_at"])
+                        if mem_data.get("created_at")
+                        else datetime.utcnow()
+                    ),
                 ))
                 seen_ids.add(mem_id)
             except Exception as e:
@@ -1210,7 +1214,7 @@ class MemoryService:
         # 7. Handle conflict detection if enabled
         if self.conflict_manager:
             try:
-                from remembra.extraction.conflicts import MemoryConflict, ConflictStatus
+                from remembra.extraction.conflicts import ConflictStatus, MemoryConflict
                 conflict = MemoryConflict(
                     user_id=user_id,
                     project_id=project_id,
@@ -1387,10 +1391,7 @@ class MemoryService:
         decay_factor = math.exp(-math.log(2) * age_days / half_life_days)
         
         # Access count boost (log scale to prevent runaway)
-        if access_count > 0:
-            access_factor = 1.0 + access_boost * math.log(1 + access_count)
-        else:
-            access_factor = 1.0
+        access_factor = 1.0 + access_boost * math.log(1 + access_count) if access_count > 0 else 1.0
         
         # Recency of access boost
         recency_boost = 0.0

@@ -11,19 +11,18 @@ Tests cover:
 
 import pytest
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 # Import retrieval modules
 from remembra.retrieval.hybrid import (
     BM25Index,
     HybridSearcher,
     HybridSearchConfig,
-    SearchResult,
 )
-from remembra.retrieval.graph import GraphRetriever, GraphSearchResult
-from remembra.retrieval.context import ContextOptimizer, OptimizedContext
-from remembra.retrieval.ranking import RelevanceRanker, RankingConfig, RankedMemory
-from remembra.retrieval.reranker import CrossEncoderReranker, RerankedResult
+from remembra.retrieval.graph import GraphRetriever
+from remembra.retrieval.context import ContextOptimizer
+from remembra.retrieval.ranking import RelevanceRanker, RankingConfig
+from remembra.retrieval.reranker import CrossEncoderReranker
 
 
 class TestBM25Index:

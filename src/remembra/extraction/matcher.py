@@ -141,7 +141,7 @@ class EntityMatcher:
         model: str = "gpt-4o-mini",
         api_key: str | None = None,
         min_confidence: float = 0.6,
-    ):
+    ) -> None:
         self.model = model
         self.api_key = api_key
         self.min_confidence = min_confidence

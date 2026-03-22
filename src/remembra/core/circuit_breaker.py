@@ -16,7 +16,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from functools import wraps
 from typing import Any, TypeVar
 
@@ -27,7 +27,7 @@ log = structlog.get_logger(__name__)
 T = TypeVar("T")
 
 
-class CircuitState(str, Enum):
+class CircuitState(StrEnum):
     """Circuit breaker states."""
     CLOSED = "closed"      # Normal - requests pass through
     OPEN = "open"          # Failing - requests fail fast
@@ -79,7 +79,7 @@ class CircuitBreaker:
         success_threshold: int = 3,
         reset_timeout: float = 60.0,
         call_timeout: float = 30.0,
-    ):
+    ) -> None:
         self.name = name
         self.config = CircuitBreakerConfig(
             failure_threshold=failure_threshold,

@@ -1020,7 +1020,7 @@ async def rebuild_vectors(
     errors = []
     
     for row in rows:
-        mem_id, mem_user_id, mem_project_id, content = row["id"], row["user_id"], row["project_id"], row["content"]
+        mem_id, mem_user_id, _mem_project_id, content = row["id"], row["user_id"], row["project_id"], row["content"]
         
         # Check if exists in Qdrant (use get_by_id)
         try:

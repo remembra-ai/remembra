@@ -6,7 +6,7 @@ Prevents duplicates, handles updates, resolves contradictions.
 
 import json
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 import structlog
 from openai import AsyncOpenAI
@@ -75,7 +75,7 @@ Return JSON with action, target_id, content, and reason."""
 # Types
 # ============================================================================
 
-class ConsolidationAction(str, Enum):
+class ConsolidationAction(StrEnum):
     """Action to take for memory consolidation."""
     ADD = "ADD"
     UPDATE = "UPDATE"
@@ -122,7 +122,7 @@ class MemoryConsolidator:
         model: str = "gpt-4o-mini",
         api_key: str | None = None,
         similarity_threshold: float = 0.5,
-    ):
+    ) -> None:
         self.model = model
         self.api_key = api_key
         self.similarity_threshold = similarity_threshold

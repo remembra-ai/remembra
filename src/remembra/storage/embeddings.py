@@ -86,7 +86,7 @@ class OpenAIEmbedder(BaseEmbedder):
         api_key: str,
         model: str = "text-embedding-3-small",
         dimensions: int | None = None,
-    ):
+    ) -> None:
         self.api_key = api_key
         self.model = model
         self.dimensions = dimensions
@@ -144,7 +144,7 @@ class AzureOpenAIEmbedder(BaseEmbedder):
         endpoint: str,
         deployment: str,
         api_version: str = "2024-02-01",
-    ):
+    ) -> None:
         self.api_key = api_key
         self.endpoint = endpoint.rstrip("/")
         self.deployment = deployment
@@ -188,7 +188,7 @@ class AzureOpenAIEmbedder(BaseEmbedder):
 class OllamaEmbedder(BaseEmbedder):
     """Ollama local embedding provider."""
 
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "nomic-embed-text"):
+    def __init__(self, base_url: str = "http://localhost:11434", model: str = "nomic-embed-text") -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
         self._client = httpx.AsyncClient(timeout=60.0)
@@ -225,7 +225,7 @@ class OllamaEmbedder(BaseEmbedder):
 class CohereEmbedder(BaseEmbedder):
     """Cohere embedding provider."""
 
-    def __init__(self, api_key: str, model: str = "embed-english-v3.0"):
+    def __init__(self, api_key: str, model: str = "embed-english-v3.0") -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = "https://api.cohere.ai/v1"
@@ -271,7 +271,7 @@ class VoyageEmbedder(BaseEmbedder):
     Models: voyage-3, voyage-3-lite, voyage-code-3
     """
 
-    def __init__(self, api_key: str, model: str = "voyage-3"):
+    def __init__(self, api_key: str, model: str = "voyage-3") -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = "https://api.voyageai.com/v1"
@@ -318,7 +318,7 @@ class JinaEmbedder(BaseEmbedder):
     Models: jina-embeddings-v3, jina-embeddings-v2-base-en
     """
 
-    def __init__(self, api_key: str, model: str = "jina-embeddings-v3"):
+    def __init__(self, api_key: str, model: str = "jina-embeddings-v3") -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = "https://api.jina.ai/v1"
@@ -372,7 +372,7 @@ class EmbeddingService:
         service.switch_provider("voyage", model="voyage-code-3", api_key="...")
     """
 
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self._embedder: BaseEmbedder | None = None
         # Track current config for change detection

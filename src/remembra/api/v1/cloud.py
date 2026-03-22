@@ -160,7 +160,7 @@ async def signup(
     # Initialize email service for welcome email
     email_service = None
     try:
-        from remembra.cloud.email import EmailService, EmailProvider
+        from remembra.cloud.email import EmailProvider, EmailService
         email_service = EmailService.create(provider=EmailProvider.RESEND)
     except Exception as e:
         import logging
@@ -654,7 +654,7 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
             # Initialize email service for welcome email
             email_service = None
             try:
-                from remembra.cloud.email import EmailService, EmailProvider
+                from remembra.cloud.email import EmailProvider, EmailService
                 email_service = EmailService.create(provider=EmailProvider.RESEND)
             except Exception as e:
                 import logging
@@ -716,9 +716,15 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
                         amount=amount,
                         plan_name=f"Remembra {plan_name}",
                     )
-                    log.info("payment_receipt_sent", email=result.customer_email, plan=plan_name)
+                    import logging
+                    logging.getLogger(__name__).info(
+                        "payment_receipt_sent: email=%s plan=%s", result.customer_email, plan_name
+                    )
                 except Exception as e:
-                    log.warning("payment_receipt_failed", email=result.customer_email, error=str(e))
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "payment_receipt_failed: email=%s error=%s", result.customer_email, str(e)
+                    )
 
     elif result.action == "update_subscription":
         if result.user_id:
@@ -761,7 +767,7 @@ async def stripe_webhook(request: Request) -> dict[str, str]:
 
     # Send email notifications for billing events
     try:
-        from remembra.cloud.email import EmailService, EmailProvider
+        from remembra.cloud.email import EmailProvider, EmailService
         from remembra.cloud.webhook_email_integration import StripeWebhookEmailHandler
         
         email_service = EmailService.create(provider=EmailProvider.RESEND)

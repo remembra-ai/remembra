@@ -58,7 +58,7 @@ class ConversationIngestService:
         self,
         settings: Settings,
         memory_service: Any,  # MemoryService - avoid circular import
-    ):
+    ) -> None:
         self.settings = settings
         self.memory_service = memory_service
         

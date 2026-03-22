@@ -40,7 +40,7 @@ class GraphRetriever:
     "Mr. Kim" or memories about companies David Kim is related to.
     """
     
-    def __init__(self, db: Database, max_depth: int = 2):
+    def __init__(self, db: Database, max_depth: int = 2) -> None:
         """
         Initialize the graph retriever.
         

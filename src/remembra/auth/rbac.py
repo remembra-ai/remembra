@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -27,13 +27,13 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     ADMIN = "admin"
     EDITOR = "editor"
     VIEWER = "viewer"
 
 
-class Permission(str, Enum):
+class Permission(StrEnum):
     """Granular permission tokens."""
 
     # Memory operations

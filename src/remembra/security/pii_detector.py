@@ -134,7 +134,7 @@ class PIIDetector:
         enabled: bool = True,
         mode: str = "detect",  # detect | redact | block
         exclusions: list[str] | None = None,
-    ):
+    ) -> None:
         self.enabled = enabled
         self.mode = mode
         self.exclusions = set(exclusions or [])

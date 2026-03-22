@@ -368,7 +368,7 @@ def require_permission(permission: str):
         ):
             ...
     """
-    async def check_permission(current_user: CurrentUser):
+    async def check_permission(current_user: CurrentUser) -> None:
         if not has_permission(current_user, permission):
             log.warning(
                 "permission_denied",

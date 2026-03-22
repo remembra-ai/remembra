@@ -77,7 +77,7 @@ class AnomalyDetector:
         db: Any,
         enabled: bool = True,
         rate_threshold: int = 100,  # Max memories per hour
-    ):
+    ) -> None:
         self.db = db
         self.enabled = enabled
         self.rate_threshold = rate_threshold

@@ -168,14 +168,32 @@ include = [
 [tool.ruff]
 src = ["src"]
 target-version = "py311"
-line-length = 100
+line-length = 130
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
-ignore = ["ANN101", "ANN102", "ANN401"]
+ignore = [
+    "ANN001",  # Missing type annotation for function argument - some are intentional
+    "ANN101",  # Missing type annotation for `self` (deprecated)
+    "ANN102",  # Missing type annotation for `cls` (deprecated)
+    "ANN201",  # Missing return type - some are intentional for factories/Any returns
+    "ANN401",  # Dynamically typed expressions (Any)
+    "B008",    # Function call in default arg - intentional for FastAPI Depends()
+    "B904",    # Exception chaining - intentional for HTTP error transformation
+    "B024",    # ABC without abstract method - sometimes intentional
+    "B027",    # Empty method in ABC without @abstractmethod - sometimes intentional
+    "SIM102",  # Collapsible if - sometimes less readable when combined
+    "SIM105",  # contextlib.suppress - often less readable
+    "SIM108",  # Ternary operator - sometimes less readable for complex conditions
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["ANN", "I"]  # Don't require type annotations or import sorting in tests
+"src/remembra/extraction/prompts/*.py" = ["E501"]  # Prompts can have long lines for readability
+"src/remembra/extraction/consolidator.py" = ["E501"]  # Prompt strings
+"src/remembra/extraction/extractor.py" = ["E501"]  # Prompt strings
+"src/remembra/extraction/matcher.py" = ["E501"]  # Prompt strings
+"src/remembra/extraction/entities.py" = ["E501"]  # Prompt strings
 
 [tool.ruff.lint.isort]
 known-first-party = ["remembra"]

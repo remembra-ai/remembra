@@ -188,7 +188,7 @@ class EntityExtractor:
         self,
         model: str = "gpt-4o-mini",
         api_key: str | None = None,
-    ):
+    ) -> None:
         self.model = model
         self.api_key = api_key
         self._client: AsyncOpenAI | None = None
@@ -326,7 +326,7 @@ def _parse_extraction_json(raw_text: str) -> ExtractionResult:
 class AnthropicEntityExtractor:
     """Entity extraction using Anthropic Claude."""
 
-    def __init__(self, model: str = "claude-sonnet-4-5", api_key: str | None = None):
+    def __init__(self, model: str = "claude-sonnet-4-5", api_key: str | None = None) -> None:
         import anthropic
 
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
@@ -398,7 +398,7 @@ class OllamaEntityExtractor:
         self,
         model: str = "llama3.1",
         base_url: str = "http://localhost:11434",
-    ):
+    ) -> None:
         import httpx
 
         self._base_url = base_url.rstrip("/")

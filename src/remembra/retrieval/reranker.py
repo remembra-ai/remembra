@@ -75,7 +75,7 @@ class CrossEncoderReranker:
         enabled: bool = True,
         blend_original: bool = True,
         original_weight: float = 0.3,
-    ):
+    ) -> None:
         """
         Initialize the reranker.
         
@@ -227,7 +227,7 @@ class CrossEncoderReranker:
         """
         return [
             self.rerank(query, docs, top_k)
-            for query, docs in zip(queries, documents_per_query)
+            for query, docs in zip(queries, documents_per_query, strict=False)
         ]
 
 

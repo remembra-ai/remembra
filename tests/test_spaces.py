@@ -281,4 +281,4 @@ class TestMemoryMembership:
 
 class TestConstants:
     def test_valid_permissions(self):
-        assert VALID_PERMISSIONS == {"read", "write", "admin"}
+        assert {"read", "write", "admin"} == VALID_PERMISSIONS

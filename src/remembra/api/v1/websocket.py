@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from remembra.config import get_settings
@@ -19,7 +19,7 @@ router = APIRouter(tags=["websocket"])
 class ConnectionManager:
     """Manages WebSocket connections for real-time updates."""
     
-    def __init__(self):
+    def __init__(self) -> None:
         # Map: namespace -> set of (websocket, project_id)
         self._connections: dict[str, set[tuple[WebSocket, str | None]]] = {}
         self._lock = asyncio.Lock()
@@ -141,7 +141,7 @@ async def websocket_endpoint(
     namespace: str = Query("default", description="Namespace to subscribe to"),
     project_id: str | None = Query(None, description="Optional project ID filter"),
     api_key: str | None = Query(None, description="API key for authentication"),
-):
+) -> None:
     """
     WebSocket endpoint for real-time memory updates.
     
@@ -159,10 +159,9 @@ async def websocket_endpoint(
     settings = get_settings()
     
     # Validate API key if auth is enabled
-    if settings.auth_enabled and not settings.debug:
-        if not api_key:
-            await websocket.close(code=4001, reason="API key required")
-            return
+    if settings.auth_enabled and not settings.debug and not api_key:
+        await websocket.close(code=4001, reason="API key required")
+        return
         # Note: Full validation would require async DB lookup
         # For MVP, we accept presence of key; production should validate
     
@@ -216,7 +215,7 @@ async def websocket_endpoint(
                 except json.JSONDecodeError:
                     pass  # Ignore invalid JSON
                     
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 # Send keepalive ping
                 try:
                     await websocket.send_text("ping")

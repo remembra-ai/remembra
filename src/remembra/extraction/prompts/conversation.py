@@ -173,10 +173,7 @@ def format_messages_for_extraction(
             continue
         
         # Build speaker label
-        if name:
-            speaker = name
-        else:
-            speaker = role.capitalize()
+        speaker = name or role.capitalize()
         
         # Add timestamp if available
         time_str = ""

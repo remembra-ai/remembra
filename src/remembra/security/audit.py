@@ -3,7 +3,7 @@
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 
 import structlog
 
@@ -12,7 +12,7 @@ from remembra.storage.database import Database
 log = structlog.get_logger(__name__)
 
 
-class AuditAction(str, Enum):
+class AuditAction(StrEnum):
     """Types of auditable actions."""
     
     # Memory operations

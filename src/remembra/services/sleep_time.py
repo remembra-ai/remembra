@@ -50,7 +50,7 @@ class SleepTimeWorker:
         self,
         settings: Settings,
         memory_service: Any,  # Avoid circular import
-    ):
+    ) -> None:
         self.settings = settings
         self.memory_service = memory_service
         self.db = memory_service.db
@@ -213,7 +213,7 @@ class SleepTimeWorker:
             rows = await cursor.fetchall()
             
             columns = ["id", "content", "metadata", "created_at", "access_count"]
-            return [dict(zip(columns, row)) for row in rows]
+            return [dict(zip(columns, row, strict=False)) for row in rows]
             
         except Exception as e:
             log.error("get_user_memories_failed", user_id=user_id, error=str(e))
@@ -413,10 +413,7 @@ class SleepTimeWorker:
             return True
         
         # One name contains the other (e.g., "John" in "John Smith")
-        if name1 in name2 or name2 in name1:
-            return True
-        
-        return False
+        return bool(name1 in name2 or name2 in name1)
     
     async def _importance_rescore_pass(self, user_id: str) -> int:
         """

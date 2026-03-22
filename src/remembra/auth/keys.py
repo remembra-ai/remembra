@@ -4,7 +4,6 @@ import hashlib
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
-from functools import lru_cache
 from typing import Any
 
 import bcrypt

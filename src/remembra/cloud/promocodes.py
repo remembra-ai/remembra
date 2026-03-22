@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 import stripe
@@ -28,7 +28,7 @@ from remembra.cloud.plans import PlanTier
 logger = logging.getLogger(__name__)
 
 
-class PromoType(str, Enum):
+class PromoType(StrEnum):
     """Types of promotional offers."""
     TRIAL = "trial"           # Free trial of paid plan
     DISCOUNT = "discount"     # Percentage off
