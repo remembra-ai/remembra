@@ -54,7 +54,13 @@ Memory(
 
 Store memories with automatic fact extraction.
 
-```python
+memory.store(
+    content: str,
+    metadata: dict = None,
+    ttl: str = None,
+    expires_at: datetime = None,  # NEW in v0.12.0
+    source: str = None
+) -> dict
 memory.store(
     content: str,
     metadata: dict = None,
@@ -71,6 +77,7 @@ memory.store(
 | `metadata` | `dict` | Custom metadata (tags, source, etc.) |
 | `ttl` | `str` | Time-to-live: "30d", "1w", "24h", "1y" |
 | `source` | `str` | Content provenance (e.g., "chat", "email") |
+| `expires_at` | `datetime` | Explicit expiry timestamp (ISO 8601) |
 
 **Example:**
 
@@ -84,6 +91,14 @@ memory.store(
     metadata={"category": "preferences", "confidence": "high"}
 )
 
+# With TTL (expires in 30 days)
+
+# With explicit expiry (v0.12.0)
+from datetime import datetime, timedelta
+memory.store(
+    "Conference call tomorrow at 3pm",
+    expires_at=datetime.now() + timedelta(hours=36)
+)
 # With TTL (expires in 30 days)
 memory.store(
     "Meeting scheduled for March 15",
@@ -113,6 +128,7 @@ memory.recall(
     enable_hybrid: bool = True,
     enable_rerank: bool = False,
     as_of: datetime = None
+    slim: bool = False  # NEW in v0.12.0
 ) -> str
 ```
 
@@ -127,6 +143,7 @@ memory.recall(
 | `enable_hybrid` | `bool` | Use semantic + keyword search |
 | `enable_rerank` | `bool` | Apply CrossEncoder reranking |
 | `as_of` | `datetime` | Historical query (time travel) |
+| `slim` | `bool` | Return only context string (90% smaller) |
 
 **Example:**
 
@@ -350,3 +367,59 @@ memory.store(
     }
 )
 ```
+
+---
+
+## User Profiles API (v0.12.0)
+
+Get aggregated user intelligence including facts, metrics, and topics.
+
+```python
+profile = memory.get_user_profile()
+```
+
+**Returns:**
+
+```python
+{
+    "user_id": "user_123",
+    "memory_count": 47,
+    "entity_breakdown": {
+        "PERSON": 12,
+        "ORG": 8,
+        "LOCATION": 5
+    },
+    "top_topics": ["AI", "meetings", "projects"],
+    "last_active": "2026-03-22T15:30:00Z",
+    "aggregated_facts": [
+        "Works at Acme Corp as senior engineer",
+        "Prefers morning meetings",
+        "Uses dark mode"
+    ]
+}
+```
+
+**Use Cases:**
+
+- Personalization dashboards
+- User insights and analytics
+- Context pre-loading for AI assistants
+
+---
+
+## Smart Auto-Forgetting (v0.12.0)
+
+Memories with temporal phrases automatically get appropriate TTLs:
+
+```python
+# No explicit TTL needed - auto-detected
+memory.store("Meeting tomorrow at 3pm")  # → 36h TTL
+memory.store("Deadline in 2 hours")      # → 3h TTL
+memory.store("Call next week")           # → 8 days TTL
+```
+
+Supports 35+ patterns including:
+- Relative dates: "tomorrow", "next week", "in 3 days"
+- Specific times: "at 3pm", "this afternoon"
+- Duration phrases: "for 2 hours", "until Friday"
+
