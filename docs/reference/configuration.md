@@ -134,6 +134,22 @@ All environment variables for Remembra.
 |----------|---------|-------------|
 | `REMEMBRA_STATIC_DIR` | - | Path to dashboard build |
 
+## Auto-Forgetting (v0.12.0)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REMEMBRA_AUTO_TTL_ENABLED` | `true` | Enable smart auto-forgetting |
+| `REMEMBRA_STRICT_MODE` | `false` | Return 410 GONE for expired memories |
+
+Smart auto-forgetting detects 35+ temporal patterns and sets appropriate TTLs:
+
+- "meeting tomorrow" → 36 hours
+- "call next week" → 8 days
+- "deadline in 2 hours" → 3 hours
+- "event next month" → 35 days
+
+No configuration needed—just store memories naturally.
+
 ## Example .env File
 
 ```bash
