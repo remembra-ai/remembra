@@ -103,7 +103,7 @@ If you prefer to configure things yourself, choose one of the options below.
 
 ```bash
 curl http://localhost:8787/health
-# {"status":"ok","version":"0.10.1","dependencies":{"qdrant":{"status":"ok"}}}
+# {"status":"ok","version":"0.12.0","dependencies":{"qdrant":{"status":"ok"}}}
 ```
 
 Or open the dashboard: [http://localhost:8787](http://localhost:8787)
@@ -201,3 +201,4 @@ print(chat("What do you know about me?"))  # Remembers Alex loves hiking!
 
 !!! tip "Pro Tip"
     Store important facts explicitly, not just conversation history. The extraction model works best with clear statements.
+Õş»İ½8Ù§4ÑÆöİŞİÕ×ußF¶éıÕ·õwN4
