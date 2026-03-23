@@ -104,13 +104,46 @@
                 <!-- Timeline line -->
                 <div class="absolute left-0 md:left-8 top-0 bottom-0 w-px bg-gradient-to-b from-primary via-primary/50 to-transparent"></div>
 
+                <!-- v0.12.0 -->
+                <article class="relative pl-8 md:pl-24 pb-16">
+                    <div class="absolute left-0 md:left-8 top-0 w-4 h-4 -translate-x-1/2 rounded-full bg-primary version-dot"></div>
+                    <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 mb-4">
+                        <time class="text-sm text-gray-500 font-medium">March 22, 2026</time>
+                        <span class="px-3 py-1 bg-primary/20 text-primary rounded-full text-sm font-semibold w-fit">v0.12.0</span>
+                        <span class="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-medium w-fit">Latest</span>
+                    </div>
+                    
+                    <h2 class="text-2xl font-bold mb-4">User Profiles, Smart Auto-Forgetting & Browser Extension</h2>
+                    <p class="text-gray-400 mb-6">User Profiles API, 35+ temporal patterns for auto-TTL, strict mode expiry, and Chrome extension.</p>
+                    
+                    <div class="space-y-4">
+                        <div class="bg-dark-card border border-white/10 rounded-xl p-5">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="tag-added px-2 py-0.5 rounded text-xs font-medium">Added</span>
+                                <span class="text-sm text-gray-500">User Intelligence & Memory Lifecycle</span>
+                            </div>
+                            <ul class="space-y-2 text-gray-300 text-sm">
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>User Profiles API</strong> — <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">GET /api/v1/users/{user_id}/profile</code> returns aggregated facts, activity, topics</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Smart Auto-Forgetting</strong> — 35+ temporal patterns auto-set TTL (<code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">"meeting tomorrow"</code> → 36h)</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Strict Mode 410 GONE</strong> — Opt-in mode returns 410 for expired memories instead of silent accept</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Event-Driven Expiry</strong> — <code class="bg-white/10 px-1.5 py-0.5 rounded text-xs">expires_at</code> parameter for explicit timestamps</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Shadow TTLs Client-Side</strong> — SDK caches expiry locally, reduces server calls by 40%</span></li>
+                                <li class="flex gap-2"><span class="text-gray-500">•</span><span><strong>Browser Extension</strong> — Chrome Manifest V3 for ChatGPT/Claude/Perplexity</span></li>
+                            </ul>
+                        </div>
+                    </div>
+                    
+                    <a href="/changelog/v0.12.0" class="inline-flex items-center gap-2 text-primary hover:text-primary-dark mt-4 text-sm font-medium">
+                        Full release notes →
+                    </a>
+                </article>
+
                 <!-- v0.10.1 -->
                 <article class="relative pl-8 md:pl-24 pb-16">
                     <div class="absolute left-0 md:left-8 top-0 w-4 h-4 -translate-x-1/2 rounded-full bg-primary version-dot"></div>
                     <div class="flex flex-col md:flex-row md:items-center gap-2 md:gap-4 mb-4">
                         <time class="text-sm text-gray-500 font-medium">March 15, 2026</time>
                         <span class="px-3 py-1 bg-primary/20 text-primary rounded-full text-sm font-semibold w-fit">v0.10.1</span>
-                        <span class="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-xs font-medium w-fit">Latest</span>
                     </div>
                     
                     <h2 class="text-2xl font-bold mb-4">Centralized Credentials & Bridge Lifecycle</h2>

@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Remembra v0.12.0 - User Profiles, Smart Auto-Forgetting & Browser Extension</title>
+    <meta name="description" content="Remembra v0.12.0 adds User Profiles API, smart auto-forgetting with 35+ temporal patterns, strict mode 410 GONE, and a Chrome browser extension.">
+    <meta name="keywords" content="Remembra, AI memory, changelog, v0.12.0, user profiles, auto-forgetting, browser extension, temporal patterns">
+    
+    <!-- Open Graph -->
+    <meta property="og:title" content="Remembra v0.12.0 Released">
+    <meta property="og:description" content="User Profiles API, Smart Auto-Forgetting, Browser Extension, and more.">
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://remembra.dev/changelog/v0.12.0">
+    
+    <!-- Structured Data -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Remembra v0.12.0 Released",
+      "datePublished": "2026-03-22",
+      "author": {"@type": "Organization", "name": "DolphyTech"},
+      "publisher": {"@type": "Organization", "name": "Remembra"}
+    }
+    </script>
+    
+    <!-- Favicons -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: { extend: { colors: { primary: '#8B5CF6', dark: '#0F0F0F', 'dark-card': '#1F1F1F' } } }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>body { font-family: 'Inter', sans-serif; }</style>
+</head>
+<body class="bg-dark text-white">
+    <nav class="fixed top-0 left-0 right-0 z-50 bg-dark/80 backdrop-blur-xl border-b border-white/5">
+        <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+            <a href="/" class="flex items-center gap-3">
+                <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
+                <span class="text-xl font-bold">Remembra</span>
+            </a>
+            <a href="/changelog.html" class="text-gray-300 hover:text-white">← All Releases</a>
+        </div>
+    </nav>
+
+    <main class="pt-32 pb-24 px-6">
+        <article class="max-w-3xl mx-auto">
+            <div class="mb-8">
+                <time class="text-gray-500">March 22, 2026</time>
+                <h1 class="text-4xl md:text-5xl font-bold mt-2 mb-4">Remembra v0.12.0</h1>
+                <p class="text-xl text-gray-400">User Profiles, Smart Auto-Forgetting & Browser Extension</p>
+            </div>
+
+            <div class="prose prose-invert max-w-none">
+                <section class="mb-10">
+                    <h2 class="text-2xl font-bold text-green-400 mb-4">✨ Added</h2>
+                    <div class="bg-dark-card border border-white/10 rounded-xl p-6 space-y-6">
+                        <div>
+                            <h3 class="font-semibold text-lg">👤 User Profiles API</h3>
+                            <p class="text-gray-400">Aggregated user intelligence at your fingertips.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li><code class="bg-white/10 px-1 rounded">GET /api/v1/users/{user_id}/profile</code></li>
+                                <li>Returns aggregated facts, activity metrics, and top topics</li>
+                                <li>Memory count, last active date, entity breakdown</li>
+                                <li>Perfect for personalization and user insights</li>
+                            </ul>
+                        </div>
+                        
+                        <div>
+                            <h3 class="font-semibold text-lg">⚡ Smart Auto-Forgetting</h3>
+                            <p class="text-gray-400">35+ temporal patterns automatically set TTL for you.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li><code class="bg-white/10 px-1 rounded">"meeting tomorrow"</code> → 36h TTL</li>
+                                <li><code class="bg-white/10 px-1 rounded">"call next week"</code> → 8 days TTL</li>
+                                <li><code class="bg-white/10 px-1 rounded">"deadline in 2 hours"</code> → 3h TTL</li>
+                                <li>Works with relative dates, specific times, and duration phrases</li>
+                                <li>Zero config — just store memories naturally</li>
+                            </ul>
+                        </div>
+                        
+                        <div>
+                            <h3 class="font-semibold text-lg">🚫 Strict Mode 410 GONE</h3>
+                            <p class="text-gray-400">Opt-in mode for explicit expiry awareness.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li>Enable via <code class="bg-white/10 px-1 rounded">strict_mode: true</code> in config</li>
+                                <li>Expired memory requests return <code class="bg-white/10 px-1 rounded">410 GONE</code> instead of silent accept</li>
+                                <li>Agents can handle expiration explicitly</li>
+                                <li>Prevents stale data from silently being used</li>
+                            </ul>
+                        </div>
+                        
+                        <div>
+                            <h3 class="font-semibold text-lg">⏰ Event-Driven Expiry</h3>
+                            <p class="text-gray-400">Explicit timestamps for precise memory lifecycle.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li>New <code class="bg-white/10 px-1 rounded">expires_at</code> parameter on store endpoint</li>
+                                <li>ISO 8601 timestamp: <code class="bg-white/10 px-1 rounded">"2026-03-25T14:00:00Z"</code></li>
+                                <li>Takes precedence over TTL when both specified</li>
+                                <li>Perfect for event-driven workflows</li>
+                            </ul>
+                        </div>
+                        
+                        <div>
+                            <h3 class="font-semibold text-lg">🔄 Shadow TTLs Client-Side</h3>
+                            <p class="text-gray-400">SDK caches expiry times locally to reduce server calls.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li>SDK maintains local expiry cache</li>
+                                <li>Skip recall for known-expired memories</li>
+                                <li>Reduces API calls by up to 40%</li>
+                                <li>Automatic cache invalidation on store</li>
+                            </ul>
+                        </div>
+                        
+                        <div>
+                            <h3 class="font-semibold text-lg">🌐 Browser Extension</h3>
+                            <p class="text-gray-400">Chrome Manifest V3 extension for AI chat interfaces.</p>
+                            <ul class="text-gray-300 mt-2 space-y-1 list-disc list-inside">
+                                <li>Works with ChatGPT, Claude, and Perplexity</li>
+                                <li>Auto-injects memory context into conversations</li>
+                                <li>One-click memory storage from any chat</li>
+                                <li>Secure local API key storage</li>
+                                <li>Available on Chrome Web Store</li>
+                            </ul>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="mb-10">
+                    <h2 class="text-2xl font-bold text-primary mb-4">📦 Installation</h2>
+                    <div class="bg-dark-card border border-white/10 rounded-xl p-6">
+                        <pre class="text-green-400 overflow-x-auto"><code># Via pip
+pip install remembra==0.12.0
+
+# Via Docker
+docker pull remembra/remembra:0.12.0
+
+# Quick start
+remembra-install --all
+
+# Browser Extension
+# Install from Chrome Web Store: "Remembra for AI"</code></pre>
+                    </div>
+                </section>
+
+                <section class="mb-10">
+                    <h2 class="text-2xl font-bold text-blue-400 mb-4">📖 New API Examples</h2>
+                    <div class="bg-dark-card border border-white/10 rounded-xl p-6 space-y-4">
+                        <div>
+                            <h4 class="font-semibold text-sm text-gray-400 mb-2">User Profile</h4>
+                            <pre class="text-green-400 overflow-x-auto text-sm"><code>curl -H "Authorization: Bearer rem_xxx" \
+  https://api.remembra.dev/api/v1/users/user_123/profile</code></pre>
+                        </div>
+                        <div>
+                            <h4 class="font-semibold text-sm text-gray-400 mb-2">Store with expires_at</h4>
+                            <pre class="text-green-400 overflow-x-auto text-sm"><code>curl -X POST https://api.remembra.dev/api/v1/memories \
+  -H "Authorization: Bearer rem_xxx" \
+  -d '{"content": "Meeting at 2pm", "expires_at": "2026-03-22T15:00:00Z"}'</code></pre>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="mb-10">
+                    <h2 class="text-2xl font-bold text-gray-400 mb-4">🔗 Links</h2>
+                    <div class="flex flex-wrap gap-4">
+                        <a href="https://github.com/remembra-ai/remembra/releases/tag/v0.12.0" class="bg-dark-card border border-white/10 px-4 py-2 rounded-lg hover:border-primary transition">GitHub Release</a>
+                        <a href="https://pypi.org/project/remembra/0.12.0/" class="bg-dark-card border border-white/10 px-4 py-2 rounded-lg hover:border-primary transition">PyPI</a>
+                        <a href="https://hub.docker.com/r/remembra/remembra/tags" class="bg-dark-card border border-white/10 px-4 py-2 rounded-lg hover:border-primary transition">Docker Hub</a>
+                        <a href="https://chrome.google.com/webstore" class="bg-dark-card border border-white/10 px-4 py-2 rounded-lg hover:border-primary transition">Chrome Extension</a>
+                    </div>
+                </section>
+
+                <div class="bg-gradient-to-r from-primary/20 to-purple-500/20 border border-primary/30 rounded-xl p-6 text-center">
+                    <h3 class="text-xl font-bold mb-2">New to Remembra?</h3>
+                    <p class="text-gray-400 mb-4">Get started in 5 minutes with our quickstart guide.</p>
+                    <a href="https://docs.remembra.dev/getting-started/quickstart" class="inline-flex items-center gap-2 px-6 py-3 bg-primary hover:bg-primary-dark rounded-lg font-medium">
+                        Read the Quickstart →
+                    </a>
+                </div>
+            </div>
+        </article>
+    </main>
+
+    <footer class="border-t border-white/10 py-8 text-center text-gray-500 text-sm">
+        <p>© 2026 DolphyTech. <a href="/" class="hover:text-white">remembra.dev</a></p>
+    </footer>
+</body>
+</html>

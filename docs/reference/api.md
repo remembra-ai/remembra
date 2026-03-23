@@ -40,6 +40,7 @@ http://localhost:8787/openapi.json
 | GET | `/memories` | List memories |
 | PUT | `/memories/{id}` | Update memory |
 | DELETE | `/memories` | Delete memories |
+| GET | `/users/{user_id}/profile` | Get user profile (v0.12.0+) |
 | GET | `/entities` | List entities |
 | GET | `/entities/{id}` | Get entity |
 | GET | `/entities/{id}/relationships` | Entity relationships |

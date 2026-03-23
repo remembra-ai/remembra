@@ -55,7 +55,8 @@ POST /api/v1/memories
     "source": "chat",
     "session_id": "sess_abc"
   },
-  "ttl": "30d"
+  "ttl": "30d",
+  "expires_at": "2026-03-25T14:00:00Z"
 }
 ```
 
@@ -237,6 +238,44 @@ POST /api/v1/memories/cleanup-expired
 
 ---
 
+## User Endpoints
+
+### Get User Profile
+
+Get aggregated user intelligence including facts, activity, and topics.
+
+```http
+GET /api/v1/users/{user_id}/profile
+```
+
+**Response:**
+```json
+{
+  "user_id": "user_123",
+  "memory_count": 42,
+  "entity_count": 15,
+  "last_active": "2026-03-22T10:30:00Z",
+  "first_memory": "2026-02-15T08:00:00Z",
+  "top_topics": ["work", "travel", "family"],
+  "top_entities": [
+    {"name": "Google", "type": "ORG", "mentions": 12},
+    {"name": "John Smith", "type": "PERSON", "mentions": 8}
+  ],
+  "activity": {
+    "stores_last_7d": 15,
+    "recalls_last_7d": 45,
+    "avg_memories_per_day": 2.1
+  },
+  "aggregated_facts": [
+    "Works at Google as Staff Engineer",
+    "Lives in San Francisco",
+    "Prefers dark mode interfaces"
+  ]
+}
+```
+
+---
+
 ## Entity Endpoints
 
 ### List Entities
@@ -407,6 +446,44 @@ Rate limit headers are included in responses:
 X-RateLimit-Limit: 30
 X-RateLimit-Remaining: 25
 X-RateLimit-Reset: 1709312400
+```
+
+---
+
+## Configuration Options
+
+### Strict Mode (410 GONE)
+
+When `strict_mode` is enabled, requests for expired memories return `410 GONE` instead of silently accepting the request.
+
+**Enable via environment variable:**
+```bash
+REMEMBRA_STRICT_MODE=true
+```
+
+**Or via config:**
+```json
+{
+  "strict_mode": true
+}
+```
+
+**Behavior:**
+- Without strict mode: Expired memory requests succeed silently (memory just not returned)
+- With strict mode: Expired memory requests return `410 GONE` with details
+
+**410 Response:**
+```json
+{
+  "error": {
+    "code": "memory_expired",
+    "message": "Memory has expired",
+    "details": {
+      "memory_id": "mem_abc123",
+      "expired_at": "2026-03-21T14:00:00Z"
+    }
+  }
+}
 ```
 
 ---

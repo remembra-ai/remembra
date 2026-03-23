@@ -5,6 +5,59 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-03-22
+
+### Added
+- **User Profiles API** — Aggregated user intelligence endpoint
+  - `GET /api/v1/users/{user_id}/profile` returns facts, activity metrics, top topics
+  - Memory count, entity breakdown, last active timestamp
+  - Aggregated facts summary for quick user context
+  - Perfect for personalization and user insights dashboards
+
+- **Smart Auto-Forgetting** — 35+ temporal patterns automatically set TTL
+  - `"meeting tomorrow"` → 36h TTL
+  - `"call next week"` → 8 days TTL  
+  - `"deadline in 2 hours"` → 3h TTL
+  - Supports relative dates, specific times, and duration phrases
+  - Zero configuration — just store memories naturally
+
+- **Strict Mode 410 GONE** — Opt-in explicit expiry awareness
+  - Enable via `REMEMBRA_STRICT_MODE=true` or config
+  - Expired memory requests return `410 GONE` instead of silent accept
+  - Allows agents to handle expiration explicitly
+  - Prevents stale data from being silently used
+
+- **Event-Driven Expiry** — Explicit timestamp control
+  - New `expires_at` parameter on store endpoint
+  - ISO 8601 format: `"2026-03-25T14:00:00Z"`
+  - Takes precedence over TTL when both specified
+  - Perfect for event-driven workflows
+
+- **Shadow TTLs Client-Side** — SDK performance optimization
+  - SDK maintains local expiry cache
+  - Skip recall for known-expired memories
+  - Reduces API calls by up to 40%
+  - Automatic cache invalidation on store
+
+- **Browser Extension** — Chrome Manifest V3 for AI chat interfaces
+  - Works with ChatGPT, Claude, and Perplexity
+  - Auto-injects memory context into conversations
+  - One-click memory storage from any chat
+  - Secure local API key storage
+  - Available on Chrome Web Store
+
+### Changed
+- Store endpoint now accepts `expires_at` parameter alongside `ttl`
+- SDK client caches expiry metadata for performance
+- API responses include `expires_at` in memory objects when set
+
+### Documentation
+- Added User Profiles API to REST API guide
+- Added strict_mode configuration documentation
+- Updated store endpoint with expires_at parameter
+
+---
+
 ## [0.10.2] - 2026-03-16
 
 ### Deployment Marker
