@@ -29,7 +29,7 @@ GET /health
 ```json
 {
   "status": "healthy",
-  "version": "0.9.0",
+  "version": "0.12.0",
   "qdrant": "connected",
   "database": "connected"
 }
@@ -523,3 +523,4 @@ Download OpenAPI spec:
 ```
 http://localhost:8787/openapi.json
 ```
+ã‡:qæßf¼{Ö½o}{×oó—|ç§ıëÇç—8
