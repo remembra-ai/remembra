@@ -201,4 +201,4 @@ print(chat("What do you know about me?"))  # Remembers Alex loves hiking!
 
 !!! tip "Pro Tip"
     Store important facts explicitly, not just conversation history. The extraction model works best with clear statements.
-Õş»İ½8Ù§4ÑÆöİŞİÕ×ußF¶éıÕ·õwN4
+İ½8Ù§4uFÕ·wN4

@@ -320,7 +320,7 @@ import type {
   DecayReportResult,
 } from '@remembra/client';
 ```
-ã_ß{i½]÷·<ÓÖÜİı\ëVm·us½xí÷5
+_ß{i]<\Vmusx5
 ---
 
 ## User Profiles API (v0.12.0)

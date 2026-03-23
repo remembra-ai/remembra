@@ -523,4 +523,4 @@ Download OpenAPI spec:
 ```
 http://localhost:8787/openapi.json
 ```
-ã‡:qæßf¼{Ö½o}{×oó—|ç§ıëÇç—8
+:qf{Ö½o}{o|Ç8
