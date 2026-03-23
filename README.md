@@ -31,22 +31,22 @@
 
 ---
 
-## 🚀 What's New in v0.10.1
+## 🚀 What's New in v0.12.0
 
-- **🤖 Universal Agent Installer** — One command configures ALL your AI tools: `remembra-install --all`
-- **🔍 Setup Diagnostics** — `remembra-doctor` pinpoints connection issues with clear failure labels
-- **🌉 Local Bridge** — `remembra-bridge` proxy for sandboxed agents (Codex CLI)
-- **🔑 Centralized Credentials** — API keys stored in `~/.remembra/credentials` (chmod 600)
-- **⚡ Slim Recall Mode** — `recall(query, slim=True)` returns 90% smaller payloads
+- **👤 User Profiles** — Profile management with avatars, preferences, and activity tracking
+- **🧠 Smart Auto-Forgetting** — Human-like memory that naturally fades over time
+- **⏰ Event-driven Expiry** — `expires_at` field for precise memory lifecycle control
+- **🔒 Strict Mode 410 GONE** — Expired memories return proper HTTP 410 status
+- **🌐 Browser Extension** — Access your memories from any webpage
+- **👻 Shadow TTLs** — Client-side memory decay visualization
 
 ### Supported Agents (6+)
 Claude Desktop • Claude Code • Codex CLI • Cursor • Windsurf • Gemini
 
-### Previous (v0.9.0)
-- ⏳ Temporal Knowledge Graph with point-in-time queries
-- 🛠️ 11 MCP Tools including `timeline` and `relationships_at`
-- 📊 Entity Graph Visualization
-- 🔐 AES-256-GCM Field Encryption
+### Previous (v0.10.1)
+- 🤖 Universal Agent Installer with `remembra-install --all`
+- 🔍 Setup Diagnostics via `remembra-doctor`
+- 🌉 Local Bridge for sandboxed agents
 
 ---
 
