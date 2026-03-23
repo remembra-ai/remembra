@@ -177,9 +177,6 @@ async def search_relationships_by_name(
     (created_at) and when it was actually true (valid_from/valid_to).
     """
     from datetime import datetime
-    import structlog
-    log = structlog.get_logger(__name__)
-    log.info("search_relationships_by_name_called", entity_name=entity_name, user_id=current_user.user_id)
 
     project_id = resolve_project_access(current_user, project_id)
 
