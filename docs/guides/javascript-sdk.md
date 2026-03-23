@@ -320,3 +320,74 @@ import type {
   DecayReportResult,
 } from '@remembra/client';
 ```
+ã_ß{i½]÷·<ÓÖÜİı\ëVm·us½xí÷5
+---
+
+## User Profiles API (v0.12.0)
+
+Get aggregated user intelligence.
+
+```typescript
+const profile = await memory.getUserProfile();
+
+console.log(profile);
+// {
+//   user_id: "user_123",
+//   memory_count: 47,
+//   entity_breakdown: { PERSON: 12, ORG: 8, LOCATION: 5 },
+//   top_topics: ["AI", "meetings", "projects"],
+//   last_active: "2026-03-22T15:30:00Z",
+//   aggregated_facts: [
+//     "Works at Acme Corp as senior engineer",
+//     "Prefers morning meetings"
+//   ]
+// }
+```
+
+---
+
+## Slim Recall Mode (v0.12.0)
+
+Get 90% smaller responsesâ€”just the context string.
+
+```typescript
+// Standard recall (full response with metadata)
+const full = await memory.recall('What does the user prefer?');
+// { context: "...", memories: [...], entities: [...], ... }
+
+// Slim mode (just the context)
+const slim = await memory.recall('What does the user prefer?', { slim: true });
+// "User prefers dark mode and morning meetings."
+```
+
+---
+
+## Event-Driven Expiry (v0.12.0)
+
+Set explicit expiration timestamps.
+
+```typescript
+// Expires at specific time
+await memory.store('Conference call at 3pm', {
+  expiresAt: new Date('2026-03-23T16:00:00Z')
+});
+
+// Or use TTL string
+await memory.store('Meeting tomorrow', {
+  ttl: '36h'
+});
+```
+
+---
+
+## Smart Auto-Forgetting (v0.12.0)
+
+Temporal phrases automatically get appropriate TTLs:
+
+```typescript
+// No explicit TTL needed - auto-detected
+await memory.store('Meeting tomorrow at 3pm');  // â†’ 36h TTL
+await memory.store('Deadline in 2 hours');      // â†’ 3h TTL
+await memory.store('Call next week');           // â†’ 8 days TTL
+```
+
