@@ -330,4 +330,4 @@ Then use `/bin/bash` with args in config:
 - [Claude Desktop Setup](../integrations/claude-desktop.md)
 - [Codex CLI Setup](../integrations/codex.md)
 - [MCP Server Reference](../integrations/mcp-server.md)
-- [API Authentication](../guides/authentication.md)
+- [API Reference](../reference/index.md)
