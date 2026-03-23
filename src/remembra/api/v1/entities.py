@@ -151,54 +151,6 @@ async def list_entities(
 
 
 @router.get(
-    "/{entity_id}",
-    response_model=EntityResponse,
-    summary="Get entity by ID",
-)
-@limiter.limit("60/minute")
-async def get_entity(
-    request: Request,
-    entity_id: str,
-    db: DatabaseDep,
-    current_user: CurrentUser,
-    project_id: str | None = Query(default=None, description="Filter to one project for restricted keys"),
-) -> EntityResponse:
-    """Get a specific entity by ID."""
-    # Reject reserved paths that should match other routes
-    reserved_paths = {"relationships", "search", "relationship-search", "by-name"}
-    if entity_id.lower() in reserved_paths:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Entity {entity_id} not found",
-        )
-    
-    project_id = resolve_project_access(current_user, project_id)
-    entity = await db.get_entity(entity_id, user_id=current_user.user_id, project_id=project_id)
-
-    if not entity:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Entity {entity_id} not found",
-        )
-
-    # Get linked memories
-    memory_ids = await db.get_memories_by_entity(
-        entity_id,
-        user_id=current_user.user_id,
-        project_id=project_id,
-    )
-
-    return EntityResponse(
-        id=entity.id,
-        canonical_name=entity.canonical_name,
-        type=entity.type,
-        aliases=entity.aliases,
-        attributes=entity.attributes,
-        confidence=entity.confidence,
-        memory_count=len(memory_ids),
-    )
-
-@router.get(
     "/relationship-search",
     response_model=RelationshipsListResponse,
     summary="Search relationships by entity name",
@@ -298,6 +250,46 @@ async def search_relationships_by_name(
         total=len(relationship_responses),
     )
 
+
+@router.get(
+    "/{entity_id}",
+    response_model=EntityResponse,
+    summary="Get entity by ID",
+)
+@limiter.limit("60/minute")
+async def get_entity(
+    request: Request,
+    entity_id: str,
+    db: DatabaseDep,
+    current_user: CurrentUser,
+    project_id: str | None = Query(default=None, description="Filter to one project for restricted keys"),
+) -> EntityResponse:
+    """Get a specific entity by ID."""
+    project_id = resolve_project_access(current_user, project_id)
+    entity = await db.get_entity(entity_id, user_id=current_user.user_id, project_id=project_id)
+
+    if not entity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Entity {entity_id} not found",
+        )
+
+    # Get linked memories
+    memory_ids = await db.get_memories_by_entity(
+        entity_id,
+        user_id=current_user.user_id,
+        project_id=project_id,
+    )
+
+    return EntityResponse(
+        id=entity.id,
+        canonical_name=entity.canonical_name,
+        type=entity.type,
+        aliases=entity.aliases,
+        attributes=entity.attributes,
+        confidence=entity.confidence,
+        memory_count=len(memory_ids),
+    )
 
 @router.get(
     "/{entity_id}/relationships",
