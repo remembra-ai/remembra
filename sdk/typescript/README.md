@@ -5,11 +5,13 @@ TypeScript/JavaScript SDK for [Remembra](https://remembra.dev) - the AI Memory L
 [![npm version](https://badge.fury.io/js/remembra.svg)](https://www.npmjs.com/package/remembra)
 [![PyPI version](https://badge.fury.io/py/remembra.svg)](https://pypi.org/project/remembra/)
 
-## What's New in v0.10.1
+## What's New in v0.12.0
 
-- **Slim Recall Mode** — `recall(query, { slim: true })` returns 90% smaller payloads
-- **Better Error Messages** — Clear failure labels for debugging
-- **Full Python CLI** — `remembra-install`, `remembra-doctor`, `remembra-bridge` for setup
+- **👤 User Profiles** — Profile management with avatars and preferences
+- **🧠 Smart Auto-Forgetting** — Human-like memory that naturally fades
+- **⏰ Event-driven Expiry** — `expires_at` field for precise lifecycle control
+- **🔒 Strict Mode 410 GONE** — Expired memories return proper HTTP 410
+- **🌐 Browser Extension** — Access memories from any webpage
 
 > **Note:** The TypeScript SDK is for client-side usage. For AI agent setup (Claude, Codex, Cursor), use the Python package: `pip install remembra && remembra-install --all`
 
