@@ -209,13 +209,19 @@ class MemoryService:
 
         now = datetime.utcnow()
 
-        # Calculate expiration if TTL provided
+        # Calculate expiration: explicit expires_at > ttl > default
         expires_at = None
-        if request.ttl:
+        if request.expires_at:
+            # Explicit expires_at takes precedence
+            expires_at = request.expires_at
+            log.debug("using_explicit_expires_at", expires_at=expires_at.isoformat())
+        elif request.ttl:
+            # Calculate from TTL string
             ttl_delta = parse_ttl(request.ttl)
             if ttl_delta:
                 expires_at = now + ttl_delta
         elif self.settings.default_ttl_days:
+            # Fall back to server default
             expires_at = now + timedelta(days=self.settings.default_ttl_days)
 
         # Step 1: Extract atomic facts using LLM

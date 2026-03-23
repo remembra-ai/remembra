@@ -153,8 +153,15 @@ class StoreRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     ttl: str | None = Field(
         default=None,
-        description="Optional time-to-live, e.g. '30d', '1y'.",
+        description="Optional time-to-live, e.g. '30d', '1y'. "
+        "Use expires_at for explicit expiry timestamps.",
         examples=["30d"],
+    )
+    expires_at: datetime | None = Field(
+        default=None,
+        description="Explicit expiration timestamp (ISO 8601). "
+        "Takes precedence over ttl if both are provided. "
+        "Example: '2026-03-23T10:00:00Z'",
     )
 
 

@@ -1,0 +1,347 @@
+/**
+ * Remembra Browser Extension - Content Script Styles
+ * Minimal, clean design that doesn't clash with AI chat interfaces
+ */
+
+/* ===== FLOATING ACTION BUTTON ===== */
+
+#remembra-fab {
+  position: fixed;
+  z-index: 999999;
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.8);
+  transition: all 0.2s ease;
+}
+
+#remembra-fab.visible {
+  opacity: 1;
+  visibility: visible;
+  transform: scale(1);
+}
+
+#remembra-fab button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  transition: all 0.2s ease;
+}
+
+#remembra-fab button:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
+}
+
+#remembra-fab button:active {
+  transform: scale(0.95);
+}
+
+/* ===== NOTIFICATION ===== */
+
+#remembra-notification {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  padding: 12px 20px;
+  background: #1f2937;
+  color: white;
+  border-radius: 8px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-size: 14px;
+  z-index: 999999;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+#remembra-notification.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#remembra-notification.success {
+  background: linear-gradient(135deg, #10b981, #059669);
+}
+
+#remembra-notification.error {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+
+#remembra-notification.loading {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+}
+
+/* ===== SIDEBAR ===== */
+
+#remembra-sidebar {
+  position: fixed;
+  top: 0;
+  right: -360px;
+  width: 350px;
+  height: 100vh;
+  background: #ffffff;
+  border-left: 1px solid #e5e7eb;
+  z-index: 999998;
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  transition: right 0.3s ease;
+  box-shadow: -4px 0 20px rgba(0, 0, 0, 0.1);
+}
+
+#remembra-sidebar.open {
+  right: 0;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  #remembra-sidebar {
+    background: #1f2937;
+    border-left-color: #374151;
+  }
+}
+
+.remembra-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+}
+
+@media (prefers-color-scheme: dark) {
+  .remembra-sidebar-header {
+    border-bottom-color: #374151;
+  }
+}
+
+.remembra-logo {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+#remembra-close-sidebar {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  opacity: 0.8;
+  transition: opacity 0.2s;
+}
+
+#remembra-close-sidebar:hover {
+  opacity: 1;
+}
+
+.remembra-sidebar-search {
+  display: flex;
+  gap: 8px;
+  padding: 16px 20px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  .remembra-sidebar-search {
+    border-bottom-color: #374151;
+  }
+}
+
+#remembra-search-input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+#remembra-search-input:focus {
+  border-color: #6366f1;
+}
+
+@media (prefers-color-scheme: dark) {
+  #remembra-search-input {
+    background: #374151;
+    border-color: #4b5563;
+    color: white;
+  }
+  
+  #remembra-search-input:focus {
+    border-color: #8b5cf6;
+  }
+}
+
+#remembra-search-btn {
+  padding: 10px 16px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+#remembra-search-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.remembra-memories-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+}
+
+.remembra-hint,
+.remembra-loading,
+.remembra-error {
+  color: #6b7280;
+  font-size: 14px;
+  text-align: center;
+  padding: 20px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .remembra-hint,
+  .remembra-loading {
+    color: #9ca3af;
+  }
+}
+
+.remembra-error {
+  color: #ef4444;
+}
+
+.remembra-memory-item {
+  padding: 14px;
+  margin-bottom: 12px;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.remembra-memory-item:hover {
+  border-color: #6366f1;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  .remembra-memory-item {
+    background: #374151;
+    border-color: #4b5563;
+  }
+  
+  .remembra-memory-item:hover {
+    border-color: #8b5cf6;
+  }
+}
+
+.remembra-memory-content {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #374151;
+  margin-bottom: 12px;
+  word-break: break-word;
+}
+
+@media (prefers-color-scheme: dark) {
+  .remembra-memory-content {
+    color: #e5e7eb;
+  }
+}
+
+.remembra-memory-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.remembra-insert-btn,
+.remembra-copy-btn {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.remembra-insert-btn {
+  background: #6366f1;
+  color: white;
+  border: none;
+}
+
+.remembra-insert-btn:hover {
+  background: #4f46e5;
+}
+
+.remembra-copy-btn {
+  background: transparent;
+  color: #6366f1;
+  border: 1px solid #6366f1;
+}
+
+.remembra-copy-btn:hover {
+  background: #6366f1;
+  color: white;
+}
+
+@media (prefers-color-scheme: dark) {
+  .remembra-copy-btn {
+    color: #a5b4fc;
+    border-color: #a5b4fc;
+  }
+  
+  .remembra-copy-btn:hover {
+    background: #6366f1;
+    color: white;
+  }
+}
+
+.remembra-sidebar-footer {
+  padding: 16px 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+@media (prefers-color-scheme: dark) {
+  .remembra-sidebar-footer {
+    border-top-color: #374151;
+  }
+}
+
+#remembra-auto-context {
+  width: 100%;
+  padding: 12px;
+  background: linear-gradient(135deg, #f59e0b, #d97706);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+#remembra-auto-context:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}

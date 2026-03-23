@@ -1,12 +1,36 @@
 """Memory CRUD endpoints – /api/v1/memories."""
 
 import logging
-from typing import Annotated
+from datetime import datetime
+from typing import Annotated, Any
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 log = structlog.get_logger(__name__)
+
+
+def _is_memory_expired(memory: dict[str, Any]) -> bool:
+    """
+    Check if a memory has expired based on its expires_at timestamp.
+    
+    Args:
+        memory: Memory dict with optional expires_at field
+        
+    Returns:
+        True if memory has expired, False otherwise
+    """
+    expires_at = memory.get("expires_at")
+    if not expires_at:
+        return False
+    
+    if isinstance(expires_at, str):
+        try:
+            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+    
+    return datetime.utcnow() > expires_at.replace(tzinfo=None)
 
 from remembra.auth.middleware import (
     CurrentUser,
@@ -604,11 +628,15 @@ async def get_memory(
     memory_id: str,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
+    settings: SettingsDep,
 ) -> dict:
     """
     Retrieve a specific memory by its ID.
 
     Note: Can only access memories belonging to the authenticated user.
+    
+    **Strict Mode (v0.12):**
+    When strict_mode=true, accessing an expired memory returns HTTP 410 GONE.
     """
     # Validate memory_id is a valid UUID format
     import uuid
@@ -642,6 +670,25 @@ async def get_memory(
             detail=f"Memory {memory_id} not found",  # Don't reveal it exists
         )
 
+    # STRICT MODE: Check for expired memory reference (v0.12)
+    if settings.strict_mode and _is_memory_expired(result):
+        log.warning(
+            "strict_mode_expired_get",
+            memory_id=memory_id,
+            user_id=current_user.user_id,
+            expires_at=result.get("expires_at"),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={
+                "error": "MEMORY_EXPIRED",
+                "message": f"Memory {memory_id} has expired. Re-acquire context via recall.",
+                "memory_id": memory_id,
+                "expires_at": result.get("expires_at"),
+                "strict_mode": True,
+            },
+        )
+
     project_id = result.get("project_id")
     if project_id:
         resolve_project_access(current_user, project_id)
@@ -668,6 +715,7 @@ async def update_memory(
     audit_logger: AuditLoggerDep,
     sanitizer: SanitizerDep,
     current_user: CurrentUser,
+    settings: SettingsDep,
 ) -> UpdateResponse:
     """
     Re-extract facts from updated content and merge entity graph.
@@ -680,6 +728,11 @@ async def update_memory(
     2. Re-generate embeddings
     3. Update the vector store and database
     4. Re-extract and link entities
+
+    **Strict Mode (v0.12):**
+    When strict_mode=true in server config, attempting to update an expired
+    memory returns HTTP 410 GONE. This forces agents to re-acquire context
+    instead of silently creating orphan updates.
 
     Rate limit: 20 requests/minute.
     """
@@ -696,6 +749,28 @@ async def update_memory(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Memory {memory_id} not found",
         )
+    
+    # STRICT MODE: Check for expired memory reference (v0.12)
+    # When enabled, writes to expired refs return 410 GONE to force
+    # agents to re-acquire context instead of creating orphan updates
+    if settings.strict_mode and _is_memory_expired(existing):
+        log.warning(
+            "strict_mode_expired_ref",
+            memory_id=memory_id,
+            user_id=current_user.user_id,
+            expires_at=existing.get("expires_at"),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={
+                "error": "MEMORY_EXPIRED",
+                "message": f"Memory {memory_id} has expired. Re-acquire context to continue.",
+                "memory_id": memory_id,
+                "expires_at": existing.get("expires_at"),
+                "strict_mode": True,
+            },
+        )
+    
     if existing.get("project_id"):
         resolve_project_access(current_user, existing["project_id"])
 

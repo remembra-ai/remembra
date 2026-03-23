@@ -18,13 +18,33 @@ Usage:
     # Recall memories
     result = memory.recall("Who is John?")
     print(result.context)  # "John is the CTO at Acme Corp."
+
+    # With Smart Auto-Forgetting (v0.12+)
+    memory = Memory(
+        base_url="http://localhost:8787",
+        user_id="user_123",
+        auto_expire_temporal=True,  # Auto-detect temporal phrases
+    )
+    # This memory will auto-expire after ~36 hours
+    memory.store("Meeting tomorrow at 3pm with John")
+
+    # With Shadow TTL Cache (v0.12+)
+    memory = Memory(
+        base_url="http://localhost:8787",
+        user_id="user_123",
+        enable_shadow_ttl=True,  # Cache TTLs client-side for lower latency
+    )
 """
 
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from remembra.client.shadow_ttl import ShadowTTLCache, parse_ttl_string
+from remembra.client.temporal_parser import TemporalParser
 from remembra.client.types import (
     ChangelogIngestResult,
     ConversationIngestResult,
@@ -37,6 +57,9 @@ from remembra.client.types import (
     RecallResult,
     StoreResult,
 )
+
+if TYPE_CHECKING:
+    pass
 
 
 class MemoryError(Exception):
@@ -60,6 +83,10 @@ class Memory:
         user_id: Unique identifier for the user
         project: Project namespace (default: "default")
         timeout: Request timeout in seconds (default: 30)
+        auto_expire_temporal: Auto-detect temporal phrases and set TTL (v0.12+)
+        temporal_min_confidence: Minimum confidence for temporal detection (0.0-1.0)
+        enable_shadow_ttl: Enable client-side TTL caching for lower latency (v0.12+)
+        shadow_ttl_max_entries: Maximum entries in shadow TTL cache
 
     Example:
         >>> memory = Memory(base_url="http://localhost:8787", user_id="user_123")
@@ -67,6 +94,10 @@ class Memory:
         StoreResult(id='01HQ...', extracted_facts=['Alice works at TechCorp...'], entities=[...])
         >>> memory.recall("Where does Alice work?")
         RecallResult(context='Alice works at TechCorp as a software engineer.', ...)
+        
+        # Smart Auto-Forgetting
+        >>> memory = Memory(base_url="http://localhost:8787", auto_expire_temporal=True)
+        >>> memory.store("Meeting tomorrow at 3pm")  # Auto-expires in ~36 hours
     """
 
     def __init__(
@@ -76,6 +107,11 @@ class Memory:
         user_id: str = "default",
         project: str = "default",
         timeout: float = 30.0,
+        # v0.12 features
+        auto_expire_temporal: bool = False,
+        temporal_min_confidence: float = 0.6,
+        enable_shadow_ttl: bool = False,
+        shadow_ttl_max_entries: int = 10000,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -83,10 +119,26 @@ class Memory:
         self.project = project
         self.timeout = timeout
 
+        # v0.12: Smart Auto-Forgetting
+        self._auto_expire_temporal = auto_expire_temporal
+        self._temporal_parser: TemporalParser | None = None
+        if auto_expire_temporal:
+            self._temporal_parser = TemporalParser(
+                min_confidence=temporal_min_confidence,
+            )
+
+        # v0.12: Shadow TTL Cache
+        self._enable_shadow_ttl = enable_shadow_ttl
+        self._shadow_cache: ShadowTTLCache | None = None
+        if enable_shadow_ttl:
+            self._shadow_cache = ShadowTTLCache(
+                max_entries=shadow_ttl_max_entries,
+            )
+
         # Build headers
         self._headers: dict[str, str] = {
             "Content-Type": "application/json",
-            "User-Agent": "remembra-python/0.1.0",
+            "User-Agent": "remembra-python/0.12.0",
         }
         if api_key:
             self._headers["X-API-Key"] = api_key
@@ -131,6 +183,7 @@ class Memory:
         content: str,
         metadata: dict[str, Any] | None = None,
         ttl: str | None = None,
+        auto_expire: bool | None = None,
     ) -> StoreResult:
         """
         Store a new memory.
@@ -142,6 +195,7 @@ class Memory:
             content: The text content to memorize
             metadata: Optional key-value metadata to attach
             ttl: Optional time-to-live (e.g., "30d", "1y")
+            auto_expire: Override auto_expire_temporal for this call (v0.12+)
 
         Returns:
             StoreResult with the memory ID, extracted facts, and entities
@@ -152,17 +206,41 @@ class Memory:
             '01HQXYZ...'
             >>> print(result.extracted_facts)
             ['John started as CEO of Acme Corp in 2024.']
+            
+            # Smart Auto-Forgetting (when auto_expire_temporal=True)
+            >>> result = memory.store("Meeting tomorrow at 3pm")
+            # Memory auto-expires in ~36 hours
         """
+        # v0.12: Smart Auto-Forgetting
+        # Detect temporal phrases and auto-set TTL if no explicit TTL provided
+        effective_ttl = ttl
+        detected_temporal = None
+        
+        should_auto_expire = auto_expire if auto_expire is not None else self._auto_expire_temporal
+        
+        if should_auto_expire and effective_ttl is None and self._temporal_parser:
+            detected_temporal = self._temporal_parser.detect(content)
+            if detected_temporal:
+                effective_ttl = detected_temporal.ttl_string
+        
         payload: dict[str, Any] = {
             "user_id": self.user_id,
             "project_id": self.project,
             "content": content,
             "metadata": metadata or {},
         }
-        if ttl:
-            payload["ttl"] = ttl
+        if effective_ttl:
+            payload["ttl"] = effective_ttl
 
         data = self._request("POST", "/api/v1/memories", json=payload)
+
+        memory_id = data["id"]
+        
+        # v0.12: Register TTL in shadow cache for latency optimization
+        if self._shadow_cache is not None and effective_ttl:
+            ttl_seconds = parse_ttl_string(effective_ttl)
+            if ttl_seconds:
+                self._shadow_cache.register(memory_id, ttl_seconds=ttl_seconds)
 
         entities = [
             EntityItem(
@@ -175,7 +253,7 @@ class Memory:
         ]
 
         return StoreResult(
-            id=data["id"],
+            id=memory_id,
             extracted_facts=data.get("extracted_facts", []),
             entities=entities,
         )
@@ -333,13 +411,24 @@ class Memory:
 
         if memory_id:
             params["memory_id"] = memory_id
+            # v0.12: Invalidate shadow cache for deleted memory
+            if self._shadow_cache is not None:
+                self._shadow_cache.invalidate(memory_id)
         elif user_id:
             params["user_id"] = user_id
+            # Clear entire cache when bulk deleting by user
+            if self._shadow_cache is not None:
+                self._shadow_cache.clear()
         elif entity:
             params["entity"] = entity
+            # Clear cache on entity deletion (conservative)
+            if self._shadow_cache is not None:
+                self._shadow_cache.clear()
         else:
             # Default to current user
             params["user_id"] = self.user_id
+            if self._shadow_cache is not None:
+                self._shadow_cache.clear()
 
         data = self._request("DELETE", "/api/v1/memories", params=params)
 
@@ -533,8 +622,104 @@ class Memory:
         )
 
     def close(self) -> None:
-        """Close the persistent HTTP client."""
+        """Close the persistent HTTP client and clean up resources."""
         self._client.close()
+        # Clear shadow cache on close
+        if self._shadow_cache is not None:
+            self._shadow_cache.clear()
+
+    # -------------------------------------------------------------------------
+    # v0.12: Shadow TTL Cache Methods
+    # -------------------------------------------------------------------------
+    
+    def is_memory_valid(self, memory_id: str) -> bool | None:
+        """
+        Check if a memory is known to be valid using shadow TTL cache.
+        
+        This method checks the local TTL cache without making a server
+        request. Useful for optimizing update/delete operations.
+        
+        Args:
+            memory_id: The memory ID to check
+            
+        Returns:
+            True if cached and valid, False if cached and expired,
+            None if not in cache (unknown)
+            
+        Note:
+            Requires enable_shadow_ttl=True on client initialization.
+        """
+        if self._shadow_cache is None:
+            return None
+        
+        if memory_id not in self._shadow_cache:
+            return None
+        
+        return self._shadow_cache.is_valid(memory_id)
+    
+    def shadow_cache_stats(self) -> dict[str, int | float] | None:
+        """
+        Get statistics from the shadow TTL cache.
+        
+        Returns:
+            Dict with entry_count, valid_count, expired_count, max_entries.
+            Returns None if shadow cache is disabled.
+        """
+        if self._shadow_cache is None:
+            return None
+        return self._shadow_cache.stats()
+    
+    def clear_shadow_cache(self) -> int:
+        """
+        Clear all entries from the shadow TTL cache.
+        
+        Returns:
+            Number of entries cleared, or 0 if cache disabled.
+        """
+        if self._shadow_cache is None:
+            return 0
+        return self._shadow_cache.clear()
+    
+    # -------------------------------------------------------------------------
+    # v0.12: Temporal Detection Methods
+    # -------------------------------------------------------------------------
+    
+    def detect_temporal(self, content: str) -> dict[str, Any] | None:
+        """
+        Detect temporal phrases in content and get suggested TTL.
+        
+        This method can be used to preview what TTL would be auto-set
+        before actually storing a memory.
+        
+        Args:
+            content: Text content to analyze
+            
+        Returns:
+            Dict with phrase, ttl_string, ttl_seconds, confidence, reason.
+            Returns None if no temporal phrase detected or feature disabled.
+            
+        Example:
+            >>> memory = Memory(auto_expire_temporal=True)
+            >>> memory.detect_temporal("Meeting tomorrow at 3pm")
+            {'phrase': 'tomorrow at 3pm', 'ttl_string': '36h', 
+             'ttl_seconds': 129600, 'confidence': 0.75, 
+             'reason': 'reference to tomorrow'}
+        """
+        if self._temporal_parser is None:
+            return None
+        
+        detection = self._temporal_parser.detect(content)
+        if detection is None:
+            return None
+        
+        return {
+            "phrase": detection.phrase,
+            "ttl_string": detection.ttl_string,
+            "ttl_seconds": detection.ttl_seconds,
+            "confidence": detection.confidence,
+            "reason": detection.reason,
+            "granularity": detection.granularity.value,
+        }
 
     def __enter__(self) -> "Memory":
         return self
@@ -543,4 +728,10 @@ class Memory:
         self.close()
 
     def __repr__(self) -> str:
-        return f"Memory(base_url='{self.base_url}', user_id='{self.user_id}', project='{self.project}')"
+        features = []
+        if self._auto_expire_temporal:
+            features.append("auto_expire_temporal")
+        if self._enable_shadow_ttl:
+            features.append("shadow_ttl")
+        feature_str = f", features=[{', '.join(features)}]" if features else ""
+        return f"Memory(base_url='{self.base_url}', user_id='{self.user_id}', project='{self.project}'{feature_str})"

@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=400, initial-scale=1.0">
+  <title>Remembra</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <span class="logo-icon">🧠</span>
+        <span class="logo-text">Remembra</span>
+      </div>
+      <div id="status-badge" class="status-badge disconnected">
+        <span class="status-dot"></span>
+        <span class="status-text">Disconnected</span>
+      </div>
+    </header>
+    
+    <!-- Settings Section (shown when no API key) -->
+    <section id="settings-section" class="section">
+      <h2>Connect to Remembra</h2>
+      <p class="hint">Enter your API key to start saving memories.</p>
+      
+      <div class="input-group">
+        <label for="api-key-input">API Key</label>
+        <input type="password" id="api-key-input" placeholder="rem_xxxxxxxxxxxxx">
+      </div>
+      
+      <button id="save-key-btn" class="btn btn-primary">
+        Connect
+      </button>
+      
+      <p class="hint">
+        Don't have a key? <a href="https://remembra.dev/dashboard" target="_blank">Get one free</a>
+      </p>
+    </section>
+    
+    <!-- Main Section (shown when connected) -->
+    <section id="main-section" class="section hidden">
+      <!-- Quick Save -->
+      <div class="card">
+        <h3>Quick Save</h3>
+        <textarea id="quick-save-input" placeholder="Type or paste something to remember..."></textarea>
+        <button id="quick-save-btn" class="btn btn-primary">
+          Save to Memory
+        </button>
+      </div>
+      
+      <!-- Search Memories -->
+      <div class="card">
+        <h3>Search Memories</h3>
+        <div class="search-group">
+          <input type="text" id="search-input" placeholder="What do you want to recall?">
+          <button id="search-btn" class="btn btn-secondary">Search</button>
+        </div>
+        <div id="search-results" class="results"></div>
+      </div>
+      
+      <!-- Keyboard Shortcut Hint -->
+      <div class="shortcut-hint">
+        <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>R</kbd> to open sidebar on AI chats
+      </div>
+      
+      <!-- Footer Actions -->
+      <div class="footer-actions">
+        <button id="open-dashboard-btn" class="btn btn-ghost">
+          Open Dashboard
+        </button>
+        <button id="disconnect-btn" class="btn btn-ghost btn-danger">
+          Disconnect
+        </button>
+      </div>
+    </section>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

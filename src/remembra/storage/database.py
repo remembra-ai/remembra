@@ -452,8 +452,16 @@ class Database:
         self,
         user_id: str,
         project_id: str | None = None,
+        since: datetime | None = None,
     ) -> int:
-        """Count active memories for a user, optionally scoped to one project."""
+        """
+        Count active memories for a user, optionally scoped to one project.
+        
+        Args:
+            user_id: User ID to count memories for
+            project_id: Optional project filter
+            since: Optional filter to count memories created since this time
+        """
         query = """
             SELECT COUNT(*) AS total
             FROM memories
@@ -465,10 +473,54 @@ class Database:
         if project_id:
             query += " AND project_id = ?"
             params.append(project_id)
+        
+        if since:
+            query += " AND created_at >= ?"
+            params.append(since.isoformat())
 
         cursor = await self.conn.execute(query, params)
         row = await cursor.fetchone()
         return int(row["total"]) if row and row["total"] is not None else 0
+
+    async def get_recent_memories(
+        self,
+        user_id: str,
+        project_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """
+        Get recent memories for a user, ordered by creation time (newest first).
+        
+        Args:
+            user_id: User ID
+            project_id: Optional project filter
+            limit: Maximum number of memories to return
+            
+        Returns:
+            List of memory dictionaries with id, content, extracted_facts, created_at, etc.
+        """
+        query = """
+            SELECT id, user_id, project_id, content, extracted_facts, metadata,
+                   created_at, updated_at, expires_at, access_count, last_accessed
+            FROM memories
+            WHERE user_id = ?
+              AND (expires_at IS NULL OR expires_at > ?)
+        """
+        params: list[Any] = [user_id, datetime.utcnow().isoformat()]
+
+        if project_id:
+            query += " AND project_id = ?"
+            params.append(project_id)
+
+        query += """
+            ORDER BY datetime(created_at) DESC
+            LIMIT ?
+        """
+        params.append(limit)
+
+        cursor = await self.conn.execute(query, params)
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
 
     async def update_memory(
         self,

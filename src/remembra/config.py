@@ -134,6 +134,13 @@ class Settings(BaseSettings):
     default_ttl_days: int | None = None
     max_memories_per_recall: int = 10
     recall_score_threshold: float = 0.70
+    
+    # Strict Mode for expired memory references (v0.12)
+    strict_mode: bool = Field(
+        False,
+        description="When enabled, writes to expired memory refs return HTTP 410 GONE. "
+        "Forces agents to re-acquire context instead of silently creating orphan memories.",
+    )
 
     # -----------------------------------------------------------------------
     # Conflict Resolution

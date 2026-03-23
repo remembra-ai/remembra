@@ -1,0 +1,68 @@
+{
+  "manifest_version": 3,
+  "name": "Remembra",
+  "version": "0.12.0",
+  "description": "Give your AI conversations persistent memory. Save and recall context across ChatGPT, Claude, and Perplexity.",
+  "author": "DolphyTech",
+  "homepage_url": "https://remembra.dev",
+  
+  "permissions": [
+    "storage",
+    "contextMenus",
+    "activeTab"
+  ],
+  
+  "host_permissions": [
+    "https://api.remembra.dev/*",
+    "https://chat.openai.com/*",
+    "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "https://perplexity.ai/*",
+    "https://www.perplexity.ai/*"
+  ],
+  
+  "background": {
+    "service_worker": "background/background.js",
+    "type": "module"
+  },
+  
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://perplexity.ai/*",
+        "https://www.perplexity.ai/*"
+      ],
+      "js": ["content/content.js"],
+      "css": ["content/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "Remembra - AI Memory"
+  },
+  
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  
+  "web_accessible_resources": [
+    {
+      "resources": ["icons/*.png"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
