@@ -1,6 +1,6 @@
 # Installation
 
-Multiple ways to install and run Remembra (v0.10.1).
+Multiple ways to install and run Remembra (v0.12.0).
 
 ## Quick Start (Recommended)
 
@@ -216,7 +216,7 @@ Expected response:
 ```json
 {
   "status": "ok",
-  "version": "0.10.1",
+  "version": "0.12.0",
   "dependencies": {
     "qdrant": {"status": "ok"}
   }
