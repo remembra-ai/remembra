@@ -289,7 +289,7 @@ class Settings(BaseSettings):
         description="Enable PII pattern detection in content",
     )
     pii_mode: str = Field(
-        "detect",
+        "redact",
         description="PII handling mode: 'detect' | 'redact' | 'block'",
     )
     pii_exclusions: list[str] = Field(
