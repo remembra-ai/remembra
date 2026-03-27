@@ -89,11 +89,24 @@ class CalibrationCache:
             cache_path: Path to cache file. Defaults to ~/.remembra/calibration.json
         """
         self.cache_path = Path(cache_path) if cache_path else DEFAULT_CACHE_PATH
-        self._ensure_cache_dir()
+        self._cache_enabled = self._ensure_cache_dir()
 
-    def _ensure_cache_dir(self) -> None:
-        """Create cache directory if it doesn't exist."""
-        self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+    def _ensure_cache_dir(self) -> bool:
+        """Create cache directory if it doesn't exist.
+        
+        Returns:
+            True if cache directory is writable, False otherwise.
+        """
+        try:
+            self.cache_path.parent.mkdir(parents=True, exist_ok=True)
+            return True
+        except (PermissionError, OSError) as e:
+            log.warning(
+                "calibration_cache_disabled",
+                error=str(e),
+                path=str(self.cache_path),
+            )
+            return False
 
     def load(self) -> CalibrationResult | None:
         """
@@ -102,6 +115,10 @@ class CalibrationCache:
         Returns:
             CalibrationResult if cache exists, None otherwise.
         """
+        if not self._cache_enabled:
+            log.debug("calibration_cache_miss", reason="cache_disabled")
+            return None
+            
         if not self.cache_path.exists():
             log.debug("calibration_cache_miss", reason="file_not_found")
             return None
@@ -130,6 +147,10 @@ class CalibrationCache:
             result: Calibration metrics to cache
             config: Current config (used for invalidation hash)
         """
+        if not self._cache_enabled:
+            log.debug("calibration_cache_skip_save", reason="cache_disabled")
+            return
+            
         result.calibrated_at = datetime.utcnow().isoformat()
         result.config_hash = config.compute_hash()
         result.is_valid = True
