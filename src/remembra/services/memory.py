@@ -984,11 +984,7 @@ class MemoryService:
             recency_top = recency_sorted[0]
 
             # Check for divergence: different memories AND both have meaningful scores
-            if (
-                semantic_top.id != recency_top.id
-                and semantic_top.semantic_score > 0.5
-                and recency_top.recency_score > 0.5
-            ):
+            if semantic_top.id != recency_top.id and semantic_top.semantic_score > 0.5 and recency_top.recency_score > 0.5:
                 # Calculate divergence score (how much they disagree)
                 divergence_score = abs(semantic_top.semantic_score - recency_top.semantic_score)
                 divergence_score += abs(semantic_top.recency_score - recency_top.recency_score)
@@ -1419,6 +1415,7 @@ class MemoryService:
         old_meta = old_memory.get("metadata") or {}
         if isinstance(old_meta, str):
             import json
+
             try:
                 old_meta = json.loads(old_meta)
             except json.JSONDecodeError:

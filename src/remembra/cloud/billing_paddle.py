@@ -74,13 +74,9 @@ class PaddleBillingManager:
             if method == "GET":
                 response = await client.get(url, headers=self._headers())
             elif method == "POST":
-                response = await client.post(
-                    url, headers=self._headers(), json=data
-                )
+                response = await client.post(url, headers=self._headers(), json=data)
             elif method == "PATCH":
-                response = await client.patch(
-                    url, headers=self._headers(), json=data
-                )
+                response = await client.patch(url, headers=self._headers(), json=data)
             else:
                 raise ValueError(f"Unsupported method: {method}")
 

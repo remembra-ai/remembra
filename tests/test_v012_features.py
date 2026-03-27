@@ -25,7 +25,7 @@ class TestIsMemoryExpired:
         # Memory expired 1 hour ago
         expired_time = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
         memory = {"expires_at": expired_time}
-        
+
         assert _is_memory_expired(memory) is True
 
     def test_not_expired_memory_returns_false(self):
@@ -33,14 +33,14 @@ class TestIsMemoryExpired:
         # Memory expires in 1 hour
         future_time = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
         memory = {"expires_at": future_time}
-        
+
         assert _is_memory_expired(memory) is False
 
     def test_no_expiry_returns_false(self):
         """Memories without expires_at should return False."""
         memory = {}
         assert _is_memory_expired(memory) is False
-        
+
         memory_none = {"expires_at": None}
         assert _is_memory_expired(memory_none) is False
 
@@ -48,7 +48,7 @@ class TestIsMemoryExpired:
         """Should handle ISO timestamps with Z suffix."""
         expired_time = (datetime.now(UTC) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
         memory = {"expires_at": expired_time}
-        
+
         assert _is_memory_expired(memory) is True
 
     def test_handles_datetime_object(self):
@@ -57,7 +57,7 @@ class TestIsMemoryExpired:
         expired_dt = datetime.now(UTC) - timedelta(hours=1)
         memory = {"expires_at": expired_dt}
         assert _is_memory_expired(memory) is True
-        
+
         # Not expired
         future_dt = datetime.now(UTC) + timedelta(hours=1)
         memory_future = {"expires_at": future_dt}
@@ -97,7 +97,7 @@ class TestStoreRequestExpiresAt:
         """Both expires_at and ttl can be provided (expires_at takes precedence)."""
         future = datetime.now(UTC) + timedelta(days=7)
         req = StoreRequest(content="test content", expires_at=future, ttl="30d")
-        
+
         assert req.expires_at == future
         assert req.ttl == "30d"
 
@@ -154,7 +154,7 @@ class TestUserProfileModels:
             total_entities=50,
             total_relationships=25,
         )
-        
+
         assert profile.user_id == "user-123"
         assert profile.project_id == "default"
         assert profile.total_memories == 100
@@ -173,11 +173,12 @@ class TestDatabaseMethods:
     async def test_count_memories_with_since(self):
         """count_memories should support since parameter."""
         from remembra.storage.database import Database
-        
+
         # Just verify the method signature accepts since
         db = Database(":memory:")
         # Check method exists and has since param
         import inspect
+
         sig = inspect.signature(db.count_memories)
         params = list(sig.parameters.keys())
         assert "since" in params
@@ -186,7 +187,7 @@ class TestDatabaseMethods:
     async def test_get_recent_memories_exists(self):
         """get_recent_memories method should exist."""
         from remembra.storage.database import Database
-        
+
         db = Database(":memory:")
         assert hasattr(db, "get_recent_memories")
         assert callable(db.get_recent_memories)

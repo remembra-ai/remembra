@@ -189,9 +189,9 @@ class TestV012Features:
             user_id="user_123",
             auto_expire_temporal=True,
         )
-        
+
         result = memory.detect_temporal("Meeting tomorrow at 3pm")
-        
+
         assert result is not None
         assert "phrase" in result
         assert "ttl_string" in result
@@ -201,9 +201,9 @@ class TestV012Features:
     def test_detect_temporal_disabled(self):
         """Test detect_temporal returns None when feature disabled."""
         memory = Memory(user_id="user_123")  # auto_expire_temporal=False
-        
+
         result = memory.detect_temporal("Meeting tomorrow")
-        
+
         assert result is None
 
     def test_shadow_cache_stats_enabled(self):
@@ -212,9 +212,9 @@ class TestV012Features:
             user_id="user_123",
             enable_shadow_ttl=True,
         )
-        
+
         stats = memory.shadow_cache_stats()
-        
+
         assert stats is not None
         assert "entry_count" in stats
         assert "valid_count" in stats
@@ -222,17 +222,17 @@ class TestV012Features:
     def test_shadow_cache_stats_disabled(self):
         """Test shadow_cache_stats returns None when disabled."""
         memory = Memory(user_id="user_123")  # enable_shadow_ttl=False
-        
+
         stats = memory.shadow_cache_stats()
-        
+
         assert stats is None
 
     def test_is_memory_valid_disabled(self):
         """Test is_memory_valid returns None when shadow cache disabled."""
         memory = Memory(user_id="user_123")
-        
+
         result = memory.is_memory_valid("mem_123")
-        
+
         assert result is None
 
     def test_clear_shadow_cache(self):
@@ -241,13 +241,13 @@ class TestV012Features:
             user_id="user_123",
             enable_shadow_ttl=True,
         )
-        
+
         # Manually add entry
         memory._shadow_cache.register("mem_123", ttl_seconds=3600)
         assert len(memory._shadow_cache) == 1
-        
+
         count = memory.clear_shadow_cache()
-        
+
         assert count == 1
         assert len(memory._shadow_cache) == 0
 
@@ -277,7 +277,7 @@ class TestV012Features:
         result = memory.store("Meeting tomorrow at 3pm")
 
         assert result.id == "mem_temporal"
-        
+
         # Verify TTL was set in request
         call_args = mock_client.request.call_args
         payload = call_args.kwargs.get("json", {})
@@ -360,14 +360,14 @@ class TestV012Features:
             user_id="user_123",
             enable_shadow_ttl=True,
         )
-        
+
         # Pre-register a memory
         memory._shadow_cache.register("mem_delete", ttl_seconds=3600)
         assert memory.is_memory_valid("mem_delete") is True
-        
+
         # Delete it
         memory.forget(memory_id="mem_delete")
-        
+
         # Should be invalidated
         assert "mem_delete" not in memory._shadow_cache
 
@@ -405,7 +405,7 @@ class TestImports:
             suggest_ttl,
             parse_ttl_string,
         )
-        
+
         assert ShadowTTLCache is not None
         assert TemporalParser is not None
         assert TemporalDetection is not None

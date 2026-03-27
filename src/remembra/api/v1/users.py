@@ -68,28 +68,28 @@ class UserStaticFacts(BaseModel):
 class UserProfileResponse(BaseModel):
     """
     Aggregated user profile with facts, activity, and insights.
-    
+
     This provides a comprehensive view of a user's memory footprint,
     including extracted entities, recent activity patterns, and top topics.
     """
 
     user_id: str
     project_id: str | None = None
-    
+
     # Memory statistics
     total_memories: int = 0
     total_entities: int = 0
     total_relationships: int = 0
-    
+
     # Static facts and entities
     static_facts: UserStaticFacts = Field(default_factory=UserStaticFacts)
-    
+
     # Activity summary
     activity: UserActivitySummary = Field(default_factory=UserActivitySummary)
-    
+
     # Top topics/themes
     top_topics: list[TopTopic] = Field(default_factory=list)
-    
+
     # Account info
     created_at: datetime | None = None
     last_active: datetime | None = None
@@ -136,15 +136,15 @@ async def get_user_profile(
 ) -> UserProfileResponse:
     """
     Get an aggregated profile for a user based on their memories.
-    
+
     This endpoint aggregates:
     - **Static facts**: Entities and facts extracted from the user's memories
     - **Activity summary**: Recent memory creation patterns
     - **Top topics**: Most frequently mentioned themes/concepts
     - **Statistics**: Total counts of memories, entities, relationships
-    
+
     Security: Users can only access their own profile unless they have admin permissions.
-    
+
     **Use cases:**
     - Agent context: "What do I know about this user?"
     - Dashboard: User profile overview
@@ -158,28 +158,28 @@ async def get_user_profile(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Permission denied: can only access your own profile",
             )
-    
+
     project_id = resolve_project_access(current_user, project_id)
-    
+
     # Get user info if available
     user_info = await db.get_user_by_id(user_id)
     created_at = None
     if user_info:
         created_at = datetime.fromisoformat(user_info["created_at"]) if user_info.get("created_at") else None
-    
+
     # Get memory statistics
     total_memories = await db.count_memories(user_id=user_id, project_id=project_id)
-    
+
     # Get entities for this user
     entities = await db.get_user_entities(user_id=user_id, project_id=project_id)
     total_entities = len(entities)
-    
+
     # Get relationship count
     total_relationships = 0
     for entity in entities[:100]:  # Limit to avoid excessive queries
         rels = await db.get_entity_relationships(entity.id)
         total_relationships += len(rels)
-    
+
     # Build static facts
     static_facts = UserStaticFacts()
     if include_facts:
@@ -199,29 +199,30 @@ async def get_user_profile(
                     mention_count=len(memory_ids),
                 )
             )
-        
+
         # Sort by mention count
         entity_summaries.sort(key=lambda e: e.mention_count, reverse=True)
         static_facts.entities = entity_summaries[:20]  # Top 20 entities
-        
+
         # Extract unique facts from recent memories
         recent_memories = await db.get_recent_memories(
             user_id=user_id,
             project_id=project_id,
             limit=100,
         )
-        
+
         all_facts: list[str] = []
         for memory in recent_memories:
             facts = memory.get("extracted_facts", [])
             if isinstance(facts, str):
                 try:
                     import json
+
                     facts = json.loads(facts)
                 except (json.JSONDecodeError, TypeError):
                     facts = []
             all_facts.extend(facts)
-        
+
         # Dedupe and limit facts
         seen_facts: set[str] = set()
         unique_facts: list[str] = []
@@ -229,15 +230,15 @@ async def get_user_profile(
             if fact.lower() not in seen_facts:
                 seen_facts.add(fact.lower())
                 unique_facts.append(fact)
-        
+
         static_facts.facts = unique_facts[:50]  # Top 50 unique facts
-    
+
     # Build activity summary
     activity = UserActivitySummary()
     last_active = None
     if include_activity:
         now = datetime.utcnow()
-        
+
         # Get most recent memory
         recent = await db.get_recent_memories(
             user_id=user_id,
@@ -252,7 +253,7 @@ async def get_user_profile(
                 else:
                     activity.last_memory_at = last_memory_at
                 last_active = activity.last_memory_at
-        
+
         # Count memories in time periods
         activity.memories_last_24h = await db.count_memories(
             user_id=user_id,
@@ -269,14 +270,14 @@ async def get_user_profile(
             project_id=project_id,
             since=now - timedelta(days=30),
         )
-    
+
     # Build top topics
     top_topics: list[TopTopic] = []
     if include_topics:
         # Extract topics from entity types and names
         topic_counter: Counter[str] = Counter()
         topic_last_seen: dict[str, datetime] = {}
-        
+
         # Use entity types as topics
         for entity in entities:
             topic = entity.type.lower()
@@ -288,7 +289,7 @@ async def get_user_profile(
                     updated = entity.updated_at
                 if topic not in topic_last_seen or updated > topic_last_seen[topic]:
                     topic_last_seen[topic] = updated
-        
+
         # Also extract from entity names (concepts, categories)
         concept_entities = [e for e in entities if e.type.lower() in ("concept", "topic", "category")]
         for entity in concept_entities:
@@ -301,7 +302,7 @@ async def get_user_profile(
                     updated = entity.updated_at
                 if topic not in topic_last_seen or updated > topic_last_seen[topic]:
                     topic_last_seen[topic] = updated
-        
+
         # Build top topics list
         for topic, count in topic_counter.most_common(topic_limit):
             top_topics.append(
@@ -311,7 +312,7 @@ async def get_user_profile(
                     last_mentioned=topic_last_seen.get(topic),
                 )
             )
-    
+
     return UserProfileResponse(
         user_id=user_id,
         project_id=project_id,
@@ -344,7 +345,7 @@ async def get_my_profile(
 ) -> UserProfileResponse:
     """
     Convenience endpoint to get your own profile.
-    
+
     Equivalent to GET /api/v1/users/{your_user_id}/profile.
     """
     return await get_user_profile(

@@ -6,13 +6,13 @@ appropriate TTLs for automatic memory expiration.
 
 Examples:
     - "meeting tomorrow at 2pm" → expires in ~36 hours
-    - "remember for next week" → expires in 7 days  
+    - "remember for next week" → expires in 7 days
     - "annual review" → expires in 1 year
     - "call me in 30 minutes" → expires in ~1 hour
 
 Usage:
     parser = TemporalParser()
-    
+
     result = parser.detect("Meeting with John tomorrow at 3pm")
     if result:
         print(f"Suggested TTL: {result.ttl_seconds}s ({result.reason})")
@@ -36,7 +36,7 @@ if TYPE_CHECKING:
 
 class TemporalGranularity(Enum):
     """Granularity of detected temporal reference."""
-    
+
     MINUTES = "minutes"
     HOURS = "hours"
     DAYS = "days"
@@ -49,25 +49,25 @@ class TemporalGranularity(Enum):
 @dataclass
 class TemporalDetection:
     """Result of temporal phrase detection."""
-    
+
     phrase: str
     """The matched temporal phrase from content."""
-    
+
     ttl_seconds: int
     """Suggested TTL in seconds."""
-    
+
     ttl_string: str
     """Human-readable TTL (e.g., '36h', '7d')."""
-    
+
     granularity: TemporalGranularity
     """Time granularity of the reference."""
-    
+
     confidence: float
     """Detection confidence (0.0 - 1.0)."""
-    
+
     reason: str
     """Explanation of why this TTL was suggested."""
-    
+
     buffer_hours: int = 12
     """Hours of buffer added after the temporal reference."""
 
@@ -126,7 +126,6 @@ TEMPORAL_PATTERNS: list[tuple[re.Pattern[str], int, TemporalGranularity, float, 
         0.95,
         "explicit remember duration",
     ),
-    
     # "until X" patterns
     (
         re.compile(r"\buntil\s+tomorrow\b", re.I),
@@ -160,7 +159,6 @@ TEMPORAL_PATTERNS: list[tuple[re.Pattern[str], int, TemporalGranularity, float, 
         0.85,
         "expires after next month",
     ),
-    
     # Relative time - "in X minutes/hours/days"
     (
         re.compile(r"\bin\s+(\d+)\s*(?:min(?:ute)?s?)\b", re.I),
@@ -197,7 +195,6 @@ TEMPORAL_PATTERNS: list[tuple[re.Pattern[str], int, TemporalGranularity, float, 
         0.80,
         "relative time reference",
     ),
-    
     # Common temporal keywords
     (
         re.compile(r"\btomorrow\b(?:\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?", re.I),
@@ -284,7 +281,6 @@ TEMPORAL_PATTERNS: list[tuple[re.Pattern[str], int, TemporalGranularity, float, 
         0.70,
         "reference to this year",
     ),
-    
     # Meeting/event patterns
     (
         re.compile(r"\bmeeting\s+(?:is\s+)?(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*(?:today)?\b", re.I),
@@ -332,7 +328,6 @@ TEMPORAL_PATTERNS: list[tuple[re.Pattern[str], int, TemporalGranularity, float, 
         0.80,
         "deadline in N days",
     ),
-    
     # Recurring/periodic patterns - longer TTLs
     (
         re.compile(r"\b(?:weekly|every\s+week)\b", re.I),
@@ -362,7 +357,6 @@ TEMPORAL_PATTERNS: list[tuple[re.Pattern[str], int, TemporalGranularity, float, 
         0.60,
         "quarterly event",
     ),
-    
     # Specific date patterns (MM/DD or Month Day)
     (
         re.compile(
@@ -382,21 +376,21 @@ TEMPORAL_PATTERNS: list[tuple[re.Pattern[str], int, TemporalGranularity, float, 
 class TemporalParser:
     """
     Parser for detecting temporal phrases and suggesting TTLs.
-    
+
     This parser uses a combination of regex patterns to detect
     temporal references in text content. When a match is found,
     it suggests an appropriate TTL that expires after the temporal
     reference (with a buffer).
-    
+
     The parser is designed to be lightweight and fast - no external
     NLP dependencies required. For complex parsing needs, you can
     optionally enable dateparser integration.
-    
+
     Args:
         use_dateparser: Try dateparser for unmatched content (requires install)
         min_confidence: Minimum confidence threshold for detection
         default_buffer_hours: Default buffer hours added after reference
-    
+
     Example:
         >>> parser = TemporalParser()
         >>> result = parser.detect("Meeting tomorrow at 3pm")
@@ -404,7 +398,7 @@ class TemporalParser:
         ...     print(f"TTL: {result.ttl_string}")
         TTL: 36h
     """
-    
+
     def __init__(
         self,
         use_dateparser: bool = False,
@@ -415,27 +409,28 @@ class TemporalParser:
         self._min_confidence = min_confidence
         self._default_buffer_hours = default_buffer_hours
         self._dateparser = None
-        
+
         if use_dateparser:
             try:
                 import dateparser
+
                 self._dateparser = dateparser
             except ImportError:
                 pass
-    
+
     def detect(self, content: str) -> TemporalDetection | None:
         """
         Detect temporal phrases in content and suggest TTL.
-        
+
         Scans the content for temporal references and returns
         the highest-confidence match with a suggested TTL.
-        
+
         Args:
             content: Text content to analyze
-            
+
         Returns:
             TemporalDetection with suggested TTL, or None if no match
-        
+
         Example:
             >>> parser = TemporalParser()
             >>> result = parser.detect("Remember for 3 days: buy groceries")
@@ -444,14 +439,14 @@ class TemporalParser:
         """
         if not content or not isinstance(content, str):
             return None
-        
+
         best_match: TemporalDetection | None = None
         best_confidence = 0.0
-        
+
         for pattern, ttl_calc, granularity, confidence, reason in TEMPORAL_PATTERNS:
             if confidence < self._min_confidence:
                 continue
-                
+
             match = pattern.search(content)
             if match:
                 # Calculate TTL (pattern may have lambda or int)
@@ -459,7 +454,7 @@ class TemporalParser:
                     ttl_seconds = ttl_calc(match)
                 else:
                     ttl_seconds = ttl_calc
-                
+
                 if confidence > best_confidence:
                     best_confidence = confidence
                     best_match = TemporalDetection(
@@ -471,41 +466,41 @@ class TemporalParser:
                         reason=reason,
                         buffer_hours=self._default_buffer_hours,
                     )
-        
+
         # Try dateparser as fallback for complex cases
         if best_match is None and self._dateparser is not None:
             best_match = self._try_dateparser(content)
-        
+
         return best_match
-    
+
     def detect_all(self, content: str) -> list[TemporalDetection]:
         """
         Detect all temporal phrases in content.
-        
+
         Unlike detect(), this returns all matches found,
         not just the highest confidence one.
-        
+
         Args:
             content: Text content to analyze
-            
+
         Returns:
             List of TemporalDetection objects, sorted by confidence (highest first)
         """
         if not content or not isinstance(content, str):
             return []
-        
+
         matches: list[TemporalDetection] = []
-        
+
         for pattern, ttl_calc, granularity, confidence, reason in TEMPORAL_PATTERNS:
             if confidence < self._min_confidence:
                 continue
-            
+
             for match in pattern.finditer(content):
                 if callable(ttl_calc):
                     ttl_seconds = ttl_calc(match)
                 else:
                     ttl_seconds = ttl_calc
-                
+
                 matches.append(
                     TemporalDetection(
                         phrase=match.group(0),
@@ -517,16 +512,16 @@ class TemporalParser:
                         buffer_hours=self._default_buffer_hours,
                     )
                 )
-        
+
         # Sort by confidence (highest first)
         matches.sort(key=lambda x: x.confidence, reverse=True)
         return matches
-    
+
     def _try_dateparser(self, content: str) -> TemporalDetection | None:
         """Fallback to dateparser for complex temporal expressions."""
         if self._dateparser is None:
             return None
-        
+
         try:
             # Try to parse the content as a date
             parsed = self._dateparser.parse(
@@ -536,13 +531,13 @@ class TemporalParser:
                     "RELATIVE_BASE": datetime.now(),
                 },
             )
-            
+
             if parsed:
                 delta = parsed - datetime.now()
                 if delta.total_seconds() > 0:
                     # Add buffer
                     ttl_seconds = int(delta.total_seconds()) + (self._default_buffer_hours * 3600)
-                    
+
                     return TemporalDetection(
                         phrase="(dateparser)",
                         ttl_seconds=ttl_seconds,
@@ -554,13 +549,13 @@ class TemporalParser:
                     )
         except Exception:
             pass
-        
+
         return None
-    
+
     def _infer_granularity(self, delta: timedelta) -> TemporalGranularity:
         """Infer granularity from timedelta."""
         seconds = delta.total_seconds()
-        
+
         if seconds < 3600:
             return TemporalGranularity.MINUTES
         elif seconds < 86400:
@@ -573,7 +568,7 @@ class TemporalParser:
             return TemporalGranularity.MONTHS
         else:
             return TemporalGranularity.YEARS
-    
+
     def _format_ttl(self, seconds: int) -> str:
         """Format seconds as human-readable TTL string."""
         if seconds < 3600:
@@ -612,16 +607,16 @@ def detect_temporal(
 ) -> TemporalDetection | None:
     """
     Convenience function to detect temporal phrases.
-    
+
     Uses a singleton parser instance for efficiency.
-    
+
     Args:
         content: Text content to analyze
         min_confidence: Minimum confidence threshold
-        
+
     Returns:
         TemporalDetection or None
-    
+
     Example:
         >>> from remembra.client.temporal_parser import detect_temporal
         >>> result = detect_temporal("Call me tomorrow at 3pm")
@@ -629,24 +624,24 @@ def detect_temporal(
         '36h'
     """
     global _default_parser
-    
+
     if _default_parser is None:
         _default_parser = TemporalParser(min_confidence=min_confidence)
-    
+
     return _default_parser.detect(content)
 
 
 def suggest_ttl(content: str, min_confidence: float = 0.5) -> str | None:
     """
     Convenience function to get TTL suggestion for content.
-    
+
     Args:
         content: Text content to analyze
         min_confidence: Minimum confidence threshold
-        
+
     Returns:
         TTL string (e.g., "36h", "7d") or None
-    
+
     Example:
         >>> from remembra.client.temporal_parser import suggest_ttl
         >>> suggest_ttl("Meeting next week")

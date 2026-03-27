@@ -456,7 +456,7 @@ class Database:
     ) -> int:
         """
         Count active memories for a user, optionally scoped to one project.
-        
+
         Args:
             user_id: User ID to count memories for
             project_id: Optional project filter
@@ -473,7 +473,7 @@ class Database:
         if project_id:
             query += " AND project_id = ?"
             params.append(project_id)
-        
+
         if since:
             query += " AND created_at >= ?"
             params.append(since.isoformat())
@@ -490,12 +490,12 @@ class Database:
     ) -> list[dict[str, Any]]:
         """
         Get recent memories for a user, ordered by creation time (newest first).
-        
+
         Args:
             user_id: User ID
             project_id: Optional project filter
             limit: Maximum number of memories to return
-            
+
         Returns:
             List of memory dictionaries with id, content, extracted_facts, created_at, etc.
         """

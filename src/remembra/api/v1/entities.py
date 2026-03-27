@@ -288,6 +288,7 @@ async def get_entity(
         memory_count=len(memory_ids),
     )
 
+
 @router.get(
     "/{entity_id}/relationships",
     response_model=RelationshipsListResponse,

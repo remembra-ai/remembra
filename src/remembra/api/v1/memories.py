@@ -79,6 +79,7 @@ def _is_memory_expired(memory: dict[str, Any]) -> bool:
 
     return datetime.utcnow() > expires_at.replace(tzinfo=None)
 
+
 router = APIRouter(prefix="/memories", tags=["memories"])
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -636,7 +637,7 @@ async def get_memory(
     Retrieve a specific memory by its ID.
 
     Note: Can only access memories belonging to the authenticated user.
-    
+
     **Strict Mode (v0.12):**
     When strict_mode=true, accessing an expired memory returns HTTP 410 GONE.
     """
@@ -751,7 +752,7 @@ async def update_memory(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Memory {memory_id} not found",
         )
-    
+
     # STRICT MODE: Check for expired memory reference (v0.12)
     # When enabled, writes to expired refs return 410 GONE to force
     # agents to re-acquire context instead of creating orphan updates
@@ -772,7 +773,7 @@ async def update_memory(
                 "strict_mode": True,
             },
         )
-    
+
     if existing.get("project_id"):
         resolve_project_access(current_user, existing["project_id"])
 
@@ -790,6 +791,7 @@ async def update_memory(
             new_metadata=body.metadata,
         )
         from remembra.security.audit import AuditAction
+
         await audit_logger.log(
             user_id=current_user.user_id,
             action=AuditAction.MEMORY_UPDATE,
@@ -817,6 +819,7 @@ async def update_memory(
         ) from None
     except Exception as e:
         from remembra.security.audit import AuditAction
+
         await audit_logger.log(
             user_id=current_user.user_id,
             action=AuditAction.MEMORY_UPDATE,
@@ -894,6 +897,7 @@ async def supersede_memory(
 
         # Audit log
         from remembra.security.audit import AuditAction
+
         await audit_logger.log(
             user_id=current_user.user_id,
             action=AuditAction.MEMORY_UPDATE,  # Or create MEMORY_SUPERSEDE
