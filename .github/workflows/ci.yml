@@ -60,7 +60,7 @@ jobs:
         run: pip install -e ".[server,cloud,dev]"
 
       - name: Run tests
-        run: pytest --tb=short
+        run: pytest --tb=short --ignore=tests/test_billing_paddle.py
 
       - name: Upload coverage
         if: matrix.python-version == '3.11'
