@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, Lock, AlertTriangle, Loader2, Shield, Smartphone, CheckCircle, XCircle, Key, Database, Globe, FolderOpen, Activity, Gauge } from 'lucide-react';
+import { User, Lock, AlertTriangle, Loader2, Shield, Smartphone, CheckCircle, XCircle, Key, Database, Globe, FolderOpen, Activity, Gauge, FileText, Clock, Download } from 'lucide-react';
 import clsx from 'clsx';
 import { api } from '../lib/api';
 import { API_V1 } from '../config';
@@ -1031,6 +1031,9 @@ function SecuritySettings() {
         )}
       </div>
 
+      {/* Activity Log */}
+      <ActivityLog />
+
       {/* Security Tips */}
       <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800 p-4">
         <h4 className="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-2">
@@ -1043,6 +1046,241 @@ function SecuritySettings() {
           <li>• Regularly review your active sessions</li>
         </ul>
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Activity Log Component
+// ---------------------------------------------------------------------------
+
+interface AuditEvent {
+  id: string;
+  timestamp: string;
+  action: string;
+  api_key_id: string | null;
+  resource_id: string | null;
+  ip_address: string | null;
+  success: boolean;
+  error_message: string | null;
+}
+
+function ActivityLog() {
+  const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('remembra_jwt_token');
+    if (token) {
+      return { 'Authorization': `Bearer ${token}` };
+    }
+    const apiKey = localStorage.getItem('remembra_api_key');
+    if (apiKey) {
+      return { 'X-API-Key': apiKey };
+    }
+    return {};
+  };
+
+  useEffect(() => {
+    fetchActivityLog();
+  }, []);
+
+  const fetchActivityLog = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_V1}/admin/audit?limit=50`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (response.status === 403) {
+        // User doesn't have admin permissions - show message
+        setEvents([]);
+        setLoading(false);
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch activity log');
+      }
+
+      const data = await response.json();
+      setEvents(data.events || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load activity log');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const exportActivityLog = async () => {
+    try {
+      const response = await fetch(`${API_V1}/admin/audit/export/json?limit=1000`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to export');
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `audit_log_${new Date().toISOString().split('T')[0]}.json`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Export failed');
+    }
+  };
+
+  const formatAction = (action: string) => {
+    const actionLabels: Record<string, string> = {
+      memory_store: 'Stored Memory',
+      memory_recall: 'Recalled Memory',
+      memory_update: 'Updated Memory',
+      memory_forget: 'Deleted Memory',
+      memory_get: 'Retrieved Memory',
+      key_created: 'Created API Key',
+      key_updated: 'Updated API Key',
+      key_revoked: 'Revoked API Key',
+      key_listed: 'Listed API Keys',
+      auth_success: 'Login Success',
+      auth_failed: 'Login Failed',
+      auth_rate_limited: 'Rate Limited',
+    };
+    return actionLabels[action] || action;
+  };
+
+  const formatTimestamp = (ts: string) => {
+    const date = new Date(ts);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+  };
+
+  const getActionIcon = (action: string, success: boolean) => {
+    if (!success) return <XCircle className="w-4 h-4 text-red-500" />;
+    if (action.startsWith('memory_')) return <Database className="w-4 h-4 text-blue-500" />;
+    if (action.startsWith('key_')) return <Key className="w-4 h-4 text-purple-500" />;
+    if (action.startsWith('auth_')) return <Shield className="w-4 h-4 text-green-500" />;
+    return <FileText className="w-4 h-4 text-gray-500" />;
+  };
+
+  if (loading) {
+    return (
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-center justify-center py-8">
+          <Loader2 className="w-6 h-6 animate-spin text-[#8B5CF6]" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
+            <FileText className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Activity Log
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Recent account and API activity
+            </p>
+          </div>
+        </div>
+        {events.length > 0 && (
+          <button
+            onClick={exportActivityLog}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-gray-100 hover:bg-gray-200 text-gray-700 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200"
+          >
+            <Download className="w-4 h-4" />
+            Export
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div className="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm">
+          {error}
+        </div>
+      )}
+
+      {events.length === 0 ? (
+        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+          <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
+          <p className="text-sm">No activity recorded yet</p>
+          <p className="text-xs mt-1">Activity will appear here as you use the API</p>
+        </div>
+      ) : (
+        <>
+          <div className="space-y-2">
+            {(expanded ? events : events.slice(0, 5)).map((event) => (
+              <div
+                key={event.id}
+                className={clsx(
+                  'flex items-center gap-3 p-3 rounded-lg',
+                  event.success 
+                    ? 'bg-gray-50 dark:bg-gray-900' 
+                    : 'bg-red-50 dark:bg-red-900/20'
+                )}
+              >
+                {getActionIcon(event.action, event.success)}
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                    {formatAction(event.action)}
+                  </p>
+                  {event.api_key_id && (
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      via API key ...{event.api_key_id.slice(-8)}
+                    </p>
+                  )}
+                  {event.error_message && (
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      {event.error_message}
+                    </p>
+                  )}
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    {formatTimestamp(event.timestamp)}
+                  </p>
+                  {event.ip_address && (
+                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                      {event.ip_address}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {events.length > 5 && (
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="w-full mt-4 py-2 text-sm text-[#8B5CF6] hover:text-[#7C3AED] font-medium"
+            >
+              {expanded ? 'Show less' : `Show ${events.length - 5} more events`}
+            </button>
+          )}
+        </>
+      )}
     </div>
   );
 }
