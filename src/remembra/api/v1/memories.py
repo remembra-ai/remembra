@@ -7,31 +7,6 @@ from typing import Annotated, Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-log = structlog.get_logger(__name__)
-
-
-def _is_memory_expired(memory: dict[str, Any]) -> bool:
-    """
-    Check if a memory has expired based on its expires_at timestamp.
-    
-    Args:
-        memory: Memory dict with optional expires_at field
-        
-    Returns:
-        True if memory has expired, False otherwise
-    """
-    expires_at = memory.get("expires_at")
-    if not expires_at:
-        return False
-    
-    if isinstance(expires_at, str):
-        try:
-            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
-        except ValueError:
-            return False
-    
-    return datetime.utcnow() > expires_at.replace(tzinfo=None)
-
 from remembra.auth.middleware import (
     CurrentUser,
     get_client_ip,
@@ -75,9 +50,34 @@ from remembra.webhooks.events import (
     memory_stored_event,
 )
 
+log = structlog.get_logger(__name__)
+
 # Security: Logger for internal error details (never exposed to users)
 _internal_log = structlog.get_logger("remembra.api.errors")
 _webhook_log = logging.getLogger(__name__)
+
+
+def _is_memory_expired(memory: dict[str, Any]) -> bool:
+    """
+    Check if a memory has expired based on its expires_at timestamp.
+
+    Args:
+        memory: Memory dict with optional expires_at field
+
+    Returns:
+        True if memory has expired, False otherwise
+    """
+    expires_at = memory.get("expires_at")
+    if not expires_at:
+        return False
+
+    if isinstance(expires_at, str):
+        try:
+            expires_at = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+
+    return datetime.utcnow() > expires_at.replace(tzinfo=None)
 
 router = APIRouter(prefix="/memories", tags=["memories"])
 
