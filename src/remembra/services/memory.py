@@ -24,6 +24,7 @@ from remembra.extraction.entities import create_entity_extractor
 from remembra.extraction.extractor import ExtractionConfig, FactExtractor
 from remembra.extraction.matcher import EntityMatcher, ExistingEntity
 from remembra.models.memory import (
+    DivergenceDetail,
     Entity,
     EntityRef,
     ForgetResponse,
@@ -966,14 +967,73 @@ class MemoryService:
         # Use top N from ranked results (respecting limit)
         final_ranked = ranked[: request.limit]
 
+        # Step 8a: Divergence Detection (v0.13)
+        # Compare top result by semantic vs top result by recency
+        divergence_detected = False
+        divergence_details = None
+        staleness_threshold_days = self.settings.ranking_recency_decay_days
+
+        if len(ranked) >= 2:
+            # Find top by semantic score
+            semantic_sorted = sorted(ranked, key=lambda r: r.semantic_score, reverse=True)
+            semantic_top = semantic_sorted[0]
+
+            # Find top by recency score
+            recency_sorted = sorted(ranked, key=lambda r: r.recency_score, reverse=True)
+            recency_top = recency_sorted[0]
+
+            # Check for divergence: different memories AND both have meaningful scores
+            if (
+                semantic_top.id != recency_top.id
+                and semantic_top.semantic_score > 0.5
+                and recency_top.recency_score > 0.5
+            ):
+                # Calculate divergence score (how much they disagree)
+                divergence_score = abs(semantic_top.semantic_score - recency_top.semantic_score)
+                divergence_score += abs(semantic_top.recency_score - recency_top.recency_score)
+                divergence_score = min(1.0, divergence_score / 2.0)
+
+                if divergence_score > 0.3:  # Threshold for flagging
+                    divergence_detected = True
+                    divergence_details = DivergenceDetail(
+                        semantic_top_id=semantic_top.id,
+                        recency_top_id=recency_top.id,
+                        semantic_content=semantic_top.content[:200],
+                        recency_content=recency_top.content[:200],
+                        divergence_score=divergence_score,
+                        recommendation=(
+                            "The most semantically relevant memory differs from the most recent. "
+                            "Consider reviewing both - they may represent evolving information."
+                        ),
+                    )
+                    log.info(
+                        "divergence_detected",
+                        semantic_top_id=semantic_top.id,
+                        recency_top_id=recency_top.id,
+                        divergence_score=divergence_score,
+                    )
+
+        # Step 8b: Build memory results with freshness scores
+        now = datetime.utcnow()
         memories: list[RecallResult] = []
         for r in final_ranked:
+            created = r.created_at or now
+            age_days = (now - created).days
+
+            # Freshness score: 1.0 = today, decays to 0 over staleness_threshold_days
+            freshness = max(0.0, 1.0 - (age_days / (staleness_threshold_days * 2)))
+
             memories.append(
                 RecallResult(
                     id=r.id,
                     relevance=r.final_score,
                     content=r.content,
-                    created_at=r.created_at or datetime.utcnow(),
+                    created_at=created,
+                    freshness_score=round(freshness, 3),
+                    age_days=age_days,
+                    staleness_warning=age_days > staleness_threshold_days,
+                    semantic_score=round(r.semantic_score, 3),
+                    recency_score=round(r.recency_score, 3),
                 )
             )
             # Update access tracking
@@ -993,12 +1053,15 @@ class MemoryService:
             results_count=len(memories),
             entities_count=len(all_entities),
             context_tokens=optimized.total_tokens,
+            divergence_detected=divergence_detected,
         )
 
         return RecallResponse(
             context=optimized.context,
             memories=memories,
             entities=all_entities,
+            divergence_detected=divergence_detected,
+            divergence_details=divergence_details,
         )
 
     # -----------------------------------------------------------------------

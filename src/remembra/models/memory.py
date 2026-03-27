@@ -221,12 +221,63 @@ class RecallResult(BaseModel):
     relevance: float
     content: str
     created_at: datetime
+    # Freshness scoring (v0.13)
+    freshness_score: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="How fresh is this memory (1.0 = recent, 0.0 = stale)",
+    )
+    age_days: int = Field(
+        default=0,
+        description="Days since memory was created",
+    )
+    staleness_warning: bool = Field(
+        default=False,
+        description="True if memory is older than staleness threshold (default 30 days)",
+    )
+    # Signal decomposition for divergence detection
+    semantic_score: float = Field(
+        default=0.0,
+        description="Raw semantic similarity score",
+    )
+    recency_score: float = Field(
+        default=0.0,
+        description="Raw recency-based score",
+    )
+
+
+class DivergenceDetail(BaseModel):
+    """Details about a detected divergence between recency and semantic signals."""
+
+    semantic_top_id: str = Field(description="Memory ID ranked top by semantic similarity")
+    recency_top_id: str = Field(description="Memory ID ranked top by recency")
+    semantic_content: str = Field(description="Content of semantic top memory")
+    recency_content: str = Field(description="Content of recency top memory")
+    divergence_score: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="How much the signals disagree (1.0 = complete disagreement)",
+    )
+    recommendation: str = Field(
+        default="Review both memories - they may represent evolving information",
+        description="Guidance for the consumer on how to handle the divergence",
+    )
 
 
 class RecallResponse(BaseModel):
     context: str
     memories: list[RecallResult]
     entities: list[EntityRef]
+    # Divergence detection (v0.13)
+    divergence_detected: bool = Field(
+        default=False,
+        description="True if recency and semantic signals point to different memories",
+    )
+    divergence_details: DivergenceDetail | None = Field(
+        default=None,
+        description="Details about the divergence, if detected",
+    )
     usage_warning: dict[str, Any] | None = Field(
         default=None,
         description="Usage warning when approaching plan limits (cloud only).",
