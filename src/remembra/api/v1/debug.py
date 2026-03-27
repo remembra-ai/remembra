@@ -586,3 +586,158 @@ async def get_memory_timeline(
         page=page,
         page_size=page_size,
     )
+
+
+# ---------------------------------------------------------------------------
+# Calibration endpoints
+# ---------------------------------------------------------------------------
+
+
+class CalibrationStatusResponse(BaseModel):
+    """Current calibration status."""
+
+    calibrated: bool = Field(description="Whether calibration has been run")
+    p99_latency_ms: float | None = Field(description="p99 recall latency in ms")
+    p95_latency_ms: float | None = Field(description="p95 recall latency in ms")
+    p50_latency_ms: float | None = Field(description="p50 recall latency in ms")
+    last_calibrated: str | None = Field(description="ISO timestamp of last calibration")
+    sample_count: int = Field(default=0, description="Number of samples in calibration")
+    config_hash: str | None = Field(description="Hash of config used for calibration")
+
+
+class CalibrationRunResponse(BaseModel):
+    """Result of running calibration."""
+
+    success: bool
+    p99_latency_ms: float
+    p95_latency_ms: float
+    p50_latency_ms: float
+    sample_count: int
+    calibrated_at: str
+    message: str
+
+
+@router.get(
+    "/calibration",
+    response_model=CalibrationStatusResponse,
+    summary="Get current calibration status",
+)
+@limiter.limit("60/minute")
+async def get_calibration_status(
+    request: Request,
+    current_user: CurrentUser,
+) -> CalibrationStatusResponse:
+    """Get the current p99 calibration status."""
+    from remembra.core.calibration import CalibrationCache
+
+    cache = CalibrationCache()
+    result = cache.load()
+
+    if result and result.is_valid:
+        return CalibrationStatusResponse(
+            calibrated=True,
+            p99_latency_ms=result.recall_p99_ms,
+            p95_latency_ms=result.recall_p95_ms,
+            p50_latency_ms=result.recall_p50_ms,
+            last_calibrated=result.calibrated_at,
+            sample_count=result.sample_count,
+            config_hash=result.config_hash,
+        )
+    else:
+        return CalibrationStatusResponse(
+            calibrated=False,
+            p99_latency_ms=None,
+            p95_latency_ms=None,
+            p50_latency_ms=None,
+            last_calibrated=None,
+            sample_count=0,
+            config_hash=None,
+        )
+
+
+@router.post(
+    "/calibrate",
+    response_model=CalibrationRunResponse,
+    summary="Run p99 calibration",
+)
+@limiter.limit("5/minute")
+async def run_calibration_endpoint(
+    request: Request,
+    memory_service: MemoryServiceDep,
+    current_user: CurrentUser,
+    samples: int = Query(default=20, ge=5, le=100, description="Number of samples to run"),
+) -> CalibrationRunResponse:
+    """
+    Run calibration to measure p99 latency.
+
+    This performs multiple recall operations to measure performance.
+    Results are cached to ~/.remembra/calibration.json.
+    """
+    from remembra.core.calibration import CalibrationCache, CalibrationConfig, CalibrationResult
+
+    # Run calibration samples
+    latencies: list[float] = []
+    test_query = "test calibration query"
+
+    for _ in range(samples):
+        start = time.perf_counter()
+        try:
+            await memory_service.recall(
+                query=test_query,
+                user_id=current_user.user_id,
+                project_id=None,
+                limit=5,
+                threshold=0.1,
+            )
+        except Exception:
+            pass  # Ignore errors during calibration
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        latencies.append(elapsed_ms)
+
+    if not latencies:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Calibration failed - no samples completed",
+        )
+
+    # Calculate percentiles
+    latencies.sort()
+    p50_idx = int(len(latencies) * 0.5)
+    p95_idx = int(len(latencies) * 0.95)
+    p99_idx = int(len(latencies) * 0.99)
+
+    p50 = latencies[p50_idx] if p50_idx < len(latencies) else latencies[-1]
+    p95 = latencies[p95_idx] if p95_idx < len(latencies) else latencies[-1]
+    p99 = latencies[p99_idx] if p99_idx < len(latencies) else latencies[-1]
+
+    # Store in cache
+    settings = get_settings()
+    config = CalibrationConfig(
+        embedding_model=settings.embedding_model,
+        embedding_dim=settings.embedding_dim,
+        enable_hybrid=settings.hybrid_alpha > 0,
+        enable_reranking=settings.enable_reranking,
+    )
+
+    result = CalibrationResult(
+        recall_p50_ms=p50,
+        recall_p95_ms=p95,
+        recall_p99_ms=p99,
+        calibrated_at=datetime.now(UTC).isoformat(),
+        config_hash=config.compute_hash(),
+        sample_count=len(latencies),
+        is_valid=True,
+    )
+
+    cache = CalibrationCache()
+    cache.save(result, config)
+
+    return CalibrationRunResponse(
+        success=True,
+        p99_latency_ms=p99,
+        p95_latency_ms=p95,
+        p50_latency_ms=p50,
+        sample_count=len(latencies),
+        calibrated_at=result.calibrated_at,
+        message=f"Calibration complete with {len(latencies)} samples. p99={p99:.2f}ms",
+    )

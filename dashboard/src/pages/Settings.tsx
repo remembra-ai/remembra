@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
-import { User, Lock, AlertTriangle, Loader2, Shield, Smartphone, CheckCircle, XCircle, Key, Database, Globe } from 'lucide-react';
+import { User, Lock, AlertTriangle, Loader2, Shield, Smartphone, CheckCircle, XCircle, Key, Database, Globe, FolderOpen, Activity, Gauge } from 'lucide-react';
 import clsx from 'clsx';
 import { api } from '../lib/api';
 import { API_V1 } from '../config';
 import type { UserResponse } from '../lib/api';
 
-type SettingsTab = 'profile' | 'password' | 'security' | 'account';
+type SettingsTab = 'profile' | 'password' | 'security' | 'workspace' | 'diagnostics' | 'account';
 
 interface SettingsProps {
   onLogout: () => void;
@@ -198,6 +198,30 @@ export function Settings({ onLogout }: SettingsProps) {
             Security
           </button>
           <button
+            onClick={() => setActiveTab('workspace')}
+            className={clsx(
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              activeTab === 'workspace'
+                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            )}
+          >
+            <FolderOpen className="w-4 h-4" />
+            Workspace
+          </button>
+          <button
+            onClick={() => setActiveTab('diagnostics')}
+            className={clsx(
+              'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
+              activeTab === 'diagnostics'
+                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
+                : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+            )}
+          >
+            <Activity className="w-4 h-4" />
+            Diagnostics
+          </button>
+          <button
             onClick={() => setActiveTab('account')}
             className={clsx(
               'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
@@ -221,6 +245,12 @@ export function Settings({ onLogout }: SettingsProps) {
       )}
       {activeTab === 'security' && (
         <SecuritySettings />
+      )}
+      {activeTab === 'workspace' && (
+        <WorkspaceSettings />
+      )}
+      {activeTab === 'diagnostics' && (
+        <DiagnosticsSettings />
       )}
       {activeTab === 'account' && user && (
         <AccountSettings user={user} onLogout={onLogout} />
@@ -1011,6 +1041,439 @@ function SecuritySettings() {
           <li>• Enable 2FA for an extra layer of protection</li>
           <li>• Never share your API keys or passwords</li>
           <li>• Regularly review your active sessions</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Workspace Settings Component
+// ---------------------------------------------------------------------------
+
+interface Project {
+  id: string;
+  name: string;
+  description: string;
+  project_id: string;
+}
+
+function WorkspaceSettings() {
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [defaultProject, setDefaultProject] = useState<string>(() => api.getProjectId() || 'default');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('remembra_jwt_token');
+    if (token) {
+      return { 'Authorization': `Bearer ${token}` };
+    }
+    const apiKey = localStorage.getItem('remembra_api_key');
+    if (apiKey) {
+      return { 'X-API-Key': apiKey };
+    }
+    return {};
+  };
+
+  useEffect(() => {
+    fetchProjects();
+  }, []);
+
+  const fetchProjects = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_V1}/spaces`, {
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch projects');
+      }
+
+      const data = await response.json();
+      const spaces = Array.isArray(data) ? data : data.spaces || [];
+      setProjects(spaces);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load projects');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const saveDefaultProject = async () => {
+    setSaving(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      // Save to localStorage and API client
+      api.setProjectId(defaultProject);
+      localStorage.setItem('remembra_project_id', defaultProject);
+      
+      // Dispatch event for other components
+      window.dispatchEvent(new CustomEvent('remembra:project-changed', {
+        detail: { projectId: defaultProject }
+      }));
+
+      setSuccess('Default project updated successfully');
+      setTimeout(() => setSuccess(null), 3000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-[#8B5CF6]" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Default Project */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 rounded-lg bg-purple-100 dark:bg-purple-900/30">
+            <FolderOpen className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              Default Project
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Choose which project to use by default when storing memories
+            </p>
+          </div>
+        </div>
+
+        {error && (
+          <div className="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+
+        {success && (
+          <div className="mb-4 p-3 rounded-lg bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-sm flex items-center gap-2">
+            <CheckCircle className="w-4 h-4" />
+            {success}
+          </div>
+        )}
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Select Default Project
+            </label>
+            <select
+              value={defaultProject}
+              onChange={(e) => setDefaultProject(e.target.value)}
+              className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+            >
+              <option value="default">Default (no project)</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.project_id}>
+                  {project.name} ({project.project_id})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            onClick={saveDefaultProject}
+            disabled={saving}
+            className={clsx(
+              'px-4 py-2 rounded-lg font-medium transition-colors',
+              'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white',
+              saving && 'opacity-50 cursor-not-allowed'
+            )}
+          >
+            {saving ? (
+              <Loader2 className="w-4 h-4 animate-spin mx-auto" />
+            ) : (
+              'Save Default Project'
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Workspace Info */}
+      <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+          About Workspaces
+        </h4>
+        <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+          <li>• Projects help organize memories by topic or application</li>
+          <li>• Memories in different projects are isolated from each other</li>
+          <li>• Use Teams to share projects with collaborators</li>
+        </ul>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics Settings Component
+// ---------------------------------------------------------------------------
+
+interface HealthStatus {
+  status: string;
+  version: string;
+  embedding_model: string;
+  vector_dimension: number;
+  qdrant_connected: boolean;
+  memories_count?: number;
+}
+
+interface CalibrationStatus {
+  calibrated: boolean;
+  p99_latency_ms?: number;
+  last_calibrated?: string;
+  embedding_dimension?: number;
+}
+
+function DiagnosticsSettings() {
+  const [health, setHealth] = useState<HealthStatus | null>(null);
+  const [calibration, setCalibration] = useState<CalibrationStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
+
+  const getAuthHeaders = () => {
+    const token = localStorage.getItem('remembra_jwt_token');
+    if (token) {
+      return { 'Authorization': `Bearer ${token}` };
+    }
+    const apiKey = localStorage.getItem('remembra_api_key');
+    if (apiKey) {
+      return { 'X-API-Key': apiKey };
+    }
+    return {};
+  };
+
+  useEffect(() => {
+    fetchDiagnostics();
+  }, []);
+
+  const fetchDiagnostics = async () => {
+    try {
+      setLoading(true);
+      
+      // Fetch health status
+      const healthResponse = await fetch(`${API_V1.replace('/api/v1', '')}/health`);
+      if (healthResponse.ok) {
+        const healthData = await healthResponse.json();
+        setHealth(healthData);
+      }
+
+      // Fetch calibration status
+      const calibrationResponse = await fetch(`${API_V1}/debug/calibration`, {
+        headers: getAuthHeaders(),
+      });
+      if (calibrationResponse.ok) {
+        const calibrationData = await calibrationResponse.json();
+        setCalibration(calibrationData);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load diagnostics');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const runCalibration = async () => {
+    setCalibrating(true);
+    try {
+      const response = await fetch(`${API_V1}/debug/calibrate`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to run calibration');
+      }
+
+      // Refresh diagnostics
+      await fetchDiagnostics();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Calibration failed');
+    } finally {
+      setCalibrating(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="w-8 h-8 animate-spin text-[#8B5CF6]" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {error && (
+        <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-sm">
+          {error}
+        </div>
+      )}
+
+      {/* Health Status */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="p-2 rounded-lg bg-green-100 dark:bg-green-900/30">
+            <Activity className="w-5 h-5 text-green-600 dark:text-green-400" />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+              System Health
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              Current status of the Remembra service
+            </p>
+          </div>
+        </div>
+
+        {health ? (
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Status</p>
+              <p className={clsx(
+                'text-sm font-medium',
+                health.status === 'ok' ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+              )}>
+                {health.status === 'ok' ? '✓ Healthy' : '✗ Unhealthy'}
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Version</p>
+              <p className="text-sm font-medium text-gray-900 dark:text-white">
+                {health.version}
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Embedding Model</p>
+              <p className="text-sm font-medium text-gray-900 dark:text-white truncate" title={health.embedding_model}>
+                {health.embedding_model}
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Vector Dimension</p>
+              <p className="text-sm font-medium text-gray-900 dark:text-white">
+                {health.vector_dimension}
+              </p>
+            </div>
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Qdrant Status</p>
+              <p className={clsx(
+                'text-sm font-medium',
+                health.qdrant_connected ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
+              )}>
+                {health.qdrant_connected ? '✓ Connected' : '✗ Disconnected'}
+              </p>
+            </div>
+            {health.memories_count !== undefined && (
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Total Memories</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  {health.memories_count.toLocaleString()}
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Unable to fetch health status
+          </p>
+        )}
+      </div>
+
+      {/* Calibration Status */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-blue-100 dark:bg-blue-900/30">
+              <Gauge className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            </div>
+            <div>
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                p99 Calibration
+              </h3>
+              <p className="text-sm text-gray-500 dark:text-gray-400">
+                Embedding latency calibration for optimal performance
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={runCalibration}
+            disabled={calibrating}
+            className={clsx(
+              'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              'bg-blue-100 hover:bg-blue-200 text-blue-700 dark:bg-blue-900/30 dark:hover:bg-blue-900/50 dark:text-blue-300',
+              calibrating && 'opacity-50 cursor-not-allowed'
+            )}
+          >
+            {calibrating ? (
+              <span className="flex items-center gap-2">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                Running...
+              </span>
+            ) : (
+              'Run Calibration'
+            )}
+          </button>
+        </div>
+
+        {calibration ? (
+          <div className="grid grid-cols-2 gap-4">
+            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Calibration Status</p>
+              <p className={clsx(
+                'text-sm font-medium',
+                calibration.calibrated ? 'text-green-600 dark:text-green-400' : 'text-amber-600 dark:text-amber-400'
+              )}>
+                {calibration.calibrated ? '✓ Calibrated' : '⚠ Not Calibrated'}
+              </p>
+            </div>
+            {calibration.p99_latency_ms !== undefined && (
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">p99 Latency</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  {calibration.p99_latency_ms.toFixed(2)} ms
+                </p>
+              </div>
+            )}
+            {calibration.last_calibrated && (
+              <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900 col-span-2">
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Last Calibrated</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">
+                  {new Date(calibration.last_calibrated).toLocaleString()}
+                </p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Calibration data not available. Run calibration to measure performance.
+          </p>
+        )}
+      </div>
+
+      {/* Diagnostics Info */}
+      <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
+        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+          About Diagnostics
+        </h4>
+        <ul className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
+          <li>• p99 calibration measures embedding latency to optimize timeouts</li>
+          <li>• Run calibration after server restarts for accurate measurements</li>
+          <li>• Calibration results are cached for improved performance</li>
         </ul>
       </div>
     </div>
