@@ -113,6 +113,7 @@ nav:
     - How It Works: concepts/how-it-works.md
     - Memory Model: concepts/memory-model.md
     - Entity Graph: concepts/entity-graph.md
+    - Durability & Recovery: concepts/durability.md
   - Examples:
     - Chatbot Memory: examples/chatbot.md
     - RAG Pipeline: examples/rag-pipeline.md
