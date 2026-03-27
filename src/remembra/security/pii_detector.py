@@ -36,9 +36,13 @@ PII_PATTERNS: dict[str, re.Pattern] = {
     "phone_intl": re.compile(r"\b\+\d{1,3}[-.\s]?\d{6,14}\b"),
     # API Keys / Secrets (common patterns)
     "api_key": re.compile(r"\b(?:sk|pk|api|key|token|secret)[-_][A-Za-z0-9]{16,}\b", re.IGNORECASE),
-    # Password values after common labels (Password: xxx, password=xxx, **Password:** xxx)
+    # Password values after common labels
+    # Catches: "password: xxx", "password=xxx", "password is xxx", "my password: xxx"
     # Matches the full pattern; password value is in group 1
-    "password": re.compile(r"(?:password|passwd|pwd)\s*[:\=\*]+\s*(\S{6,})", re.IGNORECASE),
+    "password": re.compile(
+        r"(?:password|passwd|pwd)\s*(?:[:\=\*]+|is|are|was)\s*(\S{6,})",
+        re.IGNORECASE,
+    ),
     # AWS Access Keys
     "aws_key": re.compile(r"\b(?:AKIA|ABIA|ACCA|ASIA)[A-Z0-9]{16}\b"),
     # IP Addresses (v4)
