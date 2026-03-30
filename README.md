@@ -362,3 +362,8 @@ If Remembra helps you, please star the repo! It helps others discover the projec
   Built with ❤️ by <a href="https://dolphytech.com">DolphyTech</a><br>
   <a href="https://remembra.dev">remembra.dev</a> • <a href="https://docs.remembra.dev">docs</a> • <a href="https://twitter.com/remembradev">twitter</a> • <a href="https://discord.gg/Bzv3JshRa3">discord</a>
 </p>
+
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/remembra-ai-remembra).
+
