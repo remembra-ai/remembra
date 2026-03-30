@@ -11,13 +11,20 @@
   <body>
     <div id="root"></div>
     <!-- Paddle.js for billing checkout -->
-    <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+    <script src="https://cdn.paddle.com/paddle/v2/paddle.js" onerror="console.warn('Paddle.js failed to load - checkout will use fallback')"></script>
     <script>
       // Initialize Paddle (production mode)
-      if (typeof Paddle !== 'undefined') {
-        Paddle.Initialize({ 
-          token: 'live_5d05508ad75c2fe0d5621718dbd'  // Paddle client-side token
-        });
+      try {
+        if (typeof Paddle !== 'undefined') {
+          Paddle.Initialize({ 
+            token: 'live_5d05508ad75c2fe0d5621718dbd'  // Paddle client-side token
+          });
+          console.log('Paddle initialized successfully');
+        } else {
+          console.warn('Paddle not available - checkout will redirect instead of overlay');
+        }
+      } catch (e) {
+        console.error('Paddle initialization error:', e);
       }
     </script>
     <script type="module" src="/src/main.tsx"></script>
