@@ -237,7 +237,7 @@ async def create_checkout(
 
         # Fetch user email from database (AuthenticatedUser doesn't have email)
         db = request.app.state.db
-        user_data = await db.get_user(current_user.user_id)
+        user_data = await db.get_user_by_id(current_user.user_id)
         if not user_data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
