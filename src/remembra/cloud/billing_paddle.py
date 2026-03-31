@@ -218,6 +218,28 @@ class PaddleBillingManager:
         return result
 
     # -----------------------------------------------------------------------
+    # Customer lookup
+    # -----------------------------------------------------------------------
+
+    async def get_customer_by_email(self, email: str) -> str | None:
+        """Look up a Paddle customer ID by email address.
+
+        Returns the customer ID if found, None otherwise.
+        """
+        try:
+            result = await self._request(
+                "GET",
+                f"/customers?email={email}",
+            )
+            customers = result.get("data", [])
+            if customers and len(customers) > 0:
+                return customers[0]["id"]
+            return None
+        except Exception as e:
+            logger.warning("Failed to look up customer by email %s: %s", email, e)
+            return None
+
+    # -----------------------------------------------------------------------
     # Portal - Customer portal URL
     # -----------------------------------------------------------------------
 
@@ -235,6 +257,16 @@ class PaddleBillingManager:
             {},
         )
         return result["data"]["urls"]["general"]["overview"]
+
+    async def create_portal_session_by_email(self, email: str) -> str | None:
+        """Create a customer portal session URL by looking up email.
+
+        Returns portal URL if customer found, None otherwise.
+        """
+        customer_id = await self.get_customer_by_email(email)
+        if not customer_id:
+            return None
+        return await self.create_portal_session(customer_id)
 
     # -----------------------------------------------------------------------
     # Subscription management

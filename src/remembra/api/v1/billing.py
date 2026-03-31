@@ -307,12 +307,14 @@ async def get_portal(
             sandbox=paddle_settings.sandbox,
         )
 
-        # Get customer ID from user profile
-        # TODO: Look up actual Paddle customer ID from user's subscription
-        # For now, this will fail if user doesn't have a Paddle customer ID
-        url = await billing.create_portal_session(
-            paddle_customer_id=current_user.user_id,  # We'd need to look this up
-        )
+        # Look up customer by email address
+        url = await billing.create_portal_session_by_email(current_user.email)
+
+        if not url:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No billing account found. Please contact support if you have an active subscription.",
+            )
 
         return PortalResponse(portal_url=url)
 

@@ -545,6 +545,11 @@ class ApiClient {
     // Use /billing/portal for Paddle, falls back to /cloud/portal for Stripe
     return this.fetchApi<PortalResponse>('/billing/portal', {
       method: 'POST',
+    }).catch(() => {
+      // Fallback to old Stripe endpoint if billing endpoint not available
+      return this.fetchApi<PortalResponse>('/cloud/portal', {
+        method: 'POST',
+      });
     });
   }
 
