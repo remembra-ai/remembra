@@ -474,7 +474,7 @@ export function Billing() {
             </div>
           </div>
           
-          {hasPaidPlan && (
+          {hasPaidPlan && !isEnterprise && (
             <button
               onClick={handleManageSubscription}
               disabled={portalLoading}
@@ -489,6 +489,16 @@ export function Billing() {
                 </>
               )}
             </button>
+          )}
+          
+          {isEnterprise && (
+            <a
+              href="mailto:sales@dolphytech.com?subject=Remembra Enterprise Support"
+              className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
+            >
+              <Mail className="w-4 h-4" />
+              Contact Sales
+            </a>
           )}
         </div>
       </div>
