@@ -335,6 +335,17 @@ export function Billing() {
 
   useEffect(() => {
     loadBillingData();
+    
+    // Initialize Paddle.js for overlay checkout
+    // @ts-expect-error Paddle is loaded via script tag
+    if (typeof window.Paddle !== 'undefined' && !window.Paddle.Initialized) {
+      // @ts-expect-error Paddle global
+      window.Paddle.Initialize({
+        token: 'live_5d05508ad75c2fe0d5621718dbd', // Paddle client-side token
+      });
+      // @ts-expect-error Paddle global
+      window.Paddle.Initialized = true;
+    }
   }, []);
 
   const loadBillingData = async () => {
