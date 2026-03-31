@@ -196,6 +196,51 @@ async def get_plans(
         )
 
 
+class ClientConfigResponse(BaseModel):
+    """Client-side config for Paddle.js checkout."""
+
+    provider: str
+    client_token: str | None = None
+    prices: dict[str, str] = Field(default_factory=dict, description="Plan -> price_id mapping")
+    success_url: str = "https://remembra.dev/dashboard?checkout=success"
+
+
+@router.get(
+    "/client-config",
+    response_model=ClientConfigResponse,
+    summary="Get client-side checkout config",
+)
+@limiter.limit("60/minute")
+async def get_client_config(
+    request: Request,
+    settings: SettingsDep,
+) -> ClientConfigResponse:
+    """Get config needed for client-side Paddle.js overlay checkout.
+
+    Returns price IDs and client token so the frontend can open
+    Paddle.Checkout.open() with items directly (no server-side transaction needed).
+    """
+    provider = get_billing_provider(settings)
+
+    if provider == "paddle":
+        from remembra.cloud.paddle_config import get_paddle_settings
+
+        paddle_settings = get_paddle_settings()
+        config = paddle_settings.config
+
+        return ClientConfigResponse(
+            provider="paddle",
+            client_token=paddle_settings.client_token,
+            prices={
+                "pro": config.pro_prices.monthly,
+                "team": config.team_prices.monthly,
+            },
+            success_url="https://remembra.dev/dashboard?checkout=success",
+        )
+
+    return ClientConfigResponse(provider=provider)
+
+
 @router.post(
     "/checkout",
     response_model=CheckoutResponse,
@@ -353,13 +398,13 @@ async def paddle_webhook(request: Request) -> dict[str, str]:
         )
 
     from remembra.cloud.billing_paddle import PaddleBillingManager
-    from remembra.cloud.paddle_config import get_paddle_config
+    from remembra.cloud.paddle_config import get_paddle_settings
 
-    config = get_paddle_config()
+    paddle_settings = get_paddle_settings()
     billing = PaddleBillingManager(
-        api_key=config.api_key,
-        webhook_secret=config.webhook_secret or "",
-        sandbox=config.sandbox,
+        api_key=paddle_settings.api_key,
+        webhook_secret=paddle_settings.webhook_secret or "",
+        sandbox=paddle_settings.sandbox,
     )
 
     # Get raw body and signature

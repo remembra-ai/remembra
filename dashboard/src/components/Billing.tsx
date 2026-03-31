@@ -377,11 +377,36 @@ export function Billing() {
 
   const handleUpgrade = async (plan: string) => {
     setCheckoutLoading(true);
+    setError(null);
     try {
+      // Try client-side Paddle checkout first (simpler, recommended by Paddle)
+      // @ts-expect-error Paddle is loaded via script tag
+      if (typeof window.Paddle !== 'undefined') {
+        const configResponse = await api.getBillingClientConfig();
+
+        if (configResponse.provider === 'paddle' && configResponse.prices[plan]) {
+          const userJson = localStorage.getItem('remembra_user');
+          const userEmail = userJson ? JSON.parse(userJson)?.email : undefined;
+          const userId = api.getUserId();
+
+          // @ts-expect-error Paddle global
+          window.Paddle.Checkout.open({
+            items: [{ priceId: configResponse.prices[plan], quantity: 1 }],
+            ...(userEmail ? { customer: { email: userEmail } } : {}),
+            customData: { remembra_user_id: userId, plan },
+            settings: {
+              successUrl: configResponse.success_url || 'https://remembra.dev/dashboard?checkout=success',
+            },
+          });
+          setCheckoutLoading(false);
+          return;
+        }
+      }
+
+      // Fallback: server-side transaction approach
       const response = await api.createCheckout(plan);
-      
+
       if (response.provider === 'paddle' && response.transaction_id) {
-        // Paddle overlay checkout
         // @ts-expect-error Paddle is loaded via script tag
         if (typeof window.Paddle !== 'undefined') {
           // @ts-expect-error Paddle global
@@ -389,13 +414,11 @@ export function Billing() {
             transactionId: response.transaction_id,
           });
         } else if (response.checkout_url) {
-          // Fallback to redirect if Paddle.js not loaded
           window.location.href = response.checkout_url;
         } else {
           throw new Error('Paddle checkout not available');
         }
       } else if (response.checkout_url) {
-        // Stripe redirect checkout
         window.location.href = response.checkout_url;
       } else {
         throw new Error('No checkout URL returned');

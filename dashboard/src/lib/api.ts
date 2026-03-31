@@ -533,6 +533,10 @@ class ApiClient {
     return this.fetchApi<DailyUsageResponse>(`/cloud/usage/daily?days=${days}`);
   }
 
+  async getBillingClientConfig(): Promise<BillingClientConfigResponse> {
+    return this.fetchApi<BillingClientConfigResponse>('/billing/client-config');
+  }
+
   async createCheckout(plan: string): Promise<CheckoutResponse> {
     // Use /billing/checkout for Paddle, falls back to /cloud/checkout for Stripe
     return this.fetchApi<CheckoutResponse>('/billing/checkout', {
@@ -763,6 +767,13 @@ export interface PlanInfoResponse {
   limits: Record<string, unknown>;
   usage: Record<string, number>;
   limit_checks: Record<string, { allowed: boolean; reason?: string; limit?: number; current?: number }>;
+}
+
+export interface BillingClientConfigResponse {
+  provider: string;
+  client_token?: string;
+  prices: Record<string, string>;  // plan -> price_id
+  success_url?: string;
 }
 
 export interface CheckoutResponse {
