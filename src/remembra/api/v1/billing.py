@@ -235,11 +235,26 @@ async def create_checkout(
                 detail=f"Invalid plan: {body.plan}. Choose 'pro' or 'team'.",
             )
 
+        # Fetch user email from database (AuthenticatedUser doesn't have email)
+        db = request.app.state.db
+        user_data = await db.get_user(current_user.user_id)
+        if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found.",
+            )
+        user_email = user_data.get("email")
+        if not user_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User email not found. Please update your profile.",
+            )
+
         result = await billing.create_checkout_session(
             customer_id=None,  # Will be created
             plan=plan_tier,
             user_id=current_user.user_id,
-            email=current_user.email,
+            email=user_email,
         )
 
         return CheckoutResponse(
