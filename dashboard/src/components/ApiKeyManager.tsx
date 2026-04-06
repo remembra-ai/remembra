@@ -262,7 +262,7 @@ function ModalOverlay({ children, onClose }: { children: React.ReactNode, onClos
       initial={{ opacity: 0 }} 
       animate={{ opacity: 1 }} 
       exit={{ opacity: 0 }} 
-      className="modal-backdrop fixed inset-0 z-50 flex items-center justify-center p-4"
+      className="modal-backdrop fixed inset-0 z-[100] flex items-center justify-center p-4"
       onClick={(e) => {
         if (e.target === e.currentTarget && onClose) onClose();
       }}
@@ -272,7 +272,7 @@ function ModalOverlay({ children, onClose }: { children: React.ReactNode, onClos
         animate={{ scale: 1, opacity: 1, y: 0 }}
         exit={{ scale: 0.95, opacity: 0, y: 10 }}
         transition={{ type: "spring", duration: 0.4 }}
-        className="modal-surface w-full max-w-md rounded-2xl overflow-hidden"
+        className="modal-surface w-full max-w-md rounded-2xl overflow-hidden relative z-[101]"
       >
         {children}
       </motion.div>
