@@ -1,8 +1,11 @@
 """
 LLM-powered entity extraction from text.
 
-Extracts people, organizations, locations, and their relationships.
+Extracts people, organizations, locations, trading entities, and their relationships.
 Supports OpenAI, Anthropic, and Ollama providers.
+
+Updated: April 10, 2026 - Added trading-specific entity and relationship types
+for TradeMind integration.
 """
 
 from __future__ import annotations
@@ -28,6 +31,8 @@ log = structlog.get_logger()
 ENTITY_EXTRACTION_PROMPT = """You are an entity extraction engine. Extract entities and relationships from text.
 
 ENTITY TYPES:
+
+General:
 - PERSON: People's names (include titles, roles if mentioned)
 - ORG: Companies, organizations, teams, groups
 - LOCATION: Cities, countries, addresses, places
@@ -36,7 +41,18 @@ ENTITY TYPES:
 - MONEY: Monetary amounts, prices, budgets
 - CONCEPT: Abstract concepts, topics, skills
 
+Trading/Finance:
+- SYMBOL: Trading instruments and tickers (NQ, ES, GC, SPY, AAPL, MNQ, etc.)
+- STRATEGY: Trading strategies (ORB breakout, VWAP bounce, gap fill, Globex reversal, mean reversion)
+- REGIME: Market regimes/states (trending, mean-reverting, volatile, choppy, range-bound, dislocated)
+- INDICATOR: Technical indicators (ATR, VWAP, RSI, volume ratio, moving average, Bollinger bands)
+- TRADE: Trade events with entry/exit details (long entry, short exit, stop loss hit, take profit)
+- TIMEFRAME: Trading timeframes (1-minute, 5-minute, 15-minute, daily, weekly, RTH, ETH)
+- SESSION: Trading sessions (pre-market, regular hours, after-hours, overnight, Globex, Asian, European)
+
 RELATIONSHIP TYPES:
+
+General:
 - WORKS_AT: Person works at organization
 - MANAGES: Person manages another person
 - SPOUSE_OF: Married/partner relationship
@@ -44,6 +60,17 @@ RELATIONSHIP TYPES:
 - OWNS: Person/org owns something
 - CREATED: Person/org created something
 - ROLE: Person has a role (e.g., CEO, Manager)
+
+Trading/Finance:
+- TRADES: Person/agent trades a symbol
+- USES_STRATEGY: Agent/system uses strategy for trading
+- PERFORMED_IN: Trade or strategy performed in a specific regime
+- TRIGGERS: Indicator triggers a strategy or trade signal
+- CORRELATES_WITH: Symbol correlates with another symbol
+- TRANSITIONS_TO: Regime transitions to another regime
+- HAS_WIN_RATE: Strategy has a specific win rate (often in a regime)
+- OCCURS_DURING: Event occurs during a session or timeframe
+- TARGETS: Trade targets a price level
 
 RULES:
 1. Extract ALL named entities, even if mentioned once
@@ -55,6 +82,8 @@ RULES:
    - "worked at" (past) vs "works at" (present)
    - "since 2020", "from 2018 to 2022", "until last year"
    - If no temporal info, omit valid_from/valid_to (defaults to present)
+7. TRADING: For trading content, prioritize SYMBOL, STRATEGY, REGIME, and INDICATOR entities
+8. WIN RATES: Extract win rates and statistics as relationships with the strategy
 
 OUTPUT FORMAT (strict JSON):
 {
@@ -88,7 +117,7 @@ OUTPUT FORMAT (strict JSON):
   ]
 }
 
-TEMPORAL EXAMPLES:
+GENERAL EXAMPLES:
 
 Input: "Alice used to work at Meta from 2019 to 2022. She now works at Google."
 Output: {
@@ -135,6 +164,94 @@ Output: {
     {"name": "Denver office", "type": "LOCATION", "description": "Meeting location", "aliases": ["Denver"]}
   ],
   "relationships": []
+}
+
+TRADING EXAMPLES:
+
+Input: "ORB breakout on NQ in trending regime had 71% win rate across 847 trades"
+Output: {
+  "entities": [
+    {"name": "ORB breakout", "type": "STRATEGY", "description": "Opening range breakout strategy", "aliases": ["ORB", "opening range breakout"]},
+    {"name": "NQ", "type": "SYMBOL", "description": "Nasdaq 100 E-mini futures", "aliases": ["Nasdaq futures", "MNQ", "NQ futures"]},
+    {"name": "trending", "type": "REGIME", "description": "Trending/momentum market regime", "aliases": ["trend", "momentum", "directional"]}
+  ],
+  "relationships": [
+    {"subject": "ORB breakout", "predicate": "PERFORMED_IN", "object": "trending"},
+    {"subject": "ORB breakout", "predicate": "HAS_WIN_RATE", "object": "71%"}
+  ]
+}
+
+Input: "NQ transitioned from volatile to mean-reverting at 10:30 AM during regular hours"
+Output: {
+  "entities": [
+    {"name": "NQ", "type": "SYMBOL", "description": "Nasdaq 100 E-mini futures", "aliases": []},
+    {"name": "volatile", "type": "REGIME", "description": "High volatility market regime", "aliases": ["high vol", "dislocated"]},
+    {"name": "mean-reverting", "type": "REGIME", "description": "Range-bound, choppy market regime", "aliases": ["choppy", "range", "reverting"]},
+    {"name": "10:30 AM", "type": "DATE", "description": "Time of regime transition", "aliases": []},
+    {"name": "regular hours", "type": "SESSION", "description": "Regular trading hours session", "aliases": ["RTH", "cash session"]}
+  ],
+  "relationships": [
+    {"subject": "volatile", "predicate": "TRANSITIONS_TO", "object": "mean-reverting"},
+    {"subject": "volatile", "predicate": "OCCURS_DURING", "object": "regular hours"}
+  ]
+}
+
+Input: "VWAP bounce strategy works best when ATR is below 15 points in choppy regime"
+Output: {
+  "entities": [
+    {"name": "VWAP bounce", "type": "STRATEGY", "description": "Mean reversion strategy using VWAP as support/resistance", "aliases": ["VWAP reversion", "VWAP fade"]},
+    {"name": "ATR", "type": "INDICATOR", "description": "Average True Range volatility indicator", "aliases": ["average true range"]},
+    {"name": "choppy", "type": "REGIME", "description": "Range-bound, mean-reverting market regime", "aliases": ["mean-reverting", "range-bound"]}
+  ],
+  "relationships": [
+    {"subject": "VWAP bounce", "predicate": "TRIGGERS", "object": "ATR"},
+    {"subject": "VWAP bounce", "predicate": "PERFORMED_IN", "object": "choppy"}
+  ]
+}
+
+Input: "Gap fill on ES after overnight session had 68% success rate, best results when Globex range was narrow"
+Output: {
+  "entities": [
+    {"name": "Gap fill", "type": "STRATEGY", "description": "Strategy to trade gaps filling back to previous close", "aliases": ["gap fade", "gap close"]},
+    {"name": "ES", "type": "SYMBOL", "description": "S&P 500 E-mini futures", "aliases": ["S&P futures", "MES", "SPX futures"]},
+    {"name": "overnight session", "type": "SESSION", "description": "Overnight/Globex trading session", "aliases": ["Globex", "ETH", "overnight"]},
+    {"name": "Globex range", "type": "INDICATOR", "description": "Price range during Globex/overnight session", "aliases": ["overnight range"]}
+  ],
+  "relationships": [
+    {"subject": "Gap fill", "predicate": "OCCURS_DURING", "object": "overnight session"},
+    {"subject": "Gap fill", "predicate": "HAS_WIN_RATE", "object": "68%"},
+    {"subject": "Gap fill", "predicate": "TRIGGERS", "object": "Globex range"}
+  ]
+}
+
+Input: "The General agent took a long entry on GC at 2,340 with stop at 2,335 targeting 2,355"
+Output: {
+  "entities": [
+    {"name": "The General", "type": "PERSON", "description": "Trading agent/AI system", "aliases": ["General", "agent"]},
+    {"name": "GC", "type": "SYMBOL", "description": "Gold futures", "aliases": ["gold", "gold futures", "MGC"]},
+    {"name": "long entry", "type": "TRADE", "description": "Long position entry at 2,340", "aliases": []},
+    {"name": "2,340", "type": "MONEY", "description": "Entry price", "aliases": []},
+    {"name": "2,335", "type": "MONEY", "description": "Stop loss price", "aliases": []},
+    {"name": "2,355", "type": "MONEY", "description": "Target price", "aliases": []}
+  ],
+  "relationships": [
+    {"subject": "The General", "predicate": "TRADES", "object": "GC"},
+    {"subject": "long entry", "predicate": "TARGETS", "object": "2,355"}
+  ]
+}
+
+Input: "ES and NQ regimes aligned in trending state, correlation at 0.94"
+Output: {
+  "entities": [
+    {"name": "ES", "type": "SYMBOL", "description": "S&P 500 E-mini futures", "aliases": []},
+    {"name": "NQ", "type": "SYMBOL", "description": "Nasdaq 100 E-mini futures", "aliases": []},
+    {"name": "trending", "type": "REGIME", "description": "Trending market state", "aliases": []}
+  ],
+  "relationships": [
+    {"subject": "ES", "predicate": "CORRELATES_WITH", "object": "NQ"},
+    {"subject": "ES", "predicate": "PERFORMED_IN", "object": "trending"},
+    {"subject": "NQ", "predicate": "PERFORMED_IN", "object": "trending"}
+  ]
 }
 """
 
