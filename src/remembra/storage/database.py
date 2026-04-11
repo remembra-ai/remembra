@@ -685,6 +685,43 @@ class Database:
         await self.conn.commit()
         return cursor.rowcount
 
+    async def delete_project_memories(self, user_id: str, project_id: str) -> int:
+        """Delete all memories for a user within a specific project.
+
+        SECURITY: Always requires user_id to prevent cross-user deletion.
+        Properly handles FK constraints by deleting relationships first.
+        """
+        # First, get all memory IDs for this user/project
+        cursor = await self.conn.execute(
+            "SELECT id FROM memories WHERE user_id = ? AND project_id = ?",
+            (user_id, project_id),
+        )
+        memory_ids = [row[0] for row in await cursor.fetchall()]
+
+        if not memory_ids:
+            return 0
+
+        # Delete relationships that reference these memories as source
+        placeholders = ",".join("?" * len(memory_ids))
+        await self.conn.execute(
+            f"DELETE FROM relationships WHERE source_memory_id IN ({placeholders})",
+            memory_ids,
+        )
+
+        # Delete memory_entities
+        await self.conn.execute(
+            f"DELETE FROM memory_entities WHERE memory_id IN ({placeholders})",
+            memory_ids,
+        )
+
+        # Now safe to delete the memories
+        cursor = await self.conn.execute(
+            "DELETE FROM memories WHERE user_id = ? AND project_id = ?",
+            (user_id, project_id),
+        )
+        await self.conn.commit()
+        return cursor.rowcount
+
     async def migrate_memory_relationships(
         self,
         old_memory_id: str,

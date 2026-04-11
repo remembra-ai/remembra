@@ -374,6 +374,12 @@ class ApiClient {
     });
   }
 
+  async wipeProject(projectId: string): Promise<{ deleted_memories: number }> {
+    return this.fetchApi<{ deleted_memories: number }>(`/memories?project_id=${projectId}`, {
+      method: 'DELETE',
+    });
+  }
+
   async updateMemory(id: string, content: string): Promise<Memory> {
     return this.fetchApi<Memory>(`/memories/${id}`, {
       method: 'PATCH',

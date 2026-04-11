@@ -1015,11 +1015,16 @@ async def forget_memories(
     memory_id: Annotated[str | None, Query(description="Delete a specific memory by ID")] = None,
     entity: Annotated[str | None, Query(description="Delete all memories about an entity")] = None,
     all_memories: Annotated[bool, Query(description="Delete all memories for the user")] = False,
+    project_id: Annotated[str | None, Query(description="Delete all memories in a specific project")] = None,
 ) -> ForgetResponse:
     """
     Delete memories matching the given filter.
 
-    At least one of `memory_id`, `entity`, or `all_memories=true` is required.
+    At least one of `memory_id`, `entity`, `all_memories=true`, or `project_id` is required.
+
+    For project-scoped API keys:
+    - Use `project_id` to delete all memories in your project
+    - Or delete by `memory_id` for individual deletions
 
     Note: Can only delete your own memories.
     Rate limit: 10 requests/minute.
@@ -1031,21 +1036,32 @@ async def forget_memories(
             detail="Permission denied: memory:delete required",
         )
 
-    if not any([memory_id, entity, all_memories]):
+    if not any([memory_id, entity, all_memories, project_id]):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Provide at least one of: memory_id, entity, all_memories=true",
+            detail="Provide at least one of: memory_id, entity, all_memories=true, project_id",
         )
 
     # SECURITY FIX: ALWAYS pass user_id to prevent IDOR (cross-user deletion)
     # This ensures users can only delete their own memories
     user_id = current_user.user_id
 
-    if current_user.project_ids and (entity or all_memories):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=("Project-scoped API keys must delete by memory_id until project-scoped bulk delete is implemented."),
-        )
+    # For project-scoped API keys doing bulk operations
+    if current_user.project_ids:
+        if entity or all_memories:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Project-scoped API keys cannot use entity or all_memories. Use project_id for bulk delete.",
+            )
+        # If project_id provided, verify it's in the allowed projects
+        if project_id and project_id not in current_user.project_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"API key does not have access to project: {project_id}",
+            )
+        # If no project_id but we have project_ids, use the first one (single-project key)
+        if not project_id and not memory_id and len(current_user.project_ids) == 1:
+            project_id = current_user.project_ids[0]
 
     if memory_id:
         memory = await memory_service.get(memory_id)
@@ -1062,6 +1078,7 @@ async def forget_memories(
             memory_id=memory_id,
             user_id=user_id,
             entity=entity,
+            project_id=project_id,
         )
 
         # Audit log

@@ -249,6 +249,52 @@ class QdrantStore:
         log.info("qdrant_deleted_user_memories", user_id=user_id, count=count_result.count)
         return count_result.count
 
+    async def delete_by_project(self, user_id: str, project_id: str) -> int:
+        """Delete all memories for a user within a specific project. Returns count deleted.
+        
+        SECURITY: Always requires user_id to prevent cross-user deletion.
+        """
+        client = await self._get_client()
+
+        # First count how many we're deleting
+        count_result = await client.count(
+            collection_name=self.collection_name,
+            count_filter=qmodels.Filter(
+                must=[
+                    qmodels.FieldCondition(
+                        key=FIELD_USER_ID,
+                        match=qmodels.MatchValue(value=user_id),
+                    ),
+                    qmodels.FieldCondition(
+                        key=FIELD_PROJECT_ID,
+                        match=qmodels.MatchValue(value=project_id),
+                    ),
+                ]
+            ),
+        )
+
+        # Delete by filter
+        await client.delete(
+            collection_name=self.collection_name,
+            points_selector=qmodels.FilterSelector(
+                filter=qmodels.Filter(
+                    must=[
+                        qmodels.FieldCondition(
+                            key=FIELD_USER_ID,
+                            match=qmodels.MatchValue(value=user_id),
+                        ),
+                        qmodels.FieldCondition(
+                            key=FIELD_PROJECT_ID,
+                            match=qmodels.MatchValue(value=project_id),
+                        ),
+                    ]
+                )
+            ),
+        )
+
+        log.info("qdrant_deleted_project_memories", user_id=user_id, project_id=project_id, count=count_result.count)
+        return count_result.count
+
     async def get_by_id(self, memory_id: str) -> dict[str, Any] | None:
         """Retrieve a memory by ID."""
         client = await self._get_client()

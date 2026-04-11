@@ -1475,6 +1475,7 @@ class MemoryService:
         memory_id: str | None = None,
         user_id: str | None = None,
         entity: str | None = None,
+        project_id: str | None = None,
     ) -> ForgetResponse:
         """
         GDPR-compliant deletion of memories.
@@ -1482,6 +1483,7 @@ class MemoryService:
         Can delete by:
         - Specific memory ID
         - All memories for a user
+        - All memories for a user within a project (project-scoped delete)
         - All memories mentioning an entity (TODO: Week 5)
         """
         deleted_memories = 0
@@ -1505,6 +1507,17 @@ class MemoryService:
             if await self.db.delete_memory(memory_id):
                 deleted_memories = 1
             log.info("forgot_memory", memory_id=memory_id, user_id=user_id)
+
+        elif user_id and project_id:
+            # Project-scoped deletion: delete all memories for user within a specific project
+            deleted_memories = await self.qdrant.delete_by_project(user_id, project_id)
+            await self.db.delete_project_memories(user_id, project_id)
+            log.info(
+                "forgot_project",
+                user_id=user_id,
+                project_id=project_id,
+                memories=deleted_memories,
+            )
 
         elif user_id:
             # Delete all user data

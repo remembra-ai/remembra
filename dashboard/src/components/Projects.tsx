@@ -302,6 +302,40 @@ export function Projects() {
     }
   };
 
+  const wipeProjectMemories = async (space: Space) => {
+    const memoryCount = space.memory_count || 0;
+    if (!confirm(`⚠️ DANGER: This will permanently delete ALL ${memoryCount} memories in "${space.name}".\n\nThis action cannot be undone. Are you absolutely sure?`)) {
+      return;
+    }
+    
+    // Double confirmation for safety
+    const confirmText = prompt(`Type "${space.project_id}" to confirm deletion:`);
+    if (confirmText !== space.project_id) {
+      alert('Confirmation text did not match. Deletion cancelled.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_V1}/memories?project_id=${space.project_id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || 'Failed to wipe project memories');
+      }
+
+      const result = await response.json();
+      alert(`Successfully deleted ${result.deleted_memories || 0} memories from "${space.name}".`);
+      
+      // Refresh the spaces list to update memory counts
+      fetchSpaces();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to wipe project memories');
+    }
+  };
+
   const grantAccess = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSpace) return;
@@ -503,13 +537,22 @@ export function Projects() {
                 Space ID: {selectedSpace.id} · Namespace: {selectedSpace.project_id}
               </p>
             </div>
-            <button
-              onClick={() => setShowGrantAccess(true)}
-              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors"
-            >
-              <Users className="w-4 h-4" />
-              Share Access
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowGrantAccess(true)}
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg transition-colors"
+              >
+                <Users className="w-4 h-4" />
+                Share Access
+              </button>
+              <button
+                onClick={() => wipeProjectMemories(selectedSpace)}
+                className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-700 dark:text-red-300 rounded-lg transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+                Wipe All Memories
+              </button>
+            </div>
           </div>
 
           {/* Members List */}
