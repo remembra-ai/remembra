@@ -374,6 +374,12 @@ class BatchStoreRequest(BaseModel):
         "Embeddings are still generated for semantic search. "
         "Use when your data already has structured metadata.",
     )
+    embeddings: list[list[float]] | None = Field(
+        default=None,
+        description="Pre-computed embedding vectors (one per item). "
+        "When provided, skips OpenAI embedding calls entirely. "
+        "Each vector must match the configured embedding dimension (default: 1536 for text-embedding-3-small).",
+    )
 
 
 class BatchStoreResult(BaseModel):

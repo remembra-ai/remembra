@@ -300,12 +300,13 @@ class MemoryService:
         items: list[StoreRequest],
         user_id: str,
         project_id: str = "default",
+        embeddings: list[list[float]] | None = None,
     ) -> dict[str, Any]:
         """
         Fast bulk import for pre-structured data.
         
         Optimized path that:
-        1. Batch embeds all items in one OpenAI call
+        1. Uses pre-computed embeddings OR batch embeds in one OpenAI call
         2. Bulk upserts to Qdrant
         3. Bulk inserts to SQLite
         
@@ -316,6 +317,8 @@ class MemoryService:
             items: List of StoreRequest objects
             user_id: User ID for all items
             project_id: Project ID for all items
+            embeddings: Optional pre-computed embedding vectors (one per item).
+                       When provided, skips OpenAI calls entirely.
             
         Returns:
             Dict with stored count and any errors
@@ -329,21 +332,26 @@ class MemoryService:
         now = datetime.utcnow()
         errors = []
         
-        # Extract all contents for batch embedding
-        contents = [item.content.strip() for item in items]
-        
-        # Batch embed all at once (single OpenAI call!)
-        try:
-            embeddings = await self.embeddings.embed_batch(contents)
-        except Exception as e:
-            log.error("bulk_embed_failed", error=str(e), count=len(contents))
-            return {"stored": 0, "errors": [f"Embedding failed: {str(e)}"]}
+        # Use pre-computed embeddings or generate them
+        if embeddings and len(embeddings) == len(items):
+            log.info("bulk_using_precomputed_embeddings", count=len(embeddings))
+            computed_embeddings = embeddings
+        else:
+            # Extract all contents for batch embedding
+            contents = [item.content.strip() for item in items]
+            
+            # Batch embed all at once (single OpenAI call!)
+            try:
+                computed_embeddings = await self.embeddings.embed_batch(contents)
+            except Exception as e:
+                log.error("bulk_embed_failed", error=str(e), count=len(contents))
+                return {"stored": 0, "errors": [f"Embedding failed: {str(e)}"]}
         
         # Build Memory objects
         memories = []
         memory_dicts = []
         
-        for i, (item, embedding) in enumerate(zip(items, embeddings)):
+        for i, (item, embedding) in enumerate(zip(items, computed_embeddings)):
             memory_id = str(uuid.uuid4())
             
             # Calculate expiration

@@ -490,7 +490,7 @@ async def bulk_import(
     
     **Skips:** Fact extraction, consolidation, conflict detection.
     
-    **Request:**
+    **Request (with server-side embedding):**
     ```json
     {
       "items": [
@@ -499,6 +499,17 @@ async def bulk_import(
       ]
     }
     ```
+    
+    **Request (with pre-computed embeddings - FASTEST):**
+    ```json
+    {
+      "items": [{"content": "...", "metadata": {...}}, ...],
+      "embeddings": [[0.1, 0.2, ...], [0.3, 0.4, ...]]
+    }
+    ```
+    
+    When embeddings are provided, OpenAI calls are skipped entirely.
+    Generate embeddings client-side using text-embedding-3-small (1536 dimensions).
     
     Rate limit: 10 requests/minute (100 items/request = 1000 items/minute max)
     """
@@ -517,6 +528,7 @@ async def bulk_import(
             items=body.items,
             user_id=current_user.user_id,
             project_id=project_id,
+            embeddings=body.embeddings,
         )
         
         await audit_logger.log_memory_store(
