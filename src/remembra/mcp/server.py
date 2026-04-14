@@ -150,6 +150,7 @@ def recall_memories(
     limit: int = 5,
     threshold: float = 0.4,
     slim: bool = False,
+    filters: dict[str, str] | None = None,
 ) -> str:
     """Search persistent memory for relevant information.
 
@@ -166,6 +167,9 @@ def recall_memories(
                    Lower = more results but less relevant.
         slim: If True, returns only the synthesized context string (90% smaller payload).
               Use slim=True when you only need the context, not individual memories.
+        filters: Optional metadata filters (AND-combined exact match). Applied
+                 after retrieval, before ranking. Example:
+                 {"project": "trademind", "type": "deploy-config"}.
 
     Returns:
         JSON string with synthesized context, matching memories, and entities.
@@ -173,7 +177,7 @@ def recall_memories(
     """
     try:
         client = _get_client()
-        result = client.recall(query=query, limit=limit, threshold=threshold)
+        result = client.recall(query=query, limit=limit, threshold=threshold, filters=filters)
 
         # Slim mode: return just context (90% payload reduction)
         if slim:

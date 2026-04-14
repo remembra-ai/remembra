@@ -221,6 +221,14 @@ class RecallRequest(BaseModel):
             "'operational' (entity-heavy), 'strategic' (historical depth)."
         ),
     )
+    filters: dict[str, str] | None = Field(
+        default=None,
+        description=(
+            "Optional metadata filters — AND-combined exact-match against "
+            "the memory's `metadata` field. Applied after retrieval, before "
+            "ranking. Example: {\"project\": \"trademind\", \"type\": \"deploy-config\"}."
+        ),
+    )
 
 
 class RecallResult(BaseModel):

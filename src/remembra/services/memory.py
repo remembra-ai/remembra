@@ -1035,6 +1035,28 @@ class MemoryService:
                         }
                     )
 
+        # Step 4b: Metadata filter (Issue 3)
+        # AND-combined exact-match over decrypted payload["metadata"].
+        # Applied before ranking so downstream stages see the filtered set.
+        requested_filters = getattr(request, "filters", None) or {}
+        if requested_filters:
+            before_count = len(hybrid_results)
+
+            def _matches(r: dict[str, Any]) -> bool:
+                meta = (r.get("payload") or {}).get("metadata") or {}
+                for k, v in requested_filters.items():
+                    if str(meta.get(k)) != str(v):
+                        return False
+                return True
+
+            hybrid_results = [r for r in hybrid_results if _matches(r)]
+            log.info(
+                "recall_metadata_filtered",
+                filters=requested_filters,
+                before=before_count,
+                after=len(hybrid_results),
+            )
+
         if not hybrid_results:
             log.info("recall_no_results", user_id=request.user_id)
             return RecallResponse(context="", memories=[], entities=[])

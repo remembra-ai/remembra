@@ -310,6 +310,7 @@ class Memory:
         query: str,
         limit: int = 5,
         threshold: float = 0.70,
+        filters: dict[str, str] | None = None,
     ) -> RecallResult:
         """
         Recall memories relevant to a query.
@@ -321,6 +322,8 @@ class Memory:
             query: Natural language query
             limit: Maximum number of memories to return (1-50)
             threshold: Minimum relevance score (0.0-1.0)
+            filters: Optional metadata filters (AND-combined exact-match),
+                     e.g. {"project": "trademind", "type": "deploy-config"}.
 
         Returns:
             RecallResult with context string, matching memories, and entities
@@ -339,6 +342,8 @@ class Memory:
             "limit": limit,
             "threshold": threshold,
         }
+        if filters:
+            payload["filters"] = filters
 
         data = self._request("POST", "/api/v1/memories/recall", json=payload)
 
