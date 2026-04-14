@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "remembra"
-version = "0.13.1"
+version = "0.13.2"
 description = "Universal memory layer for AI applications. Self-host in minutes."
 readme = "README.md"
 license = { text = "MIT" }
@@ -72,8 +72,13 @@ server = [
 ]
 
 # MCP server dependencies
+# NOTE: structlog is required transitively — remembra.mcp.server imports
+# remembra.security.error_sanitizer which uses structlog. Without it, the
+# `remembra-mcp` binary crashes at import with ModuleNotFoundError when
+# installed via `pipx install .[mcp]` alone.
 mcp = [
     "mcp>=1.0.0",
+    "structlog>=24.4.0",
 ]
 
 # LangChain integration

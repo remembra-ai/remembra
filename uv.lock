@@ -3772,7 +3772,7 @@ wheels = [
 
 [[package]]
 name = "remembra"
-version = "0.13.1"
+version = "0.13.2"
 source = { editable = "." }
 dependencies = [
     { name = "bcrypt" },
@@ -3836,6 +3836,7 @@ langchain = [
 ]
 mcp = [
     { name = "mcp" },
+    { name = "structlog" },
 ]
 rerank = [
     { name = "sentence-transformers" },
@@ -3910,6 +3911,7 @@ requires-dist = [
     { name = "slowapi", specifier = ">=0.1.9" },
     { name = "slowapi", marker = "extra == 'server'", specifier = ">=0.1.9" },
     { name = "stripe", marker = "extra == 'cloud'", specifier = ">=8.0.0" },
+    { name = "structlog", marker = "extra == 'mcp'", specifier = ">=24.4.0" },
     { name = "structlog", marker = "extra == 'server'", specifier = ">=24.4.0" },
     { name = "tiktoken", marker = "extra == 'server'", specifier = ">=0.7.0" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5.0.0" },
