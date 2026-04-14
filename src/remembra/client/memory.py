@@ -452,6 +452,34 @@ class Memory:
         """
         return self._request("GET", "/health")
 
+    def list(
+        self,
+        limit: int = 20,
+        offset: int = 0,
+        project_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        List stored memories (chronological, not semantically ranked).
+
+        Use this for browsing / pagination. For query-driven retrieval
+        use ``recall()`` instead.
+
+        Args:
+            limit: Maximum memories to return (1-100).
+            offset: Pagination offset.
+            project_id: Optional project namespace. When None, lists across
+                all projects owned by the authenticated user.
+
+        Returns:
+            List of memory summary dicts (id, content, created_at, ...).
+        """
+        params: dict[str, Any] = {"limit": limit, "offset": offset}
+        if project_id is not None:
+            params["project_id"] = project_id
+        result = self._request("GET", "/api/v1/memories", params=params)
+        # Server returns a JSON array, which _request returns verbatim.
+        return result if isinstance(result, list) else []
+
     def ingest_changelog(
         self,
         content: str | None = None,

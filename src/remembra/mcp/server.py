@@ -550,14 +550,15 @@ def list_memories(
     limit: int = 10,
     project_id: str | None = None,
 ) -> str:
-    """Browse stored memories.
+    """Browse stored memories (chronological, not semantic).
 
-    Returns recent memories without requiring a search query. Useful for
-    checking what has been stored or getting an overview of memory contents.
+    Returns the most recent memories without requiring a search query.
+    Useful for checking what has been stored or getting an overview.
 
     Args:
         limit: Maximum memories to return (1-50, default: 10).
-        project_id: Optional project namespace to filter by.
+        project_id: Optional project namespace to filter by. When omitted,
+            lists across all projects owned by the authenticated user.
 
     Returns:
         JSON string with memories (id, content snippet, created_at).
@@ -565,25 +566,31 @@ def list_memories(
     try:
         client = _get_client()
 
-        # Use recall with broad query and zero threshold to get recent memories
-        result = client.recall(
-            query="recent memories",
+        rows = client.list(
             limit=min(limit, 50),
-            threshold=0.0,
+            offset=0,
+            project_id=project_id,
         )
+
+        memories = []
+        for row in rows:
+            content = row.get("content") or ""
+            snippet = content[:200] + ("..." if len(content) > 200 else "")
+            memories.append(
+                {
+                    "id": row.get("id"),
+                    "content": snippet,
+                    "created_at": row.get("created_at"),
+                    "project_id": row.get("project_id"),
+                }
+            )
 
         return json.dumps(
             {
                 "status": "ok",
-                "count": len(result.memories),
-                "memories": [
-                    {
-                        "id": m.id,
-                        "content": m.content[:200] + ("..." if len(m.content) > 200 else ""),
-                        "created_at": m.created_at.isoformat(),
-                    }
-                    for m in result.memories
-                ],
+                "count": len(memories),
+                "project_id": project_id,
+                "memories": memories,
             },
             indent=2,
         )
