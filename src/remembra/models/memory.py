@@ -1,6 +1,7 @@
 """Core domain models for memories, entities, and relationships."""
 
 from datetime import datetime
+from enum import Enum
 from typing import Any
 from uuid import uuid4
 
@@ -9,6 +10,27 @@ from pydantic import BaseModel, Field, field_validator
 
 def _new_id() -> str:
     return str(uuid4())
+
+
+# ---------------------------------------------------------------------------
+# Memory Type Enum
+# ---------------------------------------------------------------------------
+
+
+class MemoryType(str, Enum):
+    """
+    Semantic classification of a memory's epistemic role.
+
+    - observation: Raw sensory/empirical data, e.g. "User said they prefer Python"
+    - fact:        Verified, stable knowledge, e.g. "Alice works at Acme Corp"
+    - inference:   Derived conclusion, e.g. "User likely prefers async patterns"
+    - task:        Actionable item or TODO, e.g. "Follow up on invoice #42"
+    """
+
+    observation = "observation"
+    fact = "fact"
+    inference = "inference"
+    task = "task"
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +107,14 @@ class Memory(BaseModel):
     user_id: str
     project_id: str = "default"
     content: str
+    memory_type: MemoryType = Field(
+        default=MemoryType.observation,
+        description="Epistemic classification: observation | fact | inference | task",
+    )
+    supersedes: str | None = Field(
+        default=None,
+        description="ID of the memory this one supersedes (creates a belief-update chain)",
+    )
     extracted_facts: list[str] = Field(default_factory=list)
     entities: list[EntityRef] = Field(default_factory=list)
     embedding: list[float] = Field(default_factory=list, exclude=True)
@@ -111,6 +141,14 @@ class Memory(BaseModel):
 class StoreRequest(BaseModel):
     content: str = Field(..., max_length=50000, description="Content to memorize (max 50,000 characters)")
     project_id: str = "default"
+    memory_type: MemoryType = Field(
+        default=MemoryType.observation,
+        description="Epistemic classification: observation | fact | inference | task",
+    )
+    supersedes: str | None = Field(
+        default=None,
+        description="ID of an existing memory that this new memory supersedes",
+    )
     user_id: str | None = Field(
         default=None,
         description="Deprecated: user_id is determined from API key. This field is ignored.",
@@ -242,6 +280,10 @@ class RecallResult(BaseModel):
     relevance: float
     content: str
     created_at: datetime
+    memory_type: MemoryType = Field(
+        default=MemoryType.observation,
+        description="Epistemic classification of this memory",
+    )
     # Freshness scoring (v0.13)
     freshness_score: float = Field(
         default=1.0,
@@ -316,7 +358,7 @@ class MemorySummary(BaseModel):
     updated_at: str | None = None
     accessed_at: str | None = None
     access_count: int = 0
-    memory_type: str | None = None
+    memory_type: MemoryType | None = None
     entities: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -548,6 +590,43 @@ class ConversationIngestResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Sleep-Time Consolidation Models (Phase 3)
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Feedback Models
+# ---------------------------------------------------------------------------
+
+
+class FeedbackRequest(BaseModel):
+    """User feedback on a recalled or stored memory."""
+
+    rating: int = Field(
+        ...,
+        ge=1,
+        le=5,
+        description="Quality/relevance rating: 1 (useless) → 5 (perfect)",
+    )
+    comment: str | None = Field(
+        default=None,
+        max_length=1000,
+        description="Optional free-text explanation",
+    )
+    relevant: bool | None = Field(
+        default=None,
+        description="Was this memory relevant to the query that surfaced it?",
+    )
+    correct: bool | None = Field(
+        default=None,
+        description="Is the memory content factually correct?",
+    )
+
+
+class FeedbackResponse(BaseModel):
+    """Acknowledgement of submitted feedback."""
+
+    memory_id: str
+    recorded: bool = True
+    message: str = "Feedback recorded"
 
 
 class ConsolidationReport(BaseModel):

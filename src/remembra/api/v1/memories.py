@@ -28,6 +28,8 @@ from remembra.models.memory import (
     BatchStoreRequest,
     BatchStoreResponse,
     BatchStoreResult,
+    FeedbackRequest,
+    FeedbackResponse,
     ForgetResponse,
     MemorySummary,
     RecallRequest,
@@ -1037,6 +1039,99 @@ async def supersede_memory(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to supersede memory",
+        ) from e
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{memory_id}/feedback",
+    response_model=FeedbackResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Submit feedback on a memory's quality or relevance",
+)
+@limiter.limit("60/minute")
+async def submit_feedback(
+    request: Request,
+    memory_id: str,
+    body: FeedbackRequest,
+    memory_service: MemoryServiceDep,
+    audit_logger: AuditLoggerDep,
+    current_user: CurrentUser,
+) -> FeedbackResponse:
+    """
+    Record user feedback (rating, relevance, correctness) on a memory.
+
+    Feedback is stored in the memory's metadata under `_feedback` and can be
+    used by consolidation/decay scoring to improve future recall quality.
+
+    - **rating**: 1 (useless) to 5 (perfect)
+    - **relevant**: Was this memory surfaced in the right context?
+    - **correct**: Is the content factually accurate?
+    - **comment**: Optional free-text note
+
+    Rate limit: 60 requests/minute.
+    """
+    if not has_permission(current_user, "memory:recall"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: memory:recall required",
+        )
+
+    existing = await memory_service.get(memory_id)
+    if not existing or existing.get("user_id") != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory {memory_id} not found",
+        )
+
+    # Merge feedback into metadata under _feedback key
+    current_meta: dict[str, Any] = existing.get("metadata") or {}
+    feedback_entry: dict[str, Any] = {
+        "rating": body.rating,
+        "submitted_at": datetime.utcnow().isoformat(),
+    }
+    if body.relevant is not None:
+        feedback_entry["relevant"] = body.relevant
+    if body.correct is not None:
+        feedback_entry["correct"] = body.correct
+    if body.comment:
+        feedback_entry["comment"] = body.comment
+
+    existing_feedback = current_meta.get("_feedback", [])
+    if not isinstance(existing_feedback, list):
+        existing_feedback = [existing_feedback]
+    existing_feedback.append(feedback_entry)
+    new_meta = {**current_meta, "_feedback": existing_feedback}
+
+    try:
+        await memory_service.update(
+            memory_id=memory_id,
+            user_id=current_user.user_id,
+            new_content=existing["content"],
+            new_metadata=new_meta,
+        )
+
+        from remembra.security.audit import AuditAction
+
+        await audit_logger.log(
+            user_id=current_user.user_id,
+            action=AuditAction.MEMORY_UPDATE,
+            resource_id=memory_id,
+            success=True,
+            details={"feedback_rating": body.rating},
+        )
+
+        return FeedbackResponse(memory_id=memory_id)
+
+    except Exception as e:
+        log.error("submit_feedback_failed", error=str(e), memory_id=memory_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to record feedback",
         ) from e
 
 
