@@ -85,6 +85,22 @@ class Memory(BaseModel):
     user_id: str
     project_id: str = "default"
     content: str
+    memory_type: str = Field(
+        default="observation",
+        description="Memory type: 'observation' (immutable evidence), 'fact' (extracted, versioned), 'inference' (lower trust, decays), 'task' (actionable, has status)",
+    )
+    scope: str | None = Field(
+        default=None,
+        description="Optional within-user scope (e.g. 'work:acme', 'personal:health'). Separate from project_id.",
+    )
+    supersedes_id: str | None = Field(
+        default=None,
+        description="ID of the memory this one replaces/supersedes.",
+    )
+    contradicts_id: str | None = Field(
+        default=None,
+        description="ID of a conflicting memory this memory disagrees with.",
+    )
     extracted_facts: list[str] = Field(default_factory=list)
     entities: list[EntityRef] = Field(default_factory=list)
     embedding: list[float] = Field(default_factory=list, exclude=True)
@@ -115,6 +131,22 @@ class StoreRequest(BaseModel):
         default=None,
         description="Deprecated: user_id is determined from API key. This field is ignored.",
     )
+    memory_type: str = Field(
+        default="observation",
+        description="Memory type: 'observation' | 'fact' | 'inference' | 'task'",
+    )
+    scope: str | None = Field(
+        default=None,
+        description="Optional within-user scope (e.g. 'work:acme', 'personal:health').",
+    )
+    supersedes_id: str | None = Field(
+        default=None,
+        description="ID of an existing memory this new one replaces.",
+    )
+    contradicts_id: str | None = Field(
+        default=None,
+        description="ID of a memory this new one conflicts with.",
+    )
     # Visibility control for team collaboration
     visibility: str = Field(
         default="personal",
@@ -141,6 +173,14 @@ class StoreRequest(BaseModel):
 
         v = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", v)
         return v.strip()
+
+    @field_validator("memory_type")
+    @classmethod
+    def validate_memory_type(cls, v: str) -> str:
+        valid = {"observation", "fact", "inference", "task"}
+        if v not in valid:
+            raise ValueError(f"memory_type must be one of: {', '.join(valid)}")
+        return v
 
     @field_validator("visibility")
     @classmethod
@@ -235,6 +275,22 @@ class RecallRequest(BaseModel):
             "ranking. Example: {\"project\": \"trademind\", \"type\": \"deploy-config\"}."
         ),
     )
+    type_filter: list[str] | None = Field(
+        default=None,
+        description="Filter by memory_type. E.g. ['fact', 'inference']. Omit to return all types.",
+    )
+    scope: str | None = Field(
+        default=None,
+        description="Filter recall to a specific scope (e.g. 'work:acme'). Omit for no scope filter.",
+    )
+    exclude: str | None = Field(
+        default=None,
+        description="Negative constraint: exclude memories containing this text/topic.",
+    )
+    slim: bool = Field(
+        default=True,
+        description="Slim mode (default True): cap context at 800 tokens. Set False for full context up to max_tokens.",
+    )
 
 
 class RecallResult(BaseModel):
@@ -242,6 +298,28 @@ class RecallResult(BaseModel):
     relevance: float
     content: str
     created_at: datetime
+    # Memory type and scope
+    memory_type: str = Field(
+        default="observation",
+        description="Type: observation | fact | inference | task",
+    )
+    scope: str | None = Field(
+        default=None,
+        description="Within-user scope this memory belongs to",
+    )
+    supersedes_id: str | None = Field(
+        default=None,
+        description="ID of memory this one supersedes",
+    )
+    contradicts_id: str | None = Field(
+        default=None,
+        description="ID of memory this one contradicts",
+    )
+    # Relevance explanation
+    why_relevant: str | None = Field(
+        default=None,
+        description="One-liner explaining why this memory was returned for the query",
+    )
     # Freshness scoring (v0.13)
     freshness_score: float = Field(
         default=1.0,
@@ -290,6 +368,10 @@ class RecallResponse(BaseModel):
     context: str
     memories: list[RecallResult]
     entities: list[EntityRef]
+    context_budget_used: int = Field(
+        default=0,
+        description="Approximate token count of all returned memories in the context string",
+    )
     # Divergence detection (v0.13)
     divergence_detected: bool = Field(
         default=False,
@@ -562,3 +644,31 @@ class ConsolidationReport(BaseModel):
     importance_rescored: int = 0
     memories_decayed: int = 0
     errors: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Feedback Models (Phase 0)
+# ---------------------------------------------------------------------------
+
+
+class FeedbackRequest(BaseModel):
+    """Signal on whether a recalled memory was helpful."""
+
+    memory_id: str = Field(..., description="ID of the memory being rated")
+    signal: str = Field(..., description="'helpful' or 'unhelpful'")
+    context: str | None = Field(default=None, description="Optional note about why this signal was given")
+
+    @field_validator("signal")
+    @classmethod
+    def validate_signal(cls, v: str) -> str:
+        if v not in {"helpful", "unhelpful"}:
+            raise ValueError("signal must be 'helpful' or 'unhelpful'")
+        return v
+
+
+class FeedbackResponse(BaseModel):
+    """Response confirming feedback was recorded."""
+
+    memory_id: str
+    signal: str
+    recorded: bool = True

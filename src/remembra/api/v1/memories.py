@@ -28,6 +28,8 @@ from remembra.models.memory import (
     BatchStoreRequest,
     BatchStoreResponse,
     BatchStoreResult,
+    FeedbackRequest,
+    FeedbackResponse,
     ForgetResponse,
     MemorySummary,
     RecallRequest,
@@ -1104,6 +1106,76 @@ async def cleanup_expired(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to cleanup expired memories. Please try again later.",
+        ) from e
+
+
+# ---------------------------------------------------------------------------
+# Feedback (Phase 0 — signal-based ranking adjustment)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/feedback",
+    response_model=FeedbackResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Submit feedback signal on a recalled memory",
+)
+@limiter.limit("60/minute")
+async def submit_feedback(
+    request: Request,
+    body: FeedbackRequest,
+    memory_service: MemoryServiceDep,
+    current_user: CurrentUser,
+) -> FeedbackResponse:
+    """
+    Record a helpful/unhelpful signal on a memory.
+
+    This adjusts that memory's ranking in future recalls for this user.
+
+    - **memory_id**: The memory being rated
+    - **signal**: "helpful" or "unhelpful"
+    - **context**: Optional note explaining the signal
+
+    Rate limit: 60 requests/minute.
+    """
+    if not has_permission(current_user, "memory:recall"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: memory:recall required",
+        )
+
+    # Verify the memory exists and belongs to this user
+    memory = await memory_service.get(body.memory_id)
+    if not memory or memory.get("user_id") != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory {body.memory_id} not found",
+        )
+
+    try:
+        from datetime import datetime
+        from uuid import uuid4
+
+        await memory_service.db.save_feedback(
+            feedback_id=str(uuid4()),
+            user_id=current_user.user_id,
+            memory_id=body.memory_id,
+            signal=body.signal,
+            context=body.context,
+            created_at=datetime.utcnow(),
+        )
+        return FeedbackResponse(memory_id=body.memory_id, signal=body.signal, recorded=True)
+
+    except Exception as e:
+        _internal_log.error(
+            "feedback_failed",
+            user_id=current_user.user_id,
+            memory_id=body.memory_id,
+            error=str(e),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to record feedback. Please try again later.",
         ) from e
 
 

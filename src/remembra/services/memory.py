@@ -262,6 +262,10 @@ class MemoryService:
                 visibility=request.visibility,
                 space_id=request.space_id,
                 team_id=request.team_id,
+                memory_type=getattr(request, "memory_type", "observation"),
+                scope=getattr(request, "scope", None),
+                supersedes_id=getattr(request, "supersedes_id", None),
+                contradicts_id=getattr(request, "contradicts_id", None),
             )
             if fact_result:
                 # Track matched existing memory ID (for NOOP cases)
@@ -444,6 +448,10 @@ class MemoryService:
         visibility: str = "personal",
         space_id: str | None = None,
         team_id: str | None = None,
+        memory_type: str = "observation",
+        scope: str | None = None,
+        supersedes_id: str | None = None,
+        contradicts_id: str | None = None,
     ) -> dict[str, Any] | None:
         """
         Store a single fact with consolidation logic.
@@ -564,6 +572,10 @@ class MemoryService:
             user_id=user_id,
             project_id=project_id,
             content=content,
+            memory_type=memory_type,
+            scope=scope,
+            supersedes_id=supersedes_id,
+            contradicts_id=contradicts_id,
             extracted_facts=[content],
             entities=[],
             embedding=embedding,
@@ -589,6 +601,10 @@ class MemoryService:
             visibility=visibility,
             space_id=space_id,
             team_id=team_id,
+            memory_type=memory_type,
+            scope=scope,
+            supersedes_id=supersedes_id,
+            contradicts_id=contradicts_id,
         )
 
         # Index in FTS5 for hybrid search (Week 6)
@@ -841,7 +857,14 @@ class MemoryService:
         # Resolve feature flags
         use_hybrid = self.settings.enable_hybrid_search
         use_rerank = self.settings.enable_reranking
-        max_tokens = request.max_tokens or self.settings.context_max_tokens
+        # Slim mode: cap context at 800 tokens by default unless caller opts out
+        slim_mode = getattr(request, "slim", True)
+        if request.max_tokens is not None:
+            max_tokens = request.max_tokens
+        elif slim_mode:
+            max_tokens = 800
+        else:
+            max_tokens = self.settings.context_max_tokens
 
         log.info(
             "recalling_memories_v2",
@@ -1061,6 +1084,37 @@ class MemoryService:
                 after=len(hybrid_results),
             )
 
+        # Step 4c: Type filter — keep only memories of requested types
+        type_filter = getattr(request, "type_filter", None)
+        if type_filter:
+            before_count = len(hybrid_results)
+            hybrid_results = [
+                r for r in hybrid_results
+                if (r.get("payload") or {}).get("memory_type", "observation") in type_filter
+            ]
+            log.info("recall_type_filtered", type_filter=type_filter, before=before_count, after=len(hybrid_results))
+
+        # Step 4d: Scope filter
+        scope_filter = getattr(request, "scope", None)
+        if scope_filter:
+            before_count = len(hybrid_results)
+            hybrid_results = [
+                r for r in hybrid_results
+                if (r.get("payload") or {}).get("scope") == scope_filter
+            ]
+            log.info("recall_scope_filtered", scope=scope_filter, before=before_count, after=len(hybrid_results))
+
+        # Step 4e: Exclude filter — drop memories that mention the exclude topic
+        exclude_query = getattr(request, "exclude", None)
+        if exclude_query:
+            exclude_lower = exclude_query.lower()
+            before_count = len(hybrid_results)
+            hybrid_results = [
+                r for r in hybrid_results
+                if exclude_lower not in r.get("content", "").lower()
+            ]
+            log.info("recall_exclude_filtered", exclude=exclude_query, before=before_count, after=len(hybrid_results))
+
         if not hybrid_results:
             log.info("recall_no_results", user_id=request.user_id)
             return RecallResponse(context="", memories=[], entities=[])
@@ -1189,12 +1243,30 @@ class MemoryService:
             # Freshness score: 1.0 = today, decays to 0 over staleness_threshold_days
             freshness = max(0.0, 1.0 - (age_days / (staleness_threshold_days * 2)))
 
+            # Build why_relevant explanation from scoring signals
+            payload = getattr(r, "payload", {}) or {}
+            why_parts = []
+            if r.semantic_score > 0.7:
+                why_parts.append("high semantic match")
+            elif r.semantic_score > 0.4:
+                why_parts.append("semantic match")
+            if r.recency_score > 0.7:
+                why_parts.append("recent")
+            if age_days > staleness_threshold_days:
+                why_parts.append(f"older ({age_days}d)")
+            why_relevant = "; ".join(why_parts) if why_parts else "relevance match"
+
             memories.append(
                 RecallResult(
                     id=r.id,
                     relevance=r.final_score,
                     content=r.content,
                     created_at=created,
+                    memory_type=payload.get("memory_type", "observation"),
+                    scope=payload.get("scope"),
+                    supersedes_id=payload.get("supersedes_id"),
+                    contradicts_id=payload.get("contradicts_id"),
+                    why_relevant=why_relevant,
                     freshness_score=round(freshness, 3),
                     age_days=age_days,
                     staleness_warning=age_days > staleness_threshold_days,
@@ -1226,6 +1298,7 @@ class MemoryService:
             context=optimized.context,
             memories=memories,
             entities=all_entities,
+            context_budget_used=optimized.total_tokens,
             divergence_detected=divergence_detected,
             divergence_details=divergence_details,
         )
