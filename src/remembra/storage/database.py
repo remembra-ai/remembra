@@ -307,6 +307,21 @@ CREATE TABLE IF NOT EXISTS adaptive_thresholds (
 );
 
 CREATE INDEX IF NOT EXISTS idx_adaptive_user ON adaptive_thresholds(user_id, project_id);
+
+-- Memory feedback signals (Phase 0)
+CREATE TABLE IF NOT EXISTS memory_feedback (
+    id TEXT PRIMARY KEY,
+    memory_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    signal TEXT NOT NULL,  -- 'helpful' | 'unhelpful'
+    comment TEXT,
+    query TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_feedback_memory ON memory_feedback(memory_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_user ON memory_feedback(user_id);
 """
 
 
@@ -381,6 +396,11 @@ class Database:
             "ALTER TABLE memories ADD COLUMN visibility TEXT DEFAULT 'personal'",
             "ALTER TABLE memories ADD COLUMN space_id TEXT",
             "ALTER TABLE memories ADD COLUMN team_id TEXT",
+            # Phase 0: memory type, scope, supersession links
+            "ALTER TABLE memories ADD COLUMN memory_type TEXT",
+            "ALTER TABLE memories ADD COLUMN scope TEXT",
+            "ALTER TABLE memories ADD COLUMN supersedes TEXT",
+            "ALTER TABLE memories ADD COLUMN contradicts TEXT",
         ]
 
         for migration in migrations:
@@ -390,10 +410,30 @@ class Database:
                 # Column likely already exists, ignore
                 pass
 
+        # Create feedback table for existing DBs (IF NOT EXISTS is idempotent)
+        await self._connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS memory_feedback (
+                id TEXT PRIMARY KEY,
+                memory_id TEXT NOT NULL,
+                user_id TEXT NOT NULL,
+                signal TEXT NOT NULL,
+                comment TEXT,
+                query TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_feedback_memory ON memory_feedback(memory_id);
+            CREATE INDEX IF NOT EXISTS idx_feedback_user ON memory_feedback(user_id);
+            """
+        )
+
         # Create indexes on newly added columns (safe to run even if they exist)
         indexes = [
             "CREATE INDEX IF NOT EXISTS idx_memories_visibility ON memories(visibility)",
             "CREATE INDEX IF NOT EXISTS idx_memories_team ON memories(team_id)",
+            "CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type)",
+            "CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope)",
         ]
         for index_sql in indexes:
             try:
@@ -430,14 +470,19 @@ class Database:
         visibility: str = "personal",
         space_id: str | None = None,
         team_id: str | None = None,
+        memory_type: str | None = None,
+        scope: str | None = None,
+        supersedes: str | None = None,
+        contradicts: str | None = None,
     ) -> None:
         """Save memory metadata to SQLite."""
         await self.conn.execute(
             """
-            INSERT INTO memories (id, user_id, project_id, content, extracted_facts, 
+            INSERT INTO memories (id, user_id, project_id, content, extracted_facts,
                                   metadata, created_at, updated_at, expires_at,
-                                  source, trust_score, checksum, visibility, space_id, team_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  source, trust_score, checksum, visibility, space_id, team_id,
+                                  memory_type, scope, supersedes, contradicts)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 content = excluded.content,
                 extracted_facts = excluded.extracted_facts,
@@ -449,7 +494,11 @@ class Database:
                 checksum = excluded.checksum,
                 visibility = excluded.visibility,
                 space_id = excluded.space_id,
-                team_id = excluded.team_id
+                team_id = excluded.team_id,
+                memory_type = excluded.memory_type,
+                scope = excluded.scope,
+                supersedes = excluded.supersedes,
+                contradicts = excluded.contradicts
             """,
             (
                 memory_id,
@@ -467,6 +516,10 @@ class Database:
                 visibility,
                 space_id,
                 team_id,
+                memory_type,
+                scope,
+                supersedes,
+                contradicts,
             ),
         )
         await self.conn.commit()
@@ -1236,6 +1289,29 @@ class Database:
             WHERE id = ?
             """,
             (datetime.utcnow().isoformat(), memory_id),
+        )
+        await self.conn.commit()
+
+    # -----------------------------------------------------------------------
+    # Feedback
+    # -----------------------------------------------------------------------
+
+    async def save_feedback(
+        self,
+        feedback_id: str,
+        memory_id: str,
+        user_id: str,
+        signal: str,
+        comment: str | None = None,
+        query: str | None = None,
+    ) -> None:
+        """Record a helpful/unhelpful signal for a memory."""
+        await self.conn.execute(
+            """
+            INSERT INTO memory_feedback (id, memory_id, user_id, signal, comment, query, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (feedback_id, memory_id, user_id, signal, comment, query, datetime.utcnow().isoformat()),
         )
         await self.conn.commit()
 

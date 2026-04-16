@@ -1,10 +1,12 @@
 """Core domain models for memories, entities, and relationships."""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator
+
+MEMORY_TYPES = Literal["observation", "fact", "inference", "task"]
 
 
 def _new_id() -> str:
@@ -85,6 +87,10 @@ class Memory(BaseModel):
     user_id: str
     project_id: str = "default"
     content: str
+    memory_type: MEMORY_TYPES | None = Field(default=None, description="observation | fact | inference | task")
+    scope: str | None = Field(default=None, description="Dot-separated scope label, e.g. 'work:acme' or 'personal:health'")
+    supersedes: str | None = Field(default=None, description="ID of the memory this one supersedes")
+    contradicts: str | None = Field(default=None, description="ID of a memory this one contradicts")
     extracted_facts: list[str] = Field(default_factory=list)
     entities: list[EntityRef] = Field(default_factory=list)
     embedding: list[float] = Field(default_factory=list, exclude=True)
@@ -111,6 +117,10 @@ class Memory(BaseModel):
 class StoreRequest(BaseModel):
     content: str = Field(..., max_length=50000, description="Content to memorize (max 50,000 characters)")
     project_id: str = "default"
+    memory_type: MEMORY_TYPES | None = Field(default=None, description="observation | fact | inference | task")
+    scope: str | None = Field(default=None, description="Dot-separated scope label, e.g. 'work:acme' or 'personal:health'")
+    supersedes: str | None = Field(default=None, description="ID of a prior memory that this one replaces")
+    contradicts: str | None = Field(default=None, description="ID of a memory this one contradicts")
     user_id: str | None = Field(
         default=None,
         description="Deprecated: user_id is determined from API key. This field is ignored.",
@@ -235,6 +245,18 @@ class RecallRequest(BaseModel):
             "ranking. Example: {\"project\": \"trademind\", \"type\": \"deploy-config\"}."
         ),
     )
+    exclude: list[str] | None = Field(
+        default=None,
+        description="Memory IDs to exclude from results (negative constraints).",
+    )
+    scope: str | None = Field(
+        default=None,
+        description="Filter results to memories with this scope prefix, e.g. 'work' or 'work:acme'.",
+    )
+    slim: bool = Field(
+        default=False,
+        description="Slim mode: cap context output at 800 tokens. Overrides max_tokens when True.",
+    )
 
 
 class RecallResult(BaseModel):
@@ -266,6 +288,18 @@ class RecallResult(BaseModel):
         default=0.0,
         description="Raw recency-based score",
     )
+    why_relevant: str = Field(
+        default="",
+        description="Human-readable explanation of why this memory matched the query.",
+    )
+    memory_type: str | None = Field(
+        default=None,
+        description="Memory type: observation | fact | inference | task",
+    )
+    scope: str | None = Field(
+        default=None,
+        description="Scope label of the memory, e.g. 'work:acme'",
+    )
 
 
 class DivergenceDetail(BaseModel):
@@ -290,6 +324,10 @@ class RecallResponse(BaseModel):
     context: str
     memories: list[RecallResult]
     entities: list[EntityRef]
+    context_budget_used: int = Field(
+        default=0,
+        description="Tokens used by the context string.",
+    )
     # Divergence detection (v0.13)
     divergence_detected: bool = Field(
         default=False,
@@ -548,6 +586,20 @@ class ConversationIngestResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Sleep-Time Consolidation Models (Phase 3)
 # ---------------------------------------------------------------------------
+
+
+class FeedbackRequest(BaseModel):
+    """Signal from consumer about a recalled memory."""
+
+    signal: Literal["helpful", "unhelpful"] = Field(description="Was this memory useful?")
+    comment: str | None = Field(default=None, max_length=1000, description="Optional free-text comment")
+    query: str | None = Field(default=None, max_length=1000, description="The query that surfaced this memory")
+
+
+class FeedbackResponse(BaseModel):
+    memory_id: str
+    signal: str
+    recorded: bool = True
 
 
 class ConsolidationReport(BaseModel):

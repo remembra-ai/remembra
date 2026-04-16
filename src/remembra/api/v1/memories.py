@@ -28,6 +28,8 @@ from remembra.models.memory import (
     BatchStoreRequest,
     BatchStoreResponse,
     BatchStoreResult,
+    FeedbackRequest,
+    FeedbackResponse,
     ForgetResponse,
     MemorySummary,
     RecallRequest,
@@ -1038,6 +1040,63 @@ async def supersede_memory(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to supersede memory",
         ) from e
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/{memory_id}/feedback",
+    response_model=FeedbackResponse,
+    summary="Submit helpful/unhelpful feedback for a recalled memory",
+)
+@limiter.limit("30/minute")
+async def submit_feedback(
+    request: Request,
+    memory_id: str,
+    body: FeedbackRequest,
+    memory_service: MemoryServiceDep,
+    current_user: CurrentUser,
+) -> FeedbackResponse:
+    """
+    Record whether a recalled memory was useful.
+
+    - **signal**: "helpful" or "unhelpful"
+    - **comment**: Optional free-text comment
+    - **query**: The query that surfaced this memory
+
+    Rate limit: 30 requests/minute.
+    """
+    import uuid
+
+    # Verify memory exists and belongs to user
+    memory = await memory_service.get(memory_id)
+    if not memory or memory.get("user_id") != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory {memory_id} not found",
+        )
+
+    feedback_id = str(uuid.uuid4())
+    await memory_service.db.save_feedback(
+        feedback_id=feedback_id,
+        memory_id=memory_id,
+        user_id=current_user.user_id,
+        signal=body.signal,
+        comment=body.comment,
+        query=body.query,
+    )
+
+    log.info(
+        "feedback_recorded",
+        memory_id=memory_id,
+        signal=body.signal,
+        user_id=current_user.user_id,
+    )
+
+    return FeedbackResponse(memory_id=memory_id, signal=body.signal)
 
 
 # ---------------------------------------------------------------------------

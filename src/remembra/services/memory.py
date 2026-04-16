@@ -262,6 +262,10 @@ class MemoryService:
                 visibility=request.visibility,
                 space_id=request.space_id,
                 team_id=request.team_id,
+                memory_type=request.memory_type,
+                scope=request.scope,
+                supersedes=request.supersedes,
+                contradicts=request.contradicts,
             )
             if fact_result:
                 # Track matched existing memory ID (for NOOP cases)
@@ -444,6 +448,10 @@ class MemoryService:
         visibility: str = "personal",
         space_id: str | None = None,
         team_id: str | None = None,
+        memory_type: str | None = None,
+        scope: str | None = None,
+        supersedes: str | None = None,
+        contradicts: str | None = None,
     ) -> dict[str, Any] | None:
         """
         Store a single fact with consolidation logic.
@@ -589,6 +597,10 @@ class MemoryService:
             visibility=visibility,
             space_id=space_id,
             team_id=team_id,
+            memory_type=memory_type,
+            scope=scope,
+            supersedes=supersedes,
+            contradicts=contradicts,
         )
 
         # Index in FTS5 for hybrid search (Week 6)
@@ -841,7 +853,9 @@ class MemoryService:
         # Resolve feature flags
         use_hybrid = self.settings.enable_hybrid_search
         use_rerank = self.settings.enable_reranking
-        max_tokens = request.max_tokens or self.settings.context_max_tokens
+        # slim mode caps context at 800 tokens
+        slim_mode = getattr(request, "slim", False)
+        max_tokens = 800 if slim_mode else (request.max_tokens or self.settings.context_max_tokens)
 
         log.info(
             "recalling_memories_v2",
@@ -1061,6 +1075,22 @@ class MemoryService:
                 after=len(hybrid_results),
             )
 
+        # Exclude filter: remove specific memory IDs
+        exclude_ids = set(getattr(request, "exclude", None) or [])
+        if exclude_ids:
+            hybrid_results = [r for r in hybrid_results if r["id"] not in exclude_ids]
+
+        # Scope filter: restrict to memories whose scope starts with the requested prefix
+        requested_scope = getattr(request, "scope", None)
+        if requested_scope:
+            def _scope_matches(r: dict[str, Any]) -> bool:
+                mem_scope = (r.get("payload") or {}).get("scope") or r.get("scope")
+                if not mem_scope:
+                    return False
+                return mem_scope == requested_scope or mem_scope.startswith(requested_scope + ":")
+
+            hybrid_results = [r for r in hybrid_results if _scope_matches(r)]
+
         if not hybrid_results:
             log.info("recall_no_results", user_id=request.user_id)
             return RecallResponse(context="", memories=[], entities=[])
@@ -1189,6 +1219,25 @@ class MemoryService:
             # Freshness score: 1.0 = today, decays to 0 over staleness_threshold_days
             freshness = max(0.0, 1.0 - (age_days / (staleness_threshold_days * 2)))
 
+            # why_relevant: synthesise a brief explanation from available signals
+            why_parts = []
+            if r.semantic_score > 0.7:
+                why_parts.append("high semantic match")
+            elif r.semantic_score > 0.5:
+                why_parts.append("semantic match")
+            if r.recency_score > 0.8:
+                why_parts.append("very recent")
+            elif r.recency_score > 0.5:
+                why_parts.append("recent")
+            if age_days > staleness_threshold_days:
+                why_parts.append("may be stale")
+            why_relevant = "; ".join(why_parts) if why_parts else "matched query"
+
+            # Extract memory_type and scope from payload if available
+            payload = getattr(r, "payload", {}) or {}
+            mem_type = payload.get("memory_type")
+            mem_scope = payload.get("scope")
+
             memories.append(
                 RecallResult(
                     id=r.id,
@@ -1200,6 +1249,9 @@ class MemoryService:
                     staleness_warning=age_days > staleness_threshold_days,
                     semantic_score=round(r.semantic_score, 3),
                     recency_score=round(r.recency_score, 3),
+                    why_relevant=why_relevant,
+                    memory_type=mem_type,
+                    scope=mem_scope,
                 )
             )
             # Update access tracking
@@ -1226,6 +1278,7 @@ class MemoryService:
             context=optimized.context,
             memories=memories,
             entities=all_entities,
+            context_budget_used=optimized.total_tokens,
             divergence_detected=divergence_detected,
             divergence_details=divergence_details,
         )
