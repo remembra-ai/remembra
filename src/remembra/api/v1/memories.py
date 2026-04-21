@@ -1,6 +1,8 @@
 """Memory CRUD endpoints – /api/v1/memories."""
 
 import logging
+import threading
+import time
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -57,6 +59,37 @@ log = structlog.get_logger(__name__)
 # Security: Logger for internal error details (never exposed to users)
 _internal_log = structlog.get_logger("remembra.api.errors")
 _webhook_log = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Idempotency cache — maps "user_id:key" → (memory_id, timestamp)
+# Entries expire after 1 hour. Thread-safe via lock.
+# ---------------------------------------------------------------------------
+_IDEMPOTENCY_TTL = 3600  # 1 hour
+_idempotency_cache: dict[str, tuple[str, float]] = {}
+_idempotency_lock = threading.Lock()
+
+
+def _idempotency_check(user_id: str, key: str) -> str | None:
+    """Return existing memory_id if this key was seen within TTL, else None."""
+    cache_key = f"{user_id}:{key}"
+    now = time.monotonic()
+    with _idempotency_lock:
+        # Lazy eviction of expired entries (cap at 100 evictions per call)
+        expired = [k for i, (k, (_, ts)) in enumerate(_idempotency_cache.items()) if now - ts > _IDEMPOTENCY_TTL and i < 100]
+        for k in expired:
+            del _idempotency_cache[k]
+
+        entry = _idempotency_cache.get(cache_key)
+        if entry and now - entry[1] <= _IDEMPOTENCY_TTL:
+            return entry[0]
+    return None
+
+
+def _idempotency_record(user_id: str, key: str, memory_id: str) -> None:
+    """Record a successful store for dedup within TTL."""
+    cache_key = f"{user_id}:{key}"
+    with _idempotency_lock:
+        _idempotency_cache[cache_key] = (memory_id, time.monotonic())
 
 
 def _is_memory_expired(memory: dict[str, Any]) -> bool:
@@ -240,6 +273,19 @@ async def store_memory(
     body.user_id = current_user.user_id
     body.project_id = resolve_project_access(current_user, body.project_id) or "default"
 
+    # Idempotency check — return cached result on duplicate key
+    idem_key = request.headers.get("Idempotency-Key")
+    if idem_key:
+        existing_id = _idempotency_check(current_user.user_id, idem_key)
+        if existing_id:
+            log.info("idempotency_hit", key=idem_key, memory_id=existing_id)
+            return StoreResponse(
+                id=existing_id,
+                extracted_facts=[],
+                entities=[],
+                usage_warning=None,
+            )
+
     # PII Detection (OWASP ASI06)
     pii_result = None
     if pii_detector:
@@ -314,6 +360,10 @@ async def store_memory(
         usage_warning = getattr(request.state, "usage_warning", None)
         if usage_warning is not None:
             result.usage_warning = usage_warning
+
+        # Record idempotency key for dedup on retries
+        if idem_key:
+            _idempotency_record(current_user.user_id, idem_key, result.id)
 
         return result
 
