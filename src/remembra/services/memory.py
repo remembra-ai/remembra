@@ -57,6 +57,7 @@ def parse_ttl(ttl: str | None) -> timedelta | None:
     Parse TTL string like '30d', '1y', '2w' into timedelta.
 
     Supported formats:
+    - Xh = X hours
     - Xd = X days
     - Xw = X weeks
     - Xm = X months (30 days)
@@ -73,7 +74,9 @@ def parse_ttl(ttl: str | None) -> timedelta | None:
         value = int(ttl[:-1])
         unit = ttl[-1]
 
-        if unit == "d":
+        if unit == "h":
+            return timedelta(hours=value)
+        elif unit == "d":
             return timedelta(days=value)
         elif unit == "w":
             return timedelta(weeks=value)
