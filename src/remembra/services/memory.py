@@ -286,6 +286,7 @@ class MemoryService:
                 id=response_id,
                 extracted_facts=extracted_facts,
                 entities=[],
+                expires_at=expires_at,
             )
 
         log.info(
@@ -299,6 +300,7 @@ class MemoryService:
             id=memory_id,
             extracted_facts=stored_facts,
             entities=[],  # TODO: Entity extraction in Week 5
+            expires_at=expires_at,
         )
 
     async def bulk_import(

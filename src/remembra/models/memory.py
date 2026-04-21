@@ -178,6 +178,10 @@ class StoreResponse(BaseModel):
     id: str
     extracted_facts: list[str]
     entities: list[EntityRef]
+    expires_at: datetime | None = Field(
+        default=None,
+        description="When this memory will expire (set when ttl was provided on store).",
+    )
     usage_warning: dict[str, Any] | None = Field(
         default=None,
         description="Usage warning when approaching plan limits (cloud only).",
@@ -438,9 +442,19 @@ class ForgetResponse(BaseModel):
 
 
 class BatchStoreRequest(BaseModel):
-    """Request to store multiple memories in one call."""
+    """Request to store multiple memories in one call.
 
-    items: list[StoreRequest] = Field(..., min_length=1, max_length=100)
+    Accepts either ``items`` or ``memories`` as the array key.
+    """
+
+    items: list[StoreRequest] | None = Field(default=None, min_length=1, max_length=100)
+    memories: list[StoreRequest] | None = Field(
+        default=None,
+        min_length=1,
+        max_length=100,
+        description="Alias for 'items'. Either 'items' or 'memories' is accepted.",
+        exclude=True,
+    )
     skip_extraction: bool = Field(
         default=False,
         description="Skip entity/fact extraction for pre-structured data. "
@@ -453,6 +467,15 @@ class BatchStoreRequest(BaseModel):
         "When provided, skips OpenAI embedding calls entirely. "
         "Each vector must match the configured embedding dimension (default: 1536 for text-embedding-3-small).",
     )
+
+    @model_validator(mode="after")
+    def resolve_items_alias(self) -> "BatchStoreRequest":
+        """Accept either 'items' or 'memories' as the array key."""
+        if not self.items and self.memories:
+            self.items = self.memories
+        if not self.items:
+            raise ValueError("Either 'items' or 'memories' must be provided with at least 1 element.")
+        return self
 
 
 class BatchStoreResult(BaseModel):
