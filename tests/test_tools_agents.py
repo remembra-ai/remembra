@@ -158,7 +158,7 @@ def test_install_agent_config_creates_file(tmp_path: Path) -> None:
         api_key="rem_test",
         project="clawdbot",
         user_id="user_123",
-        url="http://127.0.0.1:8765",
+        url="http://127.0.0.1:9819",
     )
 
     assert result.agent == "claude-desktop"
@@ -168,7 +168,7 @@ def test_install_agent_config_creates_file(tmp_path: Path) -> None:
 
     content = json.loads(config_path.read_text())
     assert content["mcpServers"]["remembra"]["command"] == "remembra-mcp"
-    assert content["mcpServers"]["remembra"]["env"]["REMEMBRA_URL"] == "http://127.0.0.1:8765"
+    assert content["mcpServers"]["remembra"]["env"]["REMEMBRA_URL"] == "http://127.0.0.1:9819"
 
 
 def test_install_agent_config_unknown_agent_raises(tmp_path: Path) -> None:

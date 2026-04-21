@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - fallback for partial installs
     REMEMBRA_VERSION = "dev"
 
 DEFAULT_BRIDGE_HOST = "127.0.0.1"
-DEFAULT_BRIDGE_PORT = 8765
+DEFAULT_BRIDGE_PORT = 9819
 DEFAULT_BRIDGE_UPSTREAM = "https://api.remembra.dev"
 DEFAULT_PID_FILE = Path.home() / ".remembra" / "bridge.pid"
 DEFAULT_BRIDGE_AGENT_NAME = "codex"

@@ -67,7 +67,7 @@ def test_install_codex_config_creates_expected_file(tmp_path: Path) -> None:
     content = config_path.read_text()
     assert result.config_path == config_path
     assert 'command = "/tmp/remembra-mcp"' in content
-    assert 'REMEMBRA_URL = "http://127.0.0.1:8765"' in content
+    assert 'REMEMBRA_URL = "http://127.0.0.1:9819"' in content
     assert 'REMEMBRA_API_KEY = "rem_test"' not in content
     assert result.bridge_enabled is True
 
@@ -105,7 +105,7 @@ def test_install_codex_config_detects_sandboxed_codex(tmp_path: Path) -> None:
     )
 
     content = config_path.read_text()
-    assert 'REMEMBRA_URL = "http://127.0.0.1:8765"' in content
+    assert 'REMEMBRA_URL = "http://127.0.0.1:9819"' in content
     assert 'REMEMBRA_API_KEY = "rem_test"' not in content
     assert result.bridge_enabled is True
 
@@ -203,7 +203,7 @@ def test_start_bridge_background_uses_bridge_command_and_env(tmp_path: Path) -> 
         popen_mock.return_value.poll.return_value = None
         pid = start_bridge_background(
             upstream="https://api.remembra.dev",
-            port=8765,
+            port=9819,
             api_key="rem_test",
             command="remembra-bridge",
             stdout_path=stdout_path,

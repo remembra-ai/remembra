@@ -66,3 +66,4 @@ logs/
 remembra.db
 .mcpregistry_*
 sdk/typescript/node_modules/
+.mcp.json
