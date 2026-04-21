@@ -351,6 +351,7 @@ async def store_memory(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to store memory. Please try again later.",
+            headers={"Retry-After": "2"},
         ) from e
 
 

@@ -142,7 +142,7 @@ async def get_current_user(
     log.warning("auth_missing_credentials", ip=get_client_ip(request))
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Authentication required. Use JWT token or API key.",
+        detail="Authentication required. Use X-API-Key header with your API key (rem_...) or Authorization: Bearer with a JWT token.",
         headers={"WWW-Authenticate": "Bearer, ApiKey"},
     )
 

@@ -1,5 +1,6 @@
 """Qdrant vector store integration."""
 
+import asyncio
 from typing import Any
 
 import structlog
@@ -12,6 +13,9 @@ from remembra.models.memory import Memory
 from remembra.security.encryption import FieldEncryptor
 
 log = structlog.get_logger(__name__)
+
+QDRANT_WRITE_RETRIES = 3
+QDRANT_WRITE_BACKOFF_BASE = 0.5  # seconds; doubles each retry
 
 # Payload field names
 FIELD_USER_ID = "user_id"
@@ -126,16 +130,25 @@ class QdrantStore:
         payload["extracted_facts"] = memory.extracted_facts
         payload["entities"] = [e.model_dump() for e in memory.entities]
 
-        await client.upsert(
-            collection_name=self.collection_name,
-            points=[
-                qmodels.PointStruct(
-                    id=memory.id,
-                    vector=memory.embedding,
-                    payload=payload,
-                )
-            ],
+        point = qmodels.PointStruct(
+            id=memory.id,
+            vector=memory.embedding,
+            payload=payload,
         )
+        for attempt in range(1, QDRANT_WRITE_RETRIES + 1):
+            try:
+                await client.upsert(
+                    collection_name=self.collection_name,
+                    points=[point],
+                )
+                break
+            except Exception:
+                if attempt == QDRANT_WRITE_RETRIES:
+                    log.error("qdrant_upsert_failed", memory_id=memory.id, attempts=attempt)
+                    raise
+                backoff = QDRANT_WRITE_BACKOFF_BASE * (2 ** (attempt - 1))
+                log.warning("qdrant_upsert_retry", memory_id=memory.id, attempt=attempt, backoff=backoff)
+                await asyncio.sleep(backoff)
 
         log.debug("qdrant_upserted", memory_id=memory.id, user_id=memory.user_id)
 

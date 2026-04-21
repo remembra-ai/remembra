@@ -1233,10 +1233,11 @@ class MemoryService:
                 why_parts.append("may be stale")
             why_relevant = "; ".join(why_parts) if why_parts else "matched query"
 
-            # Extract memory_type and scope from payload if available
+            # Extract memory_type, scope, and metadata from payload if available
             payload = getattr(r, "payload", {}) or {}
             mem_type = payload.get("memory_type")
             mem_scope = payload.get("scope")
+            mem_metadata = payload.get("metadata") or {}
 
             memories.append(
                 RecallResult(
@@ -1252,6 +1253,7 @@ class MemoryService:
                     why_relevant=why_relevant,
                     memory_type=mem_type,
                     scope=mem_scope,
+                    metadata=mem_metadata,
                 )
             )
             # Update access tracking

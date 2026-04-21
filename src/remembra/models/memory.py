@@ -300,6 +300,10 @@ class RecallResult(BaseModel):
         default=None,
         description="Scope label of the memory, e.g. 'work:acme'",
     )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="User-supplied metadata tags stored with this memory",
+    )
 
 
 class DivergenceDetail(BaseModel):
