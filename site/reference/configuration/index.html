@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
     
     
       
@@ -1601,6 +1601,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../concepts/scope/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scope & Boundaries
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../concepts/entity-graph/" class="md-nav__link">
         
   
@@ -1609,6 +1637,34 @@
     
   
     Entity Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/durability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durability & Recovery
   
 
     
@@ -2097,6 +2153,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#auto-forgetting-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Forgetting (v0.12.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#example-env-file" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2543,6 +2610,17 @@
     <span class="md-ellipsis">
       
         Dashboard
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#auto-forgetting-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Auto-Forgetting (v0.12.0)
       
     </span>
   </a>
@@ -3025,6 +3103,36 @@
 </tr>
 </tbody>
 </table>
+<h2 id="auto-forgetting-v0120">Auto-Forgetting (v0.12.0)<a class="headerlink" href="#auto-forgetting-v0120" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>REMEMBRA_AUTO_TTL_ENABLED</code></td>
+<td><code>true</code></td>
+<td>Enable smart auto-forgetting</td>
+</tr>
+<tr>
+<td><code>REMEMBRA_STRICT_MODE</code></td>
+<td><code>false</code></td>
+<td>Return 410 GONE for expired memories</td>
+</tr>
+</tbody>
+</table>
+<p>Smart auto-forgetting detects 35+ temporal patterns and sets appropriate TTLs:</p>
+<ul>
+<li>"meeting tomorrow" → 36 hours</li>
+<li>"call next week" → 8 days</li>
+<li>"deadline in 2 hours" → 3 hours</li>
+<li>"event next month" → 35 days</li>
+</ul>
+<p>No configuration needed—just store memories naturally.</p>
 <h2 id="example-env-file">Example .env File<a class="headerlink" href="#example-env-file" title="Permanent link">&para;</a></h2>
 <div class="language-bash highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Required</span>
 </span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">OPENAI_API_KEY</span><span class="o">=</span>sk-your-key-here

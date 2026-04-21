@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://docs.remembra.dev/reference/api/">
+        <link rel="canonical" href="https://docs.remembra.dev/concepts/scope/">
       
       
-        <link rel="prev" href="../configuration/">
+        <link rel="prev" href="../memory-model/">
       
       
-        <link rel="next" href="../../benchmarks/">
+        <link rel="next" href="../entity-graph/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>API Reference - Remembra</title>
+        <title>Scope & Boundaries - Remembra</title>
       
     
     
@@ -88,7 +88,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#api-reference" class="md-skip">
+        <a href="#scope-boundaries" class="md-skip">
           Skip to content
         </a>
       
@@ -125,7 +125,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              API Reference
+              Scope & Boundaries
             
           </span>
         </div>
@@ -335,11 +335,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../concepts/how-it-works/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../how-it-works/" class="md-tabs__link">
           
   
   
@@ -375,13 +377,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../configuration/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../reference/configuration/" class="md-tabs__link">
           
   
   
@@ -1488,28 +1488,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -1527,7 +1530,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1545,7 +1548,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/how-it-works/" class="md-nav__link">
+      <a href="../how-it-works/" class="md-nav__link">
         
   
   
@@ -1573,7 +1576,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/memory-model/" class="md-nav__link">
+      <a href="../memory-model/" class="md-nav__link">
         
   
   
@@ -1598,10 +1601,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../concepts/scope/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scope & Boundaries
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1617,6 +1647,220 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#remembra-is-a-memory-layer" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Remembra is a Memory Layer
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-remembra-does" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Remembra Does ✅
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-remembra-doesnt-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What Remembra Doesn't Do ❌
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#the-boundary-in-practice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Boundary in Practice
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The Boundary in Practice">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#orchestration-vs-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Orchestration vs Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-multi-agent-system" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example: Multi-Agent System
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-rag-vs-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Example: RAG vs Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#integration-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integration Patterns
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Integration Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pattern-1-memory-augmented-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pattern 1: Memory-Augmented Agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-2-multi-agent-shared-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pattern 2: Multi-Agent Shared Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-3-session-long-term-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pattern 3: Session + Long-term Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#faq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FAQ
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FAQ">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#should-remembra-handle-my-agents-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Should Remembra handle my agent's state machine?"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#should-i-store-conversation-history-in-remembra" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Should I store conversation history in Remembra?"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#can-remembra-replace-my-vector-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Can Remembra replace my vector database?"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#should-i-use-remembra-for-caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Should I use Remembra for caching?"
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1629,7 +1873,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/entity-graph/" class="md-nav__link">
+      <a href="../entity-graph/" class="md-nav__link">
         
   
   
@@ -1657,7 +1901,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/durability/" class="md-nav__link">
+      <a href="../durability/" class="md-nav__link">
         
   
   
@@ -1834,31 +2078,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
             
   
   
@@ -1876,7 +2117,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_8">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1894,7 +2135,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../configuration/" class="md-nav__link">
+      <a href="../../reference/configuration/" class="md-nav__link">
         
   
   
@@ -1919,37 +2160,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    API Reference
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
         
   
   
@@ -1965,175 +2179,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#base-url" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Base URL
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#interactive-docs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Interactive Docs
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#openapi-spec" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        OpenAPI Spec
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#endpoints-overview" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Endpoints Overview
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#authentication" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authentication
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#requestresponse-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Request/Response Format
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#error-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Error Format
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#full-endpoint-documentation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Full Endpoint Documentation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#rate-limits" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Rate Limits
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sdks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SDKs
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="SDKs">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#python" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Python
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#rest-any-language" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        REST (Any Language)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#javascript-coming-soon" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        JavaScript (Coming Soon)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2174,7 +2219,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../changelog/" class="md-nav__link">
+      <a href="../../reference/changelog/" class="md-nav__link">
         
   
   
@@ -2346,10 +2391,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#base-url" class="md-nav__link">
+  <a href="#remembra-is-a-memory-layer" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Base URL
+        Remembra is a Memory Layer
       
     </span>
   </a>
@@ -2357,10 +2402,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#interactive-docs" class="md-nav__link">
+  <a href="#what-remembra-does" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Interactive Docs
+        What Remembra Does ✅
       
     </span>
   </a>
@@ -2368,10 +2413,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#openapi-spec" class="md-nav__link">
+  <a href="#what-remembra-doesnt-do" class="md-nav__link">
     <span class="md-ellipsis">
       
-        OpenAPI Spec
+        What Remembra Doesn't Do ❌
       
     </span>
   </a>
@@ -2379,88 +2424,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#endpoints-overview" class="md-nav__link">
+  <a href="#the-boundary-in-practice" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Endpoints Overview
+        The Boundary in Practice
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#authentication" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authentication
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#requestresponse-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Request/Response Format
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#error-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Error Format
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#full-endpoint-documentation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Full Endpoint Documentation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#rate-limits" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Rate Limits
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sdks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SDKs
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="SDKs">
+    <nav class="md-nav" aria-label="The Boundary in Practice">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#python" class="md-nav__link">
+  <a href="#orchestration-vs-memory" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Python
+        Orchestration vs Memory
       
     </span>
   </a>
@@ -2468,10 +2447,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#rest-any-language" class="md-nav__link">
+  <a href="#example-multi-agent-system" class="md-nav__link">
     <span class="md-ellipsis">
       
-        REST (Any Language)
+        Example: Multi-Agent System
       
     </span>
   </a>
@@ -2479,10 +2458,121 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#javascript-coming-soon" class="md-nav__link">
+  <a href="#example-rag-vs-memory" class="md-nav__link">
     <span class="md-ellipsis">
       
-        JavaScript (Coming Soon)
+        Example: RAG vs Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#integration-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Integration Patterns
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Integration Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pattern-1-memory-augmented-agent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pattern 1: Memory-Augmented Agent
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-2-multi-agent-shared-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pattern 2: Multi-Agent Shared Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pattern-3-session-long-term-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pattern 3: Session + Long-term Memory
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#faq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FAQ
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FAQ">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#should-remembra-handle-my-agents-state-machine" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Should Remembra handle my agent's state machine?"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#should-i-store-conversation-history-in-remembra" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Should I store conversation history in Remembra?"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#can-remembra-replace-my-vector-database" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Can Remembra replace my vector database?"
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#should-i-use-remembra-for-caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Should I use Remembra for caching?"
       
     </span>
   </a>
@@ -2514,177 +2604,212 @@
   
 
 
-<h1 id="api-reference">API Reference<a class="headerlink" href="#api-reference" title="Permanent link">&para;</a></h1>
-<p>OpenAPI specification and endpoint details.</p>
-<h2 id="base-url">Base URL<a class="headerlink" href="#base-url" title="Permanent link">&para;</a></h2>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>http://localhost:8787/api/v1
+<h1 id="scope-boundaries">Scope &amp; Boundaries<a class="headerlink" href="#scope-boundaries" title="Permanent link">&para;</a></h1>
+<p>What Remembra does — and what it intentionally doesn't do.</p>
+<h2 id="remembra-is-a-memory-layer">Remembra is a Memory Layer<a class="headerlink" href="#remembra-is-a-memory-layer" title="Permanent link">&para;</a></h2>
+<p>Remembra is <strong>persistent memory</strong> for AI agents. It stores facts, recalls them semantically, and manages their lifecycle. That's it.</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>┌─────────────────────────────────────────────────────────┐
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>│                    YOUR APPLICATION                      │
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│                                                         │
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐ │
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│  │ Orchestrator│  │   Agents    │  │   Tools/APIs    │ │
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│  │ (LangGraph, │  │ (Claude,    │  │   (Searches,    │ │
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│  │  CrewAI,    │  │  GPT, etc)  │  │    DB calls)    │ │
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│  │  AutoGen)   │  │             │  │                 │ │
+</span><span id="__span-0-9"><a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│  └──────┬──────┘  └──────┬──────┘  └────────┬────────┘ │
+</span><span id="__span-0-10"><a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│         │                │                   │          │
+</span><span id="__span-0-11"><a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│         └────────────────┼───────────────────┘          │
+</span><span id="__span-0-12"><a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│                          │                              │
+</span><span id="__span-0-13"><a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│                          ▼                              │
+</span><span id="__span-0-14"><a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│  ┌──────────────────────────────────────────────────┐  │
+</span><span id="__span-0-15"><a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│  │              REMEMBRA (Memory Layer)              │  │
+</span><span id="__span-0-16"><a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│  │                                                    │  │
+</span><span id="__span-0-17"><a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│  │  • Store facts                                     │  │
+</span><span id="__span-0-18"><a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│  │  • Recall semantically                            │  │
+</span><span id="__span-0-19"><a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│  │  • Extract entities                               │  │
+</span><span id="__span-0-20"><a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│  │  • Build knowledge graph                          │  │
+</span><span id="__span-0-21"><a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>│  │  • Manage decay/expiry                            │  │
+</span><span id="__span-0-22"><a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│  │  • Handle conflicts                               │  │
+</span><span id="__span-0-23"><a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>│  └──────────────────────────────────────────────────┘  │
+</span><span id="__span-0-24"><a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>└─────────────────────────────────────────────────────────┘
 </span></code></pre></div>
-<h2 id="interactive-docs">Interactive Docs<a class="headerlink" href="#interactive-docs" title="Permanent link">&para;</a></h2>
-<p>Swagger UI available at:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>http://localhost:8787/docs
-</span></code></pre></div>
-<p>ReDoc available at:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>http://localhost:8787/redoc
-</span></code></pre></div>
-<h2 id="openapi-spec">OpenAPI Spec<a class="headerlink" href="#openapi-spec" title="Permanent link">&para;</a></h2>
-<p>Download the OpenAPI 3.0 specification:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>http://localhost:8787/openapi.json
-</span></code></pre></div>
-<h2 id="endpoints-overview">Endpoints Overview<a class="headerlink" href="#endpoints-overview" title="Permanent link">&para;</a></h2>
+<h2 id="what-remembra-does">What Remembra Does ✅<a class="headerlink" href="#what-remembra-does" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Method</th>
-<th>Endpoint</th>
+<th>Capability</th>
 <th>Description</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>GET</td>
-<td><code>/health</code></td>
-<td>Health check</td>
+<td><strong>Persistent Storage</strong></td>
+<td>Facts survive restarts, sessions, context windows</td>
 </tr>
 <tr>
-<td>POST</td>
-<td><code>/store</code></td>
-<td>Store memories</td>
+<td><strong>Semantic Recall</strong></td>
+<td>Find memories by meaning, not just keywords</td>
 </tr>
 <tr>
-<td>POST</td>
-<td><code>/recall</code></td>
-<td>Query memories</td>
+<td><strong>Entity Extraction</strong></td>
+<td>Automatically identify people, places, orgs</td>
 </tr>
 <tr>
-<td>GET</td>
-<td><code>/memories</code></td>
-<td>List memories</td>
+<td><strong>Knowledge Graph</strong></td>
+<td>Track relationships between entities</td>
 </tr>
 <tr>
-<td>PUT</td>
-<td><code>/memories/{id}</code></td>
-<td>Update memory</td>
+<td><strong>Temporal Decay</strong></td>
+<td>Recent memories rank higher than stale ones</td>
 </tr>
 <tr>
-<td>DELETE</td>
-<td><code>/memories</code></td>
-<td>Delete memories</td>
+<td><strong>Conflict Detection</strong></td>
+<td>Flag contradictory facts</td>
 </tr>
 <tr>
-<td>GET</td>
-<td><code>/users/{user_id}/profile</code></td>
-<td>Get user profile (v0.12.0+)</td>
+<td><strong>Multi-tenancy</strong></td>
+<td>User isolation, project namespaces</td>
 </tr>
 <tr>
-<td>GET</td>
-<td><code>/entities</code></td>
-<td>List entities</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/entities/{id}</code></td>
-<td>Get entity</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/entities/{id}/relationships</code></td>
-<td>Entity relationships</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/entities/{id}/memories</code></td>
-<td>Entity memories</td>
-</tr>
-<tr>
-<td>POST</td>
-<td><code>/keys</code></td>
-<td>Create API key</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/keys</code></td>
-<td>List API keys</td>
-</tr>
-<tr>
-<td>DELETE</td>
-<td><code>/keys/{id}</code></td>
-<td>Revoke API key</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/temporal/decay/report</code></td>
-<td>Decay report</td>
-</tr>
-<tr>
-<td>POST</td>
-<td><code>/temporal/cleanup</code></td>
-<td>Run cleanup</td>
-</tr>
-<tr>
-<td>POST</td>
-<td><code>/cleanup-expired</code></td>
-<td>Remove expired</td>
+<td><strong>TTL/Expiry</strong></td>
+<td>Auto-cleanup of temporary context</td>
 </tr>
 </tbody>
 </table>
-<h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
-<p>Include API key in Authorization header:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Authorization: Bearer rem_your_api_key
-</span></code></pre></div>
-<h2 id="requestresponse-format">Request/Response Format<a class="headerlink" href="#requestresponse-format" title="Permanent link">&para;</a></h2>
-<p>All requests and responses use JSON:</p>
-<div class="language-http highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="err">Content-Type: application/json</span>
-</span></code></pre></div>
-<h2 id="error-format">Error Format<a class="headerlink" href="#error-format" title="Permanent link">&para;</a></h2>
-<div class="language-json highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p">{</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">&quot;error&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">&quot;code&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;error_code&quot;</span><span class="p">,</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Human readable message&quot;</span><span class="p">,</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="nt">&quot;details&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">  </span><span class="p">}</span>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="p">}</span>
-</span></code></pre></div>
-<h2 id="full-endpoint-documentation">Full Endpoint Documentation<a class="headerlink" href="#full-endpoint-documentation" title="Permanent link">&para;</a></h2>
-<p>See <a href="../../guides/rest-api/">REST API Guide</a> for detailed endpoint documentation with examples.</p>
-<h2 id="rate-limits">Rate Limits<a class="headerlink" href="#rate-limits" title="Permanent link">&para;</a></h2>
+<h2 id="what-remembra-doesnt-do">What Remembra Doesn't Do ❌<a class="headerlink" href="#what-remembra-doesnt-do" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Endpoint</th>
-<th>Limit</th>
+<th>Not Our Job</th>
+<th>Use Instead</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>POST /store</td>
-<td>30/minute</td>
+<td><strong>Orchestration</strong></td>
+<td>LangGraph, CrewAI, AutoGen, custom code</td>
 </tr>
 <tr>
-<td>POST /recall</td>
-<td>60/minute</td>
+<td><strong>Agent Execution</strong></td>
+<td>Your LLM provider (Claude, GPT, etc)</td>
 </tr>
 <tr>
-<td>DELETE /memories</td>
-<td>10/minute</td>
+<td><strong>Task Planning</strong></td>
+<td>Orchestration frameworks</td>
 </tr>
 <tr>
-<td>Others</td>
-<td>120/minute</td>
+<td><strong>Tool Calling</strong></td>
+<td>Agent frameworks</td>
+</tr>
+<tr>
+<td><strong>Conversation Management</strong></td>
+<td>Your application layer</td>
+</tr>
+<tr>
+<td><strong>Session State</strong></td>
+<td>Redis, your app's session store</td>
+</tr>
+<tr>
+<td><strong>RAG over Documents</strong></td>
+<td>Vector DBs (Pinecone, Weaviate, etc)</td>
+</tr>
+<tr>
+<td><strong>Real-time Streaming</strong></td>
+<td>Your websocket/SSE layer</td>
 </tr>
 </tbody>
 </table>
-<h2 id="sdks">SDKs<a class="headerlink" href="#sdks" title="Permanent link">&para;</a></h2>
-<h3 id="python">Python<a class="headerlink" href="#python" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pip<span class="w"> </span>install<span class="w"> </span>remembra
+<h2 id="the-boundary-in-practice">The Boundary in Practice<a class="headerlink" href="#the-boundary-in-practice" title="Permanent link">&para;</a></h2>
+<h3 id="orchestration-vs-memory">Orchestration vs Memory<a class="headerlink" href="#orchestration-vs-memory" title="Permanent link">&para;</a></h3>
+<p><strong>Orchestration</strong> decides <em>what to do</em>:
+- "Should I search the web or ask the user?"
+- "Which tool should I call?"
+- "How do I break this task into steps?"</p>
+<p><strong>Memory</strong> provides <em>context for decisions</em>:
+- "What do I know about this user?"
+- "What happened in previous conversations?"
+- "What facts are relevant to this query?"</p>
+<h3 id="example-multi-agent-system">Example: Multi-Agent System<a class="headerlink" href="#example-multi-agent-system" title="Permanent link">&para;</a></h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Orchestrator handles coordination</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">orchestrator</span> <span class="o">=</span> <span class="n">LangGraph</span><span class="p">(</span><span class="o">...</span><span class="p">)</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Each agent gets its own memory</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">research_agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">memory</span><span class="o">=</span><span class="n">Memory</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="s2">&quot;research&quot;</span><span class="p">))</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">writer_agent</span> <span class="o">=</span> <span class="n">Agent</span><span class="p">(</span><span class="n">memory</span><span class="o">=</span><span class="n">Memory</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="s2">&quot;writing&quot;</span><span class="p">))</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="c1"># Agents share facts through memory, not orchestration</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="n">research_agent</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Company X revenue: $10M&quot;</span><span class="p">)</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="c1"># Later...</span>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="n">writer_agent</span><span class="o">.</span><span class="n">recall</span><span class="p">(</span><span class="s2">&quot;Company X financials&quot;</span><span class="p">)</span>  <span class="c1"># Gets the fact</span>
 </span></code></pre></div>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">remembra</span><span class="w"> </span><span class="kn">import</span> <span class="n">Memory</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">memory</span> <span class="o">=</span> <span class="n">Memory</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">,</span> <span class="n">user_id</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">)</span>
+<h3 id="example-rag-vs-memory">Example: RAG vs Memory<a class="headerlink" href="#example-rag-vs-memory" title="Permanent link">&para;</a></h3>
+<p><strong>RAG (Document Retrieval):</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Retrieve chunks from a corpus</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">chunks</span> <span class="o">=</span> <span class="n">vector_db</span><span class="o">.</span><span class="n">search</span><span class="p">(</span><span class="s2">&quot;quarterly earnings&quot;</span><span class="p">)</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="c1"># Use for single conversation</span>
+</span></code></pre></div></p>
+<p><strong>Memory (Persistent Facts):</strong>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Extract and persist key facts</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Acme reported $10M Q4 revenue&quot;</span><span class="p">)</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="c1"># Available forever, decays over time</span>
+</span></code></pre></div></p>
+<p>Use RAG for large document search. Use Memory for facts worth remembering.</p>
+<h2 id="integration-patterns">Integration Patterns<a class="headerlink" href="#integration-patterns" title="Permanent link">&para;</a></h2>
+<h3 id="pattern-1-memory-augmented-agent">Pattern 1: Memory-Augmented Agent<a class="headerlink" href="#pattern-1-memory-augmented-agent" title="Permanent link">&para;</a></h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="k">def</span><span class="w"> </span><span class="nf">agent_turn</span><span class="p">(</span><span class="n">user_message</span><span class="p">):</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>    <span class="c1"># 1. Recall relevant context</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>    <span class="n">context</span> <span class="o">=</span> <span class="n">memory</span><span class="o">.</span><span class="n">recall</span><span class="p">(</span><span class="n">user_message</span><span class="p">)</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>    <span class="c1"># 2. Agent generates response (YOUR orchestration)</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>    <span class="n">response</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">generate</span><span class="p">(</span>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>        <span class="n">system</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Context:</span><span class="se">\n</span><span class="si">{</span><span class="n">context</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>        <span class="n">user</span><span class="o">=</span><span class="n">user_message</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>    <span class="p">)</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>    <span class="c1"># 3. Store new facts (YOUR extraction logic)</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>    <span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="n">extract_facts</span><span class="p">(</span><span class="n">response</span><span class="p">))</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>    <span class="k">return</span> <span class="n">response</span>
 </span></code></pre></div>
-<h3 id="rest-any-language">REST (Any Language)<a class="headerlink" href="#rest-any-language" title="Permanent link">&para;</a></h3>
-<p>Use the REST API directly with any HTTP client.</p>
-<h3 id="javascript-coming-soon">JavaScript (Coming Soon)<a class="headerlink" href="#javascript-coming-soon" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>npm<span class="w"> </span>install<span class="w"> </span>remembra
+<h3 id="pattern-2-multi-agent-shared-memory">Pattern 2: Multi-Agent Shared Memory<a class="headerlink" href="#pattern-2-multi-agent-shared-memory" title="Permanent link">&para;</a></h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Shared project for collaboration</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="n">memory</span> <span class="o">=</span> <span class="n">Memory</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="s2">&quot;team-alpha&quot;</span><span class="p">)</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># Research agent finds facts</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="n">research</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;Competitor launched new product&quot;</span><span class="p">,</span> <span class="n">metadata</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;agent&quot;</span><span class="p">:</span> <span class="s2">&quot;research&quot;</span><span class="p">})</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># Strategy agent uses them</span>
+</span><span id="__span-5-8"><a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="n">context</span> <span class="o">=</span> <span class="n">strategy</span><span class="o">.</span><span class="n">recall</span><span class="p">(</span><span class="s2">&quot;competitor activity&quot;</span><span class="p">)</span>
 </span></code></pre></div>
+<h3 id="pattern-3-session-long-term-memory">Pattern 3: Session + Long-term Memory<a class="headerlink" href="#pattern-3-session-long-term-memory" title="Permanent link">&para;</a></h3>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="c1"># Session state (ephemeral) - YOUR responsibility</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="n">session</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;current_task&quot;</span><span class="p">:</span> <span class="s2">&quot;booking&quot;</span><span class="p">,</span> <span class="s2">&quot;step&quot;</span><span class="p">:</span> <span class="mi">3</span><span class="p">}</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="c1"># Long-term memory (persistent) - Remembra</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;User prefers aisle seats&quot;</span><span class="p">)</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;User&#39;s frequent flyer: Delta Gold&quot;</span><span class="p">)</span>
+</span></code></pre></div>
+<h2 id="faq">FAQ<a class="headerlink" href="#faq" title="Permanent link">&para;</a></h2>
+<h3 id="should-remembra-handle-my-agents-state-machine">"Should Remembra handle my agent's state machine?"<a class="headerlink" href="#should-remembra-handle-my-agents-state-machine" title="Permanent link">&para;</a></h3>
+<p>No. Use an orchestration framework (LangGraph, CrewAI) or custom code for agent state. Remembra stores <em>facts</em>, not <em>execution state</em>.</p>
+<h3 id="should-i-store-conversation-history-in-remembra">"Should I store conversation history in Remembra?"<a class="headerlink" href="#should-i-store-conversation-history-in-remembra" title="Permanent link">&para;</a></h3>
+<p>Store <strong>extracted facts</strong>, not raw messages. Conversation history belongs in your app layer. Memory is for distilled knowledge.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># ❌ Don&#39;t do this</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;User: Hi! Bot: Hello! User: What&#39;s the weather?&quot;</span><span class="p">)</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># ✅ Do this</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;User asked about weather in San Francisco&quot;</span><span class="p">)</span>
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="n">memory</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="s2">&quot;User prefers Celsius for temperature&quot;</span><span class="p">)</span>
+</span></code></pre></div>
+<h3 id="can-remembra-replace-my-vector-database">"Can Remembra replace my vector database?"<a class="headerlink" href="#can-remembra-replace-my-vector-database" title="Permanent link">&para;</a></h3>
+<p>Only for <strong>memory</strong> use cases. If you need:
+- Document chunking → Use a vector DB
+- Large corpus search → Use a vector DB<br />
+- Persistent facts about users/entities → Use Remembra</p>
+<h3 id="should-i-use-remembra-for-caching">"Should I use Remembra for caching?"<a class="headerlink" href="#should-i-use-remembra-for-caching" title="Permanent link">&para;</a></h3>
+<p>No. Use Redis or similar. Memory is for <em>knowledge</em>, not <em>cache</em>.</p>
+<hr />
+<p><em>Still unsure where the boundary is? <a href="https://discord.gg/mPYQRKzXz5">Ask on Discord</a> or <a href="https://github.com/remembra-ai/remembra/issues">open an issue</a>.</em></p>
 
 
 

@@ -89,7 +89,7 @@ def test_build_forward_headers_preserves_client_api_key_when_not_configured() ->
 
 def test_check_port_available_raises_on_port_in_use() -> None:
     """Test that check_port_available raises BridgePortInUseError when port is busy."""
-    port = 8765
+    port = 9819
     mock_socket = MagicMock()
     mock_socket.bind.side_effect = OSError("Address already in use")
     mock_context = MagicMock()

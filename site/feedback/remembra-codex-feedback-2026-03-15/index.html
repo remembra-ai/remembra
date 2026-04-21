@@ -19,7 +19,7 @@
       
       
       <link rel="icon" href="../../assets/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
     
     
       
@@ -1595,6 +1595,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../concepts/scope/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scope & Boundaries
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../concepts/entity-graph/" class="md-nav__link">
         
   
@@ -1603,6 +1631,34 @@
     
   
     Entity Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/durability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durability & Recovery
   
 
     
@@ -2504,7 +2560,7 @@ Agent: Codex</p>
 <p>Codex should not talk directly to the public Remembra cloud endpoint from inside the sandbox.</p>
 <p>It should connect like this:</p>
 <ol>
-<li>A user-level local bridge daemon runs outside the sandbox on <code>127.0.0.1:8765</code>.</li>
+<li>A user-level local bridge daemon runs outside the sandbox on <code>127.0.0.1:9819</code>.</li>
 <li>Codex MCP connects only to the local bridge.</li>
 <li>The local bridge owns outbound cloud connectivity, retries, DNS workarounds, auth, and health checks.</li>
 <li>Codex config only contains local connection details plus non-secret identifiers like project and user id.</li>
@@ -2565,7 +2621,7 @@ Agent: Codex</p>
 </span><span id="__span-0-35"><a id="__codelineno-0-35" name="__codelineno-0-35" href="#__codelineno-0-35"></a>cat<span class="w"> </span>&gt;<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$HOME</span><span class="s2">/.local/bin/remembra-codex-mcp&quot;</span><span class="w"> </span><span class="s">&lt;&lt;&#39;EOF&#39;</span>
 </span><span id="__span-0-36"><a id="__codelineno-0-36" name="__codelineno-0-36" href="#__codelineno-0-36"></a><span class="s">#!/usr/bin/env bash</span>
 </span><span id="__span-0-37"><a id="__codelineno-0-37" name="__codelineno-0-37" href="#__codelineno-0-37"></a><span class="s">set -euo pipefail</span>
-</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a><span class="s">export REMEMBRA_URL=&quot;${REMEMBRA_URL:-http://127.0.0.1:8765}&quot;</span>
+</span><span id="__span-0-38"><a id="__codelineno-0-38" name="__codelineno-0-38" href="#__codelineno-0-38"></a><span class="s">export REMEMBRA_URL=&quot;${REMEMBRA_URL:-http://127.0.0.1:9819}&quot;</span>
 </span><span id="__span-0-39"><a id="__codelineno-0-39" name="__codelineno-0-39" href="#__codelineno-0-39"></a><span class="s">export REMEMBRA_PROJECT=&quot;${REMEMBRA_PROJECT:?REMEMBRA_PROJECT is required}&quot;</span>
 </span><span id="__span-0-40"><a id="__codelineno-0-40" name="__codelineno-0-40" href="#__codelineno-0-40"></a><span class="s">export REMEMBRA_USER_ID=&quot;${REMEMBRA_USER_ID:?REMEMBRA_USER_ID is required}&quot;</span>
 </span><span id="__span-0-41"><a id="__codelineno-0-41" name="__codelineno-0-41" href="#__codelineno-0-41"></a><span class="s">exec &quot;$HOME/.local/bin/remembra-mcp&quot; &quot;$@&quot;</span>
@@ -2632,7 +2688,7 @@ Agent: Codex</p>
 </span><span id="__span-0-102"><a id="__codelineno-0-102" name="__codelineno-0-102" href="#__codelineno-0-102"></a><span class="s">    do_DELETE = _forward</span>
 </span><span id="__span-0-103"><a id="__codelineno-0-103" name="__codelineno-0-103" href="#__codelineno-0-103"></a>
 </span><span id="__span-0-104"><a id="__codelineno-0-104" name="__codelineno-0-104" href="#__codelineno-0-104"></a><span class="s">if __name__ == &quot;__main__&quot;:</span>
-</span><span id="__span-0-105"><a id="__codelineno-0-105" name="__codelineno-0-105" href="#__codelineno-0-105"></a><span class="s">    ThreadingHTTPServer((&quot;127.0.0.1&quot;, 8765), Proxy).serve_forever()</span>
+</span><span id="__span-0-105"><a id="__codelineno-0-105" name="__codelineno-0-105" href="#__codelineno-0-105"></a><span class="s">    ThreadingHTTPServer((&quot;127.0.0.1&quot;, 9819), Proxy).serve_forever()</span>
 </span><span id="__span-0-106"><a id="__codelineno-0-106" name="__codelineno-0-106" href="#__codelineno-0-106"></a><span class="s">EOF</span>
 </span><span id="__span-0-107"><a id="__codelineno-0-107" name="__codelineno-0-107" href="#__codelineno-0-107"></a>chmod<span class="w"> </span>+x<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$HOME</span><span class="s2">/.remembra/remembra_bridge.py&quot;</span>
 </span><span id="__span-0-108"><a id="__codelineno-0-108" name="__codelineno-0-108" href="#__codelineno-0-108"></a>
@@ -2650,7 +2706,7 @@ Agent: Codex</p>
 </span><span id="__span-0-120"><a id="__codelineno-0-120" name="__codelineno-0-120" href="#__codelineno-0-120"></a><span class="s">command = &quot;{Path.home() / &quot;.local/bin/remembra-codex-mcp&quot;}&quot;</span>
 </span><span id="__span-0-121"><a id="__codelineno-0-121" name="__codelineno-0-121" href="#__codelineno-0-121"></a>
 </span><span id="__span-0-122"><a id="__codelineno-0-122" name="__codelineno-0-122" href="#__codelineno-0-122"></a><span class="s">[mcp_servers.remembra.env]</span>
-</span><span id="__span-0-123"><a id="__codelineno-0-123" name="__codelineno-0-123" href="#__codelineno-0-123"></a><span class="s">REMEMBRA_URL = &quot;http://127.0.0.1:8765&quot;</span>
+</span><span id="__span-0-123"><a id="__codelineno-0-123" name="__codelineno-0-123" href="#__codelineno-0-123"></a><span class="s">REMEMBRA_URL = &quot;http://127.0.0.1:9819&quot;</span>
 </span><span id="__span-0-124"><a id="__codelineno-0-124" name="__codelineno-0-124" href="#__codelineno-0-124"></a><span class="s">REMEMBRA_PROJECT = &quot;{os.environ[&quot;REMEMBRA_PROJECT&quot;]}&quot;</span>
 </span><span id="__span-0-125"><a id="__codelineno-0-125" name="__codelineno-0-125" href="#__codelineno-0-125"></a><span class="s">REMEMBRA_USER_ID = &quot;{os.environ[&quot;REMEMBRA_USER_ID&quot;]}&quot;</span>
 </span><span id="__span-0-126"><a id="__codelineno-0-126" name="__codelineno-0-126" href="#__codelineno-0-126"></a><span class="s">&#39;&#39;&#39;.strip()</span>
@@ -2693,7 +2749,7 @@ Agent: Codex</p>
 </span><span id="__span-0-163"><a id="__codelineno-0-163" name="__codelineno-0-163" href="#__codelineno-0-163"></a><span class="k">fi</span>
 </span><span id="__span-0-164"><a id="__codelineno-0-164" name="__codelineno-0-164" href="#__codelineno-0-164"></a>
 </span><span id="__span-0-165"><a id="__codelineno-0-165" name="__codelineno-0-165" href="#__codelineno-0-165"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Remembra Codex setup complete.&quot;</span>
-</span><span id="__span-0-166"><a id="__codelineno-0-166" name="__codelineno-0-166" href="#__codelineno-0-166"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Bridge: http://127.0.0.1:8765&quot;</span>
+</span><span id="__span-0-166"><a id="__codelineno-0-166" name="__codelineno-0-166" href="#__codelineno-0-166"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Bridge: http://127.0.0.1:9819&quot;</span>
 </span><span id="__span-0-167"><a id="__codelineno-0-167" name="__codelineno-0-167" href="#__codelineno-0-167"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;Project: </span><span class="nv">$REMEMBRA_PROJECT</span><span class="s2">&quot;</span>
 </span><span id="__span-0-168"><a id="__codelineno-0-168" name="__codelineno-0-168" href="#__codelineno-0-168"></a><span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;User: </span><span class="nv">$REMEMBRA_USER_ID</span><span class="s2">&quot;</span>
 </span></code></pre></div>
@@ -2703,7 +2759,7 @@ Agent: Codex</p>
 </span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="n">command</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;/Users/your-user/.local/bin/remembra-codex-mcp&quot;</span>
 </span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
 </span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="k">[mcp_servers.remembra.env]</span>
-</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">REMEMBRA_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://127.0.0.1:8765&quot;</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">REMEMBRA_URL</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;http://127.0.0.1:9819&quot;</span>
 </span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="n">REMEMBRA_PROJECT</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;clawdbot&quot;</span>
 </span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="n">REMEMBRA_USER_ID</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;user_XdEOi0CkNGvePP8tS4MZ6w&quot;</span>
 </span></code></pre></div>

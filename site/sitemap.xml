@@ -2,214 +2,222 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://docs.remembra.dev/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/DEPLOYMENT/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/ENTITY-RESOLUTION/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/SETUP-CHECKLIST/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/TROUBLESHOOTING/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/api/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/benchmarks/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/bugs/BUG-001-PROJECTSWITCHER-STATE/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/bugs/BUG-002-NAMESPACE-MISMATCH/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/case-studies/multi-agent-collaboration/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
+    </url>
+    <url>
+         <loc>https://docs.remembra.dev/concepts/durability/</loc>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/concepts/entity-graph/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/concepts/how-it-works/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/concepts/memory-model/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
+    </url>
+    <url>
+         <loc>https://docs.remembra.dev/concepts/scope/</loc>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/examples/chatbot/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/examples/multi-user/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/examples/rag-pipeline/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/feedback/remembra-codex-feedback-2026-03-15/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/getting-started/agent-setup/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/getting-started/docker/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/getting-started/installation/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/getting-started/quickstart/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/conversation-ingestion/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/entity-resolution/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/field-notes/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/import-export/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/javascript-sdk/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/multi-agent-shared-memory/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/plugins/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/python-sdk/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/rbac/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/rest-api/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/security/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/sleep-time-compute/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/temporal/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/guides/webhooks/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/integrations/any-mcp-client/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/integrations/claude-code/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/integrations/claude-desktop/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/integrations/codex/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/integrations/cursor/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/integrations/jetbrains/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/integrations/mcp-server/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/integrations/vscode/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/integrations/windsurf/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/integrations/zed/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/reference/api-reference/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/reference/api/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/reference/changelog/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/reference/configuration/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/sdks/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/sdks/javascript-sdk/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
     <url>
          <loc>https://docs.remembra.dev/sdks/python-sdk/</loc>
-         <lastmod>2026-03-23</lastmod>
+         <lastmod>2026-04-21</lastmod>
     </url>
 </urlset>

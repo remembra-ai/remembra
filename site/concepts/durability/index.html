@@ -10,13 +10,13 @@
       
       
       
-        <link rel="canonical" href="https://docs.remembra.dev/reference/api/">
+        <link rel="canonical" href="https://docs.remembra.dev/concepts/durability/">
       
       
-        <link rel="prev" href="../configuration/">
+        <link rel="prev" href="../entity-graph/">
       
       
-        <link rel="next" href="../../benchmarks/">
+        <link rel="next" href="../../examples/chatbot/">
       
       
         
@@ -27,7 +27,7 @@
     
     
       
-        <title>API Reference - Remembra</title>
+        <title>Durability & Recovery - Remembra</title>
       
     
     
@@ -88,7 +88,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#api-reference" class="md-skip">
+        <a href="#durability-recovery" class="md-skip">
           Skip to content
         </a>
       
@@ -125,7 +125,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              API Reference
+              Durability & Recovery
             
           </span>
         </div>
@@ -335,11 +335,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../concepts/how-it-works/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../how-it-works/" class="md-tabs__link">
           
   
   
@@ -375,13 +377,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../configuration/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../reference/configuration/" class="md-tabs__link">
           
   
   
@@ -1488,28 +1488,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
-        
-          
-          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="">
             
   
   
@@ -1527,7 +1530,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_6">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1545,7 +1548,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/how-it-works/" class="md-nav__link">
+      <a href="../how-it-works/" class="md-nav__link">
         
   
   
@@ -1573,7 +1576,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/memory-model/" class="md-nav__link">
+      <a href="../memory-model/" class="md-nav__link">
         
   
   
@@ -1601,7 +1604,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/scope/" class="md-nav__link">
+      <a href="../scope/" class="md-nav__link">
         
   
   
@@ -1629,7 +1632,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../concepts/entity-graph/" class="md-nav__link">
+      <a href="../entity-graph/" class="md-nav__link">
         
   
   
@@ -1654,10 +1657,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../concepts/durability/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durability & Recovery
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1673,6 +1703,354 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Overview
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recovery-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery Contract
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recovery Contract">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-contract" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The Contract
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-we-dont-guarantee" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What We Don't Guarantee
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snapshot-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snapshot Window
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Snapshot Window">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#current-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Behavior
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-this-means" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What This Means
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tuning-the-snapshot-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tuning the Snapshot Window
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exposure-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exposure Surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#durability-vs-atomicity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Durability vs Atomicity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Durability vs Atomicity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-this-means-in-practice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What This Means in Practice
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sqlite-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQLite Configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SQLite Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#journal-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journal Modes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#qdrant-durability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Qdrant Durability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recovery-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery Scenarios
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recovery Scenarios">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scenario-1-server-crash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario 1: Server Crash
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-2-partial-write-torn-write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario 2: Partial Write (Torn Write)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-3-concurrent-writes-under-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario 3: Concurrent Writes Under Load
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Best Practices
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Best Practices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-production-deployments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For Production Deployments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-high-availability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For High-Availability
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics-to-monitor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics to Monitor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#faq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FAQ
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FAQ">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lose-at-most-the-last-memory-what-does-this-mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Lose at most the last memory" — What does this mean?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-often-are-checkpoints-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How often are checkpoints run?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#can-i-tune-snapshot-frequency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Can I tune snapshot frequency?
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1834,31 +2212,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_8" checked>
         
           
-          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_8" >
+        
+          
+          <label class="md-nav__link" for="__nav_8" id="__nav_8_label" tabindex="0">
             
   
   
@@ -1876,7 +2251,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_8_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_8">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1894,7 +2269,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../configuration/" class="md-nav__link">
+      <a href="../../reference/configuration/" class="md-nav__link">
         
   
   
@@ -1919,37 +2294,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    API Reference
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../reference/api/" class="md-nav__link">
         
   
   
@@ -1965,175 +2313,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#base-url" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Base URL
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#interactive-docs" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Interactive Docs
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#openapi-spec" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        OpenAPI Spec
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#endpoints-overview" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Endpoints Overview
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#authentication" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authentication
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#requestresponse-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Request/Response Format
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#error-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Error Format
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#full-endpoint-documentation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Full Endpoint Documentation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#rate-limits" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Rate Limits
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sdks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SDKs
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="SDKs">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#python" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Python
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#rest-any-language" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        REST (Any Language)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#javascript-coming-soon" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        JavaScript (Coming Soon)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2174,7 +2353,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../changelog/" class="md-nav__link">
+      <a href="../../reference/changelog/" class="md-nav__link">
         
   
   
@@ -2346,10 +2525,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#base-url" class="md-nav__link">
+  <a href="#overview" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Base URL
+        Overview
       
     </span>
   </a>
@@ -2357,110 +2536,22 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#interactive-docs" class="md-nav__link">
+  <a href="#recovery-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Interactive Docs
+        Recovery Contract
       
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#openapi-spec" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        OpenAPI Spec
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#endpoints-overview" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Endpoints Overview
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#authentication" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Authentication
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#requestresponse-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Request/Response Format
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#error-format" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Error Format
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#full-endpoint-documentation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Full Endpoint Documentation
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#rate-limits" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Rate Limits
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#sdks" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        SDKs
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="SDKs">
+    <nav class="md-nav" aria-label="Recovery Contract">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#python" class="md-nav__link">
+  <a href="#the-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Python
+        The Contract
       
     </span>
   </a>
@@ -2468,10 +2559,38 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#rest-any-language" class="md-nav__link">
+  <a href="#what-we-dont-guarantee" class="md-nav__link">
     <span class="md-ellipsis">
       
-        REST (Any Language)
+        What We Don't Guarantee
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#snapshot-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Snapshot Window
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Snapshot Window">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#current-behavior" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Current Behavior
       
     </span>
   </a>
@@ -2479,10 +2598,249 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#javascript-coming-soon" class="md-nav__link">
+  <a href="#what-this-means" class="md-nav__link">
     <span class="md-ellipsis">
       
-        JavaScript (Coming Soon)
+        What This Means
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tuning-the-snapshot-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Tuning the Snapshot Window
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exposure-surface" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Exposure Surface
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#durability-vs-atomicity" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Durability vs Atomicity
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Durability vs Atomicity">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-this-means-in-practice" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What This Means in Practice
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sqlite-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        SQLite Configuration
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="SQLite Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#journal-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Journal Modes
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#qdrant-durability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Qdrant Durability
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recovery-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Recovery Scenarios
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recovery Scenarios">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scenario-1-server-crash" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario 1: Server Crash
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-2-partial-write-torn-write" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario 2: Partial Write (Torn Write)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-3-concurrent-writes-under-load" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Scenario 3: Concurrent Writes Under Load
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#best-practices" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Best Practices
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Best Practices">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-production-deployments" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For Production Deployments
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-high-availability" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        For High-Availability
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#metrics-to-monitor" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Metrics to Monitor
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#faq" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        FAQ
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="FAQ">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#lose-at-most-the-last-memory-what-does-this-mean" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        "Lose at most the last memory" — What does this mean?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#how-often-are-checkpoints-run" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How often are checkpoints run?
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#can-i-tune-snapshot-frequency" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Can I tune snapshot frequency?
       
     </span>
   </a>
@@ -2514,177 +2872,343 @@
   
 
 
-<h1 id="api-reference">API Reference<a class="headerlink" href="#api-reference" title="Permanent link">&para;</a></h1>
-<p>OpenAPI specification and endpoint details.</p>
-<h2 id="base-url">Base URL<a class="headerlink" href="#base-url" title="Permanent link">&para;</a></h2>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>http://localhost:8787/api/v1
-</span></code></pre></div>
-<h2 id="interactive-docs">Interactive Docs<a class="headerlink" href="#interactive-docs" title="Permanent link">&para;</a></h2>
-<p>Swagger UI available at:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>http://localhost:8787/docs
-</span></code></pre></div>
-<p>ReDoc available at:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>http://localhost:8787/redoc
-</span></code></pre></div>
-<h2 id="openapi-spec">OpenAPI Spec<a class="headerlink" href="#openapi-spec" title="Permanent link">&para;</a></h2>
-<p>Download the OpenAPI 3.0 specification:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>http://localhost:8787/openapi.json
-</span></code></pre></div>
-<h2 id="endpoints-overview">Endpoints Overview<a class="headerlink" href="#endpoints-overview" title="Permanent link">&para;</a></h2>
+<h1 id="durability-recovery">Durability &amp; Recovery<a class="headerlink" href="#durability-recovery" title="Permanent link">&para;</a></h1>
+<p>Understanding Remembra's data persistence guarantees.</p>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>Remembra uses <strong>SQLite</strong> for metadata and <strong>Qdrant</strong> for vector storage. Both provide strong durability guarantees, but understanding the nuances helps you design reliable systems.</p>
+<h2 id="recovery-contract">Recovery Contract<a class="headerlink" href="#recovery-contract" title="Permanent link">&para;</a></h2>
+<p>This section documents Remembra's <strong>explicit guarantees</strong> about data safety and recovery.</p>
+<h3 id="the-contract">The Contract<a class="headerlink" href="#the-contract" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
-<th>Method</th>
-<th>Endpoint</th>
-<th>Description</th>
+<th>Guarantee</th>
+<th>Commitment</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>GET</td>
-<td><code>/health</code></td>
-<td>Health check</td>
+<td><strong>Committed writes are durable</strong></td>
+<td>Once <code>POST /memories</code> returns 2xx, data survives crashes</td>
 </tr>
 <tr>
-<td>POST</td>
-<td><code>/store</code></td>
-<td>Store memories</td>
+<td><strong>No silent data loss</strong></td>
+<td>Failures are explicit (4xx/5xx), never silent corruption</td>
 </tr>
 <tr>
-<td>POST</td>
-<td><code>/recall</code></td>
-<td>Query memories</td>
+<td><strong>Atomic operations</strong></td>
+<td>Each store/update/delete is all-or-nothing</td>
 </tr>
 <tr>
-<td>GET</td>
-<td><code>/memories</code></td>
-<td>List memories</td>
+<td><strong>Bounded staleness</strong></td>
+<td>Reads reflect writes within the snapshot window</td>
 </tr>
 <tr>
-<td>PUT</td>
-<td><code>/memories/{id}</code></td>
-<td>Update memory</td>
-</tr>
-<tr>
-<td>DELETE</td>
-<td><code>/memories</code></td>
-<td>Delete memories</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/users/{user_id}/profile</code></td>
-<td>Get user profile (v0.12.0+)</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/entities</code></td>
-<td>List entities</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/entities/{id}</code></td>
-<td>Get entity</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/entities/{id}/relationships</code></td>
-<td>Entity relationships</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/entities/{id}/memories</code></td>
-<td>Entity memories</td>
-</tr>
-<tr>
-<td>POST</td>
-<td><code>/keys</code></td>
-<td>Create API key</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/keys</code></td>
-<td>List API keys</td>
-</tr>
-<tr>
-<td>DELETE</td>
-<td><code>/keys/{id}</code></td>
-<td>Revoke API key</td>
-</tr>
-<tr>
-<td>GET</td>
-<td><code>/temporal/decay/report</code></td>
-<td>Decay report</td>
-</tr>
-<tr>
-<td>POST</td>
-<td><code>/temporal/cleanup</code></td>
-<td>Run cleanup</td>
-</tr>
-<tr>
-<td>POST</td>
-<td><code>/cleanup-expired</code></td>
-<td>Remove expired</td>
+<td><strong>Crash recovery</strong></td>
+<td>Server restarts recover all committed data</td>
 </tr>
 </tbody>
 </table>
-<h2 id="authentication">Authentication<a class="headerlink" href="#authentication" title="Permanent link">&para;</a></h2>
-<p>Include API key in Authorization header:</p>
-<div class="language-text highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>Authorization: Bearer rem_your_api_key
-</span></code></pre></div>
-<h2 id="requestresponse-format">Request/Response Format<a class="headerlink" href="#requestresponse-format" title="Permanent link">&para;</a></h2>
-<p>All requests and responses use JSON:</p>
-<div class="language-http highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="err">Content-Type: application/json</span>
-</span></code></pre></div>
-<h2 id="error-format">Error Format<a class="headerlink" href="#error-format" title="Permanent link">&para;</a></h2>
-<div class="language-json highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="p">{</span>
-</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span><span class="nt">&quot;error&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
-</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">    </span><span class="nt">&quot;code&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;error_code&quot;</span><span class="p">,</span>
-</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="w">    </span><span class="nt">&quot;message&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;Human readable message&quot;</span><span class="p">,</span>
-</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="w">    </span><span class="nt">&quot;details&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{}</span>
-</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="w">  </span><span class="p">}</span>
-</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="p">}</span>
-</span></code></pre></div>
-<h2 id="full-endpoint-documentation">Full Endpoint Documentation<a class="headerlink" href="#full-endpoint-documentation" title="Permanent link">&para;</a></h2>
-<p>See <a href="../../guides/rest-api/">REST API Guide</a> for detailed endpoint documentation with examples.</p>
-<h2 id="rate-limits">Rate Limits<a class="headerlink" href="#rate-limits" title="Permanent link">&para;</a></h2>
+<h3 id="what-we-dont-guarantee">What We Don't Guarantee<a class="headerlink" href="#what-we-dont-guarantee" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
 <tr>
-<th>Endpoint</th>
-<th>Limit</th>
+<th>Non-Guarantee</th>
+<th>Why</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>POST /store</td>
-<td>30/minute</td>
+<td><strong>Sub-millisecond consistency</strong></td>
+<td>Distributed systems have inherent propagation delay</td>
 </tr>
 <tr>
-<td>POST /recall</td>
-<td>60/minute</td>
+<td><strong>Infinite retention</strong></td>
+<td>Memories with TTL expire; decayed memories rank lower</td>
 </tr>
 <tr>
-<td>DELETE /memories</td>
-<td>10/minute</td>
-</tr>
-<tr>
-<td>Others</td>
-<td>120/minute</td>
+<td><strong>Cross-region replication</strong></td>
+<td>Not built-in (use Qdrant cluster for this)</td>
 </tr>
 </tbody>
 </table>
-<h2 id="sdks">SDKs<a class="headerlink" href="#sdks" title="Permanent link">&para;</a></h2>
-<h3 id="python">Python<a class="headerlink" href="#python" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>pip<span class="w"> </span>install<span class="w"> </span>remembra
+<h2 id="snapshot-window">Snapshot Window<a class="headerlink" href="#snapshot-window" title="Permanent link">&para;</a></h2>
+<p>The <strong>snapshot window</strong> is the maximum time between a write being committed and that write being visible to all readers.</p>
+<h3 id="current-behavior">Current Behavior<a class="headerlink" href="#current-behavior" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Snapshot Window</th>
+<th>Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>SQLite</strong></td>
+<td><strong>0ms</strong> (immediate)</td>
+<td>Writes are synchronous, readers see instantly</td>
+</tr>
+<tr>
+<td><strong>Qdrant</strong></td>
+<td><strong>≤5 seconds</strong> (default)</td>
+<td>Flush interval before vectors are searchable</td>
+</tr>
+<tr>
+<td><strong>Combined</strong></td>
+<td><strong>≤5 seconds</strong></td>
+<td>Bound by slowest component</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-this-means">What This Means<a class="headerlink" href="#what-this-means" title="Permanent link">&para;</a></h3>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>Time →   0ms        100ms       5000ms
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>         │           │           │
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>Write ───┼───────────┼───────────┼──────────────────
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>         │           │           │
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>         │  Metadata │  Vector   │
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>         │  visible  │  visible  │
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>         │  (SQLite) │  (Qdrant) │
+</span><span id="__span-0-8"><a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>         ▼           ▼           ▼
 </span></code></pre></div>
-<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="kn">from</span><span class="w"> </span><span class="nn">remembra</span><span class="w"> </span><span class="kn">import</span> <span class="n">Memory</span>
-</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="n">memory</span> <span class="o">=</span> <span class="n">Memory</span><span class="p">(</span><span class="n">base_url</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">,</span> <span class="n">user_id</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="p">)</span>
+<p><strong>Scenario:</strong> You store a memory and immediately recall it.</p>
+<ul>
+<li><strong>Metadata queries</strong> (list, get by ID): Immediate</li>
+<li><strong>Semantic search</strong> (recall): May take up to 5 seconds</li>
+</ul>
+<h3 id="tuning-the-snapshot-window">Tuning the Snapshot Window<a class="headerlink" href="#tuning-the-snapshot-window" title="Permanent link">&para;</a></h3>
+<p>For tighter consistency (at cost of write performance):</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># qdrant config</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">storage</span><span class="p">:</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">  </span><span class="nt">performance</span><span class="p">:</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">    </span><span class="nt">flush_interval_sec</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span><span class="w">  </span><span class="c1"># 1 second instead of 5</span>
 </span></code></pre></div>
-<h3 id="rest-any-language">REST (Any Language)<a class="headerlink" href="#rest-any-language" title="Permanent link">&para;</a></h3>
-<p>Use the REST API directly with any HTTP client.</p>
-<h3 id="javascript-coming-soon">JavaScript (Coming Soon)<a class="headerlink" href="#javascript-coming-soon" title="Permanent link">&para;</a></h3>
-<div class="language-bash highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>npm<span class="w"> </span>install<span class="w"> </span>remembra
+<p>For maximum performance (relaxed consistency):</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="nt">storage</span><span class="p">:</span>
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="w">  </span><span class="nt">performance</span><span class="p">:</span>
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="w">    </span><span class="nt">flush_interval_sec</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">30</span><span class="w">  </span><span class="c1"># Batch more writes</span>
 </span></code></pre></div>
+<h3 id="exposure-surface">Exposure Surface<a class="headerlink" href="#exposure-surface" title="Permanent link">&para;</a></h3>
+<p>The snapshot window creates an <strong>exposure surface</strong> — a period where recent writes may not appear in search results.</p>
+<p><strong>Impact by Use Case:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Use Case</th>
+<th>Impact</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Chat memory</strong></td>
+<td>Low</td>
+<td>Users rarely recall just-stored facts</td>
+</tr>
+<tr>
+<td><strong>Multi-agent</strong></td>
+<td>Medium</td>
+<td>Agents may miss very recent writes</td>
+</tr>
+<tr>
+<td><strong>Real-time sync</strong></td>
+<td>High</td>
+<td>Consider polling or webhooks</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Mitigations:</strong></p>
+<ol>
+<li><strong>Immediate metadata queries</strong>: Use <code>GET /memories/{id}</code> right after store</li>
+<li><strong>Webhook notifications</strong>: Subscribe to <code>memory.stored</code> events</li>
+<li><strong>Reduce flush interval</strong>: Trade write throughput for faster visibility</li>
+<li><strong>Application-level cache</strong>: Cache recent writes client-side</li>
+</ol>
+<h2 id="durability-vs-atomicity">Durability vs Atomicity<a class="headerlink" href="#durability-vs-atomicity" title="Permanent link">&para;</a></h2>
+<p>These terms are often confused:</p>
+<table>
+<thead>
+<tr>
+<th>Concept</th>
+<th>Meaning</th>
+<th>Remembra Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Atomicity</strong></td>
+<td>Operations complete fully or not at all</td>
+<td>✅ Each store/update is atomic</td>
+</tr>
+<tr>
+<td><strong>Durability</strong></td>
+<td>Committed data survives crashes</td>
+<td>✅ Data is fsync'd to disk</td>
+</tr>
+</tbody>
+</table>
+<h3 id="what-this-means-in-practice">What This Means in Practice<a class="headerlink" href="#what-this-means-in-practice" title="Permanent link">&para;</a></h3>
+<p>When <code>POST /memories</code> returns success:</p>
+<ol>
+<li>✅ Memory is written to SQLite (metadata, content)</li>
+<li>✅ Vector is written to Qdrant</li>
+<li>✅ Both are durable on disk</li>
+</ol>
+<p>If the server crashes mid-operation:</p>
+<ul>
+<li><strong>Before commit</strong>: Nothing is written (atomic rollback)</li>
+<li><strong>After commit</strong>: Data is fully persisted</li>
+</ul>
+<h2 id="sqlite-configuration">SQLite Configuration<a class="headerlink" href="#sqlite-configuration" title="Permanent link">&para;</a></h2>
+<p>Remembra uses SQLite with these settings:</p>
+<div class="language-text highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>PRAGMA foreign_keys = ON
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>PRAGMA journal_mode = DELETE (default)
+</span></code></pre></div>
+<h3 id="journal-modes">Journal Modes<a class="headerlink" href="#journal-modes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Behavior</th>
+<th>Trade-off</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DELETE</code> (default)</td>
+<td>Journal file deleted after commit</td>
+<td>Safest, slightly slower</td>
+</tr>
+<tr>
+<td><code>WAL</code></td>
+<td>Write-ahead log, concurrent reads</td>
+<td>Faster, requires cleanup</td>
+</tr>
+<tr>
+<td><code>MEMORY</code></td>
+<td>Journal in RAM only</td>
+<td>⚠️ Not durable</td>
+</tr>
+</tbody>
+</table>
+<p>To enable WAL mode for better concurrency:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># In your config or startup</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="k">await</span> <span class="n">conn</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="s2">&quot;PRAGMA journal_mode = WAL&quot;</span><span class="p">)</span>
+</span></code></pre></div>
+<h2 id="qdrant-durability">Qdrant Durability<a class="headerlink" href="#qdrant-durability" title="Permanent link">&para;</a></h2>
+<p>Qdrant provides:</p>
+<ul>
+<li><strong>Write-ahead logging</strong>: All writes logged before applied</li>
+<li><strong>Snapshots</strong>: Periodic full snapshots for recovery</li>
+<li><strong>Segment flush</strong>: Configurable flush intervals</li>
+</ul>
+<p>Default behavior ensures durability but you can tune for performance:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># qdrant config</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="nt">storage</span><span class="p">:</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="w">  </span><span class="nt">on_disk_payload</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="w">  </span><span class="nt">performance</span><span class="p">:</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="w">    </span><span class="nt">flush_interval_sec</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">5</span><span class="w">  </span><span class="c1"># Flush every 5 seconds</span>
+</span></code></pre></div>
+<h2 id="recovery-scenarios">Recovery Scenarios<a class="headerlink" href="#recovery-scenarios" title="Permanent link">&para;</a></h2>
+<h3 id="scenario-1-server-crash">Scenario 1: Server Crash<a class="headerlink" href="#scenario-1-server-crash" title="Permanent link">&para;</a></h3>
+<p><strong>What happens:</strong>
+- SQLite recovers from journal on restart
+- Qdrant replays WAL and recovers</p>
+<p><strong>Data loss:</strong> None (committed transactions are safe)</p>
+<h3 id="scenario-2-partial-write-torn-write">Scenario 2: Partial Write (Torn Write)<a class="headerlink" href="#scenario-2-partial-write-torn-write" title="Permanent link">&para;</a></h3>
+<p><strong>Detection:</strong> Remembra validates data integrity on read:
+- SQLite uses checksums on pages
+- Qdrant validates segment integrity</p>
+<p><strong>Recovery:</strong> Corrupt partial writes are discarded</p>
+<h3 id="scenario-3-concurrent-writes-under-load">Scenario 3: Concurrent Writes Under Load<a class="headerlink" href="#scenario-3-concurrent-writes-under-load" title="Permanent link">&para;</a></h3>
+<p><strong>Behavior under 50+ concurrent agents:</strong>
+- SQLite serializes writes (single-writer)
+- Qdrant handles concurrent writes internally
+- p99 latency may increase under extreme load</p>
+<p><strong>Current Performance (measured):</strong>
+- Under 50 concurrent agents: ~2.1s p99 stale window
+- Target: &lt;500ms p99 (tracked in <a href="https://github.com/remembra-ai/remembra/issues/4">#4</a>)</p>
+<p><strong>Mitigation:</strong>
+- Enable WAL mode for better read concurrency
+- Use connection pooling
+- Consider Qdrant cluster for write scaling
+- Reduce Qdrant flush interval for tighter consistency</p>
+<h2 id="best-practices">Best Practices<a class="headerlink" href="#best-practices" title="Permanent link">&para;</a></h2>
+<h3 id="for-production-deployments">For Production Deployments<a class="headerlink" href="#for-production-deployments" title="Permanent link">&para;</a></h3>
+<ol>
+<li>
+<p><strong>Enable WAL mode</strong> for better concurrency:
+   <div class="language-bash highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">REMEMBRA_SQLITE_WAL</span><span class="o">=</span><span class="nb">true</span>
+</span></code></pre></div></p>
+</li>
+<li>
+<p><strong>Regular backups</strong>:
+   <div class="language-bash highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="c1"># SQLite backup (safe during operation)</span>
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>sqlite3<span class="w"> </span>remembra.db<span class="w"> </span><span class="s2">&quot;.backup backup.db&quot;</span>
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="c1"># Qdrant snapshot</span>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:6333/collections/remembra/snapshots
+</span></code></pre></div></p>
+</li>
+<li>
+<p><strong>Monitor disk space</strong>: Both SQLite WAL and Qdrant segments grow</p>
+</li>
+</ol>
+<h3 id="for-high-availability">For High-Availability<a class="headerlink" href="#for-high-availability" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Use Qdrant cluster mode for vector storage redundancy</li>
+<li>Replicate SQLite using Litestream or similar</li>
+<li>Deploy multiple Remembra instances behind a load balancer</li>
+</ol>
+<h2 id="metrics-to-monitor">Metrics to Monitor<a class="headerlink" href="#metrics-to-monitor" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Metric</th>
+<th>What It Indicates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>store_latency_p99</code></td>
+<td>Write performance under load</td>
+</tr>
+<tr>
+<td><code>recall_latency_p99</code></td>
+<td>Read performance</td>
+</tr>
+<tr>
+<td><code>sqlite_wal_size</code></td>
+<td>WAL file growth (if using WAL)</td>
+</tr>
+<tr>
+<td><code>qdrant_segments</code></td>
+<td>Vector storage fragmentation</td>
+</tr>
+</tbody>
+</table>
+<h2 id="faq">FAQ<a class="headerlink" href="#faq" title="Permanent link">&para;</a></h2>
+<h3 id="lose-at-most-the-last-memory-what-does-this-mean">"Lose at most the last memory" — What does this mean?<a class="headerlink" href="#lose-at-most-the-last-memory-what-does-this-mean" title="Permanent link">&para;</a></h3>
+<p>If the server crashes during a <code>store</code> operation:
+- <strong>Before commit</strong>: The memory is not stored (atomic)
+- <strong>After commit</strong>: The memory is fully durable</p>
+<p>You cannot lose previously committed memories.</p>
+<h3 id="how-often-are-checkpoints-run">How often are checkpoints run?<a class="headerlink" href="#how-often-are-checkpoints-run" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>SQLite WAL</strong>: Checkpoints when WAL reaches ~1000 pages</li>
+<li><strong>Qdrant</strong>: Configurable flush interval (default: 5 seconds)</li>
+</ul>
+<h3 id="can-i-tune-snapshot-frequency">Can I tune snapshot frequency?<a class="headerlink" href="#can-i-tune-snapshot-frequency" title="Permanent link">&para;</a></h3>
+<p>For Qdrant, yes:
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="nt">storage</span><span class="p">:</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">performance</span><span class="p">:</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="nt">flush_interval_sec</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1</span><span class="w">  </span><span class="c1"># More frequent (slower writes)</span>
+</span></code></pre></div></p>
+<p>For SQLite WAL checkpoints:
+<div class="language-sql highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="n">PRAGMA</span><span class="w"> </span><span class="n">wal_checkpoint</span><span class="p">(</span><span class="k">TRUNCATE</span><span class="p">);</span><span class="w">  </span><span class="c1">-- Force checkpoint</span>
+</span></code></pre></div></p>
+<hr />
+<p><em>Questions? Open an issue on <a href="https://github.com/remembra-ai/remembra/issues">GitHub</a>.</em></p>
 
 
 

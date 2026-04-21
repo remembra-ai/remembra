@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="../../assets/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.3">
     
     
       
@@ -1063,6 +1063,50 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#user-profiles-api-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User Profiles API (v0.12.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#slim-recall-mode-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slim Recall Mode (v0.12.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-driven-expiry-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event-Driven Expiry (v0.12.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smart-auto-forgetting-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Smart Auto-Forgetting (v0.12.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1906,6 +1950,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../concepts/scope/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Scope & Boundaries
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../concepts/entity-graph/" class="md-nav__link">
         
   
@@ -1914,6 +1986,34 @@
     
   
     Entity Graph
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../concepts/durability/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Durability & Recovery
   
 
     
@@ -2650,6 +2750,50 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#user-profiles-api-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        User Profiles API (v0.12.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#slim-recall-mode-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Slim Recall Mode (v0.12.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#event-driven-expiry-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Event-Driven Expiry (v0.12.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#smart-auto-forgetting-v0120" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Smart Auto-Forgetting (v0.12.0)
+      
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2958,7 +3102,7 @@
 </ul>
 <h2 id="typescript-types">TypeScript Types<a class="headerlink" href="#typescript-types" title="Permanent link">&para;</a></h2>
 <p>All types are exported for full IntelliSense:</p>
-<div class="language-typescript highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="k">import</span><span class="w"> </span><span class="kr">type</span><span class="w"> </span><span class="p">{</span>
+<p><div class="language-typescript highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="k">import</span><span class="w"> </span><span class="kr">type</span><span class="w"> </span><span class="p">{</span>
 </span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="w">  </span><span class="nx">RemembraConfig</span><span class="p">,</span>
 </span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="w">  </span><span class="nx">StoreResult</span><span class="p">,</span>
 </span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="w">  </span><span class="nx">RecallResult</span><span class="p">,</span>
@@ -2972,6 +3116,57 @@
 </span><span id="__span-21-12"><a id="__codelineno-21-12" name="__codelineno-21-12" href="#__codelineno-21-12"></a><span class="w">  </span><span class="nx">DecayInfo</span><span class="p">,</span>
 </span><span id="__span-21-13"><a id="__codelineno-21-13" name="__codelineno-21-13" href="#__codelineno-21-13"></a><span class="w">  </span><span class="nx">DecayReportResult</span><span class="p">,</span>
 </span><span id="__span-21-14"><a id="__codelineno-21-14" name="__codelineno-21-14" href="#__codelineno-21-14"></a><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;@remembra/client&#39;</span><span class="p">;</span>
+</span></code></pre></div>
+_ߍ{i]&lt;\Vmusx5</p>
+<hr />
+<h2 id="user-profiles-api-v0120">User Profiles API (v0.12.0)<a class="headerlink" href="#user-profiles-api-v0120" title="Permanent link">&para;</a></h2>
+<p>Get aggregated user intelligence.</p>
+<div class="language-typescript highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="kd">const</span><span class="w"> </span><span class="nx">profile</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">memory</span><span class="p">.</span><span class="nx">getUserProfile</span><span class="p">();</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">profile</span><span class="p">);</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="c1">// {</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="c1">//   user_id: &quot;user_123&quot;,</span>
+</span><span id="__span-22-6"><a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="c1">//   memory_count: 47,</span>
+</span><span id="__span-22-7"><a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="c1">//   entity_breakdown: { PERSON: 12, ORG: 8, LOCATION: 5 },</span>
+</span><span id="__span-22-8"><a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="c1">//   top_topics: [&quot;AI&quot;, &quot;meetings&quot;, &quot;projects&quot;],</span>
+</span><span id="__span-22-9"><a id="__codelineno-22-9" name="__codelineno-22-9" href="#__codelineno-22-9"></a><span class="c1">//   last_active: &quot;2026-03-22T15:30:00Z&quot;,</span>
+</span><span id="__span-22-10"><a id="__codelineno-22-10" name="__codelineno-22-10" href="#__codelineno-22-10"></a><span class="c1">//   aggregated_facts: [</span>
+</span><span id="__span-22-11"><a id="__codelineno-22-11" name="__codelineno-22-11" href="#__codelineno-22-11"></a><span class="c1">//     &quot;Works at Acme Corp as senior engineer&quot;,</span>
+</span><span id="__span-22-12"><a id="__codelineno-22-12" name="__codelineno-22-12" href="#__codelineno-22-12"></a><span class="c1">//     &quot;Prefers morning meetings&quot;</span>
+</span><span id="__span-22-13"><a id="__codelineno-22-13" name="__codelineno-22-13" href="#__codelineno-22-13"></a><span class="c1">//   ]</span>
+</span><span id="__span-22-14"><a id="__codelineno-22-14" name="__codelineno-22-14" href="#__codelineno-22-14"></a><span class="c1">// }</span>
+</span></code></pre></div>
+<hr />
+<h2 id="slim-recall-mode-v0120">Slim Recall Mode (v0.12.0)<a class="headerlink" href="#slim-recall-mode-v0120" title="Permanent link">&para;</a></h2>
+<p>Get 90% smaller responses—just the context string.</p>
+<div class="language-typescript highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="c1">// Standard recall (full response with metadata)</span>
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="kd">const</span><span class="w"> </span><span class="nx">full</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">memory</span><span class="p">.</span><span class="nx">recall</span><span class="p">(</span><span class="s1">&#39;What does the user prefer?&#39;</span><span class="p">);</span>
+</span><span id="__span-23-3"><a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="c1">// { context: &quot;...&quot;, memories: [...], entities: [...], ... }</span>
+</span><span id="__span-23-4"><a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a>
+</span><span id="__span-23-5"><a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="c1">// Slim mode (just the context)</span>
+</span><span id="__span-23-6"><a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="kd">const</span><span class="w"> </span><span class="nx">slim</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">memory</span><span class="p">.</span><span class="nx">recall</span><span class="p">(</span><span class="s1">&#39;What does the user prefer?&#39;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">slim</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="w"> </span><span class="p">});</span>
+</span><span id="__span-23-7"><a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="c1">// &quot;User prefers dark mode and morning meetings.&quot;</span>
+</span></code></pre></div>
+<hr />
+<h2 id="event-driven-expiry-v0120">Event-Driven Expiry (v0.12.0)<a class="headerlink" href="#event-driven-expiry-v0120" title="Permanent link">&para;</a></h2>
+<p>Set explicit expiration timestamps.</p>
+<div class="language-typescript highlight"><pre><span></span><code><span id="__span-24-1"><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="c1">// Expires at specific time</span>
+</span><span id="__span-24-2"><a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="k">await</span><span class="w"> </span><span class="nx">memory</span><span class="p">.</span><span class="nx">store</span><span class="p">(</span><span class="s1">&#39;Conference call at 3pm&#39;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-24-3"><a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="w">  </span><span class="nx">expiresAt</span><span class="o">:</span><span class="w"> </span><span class="kt">new</span><span class="w"> </span><span class="nb">Date</span><span class="p">(</span><span class="s1">&#39;2026-03-23T16:00:00Z&#39;</span><span class="p">)</span>
+</span><span id="__span-24-4"><a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="p">});</span>
+</span><span id="__span-24-5"><a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a>
+</span><span id="__span-24-6"><a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="c1">// Or use TTL string</span>
+</span><span id="__span-24-7"><a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="k">await</span><span class="w"> </span><span class="nx">memory</span><span class="p">.</span><span class="nx">store</span><span class="p">(</span><span class="s1">&#39;Meeting tomorrow&#39;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span>
+</span><span id="__span-24-8"><a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="w">  </span><span class="nx">ttl</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;36h&#39;</span>
+</span><span id="__span-24-9"><a id="__codelineno-24-9" name="__codelineno-24-9" href="#__codelineno-24-9"></a><span class="p">});</span>
+</span></code></pre></div>
+<hr />
+<h2 id="smart-auto-forgetting-v0120">Smart Auto-Forgetting (v0.12.0)<a class="headerlink" href="#smart-auto-forgetting-v0120" title="Permanent link">&para;</a></h2>
+<p>Temporal phrases automatically get appropriate TTLs:</p>
+<div class="language-typescript highlight"><pre><span></span><code><span id="__span-25-1"><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="c1">// No explicit TTL needed - auto-detected</span>
+</span><span id="__span-25-2"><a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="k">await</span><span class="w"> </span><span class="nx">memory</span><span class="p">.</span><span class="nx">store</span><span class="p">(</span><span class="s1">&#39;Meeting tomorrow at 3pm&#39;</span><span class="p">);</span><span class="w">  </span><span class="c1">// → 36h TTL</span>
+</span><span id="__span-25-3"><a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="k">await</span><span class="w"> </span><span class="nx">memory</span><span class="p">.</span><span class="nx">store</span><span class="p">(</span><span class="s1">&#39;Deadline in 2 hours&#39;</span><span class="p">);</span><span class="w">      </span><span class="c1">// → 3h TTL</span>
+</span><span id="__span-25-4"><a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="k">await</span><span class="w"> </span><span class="nx">memory</span><span class="p">.</span><span class="nx">store</span><span class="p">(</span><span class="s1">&#39;Call next week&#39;</span><span class="p">);</span><span class="w">           </span><span class="c1">// → 8 days TTL</span>
 </span></code></pre></div>
 
 
