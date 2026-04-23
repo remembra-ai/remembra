@@ -6,8 +6,10 @@ import argparse
 import json
 import os
 import shlex
+import shutil
 import signal
 import socket
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -59,18 +61,116 @@ def check_port_available(host: str, port: int) -> None:
     """Check if a port is available for binding.
 
     Raises:
-        BridgePortInUseError: If the port is already in use.
+        BridgePortInUseError: If the port is already in use. The exception
+            message includes the offending PID when it can be resolved via
+            ``lsof``/``ss``/``netstat`` — this turns the old generic
+            "port in use" error into actionable diagnostic output and
+            unblocks the zombie-state recovery flow.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((host, port))
         except OSError as exc:
+            holder = find_pid_on_port(port)
+            holder_note = (
+                f" Process {holder} is currently holding it. "
+                f"Run 'remembra-bridge --stop --force' to clean it up."
+                if holder is not None
+                else " Run 'remembra-bridge --stop --force' to clean it up."
+            )
             raise BridgePortInUseError(
-                f"Port {port} is already in use on {host}. "
-                f"Stop the existing bridge with 'remembra-bridge --stop' "
-                f"or use a different port with '--port'."
+                f"Port {port} is already in use on {host}.{holder_note}"
             ) from exc
+
+
+def find_pid_on_port(port: int) -> int | None:
+    """Return the PID of a process listening on ``port``, or None.
+
+    Uses whichever OS tool is available. Returns None if the port is
+    free, no tool is available, or the lookup fails. This is a
+    best-effort diagnostic helper — callers MUST treat ``None`` as
+    "don't know" rather than "nothing listening".
+    """
+    # macOS / Linux — prefer lsof (consistent output across both).
+    lsof = shutil.which("lsof")
+    if lsof:
+        try:
+            result = subprocess.run(
+                [lsof, "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                # Take the first PID (there should normally be one)
+                first = result.stdout.strip().splitlines()[0].strip()
+                return int(first) if first.isdigit() else None
+        except (subprocess.SubprocessError, OSError, ValueError):
+            pass
+
+    # Linux fallback — `ss -ltnp` in case lsof is missing
+    ss = shutil.which("ss")
+    if ss:
+        try:
+            result = subprocess.run(
+                [ss, "-ltnp"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if f":{port} " in line and "LISTEN" in line:
+                        # ss output: users:(("py",pid=1234,fd=3))
+                        marker = "pid="
+                        idx = line.find(marker)
+                        if idx >= 0:
+                            tail = line[idx + len(marker) :]
+                            num = tail.split(",", 1)[0].rstrip(")")
+                            if num.isdigit():
+                                return int(num)
+        except (subprocess.SubprocessError, OSError, ValueError):
+            pass
+
+    # Windows fallback — `netstat -ano`
+    if sys.platform == "win32":  # pragma: no cover
+        netstat = shutil.which("netstat")
+        if netstat:
+            try:
+                result = subprocess.run(
+                    [netstat, "-ano"],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                    check=False,
+                )
+                if result.returncode == 0:
+                    for line in result.stdout.splitlines():
+                        if f":{port} " in line and "LISTENING" in line:
+                            parts = line.split()
+                            if parts and parts[-1].isdigit():
+                                return int(parts[-1])
+            except (subprocess.SubprocessError, OSError, ValueError):
+                pass
+
+    return None
+
+
+def is_port_listening(host: str, port: int) -> bool:
+    """Cheap probe — returns True if ``port`` on ``host`` accepts a TCP connect.
+
+    Different from ``find_pid_on_port`` which identifies *who* is listening;
+    this just answers *is anyone there*. Used by --status to detect orphans
+    even when we can't name them.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=0.5):
+            return True
+    except (OSError, socket.timeout):
+        return False
 
 
 def write_pid_file(pid: int, pid_file: Path = DEFAULT_PID_FILE) -> None:
@@ -106,35 +206,66 @@ def is_process_running(pid: int) -> bool:
         return False
 
 
-def stop_bridge(pid_file: Path = DEFAULT_PID_FILE) -> bool:
-    """Stop a running bridge using the PID file.
+def _terminate_pid(pid: int) -> bool:
+    """SIGTERM a PID, SIGKILL if it's still alive after 3 seconds.
 
-    Returns:
-        True if a bridge was stopped, False if none was running.
+    Returns True if the process is gone after this call.
     """
-    pid = read_pid_file(pid_file)
-    if pid is None:
-        return False
-
-    if not is_process_running(pid):
-        remove_pid_file(pid_file)
-        return False
-
     try:
         os.kill(pid, signal.SIGTERM)
-        # Wait up to 3 seconds for graceful shutdown
-        for _ in range(30):
-            if not is_process_running(pid):
-                break
-            time.sleep(0.1)
-        else:
-            # Force kill if still running
-            os.kill(pid, signal.SIGKILL)
+    except (OSError, ProcessLookupError):
+        return not is_process_running(pid)
+
+    for _ in range(30):
+        if not is_process_running(pid):
+            return True
+        time.sleep(0.1)
+
+    try:
+        os.kill(pid, signal.SIGKILL)
     except (OSError, ProcessLookupError):
         pass
 
+    # One last check after KILL
+    time.sleep(0.1)
+    return not is_process_running(pid)
+
+
+def stop_bridge(
+    pid_file: Path = DEFAULT_PID_FILE,
+    *,
+    host: str = DEFAULT_BRIDGE_HOST,
+    port: int = DEFAULT_BRIDGE_PORT,
+    force: bool = False,
+) -> bool:
+    """Stop a running bridge.
+
+    Default mode (``force=False``) uses the PID file.
+
+    ``force=True`` additionally reconciles against the live listener: if
+    the PID file is missing/stale but a process still holds the port,
+    it kills that orphan too. This is the recovery path for the zombie
+    state documented in issue #10.
+
+    Returns:
+        True if anything was stopped, False if the bridge was already down.
+    """
+    stopped_something = False
+
+    pid = read_pid_file(pid_file)
+    if pid is not None and is_process_running(pid):
+        _terminate_pid(pid)
+        stopped_something = True
     remove_pid_file(pid_file)
-    return True
+
+    if force:
+        # Port may still be held by an orphan whose pidfile is gone.
+        orphan = find_pid_on_port(port)
+        if orphan is not None and (pid is None or orphan != pid):
+            if _terminate_pid(orphan):
+                stopped_something = True
+
+    return stopped_something
 
 
 def wait_for_healthy(
@@ -328,6 +459,120 @@ def forward_upstream_request(
     )
 
 
+@dataclass(slots=True)
+class DoctorReport:
+    """Diagnostic snapshot of a remembra-bridge install."""
+
+    pidfile_pid: int | None
+    pidfile_process_alive: bool
+    port_pid: int | None
+    port_listening: bool
+    health_ok: bool
+    health_error: str | None
+
+    @property
+    def healthy(self) -> bool:
+        """A healthy bridge has matching pidfile+port+/health."""
+        if not self.port_listening or not self.health_ok:
+            return False
+        if self.pidfile_pid is None:
+            # No pidfile but a port holder → orphan
+            return False
+        if self.port_pid is not None and self.port_pid != self.pidfile_pid:
+            return False
+        return self.pidfile_process_alive
+
+    @property
+    def has_orphan(self) -> bool:
+        """Port is held but the pidfile doesn't know about it."""
+        if not self.port_listening:
+            return False
+        if self.pidfile_pid is None:
+            return True
+        if not self.pidfile_process_alive:
+            return True
+        if self.port_pid is not None and self.port_pid != self.pidfile_pid:
+            return True
+        return False
+
+
+def run_doctor(
+    host: str,
+    port: int,
+    pid_file: Path = DEFAULT_PID_FILE,
+) -> DoctorReport:
+    """Collect diagnostic info about the bridge state without fixing anything."""
+    pidfile_pid = read_pid_file(pid_file)
+    pidfile_alive = pidfile_pid is not None and is_process_running(pidfile_pid)
+    port_pid = find_pid_on_port(port)
+    listening = is_port_listening(host, port)
+
+    health_ok = False
+    health_error: str | None = None
+    if listening:
+        try:
+            with httpx.Client(timeout=1.0) as client:
+                resp = client.get(f"http://{host}:{port}/health")
+            health_ok = resp.status_code == 200
+            if not health_ok:
+                health_error = f"HTTP {resp.status_code}"
+        except httpx.HTTPError as exc:
+            health_error = str(exc)
+
+    return DoctorReport(
+        pidfile_pid=pidfile_pid,
+        pidfile_process_alive=pidfile_alive,
+        port_pid=port_pid,
+        port_listening=listening,
+        health_ok=health_ok,
+        health_error=health_error,
+    )
+
+
+def format_doctor_report(
+    report: DoctorReport,
+    host: str,
+    port: int,
+    pid_file: Path,
+) -> str:
+    """Format a DoctorReport for human-readable CLI output."""
+    lines: list[str] = ["remembra-bridge doctor"]
+    lines.append("-" * 40)
+    lines.append(f"  pid file:   {pid_file}")
+
+    if report.pidfile_pid is None:
+        lines.append("    pid:      (missing)")
+    else:
+        alive = "alive" if report.pidfile_process_alive else "DEAD (stale pidfile)"
+        lines.append(f"    pid:      {report.pidfile_pid} ({alive})")
+
+    lines.append(f"  port:       {host}:{port}")
+    lines.append(f"    listening: {'yes' if report.port_listening else 'no'}")
+    if report.port_pid is not None:
+        lines.append(f"    holder:    PID {report.port_pid}")
+
+    lines.append("  /health:")
+    if report.health_ok:
+        lines.append("    status:    ok")
+    elif report.port_listening:
+        lines.append(f"    status:    FAIL ({report.health_error or 'unknown'})")
+    else:
+        lines.append("    status:    n/a (nothing listening)")
+
+    lines.append("-" * 40)
+    if report.healthy:
+        lines.append("verdict: HEALTHY")
+    elif report.has_orphan:
+        holder = report.port_pid if report.port_pid is not None else "unknown"
+        lines.append(f"verdict: ORPHAN — port {port} held by PID {holder}")
+        lines.append("         run: remembra-bridge --stop --force")
+    elif not report.port_listening and report.pidfile_pid is None:
+        lines.append("verdict: NOT RUNNING")
+    else:
+        lines.append("verdict: UNHEALTHY — see details above")
+    return "\n".join(lines)
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser for the bridge."""
     parser = argparse.ArgumentParser(description="Start the local Remembra bridge.")
@@ -369,9 +614,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop a running bridge (using PID file)",
     )
     parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "With --stop, also kill any orphan process holding the port "
+            "even if the PID file is missing/stale."
+        ),
+    )
+    parser.add_argument(
         "--status",
         action="store_true",
-        help="Check if a bridge is running",
+        help="Check if a bridge is running (probes both pidfile and port)",
+    )
+    parser.add_argument(
+        "--doctor",
+        action="store_true",
+        help="Print a full diagnostic report (pidfile, port holder, /health).",
     )
     parser.add_argument(
         "--pid-file",
@@ -396,27 +654,61 @@ def main() -> None:
 
     # Handle --stop
     if args.stop:
-        if stop_bridge(args.pid_file):
+        if stop_bridge(
+            args.pid_file,
+            host=args.host,
+            port=args.port,
+            force=args.force,
+        ):
             print("Bridge stopped.")
         else:
-            print("No running bridge found.")
+            # Even without force, a live port means there's still an orphan.
+            orphan = find_pid_on_port(args.port) if not args.force else None
+            if orphan is not None:
+                print(
+                    f"No managed bridge found, but port {args.port} is held by "
+                    f"PID {orphan}. Re-run with --force to clean it up."
+                )
+            else:
+                print("No running bridge found.")
         return
+
+    # Handle --doctor
+    if args.doctor:
+        report = run_doctor(args.host, args.port, args.pid_file)
+        print(format_doctor_report(report, args.host, args.port, args.pid_file))
+        sys.exit(0 if report.healthy else 1)
 
     # Handle --status
     if args.status:
         pid = read_pid_file(args.pid_file)
+
+        # Happy path: pidfile matches a live, responding process
         if pid and is_process_running(pid):
             print(f"Bridge is running (PID {pid})")
-            # Try to get health
             if wait_for_healthy(args.host, args.port, timeout=1.0):
                 print(f"  Listening on http://{args.host}:{args.port}")
                 print("  Status: healthy")
             else:
                 print("  Status: not responding")
-        else:
-            print("Bridge is not running.")
-            if pid:
-                remove_pid_file(args.pid_file)
+            return
+
+        # Stale pidfile pointing at a dead PID — clean it up.
+        if pid:
+            remove_pid_file(args.pid_file)
+
+        # Reconcile against reality: is anyone actually holding the port?
+        if is_port_listening(args.host, args.port):
+            holder = find_pid_on_port(args.port)
+            holder_str = f"PID {holder}" if holder is not None else "an unknown process"
+            print(
+                f"Bridge is NOT managed by this pidfile, but port {args.port} "
+                f"is held by {holder_str}."
+            )
+            print("  Run 'remembra-bridge --stop --force' to clean up the orphan.")
+            return
+
+        print("Bridge is not running.")
         return
 
     # Check if port is available before starting
