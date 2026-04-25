@@ -232,6 +232,23 @@ class ApiClient {
         };
       }
 
+      const healthContentType = healthResponse.headers.get('content-type') || '';
+      if (!healthContentType.includes('application/json')) {
+        const preview = await healthResponse.text().catch(() => '');
+        const shortPreview = preview.slice(0, 120).replace(/\s+/g, ' ').trim();
+        return {
+          apiReachable: false,
+          authenticated: false,
+          authMode,
+          apiUrl,
+          detail:
+            `Health endpoint returned non-JSON (${healthContentType || 'unknown'}). ` +
+            `If you're on a standalone dashboard domain, set VITE_API_URL to your API domain at build time. ` +
+            `Preview: ${shortPreview || '(empty)'}`,
+          serverVersion: null,
+        };
+      }
+
       const healthData = await healthResponse.json().catch(() => null);
       const serverVersion = typeof healthData?.version === 'string' ? healthData.version : null;
 
@@ -328,6 +345,17 @@ class ApiClient {
         message = error.message;
       }
       throw new Error(message);
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const preview = await response.text().catch(() => '');
+      const shortPreview = preview.slice(0, 120).replace(/\s+/g, ' ').trim();
+      throw new Error(
+        `Unexpected API response (expected JSON, got ${contentType || 'unknown'}). ` +
+        `This usually means the dashboard is pointing at the wrong API URL (VITE_API_URL). ` +
+        `Preview: ${shortPreview || '(empty)'}`
+      );
     }
 
     return response.json();
