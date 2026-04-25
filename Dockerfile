@@ -50,6 +50,9 @@ LABEL org.opencontainers.image.description="AI Memory Layer - Self-hosted"
 LABEL org.opencontainers.image.url="https://github.com/remembra-ai/remembra"
 LABEL org.opencontainers.image.vendor="Remembra"
 
+# Optional build identifier (e.g. git SHA) surfaced via /health for deployment verification.
+ARG REMEMBRA_BUILD_SHA=""
+
 # Install runtime dependencies for cryptography
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl3 \
@@ -79,6 +82,7 @@ ENV REMEMBRA_PORT=8787
 ENV REMEMBRA_DATABASE_URL=sqlite:////data/remembra.db
 ENV REMEMBRA_QDRANT_URL=http://localhost:6333
 ENV REMEMBRA_STATIC_DIR=/app/static
+ENV REMEMBRA_BUILD_SHA=${REMEMBRA_BUILD_SHA}
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 

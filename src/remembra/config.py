@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     port: int = 8787
     debug: bool = False
     log_level: str = "info"
+    build_sha: str | None = Field(
+        None,
+        description="Optional build identifier (git SHA) surfaced in /health for deployment verification.",
+    )
     static_dir: str | None = Field(None, description="Directory for static files (dashboard UI). Set to enable serving.")
 
     # CORS

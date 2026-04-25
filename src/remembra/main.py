@@ -525,6 +525,7 @@ def create_app() -> FastAPI:
             version=__version__,
             qdrant=qdrant_status,
             encryption_enabled=bool(cfg.encryption_key),
+            build_sha=cfg.build_sha,
         )
         status_code = 200 if body["status"] == "ok" else 503
         return JSONResponse(content=body, status_code=status_code)

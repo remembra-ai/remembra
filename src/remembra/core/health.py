@@ -30,6 +30,7 @@ def build_health_response(
     version: str,
     qdrant: dict[str, Any],
     encryption_enabled: bool = False,
+    build_sha: str | None = None,
 ) -> dict[str, Any]:
     overall = "ok" if qdrant["status"] == "ok" else "degraded"
 
@@ -38,6 +39,9 @@ def build_health_response(
         "version": version,
         "dependencies": {"qdrant": qdrant},
     }
+
+    if build_sha:
+        response["build_sha"] = build_sha
 
     if encryption_enabled:
         response["encryption"] = "AES-256-GCM"
