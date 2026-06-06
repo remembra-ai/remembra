@@ -43,6 +43,63 @@ function colorForType(type: string): string {
   return TYPE_COLORS[type.toLowerCase()] || '#8b93a7';
 }
 
+function nodeRadius(n: UniNode): number {
+  // Smaller than before — huge spheres were part of the blinding when zoomed in.
+  return 2 + Math.min(n.memoryCount, 30) * 0.32;
+}
+
+/** Crisp text label rendered to a canvas texture (no extra dependency). */
+function makeLabelSprite(text: string): THREE.Sprite {
+  const pad = 8;
+  const fontPx = 44;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return new THREE.Sprite();
+  const font = `600 ${fontPx}px Inter, system-ui, sans-serif`;
+  ctx.font = font;
+  const textW = Math.ceil(ctx.measureText(text).width);
+  canvas.width = textW + pad * 2;
+  canvas.height = fontPx + pad * 2;
+  ctx.font = font; // context resets when the canvas is resized
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'rgba(214,220,250,0.92)';
+  ctx.fillText(text, pad, canvas.height / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.minFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, depthWrite: false });
+  const sprite = new THREE.Sprite(material);
+  const worldHeight = 5;
+  sprite.scale.set(worldHeight * (canvas.width / canvas.height), worldHeight, 1);
+  return sprite;
+}
+
+/** A readable node: crisp solid core + soft additive halo (controlled glow) + label. */
+function makeNodeObject(n: UniNode): THREE.Object3D {
+  const r = nodeRadius(n);
+  const group = new THREE.Group();
+  const halo = new THREE.Mesh(
+    new THREE.SphereGeometry(r * 2.3, 16, 16),
+    new THREE.MeshBasicMaterial({
+      color: n.color,
+      transparent: true,
+      opacity: 0.14,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    }),
+  );
+  group.add(halo);
+  const core = new THREE.Mesh(
+    new THREE.SphereGeometry(r, 18, 18),
+    new THREE.MeshBasicMaterial({ color: n.color }),
+  );
+  group.add(core);
+  const label = makeLabelSprite(n.name);
+  label.position.set(0, r + 4, 0);
+  group.add(label);
+  return group;
+}
+
 export function EntityGraphUniverse({ projectId }: EntityGraphUniverseProps) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fgRef = useRef<any>(null);
@@ -125,20 +182,24 @@ export function EntityGraphUniverse({ projectId }: EntityGraphUniverseProps) {
       if (cancelled || !fgRef.current) return;
       const g = fgRef.current;
       try {
-        // Bloom — the glow that makes nodes read as living light.
+        // Bloom — deliberately SUBTLE. Most of each node's glow comes from its own
+        // additive halo mesh (see nodeThreeObject), so bloom only needs to lift the
+        // very brightest cores. High threshold + low strength prevents the
+        // zoomed-in white-out.
         const composer = g.postProcessingComposer?.();
         if (composer) {
           const bloom = new UnrealBloomPass(
             new THREE.Vector2(dimensions.width, dimensions.height),
-            1.6, // strength
-            0.85, // radius
-            0.08, // threshold
+            0.42, // strength (was 1.6)
+            0.5, // radius
+            0.62, // threshold — only the hottest pixels bloom (was 0.08)
           );
           composer.addPass(bloom);
         }
-        // Starfield — depth, so it feels like an abyss rather than a diagram.
+        // Starfield + light fog — depth, so it feels like an abyss not a diagram.
         const scene = g.scene?.();
         if (scene) {
+          scene.fog = new THREE.FogExp2(0x05060f, 0.00065);
           const STAR_COUNT = 1400;
           const positions = new Float32Array(STAR_COUNT * 3);
           for (let i = 0; i < STAR_COUNT; i++) {
@@ -357,20 +418,19 @@ export function EntityGraphUniverse({ projectId }: EntityGraphUniverseProps) {
         showNavInfo={false}
         nodeRelSize={4}
         nodeVal={(n: UniNode) => n.val}
-        nodeColor={(n: UniNode) => n.color}
-        nodeOpacity={0.95}
-        nodeResolution={16}
+        nodeThreeObject={(n: object) => makeNodeObject(n as UniNode)}
+        nodeThreeObjectExtend={false}
         nodeLabel={(n: UniNode) => `${n.name} · ${n.memoryCount} memories`}
-        linkColor={() => 'rgba(150,160,255,0.25)'}
-        linkOpacity={0.35}
-        linkWidth={0.4}
+        linkColor={() => 'rgba(150,160,255,0.16)'}
+        linkOpacity={0.25}
+        linkWidth={0.3}
         linkDirectionalParticles={(l: UniLink) => {
           const s = graphData.nodes.find((n) => n.id === (typeof l.source === 'object' ? (l.source as UniNode).id : l.source));
-          return Math.min(4, 1 + Math.floor((s?.memoryCount || 1) / 3));
+          return Math.min(3, 1 + Math.floor((s?.memoryCount || 1) / 4));
         }}
-        linkDirectionalParticleWidth={1.6}
-        linkDirectionalParticleSpeed={0.006}
-        linkDirectionalParticleColor={() => '#a855f7'}
+        linkDirectionalParticleWidth={1.1}
+        linkDirectionalParticleSpeed={0.005}
+        linkDirectionalParticleColor={() => 'rgba(168,85,247,0.8)'}
         onNodeClick={(n: object) => handleNodeClick(n as UniNode)}
         enableNodeDrag={false}
         warmupTicks={60}
