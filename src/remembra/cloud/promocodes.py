@@ -7,7 +7,7 @@ Supports:
   - Time-limited campaigns (e.g., MARCH2026 expires end of month)
 
 Usage:
-    promo_manager = PromoCodeManager(stripe_secret_key)
+    promo_manager = PromoCodeManager()
     result = await promo_manager.redeem("LAUNCH100", user_id, email)
     if result.success:
         # User now has Pro access for result.duration_days
@@ -20,8 +20,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Any
-
-import stripe
 
 from remembra.cloud.plans import PlanTier
 from remembra.core.time import utcnow
@@ -170,11 +168,9 @@ PROMO_CODES: dict[str, PromoCode] = {
 
 
 class PromoCodeManager:
-    """Manages promotional code redemption and Stripe integration."""
+    """Manages promotional code redemption (plan-access grants)."""
 
-    def __init__(self, stripe_secret_key: str | None = None) -> None:
-        if stripe_secret_key:
-            stripe.api_key = stripe_secret_key
+    def __init__(self) -> None:
         self._codes = PROMO_CODES.copy()
 
     def get_code(self, code: str) -> PromoCode | None:
@@ -292,59 +288,12 @@ class PromoCodeManager:
             )
 
         elif promo.promo_type == PromoType.DISCOUNT:
-            # Create Stripe coupon and apply to customer
-            if not stripe_customer_id:
-                return RedemptionResult(
-                    success=False,
-                    error="Discount codes require an active subscription. Please subscribe first.",
-                )
-
-            try:
-                # Create coupon if it doesn't exist
-                coupon_id = f"PROMO_{promo.code}"
-                try:
-                    stripe.Coupon.retrieve(coupon_id)
-                except stripe.error.InvalidRequestError:
-                    stripe.Coupon.create(
-                        id=coupon_id,
-                        percent_off=promo.discount_percent,
-                        duration="forever",
-                        name=promo.description,
-                    )
-
-                # Apply to customer's subscription
-                subscriptions = stripe.Subscription.list(customer=stripe_customer_id, limit=1)
-                if subscriptions.data:
-                    stripe.Subscription.modify(
-                        subscriptions.data[0].id,
-                        coupon=coupon_id,
-                    )
-
-                # Record redemption
-                promo.redemption_count += 1
-                promo.redeemed_by.append(user_id)
-
-                logger.info(
-                    "Discount applied: code=%s user=%s discount=%d%%",
-                    code,
-                    user_id,
-                    promo.discount_percent,
-                )
-
-                return RedemptionResult(
-                    success=True,
-                    plan_tier=promo.plan_tier,
-                    duration_days=0,  # Permanent
-                    stripe_coupon_id=coupon_id,
-                    message=f"🎉 Success! {promo.discount_percent}% discount applied to your subscription!",
-                )
-
-            except stripe.error.StripeError as e:
-                logger.error("Stripe error applying promo: %s", e)
-                return RedemptionResult(
-                    success=False,
-                    error=f"Failed to apply discount: {str(e)}",
-                )
+            # Stripe-based discount coupons were removed. Discount codes are no
+            # longer supported — use a plan-access promo code to grant access.
+            return RedemptionResult(
+                success=False,
+                error="Discount codes are no longer supported. Please use a plan-access code.",
+            )
 
         return RedemptionResult(success=False, error="Unknown promo type")
 

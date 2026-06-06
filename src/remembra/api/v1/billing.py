@@ -1,6 +1,6 @@
 """Billing endpoints – /api/v1/billing.
 
-Supports both Stripe and Paddle based on REMEMBRA_BILLING_PROVIDER config.
+Paddle is the sole billing provider.
 """
 
 from typing import Annotated, Any
@@ -37,7 +37,7 @@ class PlansResponse(BaseModel):
     """Available plans."""
 
     plans: list[PlanInfo]
-    provider: str = Field(description="Billing provider: 'stripe' or 'paddle'")
+    provider: str = Field(description="Billing provider: 'paddle'")
 
 
 class CheckoutRequest(BaseModel):
@@ -68,17 +68,9 @@ class PortalResponse(BaseModel):
 
 
 def get_billing_provider(settings: Settings) -> str:
-    """Determine which billing provider to use."""
-    provider = getattr(settings, "billing_provider", None)
-    if provider:
-        return provider.lower()
-
-    # Auto-detect based on configured keys
+    """Return the active billing provider. Paddle is the only supported provider."""
     if getattr(settings, "paddle_api_key", None):
         return "paddle"
-    if getattr(settings, "stripe_secret_key", None):
-        return "stripe"
-
     return "none"
 
 
@@ -163,37 +155,10 @@ async def get_plans(
 
         return PlansResponse(plans=plans, provider="paddle")
 
-    elif provider == "stripe":
-        from remembra.cloud.plans import PLANS, PlanTier
-
-        plans = []
-        for tier in [PlanTier.PRO, PlanTier.ENTERPRISE]:
-            plan = PLANS[tier]
-            meta = PLAN_METADATA.get(tier.value, {})
-            plans.append(
-                PlanInfo(
-                    id=tier.value,
-                    name=meta.get("name", tier.value.title()),
-                    price_monthly=meta.get("price_monthly", 0),
-                    price_yearly=meta.get("price_yearly"),
-                    features=meta.get("features", []),
-                    limits={
-                        "max_memories": plan.max_memories,
-                        "max_stores_per_month": plan.max_stores_per_month,
-                        "max_recalls_per_month": plan.max_recalls_per_month,
-                        "max_api_keys": plan.max_api_keys,
-                        "max_users": plan.max_users,
-                    },
-                )
-            )
-
-        return PlansResponse(plans=plans, provider="stripe")
-
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Billing is not configured on this instance.",
-        )
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Billing is not configured on this instance.",
+    )
 
 
 class ClientConfigResponse(BaseModel):
@@ -255,8 +220,7 @@ async def create_checkout(
 ) -> CheckoutResponse:
     """Create a checkout session for plan upgrade.
 
-    For Paddle: Returns client token for overlay checkout.
-    For Stripe: Returns redirect URL for hosted checkout.
+    Returns a Paddle client token for overlay checkout.
     """
     provider = get_billing_provider(settings)
 
@@ -309,19 +273,10 @@ async def create_checkout(
             provider="paddle",
         )
 
-    elif provider == "stripe":
-        # Delegate to existing cloud checkout
-        raise HTTPException(
-            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
-            headers={"Location": "/api/v1/cloud/checkout"},
-            detail="Use /api/v1/cloud/checkout for Stripe billing.",
-        )
-
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Billing is not configured on this instance.",
-        )
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Billing is not configured on this instance.",
+    )
 
 
 @router.post(
@@ -363,18 +318,10 @@ async def get_portal(
 
         return PortalResponse(portal_url=url)
 
-    elif provider == "stripe":
-        raise HTTPException(
-            status_code=status.HTTP_307_TEMPORARY_REDIRECT,
-            headers={"Location": "/api/v1/cloud/portal"},
-            detail="Use /api/v1/cloud/portal for Stripe billing.",
-        )
-
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Billing is not configured on this instance.",
-        )
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="Billing is not configured on this instance.",
+    )
 
 
 @router.post(

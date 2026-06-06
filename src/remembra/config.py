@@ -12,6 +12,9 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        # Ignore unknown env vars so retired settings (e.g. leftover
+        # REMEMBRA_STRIPE_* secrets in a deployed environment) never break boot.
+        extra="ignore",
     )
 
     # -----------------------------------------------------------------------
@@ -171,42 +174,9 @@ class Settings(BaseSettings):
         default_factory=list,
         description="Email addresses that get automatic Enterprise access (owner bypass)",
     )
-    stripe_secret_key: str | None = Field(
-        None,
-        description="Stripe secret key (sk_live_xxx or sk_test_xxx)",
-        validation_alias=AliasChoices("REMEMBRA_STRIPE_SECRET_KEY", "STRIPE_SECRET_KEY"),
-    )
-    stripe_publishable_key: str | None = Field(
-        None,
-        description="Stripe publishable key (pk_live_xxx or pk_test_xxx)",
-        validation_alias=AliasChoices("REMEMBRA_STRIPE_PUBLISHABLE_KEY", "STRIPE_PUBLISHABLE_KEY"),
-    )
-    stripe_webhook_secret: str | None = Field(
-        None,
-        description="Stripe webhook signing secret (whsec_xxx)",
-        validation_alias=AliasChoices("REMEMBRA_STRIPE_WEBHOOK_SECRET", "STRIPE_WEBHOOK_SECRET"),
-    )
-    stripe_success_url: str = Field(
-        "https://remembra.dev/dashboard?checkout=success",
-        description="URL to redirect after successful Stripe checkout",
-    )
-    stripe_cancel_url: str = Field(
-        "https://remembra.dev/pricing?checkout=cancelled",
-        description="URL to redirect when user cancels Stripe checkout",
-    )
-    billing_portal_return_url: str = Field(
-        "https://remembra.dev/dashboard",
-        description="URL to return to after billing portal session",
-    )
-
     # -----------------------------------------------------------------------
-    # Paddle (alternative to Stripe)
+    # Paddle (sole billing provider)
     # -----------------------------------------------------------------------
-    billing_provider: str | None = Field(
-        None,
-        description="Billing provider: 'stripe' or 'paddle'. Auto-detected if not set.",
-        validation_alias=AliasChoices("REMEMBRA_BILLING_PROVIDER", "BILLING_PROVIDER"),
-    )
     paddle_api_key: str | None = Field(
         None,
         description="Paddle API key",

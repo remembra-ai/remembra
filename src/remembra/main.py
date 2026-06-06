@@ -193,7 +193,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await app.state.usage_meter.init_schema()
         log.info(
             "cloud_enabled",
-            stripe_configured=bool(settings.stripe_secret_key),
+            paddle_configured=bool(settings.paddle_api_key),
         )
     else:
         app.state.usage_meter = None

@@ -19,8 +19,6 @@ primary_region = "iad"
   # REMEMBRA_QDRANT_URL = <set via fly secrets>
   # REMEMBRA_QDRANT_API_KEY = <set via fly secrets>
   # REMEMBRA_OPENAI_API_KEY = <set via fly secrets>
-  # REMEMBRA_STRIPE_SECRET_KEY = <set via fly secrets>
-  # REMEMBRA_STRIPE_WEBHOOK_SECRET = <set via fly secrets>
   # REMEMBRA_AUTH_MASTER_KEY = <set via fly secrets>
 
 [http_service]
