@@ -114,6 +114,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         if len(settings.jwt_secret) < 32:
             raise RuntimeError("CRITICAL SECURITY ERROR: REMEMBRA_JWT_SECRET must be at least 32 characters.")
 
+        # Non-fatal posture warnings (admin endpoints now fail closed without a
+        # master key; encryption falls back to plaintext-at-rest without a key).
+        if not settings.auth_master_key:
+            log.warning("master_key_not_configured", impact="master-key admin endpoints will be denied")
+        if not settings.encryption_key:
+            log.warning("encryption_key_not_configured", impact="memory content stored unencrypted at rest")
+
     log.info(
         "remembra_starting",
         version=__version__,

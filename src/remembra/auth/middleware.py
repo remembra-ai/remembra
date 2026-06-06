@@ -1,5 +1,6 @@
 """FastAPI authentication middleware and dependencies."""
 
+import hmac
 from dataclasses import dataclass
 from typing import Annotated
 
@@ -171,6 +172,21 @@ async def get_optional_user(
     if not api_key:
         return None
 
+    # A key was supplied — validate it and return the user if valid, else None.
+    key_manager = await get_api_key_manager(request)
+    key_info = await key_manager.validate_key(api_key)
+    if key_info:
+        return AuthenticatedUser(
+            user_id=key_info["user_id"],
+            api_key_id=key_info["id"],
+            rate_limit_tier=key_info.get("rate_limit_tier", "standard"),
+            name=key_info.get("name"),
+            role=key_info.get("role", "editor"),
+            scopes=key_info.get("scopes"),
+            project_ids=key_info.get("project_ids"),
+        )
+    return None
+
 
 async def get_user_from_jwt_or_api_key(
     request: Request,
@@ -294,10 +310,18 @@ async def require_master_key(
     if not settings.auth_enabled:
         return
 
-    # If no master key configured, allow through (not recommended for production)
+    # Fail CLOSED: if no master key is configured, deny admin operations in
+    # production rather than waving them through. Debug/dev may bypass to keep
+    # local setup frictionless.
     if not settings.auth_master_key:
-        log.warning("master_key_not_configured", endpoint=str(request.url.path))
-        return
+        if settings.debug:
+            log.warning("master_key_not_configured_dev_bypass", endpoint=str(request.url.path))
+            return
+        log.error("master_key_not_configured_denying", endpoint=str(request.url.path))
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This operation requires a master key, which is not configured on the server.",
+        )
 
     if not api_key:
         raise HTTPException(
@@ -306,8 +330,8 @@ async def require_master_key(
             headers={"WWW-Authenticate": "ApiKey"},
         )
 
-    # Check against master key
-    if api_key != settings.auth_master_key:
+    # Constant-time comparison to avoid leaking the master key via timing.
+    if not hmac.compare_digest(api_key, settings.auth_master_key):
         log.warning(
             "master_key_invalid",
             ip=get_client_ip(request),

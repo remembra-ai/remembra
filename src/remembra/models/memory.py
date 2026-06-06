@@ -645,6 +645,21 @@ class FeedbackResponse(BaseModel):
     recorded: bool = True
 
 
+class ImportanceRequest(BaseModel):
+    """Set a memory's importance (salience) score."""
+
+    importance: float = Field(ge=0.0, le=1.0, description="Salience in [0,1]; higher decays slower")
+
+
+class SalienceResponse(BaseModel):
+    """Result of a pin/unpin or importance change."""
+
+    memory_id: str
+    pinned: bool | None = None
+    importance: float | None = None
+    updated: bool = True
+
+
 class ConsolidationReport(BaseModel):
     """Report from sleep-time consolidation."""
 

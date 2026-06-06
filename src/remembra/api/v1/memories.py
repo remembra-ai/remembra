@@ -34,9 +34,11 @@ from remembra.models.memory import (
     FeedbackRequest,
     FeedbackResponse,
     ForgetResponse,
+    ImportanceRequest,
     MemorySummary,
     RecallRequest,
     RecallResponse,
+    SalienceResponse,
     StoreRequest,
     StoreResponse,
     SupersedeRequest,
@@ -1149,6 +1151,68 @@ async def submit_feedback(
     )
 
     return FeedbackResponse(memory_id=memory_id, signal=body.signal)
+
+
+# ---------------------------------------------------------------------------
+# Salience: pin / unpin / importance (protect important memories from decay)
+# ---------------------------------------------------------------------------
+
+
+async def _require_owned_memory(memory_service: Any, memory_id: str, user_id: str) -> dict:
+    """Fetch a memory and 404 unless it belongs to the caller."""
+    memory = await memory_service.get(memory_id)
+    if not memory or memory.get("user_id") != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Memory {memory_id} not found",
+        )
+    return memory
+
+
+@router.post("/{memory_id}/pin", response_model=SalienceResponse, summary="Pin a memory (never decays)")
+@limiter.limit("60/minute")
+async def pin_memory(
+    request: Request,
+    memory_id: str,
+    memory_service: MemoryServiceDep,
+    current_user: CurrentUser,
+) -> SalienceResponse:
+    """Pin a memory so it is never pruned by temporal decay or TTL expiration."""
+    await _require_owned_memory(memory_service, memory_id, current_user.user_id)
+    await memory_service.db.set_memory_pin(memory_id, current_user.user_id, True)
+    log.info("memory_pinned", memory_id=memory_id, user_id=current_user.user_id)
+    return SalienceResponse(memory_id=memory_id, pinned=True)
+
+
+@router.post("/{memory_id}/unpin", response_model=SalienceResponse, summary="Unpin a memory")
+@limiter.limit("60/minute")
+async def unpin_memory(
+    request: Request,
+    memory_id: str,
+    memory_service: MemoryServiceDep,
+    current_user: CurrentUser,
+) -> SalienceResponse:
+    """Remove decay protection from a previously pinned memory."""
+    await _require_owned_memory(memory_service, memory_id, current_user.user_id)
+    await memory_service.db.set_memory_pin(memory_id, current_user.user_id, False)
+    log.info("memory_unpinned", memory_id=memory_id, user_id=current_user.user_id)
+    return SalienceResponse(memory_id=memory_id, pinned=False)
+
+
+@router.patch("/{memory_id}/importance", response_model=SalienceResponse, summary="Set memory importance")
+@limiter.limit("60/minute")
+async def set_memory_importance(
+    request: Request,
+    memory_id: str,
+    body: ImportanceRequest,
+    memory_service: MemoryServiceDep,
+    current_user: CurrentUser,
+) -> SalienceResponse:
+    """Set a memory's importance (salience) in [0,1]. Higher importance decays slower."""
+    await _require_owned_memory(memory_service, memory_id, current_user.user_id)
+    await memory_service.db.set_memory_importance(memory_id, current_user.user_id, body.importance)
+    log.info("memory_importance_set", memory_id=memory_id, importance=body.importance, user_id=current_user.user_id)
+    return SalienceResponse(memory_id=memory_id, importance=body.importance)
 
 
 # ---------------------------------------------------------------------------
