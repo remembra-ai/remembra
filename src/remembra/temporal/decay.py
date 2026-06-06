@@ -284,7 +284,13 @@ def calculate_memory_decay_info(memory_data: dict[str, Any], config: DecayConfig
         expires_at = None
 
     access_count = memory_data.get("access_count", 0) or 0
-    importance = memory_data.get("importance_score", 0.5) or 0.5
+    # Prefer the explicit per-memory `importance` column (salience), falling back
+    # to the legacy `importance_score` key, then the neutral default.
+    importance = memory_data.get("importance")
+    if importance is None:
+        importance = memory_data.get("importance_score", 0.5)
+    importance = importance if importance is not None else 0.5
+    pinned = bool(memory_data.get("pinned", False))
 
     # Calculate metrics
     relevance = calculate_relevance_score(
@@ -309,6 +315,10 @@ def calculate_memory_decay_info(memory_data: dict[str, Any], config: DecayConfig
         config=cfg,
     )
 
+    # Pinned memories are explicitly protected — never pruned or treated as expired.
+    if pinned:
+        prune = False
+
     # Time until expiration (if TTL set)
     ttl_remaining = None
     if expires_at:
@@ -321,6 +331,7 @@ def calculate_memory_decay_info(memory_data: dict[str, Any], config: DecayConfig
         "days_since_access": round(days_since_access, 2),
         "access_count": access_count,
         "should_prune": prune,
+        "pinned": pinned,
         "ttl_remaining_seconds": ttl_remaining,
         "is_expired": expires_at and now > expires_at if expires_at else False,
     }

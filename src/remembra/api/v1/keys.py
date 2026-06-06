@@ -1,5 +1,6 @@
 """API Key management endpoints – /api/v1/keys."""
 
+import hmac
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -13,6 +14,7 @@ from remembra.auth.middleware import (
 )
 from remembra.auth.rbac import Role, RoleManager
 from remembra.cloud.limits import EnforceKeyLimit
+from remembra.config import get_settings
 from remembra.core.limiter import limiter
 from remembra.security.audit import AuditLogger
 
@@ -235,13 +237,14 @@ async def create_api_key(
         # JWT auth - create key for authenticated user
         user_id = current_user.user_id
     elif body.user_id:
-        # Master key auth - check for master key in header
+        # Master key auth - create a key on behalf of an arbitrary user_id.
         master_key = request.headers.get("X-API-Key")
-        settings = request.app.state.settings
-        if not master_key or master_key != settings.master_api_key:
+        settings = get_settings()
+        configured = settings.auth_master_key
+        if not configured or not master_key or not hmac.compare_digest(master_key, configured):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Authentication required. Use JWT token or master key.",
+                detail="Authentication required. Use JWT token or a valid master key.",
             )
         user_id = body.user_id
     else:

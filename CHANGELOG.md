@@ -5,6 +5,50 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-06-05
+
+### Security
+- **O(1) API key validation** — Key validation previously loaded *every* active key
+  and bcrypt-checked the candidate against each one on a cache miss (O(n)). Because
+  invalid keys never cached, this doubled as a CPU-exhaustion vector: spraying random
+  `rem_…` keys forced a full bcrypt scan per request. Validation now uses an indexed
+  deterministic lookup column (`api_keys.key_lookup` = sha256 of the key) for a single
+  indexed read, with bcrypt retained as the at-rest verifier (defense in depth). Legacy
+  keys backfill lazily on first use; once migrated, unknown keys are rejected in O(1).
+- **Master-key admin endpoints now fail closed** — `require_master_key` previously
+  allowed requests through when no master key was configured ("fail open"), leaving
+  tenant-signup and promo-admin endpoints unprotected on a misconfigured server. It now
+  denies in production (debug may bypass for local dev) and compares the key with
+  `hmac.compare_digest` (constant-time, no timing leak).
+- **Fixed broken master-key path in key creation** — `POST /api/v1/keys` read a
+  non-existent `app.state.settings` / `settings.master_api_key`, so the admin
+  key-creation branch errored. It now reads the real `auth_master_key` via
+  `get_settings()` with a constant-time comparison.
+- **Audio capture endpoints require authentication** — `POST /api/v1/audio/start` and
+  `/stop` were unauthenticated. They now require a valid user and bind each capture
+  session to its owner; only the owner may stop/transcribe a session.
+- **Repaired `get_optional_user`** — the optional-auth dependency never validated a
+  supplied key (it fell through to `None`), a latent landmine for any future endpoint
+  using it. It now validates the key and returns the authenticated user.
+- **Startup posture warnings** — production boot now logs explicit warnings when the
+  master key or encryption key are unset (in addition to the existing hard-fail on a
+  default/short JWT secret).
+
+### Added
+- **Salience-aware memory** — memories can now be marked important or pinned:
+  - `POST /api/v1/memories/{id}/pin` / `…/unpin` — pinned memories are never pruned by
+    temporal decay or TTL expiration ("never forget this").
+  - `PATCH /api/v1/memories/{id}/importance` — set a salience score in `[0,1]`; higher
+    importance feeds the decay model so the memory retains relevance longer.
+  - New columns `memories.importance` and `memories.pinned` (additive migration;
+    existing behavior unchanged when unset). Decay and cleanup honor both.
+
+### Tests
+- 19 new tests: `test_api_key_lookup.py` (O(1) validation, lazy backfill, rejection,
+  revocation, role/scope normalization), `test_master_key_auth.py` (fail-closed +
+  constant-time), `test_salience.py` (pin protects from TTL + decay, importance slows
+  decay, user-scoped setters). Full suite: **644 passed, 6 skipped**.
+
 ## [0.13.2] - 2026-04-25
 
 ### Added

@@ -73,6 +73,19 @@ class APIKeyManager:
         return f"{KEY_PREFIX}{random_bytes}"
 
     @staticmethod
+    def compute_lookup(raw_key: str) -> str:
+        """
+        Deterministic, non-reversible lookup hash for an API key.
+
+        SHA-256 of the raw key. Because the key carries 256 bits of entropy,
+        a plain SHA-256 is not brute-forceable, so this is safe to store and
+        index — it turns validation into a single indexed read instead of an
+        O(n) bcrypt scan over every active key. bcrypt remains the at-rest
+        verifier (defense in depth).
+        """
+        return hashlib.sha256(raw_key.encode()).hexdigest()
+
+    @staticmethod
     def hash_key(key: str) -> str:
         """Hash an API key using bcrypt."""
         return bcrypt.hashpw(key.encode(), bcrypt.gensalt()).decode()
@@ -105,6 +118,7 @@ class APIKeyManager:
         key_id = self.generate_key_id()
         raw_key = self.generate_key()
         key_hash = self.hash_key(raw_key)
+        key_lookup = self.compute_lookup(raw_key)
 
         await self.db.save_api_key(
             key_id=key_id,
@@ -112,6 +126,7 @@ class APIKeyManager:
             user_id=user_id,
             name=name,
             rate_limit_tier=rate_limit_tier,
+            key_lookup=key_lookup,
         )
 
         log.info(
@@ -131,14 +146,35 @@ class APIKeyManager:
             rate_limit_tier=rate_limit_tier,
         )
 
-    async def validate_key(self, raw_key: str) -> dict | None:
+    @staticmethod
+    def _normalize_key_data(row: dict[str, Any]) -> dict[str, Any]:
+        """Parse comma-separated scopes/project_ids into lists (or None)."""
+        key_data = dict(row)
+        scopes = key_data.get("scopes")
+        key_data["scopes"] = [s for s in scopes.split(",") if s] if scopes else None
+        project_ids = key_data.get("project_ids")
+        key_data["project_ids"] = [p for p in project_ids.split(",") if p] if project_ids else None
+        return key_data
+
+    @staticmethod
+    def _cache_put(cache_key: str, key_data: dict[str, Any]) -> None:
+        """Insert into the in-memory validation cache with simple FIFO eviction."""
+        if len(_key_cache) >= _KEY_CACHE_MAX_SIZE:
+            _key_cache.pop(next(iter(_key_cache)))
+        _key_cache[cache_key] = key_data
+
+    async def validate_key(self, raw_key: str) -> dict[str, Any] | None:
         """
-        Validate an API key and return key info if valid.
+        Validate an API key and return its record if valid, else None.
 
-        Uses a SHA256 cache key for fast repeated lookups, falling back to
-        O(n) bcrypt verification for uncached keys.
-
-        Returns key record dict if valid, None otherwise.
+        Lookup strategy (each step is O(1) except the bounded legacy fallback):
+        1. In-memory cache keyed by sha256(raw_key).
+        2. Indexed DB lookup on the deterministic `key_lookup` column, then a
+           single bcrypt verification for defense in depth.
+        3. Legacy fallback: only keys created before `key_lookup` existed are
+           bcrypt-scanned, and each is backfilled on first match. Once no
+           unmigrated keys remain, unknown/invalid keys are rejected in O(1) —
+           removing the previous O(n)-bcrypt-per-request CPU-exhaustion vector.
         """
         global _key_cache
 
@@ -146,59 +182,41 @@ class APIKeyManager:
             log.debug("api_key_invalid_format", key_preview=raw_key[:8] if raw_key else "empty")
             return None
 
-        # Use SHA256 hash of the key as cache lookup (fast, constant time)
-        cache_key = hashlib.sha256(raw_key.encode()).hexdigest()
+        cache_key = self.compute_lookup(raw_key)
 
-        # Check cache first (O(1) lookup)
+        # 1) In-memory cache (revalidate active flag against the DB)
         if cache_key in _key_cache:
             cached = _key_cache[cache_key]
-            # Verify the key is still active in DB
             cursor = await self.db.conn.execute("SELECT active FROM api_keys WHERE id = ?", (cached["id"],))
-            row = await cursor.fetchone()
-            if row and row[0]:
+            active_row = await cursor.fetchone()
+            if active_row and active_row[0]:
                 await self.db.update_api_key_last_used(cached["id"])
                 log.debug("api_key_validated_cached", key_id=cached["id"])
                 return cached
-            else:
-                # Key was deactivated, remove from cache
-                del _key_cache[cache_key]
+            del _key_cache[cache_key]
 
-        # Cache miss - fall back to O(n) bcrypt check
-        # Join with api_key_roles to get the role
-        cursor = await self.db.conn.execute(
-            """
-            SELECT k.*, COALESCE(r.role, 'editor') as role, r.scopes, r.project_ids
-            FROM api_keys k
-            LEFT JOIN api_key_roles r ON k.id = r.api_key_id
-            WHERE k.active = TRUE
-            """
-        )
-        rows = await cursor.fetchall()
-
-        for row in rows:
-            key_data = dict(row)
-            if self.verify_key(raw_key, key_data["key_hash"]):
-                # Update last_used timestamp
+        # 2) O(1) indexed lookup by deterministic hash, then bcrypt verify
+        lookup_row = await self.db.get_active_api_key_by_lookup(cache_key)
+        if lookup_row:
+            if self.verify_key(raw_key, lookup_row["key_hash"]):
+                key_data = self._normalize_key_data(lookup_row)
                 await self.db.update_api_key_last_used(key_data["id"])
-
-                # Parse scopes from comma-separated string
-                if key_data.get("scopes"):
-                    key_data["scopes"] = [s for s in key_data["scopes"].split(",") if s]
-                else:
-                    key_data["scopes"] = None
-
-                if key_data.get("project_ids"):
-                    key_data["project_ids"] = [project_id for project_id in key_data["project_ids"].split(",") if project_id]
-                else:
-                    key_data["project_ids"] = None
-
-                # Cache the result (limit cache size)
-                if len(_key_cache) >= _KEY_CACHE_MAX_SIZE:
-                    # Remove oldest entry (simple eviction)
-                    _key_cache.pop(next(iter(_key_cache)))
-                _key_cache[cache_key] = key_data
-
+                self._cache_put(cache_key, key_data)
                 log.debug("api_key_validated", key_id=key_data["id"], user_id=key_data["user_id"], role=key_data.get("role"))
+                return key_data
+            # lookup collision without bcrypt match is effectively impossible; treat as invalid
+            log.warning("api_key_lookup_bcrypt_mismatch")
+            return None
+
+        # 3) Bounded legacy fallback for keys predating the key_lookup column
+        unmigrated = await self.db.get_unmigrated_active_api_keys()
+        for legacy_row in unmigrated:
+            if self.verify_key(raw_key, legacy_row["key_hash"]):
+                await self.db.set_api_key_lookup(legacy_row["id"], cache_key)  # backfill → O(1) next time
+                key_data = self._normalize_key_data(legacy_row)
+                await self.db.update_api_key_last_used(key_data["id"])
+                self._cache_put(cache_key, key_data)
+                log.info("api_key_lookup_backfilled", key_id=key_data["id"])
                 return key_data
 
         log.warning("api_key_validation_failed", key_preview=raw_key[:12] + "...")

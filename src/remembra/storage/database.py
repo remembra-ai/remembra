@@ -62,6 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
 CREATE TABLE IF NOT EXISTS api_keys (
     id TEXT PRIMARY KEY,
     key_hash TEXT NOT NULL UNIQUE,  -- bcrypt hash of the API key
+    key_lookup TEXT,  -- sha256(raw_key) hex: deterministic, non-reversible, enables O(1) validation
     user_id TEXT NOT NULL,
     name TEXT,  -- "Production Key", "Dev Key"
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -71,6 +72,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX IF NOT EXISTS idx_api_keys_lookup ON api_keys(key_lookup);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
 
 -- Audit log table (Week 7 - Security)
@@ -406,6 +408,12 @@ class Database:
             "ALTER TABLE memories ADD COLUMN scope TEXT",
             "ALTER TABLE memories ADD COLUMN supersedes TEXT",
             "ALTER TABLE memories ADD COLUMN contradicts TEXT",
+            # O(1) API key validation (security hardening) — deterministic lookup hash.
+            # Existing rows backfill lazily on first successful validation.
+            "ALTER TABLE api_keys ADD COLUMN key_lookup TEXT",
+            # Importance-weighted memory (salience) — pin protects from decay, importance boosts ranking.
+            "ALTER TABLE memories ADD COLUMN importance REAL",
+            "ALTER TABLE memories ADD COLUMN pinned BOOLEAN DEFAULT FALSE",
         ]
 
         for migration in migrations:
@@ -439,6 +447,8 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_memories_team ON memories(team_id)",
             "CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type)",
             "CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope)",
+            "CREATE INDEX IF NOT EXISTS idx_api_keys_lookup ON api_keys(key_lookup)",
+            "CREATE INDEX IF NOT EXISTS idx_memories_pinned ON memories(pinned)",
         ]
         for index_sql in indexes:
             try:
@@ -479,6 +489,8 @@ class Database:
         scope: str | None = None,
         supersedes: str | None = None,
         contradicts: str | None = None,
+        importance: float | None = None,
+        pinned: bool = False,
     ) -> None:
         """Save memory metadata to SQLite."""
         await self.conn.execute(
@@ -486,8 +498,8 @@ class Database:
             INSERT INTO memories (id, user_id, project_id, content, extracted_facts,
                                   metadata, created_at, updated_at, expires_at,
                                   source, trust_score, checksum, visibility, space_id, team_id,
-                                  memory_type, scope, supersedes, contradicts)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  memory_type, scope, supersedes, contradicts, importance, pinned)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 content = excluded.content,
                 extracted_facts = excluded.extracted_facts,
@@ -503,7 +515,9 @@ class Database:
                 memory_type = excluded.memory_type,
                 scope = excluded.scope,
                 supersedes = excluded.supersedes,
-                contradicts = excluded.contradicts
+                contradicts = excluded.contradicts,
+                importance = excluded.importance,
+                pinned = excluded.pinned
             """,
             (
                 memory_id,
@@ -525,9 +539,37 @@ class Database:
                 scope,
                 supersedes,
                 contradicts,
+                importance,
+                1 if pinned else 0,
             ),
         )
         await self.conn.commit()
+
+    async def set_memory_pin(self, memory_id: str, user_id: str, pinned: bool) -> bool:
+        """Pin or unpin a memory (protect it from decay/TTL pruning).
+
+        Scoped by user_id so callers can only pin their own memories.
+        Returns True if a row was updated.
+        """
+        cursor = await self.conn.execute(
+            "UPDATE memories SET pinned = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+            (1 if pinned else 0, utcnow().isoformat(), memory_id, user_id),
+        )
+        await self.conn.commit()
+        return cursor.rowcount > 0
+
+    async def set_memory_importance(self, memory_id: str, user_id: str, importance: float) -> bool:
+        """Set a memory's importance (salience) score in [0, 1].
+
+        Higher importance slows decay. Scoped by user_id. Returns True if updated.
+        """
+        importance = max(0.0, min(1.0, float(importance)))
+        cursor = await self.conn.execute(
+            "UPDATE memories SET importance = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+            (importance, utcnow().isoformat(), memory_id, user_id),
+        )
+        await self.conn.commit()
+        return cursor.rowcount > 0
 
     async def save_memories_bulk(
         self,
@@ -1154,8 +1196,9 @@ class Database:
         check_time = (before or utcnow()).isoformat()
 
         query = """
-            SELECT id FROM memories 
+            SELECT id FROM memories
             WHERE expires_at IS NOT NULL AND expires_at < ?
+              AND (pinned IS NULL OR pinned = 0)
         """
         params: list[Any] = [check_time]
 
@@ -2000,14 +2043,15 @@ class Database:
         user_id: str,
         name: str | None = None,
         rate_limit_tier: str = "standard",
+        key_lookup: str | None = None,
     ) -> None:
-        """Save a new API key (hashed)."""
+        """Save a new API key (bcrypt hash + deterministic lookup hash)."""
         await self.conn.execute(
             """
-            INSERT INTO api_keys (id, key_hash, user_id, name, created_at, active, rate_limit_tier)
-            VALUES (?, ?, ?, ?, ?, TRUE, ?)
+            INSERT INTO api_keys (id, key_hash, key_lookup, user_id, name, created_at, active, rate_limit_tier)
+            VALUES (?, ?, ?, ?, ?, ?, TRUE, ?)
             """,
-            (key_id, key_hash, user_id, name, utcnow().isoformat(), rate_limit_tier),
+            (key_id, key_hash, key_lookup, user_id, name, utcnow().isoformat(), rate_limit_tier),
         )
         await self.conn.commit()
 
@@ -2019,6 +2063,52 @@ class Database:
         )
         row = await cursor.fetchone()
         return dict(row) if row else None
+
+    async def get_active_api_key_by_lookup(self, key_lookup: str) -> dict[str, Any] | None:
+        """
+        O(1) lookup of an active API key by its deterministic lookup hash,
+        joined with its RBAC role/scopes/project restrictions.
+
+        The lookup hash is sha256(raw_key) — non-reversible, so storing it is
+        safe, while the indexed column turns key validation from an O(n) bcrypt
+        scan into a single indexed read.
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT k.*, COALESCE(r.role, 'editor') as role, r.scopes, r.project_ids
+            FROM api_keys k
+            LEFT JOIN api_key_roles r ON k.id = r.api_key_id
+            WHERE k.key_lookup = ? AND k.active = TRUE
+            """,
+            (key_lookup,),
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
+
+    async def get_unmigrated_active_api_keys(self) -> list[dict[str, Any]]:
+        """
+        Active keys created before the key_lookup column existed (lazy-migration
+        support). Once this returns empty, validation of unknown keys is fully
+        O(1) and no longer falls back to a bcrypt scan.
+        """
+        cursor = await self.conn.execute(
+            """
+            SELECT k.*, COALESCE(r.role, 'editor') as role, r.scopes, r.project_ids
+            FROM api_keys k
+            LEFT JOIN api_key_roles r ON k.id = r.api_key_id
+            WHERE k.active = TRUE AND (k.key_lookup IS NULL OR k.key_lookup = '')
+            """
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def set_api_key_lookup(self, key_id: str, key_lookup: str) -> None:
+        """Backfill the deterministic lookup hash for a legacy key after first use."""
+        await self.conn.execute(
+            "UPDATE api_keys SET key_lookup = ? WHERE id = ?",
+            (key_lookup, key_id),
+        )
+        await self.conn.commit()
 
     async def get_user_api_keys(self, user_id: str) -> list[dict[str, Any]]:
         """Get all API keys for a user (without hashes)."""
