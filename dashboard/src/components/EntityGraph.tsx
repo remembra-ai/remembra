@@ -71,6 +71,8 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
   const [nodeMemories, setNodeMemories] = useState<EntityMemoriesResponse['memories']>([]);
   const [memoriesTotal, setMemoriesTotal] = useState(0);
   const [memoriesLoading, setMemoriesLoading] = useState(false);
+  const [memoriesError, setMemoriesError] = useState(false);
+  const [memoriesRetry, setMemoriesRetry] = useState(0);
   const [dimensions, setDimensions] = useState({ width: 960, height: 720 });
   const [highlightNodes, setHighlightNodes] = useState<Set<string>>(new Set());
   const [highlightLinks, setHighlightLinks] = useState<Set<string>>(new Set());
@@ -273,12 +275,18 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
     if (!selectedNode) {
       setNodeMemories([]);
       setMemoriesTotal(0);
+      setMemoriesError(false);
       return;
     }
+    const entityId = selectedNode.id;
+    // `cancelled` is captured per effect run and flipped in cleanup whenever the
+    // selection (or project) changes, so an in-flight request for a previous node
+    // can never write stale memories into the panel.
     let cancelled = false;
     setMemoriesLoading(true);
+    setMemoriesError(false);
     setNodeMemories([]);
-    api.getEntityMemories(selectedNode.id, 25)
+    api.getEntityMemories(entityId, 25, projectId || undefined)
       .then((res) => {
         if (cancelled) return;
         setNodeMemories(res.memories);
@@ -288,6 +296,7 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
         if (cancelled) return;
         setNodeMemories([]);
         setMemoriesTotal(0);
+        setMemoriesError(true);
       })
       .finally(() => {
         if (!cancelled) setMemoriesLoading(false);
@@ -295,7 +304,7 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
     return () => {
       cancelled = true;
     };
-  }, [selectedNode]);
+  }, [selectedNode, projectId, memoriesRetry]);
 
   useEffect(() => {
     if (!hoveredNode) {
@@ -762,6 +771,16 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
               <div className="flex items-center justify-center gap-2 text-xs text-gray-500 py-4">
                 <Sparkles className="w-3.5 h-3.5 animate-pulse text-purple-400" />
                 Loading memories…
+              </div>
+            ) : memoriesError ? (
+              <div className="text-xs text-red-400/80 py-4 text-center">
+                Couldn't load memories.{' '}
+                <button
+                  onClick={() => setMemoriesRetry((n) => n + 1)}
+                  className="underline hover:text-red-300 transition-colors"
+                >
+                  Retry
+                </button>
               </div>
             ) : nodeMemories.length === 0 ? (
               <div className="text-xs text-gray-500 py-4 text-center">No linked memories</div>

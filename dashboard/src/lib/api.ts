@@ -496,8 +496,10 @@ class ApiClient {
     return this.fetchApi<RelationshipsListResponse>(`/entities/${entityId}/relationships`);
   }
 
-  async getEntityMemories(entityId: string, limit: number = 20): Promise<EntityMemoriesResponse> {
-    return this.fetchApi<EntityMemoriesResponse>(`/entities/${entityId}/memories?limit=${limit}`);
+  async getEntityMemories(entityId: string, limit: number = 20, projectId?: string): Promise<EntityMemoriesResponse> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (projectId) query.set('project_id', projectId);
+    return this.fetchApi<EntityMemoriesResponse>(`/entities/${entityId}/memories?${query.toString()}`);
   }
 
   // Debug / Analytics methods
@@ -815,10 +817,10 @@ export interface BillingClientConfigResponse {
 }
 
 export interface CheckoutResponse {
-  checkout_url?: string;  // Stripe redirect URL
+  checkout_url?: string;  // hosted checkout redirect URL (if any)
   client_token?: string;  // Paddle overlay checkout token
   transaction_id?: string;  // Paddle transaction ID
-  provider: string;  // 'stripe' or 'paddle'
+  provider: string;  // 'paddle'
 }
 
 export interface PortalResponse {

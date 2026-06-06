@@ -67,18 +67,6 @@ class PlanInfoResponse(BaseModel):
     limit_checks: dict[str, Any]
 
 
-class CheckoutRequest(BaseModel):
-    plan: str = Field(description="Target plan: 'pro' or 'enterprise'")
-
-
-class CheckoutResponse(BaseModel):
-    checkout_url: str
-
-
-class PortalResponse(BaseModel):
-    portal_url: str
-
-
 class DailyUsageResponse(BaseModel):
     user_id: str
     days: list[dict[str, Any]]

@@ -5,6 +5,29 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-06-06
+
+### Removed (BREAKING)
+- **Stripe removed entirely — Paddle is the only billing provider.** Per a
+  security/sales requirement (prior Stripe breach):
+  - Deleted `cloud/billing.py` (Stripe `BillingManager`) and
+    `cloud/webhook_email_integration.py`, plus the `scripts/setup_stripe.py` SDK script.
+  - Removed `/api/v1/cloud/checkout`, `/api/v1/cloud/portal`, and the unauthenticated
+    `/api/v1/cloud/webhook/stripe` endpoints; signup no longer creates a Stripe customer.
+  - `api/v1/billing.py` is Paddle-only; `promocodes.py` dropped the Stripe-coupon path.
+  - Removed all `stripe_*` settings + vestigial `billing_provider`; added `extra="ignore"`
+    so leftover `REMEMBRA_STRIPE_*` env vars in a deployed environment never break boot.
+  - Removed the `stripe` dependency. No Stripe SDK import or API call remains.
+  - Legacy `stripe_customer_id`/`stripe_subscription_id` DB columns are left inert (no
+    destructive migration); they are no longer read or written by active code.
+
+### Fixed
+- **Memory graph reveals the actual memories on node click.** Previously the panel
+  showed only a "Total Memories: 5" count. It now fetches the entity's real memories
+  (`GET /entities/{id}/memories`, project-scoped) and renders each one's content + date
+  in a scrollable list with loading/error/empty states and a "showing N of M" indicator.
+- Malformed memory IDs return a clean 404 instead of 500 across all id-resolving routes.
+
 ## [0.14.0] - 2026-06-05
 
 ### Security
