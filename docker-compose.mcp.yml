@@ -1,0 +1,38 @@
+# Remembra Remote MCP — hosted streamable-HTTP MCP endpoint.
+#
+# Deploy this as a SEPARATE service (e.g. behind mcp.remembra.dev) pointed at the
+# Remembra API. Every caller authenticates with their OWN X-API-Key — there is no
+# shared server key — and the API scopes each request to that key's account.
+#
+#   docker compose -f docker-compose.mcp.yml up -d --build
+#
+# In Coolify: new service from this repo, this compose file, domain mcp.remembra.dev,
+# proxy → port 8765.
+
+services:
+  remembra-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: remembra/remembra:latest
+    container_name: remembra-mcp
+    restart: unless-stopped
+    command: ["remembra-mcp"]
+    ports:
+      - "8765:8765"
+    environment:
+      - REMEMBRA_MCP_TRANSPORT=streamable-http
+      - REMEMBRA_MCP_HOST=0.0.0.0
+      - REMEMBRA_MCP_PORT=8765
+      # Point at your Remembra API (the auth + storage boundary).
+      - REMEMBRA_URL=${REMEMBRA_API_URL:-https://api.remembra.dev}
+      # Default project when a connection doesn't specify ?project=...
+      - REMEMBRA_PROJECT=${REMEMBRA_MCP_DEFAULT_PROJECT:-default}
+    healthcheck:
+      # The MCP endpoint returns 400/406 without a proper MCP handshake, which is
+      # still proof the listener is up; treat any HTTP response as healthy.
+      test: ["CMD-SHELL", "curl -s -o /dev/null -w '%{http_code}' http://localhost:8765/mcp | grep -qE '^[0-9]{3}$'"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

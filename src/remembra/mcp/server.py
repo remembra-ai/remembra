@@ -19,6 +19,7 @@ Configuration via environment variables:
 
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import sys
@@ -43,14 +44,65 @@ REMEMBRA_MCP_TRANSPORT = os.environ.get("REMEMBRA_MCP_TRANSPORT", "stdio")
 REMEMBRA_AGENT_ID = os.environ.get("REMEMBRA_AGENT_ID", "")
 
 # ---------------------------------------------------------------------------
-# Memory client (lazy-initialized)
+# Memory client
 # ---------------------------------------------------------------------------
+#
+# stdio transport is single-tenant: one env-configured key, one client.
+#
+# Remote (HTTP) transports are MULTI-tenant: every caller authenticates with
+# their OWN X-API-Key, set per HTTP request by the auth middleware below into
+# `_request_api_key`. We build a client per key and NEVER fall back to a shared
+# env key in remote mode — doing so would expose one tenant's memories to every
+# caller. The REST API remains the enforcement boundary: it scopes every
+# operation to the key's user (it ignores any client-supplied user_id), so as
+# long as each caller's own key is forwarded, cross-tenant access is impossible.
+
+_REMOTE_TRANSPORTS = ("sse", "streamable-http")
+_MAX_CACHED_CLIENTS = 1000
+
+_request_api_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "remembra_request_api_key", default=None
+)
+_request_project: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "remembra_request_project", default=None
+)
 
 _client: Memory | None = None
+_clients_by_key: dict[str, Memory] = {}
+
+
+def _is_remote_transport() -> bool:
+    return REMEMBRA_MCP_TRANSPORT.lower() in _REMOTE_TRANSPORTS
 
 
 def _get_client() -> Memory:
-    """Get or create the Memory client singleton."""
+    """Return the Memory client scoped to the current caller.
+
+    Remote transports require a per-request API key (no shared env-key fallback).
+    """
+    if _is_remote_transport():
+        key = _request_api_key.get()
+        if not key:
+            raise MemoryError(
+                "Authentication required. Connect with your Remembra API key in the "
+                "X-API-Key header (or Authorization: Bearer rem_...).",
+                status_code=401,
+            )
+        project = _request_project.get() or REMEMBRA_PROJECT
+        cache_key = f"{key}::{project}"
+        client = _clients_by_key.get(cache_key)
+        if client is None:
+            if len(_clients_by_key) >= _MAX_CACHED_CLIENTS:
+                _clients_by_key.clear()
+            client = Memory(
+                base_url=REMEMBRA_URL,
+                api_key=key,
+                user_id=REMEMBRA_USER_ID,
+                project=project,
+            )
+            _clients_by_key[cache_key] = client
+        return client
+
     global _client
     if _client is None:
         _client = Memory(
@@ -1124,6 +1176,48 @@ def memory_status() -> str:
 # ---------------------------------------------------------------------------
 
 
+def _extract_api_key(headers: dict[str, str]) -> str | None:
+    """Pull the caller's API key from X-API-Key or Authorization: Bearer."""
+    api_key = headers.get("x-api-key")
+    if not api_key:
+        auth = headers.get("authorization", "")
+        if auth[:7].lower() == "bearer ":
+            api_key = auth[7:].strip()
+    return api_key or None
+
+
+def _build_remote_app(transport: str):  # type: ignore[no-untyped-def]
+    """Wrap the MCP HTTP app with per-request API-key extraction.
+
+    The middleware runs at the very start of every HTTP request — before the
+    MCP session manager dispatches the tool — so the contextvars it sets are
+    inherited by the task that runs the tool and read by _get_client().
+    """
+    inner = mcp.streamable_http_app() if transport == "streamable-http" else mcp.sse_app()
+
+    async def app(scope, receive, send):  # type: ignore[no-untyped-def]
+        if scope.get("type") != "http":
+            await inner(scope, receive, send)
+            return
+        headers = {k.decode("latin-1").lower(): v.decode("latin-1") for k, v in (scope.get("headers") or [])}
+        project: str | None = None
+        qs = scope.get("query_string") or b""
+        if qs:
+            from urllib.parse import parse_qs
+
+            values = parse_qs(qs.decode("latin-1")).get("project")
+            project = values[0] if values else None
+        key_token = _request_api_key.set(_extract_api_key(headers))
+        proj_token = _request_project.set(project)
+        try:
+            await inner(scope, receive, send)
+        finally:
+            _request_api_key.reset(key_token)
+            _request_project.reset(proj_token)
+
+    return app
+
+
 def main() -> None:
     """Run the Remembra MCP server."""
     transport = REMEMBRA_MCP_TRANSPORT.lower()
@@ -1139,6 +1233,19 @@ def main() -> None:
     if not REMEMBRA_URL:
         print("REMEMBRA_URL environment variable is required.", file=sys.stderr)
         sys.exit(1)
+
+    if transport in _REMOTE_TRANSPORTS:
+        import uvicorn
+
+        host = os.environ.get("REMEMBRA_MCP_HOST", "0.0.0.0")
+        port = int(os.environ.get("REMEMBRA_MCP_PORT", "8765"))
+        print(
+            f"Remembra MCP listening on http://{host}:{port} ({transport}); "
+            "each request must carry the caller's X-API-Key.",
+            file=sys.stderr,
+        )
+        uvicorn.run(_build_remote_app(transport), host=host, port=port, log_level="info")
+        return
 
     mcp.run(transport=transport)  # type: ignore[arg-type]
 

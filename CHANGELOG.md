@@ -5,6 +5,18 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Hosted/remote MCP (connect with a URL, no install).** The MCP server now runs
+  as a multi-tenant streamable-HTTP endpoint: every caller authenticates with their
+  own `X-API-Key` (no shared server key), an ASGI middleware binds that key per
+  request, and the API scopes every operation to it — so one caller can never see
+  another's memories. This lets any MCP client (Cursor, Windsurf, Claude Desktop,
+  Cline, VS Code, …) connect with just a URL + key, eliminating the stdio-binary +
+  PATH friction. See `docs/connect.md` and `docker-compose.mcp.yml`. Covered by
+  `tests/test_mcp_remote_auth.py` (per-key isolation, no-key→401, key propagation).
+
 ## [0.15.0] - 2026-06-06
 
 ### Removed (BREAKING)
