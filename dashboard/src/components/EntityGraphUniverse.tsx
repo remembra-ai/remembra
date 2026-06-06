@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { ForceGraph3D } from 'react-force-graph';
+import ForceGraph3D from 'react-force-graph-3d';
 import * as THREE from 'three';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { api, type EntityMemoriesResponse } from '../lib/api';
