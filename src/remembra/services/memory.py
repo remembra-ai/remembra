@@ -3,6 +3,7 @@
 import asyncio
 import json
 import math
+import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -51,6 +52,23 @@ from remembra.storage.embeddings import EmbeddingService
 from remembra.storage.qdrant import QdrantStore
 
 log = structlog.get_logger(__name__)
+
+
+def _is_qdrant_point_id(value: str) -> bool:
+    """Qdrant point IDs must be a UUID or an unsigned integer; anything else is invalid.
+
+    Used to avoid issuing a Qdrant lookup for malformed ids, which would raise
+    and surface to API callers as a 500 instead of a clean "not found".
+    """
+    if not isinstance(value, str):
+        return False
+    if value.isdigit():
+        return True
+    try:
+        uuid.UUID(value)
+        return True
+    except ValueError:
+        return False
 
 
 def _get_nested_metadata_value(metadata: dict[str, Any], key: str) -> Any:
@@ -2024,11 +2042,15 @@ class MemoryService:
         return [await self._serialize_memory_record(row) for row in rows]
 
     async def get(self, memory_id: str) -> dict[str, Any] | None:
-        """Get a memory by ID."""
+        """Get a memory by ID. Returns None for unknown or malformed IDs."""
         memory = await self.db.get_memory(memory_id)
         if memory is not None:
             return await self._serialize_memory_record(memory)
-        # Fallback to Qdrant - also serialize to ensure consistent format
+        # Fallback to Qdrant. Qdrant point IDs must be a UUID or unsigned int,
+        # so a malformed id can't exist there — treat it as "not found" rather
+        # than letting Qdrant raise (which would surface as a 500 to the caller).
+        if not _is_qdrant_point_id(memory_id):
+            return None
         qdrant_result = await self.qdrant.get_by_id(memory_id)
         if qdrant_result:
             # Ensure user_id is present from Qdrant payload
