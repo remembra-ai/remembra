@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Knowledge graph "Neural Universe" (3D).** A new immersive 3D view of the memory
+  graph — glowing nodes sized by memory count, firing-synapse particles along
+  connections, cinematic bloom, a starfield, and a slow orbital drift, so the graph
+  feels like floating through your own mind. Toggle **✨ Universe / Flat** at the top
+  (defaults to Universe when WebGL is available; the proven 2D graph remains the
+  fallback). Both views share the click-to-see-real-memories panel. three.js loads
+  lazily, only when the graph tab is opened. (`EntityGraphUniverse.tsx`, `KnowledgeGraph.tsx`)
 - **Hosted/remote MCP (connect with a URL, no install).** The MCP server now runs
   as a multi-tenant streamable-HTTP endpoint: every caller authenticates with their
   own `X-API-Key` (no shared server key), an ASGI middleware binds that key per

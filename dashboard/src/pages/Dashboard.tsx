@@ -24,7 +24,7 @@ const EntityList = lazy(() =>
   import('../components/EntityList').then((module) => ({ default: module.EntityList })),
 );
 const EntityGraph = lazy(() =>
-  import('../components/EntityGraph').then((module) => ({ default: module.EntityGraph })),
+  import('../components/KnowledgeGraph').then((module) => ({ default: module.KnowledgeGraph })),
 );
 const QueryDebugger = lazy(() =>
   import('../components/QueryDebugger').then((module) => ({ default: module.QueryDebugger })),
