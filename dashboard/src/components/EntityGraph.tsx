@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import type { ForceGraphMethods, NodeObject, LinkObject } from 'react-force-graph-2d';
-import { api } from '../lib/api';
+import { api, type EntityMemoriesResponse } from '../lib/api';
 import { RefreshCw, ZoomIn, ZoomOut, Maximize2, Search, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -68,6 +68,9 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [hoveredPosition, setHoveredPosition] = useState<{ x: number; y: number } | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [nodeMemories, setNodeMemories] = useState<EntityMemoriesResponse['memories']>([]);
+  const [memoriesTotal, setMemoriesTotal] = useState(0);
+  const [memoriesLoading, setMemoriesLoading] = useState(false);
   const [dimensions, setDimensions] = useState({ width: 960, height: 720 });
   const [highlightNodes, setHighlightNodes] = useState<Set<string>>(new Set());
   const [highlightLinks, setHighlightLinks] = useState<Set<string>>(new Set());
@@ -257,12 +260,42 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
   // Handle node click - select and zoom
   const handleNodeClick = useCallback((node: GraphNode) => {
     setSelectedNode(prev => prev?.id === node.id ? null : node);
-    
+
     if (graphRef.current) {
       graphRef.current.centerAt(node.x, node.y, 500);
       graphRef.current.zoom(2, 500);
     }
   }, []);
+
+  // When a node is selected, load the ACTUAL memories linked to that entity so
+  // the panel shows what the memories are — not just a count.
+  useEffect(() => {
+    if (!selectedNode) {
+      setNodeMemories([]);
+      setMemoriesTotal(0);
+      return;
+    }
+    let cancelled = false;
+    setMemoriesLoading(true);
+    setNodeMemories([]);
+    api.getEntityMemories(selectedNode.id, 25)
+      .then((res) => {
+        if (cancelled) return;
+        setNodeMemories(res.memories);
+        setMemoriesTotal(res.total);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setNodeMemories([]);
+        setMemoriesTotal(0);
+      })
+      .finally(() => {
+        if (!cancelled) setMemoriesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedNode]);
 
   useEffect(() => {
     if (!hoveredNode) {
@@ -679,7 +712,7 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
 
       {/* Selected Node Info */}
       {selectedNode && (
-        <div className="absolute top-20 right-4 z-10 w-72 bg-black/60 backdrop-blur-xl rounded-xl p-5 border border-white/5 shadow-2xl transition-all duration-300 animate-in fade-in slide-in-from-right-4">
+        <div className="absolute top-20 right-4 z-10 w-80 max-h-[calc(100vh-7rem)] overflow-y-auto bg-black/60 backdrop-blur-xl rounded-xl p-5 border border-white/5 shadow-2xl transition-all duration-300 animate-in fade-in slide-in-from-right-4">
           <div className="flex items-start justify-between mb-4">
             <div>
               <h3 className="font-semibold text-white text-lg tracking-tight">{selectedNode.name}</h3>
@@ -715,6 +748,39 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
                 }).length}
               </span>
             </div>
+          </div>
+
+          {/* The actual memories linked to this entity — not just a count */}
+          <div className="mt-4 border-t border-white/5 pt-3">
+            <div className="flex items-center justify-between mb-2.5">
+              <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Memories</span>
+              {memoriesTotal > nodeMemories.length && (
+                <span className="text-[10px] text-gray-500">showing {nodeMemories.length} of {memoriesTotal}</span>
+              )}
+            </div>
+            {memoriesLoading ? (
+              <div className="flex items-center justify-center gap-2 text-xs text-gray-500 py-4">
+                <Sparkles className="w-3.5 h-3.5 animate-pulse text-purple-400" />
+                Loading memories…
+              </div>
+            ) : nodeMemories.length === 0 ? (
+              <div className="text-xs text-gray-500 py-4 text-center">No linked memories</div>
+            ) : (
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1 -mr-1">
+                {nodeMemories.map((m) => (
+                  <div
+                    key={m.id}
+                    title={m.content}
+                    className="rounded-lg bg-white/[0.04] hover:bg-white/[0.08] border border-white/5 px-3 py-2 transition-colors"
+                  >
+                    <p className="text-xs text-gray-200 leading-snug line-clamp-3">{m.content}</p>
+                    <p className="mt-1.5 text-[10px] text-gray-500">
+                      {new Date(m.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

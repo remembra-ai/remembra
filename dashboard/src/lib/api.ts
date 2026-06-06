@@ -581,7 +581,7 @@ class ApiClient {
   }
 
   async createCheckout(plan: string): Promise<CheckoutResponse> {
-    // Use /billing/checkout for Paddle, falls back to /cloud/checkout for Stripe
+    // Paddle overlay checkout.
     return this.fetchApi<CheckoutResponse>('/billing/checkout', {
       method: 'POST',
       body: JSON.stringify({ plan, billing_cycle: 'monthly' }),
@@ -589,14 +589,9 @@ class ApiClient {
   }
 
   async createPortalSession(): Promise<PortalResponse> {
-    // Use /billing/portal for Paddle, falls back to /cloud/portal for Stripe
+    // Paddle customer portal.
     return this.fetchApi<PortalResponse>('/billing/portal', {
       method: 'POST',
-    }).catch(() => {
-      // Fallback to old Stripe endpoint if billing endpoint not available
-      return this.fetchApi<PortalResponse>('/cloud/portal', {
-        method: 'POST',
-      });
     });
   }
 

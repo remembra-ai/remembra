@@ -18,8 +18,6 @@ interface UserDetail {
   email: string;
   name: string | null;
   plan: string;
-  stripe_customer_id: string | null;
-  stripe_subscription_id: string | null;
   created_at: string;
   last_login_at: string | null;
   is_active: boolean;
@@ -563,17 +561,6 @@ export function Admin() {
                   )}
                 </div>
               </div>
-
-              {/* Stripe Info */}
-              {(selectedUser.stripe_customer_id || selectedUser.stripe_subscription_id) && (
-                <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
-                  <h3 className="font-medium text-gray-900 dark:text-white mb-3">Stripe</h3>
-                  <div className="text-sm text-gray-600 dark:text-gray-400 space-y-1">
-                    {selectedUser.stripe_customer_id && <div>Customer: {selectedUser.stripe_customer_id}</div>}
-                    {selectedUser.stripe_subscription_id && <div>Subscription: {selectedUser.stripe_subscription_id}</div>}
-                  </div>
-                </div>
-              )}
 
               {/* Actions */}
               <div className="border-t border-gray-200 dark:border-gray-700 pt-4">
