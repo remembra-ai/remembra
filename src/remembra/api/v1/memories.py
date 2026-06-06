@@ -1158,7 +1158,7 @@ async def submit_feedback(
 # ---------------------------------------------------------------------------
 
 
-async def _require_owned_memory(memory_service: Any, memory_id: str, user_id: str) -> dict:
+async def _require_owned_memory(memory_service: Any, memory_id: str, user_id: str) -> dict[str, Any]:
     """Fetch a memory and 404 unless it belongs to the caller."""
     memory = await memory_service.get(memory_id)
     if not memory or memory.get("user_id") != user_id:

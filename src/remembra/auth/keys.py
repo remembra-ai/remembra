@@ -147,7 +147,7 @@ class APIKeyManager:
         )
 
     @staticmethod
-    def _normalize_key_data(row: dict) -> dict:
+    def _normalize_key_data(row: dict[str, Any]) -> dict[str, Any]:
         """Parse comma-separated scopes/project_ids into lists (or None)."""
         key_data = dict(row)
         scopes = key_data.get("scopes")
@@ -157,13 +157,13 @@ class APIKeyManager:
         return key_data
 
     @staticmethod
-    def _cache_put(cache_key: str, key_data: dict) -> None:
+    def _cache_put(cache_key: str, key_data: dict[str, Any]) -> None:
         """Insert into the in-memory validation cache with simple FIFO eviction."""
         if len(_key_cache) >= _KEY_CACHE_MAX_SIZE:
             _key_cache.pop(next(iter(_key_cache)))
         _key_cache[cache_key] = key_data
 
-    async def validate_key(self, raw_key: str) -> dict | None:
+    async def validate_key(self, raw_key: str) -> dict[str, Any] | None:
         """
         Validate an API key and return its record if valid, else None.
 
@@ -188,18 +188,18 @@ class APIKeyManager:
         if cache_key in _key_cache:
             cached = _key_cache[cache_key]
             cursor = await self.db.conn.execute("SELECT active FROM api_keys WHERE id = ?", (cached["id"],))
-            row = await cursor.fetchone()
-            if row and row[0]:
+            active_row = await cursor.fetchone()
+            if active_row and active_row[0]:
                 await self.db.update_api_key_last_used(cached["id"])
                 log.debug("api_key_validated_cached", key_id=cached["id"])
                 return cached
             del _key_cache[cache_key]
 
         # 2) O(1) indexed lookup by deterministic hash, then bcrypt verify
-        row = await self.db.get_active_api_key_by_lookup(cache_key)
-        if row:
-            if self.verify_key(raw_key, row["key_hash"]):
-                key_data = self._normalize_key_data(row)
+        lookup_row = await self.db.get_active_api_key_by_lookup(cache_key)
+        if lookup_row:
+            if self.verify_key(raw_key, lookup_row["key_hash"]):
+                key_data = self._normalize_key_data(lookup_row)
                 await self.db.update_api_key_last_used(key_data["id"])
                 self._cache_put(cache_key, key_data)
                 log.debug("api_key_validated", key_id=key_data["id"], user_id=key_data["user_id"], role=key_data.get("role"))
