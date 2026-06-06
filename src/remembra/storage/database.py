@@ -72,8 +72,11 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 
 CREATE INDEX IF NOT EXISTS idx_api_keys_hash ON api_keys(key_hash);
-CREATE INDEX IF NOT EXISTS idx_api_keys_lookup ON api_keys(key_lookup);
 CREATE INDEX IF NOT EXISTS idx_api_keys_user ON api_keys(user_id);
+-- NOTE: idx_api_keys_lookup is created in _run_migrations() AFTER the
+-- key_lookup column is added via ALTER TABLE, so existing databases (where
+-- CREATE TABLE IF NOT EXISTS is a no-op and the column doesn't exist yet)
+-- don't fail building the index here.
 
 -- Audit log table (Week 7 - Security)
 CREATE TABLE IF NOT EXISTS audit_log (
