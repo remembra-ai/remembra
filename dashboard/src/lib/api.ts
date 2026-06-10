@@ -545,6 +545,30 @@ class ApiClient {
     return this.fetchApi<EntityGraphDataResponse>(`/debug/entities/graph?${query.toString()}`);
   }
 
+  // Brain layer — themed communities + insights over the entity graph
+  async getBrainCommunities(projectId?: string): Promise<BrainCommunitiesResponse> {
+    const resolvedProjectId = projectId ?? this.getProjectId();
+    const query = new URLSearchParams();
+    if (resolvedProjectId) query.set('project_id', resolvedProjectId);
+    return this.fetchApi<BrainCommunitiesResponse>(`/brain/communities?${query.toString()}`);
+  }
+
+  async getBrainInsights(projectId?: string): Promise<BrainInsightsResponse> {
+    const resolvedProjectId = projectId ?? this.getProjectId();
+    const query = new URLSearchParams();
+    if (resolvedProjectId) query.set('project_id', resolvedProjectId);
+    return this.fetchApi<BrainInsightsResponse>(`/brain/insights?${query.toString()}`);
+  }
+
+  async analyzeBrain(projectId?: string): Promise<BrainInsightsResponse> {
+    const resolvedProjectId = projectId ?? this.getProjectId();
+    const query = new URLSearchParams();
+    if (resolvedProjectId) query.set('project_id', resolvedProjectId);
+    return this.fetchApi<BrainInsightsResponse>(`/brain/analyze?${query.toString()}`, {
+      method: 'POST',
+    });
+  }
+
   async getMemoryTimeline(
     page: number = 1,
     pageSize: number = 50,
@@ -758,6 +782,7 @@ export interface EntityGraphNode {
   type: string;
   confidence: number;
   memory_count: number;
+  community_id: number | null;
 }
 
 export interface EntityGraphEdge {
@@ -772,6 +797,54 @@ export interface EntityGraphDataResponse {
   nodes: EntityGraphNode[];
   edges: EntityGraphEdge[];
   stats: Record<string, unknown>;
+}
+
+export interface BrainTopEntity {
+  id: string;
+  name: string;
+  type: string;
+  centrality: number;
+}
+
+export interface BrainCommunity {
+  community_index: number;
+  label: string;
+  summary: string | null;
+  size: number;
+  top_entities: BrainTopEntity[];
+  central_entity: string | null;
+}
+
+export interface BrainCommunitiesResponse {
+  communities: BrainCommunity[];
+  count: number;
+  project_id: string;
+}
+
+export interface BrainGodNode {
+  id: string;
+  name: string;
+  type: string;
+  centrality: number;
+  community_index: number | null;
+}
+
+export interface BrainSurprisingLink {
+  from: string;
+  to: string;
+  weight: number;
+  from_community: number | null;
+  to_community: number | null;
+}
+
+export interface BrainInsightsResponse {
+  num_entities: number;
+  num_relationships: number;
+  num_communities: number;
+  modularity: number;
+  god_nodes: BrainGodNode[];
+  surprising_links: BrainSurprisingLink[];
+  communities: BrainCommunity[];
 }
 
 export interface TimelineMemory {

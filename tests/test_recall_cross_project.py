@@ -97,7 +97,10 @@ async def test_search_fts_omits_project_clause_when_none():
     assert "project_id" not in sql, (
         "FTS query must omit project_id clause when project_id is None so recall spans all of the user's projects."
     )
-    assert params == ("user_x", "hello world", 5)
+    # The query is sanitized into a safe FTS5 MATCH expression before binding.
+    from remembra.storage.database import _build_fts_match_query
+
+    assert params == ("user_x", _build_fts_match_query("hello world"), 5)
 
 
 @pytest.mark.asyncio
@@ -122,4 +125,6 @@ async def test_search_fts_includes_project_clause_when_set():
     params = conn.execute.call_args.args[1]
 
     assert "project_id = ?" in sql
-    assert params == ("user_x", "trademind", "hello world", 5)
+    from remembra.storage.database import _build_fts_match_query
+
+    assert params == ("user_x", "trademind", _build_fts_match_query("hello world"), 5)

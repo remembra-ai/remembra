@@ -443,7 +443,7 @@ async def get_entity_graph(
 
     entity_query = """
         SELECT e.id, e.canonical_name, e.type, e.confidence,
-               COUNT(me.memory_id) AS memory_count
+               COUNT(me.memory_id) AS memory_count, e.community_id
         FROM entities e
         LEFT JOIN memory_entities me ON me.entity_id = e.id
         WHERE e.user_id = ?
@@ -453,7 +453,7 @@ async def get_entity_graph(
         entity_query += " AND e.project_id = ?"
         entity_params.append(project_id)
     entity_query += """
-        GROUP BY e.id, e.canonical_name, e.type, e.confidence
+        GROUP BY e.id, e.canonical_name, e.type, e.confidence, e.community_id
         ORDER BY memory_count DESC, e.confidence DESC
     """
     if max_nodes:
@@ -472,6 +472,7 @@ async def get_entity_graph(
                 "type": row[2],
                 "confidence": row[3],
                 "memory_count": row[4] or 0,
+                "community_id": row[5],  # brain layer: theme cluster for coloring
             }
         )
 

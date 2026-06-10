@@ -26,6 +26,9 @@ const EntityList = lazy(() =>
 const EntityGraph = lazy(() =>
   import('../components/KnowledgeGraph').then((module) => ({ default: module.KnowledgeGraph })),
 );
+const BrainInsights = lazy(() =>
+  import('../components/BrainInsights').then((module) => ({ default: module.BrainInsights })),
+);
 const QueryDebugger = lazy(() =>
   import('../components/QueryDebugger').then((module) => ({ default: module.QueryDebugger })),
 );
@@ -54,7 +57,7 @@ const Admin = lazy(() =>
   import('./Admin').then((module) => ({ default: module.Admin })),
 );
 
-export type TabType = 'memories' | 'entities' | 'graph' | 'decay' | 'debugger' | 'analytics' | 'timeline' | 'projects' | 'keys' | 'billing' | 'settings' | 'teams' | 'admin';
+export type TabType = 'memories' | 'entities' | 'graph' | 'brain' | 'decay' | 'debugger' | 'analytics' | 'timeline' | 'projects' | 'keys' | 'billing' | 'settings' | 'teams' | 'admin';
 
 interface DashboardProps {
   activeTab: TabType;
@@ -406,6 +409,13 @@ export function Dashboard({ activeTab, onLogout, showNewMemory: showNewMemoryPro
         return (
           <Suspense fallback={<SectionLoading label="Loading knowledge graph..." />}>
             <EntityGraph projectId={currentProjectId} />
+          </Suspense>
+        );
+
+      case 'brain':
+        return (
+          <Suspense fallback={<SectionLoading label="Mapping your memory..." />}>
+            <BrainInsights projectId={currentProjectId} />
           </Suspense>
         );
 

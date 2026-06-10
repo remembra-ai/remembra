@@ -270,6 +270,11 @@ class RecallRequest(BaseModel):
         default=False,
         description="Slim mode: cap context output at 800 tokens. Overrides max_tokens when True.",
     )
+    include_superseded: bool = Field(
+        default=False,
+        description="Include memories that have been superseded by a newer belief. "
+        "Off by default so recall returns current facts; set True to query history.",
+    )
 
     @model_validator(mode="after")
     def require_query_or_filters(self) -> "RecallRequest":
@@ -671,4 +676,5 @@ class ConsolidationReport(BaseModel):
     relationships_discovered: int = 0
     importance_rescored: int = 0
     memories_decayed: int = 0
+    communities_detected: int = 0
     errors: list[str] = Field(default_factory=list)

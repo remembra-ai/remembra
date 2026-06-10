@@ -1,6 +1,7 @@
 """SQLite metadata database for entities, relationships, and memory metadata."""
 
 import json
+import re
 from datetime import datetime
 from typing import Any
 
@@ -12,6 +13,32 @@ from remembra.core.time import utcnow
 from remembra.models.memory import Entity, EntityRef, Relationship
 
 log = structlog.get_logger(__name__)
+
+# Token pattern for FTS5 query sanitization. Unicode word chars plus internal
+# apostrophes/hyphens (so "don't" / "co-op" stay whole). Everything else is a
+# separator, which strips the punctuation that makes FTS5 raise syntax errors.
+_FTS_TOKEN_RE = re.compile(r"[^\W_]+(?:['’\-][^\W_]+)*", re.UNICODE)
+
+
+def _build_fts_match_query(query: str) -> str | None:
+    """Turn an arbitrary user string into a safe FTS5 MATCH expression.
+
+    User recall queries are natural language, not FTS5 syntax. Passed raw, a
+    query like ``cost / benefit`` raises ``fts5: syntax error``, ``note: x``
+    is misread as a column filter (and leaks column names via the error), and
+    ``Stripe AND Paddle`` silently matches nothing because ``AND`` is an
+    operator. We instead extract plain word tokens, quote each as a literal
+    phrase (escaping embedded quotes), and OR them together so any keyword hit
+    contributes — BM25 ranks them and the downstream reranker handles noise.
+
+    Returns the MATCH string, or ``None`` if the query has no searchable tokens.
+    """
+    tokens = _FTS_TOKEN_RE.findall(query or "")
+    if not tokens:
+        return None
+    # Cap token count to bound query size on pathological input.
+    quoted = [f'"{t.replace(chr(34), chr(34) * 2)}"' for t in tokens[:32]]
+    return " OR ".join(quoted)
 
 
 def _safe_json_loads(data: str | None, default: Any = None) -> Any:
@@ -417,6 +444,13 @@ class Database:
             # Importance-weighted memory (salience) — pin protects from decay, importance boosts ranking.
             "ALTER TABLE memories ADD COLUMN importance REAL",
             "ALTER TABLE memories ADD COLUMN pinned BOOLEAN DEFAULT FALSE",
+            # Supersession marker on the OLD memory ("I have been replaced").
+            # `supersedes` already records new→old; this records old→new so a
+            # memory knows it is retired and recall can exclude it cheaply.
+            "ALTER TABLE memories ADD COLUMN superseded_by TEXT",
+            "ALTER TABLE memories ADD COLUMN superseded_at TEXT",
+            # Brain layer: which community (theme) this entity belongs to.
+            "ALTER TABLE entities ADD COLUMN community_id INTEGER",
         ]
 
         for migration in migrations:
@@ -425,6 +459,27 @@ class Database:
             except Exception:
                 # Column likely already exists, ignore
                 pass
+
+        # Brain layer: discovered communities (themes) with summaries.
+        # Recomputed by the sleep-time worker; rows are replaced per (user, project).
+        await self._connection.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS communities (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                project_id TEXT NOT NULL DEFAULT 'default',
+                community_index INTEGER NOT NULL,
+                label TEXT NOT NULL,
+                summary TEXT,
+                size INTEGER NOT NULL DEFAULT 0,
+                top_entities TEXT,          -- JSON array of {id,name,type,centrality}
+                central_entity TEXT,        -- name of the most central member
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_communities_user ON communities(user_id, project_id);
+            """
+        )
 
         # Create feedback table for existing DBs (IF NOT EXISTS is idempotent)
         await self._connection.executescript(
@@ -452,6 +507,7 @@ class Database:
             "CREATE INDEX IF NOT EXISTS idx_memories_scope ON memories(scope)",
             "CREATE INDEX IF NOT EXISTS idx_api_keys_lookup ON api_keys(key_lookup)",
             "CREATE INDEX IF NOT EXISTS idx_memories_pinned ON memories(pinned)",
+            "CREATE INDEX IF NOT EXISTS idx_memories_superseded ON memories(superseded_by)",
         ]
         for index_sql in indexes:
             try:
@@ -786,6 +842,41 @@ class Database:
                 (memory_id, mem["user_id"], mem["project_id"], content),
             )
         await self.conn.commit()
+
+    async def mark_memory_superseded(
+        self,
+        old_memory_id: str,
+        new_memory_id: str,
+        when: str | None = None,
+    ) -> None:
+        """Mark a memory as retired by a newer one.
+
+        Sets the queryable ``superseded_by``/``superseded_at`` columns so recall
+        can exclude the stale fact in one indexed query (rather than parsing
+        metadata JSON per candidate). The memory is kept, not deleted, so the
+        belief-change history remains queryable.
+        """
+        await self.conn.execute(
+            "UPDATE memories SET superseded_by = ?, superseded_at = ? WHERE id = ?",
+            (new_memory_id, when or utcnow().isoformat(), old_memory_id),
+        )
+        await self.conn.commit()
+
+    async def filter_active_memory_ids(self, memory_ids: list[str]) -> set[str]:
+        """Return the subset of ids that are NOT superseded (still current).
+
+        One indexed query over the candidate set; ids absent from the table are
+        treated as active (the caller already holds them as live candidates).
+        """
+        if not memory_ids:
+            return set()
+        placeholders = ",".join("?" for _ in memory_ids)
+        cursor = await self.conn.execute(
+            f"SELECT id FROM memories WHERE id IN ({placeholders}) AND superseded_by IS NOT NULL",
+            tuple(memory_ids),
+        )
+        superseded = {row[0] for row in await cursor.fetchall()}
+        return {mid for mid in memory_ids if mid not in superseded}
 
     async def delete_memory_entities(self, memory_id: str) -> None:
         """Delete all entity links for a memory."""
@@ -1423,8 +1514,16 @@ class Database:
         Returns list of (memory_id, bm25_score) tuples, sorted by relevance.
         BM25 scores are negative (closer to 0 = more relevant).
         """
-        # Escape special FTS5 characters
-        safe_query = query.replace('"', '""')
+        # Sanitize the user query into a safe FTS5 expression. Natural-language
+        # recall queries contain bare FTS5 operators ("AND"/"OR"/"NEAR"),
+        # column-filter syntax ("note:"), and punctuation ("/", "(") that would
+        # otherwise either raise a syntax error (→ 500) or silently mis-parse
+        # (e.g. "Stripe AND Paddle" matching nothing). See _build_fts_match_query.
+        safe_query = _build_fts_match_query(query)
+        if safe_query is None:
+            # Query had no searchable tokens (all punctuation/stopwords) — the
+            # keyword arm contributes nothing; let vector search carry recall.
+            return []
 
         if project_id is None:
             cursor = await self.conn.execute(
@@ -1663,6 +1762,126 @@ class Database:
             attributes=_safe_json_loads(row["attributes"], {}),
             confidence=row["confidence"],
         )
+
+    async def get_entities_for_graph(self, user_id: str, project_id: str | None = None) -> list[dict[str, Any]]:
+        """Load every entity for a tenant as lightweight dicts (brain layer).
+
+        Returns id/name/type/community_id — enough to build the graph and label
+        communities without hydrating full Entity models for thousands of rows.
+        """
+        if project_id:
+            cursor = await self.conn.execute(
+                "SELECT id, canonical_name, type, community_id FROM entities WHERE user_id = ? AND project_id = ?",
+                (user_id, project_id),
+            )
+        else:
+            cursor = await self.conn.execute(
+                "SELECT id, canonical_name, type, community_id FROM entities WHERE user_id = ?",
+                (user_id,),
+            )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": row["id"],
+                "name": row["canonical_name"],
+                "type": row["type"],
+                "community_id": row["community_id"],
+            }
+            for row in rows
+        ]
+
+    async def get_relationships_for_graph(self, user_id: str, project_id: str | None = None) -> list[tuple[str, str, float]]:
+        """Load current (non-superseded, still-valid) relationships as weighted edges.
+
+        Confidence is the edge weight. Superseded or expired relationships are
+        excluded so the community structure reflects what is true *now*.
+        """
+        params: list[Any] = [user_id]
+        scope = ""
+        if project_id:
+            scope = " AND e.project_id = ?"
+            params.append(project_id)
+        cursor = await self.conn.execute(
+            f"""
+            SELECT r.from_entity_id, r.to_entity_id, r.confidence
+            FROM relationships r
+            JOIN entities e ON r.from_entity_id = e.id
+            WHERE e.user_id = ?{scope}
+              AND r.valid_to IS NULL
+              AND r.superseded_by IS NULL
+            """,
+            tuple(params),
+        )
+        rows = await cursor.fetchall()
+        return [(row[0], row[1], float(row[2]) if row[2] is not None else 1.0) for row in rows]
+
+    async def set_entity_communities(self, assignments: dict[str, int]) -> None:
+        """Bulk-assign entities to their community index (brain layer)."""
+        if not assignments:
+            return
+        await self.conn.executemany(
+            "UPDATE entities SET community_id = ? WHERE id = ?",
+            [(comm_idx, ent_id) for ent_id, comm_idx in assignments.items()],
+        )
+        await self.conn.commit()
+
+    async def save_communities(self, user_id: str, project_id: str, communities: list[dict[str, Any]]) -> None:
+        """Replace the stored communities for a tenant with a freshly computed set."""
+        now = utcnow().isoformat()
+        await self.conn.execute(
+            "DELETE FROM communities WHERE user_id = ? AND project_id = ?",
+            (user_id, project_id),
+        )
+        for c in communities:
+            await self.conn.execute(
+                """
+                INSERT INTO communities
+                    (id, user_id, project_id, community_index, label, summary, size,
+                     top_entities, central_entity, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    f"{user_id}:{project_id}:{c['community_index']}",
+                    user_id,
+                    project_id,
+                    c["community_index"],
+                    c["label"],
+                    c.get("summary"),
+                    c.get("size", 0),
+                    json.dumps(c.get("top_entities", [])),
+                    c.get("central_entity"),
+                    now,
+                    now,
+                ),
+            )
+        await self.conn.commit()
+
+    async def get_communities(self, user_id: str, project_id: str | None = None) -> list[dict[str, Any]]:
+        """Load stored communities for a tenant, largest first."""
+        if project_id:
+            cursor = await self.conn.execute(
+                "SELECT * FROM communities WHERE user_id = ? AND project_id = ? ORDER BY size DESC",
+                (user_id, project_id),
+            )
+        else:
+            cursor = await self.conn.execute(
+                "SELECT * FROM communities WHERE user_id = ? ORDER BY size DESC",
+                (user_id,),
+            )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": row["id"],
+                "community_index": row["community_index"],
+                "label": row["label"],
+                "summary": row["summary"],
+                "size": row["size"],
+                "top_entities": _safe_json_loads(row["top_entities"], []),
+                "central_entity": row["central_entity"],
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
 
     async def get_entities_by_type(self, user_id: str, project_id: str | None, entity_type: str) -> list[Entity]:
         """Get all entities of a specific type for a user/project.

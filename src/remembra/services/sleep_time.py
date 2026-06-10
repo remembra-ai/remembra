@@ -117,6 +117,7 @@ class SleepTimeWorker:
                     report.relationships_discovered += user_report.relationships_discovered
                     report.importance_rescored += user_report.importance_rescored
                     report.memories_decayed += user_report.memories_decayed
+                    report.communities_detected += user_report.communities_detected
                     report.errors.extend(user_report.errors)
 
                 except Exception as e:
@@ -189,8 +190,36 @@ class SleepTimeWorker:
         decayed = await self._decay_cleanup_pass(user_id)
         report.memories_decayed = decayed
 
+        # Pass 5: Brain layer — recompute communities (themes) over the freshly
+        # resolved entity graph. Best-effort: never let it break consolidation.
+        try:
+            report.communities_detected = await self._brain_pass(user_id)
+        except Exception as exc:
+            log.warning("brain_pass_failed", user_id=user_id, error=str(exc))
+
         report.completed_at = utcnow()
         return report
+
+    async def _brain_pass(self, user_id: str) -> int:
+        """Recompute the brain layer for each project the user has entities in.
+
+        Communities are per (user, project), so we enumerate the user's projects
+        and analyze each. Returns the total number of themes detected.
+        """
+        from remembra.brain.analyzer import BrainAnalyzer
+
+        cursor = await self.db.conn.execute(
+            "SELECT DISTINCT project_id FROM entities WHERE user_id = ?",
+            (user_id,),
+        )
+        project_ids = [row[0] for row in await cursor.fetchall()] or ["default"]
+
+        analyzer = BrainAnalyzer(self.db)
+        total = 0
+        for project_id in project_ids:
+            result = await analyzer.analyze(user_id, project_id, persist=True)
+            total += result.num_communities
+        return total
 
     async def _get_user_memories(
         self,

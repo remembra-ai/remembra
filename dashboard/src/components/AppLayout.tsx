@@ -94,6 +94,10 @@ export function AppLayout({
       title: 'Knowledge Graph',
       subtitle: 'Explore how memories connect across entities, time, and teams.',
     },
+    brain: {
+      title: 'Brain',
+      subtitle: 'Themes, central memories, and surprising links across your knowledge.',
+    },
     timeline: {
       title: 'Timeline',
       subtitle: 'Follow memory creation, change, and relevance across the project.',

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import ForceGraph2D from 'react-force-graph-2d';
 import type { ForceGraphMethods, NodeObject, LinkObject } from 'react-force-graph-2d';
 import { api, type EntityMemoriesResponse } from '../lib/api';
+import { communityColor } from '../lib/communityColors';
 import { RefreshCw, ZoomIn, ZoomOut, Maximize2, Search, Sparkles } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -14,6 +15,7 @@ interface GraphNode extends NodeObject {
   name: string;
   type: string;
   memoryCount: number;
+  communityId: number | null;
   color?: string;
   size?: number;
   x?: number;
@@ -132,12 +134,19 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
     try {
       const data = await api.getEntityGraph(projectId || undefined);
       
+      // Color by community (theme) when the brain layer has run; this makes the
+      // graph read as clusters of related memory. Fall back to type color for
+      // entities that haven't been assigned a community yet.
+      const anyCommunities = data.nodes.some((n) => n.community_id !== null && n.community_id !== undefined);
       const nodes: GraphNode[] = data.nodes.map((n) => ({
         id: n.id,
         name: n.label,
         type: n.type.toLowerCase(),
         memoryCount: n.memory_count || 1,
-        color: TYPE_COLORS[n.type.toLowerCase()] || '#6b7280',
+        communityId: n.community_id ?? null,
+        color: anyCommunities
+          ? communityColor(n.community_id)
+          : TYPE_COLORS[n.type.toLowerCase()] || '#6b7280',
         size: 4 + Math.min((n.memory_count || 1) * 2, 16),
       }));
       

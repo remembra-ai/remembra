@@ -3,6 +3,7 @@ import ForceGraph3D from 'react-force-graph-3d';
 import * as THREE from 'three';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { api, type EntityMemoriesResponse } from '../lib/api';
+import { communityColor } from '../lib/communityColors';
 import { Sparkles, RefreshCw } from 'lucide-react';
 
 interface EntityGraphUniverseProps {
@@ -14,6 +15,7 @@ interface UniNode {
   name: string;
   type: string;
   memoryCount: number;
+  communityId: number | null;
   color: string;
   val: number;
 }
@@ -143,6 +145,9 @@ export function EntityGraphUniverse({ projectId }: EntityGraphUniverseProps) {
     setError(null);
     try {
       const data = await api.getEntityGraph(projectId || undefined);
+      // Color by community (theme) when the brain layer has assigned one, so the
+      // universe renders as glowing constellations of related memory.
+      const anyCommunities = data.nodes.some((n) => n.community_id !== null && n.community_id !== undefined);
       const nodes: UniNode[] = data.nodes.map((n) => {
         const count = n.memory_count || 1;
         return {
@@ -150,7 +155,8 @@ export function EntityGraphUniverse({ projectId }: EntityGraphUniverseProps) {
           name: n.label,
           type: n.type.toLowerCase(),
           memoryCount: count,
-          color: colorForType(n.type),
+          communityId: n.community_id ?? null,
+          color: anyCommunities ? communityColor(n.community_id) : colorForType(n.type),
           val: 1.5 + Math.min(count, 40) * 0.9,
         };
       });

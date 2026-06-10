@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Brain layer — themed understanding of your memory (GraphRAG-style).** Remembra now
+  clusters the entity graph into **communities (themes)** using a dependency-free,
+  deterministic Louvain modularity engine (`remembra/brain/`), then labels and
+  summarizes each theme. A new **Brain** tab in the dashboard surfaces the themes
+  (with summaries), the most **central entities** ("god nodes"), and **surprising
+  cross-theme links**, and the 2D/3D knowledge graph now **colors nodes by theme**.
+  New API: `GET /v1/brain/communities`, `GET /v1/brain/insights`, `POST /v1/brain/analyze`.
+  Communities recompute automatically in the sleep-time consolidation worker. This is
+  the higher-level "what is my memory about" layer the leading systems (Microsoft
+  GraphRAG, LightRAG) converge on — built natively, no heavy graph dependency.
 - **Knowledge graph "Neural Universe" (3D).** A new immersive 3D view of the memory
   graph — glowing nodes sized by memory count, firing-synapse particles along
   connections, cinematic bloom, a starfield, and a slow orbital drift, so the graph
@@ -23,6 +33,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Cline, VS Code, …) connect with just a URL + key, eliminating the stdio-binary +
   PATH friction. See `docs/connect.md` and `docker-compose.mcp.yml`. Covered by
   `tests/test_mcp_remote_auth.py` (per-key isolation, no-key→401, key propagation).
+
+### Fixed
+- **Recall no longer surfaces superseded facts.** Memories retired by a newer belief
+  (via the explicit `supersede()` API or the VERSION conflict strategy) are now marked
+  with a queryable `superseded_by` column and **excluded from recall by default** —
+  so after "I switched from Stripe to Paddle," recall stops returning Stripe. History
+  stays queryable via `include_superseded=true`. Covered by `tests/test_supersession_recall.py`.
+- **Recall queries with FTS5 operators no longer crash or mis-match.** Natural-language
+  recall containing `AND`/`OR`/`NEAR`, `note:` (column-filter syntax), or punctuation
+  like `/` and `(` previously raised `fts5: syntax error` (HTTP 500) or silently matched
+  nothing. The keyword arm now tokenizes and quotes the query into a safe MATCH
+  expression. Covered by `tests/test_fts_query_sanitizer.py`.
+
+### Security
+- **Closed an FTS5 schema-disclosure vector.** A recall query like `note: secret` was
+  interpreted as an FTS5 column filter and leaked table column names through the
+  database error message. User input is now always quoted as literal search terms.
 
 ## [0.15.0] - 2026-06-06
 

@@ -670,6 +670,16 @@ class MemoryService:
             contradicts=contradicts,
         )
 
+        # VERSION strategy: the new memory is the current version, so retire the
+        # contradicted one — it stays queryable as history but is excluded from
+        # default recall. FLAG is intentionally left alone (unresolved, awaiting
+        # human review); UPDATE already deletes the old memory above.
+        if is_conflict and strategy == ConflictStrategy.VERSION and result.target_id:
+            try:
+                await self.db.mark_memory_superseded(result.target_id, memory.id)
+            except Exception as exc:
+                log.warning("version_supersede_mark_failed", error=str(exc))
+
         # Index in FTS5 for hybrid search (Week 6)
         if self.settings.enable_hybrid_search:
             try:
@@ -1142,6 +1152,23 @@ class MemoryService:
                 before=before_count,
                 after=len(hybrid_results),
             )
+
+        # Supersession filter: drop memories retired by a newer belief so stale
+        # facts ("I use Stripe" after switching to Paddle) never surface. One
+        # indexed query over the candidate ids; opt back in via include_superseded
+        # to query belief history. The marker is the source-of-truth column, so
+        # this is robust even if a Qdrant payload is stale.
+        if not getattr(request, "include_superseded", False) and hybrid_results:
+            candidate_ids = [r["id"] for r in hybrid_results]
+            active_ids = await self.db.filter_active_memory_ids(candidate_ids)
+            if len(active_ids) != len(candidate_ids):
+                before_sup = len(hybrid_results)
+                hybrid_results = [r for r in hybrid_results if r["id"] in active_ids]
+                log.info(
+                    "recall_superseded_filtered",
+                    before=before_sup,
+                    after=len(hybrid_results),
+                )
 
         # Exclude filter: remove specific memory IDs
         exclude_ids = set(getattr(request, "exclude", None) or [])
@@ -1887,6 +1914,9 @@ class MemoryService:
             extracted_facts=old_memory.get("extracted_facts", []),
             metadata=old_meta,
         )
+        # Queryable supersession marker so recall excludes this stale fact by
+        # default (the metadata copy above stays for history/display).
+        await self.db.mark_memory_superseded(old_memory_id, new_memory_id)
 
         # 4. Record conflict/supersession in conflict manager if enabled
         if self.conflict_manager:

@@ -35,7 +35,8 @@ async def client():
             project_id TEXT NOT NULL,
             canonical_name TEXT NOT NULL,
             type TEXT NOT NULL,
-            confidence REAL DEFAULT 1.0
+            confidence REAL DEFAULT 1.0,
+            community_id INTEGER
         );
 
         CREATE TABLE memory_entities (

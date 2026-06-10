@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 
-export type TabType = 'memories' | 'entities' | 'graph' | 'decay' | 'debugger' | 'analytics' | 'timeline' | 'projects' | 'keys' | 'billing' | 'settings' | 'teams' | 'admin';
+export type TabType = 'memories' | 'entities' | 'graph' | 'brain' | 'decay' | 'debugger' | 'analytics' | 'timeline' | 'projects' | 'keys' | 'billing' | 'settings' | 'teams' | 'admin';
 
 interface NavItem {
   id: TabType;
@@ -38,6 +38,7 @@ const navItems: NavItem[] = [
   { id: 'projects', label: 'Projects', icon: FolderOpen, section: 'memory' },
   // Exploration
   { id: 'graph', label: 'Knowledge Graph', icon: Orbit, section: 'explore' },
+  { id: 'brain', label: 'Brain', icon: Brain, section: 'explore' },
   { id: 'timeline', label: 'Timeline', icon: History, section: 'explore' },
   { id: 'analytics', label: 'Analytics', icon: BarChart3, section: 'explore' },
   // Developer Tools

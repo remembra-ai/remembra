@@ -7,6 +7,7 @@ from remembra.api.v1 import (
     audio,
     auth,
     billing,
+    brain,
     cloud,
     conflicts,
     debug,
@@ -50,3 +51,4 @@ api_router.include_router(websocket.router, prefix="/v1")
 api_router.include_router(meetings.router, prefix="/v1")
 api_router.include_router(audio.router, prefix="/v1")
 api_router.include_router(inbox.router, prefix="/v1")
+api_router.include_router(brain.router, prefix="/v1")
