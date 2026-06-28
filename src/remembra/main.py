@@ -603,8 +603,18 @@ def create_app() -> FastAPI:
             # Serve index.html for SPA routes
             @app.get("/{full_path:path}", include_in_schema=False)
             async def serve_spa(full_path: str) -> Response:
-                # Don't intercept API routes or WebSocket
-                api_paths = ("api/", "docs", "redoc", "openapi", "ws", "health")
+                # Don't intercept API routes, metrics, or WebSocket — these must
+                # 404 as JSON rather than fall through to the SPA index.html.
+                api_paths = (
+                    "api/",
+                    "v1/",
+                    "metrics",
+                    "docs",
+                    "redoc",
+                    "openapi",
+                    "ws",
+                    "health",
+                )
                 if any(full_path.startswith(p) for p in api_paths):
                     return JSONResponse({"detail": "Not found"}, status_code=404)
 
