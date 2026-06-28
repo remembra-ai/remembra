@@ -30,6 +30,24 @@ class AuthenticatedUser:
     project_ids: list[str] | None = None  # Optional project restrictions
 
 
+def resolve_api_key(request: Request, api_key: str | None) -> str | None:
+    """Return the API key to validate.
+
+    Prefers the X-API-Key header, but also accepts a ``rem_`` API key passed as a
+    Bearer token. Many HTTP clients default to ``Authorization: Bearer`` and a
+    ``rem_`` key is unmistakably an API key (never a JWT), so we route it to
+    API-key validation instead of rejecting it with a confusing 401.
+    """
+    if api_key:
+        return api_key
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:].strip()
+        if token.startswith("rem_"):
+            return token
+    return None
+
+
 def get_client_ip(request: Request) -> str:
     """Extract client IP from request, handling proxies."""
     # Check X-Forwarded-For header (from proxies/load balancers)
@@ -112,7 +130,8 @@ async def get_current_user(
             log.warning("jwt_verification_failed", error=str(e), error_type=type(e).__name__)
             # Fall through to API key check
 
-    # Check API key
+    # Check API key (also accepts a rem_ key sent as a Bearer token)
+    api_key = resolve_api_key(request, api_key)
     if api_key:
         key_manager = await get_api_key_manager(request)
         key_info = await key_manager.validate_key(api_key)
@@ -169,6 +188,7 @@ async def get_optional_user(
             rate_limit_tier="standard",
         )
 
+    api_key = resolve_api_key(request, api_key)
     if not api_key:
         return None
 
@@ -239,7 +259,8 @@ async def get_user_from_jwt_or_api_key(
         except Exception as e:
             log.debug("jwt_verification_failed_optional", error=str(e), error_type=type(e).__name__)
 
-    # Fall back to API key
+    # Fall back to API key (also accepts a rem_ key sent as a Bearer token)
+    api_key = resolve_api_key(request, api_key)
     if api_key:
         key_manager = await get_api_key_manager(request)
         key_info = await key_manager.validate_key(api_key)
