@@ -432,6 +432,11 @@ def create_app() -> FastAPI:
         Catch unhandled exceptions and return a sanitized error.
         Don't leak internal details like stack traces or file paths.
         """
+        # Correlate with the server-generated request id (set by
+        # RequestIDMiddleware) so the client-facing error_id matches the
+        # structlog lines for this request.
+        error_id = getattr(request.state, "request_id", "unknown")
+
         # Log the full error for debugging
         log.error(
             "unhandled_exception",
@@ -439,6 +444,7 @@ def create_app() -> FastAPI:
             method=request.method,
             error_type=type(exc).__name__,
             error=str(exc),
+            error_id=error_id,
             exc_info=True,
         )
 
@@ -447,7 +453,7 @@ def create_app() -> FastAPI:
             status_code=500,
             content={
                 "detail": "An internal error occurred. Please try again or contact support.",
-                "error_id": request.headers.get("x-request-id", "unknown"),
+                "error_id": error_id,
             },
         )
 
@@ -513,6 +519,26 @@ def create_app() -> FastAPI:
             return response
 
     app.add_middleware(SecurityHeadersMiddleware)
+
+    # Request-ID middleware — every request gets a server-generated id that is
+    # (a) bound into structlog context so log lines are correlatable,
+    # (b) echoed back as X-Request-ID, and (c) used as error_id by the
+    # generic 500 handler. Added last so it wraps all other middleware.
+    class RequestIDMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+            import uuid
+
+            request_id = uuid.uuid4().hex[:16]
+            request.state.request_id = request_id
+            structlog.contextvars.bind_contextvars(request_id=request_id)
+            try:
+                response = await call_next(request)
+            finally:
+                structlog.contextvars.unbind_contextvars("request_id")
+            response.headers["X-Request-ID"] = request_id
+            return response
+
+    app.add_middleware(RequestIDMiddleware)
 
     # Instrument app for OpenTelemetry tracing (if enabled)
     from remembra.core.tracing import instrument_app

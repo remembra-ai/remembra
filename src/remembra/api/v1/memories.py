@@ -50,6 +50,7 @@ from remembra.security.audit import AuditLogger
 from remembra.security.pii_detector import PIIDetector
 from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.memory import MemoryService
+from remembra.storage.embeddings import EmbeddingProviderError
 from remembra.webhooks.events import (
     WebhookEvent,
     memory_deleted_event,
@@ -384,6 +385,33 @@ async def store_memory(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error_msg,
+        ) from e
+    except EmbeddingProviderError as e:
+        # Upstream embedding provider failed — surface an honest status
+        # instead of collapsing it into a generic 500.
+        _internal_log.error(
+            "store_memory_embedding_upstream_error",
+            user_id=current_user.user_id,
+            upstream_status=e.status_code,
+        )
+        await audit_logger.log_memory_store(
+            user_id=current_user.user_id,
+            memory_id="",
+            api_key_id=current_user.api_key_id,
+            ip_address=get_client_ip(request),
+            success=False,
+            error=str(e),
+        )
+        if e.status_code == 429:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Embedding provider rate limit hit. Retry shortly.",
+                headers={"Retry-After": "5"},
+            ) from e
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Embedding provider error. The memory was not stored — retry shortly.",
+            headers={"Retry-After": "5"},
         ) from e
     except Exception as e:
         # Log full error internally for debugging (never expose to users)
@@ -757,6 +785,31 @@ async def recall_memories(
 
         return result
 
+    except EmbeddingProviderError as e:
+        # Query embedding failed upstream — return an honest status.
+        _internal_log.error(
+            "recall_embedding_upstream_error",
+            user_id=current_user.user_id,
+            upstream_status=e.status_code,
+        )
+        await audit_logger.log_memory_recall(
+            user_id=current_user.user_id,
+            api_key_id=current_user.api_key_id,
+            ip_address=get_client_ip(request),
+            success=False,
+            error=str(e),
+        )
+        if e.status_code == 429:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Embedding provider rate limit hit. Retry shortly.",
+                headers={"Retry-After": "5"},
+            ) from e
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Embedding provider error during recall — retry shortly.",
+            headers={"Retry-After": "5"},
+        ) from e
     except Exception as e:
         # Log full error internally for debugging (never expose to users)
         _internal_log.error(

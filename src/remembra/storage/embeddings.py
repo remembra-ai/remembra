@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from abc import ABC, abstractmethod
 from typing import Any, Literal
 
@@ -20,6 +21,38 @@ EmbeddingProvider = Literal[
     "voyage",
     "jina",
 ]
+
+# Hard character cap applied before any embedding call. OpenAI's
+# text-embedding-3 models reject inputs over 8,192 tokens; ~4 chars/token
+# means anything past ~32K chars is guaranteed to 400. We truncate at a
+# conservative 24K chars so oversized agent payloads degrade gracefully
+# (stored + searchable on their head) instead of failing the whole store.
+MAX_EMBED_CHARS = 24_000
+
+
+class EmbeddingProviderError(RuntimeError):
+    """An upstream embedding provider rejected or failed the request.
+
+    Carries the upstream HTTP status so API endpoints can map it to an
+    honest client-facing status (429 rate limit, 502 upstream failure)
+    instead of collapsing everything into a generic 500.
+    """
+
+    def __init__(self, message: str, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+def _truncate_for_embedding(text: str) -> str:
+    """Clamp text to the provider-safe embedding size, logging when we do."""
+    if len(text) <= MAX_EMBED_CHARS:
+        return text
+    log.warning(
+        "embedding_input_truncated",
+        original_chars=len(text),
+        truncated_to=MAX_EMBED_CHARS,
+    )
+    return text[:MAX_EMBED_CHARS]
 
 # ---------------------------------------------------------------------------
 # Known model → dimension mapping (for auto-detection)
@@ -128,17 +161,20 @@ class OpenAIEmbedder(BaseEmbedder):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            # Log full error internally, raise sanitized error
+            # Log full error internally, raise sanitized typed error
             log.error(
                 "openai_embedding_http_error",
                 status_code=e.response.status_code,
                 model=self.model,
             )
-            raise RuntimeError(f"Embedding service error (status {e.response.status_code})") from None
+            raise EmbeddingProviderError(
+                f"Embedding service error (status {e.response.status_code})",
+                status_code=e.response.status_code,
+            ) from None
         except httpx.RequestError as e:
             # Connection/timeout errors - don't expose URLs
             log.error("openai_embedding_request_error", error_type=type(e).__name__)
-            raise RuntimeError("Embedding service unavailable") from None
+            raise EmbeddingProviderError("Embedding service unavailable") from None
 
         data = response.json()
 
@@ -586,11 +622,28 @@ class EmbeddingService:
         # Defensive check: prevent empty strings from reaching external APIs
         if not text or not text.strip():
             raise ValueError("Cannot embed empty text")
+        text = _truncate_for_embedding(text)
+
+        # Cache identical single-text embeds (recall queries repeat heavily).
+        # Key includes provider/model/dimensions so a provider switch never
+        # serves stale vectors of the wrong dimensionality.
+        from remembra.core.cache import embedding_cache
+
+        cache_key = hashlib.sha256(
+            f"{self._current_provider}|{self._current_model}|{self.dimensions}|{text}".encode()
+        ).hexdigest()
+        cached = await embedding_cache.get_by_key(cache_key)
+        if cached is not None:
+            return cached
+
         embedder = self._get_embedder()
-        return await embedder.embed(text)
+        result = await embedder.embed(text)
+        await embedding_cache.set_by_key(cache_key, result)
+        return result
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for multiple texts."""
+        texts = [_truncate_for_embedding(t) for t in texts]
         embedder = self._get_embedder()
         return await embedder.embed_batch(texts)
 
