@@ -102,40 +102,30 @@ Based on their arxiv paper (2504.19413) and production system:
 
 ## Implementation Status
 
-### ✅ Completed (Week 1-2)
+> **CHANGELOG.md is the ground truth for what's shipped** — this table is the
+> high-level map (updated 2026-07-16, v0.16.0).
 
-| Component | File | Status |
-|-----------|------|--------|
-| FastAPI skeleton | `main.py` | ✅ Done |
-| Config management | `config.py` | ✅ Done |
-| Health checks | `core/health.py` | ✅ Done |
-| Memory models | `models/memory.py` | ✅ Done |
-| Qdrant integration | `storage/qdrant.py` | ✅ Done |
-| SQLite metadata | `storage/database.py` | ✅ Done |
-| Embedding service | `storage/embeddings.py` | ✅ Done |
-| Memory service | `services/memory.py` | ✅ Done |
-| API endpoints | `api/v1/memories.py` | ✅ Done |
-| Docker setup | `docker-compose.yml` | ✅ Done |
-| CI/CD pipeline | `.github/workflows/` | ✅ Done |
-| Test suite | `tests/` | ✅ Passing |
+| Area | Where | Status |
+|------|-------|--------|
+| Core store/recall (hybrid vector+BM25+graph+rerank+decay) | `services/memory.py`, `retrieval/` | ✅ Shipped |
+| **Lossless memory** (verbatim source records + receipts + fact verification) | `services/memory.py` | ✅ Shipped (0.16.0) |
+| LLM extraction + consolidation | `extraction/` | ✅ Shipped |
+| Entity resolution + bitemporal graph | `extraction/`, `retrieval/graph.py` | ✅ Shipped |
+| Brain layer (GraphRAG communities, dependency-free Louvain) | `brain/` | ✅ Shipped |
+| Temporal: TTL, Ebbinghaus decay, archive, as-of queries | `temporal/` | ✅ Shipped |
+| Multi-tenant remote MCP (streamable-HTTP, 14 tools) | `mcp/server.py` | ✅ Shipped |
+| Auth: API keys (O(1) lookup), JWT + 2FA, RBAC scopes | `auth/` | ✅ Shipped |
+| Tenancy: users, teams, spaces, projects | `teams/`, `spaces/` | ✅ Shipped |
+| Cloud: Paddle billing, plan limits, metering | `cloud/` | ✅ Shipped (webhook→metering wiring pending) |
+| Dashboard (React SPA, 2D/3D knowledge graph, brain insights) | `dashboard/` | ✅ Shipped |
+| TypeScript SDK / Python client / Chrome extension | `sdk/`, `client/`, `extension/` | ✅ Shipped |
+| Observability: request IDs, structured logs | `main.py`, `core/` | ✅ Shipped (0.16.0) |
+| Backups: litestream (opt-in via env) | `Dockerfile.cloud`, `scripts/cloud-entrypoint.sh` | ✅ Shipped (0.16.0) |
+| Async enrichment (fast writes) | `services/memory.py` | ✅ Behind `REMEMBRA_ASYNC_ENRICHMENT` flag |
+| SQLite → Postgres migration | — | 📋 Planned |
+| Recall-quality regression gate in CI (LoCoMo runner exists) | `benchmarks/` | 📋 Planned |
 
-### 🔄 In Progress (Week 3)
-
-| Component | File | Status |
-|-----------|------|--------|
-| Python SDK | `sdk/` | 🔄 Building |
-| PyPI packaging | `pyproject.toml` | 🔄 Next |
-
-### 📋 Planned (Week 4+)
-
-| Component | Priority | Notes |
-|-----------|----------|-------|
-| LLM-powered extraction | HIGH | Replace rule-based |
-| Entity resolution | HIGH | Graph memory (+2% accuracy) |
-| Reranking | MEDIUM | Post-retrieval scoring |
-| Memory consolidation | MEDIUM | Dedup/merge |
-| Temporal queries | MEDIUM | Time-aware recall |
-| Context synthesis | MEDIUM | LLM-powered summarization |
+Deployment: see `docs/DEPLOYING.md` (production runs on Coolify, builds `Dockerfile.cloud`).
 
 ---
 

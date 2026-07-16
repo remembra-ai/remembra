@@ -3,6 +3,7 @@
 import asyncio
 import json
 import math
+import re
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
@@ -243,6 +244,83 @@ class MemoryService:
     # Store
     # -----------------------------------------------------------------------
 
+    @staticmethod
+    def _fact_source_overlap(fact: str, source_text: str) -> float:
+        """Content-word overlap between a derived fact and its source text.
+
+        Cheap lexical check used to flag extraction drift/hallucination:
+        a fact whose content words mostly don't appear in the source was
+        not derived from it. Numbers always count as content words —
+        invented figures are the most dangerous hallucination.
+        """
+        word_re = re.compile(r"[a-z0-9]+")
+        source_words = set(word_re.findall(source_text.lower()))
+        fact_words = [w for w in word_re.findall(fact.lower()) if len(w) >= 3 or w.isdigit()]
+        if not fact_words:
+            return 1.0
+        hits = sum(1 for w in fact_words if w in source_words)
+        return hits / len(fact_words)
+
+    async def _store_source_record(
+        self,
+        request: StoreRequest,
+        now: datetime,
+        expires_at: datetime | None,
+        source: str,
+        trust_score: float,
+        checksum: str | None,
+    ) -> str:
+        """Persist the verbatim original content as an immutable source record.
+
+        Source records are evidence, not derived knowledge: they are stored in
+        SQLite + FTS only (no vector), so they never pollute semantic recall
+        with near-duplicates of their own facts, and they skip consolidation —
+        the original text must never be LLM-merged or rewritten. Derived facts
+        point back via metadata.source_id (the receipt).
+        """
+        record = Memory(
+            user_id=request.user_id,
+            project_id=request.project_id,
+            content=request.content,
+            memory_type="source",
+            extracted_facts=[],
+            entities=[],
+            metadata={**(request.metadata or {}), "record_kind": "source"},
+            created_at=now,
+            updated_at=now,
+            expires_at=expires_at,
+        )
+        await self.db.save_memory_metadata(
+            memory_id=record.id,
+            user_id=record.user_id,
+            project_id=record.project_id,
+            content=record.content,
+            extracted_facts=record.extracted_facts,
+            metadata=record.metadata,
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+            source=source,
+            trust_score=trust_score,
+            checksum=checksum,
+            visibility=request.visibility,
+            space_id=request.space_id,
+            team_id=request.team_id,
+            memory_type="source",
+            scope=request.scope,
+        )
+        if self.settings.enable_hybrid_search:
+            try:
+                await self.db.index_memory_fts(
+                    memory_id=record.id,
+                    user_id=record.user_id,
+                    project_id=record.project_id,
+                    content=record.content,
+                )
+            except Exception as e:
+                log.warning("source_fts_indexing_failed", error=str(e), memory_id=record.id)
+        log.info("source_record_stored", memory_id=record.id, chars=len(record.content))
+        return record.id
+
     async def store(
         self,
         request: StoreRequest,
@@ -293,9 +371,110 @@ class MemoryService:
             # Fall back to server default
             expires_at = now + timedelta(days=self.settings.default_ttl_days)
 
+        # ── Lossless memory: async fast path ─────────────────────────────
+        # Persist the verbatim source immediately and enrich in background.
+        # The original is stored + keyword-searchable before we return; the
+        # derived facts (LLM extraction + consolidation) land shortly after.
+        if self.settings.async_enrichment and self.settings.enable_source_records and not skip_extraction:
+            source_id = await self._store_source_record(
+                request=request,
+                now=now,
+                expires_at=expires_at,
+                source=source,
+                trust_score=trust_score,
+                checksum=checksum,
+            )
+
+            async def _bg_enrichment() -> None:
+                try:
+                    await self._extract_and_store_facts(
+                        request=request,
+                        now=now,
+                        expires_at=expires_at,
+                        source=source,
+                        trust_score=trust_score,
+                        checksum=checksum,
+                        skip_extraction=False,
+                        source_id=source_id,
+                    )
+                    log.info("bg_enrichment_done", source_id=source_id)
+                except Exception as e:
+                    log.error("bg_enrichment_failed", source_id=source_id, error=str(e))
+
+            asyncio.ensure_future(_bg_enrichment())
+            return StoreResponse(
+                id=source_id,
+                extracted_facts=[request.content.strip()],
+                entities=[],
+                expires_at=expires_at,
+                source_id=source_id,
+                enrichment="pending",
+            )
+
+        # ── Synchronous path (default) ────────────────────────────────────
+        memory_id, stored_facts, extracted_facts, matched_existing_id, source_id = await self._extract_and_store_facts(
+            request=request,
+            now=now,
+            expires_at=expires_at,
+            source=source,
+            trust_score=trust_score,
+            checksum=checksum,
+            skip_extraction=skip_extraction,
+        )
+
+        # If nothing stored (all NOOPs), return the matched existing memory ID
+        if not memory_id:
+            response_id = matched_existing_id or ""
+            log.info("all_facts_skipped", user_id=request.user_id, matched_id=response_id)
+            return StoreResponse(
+                id=response_id,
+                extracted_facts=extracted_facts,
+                entities=[],
+                expires_at=expires_at,
+                source_id=source_id,
+            )
+
+        log.info(
+            "memory_stored",
+            memory_id=memory_id,
+            facts_extracted=len(extracted_facts),
+            facts_stored=len(stored_facts),
+            source_id=source_id,
+        )
+
+        return StoreResponse(
+            id=memory_id,
+            extracted_facts=stored_facts,
+            entities=[],  # Entity extraction runs in background per fact
+            expires_at=expires_at,
+            source_id=source_id,
+        )
+
+    async def _extract_and_store_facts(
+        self,
+        request: StoreRequest,
+        now: datetime,
+        expires_at: datetime | None,
+        source: str,
+        trust_score: float,
+        checksum: str | None,
+        skip_extraction: bool,
+        source_id: str | None = None,
+    ) -> tuple[str | None, list[str], list[str], str | None, str | None]:
+        """Extract facts from content and store each with consolidation.
+
+        Lossless-memory behaviour: when extraction actually derives facts
+        (rather than passing raw content through), the verbatim original is
+        preserved as an immutable source record (unless one was already
+        created by the async fast path), every derived fact carries a
+        metadata.source_id receipt, and each fact is lexically verified
+        against the source — facts that don't overlap it are stored flagged
+        verified=false instead of being silently trusted.
+
+        Returns (memory_id, stored_facts, extracted_facts, matched_existing_id, source_id).
+        """
         # Step 1: Extract atomic facts using LLM (skip if skip_extraction=True)
         if skip_extraction:
-            # Skip LLM extraction - store content as single fact
             extracted_facts = [request.content.strip()]
             log.debug("extraction_skipped", content_length=len(request.content))
         else:
@@ -305,17 +484,46 @@ class MemoryService:
                 extracted_facts = [request.content.strip()]
             log.debug("facts_extracted", count=len(extracted_facts))
 
+        # Lossless memory: preserve the verbatim original whenever extraction
+        # transformed it (sync path only — async path stored it already).
+        derived = extracted_facts != [request.content.strip()]
+        if source_id is None and derived and self.settings.enable_source_records and not skip_extraction:
+            source_id = await self._store_source_record(
+                request=request,
+                now=now,
+                expires_at=expires_at,
+                source=source,
+                trust_score=trust_score,
+                checksum=checksum,
+            )
+
         # Step 2 & 3: Process each fact with consolidation
         stored_facts: list[str] = []
         memory_id = None  # Track primary memory ID
         matched_existing_id = None  # Track matched existing memory for NOOPs
 
         for fact in extracted_facts:
+            fact_metadata = dict(request.metadata or {})
+            if source_id:
+                # The receipt: derived fact -> exact original text
+                fact_metadata["source_id"] = source_id
+            if derived:
+                overlap = self._fact_source_overlap(fact, request.content)
+                verified = overlap >= self.settings.fact_verification_threshold
+                fact_metadata["verified"] = verified
+                if not verified:
+                    log.warning(
+                        "fact_verification_failed",
+                        overlap=round(overlap, 3),
+                        fact_preview=fact[:80],
+                        source_id=source_id,
+                    )
+
             fact_result = await self._store_single_fact(
                 fact=fact,
                 user_id=request.user_id,
                 project_id=request.project_id,
-                metadata=request.metadata,
+                metadata=fact_metadata,
                 expires_at=expires_at,
                 now=now,
                 source=source,
@@ -339,31 +547,7 @@ class MemoryService:
                     if memory_id is None:
                         memory_id = fact_result["id"]
 
-        # If nothing stored (all NOOPs), return the matched existing memory ID
-        if not memory_id:
-            # Use matched existing memory ID if available, otherwise generate a placeholder
-            response_id = matched_existing_id or ""
-            log.info("all_facts_skipped", user_id=request.user_id, matched_id=response_id)
-            return StoreResponse(
-                id=response_id,
-                extracted_facts=extracted_facts,
-                entities=[],
-                expires_at=expires_at,
-            )
-
-        log.info(
-            "memory_stored",
-            memory_id=memory_id,
-            facts_extracted=len(extracted_facts),
-            facts_stored=len(stored_facts),
-        )
-
-        return StoreResponse(
-            id=memory_id,
-            extracted_facts=stored_facts,
-            entities=[],  # TODO: Entity extraction in Week 5
-            expires_at=expires_at,
-        )
+        return memory_id, stored_facts, extracted_facts, matched_existing_id, source_id
 
     async def bulk_import(
         self,

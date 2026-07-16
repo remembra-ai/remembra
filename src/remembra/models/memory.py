@@ -6,7 +6,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-MEMORY_TYPES = Literal["observation", "fact", "inference", "task"]
+MEMORY_TYPES = Literal["observation", "fact", "inference", "task", "source"]
 
 
 def _new_id() -> str:
@@ -185,6 +185,21 @@ class StoreResponse(BaseModel):
     usage_warning: dict[str, Any] | None = Field(
         default=None,
         description="Usage warning when approaching plan limits (cloud only).",
+    )
+    source_id: str | None = Field(
+        default=None,
+        description=(
+            "ID of the immutable verbatim source record preserved for this store. "
+            "Derived facts carry the same id in metadata.source_id as a receipt — "
+            "fetch it to see the exact original text."
+        ),
+    )
+    enrichment: str | None = Field(
+        default=None,
+        description=(
+            "Set to 'pending' when async enrichment is enabled: the verbatim "
+            "source is stored and searchable now; derived facts land shortly."
+        ),
     )
 
 

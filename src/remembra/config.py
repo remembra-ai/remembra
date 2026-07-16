@@ -102,6 +102,37 @@ class Settings(BaseSettings):
     consolidation_threshold: float = Field(0.5, description="Similarity threshold for memory consolidation")
 
     # -----------------------------------------------------------------------
+    # Lossless Memory (provenance-grade fidelity)
+    # -----------------------------------------------------------------------
+    enable_source_records: bool = Field(
+        True,
+        description=(
+            "Preserve the verbatim original content as an immutable source record "
+            "whenever extraction derives facts from it. Derived facts carry a "
+            "source_id receipt pointing back to the exact original text."
+        ),
+    )
+    fact_verification_threshold: float = Field(
+        0.5,
+        description=(
+            "Minimum content-word overlap between a derived fact and its source "
+            "text for the fact to be marked verified=true. Facts below the "
+            "threshold are stored but flagged verified=false (possible drift or "
+            "hallucination in extraction)."
+        ),
+    )
+    async_enrichment: bool = Field(
+        False,
+        description=(
+            "When true, store() persists the verbatim source record and returns "
+            "immediately; fact extraction/consolidation run in the background. "
+            "Cuts store latency to a single embed call, but the store response "
+            "no longer includes derived facts (they appear once enrichment "
+            "completes)."
+        ),
+    )
+
+    # -----------------------------------------------------------------------
     # Entity Resolution (Week 5)
     # -----------------------------------------------------------------------
     enable_entity_resolution: bool = Field(True, description="Enable entity extraction and resolution")

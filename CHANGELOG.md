@@ -5,9 +5,65 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.0] - 2026-07-16
+
+**Lossless memory + production reliability.** The theme of this release: what you
+store is exactly what you can get back, and when something fails you can see why.
+(Also promotes the previously-unreleased brain layer, 3D graph, and remote MCP —
+all live on Remembra Cloud as of this release.)
 
 ### Added
+- **Lossless memory (provenance-grade fidelity).** Until now, storing content ran it
+  through LLM fact-extraction and kept only the derived facts — the verbatim original
+  was discarded, and a drifted or hallucinated "fact" was indistinguishable from a real
+  one. Now, whenever extraction derives facts, the **exact original text is preserved
+  as an immutable source record** (`memory_type="source"`, keyword-searchable, never
+  LLM-merged, no vector so it can't pollute semantic recall). Every derived fact
+  carries a **receipt** — `metadata.source_id` pointing back to its source record —
+  and is **lexically verified against the source**: facts whose content words don't
+  appear in the original are stored flagged `verified=false` instead of silently
+  trusted. Store responses now include `source_id`. Config: `enable_source_records`
+  (default on), `fact_verification_threshold` (default 0.5).
+- **Async enrichment mode (opt-in fast writes).** With `REMEMBRA_ASYNC_ENRICHMENT=true`,
+  `store` persists the verbatim source and returns immediately (`enrichment: "pending"`);
+  extraction/consolidation run in the background. Cuts store latency from seconds
+  (full LLM pipeline in-request) to a single write. Off by default — the store
+  response contract changes (derived facts land after the response).
+- **Request IDs everywhere.** Every request gets a server-generated `X-Request-ID`,
+  bound into all structlog lines and used as the `error_id` in 500 responses
+  (previously always `"unknown"`). Prod failures are now correlatable end-to-end.
+- **Litestream in the cloud image (opt-in).** `Dockerfile.cloud` now ships litestream
+  with a new entrypoint: set `LITESTREAM_REPLICA_URL` and the SQLite database is
+  continuously replicated to object storage (S3/R2/Tigris) and auto-restored onto an
+  empty volume. Without the env var, behavior is unchanged.
+- **Honest upstream error mapping.** Embedding-provider failures during store/recall
+  now return `429` (with `Retry-After`) on rate limits and `502` on provider outages,
+  via a typed `EmbeddingProviderError` carrying the upstream status — instead of
+  collapsing everything into `500 "Failed to store memory"`.
+
+### Fixed
+- **Opaque store 500s (intermittent MCP `store_memory` failures).** Root cause:
+  unbounded content reached the embedding provider; anything past the model's token
+  limit made OpenAI return 400, surfaced as a generic 500. All embedding input is now
+  clamped to a provider-safe cap (24K chars) — oversized agent payloads store
+  gracefully instead of failing whole.
+- **Wrong-prefix API calls no longer return the dashboard.** `GET /v1/...` (the real
+  prefix is `/api/v1/...`) and `/metrics` used to fall through the SPA catch-all and
+  return **HTTP 200 + index.html**, breaking JSON clients with `Unexpected token '<'`.
+  They now return a clean `404 {"detail": "Not found"}`.
+- **`rem_` API keys sent as `Authorization: Bearer` now authenticate.** Many HTTP
+  clients default to Bearer; a `rem_` key is unmistakably an API key, so it now routes
+  to API-key validation instead of failing JWT verification with a confusing 401.
+  `X-API-Key` still takes precedence; real JWTs are unaffected.
+
+### Performance
+- **Embedding cache actually wired.** Identical single-text embeds (recall queries
+  repeat heavily) are served from the in-memory cache, keyed by
+  `provider|model|dimensions|text` so provider/model switches can never serve stale
+  vectors. Measured on production: repeat recalls **1.1s → 0.13s (~8×)**, and every
+  hit is an embedding API call not paid for.
+
+### Added (promoted from Unreleased)
 - **Brain layer — themed understanding of your memory (GraphRAG-style).** Remembra now
   clusters the entity graph into **communities (themes)** using a dependency-free,
   deterministic Louvain modularity engine (`remembra/brain/`), then labels and

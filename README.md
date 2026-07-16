@@ -31,28 +31,29 @@
 
 ---
 
-## 🚀 What's New in v0.13.0
+## 🚀 What's New in v0.16.0 — Lossless Memory
 
-### Dashboard v2.0
-- **🔐 Two-Factor Authentication** — TOTP-based 2FA with authenticator apps
-- **👥 Team Collaboration** — Shared memory spaces with role-based access
-- **🛠️ Admin Dashboard** — Full user management (delete/deactivate/reset)
-- **📊 Activity Log** — Security audit trail with JSON export
-- **🕵️ Entity Browser** — Visual exploration of people, places, concepts
-- **⏰ Timeline Fix** — Proper timezone handling with local time display
+**Most memory layers store an LLM's paraphrase of what you said. Remembra now keeps the receipts.**
 
-### Core API
-- **📦 npm Package** — `npm install remembra` with full TypeScript support
-- **🔒 Security Fixes** — RBAC enforcement, SSRF protection, error sanitization
+- **🧾 Verbatim source records** — the exact original text is preserved as an
+  immutable record whenever facts are derived from it. Never LLM-merged, never rewritten.
+- **🔗 Receipts on every fact** — each derived fact carries `metadata.source_id`
+  pointing back to its source. Recall a fact, fetch its evidence.
+- **🛡️ Hallucination flagging** — every derived fact is verified against its source;
+  facts that don't overlap the original are stored flagged `verified: false`, not silently trusted.
+- **⚡ Fast writes (opt-in)** — `REMEMBRA_ASYNC_ENRICHMENT=true` stores the verbatim
+  source instantly and runs extraction in the background.
+- **🩺 Production reliability** — request IDs on every response, honest 429/502 upstream
+  error mapping, embedding cache (~8× faster repeat recalls), litestream backups, and
+  the opaque store-500 class of failures fixed at the root.
+
+### Previous highlights
+- **🧠 Brain layer (v0.15+)** — GraphRAG-style community detection over your entity graph; 2D/3D knowledge graph in the dashboard
+- **🌐 Remote MCP** — multi-tenant streamable-HTTP MCP: connect any agent with just a URL + API key
+- **🔐 Dashboard v2** — 2FA, teams, admin console, audit log, entity browser
 
 ### Supported Agents (6+)
 Claude Desktop • Claude Code • Codex CLI • Cursor • Windsurf • Gemini
-
-### Previous (v0.12.x)
-- 👤 User Profiles API with activity metrics
-- 🧠 Smart Auto-Forgetting (35+ temporal patterns)
-- ⏰ Event-driven expiry with `expires_at`
-- 🌐 Browser Extension for AI chat interfaces
 
 ---
 
