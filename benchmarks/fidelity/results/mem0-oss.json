@@ -1,0 +1,296 @@
+{
+  "summary": {
+    "provider": "mem0-oss",
+    "items": 25,
+    "verbatim_retention_pct": 0.0,
+    "number_fidelity_pct": 69.4,
+    "items_with_invented_numbers": 2,
+    "mean_groundedness": 0.674,
+    "total_drifted_records": 5,
+    "recall_hit_pct": 100.0,
+    "store_seconds_total": 61.3,
+    "skipped_items": []
+  },
+  "per_item": [
+    {
+      "id": "trade-001",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 3,
+      "numbers_kept": 3,
+      "numbers_invented": [],
+      "mean_groundedness": 0.88,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "trade-002",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 5,
+      "numbers_kept": 5,
+      "numbers_invented": [],
+      "mean_groundedness": 0.875,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "trade-003",
+      "records": 0,
+      "verbatim_retained": false,
+      "numbers_expected": 3,
+      "numbers_kept": 0,
+      "numbers_invented": [],
+      "mean_groundedness": 0.0,
+      "drifted_records": 1,
+      "recall_hit": true
+    },
+    {
+      "id": "books-001",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 2,
+      "numbers_kept": 2,
+      "numbers_invented": [],
+      "mean_groundedness": 0.769,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "books-002",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 2,
+      "numbers_kept": 2,
+      "numbers_invented": [],
+      "mean_groundedness": 0.87,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "books-003",
+      "records": 0,
+      "verbatim_retained": false,
+      "numbers_expected": 1,
+      "numbers_kept": 0,
+      "numbers_invented": [],
+      "mean_groundedness": 0.0,
+      "drifted_records": 1,
+      "recall_hit": true
+    },
+    {
+      "id": "ops-001",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 2,
+      "numbers_kept": 2,
+      "numbers_invented": [],
+      "mean_groundedness": 0.833,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "ops-002",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 2,
+      "numbers_kept": 2,
+      "numbers_invented": [],
+      "mean_groundedness": 0.92,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "ops-003",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 1,
+      "numbers_kept": 1,
+      "numbers_invented": [],
+      "mean_groundedness": 0.8,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "dev-001",
+      "records": 0,
+      "verbatim_retained": false,
+      "numbers_expected": 2,
+      "numbers_kept": 0,
+      "numbers_invented": [],
+      "mean_groundedness": 0.0,
+      "drifted_records": 1,
+      "recall_hit": true
+    },
+    {
+      "id": "dev-002",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 2,
+      "numbers_kept": 2,
+      "numbers_invented": [],
+      "mean_groundedness": 0.692,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "dev-003",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 2,
+      "numbers_kept": 2,
+      "numbers_invented": [],
+      "mean_groundedness": 0.909,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "meet-001",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 3,
+      "numbers_kept": 2,
+      "numbers_invented": [
+        "14"
+      ],
+      "mean_groundedness": 0.882,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "meet-002",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 2,
+      "numbers_kept": 1,
+      "numbers_invented": [],
+      "mean_groundedness": 0.833,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "pref-001",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 1,
+      "numbers_kept": 1,
+      "numbers_invented": [],
+      "mean_groundedness": 0.84,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "pref-002",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 3,
+      "numbers_kept": 3,
+      "numbers_invented": [],
+      "mean_groundedness": 0.897,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "fact-001",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 2,
+      "numbers_kept": 2,
+      "numbers_invented": [],
+      "mean_groundedness": 0.8,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "fact-002",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 3,
+      "numbers_kept": 3,
+      "numbers_invented": [],
+      "mean_groundedness": 0.9,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "sec-001",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 3,
+      "numbers_kept": 3,
+      "numbers_invented": [
+        "2026"
+      ],
+      "mean_groundedness": 0.9,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "sec-002",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 4,
+      "numbers_kept": 0,
+      "numbers_invented": [],
+      "mean_groundedness": 0.824,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "biz-001",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 6,
+      "numbers_kept": 6,
+      "numbers_invented": [],
+      "mean_groundedness": 0.921,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "biz-002",
+      "records": 0,
+      "verbatim_retained": false,
+      "numbers_expected": 4,
+      "numbers_kept": 0,
+      "numbers_invented": [],
+      "mean_groundedness": 0.0,
+      "drifted_records": 1,
+      "recall_hit": true
+    },
+    {
+      "id": "causal-001",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 2,
+      "numbers_kept": 1,
+      "numbers_invented": [],
+      "mean_groundedness": 0.839,
+      "drifted_records": 0,
+      "recall_hit": true
+    },
+    {
+      "id": "causal-002",
+      "records": 0,
+      "verbatim_retained": false,
+      "numbers_expected": 2,
+      "numbers_kept": 0,
+      "numbers_invented": [],
+      "mean_groundedness": 0.0,
+      "drifted_records": 1,
+      "recall_hit": true
+    },
+    {
+      "id": "causal-003",
+      "records": 1,
+      "verbatim_retained": false,
+      "numbers_expected": 0,
+      "numbers_kept": 0,
+      "numbers_invented": [],
+      "mean_groundedness": 0.667,
+      "drifted_records": 0,
+      "recall_hit": true
+    }
+  ],
+  "corpus_version": "1.0"
+}

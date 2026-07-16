@@ -55,6 +55,26 @@ from remembra.storage.qdrant import QdrantStore
 log = structlog.get_logger(__name__)
 
 
+def _coerce_metadata(value: Any) -> dict[str, Any]:
+    """Return metadata as a dict regardless of how it was stored.
+
+    SQLite stores metadata as a JSON TEXT column. Some fetch paths (notably
+    graph retrieval) surface the raw string; passing that straight into
+    RecallResult(metadata=...) raises a pydantic ValidationError and 500s the
+    whole recall. This normalizes string/None/dict inputs to a dict so a
+    single memory with metadata can never break a recall.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except (ValueError, TypeError):
+            return {}
+    return {}
+
+
 def _is_qdrant_point_id(value: str) -> bool:
     """Qdrant point IDs must be a UUID or an unsigned integer; anything else is invalid.
 
@@ -1517,7 +1537,9 @@ class MemoryService:
             payload = getattr(r, "payload", {}) or {}
             mem_type = payload.get("memory_type")
             mem_scope = payload.get("scope")
-            mem_metadata = payload.get("metadata") or {}
+            # Metadata may arrive as a JSON string from DB-backed fetch paths
+            # (e.g. graph retrieval) — coerce so it never 500s recall.
+            mem_metadata = _coerce_metadata(payload.get("metadata"))
 
             memories.append(
                 RecallResult(

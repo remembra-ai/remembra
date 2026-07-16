@@ -1,0 +1,156 @@
+{
+  "version": "1.0",
+  "description": "Fidelity-sensitive memory corpus: multi-clause statements with exact numbers, causal links, names, and dates. Designed to measure whether a memory layer preserves what was actually said.",
+  "items": [
+    {
+      "id": "trade-001",
+      "content": "Mani switched TradeMind alerts from Telegram to Discord webhooks on July 16, 2026 because Telegram rate-limited the bot at 30 messages per second during CPI releases.",
+      "probe": "why did the TradeMind alerts move off Telegram?",
+      "numbers": ["30", "16", "2026"]
+    },
+    {
+      "id": "trade-002",
+      "content": "The MNQ scalping strategy uses a 2.5 point stop loss and a 7.5 point target, but only triggers when the 9 EMA crosses the 21 EMA on the 3 minute chart.",
+      "probe": "what are the stop and target for the MNQ scalping setup?",
+      "numbers": ["2.5", "7.5", "9", "21", "3"]
+    },
+    {
+      "id": "trade-003",
+      "content": "Backtest run 5f1e89 failed the promotion gate because the profit factor was 1.08, below the 1.20 minimum, even though the win rate was 52 percent.",
+      "probe": "why did backtest 5f1e89 fail?",
+      "numbers": ["1.08", "1.20", "52"]
+    },
+    {
+      "id": "books-001",
+      "content": "YaadBooks charges GCT at 15 percent on standard-rated items, but hotel accommodation uses a special 10 percent rate under the Jamaican Tourism Enhancement Act.",
+      "probe": "what GCT rate applies to hotels in YaadBooks?",
+      "numbers": ["15", "10"]
+    },
+    {
+      "id": "books-002",
+      "content": "HEART contributions in Jamaica are 3 percent from employers on gross emoluments above the 173,328 JMD annual threshold, and employees do not contribute.",
+      "probe": "who pays HEART contributions and how much?",
+      "numbers": ["3", "173328"]
+    },
+    {
+      "id": "books-003",
+      "content": "The migration importer posts opening balances to account 3300 Opening Balance Equity instead of restating revenue, because restating would double-count GCT already filed with TAJ.",
+      "probe": "which account do opening balances post to and why?",
+      "numbers": ["3300"]
+    },
+    {
+      "id": "ops-001",
+      "content": "The Coolify build server has a 2GB heap limit, so the qa-agent and backfill scripts were moved to .dockerignore after they froze deploys with out-of-memory errors that a 16GB local machine had masked.",
+      "probe": "why were the qa-agent scripts added to dockerignore?",
+      "numbers": ["2", "16"]
+    },
+    {
+      "id": "ops-002",
+      "content": "Remembra production runs on a single Fly-style 1GB shared-cpu container with a hard limit of 250 concurrent requests, and the SQLite database lives on one persistent volume.",
+      "probe": "what are the resource limits on the Remembra production container?",
+      "numbers": ["1", "250"]
+    },
+    {
+      "id": "ops-003",
+      "content": "The cron monitor emails an alert with subject YaadBooks cron ALERT only after a scheduled task misses two consecutive runs, because single misses were causing false alarms every 45 minutes.",
+      "probe": "when does the cron monitor send an alert email?",
+      "numbers": ["45"]
+    },
+    {
+      "id": "dev-001",
+      "content": "Pine Script v6 defaults margin_long to 0 instead of 100, which silently produces empty backtest reports on futures symbols until the margin is set back to 100 percent.",
+      "probe": "why were Pine v6 backtest reports coming back empty?",
+      "numbers": ["0", "100"]
+    },
+    {
+      "id": "dev-002",
+      "content": "The render pipeline must run at the native 60 fps of the Stage components because rendering at 30 fps keeps the same duration but reads as choppy, which Mani described as seeming sped up.",
+      "probe": "what fps should the render pipeline use and why?",
+      "numbers": ["60", "30"]
+    },
+    {
+      "id": "dev-003",
+      "content": "OpenAI text-embedding-3-small rejects inputs over 8192 tokens, so Remembra clamps embedding input to 24000 characters before any provider call.",
+      "probe": "what is the embedding input limit and how is it handled?",
+      "numbers": ["8192", "24000"]
+    },
+    {
+      "id": "meet-001",
+      "content": "In the Tuesday standup, Keisha agreed to deliver the Stripe-to-Paddle migration guide by August 4, 2026, while Andre owns the webhook signature verification that blocked three customers last week.",
+      "probe": "who owns the Paddle migration guide and when is it due?",
+      "numbers": ["4", "2026", "3"]
+    },
+    {
+      "id": "meet-002",
+      "content": "The investor call moved from 2 pm to 4:30 pm Eastern on Thursday because the lead partner is flying back from the Kingston fintech summit that morning.",
+      "probe": "what time is the investor call now?",
+      "numbers": ["2", "4:30"]
+    },
+    {
+      "id": "pref-001",
+      "content": "Mani prefers deploy status reported in three explicit states: committed locally, pushed to origin, or live on server, because the word done previously hid undeployed work for 18 days.",
+      "probe": "how does Mani want deploy status reported?",
+      "numbers": ["18"]
+    },
+    {
+      "id": "pref-002",
+      "content": "Mani takes his coffee black before 10 am but switches to green tea after lunch because caffeine after 2 pm wrecks his sleep tracking score, which dropped to 61 last month.",
+      "probe": "what does Mani drink in the afternoon and why?",
+      "numbers": ["10", "2", "61"]
+    },
+    {
+      "id": "fact-001",
+      "content": "The Port Royal earthquake of June 7, 1692 sank about two thirds of the town into Kingston Harbour, and the survivors relocated across the bay to found what became downtown Kingston.",
+      "probe": "what happened to Port Royal in 1692?",
+      "numbers": ["7", "1692"]
+    },
+    {
+      "id": "fact-002",
+      "content": "Jamaica's Blue Mountain Peak stands at 2256 meters, and coffee grown legally under the Blue Mountain name must come from land between 910 and 1700 meters in designated parishes.",
+      "probe": "what elevation range qualifies coffee as Blue Mountain?",
+      "numbers": ["2256", "910", "1700"]
+    },
+    {
+      "id": "sec-001",
+      "content": "The June security audit found that a master key comparison was not constant-time and that API key validation cost 100 milliseconds of bcrypt per request, which an attacker could exploit for CPU exhaustion, so validation moved to an O(1) SHA-256 indexed lookup.",
+      "probe": "what did the June audit find about API key validation?",
+      "numbers": ["100", "1", "256"]
+    },
+    {
+      "id": "sec-002",
+      "content": "Cloudflare now fronts yaadbooks.com with the apex and www proxied, but the origin server at 178.156.226.84 is still directly reachable, so the WAF can be bypassed until the firewall is restricted to Cloudflare IP ranges.",
+      "probe": "why can the yaadbooks WAF still be bypassed?",
+      "numbers": ["178", "156", "226", "84"]
+    },
+    {
+      "id": "biz-001",
+      "content": "Remembra Pro costs 49 dollars per month for 500,000 memories and 1 million API calls, while the Team plan at 199 dollars raises those limits to 2 million memories and 5 million calls.",
+      "probe": "what does Remembra Pro include for the price?",
+      "numbers": ["49", "500000", "1", "199", "2", "5"]
+    },
+    {
+      "id": "biz-002",
+      "content": "The first paying YaadBooks customer signed up on June 19, 2026, choosing the annual plan specifically because the trial reminder email arrived on day 12 of the 14 day trial.",
+      "probe": "when did the first paying customer sign up and what nudged them?",
+      "numbers": ["19", "2026", "12", "14"]
+    },
+    {
+      "id": "causal-001",
+      "content": "Because the Coolify GitHub webhook was never configured for the Remembra API app, pushes to main sat undeployed until someone clicked redeploy, which is how two critical fixes stayed offline for 18 days.",
+      "probe": "why did pushed fixes stay undeployed?",
+      "numbers": ["2", "18"]
+    },
+    {
+      "id": "causal-002",
+      "content": "The dashboard bundle grew past 4 megabytes after three.js was added, so the 3D Neural Universe graph now lazy-loads only when the graph tab opens, cutting first paint by 1.8 seconds.",
+      "probe": "why does the 3D graph lazy-load?",
+      "numbers": ["4", "1.8"]
+    },
+    {
+      "id": "causal-003",
+      "content": "Qdrant shows as unhealthy in Docker even though it works fine, because the healthcheck calls curl which does not exist inside the qdrant image.",
+      "probe": "why does qdrant show unhealthy when it works?",
+      "numbers": []
+    }
+  ]
+}
