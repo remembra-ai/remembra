@@ -1059,7 +1059,7 @@ async def rebuild_vectors(
 
             if not dry_run:
                 try:
-                    from remembra.core.models import Memory
+                    from remembra.models.memory import Memory
 
                     # Get full memory data from SQLite
                     full_cursor = await db.conn.execute(

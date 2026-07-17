@@ -124,6 +124,7 @@ class FieldEncryptor:
         try:
             from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+            assert self._key is not None  # guaranteed by the `self._enabled` check above
             nonce = os.urandom(_NONCE_SIZE)
             aesgcm = AESGCM(self._key)
             ciphertext = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
@@ -187,6 +188,7 @@ class FieldEncryptor:
             nonce = packed[:_NONCE_SIZE]
             ct_with_tag = packed[_NONCE_SIZE:]
 
+            assert self._key is not None  # guaranteed by the `self._enabled` check above
             aesgcm = AESGCM(self._key)
             plaintext_bytes = aesgcm.decrypt(nonce, ct_with_tag, None)
 

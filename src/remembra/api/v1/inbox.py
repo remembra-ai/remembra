@@ -169,9 +169,11 @@ async def get_inbox(
     current_user: CurrentUserDep,
     inbox: Annotated[InboxManager, Depends(get_inbox_manager)],
     agent_id: Annotated[str, Query(min_length=1, max_length=128)],
-    status: Annotated[
+    # Aliased to keep the "status" query-param name while avoiding shadowing the
+    # `fastapi.status` module — the error handlers below reference status.HTTP_*.
+    status_filter: Annotated[
         Literal["unread", "all"],
-        Query(description="'unread' (default) or 'all'."),
+        Query(alias="status", description="'unread' (default) or 'all'."),
     ] = "unread",
     limit: Annotated[int, Query(ge=1, le=200)] = 20,
 ) -> list[InboxRow]:
@@ -180,7 +182,7 @@ async def get_inbox(
         rows = await inbox.get_for_agent(
             owner_user_id=current_user.user_id,
             agent_id=agent_id,
-            status=status,
+            status=status_filter,
             limit=limit,
         )
     except ValueError as e:

@@ -16,9 +16,9 @@ Usage in routes:
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import Annotated, Any
 
+import structlog
 from fastapi import Depends, HTTPException, Request, Response, status
 
 from remembra.auth.middleware import (
@@ -29,7 +29,7 @@ from remembra.auth.middleware import (
 from remembra.cloud.metering import UsageMeter
 from remembra.cloud.plans import get_plan
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Track which users have received warning emails (reset on app restart)
 # In production, this should be stored in database
@@ -185,10 +185,10 @@ async def enforce_store_limit(
 
     if not check.allowed:
         logger.warning(
-            "store_limit_exceeded user=%s plan=%s reason=%s",
-            current_user.user_id,
-            snapshot.plan.value,
-            check.reason,
+            "store_limit_exceeded",
+            user_id=current_user.user_id,
+            plan=snapshot.plan.value,
+            reason=check.reason,
         )
 
         # Send limit exceeded email (fire-and-forget)
@@ -261,10 +261,10 @@ async def enforce_recall_limit(
 
     if not check.allowed:
         logger.warning(
-            "recall_limit_exceeded user=%s plan=%s reason=%s",
-            current_user.user_id,
-            snapshot.plan.value,
-            check.reason,
+            "recall_limit_exceeded",
+            user_id=current_user.user_id,
+            plan=snapshot.plan.value,
+            reason=check.reason,
         )
         detail = check.reason or "Recall limit exceeded"
         if check.upgrade_hint:
