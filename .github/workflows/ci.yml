@@ -26,7 +26,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install dev dependencies
-        run: pip install -e ".[server,cloud,dev]"
+        # Include mcp + encryption: the test suite imports remembra.mcp.server
+        # (needs the `mcp` package) and the encryption paths, so [server,cloud,dev]
+        # alone fails test collection.
+        run: pip install -e ".[server,cloud,dev,mcp,encryption]"
 
       - name: Ruff lint
         run: ruff check src/ tests/
@@ -63,7 +66,9 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install -e ".[server,cloud,dev]"
+        # mcp + encryption are needed at test-collection time (tests import
+        # remembra.mcp.server and the encryption paths).
+        run: pip install -e ".[server,cloud,dev,mcp,encryption]"
 
       - name: Run tests
         run: pytest --tb=short --ignore=tests/test_billing_paddle.py
