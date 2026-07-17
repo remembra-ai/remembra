@@ -399,6 +399,7 @@ class MemorySummary(BaseModel):
     accessed_at: str | None = None
     access_count: int = 0
     memory_type: str | None = None
+    scope: str | None = None
     entities: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 

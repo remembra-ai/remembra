@@ -2256,7 +2256,12 @@ class MemoryService:
             "updated_at": memory.get("updated_at"),
             "accessed_at": memory.get("last_accessed"),
             "access_count": memory.get("access_count", 0) or 0,
-            "memory_type": metadata.get("memory_type"),
+            # memory_type and scope are first-class table columns; read them
+            # from the row, falling back to metadata only for legacy records
+            # that stored them there. Without this, source records (and any
+            # typed/scoped memory) surface as memory_type=null over the API.
+            "memory_type": memory.get("memory_type") or metadata.get("memory_type"),
+            "scope": memory.get("scope") or metadata.get("scope"),
             "entities": [entity.canonical_name for entity in entities],
             "metadata": metadata,
         }
