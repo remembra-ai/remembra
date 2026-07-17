@@ -264,22 +264,47 @@ class MemoryService:
     # Store
     # -----------------------------------------------------------------------
 
+    # Unicode-aware word matcher: \w covers Latin, CJK, Cyrillic, Arabic, etc.
+    # (NOT [a-z0-9], which silently matches nothing for non-Latin scripts and
+    # would make verification a no-op there).
+    _WORD_RE = re.compile(r"\w+", re.UNICODE)
+
     @staticmethod
     def _fact_source_overlap(fact: str, source_text: str) -> float:
         """Content-word overlap between a derived fact and its source text.
 
-        Cheap lexical check used to flag extraction drift/hallucination:
-        a fact whose content words mostly don't appear in the source was
-        not derived from it. Numbers always count as content words —
+        Cheap, advisory lexical check used to flag likely extraction
+        drift/hallucination: a fact whose content words mostly don't appear in
+        the source probably wasn't derived from it. Numbers always count —
         invented figures are the most dangerous hallucination.
+
+        This is a heuristic, not ground truth: aggressive extraction that
+        renames pronouns or heavily paraphrases can score low on a faithful
+        fact. It only sets an advisory `verified` flag; the fact is stored
+        regardless. Numbers are comma-normalized so "3,000" and "3000" match.
         """
-        word_re = re.compile(r"[a-z0-9]+")
-        source_words = set(word_re.findall(source_text.lower()))
-        fact_words = [w for w in word_re.findall(fact.lower()) if len(w) >= 3 or w.isdigit()]
-        if not fact_words:
+
+        def norm(text: str) -> str:
+            # Casefold (stronger than lower for non-ASCII) and strip digit
+            # group separators so 3,000 == 3000.
+            return re.sub(r"(?<=\d),(?=\d)", "", text.casefold())
+
+        def tokens(text: str) -> list[str]:
+            words = [w for w in MemoryService._WORD_RE.findall(norm(text)) if len(w) >= 3 or w.isdigit()]
+            # Non-space-segmented scripts (CJK, etc.) collapse to one giant
+            # token that never matches by equality, making word overlap useless.
+            # Fall back to character bigrams so verification still discriminates.
+            if len(words) <= 1 and len(text.strip()) >= 4:
+                s = re.sub(r"\s+", "", norm(text))
+                return [s[i : i + 2] for i in range(len(s) - 1)]
+            return words
+
+        fact_tokens = tokens(fact)
+        if not fact_tokens:
             return 1.0
-        hits = sum(1 for w in fact_words if w in source_words)
-        return hits / len(fact_words)
+        source_tokens = set(tokens(source_text))
+        hits = sum(1 for w in fact_tokens if w in source_tokens)
+        return hits / len(fact_tokens)
 
     async def _store_source_record(
         self,
@@ -328,16 +353,11 @@ class MemoryService:
             memory_type="source",
             scope=request.scope,
         )
-        if self.settings.enable_hybrid_search:
-            try:
-                await self.db.index_memory_fts(
-                    memory_id=record.id,
-                    user_id=record.user_id,
-                    project_id=record.project_id,
-                    content=record.content,
-                )
-            except Exception as e:
-                log.warning("source_fts_indexing_failed", error=str(e), memory_id=record.id)
+        # Source records are deliberately NOT indexed into FTS: they are
+        # evidence fetched by their source_id receipt, not recall candidates.
+        # Indexing them would surface blank-content results in keyword recall
+        # (they have no vector payload). See search_fts for the belt-and-braces
+        # exclusion of any legacy source rows already in the index.
         log.info("source_record_stored", memory_id=record.id, chars=len(record.content))
         return record.id
 

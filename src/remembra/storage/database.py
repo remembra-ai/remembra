@@ -1525,13 +1525,21 @@ class Database:
             # keyword arm contributes nothing; let vector search carry recall.
             return []
 
+        # Exclude verbatim source records: they are evidence fetched by their
+        # source_id receipt, never recall candidates. They have no vector, so a
+        # keyword match would surface a blank-content result (no payload) and
+        # waste a slot. The JOIN filters them out for both already-indexed rows
+        # and any future ones. (New source records are also no longer indexed —
+        # see _store_source_record.)
         if project_id is None:
             cursor = await self.conn.execute(
                 """
-                SELECT id, bm25(memories_fts) as score
-                FROM memories_fts
-                WHERE user_id = ?
+                SELECT f.id, bm25(memories_fts) as score
+                FROM memories_fts f
+                JOIN memories m ON m.id = f.id
+                WHERE f.user_id = ?
                   AND memories_fts MATCH ?
+                  AND (m.memory_type IS NULL OR m.memory_type != 'source')
                 ORDER BY score
                 LIMIT ?
                 """,
@@ -1540,10 +1548,12 @@ class Database:
         else:
             cursor = await self.conn.execute(
                 """
-                SELECT id, bm25(memories_fts) as score
-                FROM memories_fts
-                WHERE user_id = ? AND project_id = ?
+                SELECT f.id, bm25(memories_fts) as score
+                FROM memories_fts f
+                JOIN memories m ON m.id = f.id
+                WHERE f.user_id = ? AND f.project_id = ?
                   AND memories_fts MATCH ?
+                  AND (m.memory_type IS NULL OR m.memory_type != 'source')
                 ORDER BY score
                 LIMIT ?
                 """,

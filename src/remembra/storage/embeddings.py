@@ -233,10 +233,13 @@ class AzureOpenAIEmbedder(BaseEmbedder):
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             log.error("azure_embedding_http_error", status_code=e.response.status_code)
-            raise RuntimeError(f"Embedding service error (status {e.response.status_code})") from None
+            raise EmbeddingProviderError(
+                f"Embedding service error (status {e.response.status_code})",
+                status_code=e.response.status_code,
+            ) from None
         except httpx.RequestError as e:
             log.error("azure_embedding_request_error", error_type=type(e).__name__)
-            raise RuntimeError("Embedding service unavailable") from None
+            raise EmbeddingProviderError("Embedding service unavailable") from None
 
         data = response.json()
 
@@ -275,10 +278,13 @@ class OllamaEmbedder(BaseEmbedder):
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             log.error("ollama_embedding_http_error", status_code=e.response.status_code)
-            raise RuntimeError(f"Embedding service error (status {e.response.status_code})") from None
+            raise EmbeddingProviderError(
+                f"Embedding service error (status {e.response.status_code})",
+                status_code=e.response.status_code,
+            ) from None
         except httpx.RequestError as e:
             log.error("ollama_embedding_request_error", error_type=type(e).__name__)
-            raise RuntimeError("Embedding service unavailable") from None
+            raise EmbeddingProviderError("Embedding service unavailable") from None
 
         data = response.json()
 
@@ -338,10 +344,13 @@ class CohereEmbedder(BaseEmbedder):
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             log.error("cohere_embedding_http_error", status_code=e.response.status_code)
-            raise RuntimeError(f"Embedding service error (status {e.response.status_code})") from None
+            raise EmbeddingProviderError(
+                f"Embedding service error (status {e.response.status_code})",
+                status_code=e.response.status_code,
+            ) from None
         except httpx.RequestError as e:
             log.error("cohere_embedding_request_error", error_type=type(e).__name__)
-            raise RuntimeError("Embedding service unavailable") from None
+            raise EmbeddingProviderError("Embedding service unavailable") from None
 
         data = response.json()
 
@@ -395,10 +404,13 @@ class VoyageEmbedder(BaseEmbedder):
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             log.error("voyage_embedding_http_error", status_code=e.response.status_code)
-            raise RuntimeError(f"Embedding service error (status {e.response.status_code})") from None
+            raise EmbeddingProviderError(
+                f"Embedding service error (status {e.response.status_code})",
+                status_code=e.response.status_code,
+            ) from None
         except httpx.RequestError as e:
             log.error("voyage_embedding_request_error", error_type=type(e).__name__)
-            raise RuntimeError("Embedding service unavailable") from None
+            raise EmbeddingProviderError("Embedding service unavailable") from None
 
         data = response.json()
 
@@ -452,10 +464,13 @@ class JinaEmbedder(BaseEmbedder):
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
             log.error("jina_embedding_http_error", status_code=e.response.status_code)
-            raise RuntimeError(f"Embedding service error (status {e.response.status_code})") from None
+            raise EmbeddingProviderError(
+                f"Embedding service error (status {e.response.status_code})",
+                status_code=e.response.status_code,
+            ) from None
         except httpx.RequestError as e:
             log.error("jina_embedding_request_error", error_type=type(e).__name__)
-            raise RuntimeError("Embedding service unavailable") from None
+            raise EmbeddingProviderError("Embedding service unavailable") from None
 
         data = response.json()
 

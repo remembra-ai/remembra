@@ -93,6 +93,37 @@ async def test_openai_http_error_raises_typed_error(upstream_status: int) -> Non
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("upstream_status", [400, 429, 500])
+async def test_all_providers_raise_typed_error(upstream_status: int) -> None:
+    """Every embedding provider — not just OpenAI — must raise the typed error
+    carrying the upstream status, so store/recall map it to an honest 429/502
+    instead of an opaque 500 (regression guard for F2)."""
+    from remembra.storage.embeddings import (
+        AzureOpenAIEmbedder,
+        CohereEmbedder,
+        JinaEmbedder,
+        OllamaEmbedder,
+        VoyageEmbedder,
+    )
+
+    providers = [
+        OllamaEmbedder(),
+        CohereEmbedder(api_key="t"),
+        VoyageEmbedder(api_key="t"),
+        JinaEmbedder(api_key="t"),
+        AzureOpenAIEmbedder(api_key="t", endpoint="https://x.openai.azure.com", deployment="d"),
+    ]
+    for emb in providers:
+        emb._client = httpx.AsyncClient(
+            transport=_mock_openai_transport(upstream_status),
+            base_url=getattr(emb, "base_url", "https://example.test"),
+        )
+        with pytest.raises(EmbeddingProviderError) as exc_info:
+            await emb.embed("hello")
+        assert exc_info.value.status_code == upstream_status, type(emb).__name__
+
+
+@pytest.mark.asyncio
 async def test_openai_connection_error_raises_typed_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("no route")

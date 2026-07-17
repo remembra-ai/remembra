@@ -113,6 +113,21 @@ def test_overlap_counts_numbers() -> None:
     assert faithful > invented
 
 
+def test_overlap_normalizes_comma_numbers() -> None:
+    # "3,000" and "3000" must be treated as the same figure, not a hallucination
+    assert MemoryService._fact_source_overlap("the budget was 3000 dollars", "approved budget was 3,000 dollars") >= 0.5
+
+
+def test_overlap_works_for_non_latin_scripts() -> None:
+    # ASCII-only tokenization made verification a silent no-op for CJK etc.
+    # (always 1.0). It must now discriminate faithful vs unrelated non-Latin text.
+    faithful = MemoryService._fact_source_overlap("契約は3月1日に署名された", "契約は3月1日に署名されました")
+    unrelated = MemoryService._fact_source_overlap("まったく無関係な猫の話", "契約は3月1日に署名されました")
+    assert faithful >= 0.5
+    assert unrelated < 0.5
+    assert faithful > unrelated
+
+
 # ---------------------------------------------------------------------------
 # Sync store: source record + receipts + verification
 # ---------------------------------------------------------------------------
@@ -137,8 +152,10 @@ async def test_store_preserves_verbatim_source_with_receipts() -> None:
     # Source records carry no vector (must never pollute semantic recall)
     assert all(getattr(m, "memory_type", None) != "source" for m in qdrant.upserted)
 
-    # ...but ARE keyword-searchable (FTS indexed)
-    assert any(f["memory_id"] == resp.source_id for f in db.fts)
+    # ...and are NOT FTS-indexed either — a source record is evidence fetched
+    # by its source_id receipt, never a recall candidate. Indexing it would
+    # surface a blank-content result in keyword recall (F1 regression guard).
+    assert all(f["memory_id"] != resp.source_id for f in db.fts)
 
     # Every derived fact carries the receipt and a verification verdict
     fact_rows = [r for r in db.saved if r.get("memory_type") != "source"]
