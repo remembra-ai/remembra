@@ -90,7 +90,7 @@ all live on Remembra Cloud as of this release.)
   PATH friction. See `docs/connect.md` and `docker-compose.mcp.yml`. Covered by
   `tests/test_mcp_remote_auth.py` (per-key isolation, no-key→401, key propagation).
 
-### Fixed
+### Fixed (from Unreleased)
 - **Recall no longer surfaces superseded facts.** Memories retired by a newer belief
   (via the explicit `supersede()` API or the VERSION conflict strategy) are now marked
   with a queryable `superseded_by` column and **excluded from recall by default** —
