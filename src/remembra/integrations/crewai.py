@@ -100,10 +100,15 @@ class RemembraStorage:
             ttl = "24h"  # Short-term expires after 24 hours
 
         try:
+            # skip_extraction: each CrewAI memory item (a task result, an
+            # entity description, a short-term observation) is a distinct record
+            # stored 1:1 — never fact-split or merged/deduped into another item.
+            # Without this, distinct items get consolidated away and lost.
             self._client.store(
                 content=content,
                 metadata=metadata,
                 ttl=ttl,
+                skip_extraction=True,
             )
         except MemoryError:
             pass  # Don't break the crew pipeline
@@ -116,7 +121,7 @@ class RemembraStorage:
         self,
         query: str,
         limit: int = 5,
-        score_threshold: float = 0.6,
+        score_threshold: float = 0.35,
     ) -> list[dict[str, Any]]:
         """Search Remembra for relevant memories.
 
@@ -124,10 +129,15 @@ class RemembraStorage:
         list of dicts with 'context', 'metadata', and 'score' keys.
         """
         try:
+            # Filter to THIS storage's memory type. CrewAI's short-term,
+            # long-term, and entity memories share one (user, project)
+            # namespace; without the filter a short-term search would also
+            # return long-term and entity items and vice versa.
             result = self._client.recall(
                 query=query,
                 limit=limit,
                 threshold=score_threshold,
+                filters={"memory_type": self._type},
             )
 
             return [
@@ -136,6 +146,7 @@ class RemembraStorage:
                     "metadata": {
                         "memory_id": m.id,
                         "memory_type": self._type,
+                        **(m.metadata or {}),
                     },
                     "score": m.relevance,
                 }
@@ -148,15 +159,31 @@ class RemembraStorage:
         self,
         query: str,
         limit: int = 5,
-        score_threshold: float = 0.6,
+        score_threshold: float = 0.35,
     ) -> list[dict[str, Any]]:
         """Async version of search (delegates to sync for now)."""
         return self.search(query, limit, score_threshold)
 
     def reset(self) -> None:
-        """Clear all memories of this type."""
+        """Clear only THIS storage's memories (its memory type).
+
+        Must never wipe the user's other memories. The previous version called
+        forget(user_id=...), which deleted ALL of the user's memory — including
+        the crew's other memory types and anything else stored under that user.
+        Instead, recall this type's memories by metadata filter and delete each,
+        looping until empty (recall is capped at 50 with no offset).
+        """
         with contextlib.suppress(MemoryError):
-            self._client.forget(user_id=self._client.user_id)
+            for _ in range(200):  # safety bound
+                result = self._client.recall(
+                    filters={"memory_type": self._type},
+                    limit=50,
+                )
+                if not result.memories:
+                    break
+                for m in result.memories:
+                    with contextlib.suppress(MemoryError):
+                        self._client.forget(memory_id=m.id)
 
 
 def _extract_content(value: Any) -> tuple[str, dict[str, Any]]:
