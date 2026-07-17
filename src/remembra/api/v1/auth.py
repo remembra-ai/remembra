@@ -334,6 +334,7 @@ async def signup(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error,
         )
+    assert user is not None  # create_user returns a user whenever error is falsy
 
     # Send welcome email with API key (fire-and-forget, don't block signup)
     if EMAIL_AVAILABLE:
@@ -400,6 +401,7 @@ async def login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=error,
         )
+    assert user is not None  # authenticate returns a user whenever error is falsy
 
     # Check if 2FA is enabled
     if await user_manager.is_totp_enabled(user.id):
@@ -637,6 +639,7 @@ async def update_profile(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error,
         )
+    assert user is not None  # update_profile returns a user whenever error is falsy
 
     return UpdateProfileResponse(
         id=user.id,

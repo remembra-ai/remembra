@@ -386,19 +386,19 @@ class Database:
         self._connection.row_factory = aiosqlite.Row
 
         # Performance optimizations for concurrent access
-        await self._connection.execute("PRAGMA foreign_keys = ON")
-        await self._connection.execute("PRAGMA journal_mode = WAL")  # Better concurrency
-        await self._connection.execute("PRAGMA synchronous = NORMAL")  # Balance durability/speed
-        await self._connection.execute("PRAGMA cache_size = -64000")  # 64MB cache
-        await self._connection.execute("PRAGMA temp_store = MEMORY")  # Temp tables in RAM
-        await self._connection.execute("PRAGMA mmap_size = 268435456")  # 256MB mmap
+        await self.conn.execute("PRAGMA foreign_keys = ON")
+        await self.conn.execute("PRAGMA journal_mode = WAL")  # Better concurrency
+        await self.conn.execute("PRAGMA synchronous = NORMAL")  # Balance durability/speed
+        await self.conn.execute("PRAGMA cache_size = -64000")  # 64MB cache
+        await self.conn.execute("PRAGMA temp_store = MEMORY")  # Temp tables in RAM
+        await self.conn.execute("PRAGMA mmap_size = 268435456")  # 256MB mmap
 
         log.info("database_connected", path=self.db_path, journal_mode="WAL")
 
     async def close(self) -> None:
         """Close database connection."""
         if self._connection:
-            await self._connection.close()
+            await self.conn.close()
             self._connection = None
             log.info("database_closed")
 
@@ -407,8 +407,8 @@ class Database:
         if not self._connection:
             await self.connect()
 
-        await self._connection.executescript(SCHEMA_SQL)
-        await self._connection.commit()
+        await self.conn.executescript(SCHEMA_SQL)
+        await self.conn.commit()
 
         # Run migrations for existing tables
         await self._run_migrations()
@@ -455,14 +455,14 @@ class Database:
 
         for migration in migrations:
             try:
-                await self._connection.execute(migration)
+                await self.conn.execute(migration)
             except Exception:
                 # Column likely already exists, ignore
                 pass
 
         # Brain layer: discovered communities (themes) with summaries.
         # Recomputed by the sleep-time worker; rows are replaced per (user, project).
-        await self._connection.executescript(
+        await self.conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS communities (
                 id TEXT PRIMARY KEY,
@@ -482,7 +482,7 @@ class Database:
         )
 
         # Create feedback table for existing DBs (IF NOT EXISTS is idempotent)
-        await self._connection.executescript(
+        await self.conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS memory_feedback (
                 id TEXT PRIMARY KEY,
@@ -511,12 +511,12 @@ class Database:
         ]
         for index_sql in indexes:
             try:
-                await self._connection.execute(index_sql)
+                await self.conn.execute(index_sql)
             except Exception:
                 # Index or column might not exist in some edge cases
                 pass
 
-        await self._connection.commit()
+        await self.conn.commit()
 
     @property
     def conn(self) -> aiosqlite.Connection:
