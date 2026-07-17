@@ -15,8 +15,12 @@ def _two_triangles_with_bridge():
     """
     nodes = ["A", "B", "C", "X", "Y", "Z"]
     edges = [
-        ("A", "B", 1.0), ("B", "C", 1.0), ("A", "C", 1.0),  # triangle 1
-        ("X", "Y", 1.0), ("Y", "Z", 1.0), ("X", "Z", 1.0),  # triangle 2
+        ("A", "B", 1.0),
+        ("B", "C", 1.0),
+        ("A", "C", 1.0),  # triangle 1
+        ("X", "Y", 1.0),
+        ("Y", "Z", 1.0),
+        ("X", "Z", 1.0),  # triangle 2
         ("C", "X", 1.0),  # bridge
     ]
     return nodes, edges

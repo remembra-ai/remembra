@@ -60,12 +60,8 @@ REMEMBRA_AGENT_ID = os.environ.get("REMEMBRA_AGENT_ID", "")
 _REMOTE_TRANSPORTS = ("sse", "streamable-http")
 _MAX_CACHED_CLIENTS = 1000
 
-_request_api_key: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "remembra_request_api_key", default=None
-)
-_request_project: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "remembra_request_project", default=None
-)
+_request_api_key: contextvars.ContextVar[str | None] = contextvars.ContextVar("remembra_request_api_key", default=None)
+_request_project: contextvars.ContextVar[str | None] = contextvars.ContextVar("remembra_request_project", default=None)
 
 _client: Memory | None = None
 _clients_by_key: dict[str, Memory] = {}
@@ -1186,7 +1182,7 @@ def _extract_api_key(headers: dict[str, str]) -> str | None:
     return api_key or None
 
 
-def _build_remote_app(transport: str):  # type: ignore[no-untyped-def]
+def _build_remote_app(transport: str) -> Any:
     """Wrap the MCP HTTP app with per-request API-key extraction.
 
     The middleware runs at the very start of every HTTP request — before the
@@ -1195,7 +1191,7 @@ def _build_remote_app(transport: str):  # type: ignore[no-untyped-def]
     """
     inner = mcp.streamable_http_app() if transport == "streamable-http" else mcp.sse_app()
 
-    async def app(scope, receive, send):  # type: ignore[no-untyped-def]
+    async def app(scope: Any, receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
             await inner(scope, receive, send)
             return
@@ -1240,8 +1236,7 @@ def main() -> None:
         host = os.environ.get("REMEMBRA_MCP_HOST", "0.0.0.0")
         port = int(os.environ.get("REMEMBRA_MCP_PORT", "8765"))
         print(
-            f"Remembra MCP listening on http://{host}:{port} ({transport}); "
-            "each request must carry the caller's X-API-Key.",
+            f"Remembra MCP listening on http://{host}:{port} ({transport}); each request must carry the caller's X-API-Key.",
             file=sys.stderr,
         )
         uvicorn.run(_build_remote_app(transport), host=host, port=port, log_level="info")

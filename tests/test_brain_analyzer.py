@@ -38,8 +38,12 @@ async def _db_with_two_themes() -> tuple[Database, dict[str, str]]:
         return Relationship(from_entity_id=ids[a], to_entity_id=ids[b], type="relates_to", confidence=conf)
 
     for a, b in [
-        ("TradeMind", "ChartHustle"), ("ChartHustle", "Mani"), ("TradeMind", "Mani"),
-        ("YaadBooks", "GCT"), ("GCT", "Stripe"), ("YaadBooks", "Stripe"),
+        ("TradeMind", "ChartHustle"),
+        ("ChartHustle", "Mani"),
+        ("TradeMind", "Mani"),
+        ("YaadBooks", "GCT"),
+        ("GCT", "Stripe"),
+        ("YaadBooks", "Stripe"),
     ]:
         await db.save_relationship(rel(a, b))
     # Bridge
@@ -98,6 +102,7 @@ async def test_analyzer_surfaces_bridge_as_surprising_link():
 async def test_custom_summarizer_is_used():
     db, ids = await _db_with_two_themes()
     try:
+
         async def fake_llm(label, names, types):
             return f"LLM[{label}:{len(names)}]"
 

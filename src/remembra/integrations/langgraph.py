@@ -235,4 +235,3 @@ class RemembraStore(BaseStore):
 
     async def abatch(self, ops: Any) -> list[Any]:
         return await asyncio.to_thread(self.batch, list(ops))
-
