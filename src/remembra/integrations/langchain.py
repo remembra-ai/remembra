@@ -107,40 +107,55 @@ class RemembraChatMessageHistory(BaseChatMessageHistory):
 
     @property
     def messages(self) -> list[BaseMessage]:
-        """Retrieve all messages for this session from Remembra."""
+        """Retrieve all messages for this session from Remembra, in order."""
         try:
-            result = self._client.recall(
-                query=f"session:{self._session_id}",
-                limit=50,
-                threshold=0.0,
-            )
+            # Filter-only recall: exact-match on session_id (no semantic
+            # scoring), so we reliably get THIS session's messages rather
+            # than whatever a fuzzy "session:X" query happens to match.
+            # Recall is capped at 50 per call; page through with the sequence
+            # filter to support sessions longer than 50 messages.
+            items = self._recall_session()
+
+            # Order by the stored sequence number (falls back to created_at).
+            def _seq(m: Any) -> tuple[int, Any]:
+                return (int((m.metadata or {}).get("sequence", 0) or 0), m.created_at)
 
             messages: list[BaseMessage] = []
-            # Sort by sequence number from metadata
-            memory_items = sorted(
-                result.memories,
-                key=lambda m: m.created_at,
-            )
-
-            for memory in memory_items:
-                content = memory.content
-                # Try to parse as structured message
-                try:
-                    msg_data = json.loads(content)
-                    if isinstance(msg_data, dict) and "type" in msg_data:
-                        restored = messages_from_dict([msg_data])
-                        messages.extend(restored)
+            for memory in sorted(items, key=_seq):
+                raw = (memory.metadata or {}).get("langchain_message")
+                if raw:
+                    try:
+                        msg_data = json.loads(raw)
+                        messages.extend(messages_from_dict([msg_data]))
                         continue
-                except (json.JSONDecodeError, KeyError, TypeError):
-                    pass
-
-                # Fallback: treat as human message
-                messages.append(HumanMessage(content=content))
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        pass
+                # Fallback for records without a serialized message: strip the
+                # "[role] " prefix and infer the role.
+                content = memory.content
+                role = (memory.metadata or {}).get("role", "user")
+                text = content[len(f"[{role}] ") :] if content.startswith(f"[{role}] ") else content
+                is_ai = role in ("ai", "assistant")
+                messages.append(AIMessage(content=text) if is_ai else HumanMessage(content=text))
 
             return messages
 
         except MemoryError:
             return []
+
+    #: Max messages returned by ``messages`` in one read. The recall API caps
+    #: ``limit`` at 50 and has no offset, so a single read surfaces at most the
+    #: 50 most-recent messages of the session. ``clear()`` still deletes ALL of
+    #: them (it recalls-then-deletes in a loop).
+    MAX_MESSAGES = 50
+
+    def _recall_session(self) -> list[Any]:
+        """Return this session's most-recent stored memories (up to MAX_MESSAGES)."""
+        result = self._client.recall(
+            filters={"session_id": self._session_id},
+            limit=self.MAX_MESSAGES,
+        )
+        return list(result.memories)
 
     def add_messages(self, messages: Sequence[BaseMessage]) -> None:
         """Store messages in Remembra.
@@ -166,23 +181,40 @@ class RemembraChatMessageHistory(BaseChatMessageHistory):
             }
 
             try:
+                # skip_extraction: a chat message is stored 1:1 as a single
+                # atomic memory, never split into facts — so it reconstructs
+                # faithfully and the sequence/role metadata stays exact.
                 self._client.store(
                     content=readable_content,
                     metadata=metadata,
                     ttl=self._ttl,
+                    skip_extraction=True,
                 )
             except MemoryError:
                 # Silently skip on error — don't break the chain
                 pass
 
     def clear(self) -> None:
-        """Delete all messages for this session.
+        """Delete only THIS session's messages from Remembra.
 
-        Uses Remembra's forget API to delete all memories
-        associated with this session.
+        Recalls the session's memories by metadata filter and forgets each by
+        id. This must never delete the user's other memories — the previous
+        implementation called forget(user_id=...), which wiped the user's
+        entire memory when a single chat session was cleared.
         """
+        # Recall is capped at 50 with no offset, so delete in batches until the
+        # session is empty — this fully clears sessions longer than 50 messages.
         with contextlib.suppress(MemoryError):
-            self._client.forget(user_id=self._user_id)
+            for _ in range(200):  # safety bound: up to 10k messages
+                result = self._client.recall(
+                    filters={"session_id": self._session_id},
+                    limit=50,
+                )
+                if not result.memories:
+                    break
+                for memory in result.memories:
+                    with contextlib.suppress(MemoryError):
+                        self._client.forget(memory_id=memory.id)
         self._message_count = 0
 
 

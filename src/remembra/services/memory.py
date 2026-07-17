@@ -20,6 +20,7 @@ from remembra.extraction.conflicts import (
 )
 from remembra.extraction.consolidator import (
     ConsolidationAction,
+    ConsolidationResult,
     ExistingMemory,
     MemoryConsolidator,
 )
@@ -576,6 +577,8 @@ class MemoryService:
                 scope=request.scope,
                 supersedes=request.supersedes,
                 contradicts=request.contradicts,
+                # Atomic stores (skip_extraction) must not be merged/deduped.
+                skip_consolidation=skip_extraction,
             )
             if fact_result:
                 # Track matched existing memory ID (for NOOP cases)
@@ -743,9 +746,15 @@ class MemoryService:
         scope: str | None = None,
         supersedes: str | None = None,
         contradicts: str | None = None,
+        skip_consolidation: bool = False,
     ) -> dict[str, Any] | None:
         """
         Store a single fact with consolidation logic.
+
+        When ``skip_consolidation`` is True, the fact is embedded and added
+        directly with no similarity search, dedup, or merge — required for
+        atomic records (chat messages, logs, pre-structured data) where every
+        item is a distinct entry that must never be merged into another.
 
         Returns dict with id and content if stored, None if skipped.
 
@@ -766,22 +775,28 @@ class MemoryService:
         # Generate embedding for this fact
         embedding = await self.embeddings.embed(fact)
 
-        # Search for similar existing memories
-        similar = await self.qdrant.search(
-            query_vector=embedding,
-            user_id=user_id,
-            project_id=project_id,
-            limit=5,
-            score_threshold=0.4,  # Lower threshold to find candidates
-        )
+        if skip_consolidation:
+            # Atomic path: no similarity search, no dedup, no merge — always ADD.
+            result = ConsolidationResult(action=ConsolidationAction.ADD, content=fact, reason="atomic", target_id=None)
+            existing_memories = []
+        else:
+            # Search for similar existing memories
+            similar = await self.qdrant.search(
+                query_vector=embedding,
+                user_id=user_id,
+                project_id=project_id,
+                limit=5,
+                score_threshold=0.4,  # Lower threshold to find candidates
+            )
 
-        # Convert to ExistingMemory objects
-        existing_memories = [
-            ExistingMemory(id=str(mid), content=payload.get("content", ""), score=score) for mid, score, payload in similar
-        ]
+            # Convert to ExistingMemory objects
+            existing_memories = [
+                ExistingMemory(id=str(mid), content=payload.get("content", ""), score=score)
+                for mid, score, payload in similar
+            ]
 
-        # Consolidate: decide ADD/UPDATE/DELETE/NOOP
-        result = await self.consolidator.consolidate(fact, existing_memories)
+            # Consolidate: decide ADD/UPDATE/DELETE/NOOP
+            result = await self.consolidator.consolidate(fact, existing_memories)
 
         if result.action == ConsolidationAction.NOOP:
             # Return matched existing memory ID so caller can reference it

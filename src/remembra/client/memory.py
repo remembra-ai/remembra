@@ -190,6 +190,7 @@ class Memory:
         metadata: dict[str, Any] | None = None,
         ttl: str | None = None,
         auto_expire: bool | None = None,
+        skip_extraction: bool = False,
     ) -> StoreResult:
         """
         Store a new memory.
@@ -237,6 +238,8 @@ class Memory:
         }
         if effective_ttl:
             payload["ttl"] = effective_ttl
+        if skip_extraction:
+            payload["skip_extraction"] = True
 
         data = self._request("POST", "/api/v1/memories", json=payload)
 
@@ -368,6 +371,8 @@ class Memory:
                 content=m["content"],
                 relevance=m["relevance"],
                 created_at=datetime.fromisoformat(m["created_at"]),
+                metadata=m.get("metadata") or {},
+                memory_type=m.get("memory_type"),
             )
             for m in data.get("memories", [])
         ]

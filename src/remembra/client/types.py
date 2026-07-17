@@ -1,7 +1,8 @@
 """SDK type definitions."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
+from typing import Any
 
 
 @dataclass
@@ -22,6 +23,8 @@ class MemoryItem:
     content: str
     relevance: float
     created_at: datetime
+    metadata: dict[str, Any] = field(default_factory=dict)
+    memory_type: str | None = None
 
 
 @dataclass

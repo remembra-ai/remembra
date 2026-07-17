@@ -117,6 +117,14 @@ class Memory(BaseModel):
 class StoreRequest(BaseModel):
     content: str = Field(..., max_length=50000, description="Content to memorize (max 50,000 characters)")
     project_id: str = "default"
+    skip_extraction: bool = Field(
+        default=False,
+        description=(
+            "Store the content as a single atomic memory without LLM fact "
+            "extraction or consolidation. Use for pre-structured data, logs, "
+            "or chat messages that must be preserved 1:1 and never split."
+        ),
+    )
     memory_type: MEMORY_TYPES | None = Field(default=None, description="observation | fact | inference | task")
     scope: str | None = Field(default=None, description="Dot-separated scope label, e.g. 'work:acme' or 'personal:health'")
     supersedes: str | None = Field(default=None, description="ID of a prior memory that this one replaces")

@@ -322,6 +322,7 @@ async def store_memory(
             source="user_input",
             trust_score=sanitization.trust_score if sanitization else 1.0,
             checksum=sanitization.checksum if sanitization else None,
+            skip_extraction=body.skip_extraction,
         )
 
         # Audit log (don't log content, only memory_id)
