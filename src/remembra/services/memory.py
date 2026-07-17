@@ -791,8 +791,7 @@ class MemoryService:
 
             # Convert to ExistingMemory objects
             existing_memories = [
-                ExistingMemory(id=str(mid), content=payload.get("content", ""), score=score)
-                for mid, score, payload in similar
+                ExistingMemory(id=str(mid), content=payload.get("content", ""), score=score) for mid, score, payload in similar
             ]
 
             # Consolidate: decide ADD/UPDATE/DELETE/NOOP

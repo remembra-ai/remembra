@@ -221,7 +221,8 @@ class RemembraStore(BaseStore):
         results: list[Any] = []
         for op in ops:
             if isinstance(op, PutOp):
-                results.append(self._do_put(op))
+                self._do_put(op)
+                results.append(None)
             elif isinstance(op, GetOp):
                 results.append(self._do_get(op))
             elif isinstance(op, SearchOp):

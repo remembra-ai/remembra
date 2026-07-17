@@ -54,6 +54,7 @@ def _truncate_for_embedding(text: str) -> str:
     )
     return text[:MAX_EMBED_CHARS]
 
+
 # ---------------------------------------------------------------------------
 # Known model → dimension mapping (for auto-detection)
 # ---------------------------------------------------------------------------
@@ -647,7 +648,7 @@ class EmbeddingService:
         cache_key = hashlib.sha256(
             f"{self._current_provider}|{self._current_model}|{self.dimensions}|{text}".encode()
         ).hexdigest()
-        cached = await embedding_cache.get_by_key(cache_key)
+        cached: list[float] | None = await embedding_cache.get_by_key(cache_key)
         if cached is not None:
             return cached
 

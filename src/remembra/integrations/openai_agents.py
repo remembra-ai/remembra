@@ -107,7 +107,8 @@ class RemembraSession:
         if not raw:
             return None
         try:
-            return json.loads(raw)
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else None
         except (json.JSONDecodeError, TypeError):
             return None
 
