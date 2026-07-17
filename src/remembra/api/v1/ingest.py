@@ -3,7 +3,7 @@
 import json
 import time
 from collections.abc import AsyncGenerator
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -29,22 +29,26 @@ router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
 def get_memory_service(request: Request) -> MemoryService:
     """Dependency to get the memory service from app state."""
-    return request.app.state.memory_service
+    service: MemoryService = request.app.state.memory_service
+    return service
 
 
 def get_audit_logger(request: Request) -> AuditLogger:
     """Dependency to get the audit logger from app state."""
-    return request.app.state.audit_logger
+    logger: AuditLogger = request.app.state.audit_logger
+    return logger
 
 
 def get_conversation_ingest(request: Request) -> ConversationIngestService:
     """Dependency to get the conversation ingest service from app state."""
-    return request.app.state.conversation_ingest
+    ingest: ConversationIngestService = request.app.state.conversation_ingest
+    return ingest
 
 
 def get_sanitizer(request: Request) -> ContentSanitizer:
     """Dependency to get the content sanitizer from app state."""
-    return request.app.state.sanitizer
+    sanitizer: ContentSanitizer = request.app.state.sanitizer
+    return sanitizer
 
 
 def get_pii_detector(request: Request) -> PIIDetector | None:
@@ -431,7 +435,7 @@ async def ingest_conversation_stream(
             if sanitization.trust_score < 0.3:
 
                 async def error_generator(
-                    warnings: list = sanitization.warnings,
+                    warnings: list[Any] = sanitization.warnings,
                 ) -> AsyncGenerator[str, None]:
                     error_msg = f"Message content failed security check: {warnings}"
                     yield f"data: {json.dumps({'phase': 'error', 'error': error_msg})}\n\n"

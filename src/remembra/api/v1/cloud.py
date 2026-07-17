@@ -24,7 +24,7 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 def get_usage_meter(request: Request) -> UsageMeter:
     """Dependency to get UsageMeter from app state."""
-    meter = getattr(request.app.state, "usage_meter", None)
+    meter: UsageMeter | None = getattr(request.app.state, "usage_meter", None)
     if meter is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -38,7 +38,8 @@ UsageMeterDep = Annotated[UsageMeter, Depends(get_usage_meter)]
 
 def get_team_manager(request: Request) -> TeamManager | None:
     """Dependency to get TeamManager from app state (optional)."""
-    return getattr(request.app.state, "team_manager", None)
+    manager: TeamManager | None = getattr(request.app.state, "team_manager", None)
+    return manager
 
 
 TeamManagerDep = Annotated[TeamManager | None, Depends(get_team_manager)]
@@ -424,7 +425,7 @@ class PromoResponse(BaseModel):
 
 
 class PromoListResponse(BaseModel):
-    codes: list[dict]
+    codes: list[dict[str, Any]]
 
 
 @router.post(
@@ -525,7 +526,7 @@ async def list_promo_codes(request: Request) -> PromoListResponse:
     description="Admin endpoint: Get redemption stats for a specific promo code.",
     dependencies=[Depends(RequireMasterKey)],
 )
-async def get_promo_stats(request: Request, code: str) -> dict:
+async def get_promo_stats(request: Request, code: str) -> dict[str, Any]:
     """Get stats for a specific promo code (admin only)."""
     from remembra.cloud.promocodes import PromoCodeManager
 

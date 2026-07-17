@@ -4,6 +4,7 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 import structlog
 
@@ -212,7 +213,7 @@ class AuditLogger:
         user_id: str,
         key_id: str,
         ip_address: str | None = None,
-        details: dict | None = None,
+        details: dict[str, Any] | None = None,
     ) -> AuditEvent:
         """Log API key update."""
         return await self.log(
@@ -247,7 +248,7 @@ class AuditLogger:
         resource_id: str | None = None,
         ip_address: str | None = None,
         success: bool = True,
-        details: dict | None = None,
+        details: dict[str, Any] | None = None,
     ) -> AuditEvent:
         """
         Generic event logging for custom actions.
@@ -315,7 +316,7 @@ class AuditLogger:
         user_id: str | None = None,
         action: AuditAction | None = None,
         limit: int = 100,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """
         Get recent audit events with optional filters.
 

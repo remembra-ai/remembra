@@ -3,13 +3,15 @@
 Separated from main.py to avoid circular imports.
 """
 
+from typing import Any
+
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from remembra.config import get_settings
 
 
-def get_key_func(request):
+def get_key_func(request: Any) -> str:
     """
     Get rate limit key - prefer API key over IP.
 

@@ -118,22 +118,26 @@ class UpdateKeyResponse(BaseModel):
 
 def get_api_key_manager(request: Request) -> APIKeyManager:
     """Dependency to get the API key manager from app state."""
-    return request.app.state.api_key_manager
+    manager: APIKeyManager = request.app.state.api_key_manager
+    return manager
 
 
 def get_role_manager(request: Request) -> RoleManager:
     """Dependency to get the role manager from app state."""
-    return request.app.state.role_manager
+    manager: RoleManager = request.app.state.role_manager
+    return manager
 
 
 def get_audit_logger(request: Request) -> AuditLogger:
     """Dependency to get the audit logger from app state."""
-    return request.app.state.audit_logger
+    logger: AuditLogger = request.app.state.audit_logger
+    return logger
 
 
 def get_limiter(request: Request) -> Limiter:
     """Dependency to get the rate limiter from app state."""
-    return request.app.state.limiter
+    rate_limiter: Limiter = request.app.state.limiter
+    return rate_limiter
 
 
 APIKeyManagerDep = Annotated[APIKeyManager, Depends(get_api_key_manager)]

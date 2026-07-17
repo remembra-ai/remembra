@@ -1,7 +1,7 @@
 """Authentication API endpoints for user signup, login, and password management."""
 
 import asyncio
-from typing import Annotated
+from typing import Annotated, Any
 
 import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
@@ -103,7 +103,7 @@ class LoginResponse(BaseModel):
 
     access_token: str | None = None
     token_type: str = "bearer"
-    user: dict | None = None
+    user: dict[str, Any] | None = None
     requires_2fa: bool = False
     message: str | None = None
 
@@ -204,7 +204,7 @@ async def get_user_manager(request: Request) -> UserManager:
 async def get_current_user_from_jwt(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
-) -> dict:
+) -> dict[str, Any]:
     """
     Dependency that validates JWT token and returns user info.
 
@@ -295,7 +295,7 @@ async def get_current_user_from_jwt(
 
 
 # Type alias for authenticated user
-CurrentUser = Annotated[dict, Depends(get_current_user_from_jwt)]
+CurrentUser = Annotated[dict[str, Any], Depends(get_current_user_from_jwt)]
 
 
 # ---------------------------------------------------------------------------

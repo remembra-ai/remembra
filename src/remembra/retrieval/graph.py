@@ -17,7 +17,7 @@ import hashlib
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import structlog
 
@@ -293,7 +293,7 @@ class GraphRetriever:
                         query=query[:50],
                         age_seconds=round(time.time() - cached_time, 2),
                     )
-                    return cached_result
+                    return cast(GraphSearchResult, cached_result)
 
         result = GraphSearchResult()
 

@@ -19,7 +19,7 @@ router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
 def get_webhook_manager(request: Request) -> WebhookManager:
-    manager = getattr(request.app.state, "webhook_manager", None)
+    manager: WebhookManager | None = getattr(request.app.state, "webhook_manager", None)
     if manager is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

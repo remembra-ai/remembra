@@ -31,7 +31,7 @@ router = APIRouter(prefix="/inbox", tags=["inbox"])
 
 
 def get_inbox_manager(request: Request) -> InboxManager:
-    manager = getattr(request.app.state, "inbox_manager", None)
+    manager: InboxManager | None = getattr(request.app.state, "inbox_manager", None)
     if manager is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

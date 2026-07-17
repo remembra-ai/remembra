@@ -39,7 +39,8 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 
 def get_audit_logger(request: Request) -> AuditLogger:
-    return request.app.state.audit_logger
+    logger: AuditLogger = request.app.state.audit_logger
+    return logger
 
 
 def get_role_manager(request: Request) -> RoleManager | None:
@@ -47,7 +48,8 @@ def get_role_manager(request: Request) -> RoleManager | None:
 
 
 def get_database(request: Request) -> Database:
-    return request.app.state.db
+    db: Database = request.app.state.db
+    return db
 
 
 def get_usage_meter(request: Request) -> UsageMeter | None:

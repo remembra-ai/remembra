@@ -109,7 +109,7 @@ class AudioAdapter:
             log.warning("sounddevice unavailable (%s); session in file-only mode", exc)
             return session
 
-        def _callback(indata, frames, time_info, status) -> None:  # noqa: ANN001
+        def _callback(indata: Any, frames: Any, time_info: Any, status: Any) -> None:
             if not session._active:
                 return
             session.frames.append(bytes(indata))

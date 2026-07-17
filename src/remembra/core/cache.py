@@ -280,14 +280,14 @@ class MemoryCache(Generic[T]):
 # Global Caches
 # ============================================================================
 
-_caches: dict[str, MemoryCache] = {}
+_caches: dict[str, MemoryCache[Any]] = {}
 
 
 def get_cache(
     name: str,
     max_size: int = 1000,
     ttl_seconds: int = 300,
-) -> MemoryCache:
+) -> MemoryCache[Any]:
     """
     Get or create a named cache.
 

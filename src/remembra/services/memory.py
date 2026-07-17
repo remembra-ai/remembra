@@ -1421,7 +1421,8 @@ class MemoryService:
                 mem_scope = (r.get("payload") or {}).get("scope") or r.get("scope")
                 if not mem_scope:
                     return False
-                return mem_scope == requested_scope or mem_scope.startswith(requested_scope + ":")
+                matches: bool = mem_scope == requested_scope or mem_scope.startswith(requested_scope + ":")
+                return matches
 
             hybrid_results = [r for r in hybrid_results if _scope_matches(r)]
 

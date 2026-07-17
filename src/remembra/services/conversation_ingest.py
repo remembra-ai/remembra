@@ -548,7 +548,7 @@ class ConversationIngestService:
     async def _get_dedup_decision(
         self,
         new_fact: str,
-        existing_memories: list[dict],
+        existing_memories: list[dict[str, Any]],
     ) -> dict[str, Any]:
         """
         Use LLM with function calling to decide dedup action.

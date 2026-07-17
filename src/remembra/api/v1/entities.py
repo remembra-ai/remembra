@@ -14,7 +14,8 @@ router = APIRouter(prefix="/entities", tags=["entities"])
 
 def get_database(request: Request) -> Database:
     """Dependency to get the database from app state."""
-    return request.app.state.db
+    db: Database = request.app.state.db
+    return db
 
 
 DatabaseDep = Annotated[Database, Depends(get_database)]

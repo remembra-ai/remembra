@@ -238,6 +238,6 @@ async def websocket_endpoint(
 
 
 @router.get("/ws/stats", tags=["websocket"])
-async def websocket_stats():
+async def websocket_stats() -> dict[str, Any]:
     """Get WebSocket connection statistics."""
     return await connection_manager.get_stats()

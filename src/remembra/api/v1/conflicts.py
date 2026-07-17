@@ -18,7 +18,7 @@ router = APIRouter(prefix="/conflicts", tags=["conflicts"])
 
 
 def get_conflict_manager(request: Request) -> ConflictManager:
-    manager = getattr(request.app.state, "conflict_manager", None)
+    manager: ConflictManager | None = getattr(request.app.state, "conflict_manager", None)
     if manager is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

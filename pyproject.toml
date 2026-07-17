@@ -211,7 +211,17 @@ files = ["src/remembra"]
 plugins = ["pydantic.mypy"]
 
 [[tool.mypy.overrides]]
-module = ["qdrant_client.*", "structlog.*", "dateparser.*"]
+# Third-party libs without type stubs, and optional runtime deps that are
+# imported behind try/except (not installed in the type-check env).
+module = [
+    "qdrant_client.*",
+    "structlog.*",
+    "dateparser.*",
+    "sentence_transformers.*",
+    "aiosmtplib.*",
+    "anthropic.*",
+    "opentelemetry.*",
+]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------------------

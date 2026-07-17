@@ -245,7 +245,8 @@ class CircuitBreaker:
 
         @wraps(func)
         async def wrapper(*args: Any, **kwargs: Any) -> T:
-            return await self.call(func, *args, **kwargs)
+            result: T = await self.call(func, *args, **kwargs)
+            return result
 
         return wrapper
 
@@ -325,7 +326,7 @@ def circuit_breaker(
     name: str,
     failure_threshold: int = 5,
     reset_timeout: float = 60.0,
-) -> Callable:
+) -> Callable[..., Any]:
     """
     Decorator to protect a function with a circuit breaker.
 

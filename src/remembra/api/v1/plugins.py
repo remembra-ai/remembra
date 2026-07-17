@@ -21,7 +21,7 @@ router = APIRouter(prefix="/plugins", tags=["plugins"])
 
 
 def get_plugin_manager(request: Request) -> PluginManager:
-    manager = getattr(request.app.state, "plugin_manager", None)
+    manager: PluginManager | None = getattr(request.app.state, "plugin_manager", None)
     if manager is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -237,6 +237,7 @@ def _resolve_plugin_class(name: str) -> type | None:
     module_path, class_name = path.rsplit(".", 1)
     try:
         module = importlib.import_module(module_path)
-        return getattr(module, class_name)
+        plugin_cls: type = getattr(module, class_name)
+        return plugin_cls
     except (ImportError, AttributeError):
         return None

@@ -9,6 +9,8 @@ These prompts handle:
 4. Deduplication decisions via function calling
 """
 
+from typing import Any
+
 # ============================================================================
 # Conversation Extraction Prompts
 # ============================================================================
@@ -146,7 +148,7 @@ DEDUP_DECISION_FUNCTIONS = [
 
 
 def format_messages_for_extraction(
-    messages: list[dict],
+    messages: list[dict[str, Any]],
     extract_from: str = "both",
 ) -> str:
     """
@@ -189,7 +191,7 @@ def format_messages_for_extraction(
     return "\n".join(lines)
 
 
-def format_existing_memories(memories: list[dict]) -> str:
+def format_existing_memories(memories: list[dict[str, Any]]) -> str:
     """
     Format existing memories for the dedup decision prompt.
 

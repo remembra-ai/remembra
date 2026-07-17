@@ -23,7 +23,7 @@ router = APIRouter(prefix="/teams", tags=["teams"])
 
 
 def get_team_manager(request: Request) -> TeamManager:
-    manager = getattr(request.app.state, "team_manager", None)
+    manager: TeamManager | None = getattr(request.app.state, "team_manager", None)
     if manager is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

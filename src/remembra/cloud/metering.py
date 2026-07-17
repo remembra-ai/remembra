@@ -133,7 +133,8 @@ class UsageMeter:
         )
         row = await cursor.fetchone()
         if row and row[0]:
-            return row[0]
+            email: str = row[0]
+            return email
 
         # Fall back to cloud_tenants table (API key signup flow)
         cursor = await self._db.conn.execute(

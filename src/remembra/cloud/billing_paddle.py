@@ -66,7 +66,7 @@ class PaddleBillingManager:
         self,
         method: str,
         endpoint: str,
-        data: dict | None = None,
+        data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Make authenticated request to Paddle API."""
         url = f"{self._api_base}{endpoint}"
@@ -81,7 +81,8 @@ class PaddleBillingManager:
                 raise ValueError(f"Unsupported method: {method}")
 
             response.raise_for_status()
-            return response.json()
+            result: dict[str, Any] = response.json()
+            return result
 
     # -----------------------------------------------------------------------
     # Customer management
@@ -107,7 +108,7 @@ class PaddleBillingManager:
             payload["name"] = name
 
         result = await self._request("POST", "/customers", payload)
-        customer_id = result["data"]["id"]
+        customer_id: str = result["data"]["id"]
         logger.info("Created Paddle customer %s for user %s", customer_id, user_id)
         return customer_id
 
@@ -233,7 +234,8 @@ class PaddleBillingManager:
             )
             customers = result.get("data", [])
             if customers and len(customers) > 0:
-                return customers[0]["id"]
+                customer_id: str = customers[0]["id"]
+                return customer_id
             return None
         except Exception as e:
             logger.warning("Failed to look up customer by email %s: %s", email, e)
@@ -256,7 +258,8 @@ class PaddleBillingManager:
             f"/customers/{paddle_customer_id}/portal-sessions",
             {},
         )
-        return result["data"]["urls"]["general"]["overview"]
+        overview_url: str = result["data"]["urls"]["general"]["overview"]
+        return overview_url
 
     async def create_portal_session_by_email(self, email: str) -> str | None:
         """Create a customer portal session URL by looking up email.
@@ -386,7 +389,8 @@ class PaddleBillingManager:
         if not hmac.compare_digest(expected, h1):
             raise ValueError("Invalid webhook signature")
 
-        return json.loads(payload)
+        event: dict[str, Any] = json.loads(payload)
+        return event
 
     async def handle_webhook_event(
         self,

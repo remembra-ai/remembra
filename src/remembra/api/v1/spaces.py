@@ -24,7 +24,7 @@ router = APIRouter(prefix="/spaces", tags=["spaces"])
 
 
 def get_space_manager(request: Request) -> SpaceManager:
-    manager = getattr(request.app.state, "space_manager", None)
+    manager: SpaceManager | None = getattr(request.app.state, "space_manager", None)
     if manager is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -37,7 +37,8 @@ SpaceManagerDep = Annotated[SpaceManager, Depends(get_space_manager)]
 
 
 def get_memory_service(request: Request) -> MemoryService:
-    return request.app.state.memory_service
+    service: MemoryService = request.app.state.memory_service
+    return service
 
 
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]

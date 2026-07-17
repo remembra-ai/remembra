@@ -17,7 +17,8 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 def get_database(request: Request) -> Database:
     """Dependency to get the database from app state."""
-    return request.app.state.db
+    db: Database = request.app.state.db
+    return db
 
 
 DatabaseDep = Annotated[Database, Depends(get_database)]
@@ -349,7 +350,7 @@ async def get_my_profile(
 
     Equivalent to GET /api/v1/users/{your_user_id}/profile.
     """
-    return await get_user_profile(
+    profile: UserProfileResponse = await get_user_profile(
         request=request,
         user_id=current_user.user_id,
         db=db,
@@ -360,3 +361,4 @@ async def get_my_profile(
         include_topics=include_topics,
         topic_limit=topic_limit,
     )
+    return profile

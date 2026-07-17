@@ -24,7 +24,8 @@ router = APIRouter(prefix="/temporal", tags=["temporal"])
 
 def get_memory_service(request: Request) -> MemoryService:
     """Dependency to get the memory service from app state."""
-    return request.app.state.memory_service
+    service: MemoryService = request.app.state.memory_service
+    return service
 
 
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]

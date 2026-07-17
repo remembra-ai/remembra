@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, Response, status
 
@@ -93,7 +93,7 @@ async def _send_limit_exceeded_email(
         logger.warning("limit_exceeded_email_failed", user_id=user_id, error=str(e))
 
 
-def get_usage_warning(usage_percent: float, plan: str) -> dict | None:
+def get_usage_warning(usage_percent: float, plan: str) -> dict[str, Any] | None:
     """Return a usage warning dict if threshold is crossed."""
     if usage_percent >= 95:
         return {

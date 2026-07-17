@@ -289,7 +289,8 @@ class OllamaEmbedder(BaseEmbedder):
 
         data = response.json()
 
-        return data["embedding"]
+        embedding: list[float] = data["embedding"]
+        return embedding
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if not texts or all(not t.strip() for t in texts):
@@ -355,7 +356,8 @@ class CohereEmbedder(BaseEmbedder):
 
         data = response.json()
 
-        return data["embeddings"]
+        embeddings: list[list[float]] = data["embeddings"]
+        return embeddings
 
     async def close(self) -> None:
         await self._client.aclose()

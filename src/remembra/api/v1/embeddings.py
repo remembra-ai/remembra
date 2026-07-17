@@ -26,11 +26,12 @@ router = APIRouter(prefix="/embeddings", tags=["embeddings"])
 
 
 def get_embedding_service(request: Request) -> EmbeddingService:
-    return request.app.state.embeddings
+    service: EmbeddingService = request.app.state.embeddings
+    return service
 
 
 def get_reindex_manager(request: Request) -> ReindexManager:
-    manager = getattr(request.app.state, "reindex_manager", None)
+    manager: ReindexManager | None = getattr(request.app.state, "reindex_manager", None)
     if manager is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

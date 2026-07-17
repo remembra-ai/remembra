@@ -2,7 +2,7 @@
 
 import hmac
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 
 import structlog
 from fastapi import Depends, HTTPException, Request, Security, status
@@ -70,7 +70,8 @@ def get_client_ip(request: Request) -> str:
 
 async def get_api_key_manager(request: Request) -> APIKeyManager:
     """Dependency to get APIKeyManager from app state."""
-    return request.app.state.api_key_manager
+    manager: APIKeyManager = request.app.state.api_key_manager
+    return manager
 
 
 async def get_current_user(
@@ -419,7 +420,7 @@ def has_permission(user: AuthenticatedUser, permission: str) -> bool:
     return permission in role_perms
 
 
-def require_permission(permission: str):
+def require_permission(permission: str) -> Any:
     """
     Dependency factory that requires a specific permission.
 
@@ -450,33 +451,33 @@ def require_permission(permission: str):
 
 
 # Permission dependency factories (aligned with remembra.auth.rbac.Permission)
-def require_memory_store():
+def require_memory_store() -> Any:
     return require_permission("memory:store")
 
 
-def require_memory_recall():
+def require_memory_recall() -> Any:
     return require_permission("memory:recall")
 
 
-def require_memory_delete():
+def require_memory_delete() -> Any:
     return require_permission("memory:delete")
 
 
-def require_entity_read():
+def require_entity_read() -> Any:
     return require_permission("entity:read")
 
 
-def require_entity_merge():
+def require_entity_merge() -> Any:
     return require_permission("entity:merge")
 
 
-def require_webhook_manage():
+def require_webhook_manage() -> Any:
     return require_permission("webhook:manage")
 
 
-def require_audit_read():
+def require_audit_read() -> Any:
     return require_permission("admin:audit")
 
 
-def require_user_manage():
+def require_user_manage() -> Any:
     return require_permission("admin:users")

@@ -133,7 +133,7 @@ class CrossEncoderReranker:
         if not self._ensure_model():
             # Gracefully degrade: return documents sorted by original score
             log.debug("reranker_unavailable_passthrough", count=len(documents))
-            results = [
+            results: list[RerankedResult] = [
                 RerankedResult(
                     id=str(doc.get("id", "")),
                     content=doc.get(content_key, ""),
@@ -166,7 +166,7 @@ class CrossEncoderReranker:
         max_score = max(rerank_scores) if rerank_scores else 1
         score_range = max_score - min_score if max_score != min_score else 1.0
 
-        results: list[RerankedResult] = []
+        results = []
 
         for i, doc in enumerate(documents):
             original_score = doc.get(score_key, 0.0)

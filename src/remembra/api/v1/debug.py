@@ -32,7 +32,8 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 
 def get_memory_service(request: Request) -> MemoryService:
-    return request.app.state.memory_service
+    service: MemoryService = request.app.state.memory_service
+    return service
 
 
 MemoryServiceDep = Annotated[MemoryService, Depends(get_memory_service)]

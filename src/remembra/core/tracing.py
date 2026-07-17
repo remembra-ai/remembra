@@ -15,7 +15,7 @@ Install tracing packages with:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import structlog
 
@@ -69,7 +69,7 @@ def setup_tracing(settings: Settings) -> None:
         )
 
 
-def instrument_app(app) -> None:
+def instrument_app(app: Any) -> None:
     """Instrument FastAPI app if OpenTelemetry is available.
 
     Automatically adds tracing middleware to capture:

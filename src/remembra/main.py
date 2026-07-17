@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 import structlog
 import uvicorn
@@ -671,7 +671,7 @@ app = create_app()
 
 def get_memory_service() -> MemoryService:
     """Dependency to get the memory service from app state."""
-    return app.state.memory_service
+    return cast(MemoryService, app.state.memory_service)
 
 
 # ---------------------------------------------------------------------------

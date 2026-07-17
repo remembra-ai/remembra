@@ -126,17 +126,20 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 def get_memory_service(request: Request) -> MemoryService:
     """Dependency to get the memory service from app state."""
-    return request.app.state.memory_service
+    service: MemoryService = request.app.state.memory_service
+    return service
 
 
 def get_audit_logger(request: Request) -> AuditLogger:
     """Dependency to get the audit logger from app state."""
-    return request.app.state.audit_logger
+    logger: AuditLogger = request.app.state.audit_logger
+    return logger
 
 
 def get_sanitizer(request: Request) -> ContentSanitizer:
     """Dependency to get the content sanitizer from app state."""
-    return request.app.state.sanitizer
+    sanitizer: ContentSanitizer = request.app.state.sanitizer
+    return sanitizer
 
 
 def get_pii_detector(request: Request) -> PIIDetector | None:
@@ -163,7 +166,7 @@ async def _dispatch_webhook(request: Request, event: WebhookEvent) -> None:
 
 async def _broadcast_websocket(
     event_type: str,
-    data: dict,
+    data: dict[str, Any],
     project_id: str = "default",
 ) -> None:
     """Fire-and-forget WebSocket broadcast for real-time updates."""
@@ -557,7 +560,7 @@ async def bulk_import(
     memory_service: MemoryServiceDep,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
-) -> dict:
+) -> dict[str, Any]:
     """
     Fast bulk import optimized for pre-structured data.
 
@@ -848,7 +851,7 @@ async def get_memory(
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
     settings: SettingsDep,
-) -> dict:
+) -> dict[str, Any]:
     """
     Retrieve a specific memory by its ID.
 
@@ -1220,7 +1223,8 @@ async def _require_owned_memory(memory_service: Any, memory_id: str, user_id: st
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Memory {memory_id} not found",
         )
-    return memory
+    result: dict[str, Any] = memory
+    return result
 
 
 @router.post("/{memory_id}/pin", response_model=SalienceResponse, summary="Pin a memory (never decays)")
@@ -1289,7 +1293,7 @@ async def cleanup_expired(
     memory_service: MemoryServiceDep,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
-) -> dict:
+) -> dict[str, Any]:
     """
     Delete all expired memories (TTL-based cleanup).
 
