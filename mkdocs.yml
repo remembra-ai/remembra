@@ -101,6 +101,7 @@ nav:
     - LangChain: integrations/langchain.md
     - CrewAI: integrations/crewai.md
     - OpenAI Agents SDK: integrations/openai-agents.md
+    - LangGraph: integrations/langgraph.md
   - Guides:
     - Multi-Agent Shared Memory: guides/multi-agent-shared-memory.md
     - Conversation Ingestion: guides/conversation-ingestion.md
