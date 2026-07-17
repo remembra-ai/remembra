@@ -236,28 +236,35 @@ def _llm_judge_score(
         # For adversarial, use the standard refusal-phrase check
         return eval_question(prediction, ground_truth, category)
 
-    prompt = f"""You are an evaluation judge for a memory benchmark.
+    prompt = f"""You are a STRICT evaluation judge for a memory benchmark.
 
-Given a question, the ground truth answer, and a model's prediction, determine if the prediction is CORRECT or INCORRECT.
+Given a question, the ground truth answer, and a model's prediction, decide if the prediction is correct.
 
-A prediction is CORRECT if it conveys the same meaning as the ground truth, even if worded differently.
-A prediction is INCORRECT if it gives wrong information, is missing key facts, or is irrelevant.
+Rules:
+- Dates, numbers, names, and quantities must MATCH the ground truth. A different
+  date/number/name is WRONG (e.g. "October 2" for "7 May" is WRONG; "3000" for "3,000" is fine).
+- A vague or relative answer that does not resolve to the ground truth is WRONG
+  (e.g. "last year" for "2022" is WRONG unless the prediction actually states 2022).
+- Wording may differ if the meaning and all specific facts match.
+- Missing the key fact, or "No information available", is WRONG.
 
 Question: {question}
 Ground Truth: {ground_truth}
 Prediction: {prediction}
 
-Respond with ONLY one word: CORRECT or INCORRECT"""
+Respond with ONLY one token: YES (correct) or NO (incorrect)."""
 
     try:
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0.0,
-            max_tokens=10,
+            max_tokens=5,
         )
-        verdict = response.choices[0].message.content.strip().upper()
-        return 1.0 if "CORRECT" in verdict else 0.0
+        verdict = (response.choices[0].message.content or "").strip().upper()
+        # Careful parsing: "NO" must not be confused, and never use substring
+        # matching on CORRECT/INCORRECT (INCORRECT contains CORRECT).
+        return 1.0 if verdict.startswith("YES") else 0.0
     except Exception as e:
         print(f"  [judge error] {e} — falling back to F1")
         return eval_question(prediction, ground_truth, category)
@@ -499,6 +506,43 @@ def ingest_conversation(
 # ---------------------------------------------------------------------------
 
 
+def _generate_answer(
+    question: str,
+    context: str,
+    gen_client: "openai.OpenAI | None",
+    gen_model: str,
+) -> str:
+    """RAG answer generation: turn retrieved memory context into a concise answer.
+
+    Standard LoCoMo QA is retrieve -> generate -> score. Scoring the raw
+    retrieved blob against a short gold answer produces meaningless ~0 F1;
+    the memory layer's job is to surface the right context, and a small LLM
+    turns that context into the answer that is actually scored.
+    """
+    if gen_client is None:
+        return context  # fallback: score raw context (not recommended)
+    if not context.strip():
+        return "No information available."
+    prompt = (
+        "Answer the question using ONLY the memory context below. "
+        "Be concise — a few words or one short sentence, matching the style of a "
+        "short factual answer (e.g. a date, name, number, or brief phrase). "
+        "If the context does not contain the answer, reply exactly: No information available.\n\n"
+        f"Memory context:\n{context}\n\nQuestion: {question}\nAnswer:"
+    )
+    try:
+        resp = gen_client.chat.completions.create(
+            model=gen_model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=100,
+        )
+        return (resp.choices[0].message.content or "").strip()
+    except Exception as e:
+        print(f"  [answer-gen error] {e}")
+        return context
+
+
 def evaluate_conversation(
     client: RemembraClient,
     conv: dict,
@@ -507,6 +551,8 @@ def evaluate_conversation(
     judge_client: "openai.OpenAI | None" = None,
     judge_model: str = "gpt-4o-mini",
     recall_limit: int = 10,
+    gen_client: "openai.OpenAI | None" = None,
+    gen_model: str = "gpt-4o-mini",
 ) -> list[QAResult]:
     """Evaluate all QA questions for one conversation."""
     conv_id = conv.get("sample_id", f"conv-{conv_index}")
@@ -538,8 +584,9 @@ def evaluate_conversation(
             print(f"  [recall error] Q{i+1}: {e}")
         latency_ms = (time.time() - t0) * 1000
 
-        # Use the synthesized context as the model's "prediction"
-        prediction = context
+        # RAG: generate a concise answer from the retrieved context, then score
+        # THAT against gold (retrieve -> generate -> score, the standard method).
+        prediction = _generate_answer(question, context, gen_client, gen_model)
 
         # Score
         if scoring == "llm-judge" and judge_client is not None:
@@ -707,6 +754,17 @@ Examples:
         help="Remembra server URL (default: $REMEMBRA_URL or http://localhost:8787)",
     )
     parser.add_argument(
+        "--answer-model",
+        type=str,
+        default="gpt-4o-mini",
+        help="Model that turns retrieved context into a concise answer (RAG). Default: gpt-4o-mini",
+    )
+    parser.add_argument(
+        "--no-generate",
+        action="store_true",
+        help="Skip RAG answer generation and score raw retrieved context (not LoCoMo-standard)",
+    )
+    parser.add_argument(
         "--api-key",
         type=str,
         default=os.getenv("REMEMBRA_API_KEY"),
@@ -820,6 +878,23 @@ Examples:
             print("Error: --scoring llm-judge requires the openai package")
             print("  pip install openai")
             sys.exit(1)
+
+    # Initialize the RAG answer generator (retrieve -> generate -> score).
+    # Without it, raw retrieved context is scored against short gold answers,
+    # which is not the LoCoMo methodology and yields meaningless ~0 F1.
+    gen_client = None
+    if not args.no_generate:
+        try:
+            import openai
+
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                print("Warning: no OPENAI_API_KEY — scoring raw context (use --no-generate to silence)")
+            else:
+                gen_client = openai.OpenAI(api_key=api_key)
+                print(f"Answer generator: {args.answer_model}")
+        except ImportError:
+            print("Warning: openai package missing — scoring raw context")
 
     # Try to import nltk for stemming
     try:
@@ -938,6 +1013,8 @@ Examples:
             judge_client=judge_client,
             judge_model=args.judge_model,
             recall_limit=args.recall_limit,
+            gen_client=gen_client,
+            gen_model=args.answer_model,
         )
         all_results.extend(results)
 
