@@ -86,6 +86,16 @@ langchain = [
     "langchain-core>=0.3.0",
 ]
 
+# LangGraph integration (BaseStore long-term memory)
+langgraph = [
+    "langgraph>=0.2.0",
+]
+
+# OpenAI Agents SDK integration (Session protocol)
+openai-agents = [
+    "openai-agents>=0.1.0",
+]
+
 # CrewAI integration
 crewai = [
     "crewai>=0.80.0",

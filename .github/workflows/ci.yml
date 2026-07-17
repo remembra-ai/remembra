@@ -26,10 +26,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install dev dependencies
-        # Include mcp + encryption: the test suite imports remembra.mcp.server
-        # (needs the `mcp` package) and the encryption paths, so [server,cloud,dev]
-        # alone fails test collection.
-        run: pip install -e ".[server,cloud,dev,mcp,encryption]"
+        # mcp + encryption for test collection; langchain/langgraph/openai-agents
+        # so mypy can type-check the integration adapters against real framework
+        # types (they import those libs at module top).
+        run: pip install -e ".[server,cloud,dev,mcp,encryption,langchain,langgraph,openai-agents]"
 
       - name: Ruff lint
         run: ruff check src/ tests/
