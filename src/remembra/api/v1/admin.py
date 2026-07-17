@@ -25,12 +25,30 @@ from remembra.cloud.metering import UsageMeter
 from remembra.cloud.plans import PlanTier, get_plan
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
-from remembra.security.audit import AuditLogger
+from remembra.security.audit import AuditAction, AuditLogger
 from remembra.storage.database import Database
 
 log = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+def _parse_audit_action(action: str | None) -> AuditAction | None:
+    """Coerce a query-string action filter into an ``AuditAction``.
+
+    Returns ``None`` when no filter is supplied. Raises a 400 for an
+    unknown action so callers get a clean error instead of a 500.
+    """
+    if action is None:
+        return None
+    try:
+        return AuditAction(action)
+    except ValueError as exc:
+        valid = ", ".join(a.value for a in AuditAction)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown audit action: {action}. Valid: {valid}",
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +236,7 @@ async def list_audit_events(
     """List recent audit events. Requires admin:export permission."""
     events = await audit_logger.get_recent_events(
         user_id=user_id,
-        action=action,
+        action=_parse_audit_action(action),
         limit=limit,
     )
     return AuditListResponse(events=events, total=len(events))
@@ -242,7 +260,7 @@ async def export_audit_json(
     """Export audit events as JSON. Requires admin:export permission."""
     events = await audit_logger.get_recent_events(
         user_id=user_id,
-        action=action,
+        action=_parse_audit_action(action),
         limit=limit,
     )
     content = json.dumps(events, indent=2, default=str)
@@ -274,7 +292,7 @@ async def export_audit_csv(
     """Export audit events as CSV. Requires admin:export permission."""
     events = await audit_logger.get_recent_events(
         user_id=user_id,
-        action=action,
+        action=_parse_audit_action(action),
         limit=limit,
     )
 
@@ -570,7 +588,9 @@ async def list_all_users(
         count_params.extend([f"%{search}%", f"%{search}%"])
 
     count_cursor = await db.conn.execute(count_query, count_params)
-    total = (await count_cursor.fetchone())[0]
+    count_row = await count_cursor.fetchone()
+    assert count_row is not None  # COUNT(*) always returns exactly one row
+    total = count_row[0]
 
     users = []
     for row in rows:
@@ -591,14 +611,18 @@ async def list_all_users(
             "SELECT COUNT(*) FROM memories WHERE user_id = ?",
             (user_id,),
         )
-        memories_count = (await mem_cursor.fetchone())[0]
+        mem_row = await mem_cursor.fetchone()
+        assert mem_row is not None  # COUNT(*) always returns exactly one row
+        memories_count = mem_row[0]
 
         # Get API key count
         key_cursor = await db.conn.execute(
             "SELECT COUNT(*) FROM api_keys WHERE user_id = ? AND active = TRUE",
             (user_id,),
         )
-        api_keys_count = (await key_cursor.fetchone())[0]
+        key_row = await key_cursor.fetchone()
+        assert key_row is not None  # COUNT(*) always returns exactly one row
+        api_keys_count = key_row[0]
 
         users.append(
             UserListItem(
@@ -941,18 +965,26 @@ async def get_platform_stats(
     """
     # User stats
     user_cursor = await db.conn.execute("SELECT COUNT(*) FROM users")
-    total_users = (await user_cursor.fetchone())[0]
+    user_row = await user_cursor.fetchone()
+    assert user_row is not None  # COUNT(*) always returns exactly one row
+    total_users = user_row[0]
 
     active_cursor = await db.conn.execute("SELECT COUNT(*) FROM users WHERE is_active = TRUE")
-    active_users = (await active_cursor.fetchone())[0]
+    active_row = await active_cursor.fetchone()
+    assert active_row is not None  # COUNT(*) always returns exactly one row
+    active_users = active_row[0]
 
     # Memory stats
     mem_cursor = await db.conn.execute("SELECT COUNT(*) FROM memories")
-    total_memories = (await mem_cursor.fetchone())[0]
+    mem_row = await mem_cursor.fetchone()
+    assert mem_row is not None  # COUNT(*) always returns exactly one row
+    total_memories = mem_row[0]
 
     # API key stats
     key_cursor = await db.conn.execute("SELECT COUNT(*) FROM api_keys WHERE active = TRUE")
-    active_keys = (await key_cursor.fetchone())[0]
+    key_row = await key_cursor.fetchone()
+    assert key_row is not None  # COUNT(*) always returns exactly one row
+    active_keys = key_row[0]
 
     # Plan distribution
     plan_cursor = await db.conn.execute("""
@@ -974,7 +1006,9 @@ async def get_platform_stats(
         "SELECT COUNT(*) FROM users WHERE created_at >= ?",
         (week_ago,),
     )
-    recent_signups = (await recent_cursor.fetchone())[0]
+    recent_row = await recent_cursor.fetchone()
+    assert recent_row is not None  # COUNT(*) always returns exactly one row
+    recent_signups = recent_row[0]
 
     return {
         "users": {
@@ -1032,7 +1066,7 @@ async def rebuild_vectors(
     else:
         cursor = await db.conn.execute("SELECT id, user_id, project_id, content FROM memories")
 
-    rows = await cursor.fetchall()
+    rows = list(await cursor.fetchall())
 
     missing = []
     rebuilt = []

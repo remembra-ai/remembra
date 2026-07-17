@@ -38,9 +38,10 @@ Usage:
 
 from __future__ import annotations
 
+import builtins
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
@@ -182,7 +183,7 @@ class Memory:
                 status_code=response.status_code,
             )
 
-        return response.json()
+        return cast("dict[str, Any]", response.json())
 
     def store(
         self,
@@ -564,7 +565,7 @@ class Memory:
 
     def ingest_conversation(
         self,
-        messages: list[dict[str, Any]],
+        messages: builtins.list[dict[str, Any]],
         session_id: str | None = None,
         extract_from: str = "both",
         min_importance: float = 0.5,
@@ -724,7 +725,7 @@ class Memory:
         agent_id: str,
         status: str = "unread",
         limit: int = 20,
-    ) -> list[dict[str, Any]]:
+    ) -> builtins.list[dict[str, Any]]:
         """List inbox rows addressed to `agent_id`.
 
         Args:

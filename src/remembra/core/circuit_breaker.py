@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 from functools import wraps
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 import structlog
 
@@ -248,7 +248,9 @@ class CircuitBreaker:
             result: T = await self.call(func, *args, **kwargs)
             return result
 
-        return wrapper
+        # @wraps rewrites the inferred type to _Wrapped; the wrapper preserves
+        # func's call signature, so cast back to the declared Callable.
+        return cast(Callable[..., T], wrapper)
 
     def reset(self) -> None:
         """Manually reset the circuit breaker to closed state."""

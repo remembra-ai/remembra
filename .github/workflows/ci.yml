@@ -37,14 +37,8 @@ jobs:
       - name: Ruff format check
         run: ruff format --check src/ tests/
 
-      # Mypy is advisory: the codebase carries ~206 pre-existing type errors
-      # (spread across ~48 files: no-any-return, union-attr, arg-type, …). It
-      # runs and reports on every build, but does not block merges while that
-      # debt is being burned down incrementally. Remove continue-on-error once
-      # `mypy src/remembra` is clean.
-      - name: Mypy (advisory)
+      - name: Mypy
         run: mypy src/remembra
-        continue-on-error: true
 
   # ---------------------------------------------------------------------------
   # Tests

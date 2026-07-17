@@ -204,7 +204,7 @@ async def list_memories(
         str | None,
         Query(description="Filter by project. Omit to list memories across all projects."),
     ] = None,
-) -> list[MemorySummary]:
+) -> list[dict[str, Any]]:
     """List memories for dashboard browsing and pagination."""
     if not has_permission(current_user, "memory:recall"):
         raise HTTPException(
@@ -494,6 +494,10 @@ async def batch_store(
             detail="Permission denied: memory:store required",
         )
 
+    # BatchStoreRequest.resolve_items_alias validates that items is non-empty
+    # (raising otherwise), so it is always populated by the time we get here.
+    assert body.items is not None, "items is guaranteed non-None by request validation"
+
     results: list[BatchStoreResult] = []
     succeeded = 0
 
@@ -607,6 +611,10 @@ async def bulk_import(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Permission denied: memory:store required",
         )
+
+    # BatchStoreRequest.resolve_items_alias validates that items is non-empty
+    # (raising otherwise), so it is always populated by the time we get here.
+    assert body.items is not None, "items is guaranteed non-None by request validation"
 
     # Resolve project
     project_id = resolve_project_access(current_user, body.items[0].project_id if body.items else None) or "default"
@@ -776,7 +784,7 @@ async def recall_memories(
             request,
             memory_recalled_event(
                 user_id=current_user.user_id,
-                query=body.query,
+                query=body.query or "",
                 result_count=len(result.memories) if result.memories else 0,
                 project_id=body.project_id or "default",
             ),
@@ -1122,7 +1130,6 @@ async def supersede_memory(
             action=AuditAction.MEMORY_UPDATE,  # Or create MEMORY_SUPERSEDE
             resource_id=memory_id,
             success=True,
-            details={"new_memory_id": result.new_memory_id, "reason": body.reason},
         )
 
         # Broadcast to WebSocket

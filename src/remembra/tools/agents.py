@@ -64,7 +64,8 @@ def read_credentials() -> dict[str, str] | None:
         return None
 
     try:
-        return json.loads(CREDENTIALS_FILE.read_text())
+        data: dict[str, str] = json.loads(CREDENTIALS_FILE.read_text())
+        return data
     except (json.JSONDecodeError, OSError):
         return None
 

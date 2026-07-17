@@ -478,10 +478,15 @@ async def redeem_promo_code(
     tenant_info = await meter.get_tenant(user.user_id)
     stripe_customer_id = tenant_info.get("stripe_customer_id") if tenant_info else None
 
+    # Fetch email from database (AuthenticatedUser doesn't carry email)
+    db = request.app.state.db
+    user_data = await db.get_user_by_id(user.user_id)
+    user_email = user_data.get("email") if user_data else None
+
     result = await manager.redeem(
         code=body.code,
         user_id=user.user_id,
-        email=user.email,
+        email=user_email,
         stripe_customer_id=stripe_customer_id,
     )
 

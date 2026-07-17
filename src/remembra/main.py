@@ -1,6 +1,6 @@
 """FastAPI application factory and entry point."""
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, cast
 
@@ -393,8 +393,13 @@ def create_app() -> FastAPI:
     # Add rate limiter to app state
     app.state.limiter = limiter
 
-    # Add rate limit exception handler
-    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    # Add rate limit exception handler. slowapi types the handler against
+    # RateLimitExceeded specifically; Starlette expects the broader Exception
+    # base, so cast to the framework-expected signature.
+    app.add_exception_handler(
+        RateLimitExceeded,
+        cast(Callable[[Request, Exception], Response], _rate_limit_exceeded_handler),
+    )
 
     # Validation error handler - sanitize validation messages
     @app.exception_handler(RequestValidationError)

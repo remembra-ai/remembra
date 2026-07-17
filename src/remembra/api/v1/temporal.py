@@ -1,5 +1,7 @@
 """Temporal endpoints - TTL, decay, archive, and adaptive threshold operations."""
 
+import json
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -504,15 +506,22 @@ async def restore_memory(
     # Re-index in vector store
     if memory_service.qdrant and memory.get("content"):
         try:
-            embedding = await memory_service._get_embedding(memory["content"])
-            await memory_service.qdrant.upsert(
-                memory_id=memory_id,
+            from remembra.models.memory import Memory
+
+            embedding = await memory_service.embeddings.embed(memory["content"])
+            restored = Memory(
+                id=memory_id,
+                user_id=memory["user_id"],
+                project_id=memory.get("project_id") or "default",
+                content=memory["content"],
+                extracted_facts=json.loads(memory.get("extracted_facts") or "[]"),
+                entities=[],
                 embedding=embedding,
-                metadata={
-                    "user_id": memory["user_id"],
-                    "project_id": memory.get("project_id", "default"),
-                },
+                metadata=json.loads(memory.get("metadata") or "{}"),
+                created_at=datetime.fromisoformat(memory["created_at"]),
+                expires_at=(datetime.fromisoformat(memory["expires_at"]) if memory.get("expires_at") else None),
             )
+            await memory_service.qdrant.upsert(restored)
         except Exception:
             # Log but don't fail - memory is restored, just not searchable yet
             pass

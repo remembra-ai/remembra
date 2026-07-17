@@ -119,13 +119,14 @@ async def get_current_user(
             else:
                 user_manager = UserManager(db, settings.jwt_secret)
                 payload = user_manager.verify_jwt_token(token)
-                if payload and payload.get("sub"):
-                    log.debug("auth_jwt_success", user_id=payload.get("sub"))
+                sub = payload.get("sub") if payload else None
+                if sub:
+                    log.debug("auth_jwt_success", user_id=sub)
                     return AuthenticatedUser(
-                        user_id=payload.get("sub"),
+                        user_id=sub,
                         api_key_id="jwt_auth",
                         rate_limit_tier="standard",
-                        name=payload.get("email"),
+                        name=payload.get("email") if payload else None,
                     )
         except Exception as e:
             log.warning("jwt_verification_failed", error=str(e), error_type=type(e).__name__)
@@ -250,12 +251,13 @@ async def get_user_from_jwt_or_api_key(
             else:
                 user_manager = UserManager(db, settings.jwt_secret)
                 payload = user_manager.verify_jwt_token(token)
-                if payload:
+                sub = payload.get("sub") if payload else None
+                if sub:
                     return AuthenticatedUser(
-                        user_id=payload.get("sub"),
+                        user_id=sub,
                         api_key_id="jwt_auth",
                         rate_limit_tier="standard",
-                        name=payload.get("email"),
+                        name=payload.get("email") if payload else None,
                     )
         except Exception as e:
             log.debug("jwt_verification_failed_optional", error=str(e), error_type=type(e).__name__)

@@ -307,8 +307,23 @@ async def get_portal(
             sandbox=paddle_settings.sandbox,
         )
 
+        # Fetch user email from database (AuthenticatedUser doesn't have email)
+        db = request.app.state.db
+        user_data = await db.get_user_by_id(current_user.user_id)
+        if not user_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found.",
+            )
+        user_email = user_data.get("email")
+        if not user_email:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User email not found. Please update your profile.",
+            )
+
         # Look up customer by email address
-        url = await billing.create_portal_session_by_email(current_user.email)
+        url = await billing.create_portal_session_by_email(user_email)
 
         if not url:
             raise HTTPException(
@@ -359,7 +374,7 @@ async def paddle_webhook(request: Request) -> dict[str, str]:
     signature = request.headers.get("paddle-signature", "")
 
     try:
-        event = billing.verify_webhook(payload.decode(), signature)
+        event = billing.verify_webhook(payload, signature)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

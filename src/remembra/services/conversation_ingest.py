@@ -13,10 +13,15 @@ This is the #1 feature gap vs Mem0 - automatic conversation ingestion.
 
 import json
 import time
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from openai import AsyncOpenAI
+from openai.types.chat import (
+    ChatCompletionMessageParam,
+    ChatCompletionToolChoiceOptionParam,
+    ChatCompletionToolParam,
+)
 
 from remembra.config import Settings
 from remembra.core.time import utcnow
@@ -102,6 +107,11 @@ class ConversationIngestService:
             ConversationIngestResponse with extracted facts, entities, and stats
         """
         start_time = time.time()
+
+        # The API layer overrides request.user_id with the authenticated
+        # user_id before calling ingest (ingest.py: body.user_id = current_user.user_id),
+        # so it is always set here despite the model default of None.
+        assert request.user_id is not None, "user_id must be set by the API layer before ingest"
 
         log.info(
             "conversation_ingest_started",
@@ -565,18 +575,24 @@ class ConversationIngestService:
 
             response = await client.chat.completions.create(
                 model=self.settings.extraction_model,
-                messages=[
-                    {"role": "user", "content": prompt},
-                ],
-                tools=DEDUP_DECISION_FUNCTIONS,
-                tool_choice={"type": "function", "function": {"name": "decide_action"}},
+                messages=cast(
+                    "list[ChatCompletionMessageParam]",
+                    [
+                        {"role": "user", "content": prompt},
+                    ],
+                ),
+                tools=cast("list[ChatCompletionToolParam]", DEDUP_DECISION_FUNCTIONS),
+                tool_choice=cast(
+                    "ChatCompletionToolChoiceOptionParam",
+                    {"type": "function", "function": {"name": "decide_action"}},
+                ),
                 temperature=0.1,
                 timeout=30.0,
             )
 
             # Extract function call result
             tool_call = response.choices[0].message.tool_calls
-            if tool_call and len(tool_call) > 0:
+            if tool_call and len(tool_call) > 0 and tool_call[0].type == "function":
                 args = json.loads(tool_call[0].function.arguments)
                 return {
                     "action": args.get("action", "ADD"),

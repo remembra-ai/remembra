@@ -147,7 +147,7 @@ class OpenAIEmbedder(BaseEmbedder):
         if not texts or all(not t.strip() for t in texts):
             raise ValueError("Cannot embed empty text")
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "input": texts,
         }

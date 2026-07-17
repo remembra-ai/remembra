@@ -453,7 +453,7 @@ class MemoryService:
             )
 
         # ── Synchronous path (default) ────────────────────────────────────
-        memory_id, stored_facts, extracted_facts, matched_existing_id, source_id = await self._extract_and_store_facts(
+        memory_id, stored_facts, extracted_facts, matched_existing_id, derived_source_id = await self._extract_and_store_facts(
             request=request,
             now=now,
             expires_at=expires_at,
@@ -472,7 +472,7 @@ class MemoryService:
                 extracted_facts=extracted_facts,
                 entities=[],
                 expires_at=expires_at,
-                source_id=source_id,
+                source_id=derived_source_id,
             )
 
         log.info(
@@ -480,7 +480,7 @@ class MemoryService:
             memory_id=memory_id,
             facts_extracted=len(extracted_facts),
             facts_stored=len(stored_facts),
-            source_id=source_id,
+            source_id=derived_source_id,
         )
 
         return StoreResponse(
@@ -488,7 +488,7 @@ class MemoryService:
             extracted_facts=stored_facts,
             entities=[],  # Entity extraction runs in background per fact
             expires_at=expires_at,
-            source_id=source_id,
+            source_id=derived_source_id,
         )
 
     async def _extract_and_store_facts(
@@ -514,6 +514,11 @@ class MemoryService:
 
         Returns (memory_id, stored_facts, extracted_facts, matched_existing_id, source_id).
         """
+        # The API layer overrides request.user_id with the authenticated user_id
+        # before calling store() (memories.py: body.user_id = current_user.user_id),
+        # so it is always set here despite the model default of None.
+        assert request.user_id is not None, "user_id must be set by the API layer before store"
+
         # Step 1: Extract atomic facts using LLM (skip if skip_extraction=True)
         if skip_extraction:
             extracted_facts = [request.content.strip()]
@@ -1165,6 +1170,11 @@ class MemoryService:
         Returns:
             RecallResponse with context, memories, and entities
         """
+        # The API layer overrides request.user_id with the authenticated user_id
+        # before calling recall (memories.py: body.user_id = current_user.user_id),
+        # so it is always set here despite the model default of None.
+        assert request.user_id is not None, "user_id must be set by the API layer before recall"
+
         # Resolve feature flags
         use_hybrid = self.settings.enable_hybrid_search
         use_rerank = self.settings.enable_reranking
@@ -1443,7 +1453,7 @@ class MemoryService:
                 # Update hybrid_results with rerank scores
                 hybrid_results = [
                     {
-                        **r.payload,
+                        **(r.payload or {}),
                         "id": r.id,
                         "content": r.content,
                         "relevance": r.final_score,

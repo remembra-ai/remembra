@@ -48,7 +48,7 @@ class QdrantStore:
             self._client = AsyncQdrantClient(
                 url=self.settings.qdrant_url,
                 api_key=self.settings.qdrant_api_key,
-                timeout=30.0,
+                timeout=30,
                 prefer_grpc=True,  # gRPC is faster than HTTP for high throughput
             )
         return self._client
@@ -269,7 +269,7 @@ class QdrantStore:
             score_threshold=score_threshold,
         )
 
-        return [(r.id, r.score, self._decrypt_payload(r.payload or {})) for r in results.points]
+        return [(str(r.id), r.score, self._decrypt_payload(r.payload or {})) for r in results.points]
 
     async def delete(self, memory_id: str) -> bool:
         """Delete a single memory by ID."""

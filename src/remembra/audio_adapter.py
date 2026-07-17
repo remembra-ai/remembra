@@ -87,7 +87,7 @@ class AudioAdapter:
         self.num_speakers_hint = max(1, num_speakers_hint)
         self._sessions: dict[str, AudioSession] = {}
         self._model = None  # lazy-loaded faster-whisper model
-        self._stream = None
+        self._stream: Any = None
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------------ capture

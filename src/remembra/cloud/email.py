@@ -18,7 +18,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,7 @@ class ResendBackend(EmailBackend):
 
             resend.api_key = self.api_key
 
-            params = {
+            params: dict[str, Any] = {
                 "from": message.from_email,
                 "to": message.to,
                 "subject": message.subject,
@@ -93,7 +93,7 @@ class ResendBackend(EmailBackend):
             if message.tags:
                 params["tags"] = [{"name": k, "value": v} for k, v in message.tags.items()]
 
-            response = resend.Emails.send(params)
+            response = resend.Emails.send(cast("resend.Emails.SendParams", params))
 
             logger.info(
                 "Email sent via Resend: to=%s subject=%s id=%s",
@@ -247,6 +247,7 @@ class EmailService:
         Returns:
             Configured EmailService instance
         """
+        backend: EmailBackend
         if provider == EmailProvider.RESEND:
             backend = ResendBackend(**kwargs)
         elif provider == EmailProvider.SMTP:

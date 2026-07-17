@@ -173,6 +173,9 @@ async def ingest_changelog(
         if body.file_path:
             releases = parser.parse_file(body.file_path)
         else:
+            # Guaranteed non-None: the guard above rejects both-empty, and
+            # file_path is falsy in this branch, so content must be set.
+            assert body.content is not None
             releases = parser.parse(body.content)
     except FileNotFoundError as e:
         raise HTTPException(
@@ -321,7 +324,7 @@ async def ingest_conversation(
             if sanitization.trust_score < 0.3:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Message content failed security check: {sanitization.warnings}",
+                    detail=f"Message content failed security check: {sanitization.flagged_patterns}",
                 )
 
     try:
@@ -346,9 +349,9 @@ async def ingest_conversation(
 
                 await webhook_manager.dispatch(
                     WebhookEvent(
-                        event_type="conversation_ingested",
+                        type="conversation_ingested",
                         user_id=current_user.user_id,
-                        data={
+                        payload={
                             "session_id": result.session_id,
                             "facts_stored": result.stats.facts_stored,
                             "entities_found": result.stats.entities_found,
@@ -435,7 +438,7 @@ async def ingest_conversation_stream(
             if sanitization.trust_score < 0.3:
 
                 async def error_generator(
-                    warnings: list[Any] = sanitization.warnings,
+                    warnings: list[Any] = sanitization.flagged_patterns,
                 ) -> AsyncGenerator[str, None]:
                     error_msg = f"Message content failed security check: {warnings}"
                     yield f"data: {json.dumps({'phase': 'error', 'error': error_msg})}\n\n"

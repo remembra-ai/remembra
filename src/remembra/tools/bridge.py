@@ -353,7 +353,7 @@ class BridgeRequestHandler(BaseHTTPRequestHandler):
                 client=server.client,
                 method=self.command,
                 path=path,
-                headers=self.headers,
+                headers=cast(HTTPMessage, self.headers),
                 body=body,
                 api_key=server.config.api_key,
                 agent_name=server.config.agent_name,

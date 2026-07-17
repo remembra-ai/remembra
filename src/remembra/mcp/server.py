@@ -969,7 +969,7 @@ def get_inbox(
     try:
         aid = _resolve_agent_id(agent_id)
         client = _get_client()
-        rows = client.get_inbox(agent_id=aid, status=status, limit=limit)
+        rows: list[dict[str, Any]] = client.get_inbox(agent_id=aid, status=status, limit=limit)
 
         items = [
             {

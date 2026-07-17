@@ -196,7 +196,7 @@ async def switch_provider(
 
     # Check dimensions compatibility before switching
     new_model_key = f"{body.provider}:{body.model}" if body.model else body.provider
-    new_dims = MODEL_DIMENSIONS.get(body.model) or MODEL_DIMENSIONS.get(new_model_key)
+    new_dims = (MODEL_DIMENSIONS.get(body.model) if body.model else None) or MODEL_DIMENSIONS.get(new_model_key)
 
     if new_dims and old_dims and new_dims != old_dims:
         if not getattr(body, "force", False):

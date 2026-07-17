@@ -106,7 +106,7 @@ class RemembraChatMessageHistory(BaseChatMessageHistory):
         self._message_count = 0
 
     @property
-    def messages(self) -> list[BaseMessage]:
+    def messages(self) -> list[BaseMessage]:  # type: ignore[override]  # LangChain's base declares `messages` as a writeable attr; we intentionally back it with a read-only property sourced from Remembra.
         """Retrieve all messages for this session from Remembra, in order."""
         try:
             # Filter-only recall: exact-match on session_id (no semantic

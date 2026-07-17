@@ -6,6 +6,7 @@ import argparse
 import json
 import shutil
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -257,7 +258,7 @@ def run_remote_checks(
 def _run_doctor(
     agent: str,
     config_path: Path,
-    loader: callable,
+    loader: Callable[[Path], DoctorTarget],
     timeout: float = 5.0,
 ) -> list[CheckResult]:
     """Generic doctor runner for any agent."""

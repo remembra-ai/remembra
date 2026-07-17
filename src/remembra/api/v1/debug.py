@@ -511,7 +511,7 @@ async def get_entity_graph(
             }
         )
 
-    stats = {
+    stats: dict[str, Any] = {
         "total_nodes": len(nodes),
         "total_edges": len(edges),
         "entity_types": {},
@@ -709,11 +709,13 @@ async def run_calibration_endpoint(
         start = time.perf_counter()
         try:
             await memory_service.recall(
-                query=test_query,
-                user_id=current_user.user_id,
-                project_id=None,
-                limit=5,
-                threshold=0.1,
+                RecallRequest(
+                    query=test_query,
+                    user_id=current_user.user_id,
+                    project_id=None,
+                    limit=5,
+                    threshold=0.1,
+                )
             )
         except Exception:
             pass  # Ignore errors during calibration
@@ -740,7 +742,7 @@ async def run_calibration_endpoint(
     settings = get_settings()
     config = CalibrationConfig(
         embedding_model=settings.embedding_model,
-        embedding_dim=settings.embedding_dim,
+        embedding_dim=settings.embedding_dimensions,
         enable_hybrid=settings.hybrid_alpha > 0,
         enable_reranking=settings.enable_reranking,
     )
