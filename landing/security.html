@@ -246,7 +246,7 @@
                 <ul>
                     <li>
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>Encryption at Rest:</strong> All stored memories are encrypted using AES-256.</span>
+                        <span><strong>Encryption at Rest:</strong> Memory content and metadata in the vector store are encrypted with AES-256-GCM, and 2FA secrets are encrypted. The metadata database is not yet field-encrypted; we are extending encryption to all stored memory data.</span>
                     </li>
                     <li>
                         <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
