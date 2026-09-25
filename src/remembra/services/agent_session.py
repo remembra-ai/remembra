@@ -114,10 +114,15 @@ def serialize_memory_row(row: dict[str, Any]) -> dict[str, Any]:
         "source_id": metadata.get("source_id"),
         "agent_id": metadata.get("agent_id"),
         "metadata": metadata,
+        # Provenance columns: which write path stored the row, and the sanitizer's verdict.
+        "source": row.get("source"),
+        "trust_score": row.get("trust_score"),
     }
 
 
-_ROW_COLUMNS = "id, user_id, project_id, content, metadata, created_at, expires_at, memory_type, superseded_by"
+_ROW_COLUMNS = (
+    "id, user_id, project_id, content, metadata, created_at, expires_at, memory_type, superseded_by, source, trust_score"
+)
 
 
 class AgentSessionService:

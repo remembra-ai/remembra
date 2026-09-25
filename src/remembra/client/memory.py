@@ -39,6 +39,8 @@ Usage:
 from __future__ import annotations
 
 import builtins
+import logging
+import re
 import socket
 import uuid
 from collections.abc import Mapping
@@ -69,6 +71,34 @@ from remembra.client.types import (
 
 if TYPE_CHECKING:
     pass
+
+
+_AGENT_HEADER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$")
+_warned_agent_ids: set[str] = set()
+
+
+def _header_agent_id(agent: str | None) -> str | None:
+    """The agent id to send in ``X-Remembra-Agent-Id``, or None.
+
+    HTTP headers must be ASCII, and the relay endpoints only accept
+    ``[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}``. Any other id ("Claude Desktop",
+    "mani’s-agent") is not sent as a header (a warning is logged once): the
+    request still succeeds, and the id is still passed where endpoints take
+    it as a parameter.
+    """
+    value = (agent or "").strip()
+    if not value:
+        return None
+    if _AGENT_HEADER_RE.match(value):
+        return value
+    if value not in _warned_agent_ids:
+        _warned_agent_ids.add(value)
+        logging.getLogger(__name__).warning(
+            "agent_id %r is not a valid relay agent id (letters, digits and ._:@/+-); "
+            "it is not sent as the X-Remembra-Agent-Id header",
+            value,
+        )
+    return None
 
 
 class MemoryError(Exception):
@@ -187,12 +217,12 @@ class Memory:
         """Make an HTTP request to the Remembra server."""
         url = f"{self.base_url}{path}"
 
-        response = self._client.request(
-            method=method,
-            url=url,
-            json=json,
-            params=params,
-        )
+        kwargs: dict[str, Any] = {"method": method, "url": url, "json": json, "params": params}
+        agent = _header_agent_id(getattr(self, "agent_id", None))
+        if agent:
+            # Declared identity; an agent-scoped API key overrides it server-side.
+            kwargs["headers"] = {"X-Remembra-Agent-Id": agent}
+        response = self._client.request(**kwargs)
 
         if response.status_code >= 400:
             try:
@@ -239,6 +269,7 @@ class Memory:
         auto_expire: bool | None = None,
         skip_extraction: bool = False,
         memory_type: str | None = None,
+        project_id: str | None = None,
     ) -> StoreResult:
         """
         Store a new memory.
@@ -255,6 +286,7 @@ class Memory:
             memory_type: Optional type. Agent hygiene types: "checkpoint"
                 (server applies a default TTL), "handoff" (stored verbatim as
                 one unit). For current-state values use ``store_status``.
+            project_id: Store into this project instead of the client's project.
 
         Returns:
             StoreResult with the memory ID, extracted facts, and entities.
@@ -285,7 +317,7 @@ class Memory:
 
         payload: dict[str, Any] = {
             "user_id": self.user_id,
-            "project_id": self.project,
+            "project_id": self._project(project_id),
             "content": content,
             "metadata": self._stamp(metadata),
         }
@@ -779,14 +811,21 @@ class Memory:
         agent_id: str | None = None,
         recent_n: int = 10,
         inbox_limit: int = 10,
+        locator: dict[str, Any] | None = None,
+        branch: str | None = None,
+        head_commit: str | None = None,
     ) -> dict[str, Any]:
-        """Session-start brief: latest handoff, unread inbox, status, recent-by-time.
+        """Session-start brief: last session, unread inbox, status, linked projects, recent-by-time.
 
         Args:
             project_id: Project to brief on (default: the client's project).
             agent_id: Inbox owner (default: the client's ``agent_id``).
             recent_n: Number of most recent memories (by creation time).
             inbox_limit: Max unread inbox previews.
+            locator: Resolve the project from a location instead
+                (git_remote / root_commit / root_path / repo_name / host / hint_project).
+            branch, head_commit: The reader's checkout; a handoff recorded on a
+                different branch/commit is flagged as possibly stale.
         """
         params: dict[str, Any] = {
             "project_id": self._project(project_id),
@@ -796,7 +835,94 @@ class Memory:
         agent = (agent_id or self.agent_id or "").strip()
         if agent:
             params["agent_id"] = agent
+        if locator:
+            params.pop("project_id")
+            params.update({k: v for k, v in locator.items() if v is not None})
+        if branch:
+            params["branch"] = branch
+        if head_commit:
+            params["head_commit"] = head_commit
         return self._request("GET", "/api/v1/session/brief", params=params)
+
+    def resolve_project(
+        self,
+        git_remote: str | None = None,
+        root_commit: str | None = None,
+        root_path: str | None = None,
+        repo_name: str | None = None,
+        host: str | None = None,
+        hint_project: str | None = None,
+        bind: bool = False,
+    ) -> dict[str, Any]:
+        """Resolve a location (git remote / root commit / path) to a stable project id.
+
+        Returns ``{project_id, created, persisted, fingerprint, kind, bound}``.
+        """
+        payload = {
+            "git_remote": git_remote,
+            "root_commit": root_commit,
+            "root_path": root_path,
+            "repo_name": repo_name,
+            "host": host,
+            "hint_project": hint_project,
+            "bind": bind,
+        }
+        return self._request("POST", "/api/v1/projects/resolve", json={k: v for k, v in payload.items() if v is not None})
+
+    def close_session(
+        self,
+        facts: dict[str, Any] | None = None,
+        summary: str | None = None,
+        end_reason: str | None = None,
+        session_id: str | None = None,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        locator: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Close this session: the server stores ONE structured handoff.
+
+        ``facts`` follows the ``/api/v1/session/close`` schema (branch,
+        head_commit, commits, files_changed, commands, tests, errors,
+        todos_open, notes, next_step, ...). ``locator`` (git_remote /
+        root_commit / root_path / repo_name / hint_project) resolves the
+        project instead of ``project_id``. Closing again with the same
+        session id updates the same handoff.
+        """
+        payload: dict[str, Any] = {
+            "session_id": session_id or self.session_id,
+            "facts": facts or {},
+        }
+        agent = (agent_id or self.agent_id or "").strip()
+        if agent:
+            payload["agent_id"] = agent
+        if locator:
+            payload["project"] = {k: v for k, v in locator.items() if v is not None}
+        else:
+            payload["project_id"] = self._project(project_id)
+        if summary:
+            payload["summary"] = summary
+        if end_reason:
+            payload["end_reason"] = end_reason
+        return self._request("POST", "/api/v1/session/close", json=payload)
+
+    def trail(self, project_id: str | None = None, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+        """Handoffs and checkpoints across agents for a project, newest first."""
+        return self._request(
+            "GET", "/api/v1/trail", params={"project_id": self._project(project_id), "limit": limit, "offset": offset}
+        )
+
+    def link_projects(self, from_project: str, to_project: str, relation: str = "related") -> dict[str, Any]:
+        """Link two projects; the brief of either shows the other's latest handoff headline."""
+        return self._request(
+            "POST",
+            "/api/v1/projects/links",
+            json={"from_project": self._project(from_project), "to_project": self._project(to_project), "relation": relation},
+        )
+
+    def project_links(self, project_id: str | None = None) -> builtins.list[dict[str, Any]]:
+        data = self._request("GET", "/api/v1/projects/links", params={"project_id": self._project(project_id)})
+        items = data.get("items", [])
+        return items if isinstance(items, builtins.list) else []
 
     def store_status(
         self,

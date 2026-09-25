@@ -5,6 +5,50 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Remembra Relay: session continuity across agents.** Every agent leaves a structured handoff
+  when it stops, and any agent picks it up at session start, whatever the tool, machine or checkout location.
+  - Location-independent project identity: `POST /api/v1/projects/resolve` maps a normalized git
+    remote (then root commit, then path) to a per-user project id. The same repo on any machine,
+    drive or worktree gets the same id. Adds project links (`/api/v1/projects/links`); a brief shows
+    linked projects' latest handoff headlines.
+  - `POST /api/v1/session/close`: session facts become ONE deterministic handoff
+    (Done / Not done / Failing / Next step). The optional agent summary is grounding-checked against the facts.
+    Idempotent per (agent, session). Upserts `last_agent:<project>` and `branch:<project>`.
+  - `GET /api/v1/session/brief` accepts a location, leads with a "Last session: …" line and returns a
+    compact `rendered` text (~1500 tokens). `GET /api/v1/trail` lists handoffs and checkpoints.
+  - `remembra-relay` CLI (`brief`, `close`, `trail`, `resolve`, `connect`) gathers facts from git and
+    Claude Code transcripts without uploading them. It is hook-safe (≤10 s, always exits 0). `connect` wires
+    agent hooks through an adapter registry (Claude Code verified; Codex, Cursor, Gemini, Qwen and Kimi
+    shipped unverified and dry-run only).
+  - MCP: new `close_session` and `resolve_project` tools. `session_brief` is compact by default
+    (`verbose=True` for the full JSON). The server instructions tell every MCP agent to brief at start and close before finishing.
+  - Agent-scoped API keys (`agent_id` on key creation). Relay attribution comes from the key, not the request body.
+- Migration 4: `project_fingerprints`, `project_links`, `api_keys.agent_id`.
+
+### Changed (breaking)
+- **`remembra-relay` / MCP location briefs: which project a git repository uses.** A repository the
+  server has not seen joins the configured project (`REMEMBRA_RELAY_PROJECT`, else `REMEMBRA_PROJECT`
+  from the environment, MCP env or credentials, unless it is `default`); only with nothing configured
+  does it get its own per-repository project. Existing users keep one namespace; bind a repository
+  elsewhere with `remembra-relay resolve --project <id> --bind`. `GET /session/brief` and `GET /trail`
+  no longer record bindings (only close and `POST /projects/resolve` do), and a brief warns when the
+  repository resolves to a project other than the configured one.
+- Project-restricted API keys can no longer bind (`403`) or record new location bindings.
+- The rendered brief wraps everything recorded by agents in `<remembra-data untrusted="true">…</remembra-data>`,
+  marks agents as key-verified or self-declared, labels an agent's next step as an unverified
+  suggestion, withholds low-trust text and flags a handoff from another branch/commit as possibly stale.
+- `POST /memories` (and batch, bulk, PATCH, supersede) drop the relay-only metadata keys `relay` and
+  `relay_key`; agent-scoped keys stamp their own `agent_id` on memories and inbox messages.
+- MCP `session_brief` returns the pre-relay fields again by default, plus `brief`, `handoff_id` and
+  `inbox_unread`; `compact=true` returns only the text brief (the unreleased `verbose` flag is gone).
+  `close_session` and `store_memory` default to the project the last `session_brief` resolved.
+- The SDK sends `X-Remembra-Agent-Id` only for ids the relay accepts (ASCII letters, digits and
+  `._:@/+-`), so ids such as "Claude Desktop" no longer break requests; `GET /session/brief` accepts
+  any agent id again.
+
 ## [0.16.0] - 2026-07-16
 
 **Lossless memory + production reliability.** The theme of this release: what you

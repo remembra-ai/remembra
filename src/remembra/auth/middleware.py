@@ -30,6 +30,7 @@ class AuthenticatedUser:
     role: str = "editor"  # Populated by RBAC layer if enabled
     scopes: list[str] | None = None  # Explicit scope restrictions
     project_ids: list[str] | None = None  # Optional project restrictions
+    agent_id: str | None = None  # Agent-scoped key: relay writes are attributed to this agent
 
 
 def resolve_api_key(request: Request, api_key: str | None) -> str | None:
@@ -122,6 +123,7 @@ def _user_from_key_info(key_info: dict[str, Any]) -> AuthenticatedUser:
         role=key_info.get("role", "editor"),
         scopes=key_info.get("scopes"),
         project_ids=key_info.get("project_ids"),
+        agent_id=(key_info.get("agent_id") or None),
     )
 
 

@@ -1,6 +1,6 @@
 """Agent session endpoints — session brief, status upsert, timeline.
 
-- ``GET  /api/v1/session/brief``   latest handoff + unread inbox + status + recent-by-time
+- ``GET  /api/v1/session/brief``   see ``api/v1/relay.py`` (brief + relay pickup)
 - ``POST /api/v1/session/status``  upsert a status value by key (supersedes the prior value)
 - ``GET  /api/v1/session/status``  current status values for a project
 - ``GET  /api/v1/timeline``        chronological memories with a created_at range filter
@@ -45,32 +45,35 @@ def _require(current_user: Any, permission: str) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# Session brief
-# ---------------------------------------------------------------------------
+def screen_text(request: Request, text: str, apply_pii: bool = True) -> tuple[str, float, str | None]:
+    """Same content protections as POST /memories: PII policy + sanitizer.
 
-
-@router.get("/session/brief", summary="Session-start brief for an agent")
-@limiter.limit("60/minute")
-async def session_brief(
-    request: Request,
-    current_user: CurrentUser,
-    project_id: Annotated[str | None, Query(max_length=128)] = None,
-    agent_id: Annotated[str | None, Query(max_length=128)] = None,
-    recent_n: Annotated[int, Query(ge=0, le=50)] = 10,
-    inbox_limit: Annotated[int, Query(ge=0, le=50)] = 10,
-) -> dict[str, Any]:
-    """Latest handoff snapshot, unread inbox summary, current status values and
-    the most recent memories by creation time (not semantic similarity)."""
-    _require(current_user, "memory:recall")
-    project = resolve_project_access(current_user, project_id)
-    return await _service(request).brief(
-        user_id=current_user.user_id,
-        project_id=project,
-        agent_id=agent_id,
-        recent_n=recent_n,
-        inbox_limit=inbox_limit,
-    )
+    Returns ``(text, trust_score, checksum)``; raises 400 when the PII policy
+    blocks the content outright. ``apply_pii=False`` is for text assembled
+    from values that were already PII-scrubbed one by one (relay close-out):
+    only the sanitizer runs.
+    """
+    pii_detector = getattr(request.app.state, "pii_detector", None) if apply_pii else None
+    if pii_detector:
+        pii_result = pii_detector.scan(text, source="user_input")
+        if pii_result.has_pii:
+            if pii_result.blocked:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "error": "PII_DETECTED",
+                        "message": "Content contains sensitive information that cannot be stored",
+                        "types": [m.type for m in pii_result.matches],
+                    },
+                )
+            if pii_result.redacted_content:
+                text = pii_result.redacted_content
+    trust_score, checksum = 1.0, None
+    sanitizer = getattr(request.app.state, "sanitizer", None)
+    if get_settings().sanitization_enabled and sanitizer is not None:
+        analysis = sanitizer.analyze(text, source="user_input")
+        text, trust_score, checksum = analysis.content, analysis.trust_score, analysis.checksum
+    return text, trust_score, checksum
 
 
 # ---------------------------------------------------------------------------
@@ -100,27 +103,7 @@ async def upsert_status(
     project = resolve_project_access(current_user, body.project_id) or "default"
     value = body.value
 
-    # Same content protections as POST /memories: PII policy + sanitizer.
-    pii_detector = getattr(request.app.state, "pii_detector", None)
-    if pii_detector:
-        pii_result = pii_detector.scan(value, source="user_input")
-        if pii_result.has_pii:
-            if pii_result.blocked:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail={
-                        "error": "PII_DETECTED",
-                        "message": "Content contains sensitive information that cannot be stored",
-                        "types": [m.type for m in pii_result.matches],
-                    },
-                )
-            if pii_result.redacted_content:
-                value = pii_result.redacted_content
-    trust_score, checksum = 1.0, None
-    sanitizer = getattr(request.app.state, "sanitizer", None)
-    if get_settings().sanitization_enabled and sanitizer is not None:
-        analysis = sanitizer.analyze(value, source="user_input")
-        value, trust_score, checksum = analysis.content, analysis.trust_score, analysis.checksum
+    value, trust_score, checksum = screen_text(request, body.value)
 
     try:
         result = await _service(request).upsert_status(

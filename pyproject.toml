@@ -163,6 +163,7 @@ remembra-bridge = "remembra.tools.bridge:main"
 remembra-install-codex = "remembra.tools.codex:main"
 remembra-install = "remembra.tools.agents:main"
 remembra-doctor = "remembra.tools.doctor:main"
+remembra-relay = "remembra.relay.cli:entrypoint"
 
 # ---------------------------------------------------------------------------
 # Hatch build config

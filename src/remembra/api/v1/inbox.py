@@ -136,7 +136,8 @@ async def send_to_inbox(
     try:
         row = await inbox.send(
             owner_user_id=current_user.user_id,
-            from_agent=payload.from_agent or "unknown",
+            # An agent-scoped key sends as its own agent, whatever the payload claims.
+            from_agent=getattr(current_user, "agent_id", None) or payload.from_agent or "unknown",
             to_agent=payload.to_agent,
             subject=payload.subject,
             body=payload.body,
