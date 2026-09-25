@@ -70,6 +70,9 @@ async def session_brief(
         agent_id=agent_id,
         recent_n=recent_n,
         inbox_limit=inbox_limit,
+        # Project-restricted callers (scoped keys, connector grants) only see
+        # inbox messages tagged with a project they may access.
+        inbox_project_ids=list(current_user.project_ids) if current_user.project_ids else None,
     )
 
 

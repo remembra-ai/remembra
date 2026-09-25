@@ -81,6 +81,20 @@ def normalize_status_key(key: str) -> str:
     return cleaned
 
 
+def _inbox_project_filter(project_ids: list[str] | None) -> tuple[str, list[str]]:
+    """SQL (appended to a WHERE) keeping inbox rows tagged with one of ``project_ids``.
+
+    None means no restriction. An empty list matches nothing (fail closed).
+    Rows without ``metadata.project_id`` never match a restriction.
+    """
+    if project_ids is None:
+        return "", []
+    if not project_ids:
+        return " AND 0", []
+    marks = ", ".join("?" for _ in project_ids)
+    return f" AND json_extract(metadata, '$.project_id') IN ({marks})", list(project_ids)
+
+
 def _to_naive_utc_iso(value: datetime) -> str:
     """Normalize a datetime to the naive-UTC ISO format memories are stored in."""
     if value.tzinfo is not None:
@@ -338,27 +352,30 @@ class AgentSessionService:
     # Inbox (read-only views for the brief)
     # ------------------------------------------------------------------
 
-    async def _inbox_summary(self, user_id: str, agent_id: str, limit: int) -> dict[str, Any]:
+    async def _inbox_summary(
+        self, user_id: str, agent_id: str, limit: int, project_ids: list[str] | None = None
+    ) -> dict[str, Any]:
         now_iso = datetime.now(UTC).isoformat()
+        project_sql, project_args = _inbox_project_filter(project_ids)
         try:
             cursor = await self.db.conn.execute(
-                """
+                f"""
                 SELECT COUNT(*) FROM agent_inbox
                 WHERE owner_user_id = ? AND to_agent = ? AND status = 'unread'
-                  AND (expires_at IS NULL OR expires_at > ?)
-                """,
-                (user_id, agent_id, now_iso),
+                  AND (expires_at IS NULL OR expires_at > ?){project_sql}
+                """,  # noqa: S608 - placeholders only; values are bound
+                (user_id, agent_id, now_iso, *project_args),
             )
             count_row = await cursor.fetchone()
             cursor = await self.db.conn.execute(
-                """
+                f"""
                 SELECT inbox_id, from_agent, subject, body, created_at FROM agent_inbox
                 WHERE owner_user_id = ? AND to_agent = ? AND status = 'unread'
-                  AND (expires_at IS NULL OR expires_at > ?)
+                  AND (expires_at IS NULL OR expires_at > ?){project_sql}
                 ORDER BY julianday(created_at) DESC, inbox_id DESC
                 LIMIT ?
-                """,
-                (user_id, agent_id, now_iso, limit),
+                """,  # noqa: S608 - placeholders only; values are bound
+                (user_id, agent_id, now_iso, *project_args, limit),
             )
             rows = await cursor.fetchall()
         except Exception as e:  # agent_inbox table absent (inbox disabled)
@@ -384,17 +401,19 @@ class AgentSessionService:
             "items": items,
         }
 
-    async def known_agents(self, user_id: str) -> list[str]:
-        """Agent ids that have sent or received inbox messages for this user."""
+    async def known_agents(self, user_id: str, project_ids: list[str] | None = None) -> list[str]:
+        """Agent ids that have sent or received inbox messages for this user
+        (only in messages tagged with one of ``project_ids`` when given)."""
+        project_sql, project_args = _inbox_project_filter(project_ids)
         try:
             cursor = await self.db.conn.execute(
-                """
-                SELECT to_agent AS agent FROM agent_inbox WHERE owner_user_id = ?
+                f"""
+                SELECT to_agent AS agent FROM agent_inbox WHERE owner_user_id = ?{project_sql}
                 UNION
-                SELECT from_agent AS agent FROM agent_inbox WHERE owner_user_id = ?
+                SELECT from_agent AS agent FROM agent_inbox WHERE owner_user_id = ?{project_sql}
                 ORDER BY agent LIMIT 100
-                """,
-                (user_id, user_id),
+                """,  # noqa: S608 - placeholders only; values are bound
+                (user_id, *project_args, user_id, *project_args),
             )
             return [r[0] for r in await cursor.fetchall() if r[0]]
         except Exception:
@@ -411,8 +430,16 @@ class AgentSessionService:
         agent_id: str | None,
         recent_n: int = 10,
         inbox_limit: int = 10,
+        inbox_project_ids: list[str] | None = None,
     ) -> dict[str, Any]:
-        """Everything an agent needs at session start, in one call."""
+        """Everything an agent needs at session start, in one call.
+
+        ``inbox_project_ids`` limits the inbox and ``known_agents`` to messages
+        tagged (``metadata.project_id``) with one of those projects. Callers
+        restricted to projects (project-scoped keys, connector grants) must
+        pass their allowed projects; untagged messages are then excluded
+        because nothing says which project they belong to.
+        """
         warnings: list[str] = []
         agent = (agent_id or "").strip() or None
 
@@ -432,12 +459,12 @@ class AgentSessionService:
         )["memories"]
 
         if agent:
-            inbox: dict[str, Any] | None = await self._inbox_summary(user_id, agent, inbox_limit)
+            inbox: dict[str, Any] | None = await self._inbox_summary(user_id, agent, inbox_limit, inbox_project_ids)
         else:
             inbox = None
             warnings.append("No agent_id: inbox not checked. Set REMEMBRA_AGENT_ID for this client so other agents can reach it.")
 
-        known = await self.known_agents(user_id)
+        known = await self.known_agents(user_id, inbox_project_ids)
         if agent and known and agent not in known:
             warnings.append(f"agent_id '{agent}' has never sent or received an inbox message; check for id typos.")
 

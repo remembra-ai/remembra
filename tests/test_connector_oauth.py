@@ -240,6 +240,18 @@ async def test_phone_inbox_instruction_reaches_desktop_session_brief(h, monkeypa
     assert item["subject"] == "Fix the flaky login test"
     assert item["from_agent"] == "claude-app"
 
+    # The desktop replies; its message is tagged with its project, so the
+    # project-restricted phone connection sees it in its own brief.
+    reply = json.loads(
+        await anyio.to_thread.run_sync(
+            lambda: desktop_mcp.send_to_inbox(to_agent="claude-app", subject="Fixed: flaky login test", body="Retry on 429.")
+        )
+    )
+    assert reply["ok"] is True, reply
+    phone_brief = await h.tool(phone.access_token, "session_brief", {})
+    assert [i["subject"] for i in phone_brief["inbox"]["items"]] == ["Fixed: flaky login test"]
+    assert phone_brief["inbox"]["items"][0]["from_agent"] == "claude-code"
+
 
 # ---------------------------------------------------------------------------
 # Negative paths
@@ -985,3 +997,78 @@ async def test_authorize_keeps_the_supported_subset_of_scopes(h):
         {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "recall_memories", "arguments": {"query": "x"}}},
     )
     assert denied.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# The project restriction covers the inbox
+# ---------------------------------------------------------------------------
+
+
+async def _send_as_desktop(h: ConnectorHarness, key: str, to_agent: str, subject: str, metadata: dict[str, Any]) -> None:
+    resp = await h.http.post(
+        "/api/v1/inbox/send",
+        headers={"X-API-Key": key},
+        json={
+            "to_agent": to_agent,
+            "subject": subject,
+            "body": f"body of {subject}",
+            "from_agent": "codex",
+            "metadata": metadata,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def test_connector_brief_only_shows_inbox_of_granted_projects(h):
+    alice = await _alice(h)
+    key = await h.api_key(alice)
+    await _send_as_desktop(h, key, "claude-code", "prod creds rotation for project-b", {"project_id": "project-b"})
+    await _send_as_desktop(h, key, "claude-code", "untagged note", {})
+    await _send_as_desktop(h, key, "claude-code", "project-a task", {"project_id": "project-a"})
+    await _send_as_desktop(h, key, "secret-agent", "project-b only agent", {"project_id": "project-b"})
+    conn = await h.connect("alice@example.com", ["project-a"])
+
+    brief = await h.tool(conn.access_token, "session_brief", {"agent_id": "claude-code"})
+    assert brief["status"] == "ok"
+    inbox = brief["inbox"]
+    assert inbox["unread_count"] == 1
+    assert [i["subject"] for i in inbox["items"]] == ["project-a task"]
+    dump = json.dumps(brief)
+    assert "project-b" not in dump and "untagged note" not in dump
+    assert brief["known_agents"] == ["claude-code", "codex"]
+    assert "secret-agent" not in brief["known_agents"]
+
+    # The unrestricted desktop key still sees everything, as before.
+    full = await h.http.get(
+        "/api/v1/session/brief", params={"project_id": "project-a", "agent_id": "claude-code"}, headers={"X-API-Key": key}
+    )
+    assert full.status_code == 200
+    assert full.json()["inbox"]["unread_count"] == 3
+    assert "secret-agent" in full.json()["known_agents"]
+
+
+async def test_project_scoped_api_key_brief_only_shows_its_projects_inbox(h):
+    from remembra.auth.keys import APIKeyManager
+    from remembra.auth.rbac import Role, RoleManager
+
+    alice = await _alice(h)
+    key = await h.api_key(alice)
+    await _send_as_desktop(h, key, "claude-code", "for beta", {"project_id": "beta"})
+    await _send_as_desktop(h, key, "claude-code", "for alpha", {"project_id": "alpha"})
+    scoped = await APIKeyManager(h.db).create_key(user_id=alice, name="alpha-only")
+    await RoleManager(h.db).assign_role(scoped.id, Role("editor"), project_ids=["alpha"])
+    resp = await h.http.get("/api/v1/session/brief", params={"agent_id": "claude-code"}, headers={"X-API-Key": scoped.key})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["project_id"] == "alpha"
+    assert [i["subject"] for i in body["inbox"]["items"]] == ["for alpha"]
+    assert body["inbox"]["unread_count"] == 1
+
+
+async def test_inbox_project_filter_edges():
+    from remembra.services.agent_session import _inbox_project_filter
+
+    assert _inbox_project_filter(None) == ("", [])
+    assert _inbox_project_filter([]) == (" AND 0", [])
+    sql, args = _inbox_project_filter(["a", "b"])
+    assert sql == " AND json_extract(metadata, '$.project_id') IN (?, ?)" and args == ["a", "b"]

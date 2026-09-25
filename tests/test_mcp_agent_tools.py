@@ -266,6 +266,16 @@ def test_send_to_inbox_warns_on_unknown_agent_and_sets_expiry(mcp_env):
     assert _j(server.send_to_inbox(to_agent="codex", subject="s", body="b", expires_in="soon"))["ok"] is False
 
 
+def test_send_to_inbox_tags_the_clients_project(mcp_env):
+    """Project-restricted readers (the Claude/ChatGPT connector) only see inbox
+    messages tagged with their projects, so the desktop tags its sends."""
+    assert _j(server.send_to_inbox(to_agent="claude-code", subject="tagged", body="b", metadata={"k": "v"}))["ok"] is True
+    assert _j(server.send_to_inbox(to_agent="claude-code", subject="explicit", body="b", metadata={"project_id": "beta"}))["ok"]
+    items = {i["subject"]: i for i in _j(server.get_inbox())["items"]}
+    assert items["tagged"]["metadata"] == {"k": "v", "project_id": "alpha"}
+    assert items["explicit"]["metadata"] == {"project_id": "beta"}
+
+
 def test_get_inbox_summary_mode(mcp_env):
     codex = mcp_env["make_client"](project="alpha", agent_id="codex")
     codex.send_to_inbox(to_agent="claude-code", subject="long", body="z" * 1000, metadata={"k": "v"})
