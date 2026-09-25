@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UsageSummaryResponse } from '../api';
-import { clampSeats, creditsView, degradedCopy, formatUsd, planLine, resetLabel } from '../credits';
+import { clampSeats, creditsView, degradedCopy, formatUsd, parseSeatDraft, planLine, resetLabel } from '../credits';
 
 function summary(overrides: Partial<UsageSummaryResponse> = {}, credits: Partial<UsageSummaryResponse['credits']> = {}): UsageSummaryResponse {
   return {
@@ -108,6 +108,18 @@ describe('seats and prices', () => {
     expect(clampSeats(7, 3)).toBe(7);
     expect(clampSeats(Number.NaN, 3)).toBe(3);
     expect(clampSeats(5000, 3)).toBe(1000);
+  });
+  it('reads a half-typed seat field without rewriting it', () => {
+    // Typing 10 passes through "1": not a count yet, and not snapped to 3.
+    expect(parseSeatDraft('1', 3)).toBeNull();
+    expect(parseSeatDraft('10', 3)).toBe(10);
+    expect(parseSeatDraft('3', 3)).toBe(3);
+    expect(parseSeatDraft('', 3)).toBeNull();
+    expect(parseSeatDraft(' 12 ', 3)).toBe(12);
+    expect(parseSeatDraft('4.5', 3)).toBeNull();
+    expect(parseSeatDraft('1e3', 3)).toBeNull();
+    expect(parseSeatDraft('1001', 3)).toBeNull();
+    expect(parseSeatDraft('1000', 3)).toBe(1000);
   });
   it('formats cents', () => {
     expect(formatUsd(1200)).toBe('$12');

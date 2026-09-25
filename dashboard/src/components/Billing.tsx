@@ -14,7 +14,7 @@ import {
   type PlansResponse,
   type UsageSummaryResponse,
 } from '../lib/api';
-import { clampSeats, creditsView, formatUsd, planLine, resetLabel } from '../lib/credits';
+import { clampSeats, creditsView, formatUsd, parseSeatDraft, planLine, resetLabel } from '../lib/credits';
 import { useResource } from '../hooks/useResource';
 import { Card, CardHeader, ErrorNotice, Pill, Skeleton } from './relay/ui';
 import { DegradedNotice, PixelMeter } from './credits/Credits';
@@ -205,18 +205,35 @@ function HowCreditsWork() {
   );
 }
 
-function SeatStepper({ seats, min, onChange, planName }: { seats: number; min: number; onChange: (n: number) => void; planName: string }) {
+// The field holds the raw text while someone types ("1" on the way to "10"),
+// and snaps to the allowed range only on blur, on Enter, or from the buttons.
+// While the text is not a valid count the parent gets null and checkout waits.
+function SeatStepper({
+  draft,
+  min,
+  onDraft,
+  planName,
+}: {
+  draft: string;
+  min: number;
+  onDraft: (text: string) => void;
+  planName: string;
+}) {
   const inputId = useId();
+  const hintId = `${inputId}-hint`;
+  const seats = parseSeatDraft(draft, min);
+  const settled = seats ?? clampSeats(draft.trim() === '' ? Number.NaN : Number(draft), min);
+  const commit = () => onDraft(String(settled));
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <label htmlFor={inputId} className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
         Seats
       </label>
-      <div className="inline-flex items-stretch border border-rule">
+      <div className={clsx('inline-flex items-stretch border', seats === null ? 'border-fail' : 'border-rule')}>
         <button
           type="button"
-          onClick={() => onChange(clampSeats(seats - 1, min))}
-          disabled={seats <= min}
+          onClick={() => onDraft(String(clampSeats(settled - 1, min)))}
+          disabled={settled <= min}
           aria-label={`One fewer ${planName} seat`}
           className="px-2 text-ink-2 hover:bg-paper-2 disabled:opacity-40"
         >
@@ -228,20 +245,32 @@ function SeatStepper({ seats, min, onChange, planName }: { seats: number; min: n
           inputMode="numeric"
           min={min}
           max={1000}
-          value={seats}
-          onChange={(e) => onChange(clampSeats(Number(e.target.value), min))}
+          value={draft}
+          onChange={(e) => onDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              commit();
+            }
+          }}
+          aria-invalid={seats === null}
+          aria-describedby={hintId}
           className="tabular w-14 border-x border-rule bg-panel py-1 text-center font-mono text-sm text-ink [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
         />
         <button
           type="button"
-          onClick={() => onChange(clampSeats(seats + 1, min))}
+          onClick={() => onDraft(String(clampSeats(settled + 1, min)))}
+          disabled={settled >= 1000}
           aria-label={`One more ${planName} seat`}
-          className="px-2 text-ink-2 hover:bg-paper-2"
+          className="px-2 text-ink-2 hover:bg-paper-2 disabled:opacity-40"
         >
           <Plus className="h-3.5 w-3.5" />
         </button>
       </div>
-      <span className="text-xs text-ink-3">minimum {min}</span>
+      <span id={hintId} className={clsx('text-xs', seats === null ? 'text-fail' : 'text-ink-3')}>
+        {seats === null ? `${min} to 1,000 seats` : `minimum ${min}`}
+      </span>
     </div>
   );
 }
@@ -263,11 +292,15 @@ function PlanRow({
   busy: boolean;
   onBuy: (plan: PlanCatalogEntry, seats: number | undefined) => void;
 }) {
-  const [seats, setSeats] = useState(Math.max(plan.min_seats, 1));
+  const minSeats = Math.max(plan.min_seats, 1);
+  const [seatDraft, setSeatDraft] = useState(String(minSeats));
+  // null while the seat field holds something that is not a valid count yet.
+  const seats = plan.per_seat ? parseSeatDraft(seatDraft, minSeats) : null;
+  const seatsReady = !plan.per_seat || seats !== null;
   const price = priceFor(plan, cycle);
   const available = cycle === 'yearly' ? plan.available_yearly : plan.available_monthly;
   const per = cycle === 'yearly' ? 'yr' : 'mo';
-  const total = price !== null && plan.per_seat ? price * seats : price;
+  const total = price !== null && plan.per_seat ? (seats !== null ? price * seats : null) : price;
   return (
     <li className={clsx('grid gap-4 py-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_auto] md:items-start', current && 'relative')}>
       {current && <span aria-hidden="true" className="absolute inset-y-4 -left-4 w-[3px] bg-signal sm:-left-5" />}
@@ -299,16 +332,19 @@ function PlanRow({
         ))}
       </ul>
       <div className="flex flex-col items-start gap-2 md:items-end">
-        {plan.per_seat && !current && <SeatStepper seats={seats} min={plan.min_seats} onChange={setSeats} planName={plan.name} />}
+        {plan.per_seat && !current && <SeatStepper draft={seatDraft} min={minSeats} onDraft={setSeatDraft} planName={plan.name} />}
         {!current && (
           <button
             type="button"
-            onClick={() => onBuy(plan, plan.per_seat ? seats : undefined)}
-            disabled={busy || !available || price === null}
+            onClick={() => {
+              if (!plan.per_seat) onBuy(plan, undefined);
+              else if (seats !== null) onBuy(plan, clampSeats(seats, minSeats));
+            }}
+            disabled={busy || !available || price === null || !seatsReady}
             className="rr-btn-primary inline-flex items-center gap-1.5 px-3.5 py-2 text-sm"
           >
             {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-            {plan.per_seat ? `Start Team with ${seats} seats` : `Choose ${plan.name}`}
+            {plan.per_seat ? (seats !== null ? `Start Team with ${seats} seats` : 'Start Team') : `Choose ${plan.name}`}
           </button>
         )}
         {!current && !available && (

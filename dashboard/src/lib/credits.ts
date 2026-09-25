@@ -98,3 +98,15 @@ export function clampSeats(value: number, minSeats: number, maxSeats = 1000): nu
   if (!Number.isFinite(value)) return minSeats;
   return Math.min(maxSeats, Math.max(minSeats, Math.round(value)));
 }
+
+/**
+ * The seat count a half-typed field stands for, or null while it is not yet a
+ * whole number between the floor and the ceiling ("1" on the way to "10").
+ * The field keeps the raw text; this never rewrites it.
+ */
+export function parseSeatDraft(text: string, minSeats: number, maxSeats = 1000): number | null {
+  const t = text.trim();
+  if (!/^\d+$/.test(t)) return null;
+  const n = Number(t);
+  return n >= minSeats && n <= maxSeats ? n : null;
+}
