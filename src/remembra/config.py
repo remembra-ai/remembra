@@ -15,6 +15,9 @@ class Settings(BaseSettings):
         # Ignore unknown env vars so retired settings (e.g. leftover
         # REMEMBRA_STRIPE_* secrets in a deployed environment) never break boot.
         extra="ignore",
+        # Aliased settings (e.g. typesafe_api_key <- TYPESAFE_API_KEY) can also
+        # be passed by field name in code and tests.
+        populate_by_name=True,
     )
 
     # -----------------------------------------------------------------------
