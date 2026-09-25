@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -22,6 +22,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+    <link rel="stylesheet" href="/site.css">
     
     <style>
         *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -35,8 +37,8 @@
             --gray-400: #737373;
             --gray-300: #a3a3a3;
             --white: #ffffff;
-            --purple: #8b5cf6;
-            --purple-light: #a78bfa;
+            --purple: #FF6B2B;
+            --purple-light: #FF9160;
             --green: #22c55e;
         }
         
@@ -219,20 +221,32 @@
         }
     </style>
 </head>
-<body>
-    <header class="header">
-        <div class="header-inner">
-            <a href="/" class="logo">
-                <img src="/logo.jpg" alt="Remembra">
-                Remembra
-            </a>
-            <a href="https://app.remembra.dev/signup" class="btn">Get Started</a>
-        </div>
+<body class="legacy">
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="wrap bar">
+        <a class="brand" href="/" aria-label="Remembra home">
+          <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="6" cy="25" r="2.4" fill="currentColor" opacity=".3"/>
+            <circle cx="11.5" cy="20" r="2.4" fill="currentColor" opacity=".55"/>
+            <rect x="15" y="4" width="9" height="22" rx="4.5" transform="rotate(40 19.5 15)" fill="var(--signal)"/>
+          </svg>
+          <span class="brand-name">Remembra</span>
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+          <a class="nav-hide-md" href="/#how">How it works</a>
+          <a class="nav-hide-sm" href="/pricing">Pricing</a>
+          <a class="nav-hide-md" href="https://docs.remembra.dev">Docs</a>
+          <a class="nav-hide-md" href="https://github.com/remembra-ai/remembra">GitHub</a>
+          <a class="btn-nav" href="https://app.remembra.dev/signup">Start free</a>
+        </nav>
+      </div>
     </header>
+    <div id="main">
 
     <main class="content">
         <div class="container">
-            <span class="badge">🔒 Security First</span>
+            <span class="badge">Security first</span>
             <h1 class="page-title">Security</h1>
             <p class="page-subtitle">How we protect your data and maintain trust.</p>
 
@@ -329,13 +343,25 @@
         </div>
     </main>
 
-    <footer class="footer">
-        <div class="footer-links">
-            <a href="/privacy">Privacy</a>
-            <a href="/terms">Terms</a>
-            <a href="/contact">Contact</a>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap foot">
+        <div class="foot-brand">
+          <span class="brand-name">Remembra</span>
+          <p>One cloud memory for all your AI agents. &copy; 2026 DolphyTech.</p>
         </div>
-        <p>&copy; 2026 DolphyTech. All rights reserved.</p>
+        <nav aria-label="Footer">
+          <ul class="foot-links">
+            <li><a href="/pricing">Pricing</a></li>
+            <li><a href="https://docs.remembra.dev">Docs</a></li>
+            <li><a href="https://github.com/remembra-ai/remembra">GitHub</a></li>
+            <li><a href="/security">Security</a></li>
+            <li><a href="/privacy">Privacy</a></li>
+            <li><a href="/terms">Terms</a></li>
+            <li><a href="/contact">Contact</a></li>
+          </ul>
+        </nav>
+      </div>
     </footer>
 </body>
 </html>

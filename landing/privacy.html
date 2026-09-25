@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="scroll-smooth">
+<html lang="en" class="scroll-smooth" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -20,12 +20,12 @@
             theme: {
                 extend: {
                     colors: {
-                        primary: '#8B5CF6',
-                        'primary-dark': '#7C3AED',
-                        secondary: '#A78BFA',
-                        dark: '#0F0F0F',
-                        'dark-lighter': '#1A1A1A',
-                        'dark-card': '#1F1F1F',
+                        primary: '#FF9160',
+                        'primary-dark': '#FF7F45',
+                        secondary: '#FF9160',
+                        dark: '#131416',
+                        'dark-lighter': '#1A1C1F',
+                        'dark-card': '#1B1D20',
                     }
                 }
             }
@@ -36,6 +36,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+    <link rel="stylesheet" href="/site.css">
     
     <style>
         body { font-family: 'Inter', sans-serif; }
@@ -46,27 +48,39 @@
             background-clip: text;
         }
         .prose h2 { scroll-margin-top: 100px; }
+        /* Brand refresh: filled buttons use signal orange with graphite text (AA contrast). */
+        .bg-primary { background-color: #FF6B2B !important; color: #15171A !important; }
+        .hover\:bg-primary-dark:hover { background-color: #FF7F45 !important; }
+        .gradient-text {
+            background: linear-gradient(135deg, #FF6B2B 0%, #FF9160 60%, #FFB38F 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
     </style>
 </head>
-<body class="bg-dark text-white antialiased">
-    <!-- Navigation -->
-    <nav class="fixed top-0 left-0 right-0 z-50 bg-dark/80 backdrop-blur-xl border-b border-white/5">
-        <div class="max-w-7xl mx-auto px-6 py-4">
-            <div class="flex items-center justify-between">
-                <a href="/" class="flex items-center gap-3">
-                    <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
-                    <span class="text-xl font-bold">Remembra</span>
-                </a>
-                <div class="flex items-center gap-4">
-                    <a href="/about.html" class="hidden md:block text-gray-300 hover:text-white transition">About</a>
-                    <a href="https://docs.remembra.dev" class="text-gray-300 hover:text-white transition">Docs</a>
-                    <a href="https://github.com/remembra-ai/remembra" target="_blank" class="px-5 py-2.5 bg-primary hover:bg-primary-dark text-white font-medium rounded-lg transition">
-                        Get Started →
-                    </a>
-                </div>
-            </div>
-        </div>
-    </nav>
+<body class="legacy bg-dark text-white antialiased">
+    <a class="skip" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="wrap bar">
+        <a class="brand" href="/" aria-label="Remembra home">
+          <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true">
+            <circle cx="6" cy="25" r="2.4" fill="currentColor" opacity=".3"/>
+            <circle cx="11.5" cy="20" r="2.4" fill="currentColor" opacity=".55"/>
+            <rect x="15" y="4" width="9" height="22" rx="4.5" transform="rotate(40 19.5 15)" fill="var(--signal)"/>
+          </svg>
+          <span class="brand-name">Remembra</span>
+        </a>
+        <nav class="nav-links" aria-label="Primary">
+          <a class="nav-hide-md" href="/#how">How it works</a>
+          <a class="nav-hide-sm" href="/pricing">Pricing</a>
+          <a class="nav-hide-md" href="https://docs.remembra.dev">Docs</a>
+          <a class="nav-hide-md" href="https://github.com/remembra-ai/remembra">GitHub</a>
+          <a class="btn-nav" href="https://app.remembra.dev/signup">Start free</a>
+        </nav>
+      </div>
+    </header>
+    <div id="main">
 
     <!-- Hero -->
     <section class="pt-32 pb-8 px-6">
@@ -326,24 +340,25 @@
             </div>
         </div>
     </section>
-
-    <!-- Footer -->
-    <footer class="py-12 px-6 border-t border-white/5 mt-12">
-        <div class="max-w-6xl mx-auto">
-            <div class="flex flex-col md:flex-row items-center justify-between gap-6">
-                <div class="flex items-center gap-3">
-                    <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
-                    <span class="font-bold">Remembra</span>
-                </div>
-                <div class="flex items-center gap-6 text-sm text-gray-400">
-                    <a href="/about.html" class="hover:text-white transition">About</a>
-                    <a href="/contact.html" class="hover:text-white transition">Contact</a>
-                    <a href="/privacy.html" class="hover:text-white transition">Privacy</a>
-                    <a href="/terms.html" class="hover:text-white transition">Terms</a>
-                </div>
-                <p class="text-sm text-gray-500">© 2026 DolphyTech. All rights reserved.</p>
-            </div>
+    </div>
+    <footer class="site-footer">
+      <div class="wrap foot">
+        <div class="foot-brand">
+          <span class="brand-name">Remembra</span>
+          <p>One cloud memory for all your AI agents. &copy; 2026 DolphyTech.</p>
         </div>
+        <nav aria-label="Footer">
+          <ul class="foot-links">
+            <li><a href="/pricing">Pricing</a></li>
+            <li><a href="https://docs.remembra.dev">Docs</a></li>
+            <li><a href="https://github.com/remembra-ai/remembra">GitHub</a></li>
+            <li><a href="/security">Security</a></li>
+            <li><a href="/privacy">Privacy</a></li>
+            <li><a href="/terms">Terms</a></li>
+            <li><a href="/contact">Contact</a></li>
+          </ul>
+        </nav>
+      </div>
     </footer>
 </body>
 </html>

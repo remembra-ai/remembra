@@ -1,0 +1,225 @@
+/* ==================================================================
+   Remembra site: shared tokens, header, footer and small components.
+   Used by the home page, the pricing page and (lightly) by the legal
+   and contact pages. Signal orange is reserved for the baton: the
+   thing that moves and the thing you act on.
+   ================================================================== */
+:root {
+  --paper:        #ECEDE8;  /* stone */
+  --paper-2:      #E2E4DE;
+  --panel:        #FAFAF7;
+  --ink:          #15171A;  /* graphite */
+  --ink-2:        #464B51;
+  --ink-3:        #62686E;
+  --rule:         #C9CCC5;
+  --rule-strong:  #15171A;
+  --signal:       #FF5B14;  /* fills, baton, marks */
+  --signal-ink:   #AE3700;  /* orange for small text on stone (AA) */
+  --signal-wash:  rgba(255, 91, 20, .12);
+  --on-signal:    #15171A;
+  --ok:           #1F6B3B;
+  --fail:         #B0281C;
+  --head:         #15171A;
+  --head-ink:     #ECEDE8;
+  --shadow:       0 1px 0 rgba(21,23,26,.05), 0 30px 60px -30px rgba(21,23,26,.35);
+
+  --f-display: "Bricolage Grotesque", "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body:    "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --f-mono:    "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --t-12: .75rem;
+  --t-14: .875rem;
+  --t-16: 1rem;
+  --t-18: 1.125rem;
+  --t-22: 1.375rem;
+  --t-30: clamp(1.5rem, 1.1rem + 1.2vw, 1.875rem);
+  --t-44: clamp(2rem, 1.2rem + 2.4vw, 2.75rem);
+
+  --r: 3px;
+  --gutter: clamp(16px, 4vw, 48px);
+  --max: 1320px;
+  --nav-h: 68px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper:#131416; --paper-2:#1A1C1F; --panel:#1B1D20; --ink:#ECEDE7; --ink-2:#B4B7B1; --ink-3:#8F938D;
+    --rule:#2E3135; --rule-strong:#ECEDE7; --signal:#FF6B2B; --signal-ink:#FF9160; --signal-wash:rgba(255,107,43,.15);
+    --on-signal:#15171A; --ok:#72C794; --fail:#F28D83; --head:#0D0E0F; --head-ink:#ECEDE7;
+    --shadow: 0 1px 0 rgba(0,0,0,.4), 0 30px 60px -30px rgba(0,0,0,.8);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper:#131416; --paper-2:#1A1C1F; --panel:#1B1D20; --ink:#ECEDE7; --ink-2:#B4B7B1; --ink-3:#8F938D;
+  --rule:#2E3135; --rule-strong:#ECEDE7; --signal:#FF6B2B; --signal-ink:#FF9160; --signal-wash:rgba(255,107,43,.15);
+  --on-signal:#15171A; --ok:#72C794; --fail:#F28D83; --head:#0D0E0F; --head-ink:#ECEDE7;
+  --shadow: 0 1px 0 rgba(0,0,0,.4), 0 30px 60px -30px rgba(0,0,0,.8);
+  color-scheme: dark;
+}
+
+/* ------------------------------------------------------------------
+   Base (only on pages that opt in with body.site)
+------------------------------------------------------------------- */
+*, *::before, *::after { box-sizing: border-box; }
+body.site {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-body);
+  font-size: var(--t-16);
+  line-height: 1.55;
+  overflow-x: clip;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+html:has(body.site) { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; background: var(--paper); }
+/* :where() keeps these resets at zero specificity so component classes win. */
+:where(.site) :where(h1, h2, h3, p, ol, ul, dl, dd, figure) { margin: 0; }
+:where(.site) :where(ol, ul) { padding: 0; list-style: none; }
+:where(.site) a { color: inherit; }
+:where(.site) button { font: inherit; color: inherit; }
+/* Focus ring: --signal-ink clears 3:1 on paper and panel in both themes
+   (--signal does not in light mode). On the command block the ring sits
+   on --ink, so it takes the page color instead. */
+:focus-visible { outline: 2px solid var(--signal-ink); outline-offset: 3px; border-radius: 1px; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.skip { position: absolute; left: 16px; top: -60px; background: var(--ink); color: var(--paper); padding: 8px 12px; z-index: 60; text-decoration: none; font-family: var(--f-body); }
+.skip:focus { top: 12px; }
+.wrap { max-width: var(--max); margin: 0 auto; padding: 0 var(--gutter); }
+.mono { font-family: var(--f-mono); }
+
+.eyebrow {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--f-mono); font-size: var(--t-12); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2);
+}
+.eyebrow::before { content: ""; width: 22px; height: 2px; background: var(--signal); flex: none; }
+
+/* ------------------------------------------------------------------
+   Header
+------------------------------------------------------------------- */
+.site-header { background: var(--paper); font-family: var(--f-body); }
+.site-header .bar { height: var(--nav-h); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
+.brand svg { flex: none; display: block; }
+.brand-name { font-family: var(--f-display); font-weight: 800; font-size: 1.3rem; letter-spacing: -.02em; line-height: 1; }
+.nav-links { display: flex; align-items: center; gap: 26px; font-size: var(--t-14); }
+.nav-links a:not(.btn-nav) { text-decoration: none; color: var(--ink-2); }
+.nav-links a:not(.btn-nav):hover,
+.nav-links a[aria-current="page"] { color: var(--ink); text-decoration: underline; text-decoration-color: var(--signal); text-underline-offset: 5px; text-decoration-thickness: 2px; }
+.btn-nav {
+  display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+  padding: 9px 14px; border-radius: var(--r);
+  background: var(--ink); color: var(--paper); border: 1px solid var(--ink);
+  font-weight: 600; font-size: var(--t-14); text-decoration: none;
+}
+.btn-nav:hover { background: transparent; color: var(--ink); }
+.theme-btn {
+  width: 38px; height: 38px; display: inline-grid; place-items: center; flex: none; padding: 0;
+  background: transparent; border: 1px solid var(--rule); border-radius: 50%; cursor: pointer; color: var(--ink-2);
+}
+.theme-btn:hover { border-color: var(--ink); color: var(--ink); }
+.theme-btn svg { display: block; }
+.theme-btn .moon { display: none; }
+:root[data-theme="dark"] .theme-btn .sun { display: none; }
+:root[data-theme="dark"] .theme-btn .moon { display: block; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .theme-btn .sun { display: none; }
+  :root:not([data-theme="light"]) .theme-btn .moon { display: block; }
+}
+
+/* ------------------------------------------------------------------
+   Install line (the one command)
+------------------------------------------------------------------- */
+.cmd {
+  max-width: 620px;
+  display: flex; align-items: stretch;
+  background: var(--ink); color: var(--paper);
+  border-radius: var(--r);
+  box-shadow: 6px 6px 0 var(--signal);
+}
+.cmd code {
+  flex: 1; min-width: 0;
+  display: flex; flex-wrap: wrap; align-items: center; column-gap: .6ch; row-gap: 2px;
+  padding: 16px 18px;
+  font-family: var(--f-mono); font-size: .95rem; line-height: 1.45;
+}
+.cmd code .ps { color: var(--signal); user-select: none; }
+.cmd code span { white-space: nowrap; }
+/* Several commands, one per line; a long one wraps between its parts. */
+.cmd.steps code { flex-direction: column; align-items: flex-start; }
+.cmd.steps code .ln { display: flex; flex-wrap: wrap; column-gap: .6ch; white-space: normal; }
+.copy {
+  flex: none; display: inline-flex; align-items: center; gap: 8px;
+  padding: 0 18px; min-width: 104px; justify-content: center;
+  background: transparent; color: inherit; border: 0; border-left: 1px solid rgba(236,237,232,.18);
+  font-family: var(--f-mono); font-size: var(--t-14); cursor: pointer;
+  border-radius: 0 var(--r) var(--r) 0;
+}
+:root[data-theme="dark"] .copy { border-left-color: rgba(21,23,26,.2); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .copy { border-left-color: rgba(21,23,26,.2); } }
+.copy:hover { background: rgba(255,91,20,.18); }
+.copy:focus-visible { outline-offset: -4px; }
+.cmd :focus-visible { outline-color: var(--paper); }
+.copy[data-state="copied"] { color: var(--signal); }
+.cmd-meta {
+  margin-top: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+  font-size: var(--t-14); color: var(--ink-2);
+}
+.cmd-meta .free { font-weight: 600; color: var(--ink); }
+.cmd-meta a { color: var(--ink); text-decoration-color: var(--signal); text-underline-offset: 4px; text-decoration-thickness: 2px; }
+.cmd-meta .sep { width: 4px; height: 4px; background: var(--ink-3); border-radius: 50%; flex: none; }
+
+/* ------------------------------------------------------------------
+   Buttons
+------------------------------------------------------------------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-weight: 600; font-size: var(--t-16); text-decoration: none; cursor: pointer;
+  padding: 12px 18px; border-radius: var(--r); border: 1px solid var(--ink);
+  background: transparent; color: var(--ink);
+}
+.btn:hover { background: var(--ink); color: var(--paper); }
+.btn.ink { background: var(--ink); color: var(--paper); }
+.btn.ink:hover { background: transparent; color: var(--ink); }
+
+/* ------------------------------------------------------------------
+   Footer
+------------------------------------------------------------------- */
+.site-footer { border-top: 1px solid var(--rule); padding: 32px 0 44px; font-family: var(--f-body); font-size: var(--t-14); color: var(--ink-3); background: var(--paper); }
+.site-footer .foot { display: flex; flex-wrap: wrap; gap: 18px 32px; justify-content: space-between; align-items: flex-start; }
+.site-footer .foot-brand { display: grid; gap: 8px; max-width: 30em; }
+.site-footer .foot-brand .brand-name { font-size: 1.1rem; }
+.site-footer .foot-links { display: flex; flex-wrap: wrap; gap: 8px 22px; margin: 0; padding: 0; list-style: none; }
+.site-footer .foot-links a { color: var(--ink-2); text-decoration: none; }
+.site-footer .foot-links a:hover { color: var(--ink); text-decoration: underline; text-decoration-color: var(--signal); text-underline-offset: 4px; }
+.site-footer p { margin: 0; }
+
+/* ------------------------------------------------------------------
+   Pages that keep their older body styling (legal, contact, security):
+   the new header is fixed so their existing top spacing still works.
+------------------------------------------------------------------- */
+body.legacy { background: var(--paper) !important; }
+body.legacy .site-header { position: fixed; top: 0; left: 0; right: 0; z-index: 50; border-bottom: 1px solid var(--rule); }
+body.legacy .site-footer { margin-top: 48px; }
+
+/* ------------------------------------------------------------------
+   Responsive
+------------------------------------------------------------------- */
+@media (max-width: 960px) {
+  :root { --nav-h: 58px; }
+  .nav-links { gap: 18px; }
+  .nav-links .nav-hide-md { display: none; }
+}
+@media (max-width: 520px) {
+  .nav-links { gap: 10px; }
+  .nav-links .nav-hide-sm { display: none; }
+  .brand-name { font-size: 1.15rem; }
+  .cmd { box-shadow: 4px 4px 0 var(--signal); }
+  .cmd code { padding: 12px 14px; font-size: .8125rem; }
+  .copy { min-width: 0; padding: 0 14px; }
+  .copy .copy-label { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  html:has(body.site) { scroll-behavior: auto; }
+}
