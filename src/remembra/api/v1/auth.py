@@ -690,6 +690,7 @@ class ChangePasswordResponse(BaseModel):
     response_model=ChangePasswordResponse,
     responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}},
 )
+@limiter.limit("5/minute")  # password / TOTP guessing with a stolen session
 async def change_password(
     request: Request,
     body: ChangePasswordRequest,
@@ -737,6 +738,7 @@ class DeleteAccountResponse(BaseModel):
     response_model=DeleteAccountResponse,
     responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}},
 )
+@limiter.limit("5/minute")  # password / TOTP guessing with a stolen session
 async def delete_account(
     request: Request,
     body: DeleteAccountRequest,
@@ -853,6 +855,7 @@ async def setup_totp(
     response_model=TotpVerifyResponse,
     responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}},
 )
+@limiter.limit("5/minute")  # password / TOTP guessing with a stolen session
 async def enable_totp(
     request: Request,
     body: TotpVerifyRequest,
@@ -885,6 +888,7 @@ async def enable_totp(
     response_model=TotpDisableResponse,
     responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}},
 )
+@limiter.limit("5/minute")  # password / TOTP guessing with a stolen session
 async def disable_totp(
     request: Request,
     body: TotpDisableRequest,

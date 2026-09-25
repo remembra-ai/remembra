@@ -168,3 +168,14 @@ async def test_meetings_require_auth_and_reject_server_paths(tmp_path):
         # Reading the server's own calendar is a platform-operator action.
         r = await h.client.get("/api/v1/meetings/brief", params={"event_id": "e"}, headers=hdr)
         assert r.status_code == 403
+
+
+async def test_import_without_project_pins_single_project_key(tmp_path):
+    async with secure_app(tmp_path, ROUTERS) as h:
+        recorder, _ = await _setup(h)
+        key, _ = await h.api_key("tenant-a", "editor", project_ids=["alpha"])
+        r = await h.client.post(
+            "/api/v1/transfer/import", json={"format": "plaintext", "data": TWO_PARAGRAPHS}, headers={"X-API-Key": key}
+        )
+        assert r.status_code == 200, r.text
+        assert {c[0].project_id for c in recorder.calls} == {"alpha"}

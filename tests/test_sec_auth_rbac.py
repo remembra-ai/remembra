@@ -465,3 +465,20 @@ async def test_auth_logs_contain_no_emails_or_key_material(tmp_path, capsys, cap
     logs = captured.out + captured.err + caplog.text
     assert email not in logs and "ghost@example.com" not in logs
     assert "rem_Forged" not in logs
+
+
+async def test_password_confirming_endpoints_are_rate_limited(tmp_path):
+    limiter.enabled = True
+    limiter.reset()
+    try:
+        async with secure_app(tmp_path, ROUTERS) as h:
+            uid = await h.create_user("rl@example.com", password="Str0ng!Passw0rd")
+            hdr = h.jwt(uid, "rl@example.com")
+            codes = [
+                (await h.client.post("/api/v1/auth/2fa/disable", json={"password": f"guess{i}"}, headers=hdr)).status_code
+                for i in range(7)
+            ]
+            assert codes[:5] == [400] * 5 and codes[5] == 429
+    finally:
+        limiter.reset()
+        limiter.enabled = False
