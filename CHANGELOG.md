@@ -5,6 +5,44 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**New plans and cost protection for Remembra Cloud.**
+
+### Added
+- **New plan catalog:** Free $0, Solo $12/mo or $120/yr, Pro $29/mo or $290/yr,
+  Team $15/seat/mo or $150/seat/yr (3-seat minimum), Enterprise custom. Founding 100:
+  Solo at $108/yr, annual only, first 100 accounts. Existing $49 Pro and $199 Team
+  subscribers move to grandfathered `legacy_pro_49` / `legacy_team_199` tiers with
+  $30 / $150 monthly AI ceilings; reduced memory caps wait for
+  `REMEMBRA_MEMORY_CAP_NOTICE_EFFECTIVE_AT`.
+- **Smart credits.** AI enrichment (extraction, consolidation, entity resolution) is
+  metered in credits: `max(ceil(chars / 8000), actual LLM $ / 0.0025)` per store. A
+  chunk-aware reservation (16 credits per 8K chunk) is taken before any LLM call on
+  every write path, then settled from real OpenAI `usage` after the background work
+  finishes and the rest refunded. Annual plans get the whole year's credits up front.
+- **Degrade, never reject.** Out of credits (or with the global free-tier breaker
+  open), writes are stored atomically without enrichment. Responses carry
+  `X-Remembra-Enrichment: full|degraded|atomic` and `X-Remembra-Credits-Remaining`.
+  The only store 429 is the memory cap.
+- **Relay is free:** handoffs, checkpoints, status values, inbox messages, pickup
+  briefs, trail reads and recalls never use credits (relay has a per-plan burst limit
+  and a reported soft cap; recalls have monthly and burst limits).
+- **Global free-tier circuit breaker:** once a month's free AI spend reaches
+  max($50, 20% of last month's net paid revenue), all free enrichment degrades until
+  month end.
+- **Bounded enrichment queue** with per-tenant concurrency (Free 2, Solo 4, Pro/Team 8)
+  and a global cap.
+- **Signup hardening:** 3 signups/hour per /24, 20/day per email domain, optional
+  Cloudflare Turnstile (`REMEMBRA_TURNSTILE_SECRET`), and Free accounts hold 25 credits
+  until the email is verified. Rate-limit storage can be Redis
+  (`REMEMBRA_RATE_LIMIT_STORAGE=redis://...`; `redis` added to the `cloud` extra).
+- `GET /api/v1/cloud/usage/summary` for the dashboard billing panel.
+
+### Fixed
+- Entity resolution (a ~3K-token LLM call) no longer runs for atomic stores:
+  handoff, checkpoint, status, `skip_extraction` and degraded writes.
+
 ## [0.16.0] - 2026-07-16
 
 **Lossless memory + production reliability.** The theme of this release: what you

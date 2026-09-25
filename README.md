@@ -225,10 +225,10 @@ const result = await memory.recall('preferences');
 | **6 Embedding Providers** | ✅ Hot-swap | ❌ (1-2) | ❌ (1) | ❌ | ❌ |
 | **Plugin System** | ✅ | ❌ | ❌ | ✅ | ❌ |
 | **Sleep-Time Compute** | ✅ | ❌ | ❌ | ✅ | ❌ |
-| **Self-Host + Billing** | ✅ Stripe | ❌ | ❌ | ❌ | ❌ |
+| **Self-Host + Billing** | ✅ Paddle | ❌ | ❌ | ❌ | ❌ |
 | **Memory Spaces** | ✅ Multi-tenant | ❌ | ❌ | ❌ | ❌ |
 | **MCP Server** | ✅ 11 Tools | ✅ | ❌ | ❌ | ✅ |
-| **Pricing** | Free / $49 / $199 | $19 → $249 | $25+ | Free | Free |
+| **Pricing** | Free / $12 / $29 / $15 per seat | $19 → $249 | $25+ | Free | Free |
 | **License** | MIT | Apache 2.0 | Apache 2.0 | Apache 2.0 | MIT |
 
 ### Core Features
