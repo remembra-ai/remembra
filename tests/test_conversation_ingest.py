@@ -24,6 +24,7 @@ from remembra.models.memory import (
     IngestStats,
 )
 from remembra.services.conversation_ingest import ConversationIngestService
+from remembra.services.memory import _FactResult
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +58,7 @@ def mock_memory_service():
 
     # Mock async methods
     service.store = AsyncMock()
-    service.forget_by_id = AsyncMock()
+    service.store_fact = AsyncMock()
 
     return service
 
@@ -245,9 +246,10 @@ class TestConversationIngestService:
                 return_value=MagicMock(entities=[], relationships=[])
             )
 
-            # Mock embedding and search
-            conversation_ingest_service.embeddings.embed = AsyncMock(return_value=[0.1] * 1536)
-            conversation_ingest_service.qdrant.search = AsyncMock(return_value=[])
+            # Per-fact grounding/consolidation/storage is MemoryService.store_fact
+            conversation_ingest_service.memory_service.store_fact = AsyncMock(
+                return_value=_FactResult(fact="f", action="add", decided_by="rule", memory_id="mem_123")
+            )
 
             # Mock store
             conversation_ingest_service.memory_service.store = AsyncMock(return_value=MagicMock(id="mem_123"))
@@ -345,8 +347,9 @@ class TestConversationIngestService:
             conversation_ingest_service.entity_extractor.extract = AsyncMock(
                 return_value=MagicMock(entities=[], relationships=[])
             )
-            conversation_ingest_service.embeddings.embed = AsyncMock(return_value=[0.1] * 1536)
-            conversation_ingest_service.qdrant.search = AsyncMock(return_value=[])
+            conversation_ingest_service.memory_service.store_fact = AsyncMock(
+                return_value=_FactResult(fact="f", action="add", decided_by="rule", memory_id="mem_123")
+            )
             conversation_ingest_service.memory_service.store = AsyncMock(return_value=MagicMock(id="mem_123"))
 
             request = ConversationIngestRequest(

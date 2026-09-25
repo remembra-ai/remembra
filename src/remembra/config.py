@@ -15,6 +15,9 @@ class Settings(BaseSettings):
         # Ignore unknown env vars so retired settings (e.g. leftover
         # REMEMBRA_STRIPE_* secrets in a deployed environment) never break boot.
         extra="ignore",
+        # Aliased settings (e.g. typesafe_api_key <- TYPESAFE_API_KEY) can also
+        # be passed by field name in code and tests.
+        populate_by_name=True,
     )
 
     # -----------------------------------------------------------------------
@@ -99,7 +102,83 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     smart_extraction_enabled: bool = Field(True, description="Enable LLM-powered fact extraction")
     extraction_model: str = Field("gpt-4o-mini", description="Model for fact extraction and consolidation")
-    consolidation_threshold: float = Field(0.5, description="Similarity threshold for memory consolidation")
+    extraction_max_facts: int = Field(
+        25,
+        ge=1,
+        description="Maximum facts kept per extraction chunk. Truncation is logged and flagged, never silent.",
+    )
+    extraction_chunk_chars: int = Field(
+        8000,
+        ge=500,
+        description="Long inputs are split into chunks of about this many characters before extraction.",
+    )
+    consolidation_threshold: float = Field(
+        0.6,
+        description=(
+            "Minimum vector similarity for an existing memory to be considered a "
+            "consolidation candidate (duplicate / supersede) for a new fact."
+        ),
+    )
+    consolidation_candidate_limit: int = Field(5, ge=1, le=20, description="Max consolidation candidates per fact")
+    supersede_min_confidence: float = Field(
+        0.7,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum decision confidence for the LLM consolidator to retire (supersede) "
+            "an existing memory. Below it the new fact is added and the pair is flagged."
+        ),
+    )
+    grounding_action: str = Field(
+        "drop",
+        description=(
+            "What to do with an extracted fact that is not supported by its source text: "
+            "'drop' (default; reported in the store response) or 'flag' (store with verified=false)."
+        ),
+    )
+
+    # -----------------------------------------------------------------------
+    # TypeSafe / Jev decisions (UPG-5)
+    # -----------------------------------------------------------------------
+    typesafe_api_key: str | None = Field(
+        None,
+        description="TypeSafe API key. Enables Jev decisions (shadow mode by default).",
+        validation_alias=AliasChoices("REMEMBRA_TYPESAFE_API_KEY", "TYPESAFE_API_KEY"),
+    )
+    typesafe_mode: str | None = Field(
+        None,
+        description=(
+            "off | shadow | enforce. Unset = 'shadow' when a TypeSafe key is configured, "
+            "'off' otherwise. shadow: the LLM decides, Jev is logged to decision_log. "
+            "enforce: Jev decides, with LLM fallback on any Jev error."
+        ),
+    )
+    typesafe_base_url: str = Field("https://api.typesafe.ai", description="TypeSafe API base URL")
+    typesafe_model: str = Field("jev-latest", description="TypeSafe model name")
+    typesafe_timeout: float = Field(2.0, gt=0, description="Per-request TypeSafe timeout in seconds")
+    typesafe_supersede_threshold: float = Field(
+        0.85, ge=0.0, le=1.0, description="Enforce mode: min P(supersedes) to retire an existing memory"
+    )
+    typesafe_duplicate_threshold: float = Field(
+        0.85, ge=0.0, le=1.0, description="Enforce mode: min P(duplicate) to skip a fact as already known"
+    )
+    typesafe_grounding_threshold: float = Field(
+        0.5, ge=0.0, le=1.0, description="Enforce mode: min grounding probability for a fact to count as supported"
+    )
+    typesafe_entity_match_threshold: float = Field(
+        0.8, ge=0.0, le=1.0, description="Enforce mode: min coreference probability to merge an entity mention"
+    )
+
+    # -----------------------------------------------------------------------
+    # Store reliability
+    # -----------------------------------------------------------------------
+    idempotency_ttl_hours: int = Field(24, ge=1, description="How long a completed Idempotency-Key is remembered")
+    idempotency_inflight_timeout_seconds: int = Field(
+        300,
+        ge=10,
+        description="An in-flight Idempotency-Key older than this is treated as abandoned and may be retried",
+    )
+    batch_store_concurrency: int = Field(4, ge=1, le=16, description="Parallel item stores in POST /memories/batch")
 
     # -----------------------------------------------------------------------
     # Lossless Memory (provenance-grade fidelity)
@@ -366,6 +445,14 @@ class Settings(BaseSettings):
                     stacklevel=2,
                 )
 
+        if self.typesafe_mode is not None:
+            mode = self.typesafe_mode.strip().lower()
+            if mode not in {"off", "shadow", "enforce"}:
+                raise ValueError("typesafe_mode must be one of: off, shadow, enforce")
+            object.__setattr__(self, "typesafe_mode", mode)
+        if self.grounding_action not in {"drop", "flag"}:
+            raise ValueError("grounding_action must be 'drop' or 'flag'")
+
         # Filter out localhost from CORS origins in production mode
         if not self.debug and self.cors_filter_localhost_in_production:
             # Use object.__setattr__ since model is frozen after validation
@@ -373,6 +460,13 @@ class Settings(BaseSettings):
             object.__setattr__(self, "cors_origins", filtered)
 
         return self
+
+    @property
+    def typesafe_effective_mode(self) -> str:
+        """Resolved Jev mode: explicit setting, else shadow iff a key is configured."""
+        if not self.typesafe_api_key:
+            return "off"
+        return self.typesafe_mode or "shadow"
 
 
 _settings: Settings | None = None

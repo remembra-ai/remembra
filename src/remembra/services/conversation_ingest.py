@@ -2,36 +2,32 @@
 Conversation Ingestion Service.
 
 Orchestrates the extraction pipeline for conversations:
-1. Message parsing and filtering
-2. Fact extraction (using FactExtractor with conversation-aware prompts)
-3. Entity extraction (using EntityExtractor)
-4. Deduplication (using MemoryConsolidator)
-5. Storage (using MemoryService)
-
-This is the #1 feature gap vs Mem0 - automatic conversation ingestion.
+1. Message selection (system role excluded by default)
+2. Fact extraction with a conversation-aware prompt (speaker attribution,
+   importance, relative dates resolved against message timestamps)
+3. Entity extraction for the response
+4. Per-fact grounding + consolidation decision + storage through
+   ``MemoryService.store_fact`` — the SAME path as ``store()``. Nothing is
+   extracted or consolidated twice, and existing memories are never rewritten
+   or deleted: an update stores the new fact and marks the old one superseded.
 """
 
 import json
 import time
-from typing import Any, cast
+from typing import Any
 
 import structlog
 from openai import AsyncOpenAI
-from openai.types.chat import (
-    ChatCompletionMessageParam,
-    ChatCompletionToolChoiceOptionParam,
-    ChatCompletionToolParam,
-)
 
 from remembra.config import Settings
 from remembra.core.time import utcnow
+from remembra.extraction.prompting import reference_date_line, wrap_untrusted
 from remembra.extraction.prompts.conversation import (
     CONVERSATION_EXTRACTION_SYSTEM_PROMPT,
     CONVERSATION_EXTRACTION_USER_PROMPT,
-    DEDUP_DECISION_FUNCTIONS,
-    DEDUP_DECISION_PROMPT,
-    format_existing_memories,
+    format_messages_as_json,
     format_messages_for_extraction,
+    select_messages,
 )
 from remembra.models.memory import (
     ConversationIngestRequest,
@@ -48,16 +44,18 @@ from remembra.models.memory import (
 log = structlog.get_logger(__name__)
 
 
-class ConversationIngestService:
-    """
-    Service for ingesting conversations and extracting memories.
+class ConversationExtractionError(Exception):
+    """The extraction model call failed or returned something unusable."""
 
-    Orchestrates existing extractors into a unified pipeline:
-    - FactExtractor for atomic fact extraction
-    - EntityExtractor for entity/relationship extraction
-    - MemoryConsolidator for deduplication decisions
-    - ConflictManager for contradiction handling
-    """
+
+def _clamp01(value: Any, default: float) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return default
+    return max(0.0, min(1.0, float(value)))
+
+
+class ConversationIngestService:
+    """Service for ingesting conversations and extracting memories."""
 
     def __init__(
         self,
@@ -66,14 +64,7 @@ class ConversationIngestService:
     ) -> None:
         self.settings = settings
         self.memory_service = memory_service
-
-        # Access extractors through memory_service
-        self.extractor = memory_service.extractor
         self.entity_extractor = memory_service.entity_extractor
-        self.consolidator = memory_service.consolidator
-        self.conflict_manager = memory_service.conflict_manager
-        self.embeddings = memory_service.embeddings
-        self.qdrant = memory_service.qdrant
 
         # LLM client for conversation-specific extraction
         self._client: AsyncOpenAI | None = None
@@ -83,7 +74,7 @@ class ConversationIngestService:
     def _get_client(self) -> AsyncOpenAI:
         """Get or create OpenAI client."""
         if self._client is None:
-            self._client = AsyncOpenAI(api_key=self.settings.openai_api_key)
+            self._client = AsyncOpenAI(api_key=self.settings.openai_api_key, max_retries=1)
         return self._client
 
     async def ingest(
@@ -93,24 +84,13 @@ class ConversationIngestService:
         """
         Main ingestion pipeline.
 
-        Phases:
-        1. Message parsing - filter and format messages
-        2. Fact extraction - extract atomic facts with importance scores
-        3. Entity extraction - extract entities and relationships
-        4. Deduplication - check each fact against existing memories
-        5. Storage - store new/updated facts
-
-        Args:
-            request: ConversationIngestRequest with messages and options
-
-        Returns:
-            ConversationIngestResponse with extracted facts, entities, and stats
+        Returns status "ok" when every fact was processed, "partial" when some
+        facts failed, and "error" when extraction itself failed (nothing is
+        reported as ok when nothing could be extracted).
         """
         start_time = time.time()
 
-        # The API layer overrides request.user_id with the authenticated
-        # user_id before calling ingest (ingest.py: body.user_id = current_user.user_id),
-        # so it is always set here despite the model default of None.
+        # The API layer overrides request.user_id with the authenticated user_id.
         assert request.user_id is not None, "user_id must be set by the API layer before ingest"
 
         log.info(
@@ -121,46 +101,50 @@ class ConversationIngestService:
             options=request.options.model_dump(),
         )
 
-        # Initialize response components
         extracted_facts: list[ExtractedFact] = []
         extracted_entities: list[ExtractedEntityResult] = []
         deduped_results: list[DedupeResult] = []
         errors: list[str] = []
-
         stats = IngestStats(messages_processed=len(request.messages))
 
-        try:
-            # Phase 1: Handle raw mode (infer=False)
-            if not request.options.infer:
-                return await self._store_raw_messages(request, start_time)
+        def response(status: str) -> ConversationIngestResponse:
+            stats.processing_time_ms = int((time.time() - start_time) * 1000)
+            return ConversationIngestResponse(
+                status=status,
+                session_id=request.session_id,
+                facts=extracted_facts,
+                entities=extracted_entities,
+                deduped=deduped_results,
+                stats=stats,
+                errors=errors,
+            )
 
-            # Phase 2: Extract facts from conversation
+        if not request.options.infer:
+            return await self._store_raw_messages(request, start_time)
+
+        message_dicts = [m.model_dump() for m in request.messages]
+        try:
             extracted_facts = await self._extract_facts(
                 messages=request.messages,
                 options=request.options,
                 context=request.context,
             )
-            stats.facts_extracted = len(extracted_facts)
+        except ConversationExtractionError as e:
+            log.error("conversation_extraction_failed", error=str(e))
+            errors.append(f"Extraction failed: {e}")
+            return response("error")
+        stats.facts_extracted = len(extracted_facts)
 
-            log.debug("facts_extracted", count=len(extracted_facts))
+        transcript = format_messages_for_extraction(
+            message_dicts,
+            extract_from=request.options.extract_from,
+            include_system=request.options.include_system,
+        )
 
-            # Phase 3: Extract entities
-            transcript = format_messages_for_extraction(
-                [m.model_dump() for m in request.messages],
-                extract_from=request.options.extract_from,
-            )
+        try:
             entity_result = await self.entity_extractor.extract(transcript)
-
             for entity in entity_result.entities:
-                extracted_entities.append(
-                    ExtractedEntityResult(
-                        name=entity.name,
-                        type=entity.type,
-                        relationship=None,
-                        subtype=None,
-                    )
-                )
-
+                extracted_entities.append(ExtractedEntityResult(name=entity.name, type=entity.type))
             for rel in entity_result.relationships:
                 extracted_entities.append(
                     ExtractedEntityResult(
@@ -170,106 +154,82 @@ class ConversationIngestService:
                         subtype=rel.predicate,
                     )
                 )
-
             stats.entities_found = len(entity_result.entities)
+        except Exception as e:  # entity listing is informational; never fails the ingest
+            log.warning("conversation_entity_extraction_failed", error=str(e))
+            errors.append("Entity extraction failed")
 
-            log.debug(
-                "entities_extracted",
-                entity_count=len(entity_result.entities),
-                relationship_count=len(entity_result.relationships),
-            )
+        if not request.options.store:
+            for fact in extracted_facts:
+                fact.stored = False
+                fact.action = "add"
+                fact.action_reason = "Dry run - not stored"
+            return response("ok")
 
-            # Phase 4 & 5: Deduplication and Storage
-            if request.options.store:
-                for fact in extracted_facts:
-                    try:
-                        result = await self._process_fact(
-                            fact=fact,
-                            user_id=request.user_id,
-                            project_id=request.project_id,
-                            session_id=request.session_id,
-                            options=request.options,
-                            context=request.context,
-                        )
+        sibling_ids: set[str] = set()
+        for fact in extracted_facts:
+            try:
+                result = await self.memory_service.store_fact(
+                    fact=fact.content,
+                    user_id=request.user_id,
+                    project_id=request.project_id,
+                    metadata={
+                        "source": "conversation_ingest",
+                        "session_id": request.session_id,
+                        "source_message_index": fact.source_message_index,
+                        "speaker": fact.speaker,
+                        "importance": fact.importance,
+                        "channel": request.context.get("channel") if request.context else None,
+                    },
+                    source="conversation_ingest",
+                    trust_score=fact.confidence,
+                    grounding_source=transcript,
+                    consolidate=request.options.dedupe,
+                    exclude_ids=sibling_ids,
+                )
+            except Exception as e:
+                log.error("fact_processing_error", fact=fact.content[:50], error=str(e))
+                fact.action = "skipped"
+                fact.action_reason = "Store failed"
+                errors.append(f"Failed to process fact {fact.content[:40]!r}: {type(e).__name__}")
+                continue
 
-                        # Update fact with result
-                        fact.action = result["action"].lower()
-                        fact.action_reason = result.get("reason")
-                        fact.stored = result.get("stored", False)
-                        fact.memory_id = result.get("memory_id")
+            fact.action = result.action
+            fact.action_reason = result.reason
+            fact.memory_id = result.memory_id
+            fact.stored = result.memory_id is not None
+            if result.memory_id:
+                sibling_ids.add(result.memory_id)
 
-                        # Track deduplication
-                        if result["action"] in ["UPDATE", "NOOP"]:
-                            if result.get("target_memory_id"):
-                                deduped_results.append(
-                                    DedupeResult(
-                                        content=fact.content,
-                                        existing_memory_id=result["target_memory_id"],
-                                        action="merged" if result["action"] == "UPDATE" else "skipped",
-                                    )
-                                )
+            if result.action == "add":
+                stats.facts_stored += 1
+            elif result.action == "supersede":
+                stats.facts_stored += 1
+                stats.facts_updated += 1
+                deduped_results.append(
+                    DedupeResult(content=fact.content, existing_memory_id=result.target_id or "", action="superseded")
+                )
+            elif result.action == "noop":
+                stats.facts_skipped += 1
+                stats.facts_deduped += 1
+                if result.target_id:
+                    deduped_results.append(
+                        DedupeResult(content=fact.content, existing_memory_id=result.target_id, action="skipped")
+                    )
+            elif result.action == "dropped":
+                stats.facts_dropped += 1
 
-                        # Update stats
-                        if result["action"] == "ADD":
-                            stats.facts_stored += 1
-                        elif result["action"] == "UPDATE":
-                            stats.facts_updated += 1
-                            stats.facts_deduped += 1
-                        elif result["action"] == "NOOP":
-                            stats.facts_skipped += 1
-                            stats.facts_deduped += 1
-                        elif result["action"] == "DELETE":
-                            stats.facts_stored += 1  # We store the new version
-
-                    except Exception as e:
-                        log.error("fact_processing_error", fact=fact.content[:50], error=str(e))
-                        fact.action = "skipped"
-                        fact.action_reason = f"Error: {str(e)}"
-                        errors.append(f"Failed to process fact: {str(e)}")
-            else:
-                # Dry run - mark all as not stored
-                for fact in extracted_facts:
-                    fact.stored = False
-                    fact.action = "add"  # Would be added
-                    fact.action_reason = "Dry run - not stored"
-
-            processing_time_ms = int((time.time() - start_time) * 1000)
-            stats.processing_time_ms = processing_time_ms
-
-            status = "ok" if not errors else "partial"
-
-            log.info(
-                "conversation_ingest_completed",
-                user_id=request.user_id,
-                status=status,
-                facts_extracted=stats.facts_extracted,
-                facts_stored=stats.facts_stored,
-                facts_deduped=stats.facts_deduped,
-                processing_time_ms=processing_time_ms,
-            )
-
-            return ConversationIngestResponse(
-                status=status,
-                session_id=request.session_id,
-                facts=extracted_facts,
-                entities=extracted_entities,
-                deduped=deduped_results,
-                stats=stats,
-            )
-
-        except Exception as e:
-            log.error("conversation_ingest_failed", error=str(e))
-            processing_time_ms = int((time.time() - start_time) * 1000)
-            stats.processing_time_ms = processing_time_ms
-
-            return ConversationIngestResponse(
-                status="error",
-                session_id=request.session_id,
-                facts=extracted_facts,
-                entities=extracted_entities,
-                deduped=deduped_results,
-                stats=stats,
-            )
+        status = "ok" if not errors else "partial"
+        log.info(
+            "conversation_ingest_completed",
+            user_id=request.user_id,
+            status=status,
+            facts_extracted=stats.facts_extracted,
+            facts_stored=stats.facts_stored,
+            facts_deduped=stats.facts_deduped,
+            facts_dropped=stats.facts_dropped,
+        )
+        return response(status)
 
     async def _store_raw_messages(
         self,
@@ -277,25 +237,36 @@ class ConversationIngestService:
         start_time: float,
     ) -> ConversationIngestResponse:
         """
-        Store messages as raw memories without extraction (infer=False mode).
+        Store messages verbatim (infer=False): one atomic memory per message.
+
+        ``skip_extraction=True`` means no fact extraction and no consolidation —
+        raw really is raw (ING-11). System messages are skipped unless
+        ``options.include_system``.
         """
         log.info("storing_raw_messages", message_count=len(request.messages))
 
         facts: list[ExtractedFact] = []
+        errors: list[str] = []
         stored_count = 0
 
-        for i, msg in enumerate(request.messages):
-            if msg.role == "system":
-                continue  # Skip system messages
+        selected = select_messages(
+            [m.model_dump() for m in request.messages],
+            extract_from="both",
+            include_system=request.options.include_system,
+        )
+        for m in selected:
+            i, speaker, role = m["index"], m["speaker"], m["role"]
+            content = f"{speaker}: {m['text']}"
+            fact = ExtractedFact(content=content, confidence=1.0, importance=0.5, source_message_index=i, speaker=speaker)
 
-            # Build content with speaker attribution
-            speaker = msg.name or msg.role.capitalize()
-            content = f"{speaker}: {msg.content}"
-
-            # Store via memory service
-            if request.options.store:
-                try:
-                    store_request = StoreRequest(
+            if not request.options.store:
+                fact.action = "add"
+                fact.action_reason = "Dry run"
+                facts.append(fact)
+                continue
+            try:
+                result = await self.memory_service.store(
+                    StoreRequest(
                         user_id=request.user_id,
                         content=content,
                         project_id=request.project_id,
@@ -304,72 +275,38 @@ class ConversationIngestService:
                             "session_id": request.session_id,
                             "message_index": i,
                             "speaker": speaker,
-                            "role": msg.role,
-                            "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+                            "role": role,
+                            "timestamp": m["timestamp"],
                         },
-                    )
-                    result = await self.memory_service.store(
-                        store_request,
-                        source="conversation_ingest",
-                        trust_score=1.0,
-                    )
-
-                    facts.append(
-                        ExtractedFact(
-                            content=content,
-                            confidence=1.0,
-                            importance=0.5,
-                            source_message_index=i,
-                            speaker=speaker,
-                            stored=True,
-                            memory_id=result.id,
-                            action="add",
-                            action_reason="Raw message stored",
-                        )
-                    )
-                    stored_count += 1
-
-                except Exception as e:
-                    log.error("raw_message_store_error", index=i, error=str(e))
-                    facts.append(
-                        ExtractedFact(
-                            content=content,
-                            confidence=1.0,
-                            importance=0.5,
-                            source_message_index=i,
-                            speaker=speaker,
-                            stored=False,
-                            action="skipped",
-                            action_reason=f"Error: {str(e)}",
-                        )
-                    )
-            else:
-                facts.append(
-                    ExtractedFact(
-                        content=content,
-                        confidence=1.0,
-                        importance=0.5,
-                        source_message_index=i,
-                        speaker=speaker,
-                        stored=False,
-                        action="add",
-                        action_reason="Dry run",
-                    )
+                    ),
+                    source="conversation_ingest",
+                    trust_score=1.0,
+                    skip_extraction=True,
                 )
-
-        processing_time_ms = int((time.time() - start_time) * 1000)
+                fact.stored = True
+                fact.memory_id = result.id
+                fact.action = "add"
+                fact.action_reason = "Raw message stored"
+                stored_count += 1
+            except Exception as e:
+                log.error("raw_message_store_error", index=i, error=str(e))
+                fact.action = "skipped"
+                fact.action_reason = "Store failed"
+                errors.append(f"Failed to store message {i}: {type(e).__name__}")
+            facts.append(fact)
 
         return ConversationIngestResponse(
-            status="ok",
+            status="ok" if not errors else ("error" if stored_count == 0 else "partial"),
             session_id=request.session_id,
             facts=facts,
             entities=[],
             deduped=[],
+            errors=errors,
             stats=IngestStats(
                 messages_processed=len(request.messages),
                 facts_extracted=len(facts),
                 facts_stored=stored_count,
-                processing_time_ms=processing_time_ms,
+                processing_time_ms=int((time.time() - start_time) * 1000),
             ),
         )
 
@@ -380,31 +317,33 @@ class ConversationIngestService:
         context: dict[str, Any] | None,
     ) -> list[ExtractedFact]:
         """
-        Extract facts from conversation using LLM with conversation-aware prompt.
+        Extract facts with the conversation-aware prompt.
+
+        Each returned fact is validated (ING-15): non-empty string content,
+        importance clamped to [0, 1], source_message must be one of the
+        messages actually offered, and the speaker is taken from that message
+        (never from free text). Raises ConversationExtractionError when the
+        model call fails or returns an unusable payload.
         """
-        # Format messages for extraction
-        formatted = format_messages_for_extraction(
-            [m.model_dump() for m in messages],
-            extract_from=options.extract_from,
-        )
+        message_dicts = [m.model_dump() for m in messages]
+        offered = select_messages(message_dicts, options.extract_from, options.include_system)
+        if not offered:
+            return []
+        speaker_by_index = {m["index"]: m["speaker"] for m in offered}
 
-        # Build context section
-        context_section = ""
-        if context:
-            context_section = f"CONTEXT: {json.dumps(context)}"
-
-        # Build user prompt
+        context_section = f"CONTEXT:\n{wrap_untrusted(json.dumps(context, ensure_ascii=False))}" if context else ""
         user_prompt = CONVERSATION_EXTRACTION_USER_PROMPT.format(
-            formatted_messages=formatted,
+            formatted_messages=wrap_untrusted(
+                format_messages_as_json(message_dicts, options.extract_from, options.include_system)
+            ),
             context_section=context_section,
             extract_from=options.extract_from,
             min_importance=options.min_importance,
+            reference_line=reference_date_line(utcnow()),
         )
 
         try:
-            client = self._get_client()
-
-            response = await client.chat.completions.create(
+            response = await self._get_client().chat.completions.create(
                 model=self.settings.extraction_model,
                 messages=[
                     {"role": "system", "content": CONVERSATION_EXTRACTION_SYSTEM_PROMPT},
@@ -414,305 +353,42 @@ class ConversationIngestService:
                 response_format={"type": "json_object"},
                 timeout=60.0,
             )
+        except Exception as e:
+            raise ConversationExtractionError(type(e).__name__) from e
 
-            result_text = response.choices[0].message.content
-            if not result_text:
-                log.warning("empty_extraction_response")
-                return []
-
+        result_text = response.choices[0].message.content
+        if not result_text:
+            raise ConversationExtractionError("empty response")
+        try:
             result = json.loads(result_text)
-            raw_facts = result.get("facts", [])
-
-            # Convert to ExtractedFact objects and filter by importance
-            extracted = []
-            for fact_data in raw_facts:
-                importance = fact_data.get("importance", 0.5)
-
-                # Filter by minimum importance
-                if importance < options.min_importance:
-                    continue
-
-                extracted.append(
-                    ExtractedFact(
-                        content=fact_data.get("content", ""),
-                        confidence=1.0,  # Extraction confidence
-                        importance=importance,
-                        source_message_index=fact_data.get("source_message", 0),
-                        speaker=fact_data.get("speaker"),
-                        stored=False,
-                        action="add",
-                    )
-                )
-
-            return extracted
-
         except json.JSONDecodeError as e:
-            log.error("extraction_json_error", error=str(e))
-            return []
-        except Exception as e:
-            log.error("extraction_error", error=str(e))
-            return []
+            raise ConversationExtractionError("invalid JSON") from e
+        if not isinstance(result, dict) or not isinstance(result.get("facts", []), list):
+            raise ConversationExtractionError("response has no facts list")
 
-    async def _process_fact(
-        self,
-        fact: ExtractedFact,
-        user_id: str,
-        project_id: str,
-        session_id: str | None,
-        options: IngestOptions,
-        context: dict[str, Any] | None,
-    ) -> dict[str, Any]:
-        """
-        Process a single fact through deduplication and storage.
-
-        Returns dict with: action, reason, stored, memory_id, target_memory_id
-        """
-        # Step 1: Generate embedding for this fact
-        embedding = await self.embeddings.embed(fact.content)
-
-        # Step 2: Search for similar existing memories
-        similar_memories = await self.qdrant.search(
-            query_vector=embedding,
-            user_id=user_id,
-            project_id=project_id,
-            limit=5,
-            score_threshold=0.5,  # Lower threshold for dedup checking
-        )
-
-        # Step 3: If no similar memories, just ADD
-        if not similar_memories and options.dedupe:
-            return await self._store_new_fact(
-                fact=fact,
-                user_id=user_id,
-                project_id=project_id,
-                session_id=session_id,
-                context=context,
-            )
-
-        # Step 4: Use LLM to decide action (if dedup enabled)
-        if options.dedupe and similar_memories:
-            decision = await self._get_dedup_decision(
-                new_fact=fact.content,
-                existing_memories=[
-                    {"id": m.get("id"), "content": m.get("content"), "score": m.get("score", 0.0)} for m in similar_memories
-                ],
-            )
-
-            # Execute decision
-            if decision["action"] == "ADD":
-                return await self._store_new_fact(
-                    fact=fact,
-                    user_id=user_id,
-                    project_id=project_id,
-                    session_id=session_id,
-                    context=context,
-                    reason=decision.get("reason"),
+        extracted: list[ExtractedFact] = []
+        for fact_data in result.get("facts", []):
+            if not isinstance(fact_data, dict):
+                continue
+            content = fact_data.get("content")
+            if not isinstance(content, str) or not content.strip():
+                continue
+            importance = _clamp01(fact_data.get("importance"), 0.5)
+            if importance < options.min_importance:
+                continue
+            index = fact_data.get("source_message")
+            if isinstance(index, bool) or not isinstance(index, int) or index not in speaker_by_index:
+                log.warning("conversation_fact_bad_source_message", source_message=str(index)[:20])
+                index = -1
+            extracted.append(
+                ExtractedFact(
+                    content=content.strip(),
+                    confidence=1.0,
+                    importance=importance,
+                    source_message_index=index,
+                    speaker=speaker_by_index.get(index),
+                    stored=False,
+                    action="add",
                 )
-
-            elif decision["action"] == "UPDATE":
-                return await self._update_existing(
-                    fact=fact,
-                    target_id=decision.get("target_memory_id"),
-                    merged_content=decision.get("merged_content"),
-                    user_id=user_id,
-                    project_id=project_id,
-                    session_id=session_id,
-                    context=context,
-                    reason=decision.get("reason"),
-                )
-
-            elif decision["action"] == "DELETE":
-                # Delete old, store new
-                if decision.get("target_memory_id"):
-                    await self.memory_service.forget_by_id(
-                        memory_id=decision["target_memory_id"],
-                        user_id=user_id,
-                    )
-                return await self._store_new_fact(
-                    fact=fact,
-                    user_id=user_id,
-                    project_id=project_id,
-                    session_id=session_id,
-                    context=context,
-                    reason=f"Replaced old memory: {decision.get('reason')}",
-                )
-
-            elif decision["action"] == "NOOP":
-                return {
-                    "action": "NOOP",
-                    "reason": decision.get("reason", "Already exists"),
-                    "stored": False,
-                    "memory_id": None,
-                    "target_memory_id": decision.get("target_memory_id"),
-                }
-
-        # Default: store as new
-        return await self._store_new_fact(
-            fact=fact,
-            user_id=user_id,
-            project_id=project_id,
-            session_id=session_id,
-            context=context,
-        )
-
-    async def _get_dedup_decision(
-        self,
-        new_fact: str,
-        existing_memories: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        """
-        Use LLM with function calling to decide dedup action.
-        """
-        try:
-            client = self._get_client()
-
-            formatted_existing = format_existing_memories(existing_memories)
-
-            prompt = DEDUP_DECISION_PROMPT.format(
-                new_fact=new_fact,
-                existing_memories=formatted_existing,
             )
-
-            response = await client.chat.completions.create(
-                model=self.settings.extraction_model,
-                messages=cast(
-                    "list[ChatCompletionMessageParam]",
-                    [
-                        {"role": "user", "content": prompt},
-                    ],
-                ),
-                tools=cast("list[ChatCompletionToolParam]", DEDUP_DECISION_FUNCTIONS),
-                tool_choice=cast(
-                    "ChatCompletionToolChoiceOptionParam",
-                    {"type": "function", "function": {"name": "decide_action"}},
-                ),
-                temperature=0.1,
-                timeout=30.0,
-            )
-
-            # Extract function call result
-            tool_call = response.choices[0].message.tool_calls
-            if tool_call and len(tool_call) > 0 and tool_call[0].type == "function":
-                args = json.loads(tool_call[0].function.arguments)
-                return {
-                    "action": args.get("action", "ADD"),
-                    "reason": args.get("reason", ""),
-                    "target_memory_id": args.get("target_memory_id"),
-                    "merged_content": args.get("merged_content"),
-                }
-
-            # Fallback to ADD
-            return {"action": "ADD", "reason": "No decision returned"}
-
-        except Exception as e:
-            log.error("dedup_decision_error", error=str(e))
-            return {"action": "ADD", "reason": f"Decision error: {str(e)}"}
-
-    async def _store_new_fact(
-        self,
-        fact: ExtractedFact,
-        user_id: str,
-        project_id: str,
-        session_id: str | None,
-        context: dict[str, Any] | None,
-        reason: str | None = None,
-    ) -> dict[str, Any]:
-        """Store a new fact as a memory."""
-        try:
-            store_request = StoreRequest(
-                user_id=user_id,
-                content=fact.content,
-                project_id=project_id,
-                metadata={
-                    "source": "conversation_ingest",
-                    "session_id": session_id,
-                    "source_message_index": fact.source_message_index,
-                    "speaker": fact.speaker,
-                    "importance": fact.importance,
-                    "channel": context.get("channel") if context else None,
-                },
-            )
-
-            result = await self.memory_service.store(
-                store_request,
-                source="conversation_ingest",
-                trust_score=fact.confidence,
-            )
-
-            return {
-                "action": "ADD",
-                "reason": reason or "New information",
-                "stored": True,
-                "memory_id": result.id,
-                "target_memory_id": None,
-            }
-
-        except Exception as e:
-            log.error("store_fact_error", error=str(e))
-            return {
-                "action": "ADD",
-                "reason": f"Store failed: {str(e)}",
-                "stored": False,
-                "memory_id": None,
-                "target_memory_id": None,
-            }
-
-    async def _update_existing(
-        self,
-        fact: ExtractedFact,
-        target_id: str | None,
-        merged_content: str | None,
-        user_id: str,
-        project_id: str,
-        session_id: str | None,
-        context: dict[str, Any] | None,
-        reason: str | None = None,
-    ) -> dict[str, Any]:
-        """Update an existing memory with merged content."""
-        if not target_id:
-            # Fallback to storing as new
-            return await self._store_new_fact(
-                fact=fact,
-                user_id=user_id,
-                project_id=project_id,
-                session_id=session_id,
-                context=context,
-                reason="No target ID for update, stored as new",
-            )
-
-        try:
-            # Use merged content if provided, otherwise use fact content
-            content = merged_content or fact.content
-
-            # Update the memory
-            # Note: MemoryService.update() method varies by implementation
-            # This is a simplified version - adjust based on actual method signature
-            await self.memory_service.db.conn.execute(
-                """
-                UPDATE memories 
-                SET content = ?, updated_at = ? 
-                WHERE id = ? AND user_id = ?
-                """,
-                (content, utcnow().isoformat(), target_id, user_id),
-            )
-            await self.memory_service.db.conn.commit()
-
-            return {
-                "action": "UPDATE",
-                "reason": reason or "Merged with existing",
-                "stored": True,
-                "memory_id": target_id,
-                "target_memory_id": target_id,
-            }
-
-        except Exception as e:
-            log.error("update_memory_error", error=str(e))
-            # Fallback to storing as new
-            return await self._store_new_fact(
-                fact=fact,
-                user_id=user_id,
-                project_id=project_id,
-                session_id=session_id,
-                context=context,
-                reason=f"Update failed: {str(e)}, stored as new",
-            )
+        return extracted

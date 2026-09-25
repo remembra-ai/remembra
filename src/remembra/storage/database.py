@@ -2,6 +2,7 @@
 
 import json
 import re
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -359,6 +360,40 @@ CREATE TABLE IF NOT EXISTS memory_feedback (
 
 CREATE INDEX IF NOT EXISTS idx_feedback_memory ON memory_feedback(memory_id);
 CREATE INDEX IF NOT EXISTS idx_feedback_user ON memory_feedback(user_id);
+
+-- Ingest pipeline (ING-18): durable Idempotency-Key records with in-flight state
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    user_id TEXT NOT NULL,
+    idem_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    status TEXT NOT NULL,          -- 'in_flight' | 'done'
+    response_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, idem_key)
+);
+
+-- Source-record dedupe by checksum (ING-18)
+CREATE INDEX IF NOT EXISTS idx_memories_user_checksum ON memories(user_id, checksum);
+
+-- Jev shadow/enforce decision log (UPG-5): LLM vs Jev decisions side by side
+CREATE TABLE IF NOT EXISTS decision_log (
+    id TEXT PRIMARY KEY,
+    decision_type TEXT NOT NULL,   -- 'consolidation' | 'grounding' | 'entity_coref'
+    mode TEXT NOT NULL,            -- 'shadow' | 'enforce'
+    user_id TEXT NOT NULL,
+    project_id TEXT,
+    memory_id TEXT,                -- memory stored for the fact (NULL for noop/dropped)
+    subject TEXT,                  -- fact text / entity name (truncated)
+    llm_decision TEXT,
+    jev_decision TEXT,
+    jev_probs TEXT,                -- JSON
+    agreed INTEGER,                -- 1/0, NULL when not comparable
+    latency_ms REAL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_decision_log_type ON decision_log(decision_type, created_at);
+CREATE INDEX IF NOT EXISTS idx_decision_log_user ON decision_log(user_id);
 """
 
 
@@ -878,6 +913,150 @@ class Database:
         superseded = {row[0] for row in await cursor.fetchall()}
         return {mid for mid in memory_ids if mid not in superseded}
 
+    async def get_memories_by_ids(self, memory_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Fetch several memory rows in one query, keyed by id (missing ids omitted)."""
+        if not memory_ids:
+            return {}
+        placeholders = ",".join("?" for _ in memory_ids)
+        cursor = await self.conn.execute(f"SELECT * FROM memories WHERE id IN ({placeholders})", tuple(memory_ids))
+        return {row["id"]: dict(row) for row in await cursor.fetchall()}
+
+    async def find_source_record(self, user_id: str, project_id: str, checksum: str) -> str | None:
+        """Most recent live source record with this checksum (ING-18 retry dedupe)."""
+        cursor = await self.conn.execute(
+            """
+            SELECT id FROM memories
+            WHERE user_id = ? AND project_id = ? AND checksum = ? AND memory_type = 'source'
+              AND (expires_at IS NULL OR expires_at > ?)
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (user_id, project_id, checksum, utcnow().isoformat()),
+        )
+        row = await cursor.fetchone()
+        return str(row[0]) if row else None
+
+    # -- Idempotency keys (ING-18) -------------------------------------------
+
+    async def idempotency_claim(
+        self,
+        user_id: str,
+        key: str,
+        request_hash: str,
+        ttl_seconds: int,
+        inflight_timeout_seconds: int,
+    ) -> tuple[str, str | None]:
+        """Claim an Idempotency-Key for a new request.
+
+        Returns (state, response_json):
+        - ("claimed", None): caller owns the key and must complete or release it.
+        - ("done", json): the request already completed; replay the response.
+        - ("in_flight", None): another request with this key is still running.
+        - ("mismatch", None): the key was used with a different request body.
+        Expired completed keys and abandoned in-flight keys are reclaimed.
+        """
+        now = utcnow()
+        now_iso = now.isoformat()
+        cursor = await self.conn.execute(
+            """
+            INSERT OR IGNORE INTO idempotency_keys
+                (user_id, idem_key, request_hash, status, response_json, created_at, updated_at)
+            VALUES (?, ?, ?, 'in_flight', NULL, ?, ?)
+            """,
+            (user_id, key, request_hash, now_iso, now_iso),
+        )
+        await self.conn.commit()
+        if cursor.rowcount > 0:
+            return "claimed", None
+
+        cursor = await self.conn.execute(
+            "SELECT request_hash, status, response_json, created_at, updated_at FROM idempotency_keys "
+            "WHERE user_id = ? AND idem_key = ?",
+            (user_id, key),
+        )
+        row = await cursor.fetchone()
+        if row is None:  # deleted between the two statements; try once more
+            return await self.idempotency_claim(user_id, key, request_hash, ttl_seconds, inflight_timeout_seconds)
+
+        created = datetime.fromisoformat(row["created_at"])
+        updated = datetime.fromisoformat(row["updated_at"])
+        expired = (now - created).total_seconds() > ttl_seconds
+        abandoned = row["status"] == "in_flight" and (now - updated).total_seconds() > inflight_timeout_seconds
+        if expired or abandoned:
+            await self.conn.execute(
+                "UPDATE idempotency_keys SET request_hash = ?, status = 'in_flight', response_json = NULL, "
+                "created_at = ?, updated_at = ? WHERE user_id = ? AND idem_key = ?",
+                (request_hash, now_iso, now_iso, user_id, key),
+            )
+            await self.conn.commit()
+            return "claimed", None
+        if row["request_hash"] != request_hash:
+            return "mismatch", None
+        if row["status"] == "done":
+            return "done", row["response_json"]
+        return "in_flight", None
+
+    async def idempotency_complete(self, user_id: str, key: str, response_json: str) -> None:
+        await self.conn.execute(
+            "UPDATE idempotency_keys SET status = 'done', response_json = ?, updated_at = ? WHERE user_id = ? AND idem_key = ?",
+            (response_json, utcnow().isoformat(), user_id, key),
+        )
+        await self.conn.commit()
+
+    async def idempotency_release(self, user_id: str, key: str) -> None:
+        """Forget an in-flight key after a failed request so a retry can run."""
+        await self.conn.execute(
+            "DELETE FROM idempotency_keys WHERE user_id = ? AND idem_key = ? AND status = 'in_flight'",
+            (user_id, key),
+        )
+        await self.conn.commit()
+
+    # -- Decision log (UPG-5 Jev shadow mode) ---------------------------------
+
+    async def log_decision(
+        self,
+        decision_type: str,
+        mode: str,
+        user_id: str,
+        project_id: str | None,
+        memory_id: str | None,
+        subject: str | None,
+        llm_decision: str | None,
+        jev_decision: str | None,
+        jev_probs: dict[str, Any] | None,
+        agreed: bool | None,
+        latency_ms: float | None,
+    ) -> str:
+        entry_id = str(uuid.uuid4())
+        await self.conn.execute(
+            """
+            INSERT INTO decision_log (id, decision_type, mode, user_id, project_id, memory_id, subject,
+                                      llm_decision, jev_decision, jev_probs, agreed, latency_ms, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                entry_id,
+                decision_type,
+                mode,
+                user_id,
+                project_id,
+                memory_id,
+                (subject or "")[:500] or None,
+                llm_decision,
+                jev_decision,
+                json.dumps(jev_probs) if jev_probs is not None else None,
+                None if agreed is None else (1 if agreed else 0),
+                latency_ms,
+                utcnow().isoformat(),
+            ),
+        )
+        await self.conn.commit()
+        return entry_id
+
+    async def delete_user_decision_logs(self, user_id: str) -> int:
+        cursor = await self.conn.execute("DELETE FROM decision_log WHERE user_id = ?", (user_id,))
+        await self.conn.commit()
+        return cursor.rowcount
+
     async def delete_memory_entities(self, memory_id: str) -> None:
         """Delete all entity links for a memory."""
         await self.conn.execute(
@@ -886,11 +1065,17 @@ class Database:
         )
         await self.conn.commit()
 
-    async def delete_memory(self, memory_id: str) -> bool:
+    async def delete_memory(self, memory_id: str, user_id: str | None = None) -> bool:
         """Delete a memory and its associations.
 
+        When ``user_id`` is given the delete only happens if that user owns the
+        memory (ING-2: no unscoped deletes from request paths).
         Properly handles FK constraints by deleting relationships first.
         """
+        if user_id is not None:
+            owner = await self.conn.execute("SELECT 1 FROM memories WHERE id = ? AND user_id = ?", (memory_id, user_id))
+            if await owner.fetchone() is None:
+                return False
         # Delete relationships that reference this memory as source
         # (source_memory_id FK doesn't have CASCADE)
         await self.conn.execute(
@@ -1893,27 +2078,29 @@ class Database:
             for row in rows
         ]
 
-    async def get_entities_by_type(self, user_id: str, project_id: str | None, entity_type: str) -> list[Entity]:
-        """Get all entities of a specific type for a user/project.
+    async def get_entities_by_type(
+        self,
+        user_id: str,
+        project_id: str | None,
+        entity_type: str,
+        limit: int | None = None,
+    ) -> list[Entity]:
+        """Get entities of a specific type for a user/project.
 
-        If project_id is None, returns entities from ALL projects.
+        If project_id is None, returns entities from ALL projects. ``limit``
+        bounds the load to the most recently updated entities (ING-23).
         """
+        params: list[Any] = [user_id]
+        query = "SELECT * FROM entities WHERE user_id = ?"
         if project_id:
-            cursor = await self.conn.execute(
-                """
-                SELECT * FROM entities 
-                WHERE user_id = ? AND project_id = ? AND LOWER(type) = LOWER(?)
-                """,
-                (user_id, project_id, entity_type),
-            )
-        else:
-            cursor = await self.conn.execute(
-                """
-                SELECT * FROM entities 
-                WHERE user_id = ? AND LOWER(type) = LOWER(?)
-                """,
-                (user_id, entity_type),
-            )
+            query += " AND project_id = ?"
+            params.append(project_id)
+        query += " AND LOWER(type) = LOWER(?)"
+        params.append(entity_type)
+        if limit is not None:
+            query += " ORDER BY updated_at DESC LIMIT ?"
+            params.append(limit)
+        cursor = await self.conn.execute(query, tuple(params))
         rows = await cursor.fetchall()
         return [
             Entity(

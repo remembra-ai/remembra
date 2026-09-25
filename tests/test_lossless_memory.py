@@ -36,6 +36,9 @@ class FakeDB:
     async def index_memory_fts(self, **kwargs: Any) -> None:
         self.fts.append(kwargs)
 
+    async def find_source_record(self, user_id: str, project_id: str, checksum: str) -> str | None:
+        return None
+
 
 class FakeQdrant:
     def __init__(self) -> None:
@@ -61,6 +64,12 @@ class FakeExtractor:
     async def extract(self, content: str) -> list[str]:
         self.calls.append(content)
         return self.facts
+
+    async def extract_detailed(self, content: str, reference_date: Any = None) -> Any:
+        from remembra.extraction.extractor import ExtractionOutcome
+
+        self.calls.append(content)
+        return ExtractionOutcome(facts=list(self.facts))
 
 
 class FakeConsolidator:
@@ -166,12 +175,32 @@ async def test_store_preserves_verbatim_source_with_receipts() -> None:
 
 
 @pytest.mark.asyncio
-async def test_hallucinated_fact_is_flagged_not_trusted() -> None:
+async def test_hallucinated_fact_is_dropped_and_reported() -> None:
+    # Default grounding_action="drop": an unsupported fact is not stored and
+    # is reported in dropped_facts (it used to be stored with verified=false).
     facts = [
         "Mani prefers TradingView Pine v6 strategies with margin_long set to 100",
         "The backend POST /api/listings/:id/promote is live and works, verified with curl",
     ]
     service, db, _ = make_service(facts)
+
+    resp = await service.store(StoreRequest(content=SOURCE_TEXT, user_id="u1"))
+
+    fact_rows = [r for r in db.saved if r.get("memory_type") != "source"]
+    assert [r["content"] for r in fact_rows] == [facts[0]]
+    assert fact_rows[0]["metadata"]["verified"] is True
+    assert resp.extracted_facts == [facts[0]]
+    assert [d.fact for d in resp.dropped_facts] == [facts[1]]
+    assert resp.dropped_facts[0].decided_by == "heuristic"
+
+
+@pytest.mark.asyncio
+async def test_hallucinated_fact_is_flagged_when_grounding_action_flag() -> None:
+    facts = [
+        "Mani prefers TradingView Pine v6 strategies with margin_long set to 100",
+        "The backend POST /api/listings/:id/promote is live and works, verified with curl",
+    ]
+    service, db, _ = make_service(facts, grounding_action="flag")
 
     await service.store(StoreRequest(content=SOURCE_TEXT, user_id="u1"))
 
@@ -179,6 +208,19 @@ async def test_hallucinated_fact_is_flagged_not_trusted() -> None:
     verdicts = {row["content"]: row["metadata"]["verified"] for row in fact_rows}
     assert verdicts[facts[0]] is True
     assert verdicts[facts[1]] is False  # the hallucination is flagged
+
+
+@pytest.mark.asyncio
+async def test_all_facts_ungrounded_falls_back_to_verbatim_content() -> None:
+    service, db, _ = make_service(["The moon is made of cheese according to NASA in 1999"])
+
+    resp = await service.store(StoreRequest(content=SOURCE_TEXT, user_id="u1"))
+
+    fact_rows = [r for r in db.saved if r.get("memory_type") != "source"]
+    assert [r["content"] for r in fact_rows] == [SOURCE_TEXT]
+    assert resp.extraction == "grounding_fallback"
+    assert resp.status == "stored"
+    assert len(resp.dropped_facts) == 1
 
 
 @pytest.mark.asyncio

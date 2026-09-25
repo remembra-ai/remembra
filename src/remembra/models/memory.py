@@ -182,10 +182,61 @@ class StoreRequest(BaseModel):
     )
 
 
+class ConsolidationEntry(BaseModel):
+    """How one extracted fact was integrated with existing memories.
+
+    Consolidation is a decision, never a rewrite: ``fact`` is exactly the text
+    that was (or, for ``noop``, would have been) stored.
+    """
+
+    fact: str
+    action: Literal["add", "noop", "supersede"] = Field(
+        description="add: stored as new · noop: already known (target_id) · supersede: stored and target_id retired"
+    )
+    target_id: str | None = Field(default=None, description="Existing memory this decision refers to")
+    memory_id: str | None = Field(default=None, description="ID of the memory stored for this fact (None for noop)")
+    confidence: float | None = Field(default=None, description="Decision confidence (0-1) when the decider reports one")
+    decided_by: str = Field(description="rule | llm | jev | atomic | fallback")
+    reason: str | None = None
+
+
+class DroppedFact(BaseModel):
+    """An extracted fact that was not stored because its source does not support it."""
+
+    fact: str
+    reason: str
+    grounding_score: float | None = None
+    decided_by: str = Field(description="heuristic | jev")
+
+
 class StoreResponse(BaseModel):
-    id: str
-    extracted_facts: list[str]
+    id: str = Field(
+        description=(
+            "ID of the first memory stored by this call. When status='duplicate' "
+            "nothing new was stored and this is the existing memory (see duplicate_of)."
+        )
+    )
+    extracted_facts: list[str] = Field(description="Facts exactly as stored by this call (nothing merged in)")
     entities: list[EntityRef]
+    status: Literal["stored", "duplicate", "pending", "not_stored"] = Field(
+        default="stored",
+        description=(
+            "stored: at least one new memory · duplicate: every fact was already known · "
+            "pending: async enrichment · not_stored: nothing could be stored"
+        ),
+    )
+    duplicate_of: str | None = Field(default=None, description="Existing memory id when status='duplicate'")
+    consolidation: list[ConsolidationEntry] = Field(default_factory=list)
+    dropped_facts: list[DroppedFact] = Field(
+        default_factory=list, description="Extracted facts rejected by the grounding check (not stored)"
+    )
+    entities_status: Literal["pending", "disabled", "none"] = Field(
+        default="none",
+        description="Entity linking runs in the background: pending | disabled | none (nothing stored)",
+    )
+    extraction: str | None = Field(
+        default=None, description="How facts were produced: llm | fallback | disabled | verbatim | skipped"
+    )
     expires_at: datetime | None = Field(
         default=None,
         description="When this memory will expire (set when ttl was provided on store).",
@@ -578,6 +629,10 @@ class IngestOptions(BaseModel):
         default=True,
         description="True = full extraction, False = store raw messages",
     )
+    include_system: bool = Field(
+        default=False,
+        description="Include system-role messages in extraction and raw storage (excluded by default)",
+    )
 
 
 class ConversationIngestRequest(BaseModel):
@@ -603,13 +658,13 @@ class ExtractedFact(BaseModel):
     content: str
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
     importance: float = Field(default=0.5, ge=0.0, le=1.0)
-    source_message_index: int
+    source_message_index: int = Field(description="Index of the source message, -1 if the model gave an invalid one")
     speaker: str | None = None
     stored: bool = False
     memory_id: str | None = None
     action: str = Field(
         default="add",
-        description="'add' | 'update' | 'delete' | 'noop' | 'skipped'",
+        description="'add' | 'supersede' | 'noop' | 'dropped' (ungrounded) | 'skipped' (error)",
     )
     action_reason: str | None = None
 
@@ -628,7 +683,7 @@ class DedupeResult(BaseModel):
 
     content: str
     existing_memory_id: str
-    action: str = Field(description="'merged' | 'updated' | 'skipped'")
+    action: str = Field(description="'skipped' (already known) | 'superseded' (existing memory retired)")
 
 
 class IngestStats(BaseModel):
@@ -640,6 +695,7 @@ class IngestStats(BaseModel):
     facts_updated: int = 0
     facts_deduped: int = 0
     facts_skipped: int = 0
+    facts_dropped: int = 0
     entities_found: int = 0
     processing_time_ms: int = 0
 
@@ -653,6 +709,7 @@ class ConversationIngestResponse(BaseModel):
     entities: list[ExtractedEntityResult] = Field(default_factory=list)
     deduped: list[DedupeResult] = Field(default_factory=list)
     stats: IngestStats = Field(default_factory=IngestStats)
+    errors: list[str] = Field(default_factory=list, description="Per-fact or extraction failures")
 
 
 # ---------------------------------------------------------------------------

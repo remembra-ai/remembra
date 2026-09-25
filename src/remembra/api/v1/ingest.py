@@ -330,6 +330,8 @@ async def ingest_conversation(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Message content failed security check: {sanitization.flagged_patterns}",
                 )
+            # ING-17: extract from the sanitized text, not the raw input.
+            msg.content = sanitization.content
 
     try:
         # Process conversation through the ingest service
