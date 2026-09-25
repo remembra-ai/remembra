@@ -20,6 +20,7 @@ export type TabType =
   | 'brain'
   | 'settings'
   | 'keys'
+  | 'connections'
   | 'billing'
   | 'teams'
   | 'projects'
@@ -43,11 +44,12 @@ export const TABS: Record<TabType, TabMeta> = {
   analytics: { label: 'Analytics', title: 'Memory', subtitle: 'Recall traffic, storage growth and usage.' },
   decay: { label: 'Decay', title: 'Memory', subtitle: 'Recency, retention, and what is being forgotten.' },
   debugger: { label: 'Debugger', title: 'Memory', subtitle: 'Why a recall returned what it did.' },
-  graph: { label: 'Graph', title: 'Graph', subtitle: 'How memories connect through people, projects and ideas.' },
+  graph: { label: 'Constellation', title: 'Graph', subtitle: 'Agents, projects, handoffs and entities, live. Orange packets are handoffs and notes in flight.' },
   entities: { label: 'Entities', title: 'Graph', subtitle: 'The people, products and concepts memory has resolved.' },
   brain: { label: 'Brain', title: 'Graph', subtitle: 'Themes, central memories and surprising links.' },
   settings: { label: 'General', title: 'Settings', subtitle: 'Profile, preferences and workspace defaults.' },
   keys: { label: 'API keys', title: 'Settings', subtitle: 'Keys for your agents, apps and automation.' },
+  connections: { label: 'Apps & connections', title: 'Settings', subtitle: 'Apps connected to your memory through the remote connector.' },
   billing: { label: 'Billing', title: 'Settings', subtitle: 'Plan, usage and invoices.' },
   teams: { label: 'Teams', title: 'Settings', subtitle: 'Shared memory across people and agents.' },
   projects: { label: 'Projects', title: 'Settings', subtitle: 'Memory workspaces and their boundaries.' },
@@ -61,7 +63,7 @@ export const SECTIONS: { id: SectionId; label: string; tabs: TabType[]; adminOnl
   { id: 'inbox', label: 'Inbox', tabs: ['inbox'] },
   { id: 'memory', label: 'Memory', tabs: ['memories', 'timeline', 'analytics', 'decay', 'debugger'] },
   { id: 'graph', label: 'Graph', tabs: ['graph', 'entities', 'brain'] },
-  { id: 'settings', label: 'Settings', tabs: ['settings', 'keys', 'billing', 'teams', 'projects'] },
+  { id: 'settings', label: 'Settings', tabs: ['settings', 'keys', 'connections', 'billing', 'teams', 'projects'] },
   { id: 'admin', label: 'Admin', tabs: ['admin'], adminOnly: true },
 ];
 

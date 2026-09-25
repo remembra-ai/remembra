@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { Key, Loader2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { api } from '../lib/api';
+import { BrandLockup } from '../brand/Brand';
 
 interface ApiKeyFormProps {
   onAuthenticated: () => void;
@@ -41,14 +42,14 @@ export function ApiKeyForm({ onAuthenticated }: ApiKeyFormProps) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-paper px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-signal to-signal flex items-center justify-center mx-auto mb-4">
-            <Key className="w-8 h-8 text-white" />
+          <div className="mb-6 flex items-center justify-center lg:hidden">
+            <BrandLockup height={38} className="text-ink" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-            Welcome to Remembra
+          <h1 className="font-display text-3xl font-extrabold tracking-[-0.03em] text-ink">
+            Sign in with an API key
           </h1>
           <p className="text-gray-500 dark:text-gray-400 mt-2">
             Enter your API key to access your memories

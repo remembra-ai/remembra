@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Mail, Loader2, ArrowLeft, Check, Eye, EyeOff, X } from 'lucide-react';
 import { API_V1 } from '../config';
-import { BrandMark } from '../components/relay/ui';
+import { BrandLockup } from '../brand/Brand';
 
 interface ForgotPasswordProps {
   onBackToLogin: () => void;
@@ -148,9 +148,8 @@ export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordPro
     <div className="min-h-screen flex items-center justify-center bg-[hsl(var(--background))] px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <div className="mb-5 flex items-center justify-center gap-2.5" role="img" aria-label="Remembra">
-            <BrandMark size={40} className="text-ink" />
-            <span className="font-display text-2xl font-extrabold tracking-[-0.02em] text-ink">Remembra</span>
+          <div className="mb-6 flex items-center justify-center lg:hidden">
+            <BrandLockup height={38} className="text-ink" />
           </div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
             {step === 'request' ? 'Reset your password' : 'Enter new password'}

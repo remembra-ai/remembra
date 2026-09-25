@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { UserPlus, Loader2, Eye, EyeOff, Check, X } from 'lucide-react';
 import { API_V1 } from '../config';
-import { BrandMark } from '../components/relay/ui';
+import { BrandLockup } from '../brand/Brand';
 
 interface SignupProps {
   onSignup: (user: { id: string; email: string; name?: string }) => void;
@@ -79,9 +79,8 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
     <div className="min-h-screen flex items-center justify-center bg-[hsl(var(--background))] px-4 py-8">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <div className="mb-5 flex items-center justify-center gap-2.5" role="img" aria-label="Remembra">
-            <BrandMark size={40} className="text-ink" />
-            <span className="font-display text-2xl font-extrabold tracking-[-0.02em] text-ink">Remembra</span>
+          <div className="mb-6 flex items-center justify-center lg:hidden">
+            <BrandLockup height={38} className="text-ink" />
           </div>
           <h1 className="font-display text-3xl font-extrabold tracking-[-0.03em] text-[hsl(var(--foreground))]">
             Create your account

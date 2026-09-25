@@ -21,7 +21,7 @@ import {
   X,
 } from 'lucide-react';
 import { SECTIONS, hrefFor, sectionOf, type SectionId, type TabType } from '../lib/nav';
-import { BrandMark } from './relay/ui';
+import { BrandLockup, BrandMark } from '../brand/Brand';
 
 export type { TabType } from '../lib/nav';
 
@@ -84,12 +84,9 @@ export function Sidebar({
       aria-label="Primary"
       className="hidden h-full w-[68px] shrink-0 flex-col border-r border-rule bg-panel md:flex lg:w-60"
     >
-      <a href={hrefFor('home')} className="flex h-16 items-center gap-2.5 px-5 lg:px-5" aria-label="Remembra home">
-        <BrandMark size={28} className="shrink-0 text-ink" />
-        <span className="hidden min-w-0 items-baseline gap-2 lg:flex">
-          <span className="font-display text-xl font-extrabold tracking-[-0.02em] text-ink">Remembra</span>
-          <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-signal-ink">Relay</span>
-        </span>
+      <a href={hrefFor('home')} className="flex h-16 items-center justify-center px-4 lg:justify-start lg:px-5" aria-label="Remembra home">
+        <BrandMark size={34} className="shrink-0 text-ink lg:hidden" />
+        <BrandLockup height={27} label="Remembra" className="hidden shrink-0 text-ink lg:block" />
       </a>
 
       <ul className="flex-1 space-y-0.5 overflow-y-auto px-2.5 py-3">

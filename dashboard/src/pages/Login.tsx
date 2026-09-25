@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { LogIn, Loader2, Eye, EyeOff } from 'lucide-react';
 import { API_V1 } from '../config';
-import { BrandMark } from '../components/relay/ui';
+import { BrandLockup } from '../brand/Brand';
 
 interface LoginProps {
   onLogin: (token: string, user: { id: string; email: string; name?: string; is_admin?: boolean }) => void;
@@ -54,9 +54,8 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProp
     <div className="min-h-screen flex items-center justify-center bg-[hsl(var(--background))] px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <div className="mb-5 flex items-center justify-center gap-2.5" role="img" aria-label="Remembra">
-            <BrandMark size={40} className="text-ink" />
-            <span className="font-display text-2xl font-extrabold tracking-[-0.02em] text-ink">Remembra</span>
+          <div className="mb-6 flex items-center justify-center lg:hidden">
+            <BrandLockup height={38} className="text-ink" />
           </div>
           <h1 className="font-display text-3xl font-extrabold tracking-[-0.03em] text-[hsl(var(--foreground))]">
             Welcome back

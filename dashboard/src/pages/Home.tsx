@@ -13,7 +13,8 @@ import { parseServerTime, relativeTime, greeting } from '../lib/time';
 import { Card, CardHeader, ErrorNotice, Skeleton, StaleNotice, TrailSkeleton, AgentAvatar } from '../components/relay/ui';
 import { TrailNode } from '../components/relay/Handoff';
 import { LatestHandoff } from '../components/relay/LatestHandoff';
-import { ConnectChecklist, FirstHandoffCelebration, PlanMeter, WeeklyRecap } from '../components/relay/HomeCards';
+import { ConnectChecklist, FirstHandoffCelebration, WeeklyRecap } from '../components/relay/HomeCards';
+import { PlanMeter } from '../components/credits/Credits';
 
 const LAST_SEEN_KEY = 'remembra_home_last_seen';
 const LAST_ACTIVE_KEY = 'remembra_home_last_active';

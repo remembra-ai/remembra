@@ -46,6 +46,17 @@ export function saveKeyCommand(serverUrl: string): string {
   return `remembra-install --all --api-key <your-key> --url ${serverUrl || 'https://api.remembra.dev'}`;
 }
 
+/**
+ * The whole first run on one line: install, save the key where the relay
+ * reads it (and add the MCP server to the agents it finds), then write the
+ * hooks. Without a key it keeps the `<your-key>` placeholder, which the shell
+ * rejects if pasted unedited.
+ */
+export function oneLineInstall(serverUrl: string, apiKey?: string | null): string {
+  const key = apiKey && /^[A-Za-z0-9_\-.]+$/.test(apiKey) ? apiKey : '<your-key>';
+  return `${PIPX_INSTALL} && remembra-install --all --api-key ${key} --url ${serverUrl || 'https://api.remembra.dev'} && remembra-relay connect --apply`;
+}
+
 /** The agents `remembra-relay connect` can wire up, in checklist order. */
 export const CONNECTABLE_AGENTS = ['claude-code', 'codex', 'cursor', 'gemini', 'qwen', 'kimi'];
 
