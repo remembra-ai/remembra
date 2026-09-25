@@ -145,6 +145,7 @@ def test_signup_links_point_at_the_dashboard_signup_route() -> None:
 # ---------------------------------------------------------------------------
 
 RELAY_GATE = "<!-- requires PyPI release with remembra-relay and the published relay setup guide -->"
+BILLING_GATE = "<!-- requires billing: Solo, Pro, Team and Founding 100 live in Paddle and the dashboard -->"
 RELAY_GUIDE = "https://docs.remembra.dev/guides/relay/"
 KEY_STEP = "remembra-install --all --api-key <your-key>"
 
@@ -173,6 +174,14 @@ def test_every_install_block_has_the_key_step_the_setup_guide_and_the_release_ga
         assert shown == f"$ pipx install remembra $ {KEY_STEP} $ remembra-relay connect"
         assert f'href="{RELAY_GUIDE}"' in meta
         assert 'href="https://app.remembra.dev/signup"' in meta
+
+
+def test_paid_prices_sit_behind_the_billing_gate() -> None:
+    home = (LANDING / "index.html").read_text()
+    assert f'{BILLING_GATE}\n        <div class="prices">' in home
+    pricing = (LANDING / "pricing.html").read_text()
+    assert f'{BILLING_GATE}\n    <div class="founding">' in pricing
+    assert pricing.index(BILLING_GATE) < pricing.index("Claim a founding seat") < pricing.index("Start with Solo")
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +217,18 @@ def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
     assert "Claude Code's session hooks are verified" in note
     assert "unverified" in note and "beta" not in note
     assert "through Remembra's MCP tools" in note
+
+
+def test_pricing_shows_the_spec_monthly_credits_and_no_yearly_bank() -> None:
+    pricing = (LANDING / "pricing.html").read_text()
+    text = _text(pricing)
+    for invented in ("up front", "credit bank", "26,400", "60,000"):
+        assert invented not in text, invented
+    assert "<b>2,200</b> credits every month" in pricing
+    assert "<b>5,000</b> credits every month" in pricing
+    assert "<b>2,200</b> credits per seat every month, pooled" in pricing
+    # the credit line is the same for monthly and yearly billing
+    assert not re.search(r'class="credits"><span class="[my]-only"', pricing)
 
 
 # ---------------------------------------------------------------------------
