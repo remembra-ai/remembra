@@ -23,6 +23,8 @@ from remembra.cloud.plans import (
 )
 from tests._cost_harness import USD_PER_CALL, cost_app
 
+# The unverified-email credit hold is off until the owner sets its start date.
+CAP_ON = datetime(2026, 1, 1, tzinfo=UTC)
 ENRICH = "X-Remembra-Enrichment"
 REMAINING = "X-Remembra-Credits-Remaining"
 
@@ -337,7 +339,7 @@ async def test_stale_reservation_expires_and_late_settle_charges_difference(tmp_
 async def test_reservation_is_a_hard_ceiling_under_concurrency(tmp_path) -> None:
     import asyncio
 
-    async with cost_app(tmp_path) as c:
+    async with cost_app(tmp_path, unverified_credit_cap_effective_at=CAP_ON) as c:
         uid, _ = await c.account("race@example.com", verified=False)  # 25 credits until verified
         account = await c.meter.get_account(uid)
         assert account.credit_limit == 25
@@ -352,7 +354,7 @@ async def test_reservation_is_a_hard_ceiling_under_concurrency(tmp_path) -> None
 
 
 async def test_unverified_free_account_is_held_at_25_credits(tmp_path) -> None:
-    async with cost_app(tmp_path) as c:
+    async with cost_app(tmp_path, unverified_credit_cap_effective_at=CAP_ON) as c:
         uid, hdr = await c.account("new@example.com", verified=False)
         assert (await c.meter.get_account(uid)).credit_limit == 25
         r = await c.h.client.post("/api/v1/memories", json={"content": "Mani lives in Kingston"}, headers=hdr)

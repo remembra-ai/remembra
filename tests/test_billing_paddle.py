@@ -223,8 +223,10 @@ class TestPlanLimits:
         plan = get_plan(PlanTier.TEAM)
         assert plan.per_seat and plan.min_seats == 3
         assert (plan.price_monthly_cents, plan.price_annual_cents) == (1_500, 15_000)
-        pooled = plan.scaled(1)  # never below the minimum
-        assert pooled.max_users == 3 and pooled.max_smart_credits_per_month == 6_600
+        unknown = plan.scaled(None)  # seat count unknown (e.g. a promo trial): the minimum
+        assert unknown.max_users == 3 and unknown.max_smart_credits_per_month == 6_600
+        paid_one = plan.scaled(1)  # exactly the seats paid for, never rounded up
+        assert paid_one.max_users == 1 and paid_one.max_smart_credits_per_month == 2_200
         five = plan.scaled(5)
         assert five.max_memories == 250_000 and five.max_api_keys == 50 and five.max_users == 5
 
@@ -378,9 +380,12 @@ class TestWebhookEventProcessing:
         event = {
             "event_type": "transaction.completed",
             "data": {
+                # The price ID decides the plan (the sandbox $49 legacy Pro price);
+                # custom_data "plan" is browser-controlled and ignored.
+                "items": [{"price": {"id": "pri_01kmeq0ss2j2b74w9f1xwmvbc0"}, "quantity": 1}],
                 "custom_data": {
                     "remembra_user_id": "user_123",
-                    "plan": "pro",
+                    "plan": "enterprise",
                 },
                 "subscription_id": "sub_123",
                 "customer_id": "ctm_123",
@@ -395,7 +400,7 @@ class TestWebhookEventProcessing:
 
         assert result.action == "activate_subscription"
         assert result.user_id == "user_123"
-        assert result.plan == PlanTier.PRO
+        assert result.plan == PlanTier.LEGACY_PRO
         assert result.paddle_customer_id == "ctm_123"
         assert result.paddle_subscription_id == "sub_123"
         assert result.customer_email == "test@example.com"
@@ -407,6 +412,7 @@ class TestWebhookEventProcessing:
             "event_type": "subscription.activated",
             "data": {
                 "id": "sub_456",
+                "items": [{"price": {"id": "pri_01kmeq5y8ch8zfy2kw9qnrz6s1"}, "quantity": 1}],  # sandbox $199 Team
                 "custom_data": {
                     "remembra_user_id": "user_456",
                     "plan": "team",
@@ -418,7 +424,7 @@ class TestWebhookEventProcessing:
 
         assert result.action == "activate_subscription"
         assert result.user_id == "user_456"
-        assert result.plan == PlanTier.TEAM
+        assert result.plan == PlanTier.LEGACY_TEAM
         assert result.paddle_subscription_id == "sub_456"
 
     @pytest.mark.asyncio

@@ -21,6 +21,7 @@ from remembra.api.v1 import agent_session, auth, billing, cloud, inbox, ingest, 
 from remembra.cloud.metering import UsageMeter
 from remembra.cloud.plans import PlanTier
 from remembra.cloud.ratelimit import CloudRateLimiter, set_cloud_rate_limiter
+from remembra.core import ai_spend
 from remembra.core.enrichment_queue import EnrichmentQueue, set_enrichment_queue
 from remembra.core.tasks import get_task_registry
 from remembra.extraction import background
@@ -60,14 +61,22 @@ class CountingLLM:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
         self.on_call: Any = None
+        # Facts returned by the next fact-extraction calls (one list per call).
+        self.extraction_facts: list[list[str]] = []
         self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
 
     async def _create(self, **kwargs: Any) -> Any:
+        from remembra.extraction.extractor import EXTRACTION_SYSTEM_PROMPT
+
         self.calls.append(kwargs)
         if self.on_call is not None:
             await self.on_call(kwargs)
+        facts: list[str] = []
+        system = next((m["content"] for m in kwargs.get("messages", []) if m.get("role") == "system"), "")
+        if system == EXTRACTION_SYSTEM_PROMPT and self.extraction_facts:
+            facts = self.extraction_facts.pop(0)
         reply = {
-            "facts": [],
+            "facts": facts,
             "entities": [],
             "relationships": [],
             "match": False,
@@ -153,6 +162,7 @@ async def cost_app(tmp_path: Any, **overrides: Any) -> AsyncIterator[CostHarness
             meter = UsageMeter(h.db)
             await meter.init_schema()
             h.app.state.usage_meter = meter
+            ai_spend.set_attribution_policy(meter)
             service = MemoryService(settings=settings, qdrant=MemQdrant(), db=h.db, embeddings=HashEmbeddings())  # type: ignore[arg-type]
             llm = CountingLLM()
             for client_owner in (service.extractor, service.consolidator, service.entity_extractor, service.entity_matcher):
@@ -171,5 +181,6 @@ async def cost_app(tmp_path: Any, **overrides: Any) -> AsyncIterator[CostHarness
             finally:
                 await background.drain(timeout=5.0)
     finally:
+        ai_spend.set_attribution_policy(None)
         set_enrichment_queue(None)
         set_cloud_rate_limiter(None)
