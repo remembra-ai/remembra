@@ -23,6 +23,31 @@ puts a message in Claude Code's inbox. The next time Claude Code starts a sessio
 of its brief, from the agent name you gave this connection (for example `claude-app`). The
 desktop agent must run with `REMEMBRA_AGENT_ID=claude-code` for its inbox to match.
 
+**Turn the connector off inside desktop Claude Code.** A connector you add on claude.ai is
+also loaded automatically by Claude Code when you sign in with the same Claude account. It
+shows up in `/mcp` as `claude.ai Remembra`, next to Claude Code's own Remembra server (the
+API-key setup that runs as `claude-code`). Both offer `session_brief`, `recall_memories`,
+`store_memory` and `send_to_inbox`, and if Claude Code picks the connector's copy it acts as
+`claude-app`: its brief shows `claude-app`'s inbox (so it never sees the phone's
+instruction), its notes and replies are signed `claude-app`, and it can only use the
+connection's projects. Keep the connector for the phone and turn it off in Claude Code with
+any one of these:
+
+- In Claude Code, run `/mcp`, select `claude.ai Remembra` and disable it (this project only).
+- Block just this connector in your Claude Code settings (`~/.claude/settings.json`):
+
+    ```json
+    { "deniedMcpServers": [{ "serverName": "claude.ai Remembra" }] }
+    ```
+
+    Use the exact name `/mcp` shows if you named the connector differently.
+
+- Turn off all claude.ai connectors in Claude Code: `"disableClaudeAiConnectors": true` in
+  settings, or start it with `ENABLE_CLAUDEAI_MCP_SERVERS=false claude`.
+
+Sources: [Claude Code: MCP](https://code.claude.com/docs/en/mcp) ("Use MCP servers from
+Claude.ai"), [Claude: get started with connectors](https://claude.com/docs/connectors/getting-started).
+
 ## Where this works
 
 Checked against the vendors' documentation on 2026-09-25:
@@ -68,10 +93,19 @@ Try: *"Using Remembra, what's the latest handoff for my project?"* or
 
 ## Connect ChatGPT (web)
 
-1. In ChatGPT on the web, open **Settings** and turn on **Developer mode** (under the
-   connectors/apps settings; OpenAI moves this menu occasionally).
-2. Create a developer-mode app with the **+** button, give it the name *Remembra* and the
-   MCP server URL `https://api.remembra.dev/mcp`, with **OAuth** authentication.
+Following [OpenAI's developer-mode guide](https://developers.openai.com/api/docs/guides/developer-mode)
+(Pro, Plus, Business, Enterprise and Education accounts, on the web):
+
+1. In ChatGPT on the web, open **Settings > Security and login** and turn on
+   **Developer mode**.
+2. Open **ChatGPT Plugins** and select the **+** button (it only works once Developer mode is
+   on) to create a developer-mode app for a remote MCP server:
+    - **Name**: *Remembra*
+    - **MCP server URL**: `https://api.remembra.dev/mcp`
+    - **Authentication**: **OAuth**, using **dynamic client registration (DCR)**. Leave the
+      OAuth **client ID and client secret empty** and do not pick Client ID Metadata
+      Document (CIMD): Remembra supports only DCR. If you fill in a client ID/secret,
+      ChatGPT uses those static values and the sign-in fails with "Unknown client".
 3. ChatGPT opens the Remembra sign-in page. Sign in, choose projects and an agent name
    (defaults to `chatgpt`), and click **Allow**.
 4. In a chat, enable the Remembra app. ChatGPT asks you to confirm each write
@@ -90,6 +124,10 @@ the result goes to `localhost`; that is expected for Claude Code. Use a distinct
 (for example `claude-code-connector`) if Claude Code already uses `claude-code` through its
 API-key setup, so inbox messages don't split between the two.
 
+This is separate from the claude.ai connector, which Claude Code also loads on its own when
+you're signed in with your Claude account; see "Turn the connector off inside desktop Claude
+Code" above.
+
 ## Manage or disconnect
 
 - **From Claude or ChatGPT**: disconnect or remove the connector in the app's connector
@@ -97,7 +135,9 @@ API-key setup, so inbox messages don't split between the two.
 - **From Remembra**: `GET /api/v1/connector/connections` lists every connected app (with the
   dashboard login token as `Authorization: Bearer <jwt>`), and
   `DELETE /api/v1/connector/connections/<connection_id>` disconnects one immediately.
-- Changing or resetting your password, or deactivating the account, disconnects all apps.
+- Changing or resetting your password, or deactivating the account, disconnects all apps,
+  including a sign-in that was still on the consent page: approving it after the password
+  change is refused.
 
 ## Security model
 
@@ -111,12 +151,21 @@ API-key setup, so inbox messages don't split between the two.
   your sign-in to another site.
 - **Tokens are bound to you, the chosen projects and this server** (`resource`
   `https://api.remembra.dev/mcp`). Access tokens last 1 hour; refresh tokens 30 days and are
-  replaced on every use. A refresh token that comes back more than 30 seconds after it was
-  replaced, or an authorization code used twice, ends the whole connection.
+  replaced on every use. A refresh sent again within 30 seconds (a client retry) gets back the
+  same new pair, never a second one, so each connection has exactly one live refresh token.
+  A refresh token that comes back later than that, or after its replacement was itself used,
+  or an authorization code used twice, ends the whole connection.
 - **Every token, code and client secret is stored only as a SHA-256 hash.**
 - **Scopes**: `session:brief` (brief and trail), `memory:recall` (search),
   `memory:store` (notes and inbox messages only). A call without the needed scope gets
-  `403 insufficient_scope`.
+  `403 insufficient_scope`. Scopes Remembra doesn't know (for example a client's own
+  `claudeai`) are ignored at registration and dropped at sign-in; the consent page and the
+  token response list exactly what was granted.
+- **Projects cover the inbox too.** `session_brief` over the connector only shows inbox
+  messages tagged with one of the connection's projects, and only agent names seen in those
+  messages. Messages the connector sends are tagged with their project, and so are messages
+  sent from the desktop MCP server (with its `REMEMBRA_PROJECT`); untagged messages from
+  other clients stay out of the connector's view.
 - **The connector token only works at `/mcp`.** Tools reach your memory through the same
   REST routes and checks every other client goes through (project restriction, PII policy,
   content sanitizer, usage limits, audit log). Audit entries carry `oauth:<connection_id>`.

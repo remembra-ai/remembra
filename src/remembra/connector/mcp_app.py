@@ -73,7 +73,10 @@ INSTRUCTIONS = (
     "Use session_brief to see where work stands (latest handoff, status, recent work), trail for the "
     "handoffs and checkpoints agents left over time, and recall_memories to search. To ask a desktop "
     "agent to do something, use send_to_inbox with its agent id (for example 'claude-code'); it sees "
-    "the message at its next session start. store_memory saves a note. Nothing here edits or deletes."
+    "the message at its next session start. store_memory saves a note. Nothing here edits or deletes. "
+    "This connection speaks as the chat app's own agent (see list_projects for its agent id and projects). "
+    "A coding agent that also has a local Remembra MCP server (for example Claude Code on a desktop) "
+    "should use that local server instead, so its inbox and notes stay under its own agent id."
 )
 
 
