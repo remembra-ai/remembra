@@ -16,7 +16,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
@@ -447,8 +447,22 @@ class RelayService:
             "status": [],
         }
 
-    async def trail(self, user_id: str, project_id: str | None, limit: int = 20, offset: int = 0) -> dict[str, Any]:
-        """Handoffs and checkpoints across agents, newest first."""
+    async def trail(
+        self,
+        user_id: str,
+        project_id: str | None,
+        limit: int = 20,
+        offset: int = 0,
+        agent_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Handoffs and checkpoints across agents, newest first.
+
+        Each item carries the headline and counts for a compact list, plus
+        ``detail`` (the handoff's Done / Not done / Failing / Next sections,
+        commits and grounding) so a reader can expand it without another call.
+        Checkpoints and free-form handoffs have no sections; their ``detail``
+        holds the stored ``content`` instead.
+        """
         result = await self.sessions.timeline(
             user_id=user_id,
             project_id=project_id,
@@ -456,6 +470,7 @@ class RelayService:
             limit=limit,
             offset=offset,
             newest_first=True,
+            agent_id=agent_id,
         )
         items = []
         for mem in result["memories"]:
@@ -475,9 +490,169 @@ class RelayService:
                     "headline": handoff_headline(mem),
                     "failing": len(relay.get("failing") or []),
                     "open": len(relay.get("not_done") or []),
+                    "detail": _trail_detail(mem, relay),
                 }
             )
-        return {"project_id": project_id, "items": items, "total": result["total"]}
+        return {"project_id": project_id, "agent_id": agent_id, "items": items, "total": result["total"]}
+
+    async def activity_summary(
+        self,
+        user_id: str,
+        days: int = 14,
+        tz_offset_minutes: int = 0,
+        allowed: list[str] | None = None,
+        now: datetime | None = None,
+    ) -> dict[str, Any]:
+        """Per-agent and per-project activity over handoffs and checkpoints.
+
+        ``agents``: every agent id seen, with all-time totals, the last active
+        time, sessions (handoffs) in the last 7 days and a ``daily`` series of
+        ``days`` counts (oldest first; the last entry is today). Days are local
+        to ``tz_offset_minutes`` (minutes east of UTC). ``projects``: the same
+        per project. ``week``: handoffs, checkpoints, agents and projects in the
+        last 7 days. Only current (not superseded, not expired) rows count, so a
+        re-closed session counts once. ``allowed`` restricts to those projects.
+        """
+        days = max(1, min(int(days), 90))
+        now_utc = (now or datetime.now(UTC)).astimezone(UTC)
+        offset = timedelta(minutes=tz_offset_minutes)
+        today = (now_utc + offset).date()
+        first_day = today - timedelta(days=days - 1)
+        week_start = now_utc - timedelta(days=7)
+        window_start = min(
+            datetime.combine(first_day, datetime.min.time(), tzinfo=UTC) - offset,
+            week_start,
+        )
+
+        where = (
+            "user_id = ? AND superseded_by IS NULL AND (expires_at IS NULL OR expires_at > ?) "
+            "AND memory_type IN ('handoff', 'checkpoint')"
+        )
+        params: list[Any] = [user_id, _now_iso()]
+        if allowed:
+            where += f" AND project_id IN ({','.join('?' for _ in allowed)})"
+            params.extend(allowed)
+        agent_expr = "CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.agent_id') END"
+
+        cursor = await self.db.conn.execute(
+            f"""
+            SELECT {agent_expr} AS agent, project_id,
+                   SUM(CASE WHEN memory_type = 'handoff' THEN 1 ELSE 0 END) AS handoffs,
+                   SUM(CASE WHEN memory_type = 'checkpoint' THEN 1 ELSE 0 END) AS checkpoints,
+                   MAX(julianday(created_at)) AS last_jd
+            FROM memories WHERE {where}
+            GROUP BY agent, project_id
+            """,
+            params,
+        )
+        totals = [dict(r) for r in await cursor.fetchall()]
+
+        cursor = await self.db.conn.execute(
+            f"""
+            SELECT {agent_expr} AS agent, project_id, memory_type, julianday(created_at) AS jd
+            FROM memories WHERE {where} AND julianday(created_at) >= julianday(?)
+            """,
+            [*params, window_start.replace(tzinfo=None).isoformat()],
+        )
+        recent = [dict(r) for r in await cursor.fetchall()]
+
+        agents: dict[str, dict[str, Any]] = {}
+        projects: dict[str, dict[str, Any]] = {}
+
+        def _agent(name: str) -> dict[str, Any]:
+            return agents.setdefault(
+                name,
+                {
+                    "agent_id": name,
+                    "handoffs": 0,
+                    "checkpoints": 0,
+                    "last_active": None,
+                    "_last_jd": 0.0,
+                    "sessions_7d": 0,
+                    "daily": [0] * days,
+                    "projects": set(),
+                },
+            )
+
+        def _project(name: str) -> dict[str, Any]:
+            return projects.setdefault(
+                name,
+                {
+                    "project_id": name,
+                    "handoffs": 0,
+                    "checkpoints": 0,
+                    "last_active": None,
+                    "_last_jd": 0.0,
+                    "sessions_7d": 0,
+                    "daily": [0] * days,
+                    "agents": set(),
+                },
+            )
+
+        for row in totals:
+            project_name = row["project_id"] or "default"
+            buckets = [_project(project_name)]
+            if row["agent"]:
+                buckets.append(_agent(str(row["agent"])))
+                buckets[0]["agents"].add(str(row["agent"]))
+                buckets[1]["projects"].add(project_name)
+            for bucket in buckets:
+                bucket["handoffs"] += int(row["handoffs"] or 0)
+                bucket["checkpoints"] += int(row["checkpoints"] or 0)
+                if row["last_jd"] is not None and row["last_jd"] > bucket["_last_jd"]:
+                    bucket["_last_jd"] = float(row["last_jd"])
+
+        week_counts = {"handoffs": 0, "checkpoints": 0}
+        week_agents: set[str] = set()
+        week_projects: set[str] = set()
+        for row in recent:
+            if row["jd"] is None:
+                continue
+            at = _from_julian(float(row["jd"]))
+            project_name = row["project_id"] or "default"
+            buckets = [_project(project_name)]
+            if row["agent"]:
+                buckets.append(_agent(str(row["agent"])))
+            index = (days - 1) - (today - (at + offset).date()).days
+            in_week = at >= week_start
+            is_handoff = row["memory_type"] == "handoff"
+            for bucket in buckets:
+                if 0 <= index < days:
+                    bucket["daily"][index] += 1
+                if in_week and is_handoff:
+                    bucket["sessions_7d"] += 1
+            if in_week:
+                week_counts["handoffs" if is_handoff else "checkpoints"] += 1
+                week_projects.add(project_name)
+                if row["agent"]:
+                    week_agents.add(str(row["agent"]))
+
+        def _finish(bucket: dict[str, Any], set_key: str) -> dict[str, Any]:
+            last_jd = bucket.pop("_last_jd")
+            bucket["last_active"] = _from_julian(last_jd).isoformat() if last_jd else None
+            bucket[set_key] = sorted(bucket[set_key])
+            return bucket
+
+        agent_list = sorted((_finish(a, "projects") for a in agents.values()), key=lambda a: a["last_active"] or "", reverse=True)
+        project_list = sorted(
+            (_finish(p, "agents") for p in projects.values()), key=lambda p: p["last_active"] or "", reverse=True
+        )
+        return {
+            "generated_at": now_utc.isoformat(),
+            "days": days,
+            "tz_offset_minutes": tz_offset_minutes,
+            "first_day": first_day.isoformat(),
+            "total_handoffs": sum(p["handoffs"] for p in project_list),
+            "total_checkpoints": sum(p["checkpoints"] for p in project_list),
+            "week": {
+                "handoffs": week_counts["handoffs"],
+                "checkpoints": week_counts["checkpoints"],
+                "agents": sorted(week_agents),
+                "projects": sorted(week_projects),
+            },
+            "agents": agent_list,
+            "projects": project_list,
+        }
 
     async def linked_with_headlines(self, user_id: str, project_id: str, allowed: list[str] | None) -> list[dict[str, Any]]:
         linked = []
@@ -528,3 +703,34 @@ def _same_session_facts(prev: dict[str, Any], new: dict[str, Any]) -> bool:
     """True when two relay metadata blocks describe the same facts (ignoring close time)."""
     ignore = {"closed_at"}
     return {k: v for k, v in prev.items() if k not in ignore} == {k: v for k, v in new.items() if k not in ignore}
+
+
+_UNIX_EPOCH_JULIAN = 2440587.5
+
+
+def _from_julian(jd: float) -> datetime:
+    """SQLite ``julianday()`` (UTC) -> aware UTC datetime, millisecond precision."""
+    seconds = round((jd - _UNIX_EPOCH_JULIAN) * 86400.0, 3)
+    return datetime.fromtimestamp(seconds, tz=UTC)
+
+
+def _trail_detail(memory: dict[str, Any], relay: dict[str, Any]) -> dict[str, Any]:
+    """Expandable detail for one trail entry (structured sections or raw content)."""
+    if not relay:
+        return {"structured": False, "content": str(memory.get("content") or "")[:4000]}
+    return {
+        "structured": True,
+        "done": list(relay.get("done") or []),
+        "not_done": list(relay.get("not_done") or []),
+        "failing": list(relay.get("failing") or []),
+        "next": relay.get("next"),
+        "next_source": relay.get("next_source"),
+        "commits": list(relay.get("commits") or []),
+        "upstream": relay.get("upstream"),
+        "unpushed_commits": relay.get("unpushed_commits"),
+        "files_changed_count": relay.get("files_changed_count"),
+        "uncommitted_count": relay.get("uncommitted_count"),
+        "grounding_status": (relay.get("grounding") or {}).get("status"),
+        "agent_verified": bool(relay.get("agent_verified")),
+        "end_reason": relay.get("end_reason"),
+    }

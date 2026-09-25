@@ -157,12 +157,14 @@ class AgentSessionService:
         limit: int = 20,
         offset: int = 0,
         newest_first: bool = False,
+        agent_id: str | None = None,
     ) -> dict[str, Any]:
         """Chronological memories with server-side created_at range filtering.
 
         ``start`` is inclusive, ``end`` exclusive. ``entity`` matches an
         entity's canonical name or alias exactly (case-insensitive) — never a
         substring, so "A" or "bot" can't pull in unrelated memories.
+        ``agent_id`` keeps only memories whose metadata names that agent.
         Returns ``{"memories": [...], "total": N}`` where ``total`` counts all
         matches ignoring limit/offset.
         """
@@ -179,6 +181,9 @@ class AgentSessionService:
         if memory_types:
             where += f" AND memory_type IN ({','.join('?' for _ in memory_types)})"
             params.extend(memory_types)
+        if agent_id:
+            where += " AND json_valid(metadata) AND json_extract(metadata, '$.agent_id') = ?"
+            params.append(agent_id)
         if exclude_types:
             where += f" AND (memory_type IS NULL OR memory_type NOT IN ({','.join('?' for _ in exclude_types)}))"
             params.extend(exclude_types)

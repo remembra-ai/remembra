@@ -232,6 +232,97 @@ class InboxManager:
         row = await cursor.fetchone()
         return _row_to_dict(row) if row else None
 
+    async def list_messages(
+        self,
+        owner_user_id: str,
+        status: str = "open",
+        agent_id: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        """Messages across every agent of this owner (the dashboard view).
+
+        Args:
+            owner_user_id: Tenant scope.
+            status: "unread", "open" (unread or read: not yet done/blocked/
+                rejected) or "all".
+            agent_id: Only messages to or from this agent.
+            limit: Max rows (1-200). offset: rows to skip.
+
+        Returns ``{"items": [...], "total": N}``, newest first; expired rows
+        are skipped.
+        """
+        if status not in {"unread", "open", "all"}:
+            raise ValueError(f"status must be 'unread', 'open' or 'all', got '{status}'")
+        limit = max(1, min(int(limit), 200))
+        offset = max(0, int(offset))
+        where = "owner_user_id = ? AND (expires_at IS NULL OR expires_at > ?)"
+        params: list[Any] = [owner_user_id, datetime.now(UTC).isoformat()]
+        if status == "unread":
+            where += " AND status = 'unread'"
+        elif status == "open":
+            where += " AND status IN ('unread', 'read')"
+        agent = (agent_id or "").strip()
+        if agent:
+            where += " AND (to_agent = ? OR from_agent = ?)"
+            params.extend([agent, agent])
+
+        cursor = await self._db.conn.execute(f"SELECT COUNT(*) FROM agent_inbox WHERE {where}", params)
+        count_row = await cursor.fetchone()
+        cursor = await self._db.conn.execute(
+            f"SELECT * FROM agent_inbox WHERE {where} ORDER BY julianday(created_at) DESC, inbox_id DESC LIMIT ? OFFSET ?",
+            [*params, limit, offset],
+        )
+        rows = await cursor.fetchall()
+        return {"items": [_row_to_dict(r) for r in rows], "total": int(count_row[0]) if count_row else 0}
+
+    async def summary(self, owner_user_id: str) -> dict[str, Any]:
+        """Per-agent counts: messages waiting for each agent and sent by it.
+
+        Returns ``{"unread_total", "open_total", "agents": [{agent_id, unread,
+        open, received, sent, last_at}]}``; agents sorted by unread, then by
+        most recent activity. Expired rows are skipped.
+        """
+        now_iso = datetime.now(UTC).isoformat()
+        cursor = await self._db.conn.execute(
+            """
+            SELECT agent,
+                   SUM(is_to * (status = 'unread')) AS unread,
+                   SUM(is_to * (status IN ('unread', 'read'))) AS open,
+                   SUM(is_to) AS received,
+                   SUM(1 - is_to) AS sent,
+                   MAX(julianday(created_at)) AS last_jd,
+                   MAX(created_at) AS last_at
+            FROM (
+                SELECT to_agent AS agent, 1 AS is_to, status, created_at FROM agent_inbox
+                WHERE owner_user_id = ? AND (expires_at IS NULL OR expires_at > ?)
+                UNION ALL
+                SELECT from_agent AS agent, 0 AS is_to, status, created_at FROM agent_inbox
+                WHERE owner_user_id = ? AND (expires_at IS NULL OR expires_at > ?)
+            )
+            GROUP BY agent
+            ORDER BY unread DESC, last_jd DESC, agent
+            """,
+            (owner_user_id, now_iso, owner_user_id, now_iso),
+        )
+        agents = [
+            {
+                "agent_id": r["agent"],
+                "unread": int(r["unread"] or 0),
+                "open": int(r["open"] or 0),
+                "received": int(r["received"] or 0),
+                "sent": int(r["sent"] or 0),
+                "last_at": r["last_at"],
+            }
+            for r in await cursor.fetchall()
+            if r["agent"]
+        ]
+        return {
+            "unread_total": sum(a["unread"] for a in agents),
+            "open_total": sum(a["open"] for a in agents),
+            "agents": agents,
+        }
+
     # -----------------------------------------------------------------------
     # Ack
     # -----------------------------------------------------------------------

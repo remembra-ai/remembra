@@ -74,7 +74,10 @@ Use `resolve --project clawdbot --bind` to point an existing checkout at an exis
 | POST / GET / DELETE | `/api/v1/projects/links` | link projects (`from_project`, `to_project`, `relation`) |
 | POST | `/api/v1/session/close` | `{agent_id, session_id, project_id \| project:{locator}, facts:{…}, summary?, end_reason?}` → handoff id + rendered text |
 | GET | `/api/v1/session/brief` | `project_id` or locator params → brief JSON + `rendered` |
-| GET | `/api/v1/trail` | handoffs + checkpoints across agents, newest first |
+| GET | `/api/v1/trail` | handoffs + checkpoints across agents, newest first; `agent_id` filters; each item's `detail` holds its sections |
+| GET | `/api/v1/trail/summary` | per-agent and per-project activity: last active, sessions in 7 days, a daily series (`days`, `tz_offset_minutes`) |
+| GET | `/api/v1/inbox/messages` | inbox messages across all agents (`status=open\|unread\|all`, `agent_id`, `limit`, `offset`) |
+| GET | `/api/v1/inbox/summary` | unread / open counts per agent |
 
 Closing again with the same `(agent_id, session_id)` updates that session's handoff: the previous version
 is superseded, never duplicated. Each close also sets the `last_agent:<project>` and `branch:<project>`

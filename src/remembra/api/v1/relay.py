@@ -7,6 +7,7 @@
 - ``POST   /api/v1/session/close``     session facts -> ONE structured handoff (idempotent per agent+session)
 - ``GET    /api/v1/session/brief``     pickup brief (accepts a project id or a location)
 - ``GET    /api/v1/trail``             handoffs + checkpoints across agents, newest first
+- ``GET    /api/v1/trail/summary``     per-agent / per-project activity (dashboard)
 
 Attribution: when the API key is agent-scoped, the agent id comes from the key
 and a different id in the body or the ``X-Remembra-Agent-Id`` header is
@@ -491,6 +492,7 @@ async def trail(
     project: Annotated[str | None, Query(max_length=128, description="Alias of project_id")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
+    agent_id: Annotated[str | None, Query(max_length=128, description="Only this agent's entries")] = None,
     git_remote: Annotated[str | None, Query(max_length=2000)] = None,
     root_commit: Annotated[str | None, Query(max_length=64)] = None,
     root_path: Annotated[str | None, Query(max_length=4096)] = None,
@@ -498,8 +500,30 @@ async def trail(
     host: Annotated[str | None, Query(max_length=255)] = None,
 ) -> dict[str, Any]:
     _require(current_user, "memory:recall")
+    agent_filter = _clean_agent(agent_id, "agent_id")
     locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host)
     resolved, resolution = await _project_from_query(request, current_user, project_id or project, locator, None)
-    result = await _service(request).trail(current_user.user_id, resolved, limit=limit, offset=offset)
+    result = await _service(request).trail(current_user.user_id, resolved, limit=limit, offset=offset, agent_id=agent_filter)
     result["resolution"] = resolution
     return result
+
+
+@router.get("/trail/summary", summary="Activity per agent and per project (handoffs + checkpoints)")
+@limiter.limit("60/minute")
+async def trail_summary(
+    request: Request,
+    current_user: CurrentUser,
+    days: Annotated[int, Query(ge=1, le=90, description="Length of the daily series")] = 14,
+    tz_offset_minutes: Annotated[
+        int, Query(ge=-840, le=840, description="Minutes east of UTC for day boundaries (JS: -getTimezoneOffset())")
+    ] = 0,
+) -> dict[str, Any]:
+    """Every agent and project seen in the trail, with last activity, sessions in
+    the last 7 days and a daily series, plus a 7-day recap. Read-only."""
+    _require(current_user, "memory:recall")
+    return await _service(request).activity_summary(
+        current_user.user_id,
+        days=days,
+        tz_offset_minutes=tz_offset_minutes,
+        allowed=current_user.project_ids or None,
+    )
