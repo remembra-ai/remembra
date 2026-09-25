@@ -15,7 +15,9 @@ from typing import Any
 import structlog
 
 from remembra.config import Settings
+from remembra.core import ai_spend
 from remembra.core import metrics as core_metrics
+from remembra.core.enrichment_queue import get_enrichment_queue
 from remembra.core.llm_guard import llm_fallback_scope, mark_llm_fallback
 from remembra.core.time import utcnow
 from remembra.extraction import metrics
@@ -39,6 +41,7 @@ from remembra.extraction.matcher import EntityMatcher, ExistingEntity, rank_cand
 from remembra.extraction.typesafe import JevDecider
 from remembra.extraction.typesafe import decide as jev_decide
 from remembra.models.memory import (
+    RELAY_MEMORY_TYPES,
     ConsolidationEntry,
     DivergenceDetail,
     DroppedFact,
@@ -650,10 +653,27 @@ class MemoryService:
         if isinstance(meta_type, str) and meta_type.strip().lower() in _USER_MEMORY_TYPES:
             request.memory_type = meta_type.strip().lower()  # type: ignore[assignment]
 
-    def _entities_status(self, stored_any: bool) -> str:
+    def _entities_status(self, stored_any: bool, atomic: bool = False) -> str:
         if not stored_any:
             return "none"
-        return "pending" if self.settings.enable_entity_resolution else "disabled"
+        # Atomic stores (skip_extraction, relay types, degraded writes) never run entity resolution.
+        return "pending" if self.settings.enable_entity_resolution and not atomic else "disabled"
+
+    @staticmethod
+    def _enqueue_enrichment(user_id: str, coro: Any, name: str, *, droppable: bool = True) -> None:
+        """Run background enrichment on the bounded per-tenant queue.
+
+        Concurrency follows the plan of the write being served (the current
+        spend job); the job's credit reservation settles after this work.
+        """
+        job = ai_spend.current_job()
+        get_enrichment_queue().submit(
+            user_id,
+            coro,
+            name=name,
+            concurrency=job.concurrency if job is not None else None,
+            droppable=droppable,
+        )
 
     async def store(
         self,
@@ -774,7 +794,8 @@ class MemoryService:
                     metrics.incr("enrichment_failures_total")
                     log.error("bg_enrichment_failed", source_id=source_id, error=str(e))
 
-            spawn(_bg_enrichment(), "store_enrichment")
+            # Not droppable: the verbatim source is only recallable once its facts exist.
+            self._enqueue_enrichment(request.user_id or "", _bg_enrichment(), "store_enrichment", droppable=False)
             return StoreResponse(
                 id=source_id,
                 extracted_facts=[],
@@ -796,7 +817,10 @@ class MemoryService:
             checksum=checksum,
             skip_extraction=skip_extraction,
         )
-        response = outcome.to_response(expires_at=expires_at, entities_status=self._entities_status(bool(outcome.stored)))
+        atomic = skip_extraction or request.memory_type in RELAY_MEMORY_TYPES
+        response = outcome.to_response(
+            expires_at=expires_at, entities_status=self._entities_status(bool(outcome.stored), atomic=atomic)
+        )
         log.info(
             "memory_stored",
             memory_id=response.id,
@@ -1509,8 +1533,11 @@ class MemoryService:
             except Exception as exc:
                 log.warning("conflict_recording_failed", error=str(exc))
 
-        if self.settings.enable_entity_resolution:
-            spawn(self._bg_entities(memory.id, fact, user_id, project_id), "entity_resolution")
+        # P0 relay cost gate: atomic stores (skip_extraction / skip_consolidation,
+        # handoff / checkpoint / status, degraded writes) never run the LLM
+        # entity pass — relay events must cost nothing but an embedding.
+        if self.settings.enable_entity_resolution and not skip_consolidation and memory_type not in RELAY_MEMORY_TYPES:
+            self._enqueue_enrichment(user_id, self._bg_entities(memory.id, fact, user_id, project_id), "entity_resolution")
 
         if self.jev.enabled and not self.jev.enforcing and not skip_consolidation:
             spawn(
@@ -2543,6 +2570,7 @@ class MemoryService:
         user_id: str,
         new_content: str,
         new_metadata: dict[str, Any] | None = None,
+        enrich: bool = True,
     ) -> UpdateResponse:
         """
         Update memory content, re-extract facts/entities, re-embed.
@@ -2561,6 +2589,8 @@ class MemoryService:
             user_id: User ID (must match memory owner)
             new_content: New content text
             new_metadata: Optional metadata to merge
+            enrich: False when the account has no smart credits left — the
+                content is stored as one fact and entities are not re-resolved.
 
         Returns:
             UpdateResponse with updated entity refs
@@ -2578,8 +2608,8 @@ class MemoryService:
 
         project_id = existing.get("project_id", "default")
 
-        # 2. Re-extract facts from new content
-        extracted_facts = await self.extractor.extract(new_content, reference_date=utcnow())
+        # 2. Re-extract facts from new content (skipped when enrichment is degraded)
+        extracted_facts = await self.extractor.extract(new_content, reference_date=utcnow()) if enrich else []
         if not extracted_facts:
             extracted_facts = [new_content.strip()]
 
@@ -2629,8 +2659,8 @@ class MemoryService:
         await self.db.delete_memory_entities(memory_id)
 
         entity_refs: list[EntityRef] = []
-        if self.settings.enable_entity_resolution:
-            spawn(self._bg_entities(memory_id, new_content, user_id, project_id), "entity_update")
+        if self.settings.enable_entity_resolution and enrich:
+            self._enqueue_enrichment(user_id, self._bg_entities(memory_id, new_content, user_id, project_id), "entity_update")
 
         # 7. Handle conflict detection if enabled
         if self.conflict_manager:

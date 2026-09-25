@@ -2,8 +2,8 @@
 Remembra Cloud — Billing, metering, and plan enforcement.
 
 Provides:
-  - Stripe billing integration (subscriptions, usage-based metering)
-  - Plan-based limits (memory count, recall rate, API keys)
+  - Paddle billing integration (subscriptions, seats, annual plans)
+  - Plan-based limits and smart-credit metering (degrade, never reject)
   - Usage tracking and enforcement
   - Tenant provisioning (signup → API key → ready)
   - Promotional codes (trials, discounts)

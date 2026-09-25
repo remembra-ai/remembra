@@ -14,11 +14,11 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
 from remembra.auth.middleware import CurrentUser, has_permission, resolve_project_access
-from remembra.cloud.limits import EnforceStoreLimit, record_store_usage
+from remembra.cloud.limits import gate_write, record_relay_usage
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
 from remembra.services.agent_session import AgentSessionService
@@ -92,13 +92,17 @@ async def upsert_status(
     request: Request,
     body: StatusUpsertRequest,
     current_user: CurrentUser,
-    _limit: EnforceStoreLimit = None,
+    response: Response,
 ) -> dict[str, Any]:
     """Store-by-key: the new value supersedes the previous value for the same
-    (user, project, key). Re-sending the current value is a no-op."""
+    (user, project, key). Re-sending the current value is a no-op.
+
+    A status write is a relay event: stored atomically, never enriched, never
+    billed in smart credits (plan relay burst limit and memory cap apply)."""
     _require(current_user, "memory:store")
     project = resolve_project_access(current_user, body.project_id) or "default"
     value = body.value
+    await gate_write(request, response, current_user.user_id, [value], atomic=[True], project_ids=[project], relay=True)
 
     # Same content protections as POST /memories: PII policy + sanitizer.
     pii_detector = getattr(request.app.state, "pii_detector", None)
@@ -137,7 +141,7 @@ async def upsert_status(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     if result["changed"]:
-        await record_store_usage(request, current_user.user_id)
+        await record_relay_usage(request, current_user.user_id)
     return {"project_id": project, **result}
 
 

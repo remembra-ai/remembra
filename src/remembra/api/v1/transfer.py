@@ -13,7 +13,7 @@ from remembra.auth.middleware import (
     require_memory_store,
     resolve_project_or_default,
 )
-from remembra.cloud.limits import enforce_store_quota, record_store_usage
+from remembra.cloud.limits import EnrichmentGrant, gate_write, record_store_usage
 from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
 from remembra.io.export import export_csv, export_json, export_jsonl
@@ -153,6 +153,7 @@ async def import_memories(
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
     settings: SettingsDep,
+    response: Response,
 ) -> ImportResponse:
     """Import memories from various formats.
 
@@ -164,7 +165,7 @@ async def import_memories(
     if not parsed:
         return ImportResponse(imported=0, skipped=0, errors=0, details=[])
 
-    await enforce_store_quota(request, current_user.user_id, len(parsed))
+    grant = await _gate_import(request, response, current_user.user_id, parsed, project_id)
     result = await _store_imported_memories(
         request=request,
         memories=parsed,
@@ -172,8 +173,10 @@ async def import_memories(
         user_id=current_user.user_id,
         project_id=project_id,
         sanitization_enabled=settings.sanitization_enabled,
+        grant=grant,
     )
     await record_store_usage(request, current_user.user_id, result.imported)
+    await grant.record_degraded(result.imported)
     return result
 
 
@@ -195,6 +198,7 @@ async def import_from_file(
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
     settings: SettingsDep,
+    response: Response,
     format: str = Query(
         ...,
         description=f"Source format: {', '.join(SUPPORTED_FORMATS)}",
@@ -220,7 +224,7 @@ async def import_from_file(
     if not parsed:
         return ImportResponse(imported=0, skipped=0, errors=0, details=[])
 
-    await enforce_store_quota(request, current_user.user_id, len(parsed))
+    grant = await _gate_import(request, response, current_user.user_id, parsed, project_id)
     result = await _store_imported_memories(
         request=request,
         memories=parsed,
@@ -228,8 +232,10 @@ async def import_from_file(
         user_id=current_user.user_id,
         project_id=project_id,
         sanitization_enabled=settings.sanitization_enabled,
+        grant=grant,
     )
     await record_store_usage(request, current_user.user_id, result.imported)
+    await grant.record_degraded(result.imported)
     return result
 
 
@@ -288,6 +294,26 @@ def _parse_import(format: str, data: str, split_mode: str = "paragraph") -> list
         )
 
 
+async def _gate_import(
+    request: Request, response: Response, user_id: str, parsed: list[ImportedMemory], project_id: str
+) -> EnrichmentGrant:
+    """Memory cap + one chunk-aware credit reservation for the whole import, before any LLM call.
+
+    Imports are metered per 8,000-character chunk instead of the per-store
+    size and batch limits; when the reservation does not fit, the import is
+    stored atomically (degraded) rather than rejected.
+    """
+    return await gate_write(
+        request,
+        response,
+        user_id,
+        [m.content for m in parsed],
+        project_ids=[project_id],
+        enforce_batch_limit=False,
+        enforce_content_limit=False,
+    )
+
+
 async def _store_imported_memories(
     request: Request,
     memories: list[ImportedMemory],
@@ -295,8 +321,23 @@ async def _store_imported_memories(
     user_id: str,
     project_id: str,
     sanitization_enabled: bool = True,
+    grant: EnrichmentGrant | None = None,
 ) -> ImportResponse:
     """Store a batch of parsed memories and return results."""
+    grant = grant or EnrichmentGrant(mode="unmetered", user_id=user_id)
+    with grant.activate():
+        return await _store_imported_items(request, memories, memory_service, user_id, project_id, sanitization_enabled, grant)
+
+
+async def _store_imported_items(
+    request: Request,
+    memories: list[ImportedMemory],
+    memory_service: MemoryService,
+    user_id: str,
+    project_id: str,
+    sanitization_enabled: bool,
+    grant: EnrichmentGrant,
+) -> ImportResponse:
     imported = 0
     skipped = 0
     errors = 0
@@ -330,6 +371,7 @@ async def _store_imported_memories(
                 source=f"import_{mem.source_format}",
                 trust_score=min(_IMPORT_MAX_TRUST, prepared.trust_score),
                 checksum=prepared.checksum,
+                skip_extraction=not grant.enrich,
             )
 
             if result.id:

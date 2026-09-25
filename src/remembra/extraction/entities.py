@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING
 import structlog
 from openai import AsyncOpenAI
 
+from remembra.core.ai_spend import record_llm_usage
 from remembra.extraction import metrics
 from remembra.extraction.prompting import wrap_untrusted
 
@@ -355,6 +356,7 @@ class EntityExtractor:
                 response_format={"type": "json_object"},
                 timeout=30.0,
             )
+            record_llm_usage(response, self.model)
 
             result_text = response.choices[0].message.content
             if not result_text:

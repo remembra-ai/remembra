@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -141,6 +142,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.tasks = TaskRegistry(max_concurrency=settings.background_task_concurrency)
     set_task_registry(app.state.tasks)
 
+    # Bounded per-tenant enrichment queue (extraction / entity resolution).
+    from remembra.core.enrichment_queue import EnrichmentQueue, set_enrichment_queue
+
+    app.state.enrichment_queue = EnrichmentQueue(
+        global_concurrency=settings.enrichment_global_concurrency,
+        default_concurrency=settings.enrichment_default_concurrency,
+        max_pending_per_tenant=settings.enrichment_max_pending_per_tenant,
+    )
+    set_enrichment_queue(app.state.enrichment_queue)
+
+    if settings.rate_limit_enabled:
+        # Fail fast on a bad REMEMBRA_RATE_LIMIT_STORAGE (e.g. redis:// without
+        # the redis package) instead of on the first signup or recall.
+        from remembra.cloud.ratelimit import get_cloud_rate_limiter
+
+        get_cloud_rate_limiter()
+
     # SQLite metadata database (first: it holds the active vector collection)
     app.state.db = Database(settings.database_url)
     await app.state.db.connect()
@@ -258,6 +276,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.cloud_enabled:
         app.state.usage_meter = UsageMeter(app.state.db)
         await app.state.usage_meter.init_schema()
+        # Enrichment work of the previous process died with it: release its
+        # credit holds (charged at the chunk minimum; a late settle adds the rest).
+        await app.state.usage_meter.expire_stale_reservations(older_than=timedelta(0))
         log.info(
             "cloud_enabled",
             paddle_configured=bool(settings.paddle_api_key),
@@ -349,6 +370,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.sleep_worker = SleepTimeWorker(
             settings=settings,
             memory_service=app.state.memory_service,
+            usage_meter=app.state.usage_meter,
         )
         log.info(
             "sleep_time_worker_enabled",
@@ -456,6 +478,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await app.state.pending_worker.stop()
     await app.state.tasks.shutdown(timeout=10.0)
     set_task_registry(None)
+    set_enrichment_queue(None)
     if app.state.plugin_manager:
         await app.state.plugin_manager.shutdown()
     # Close persistent HTTP clients

@@ -17,7 +17,13 @@ from remembra.auth.middleware import (
     require_memory_store,
     resolve_project_or_default,
 )
-from remembra.cloud.limits import enforce_store_quota, record_store_usage
+from remembra.cloud.limits import (
+    CREDITS_HEADER,
+    ENRICHMENT_HEADER,
+    EnrichmentGrant,
+    gate_write,
+    record_store_usage,
+)
 from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
 from remembra.ingestion.changelog import ChangelogParser, ChangelogRelease
@@ -42,6 +48,43 @@ def _resolve_body_project(user: AuthenticatedUser, body: BaseModel) -> str:
     """Honour an explicit project_id; pin single-project keys when it was omitted (SEC-21)."""
     explicit = getattr(body, "project_id", None) if "project_id" in body.model_fields_set else None
     return resolve_project_or_default(user, explicit)
+
+
+async def _gate_conversation(
+    request: Request, response: Response | None, user_id: str, body: ConversationIngestRequest
+) -> EnrichmentGrant:
+    """Credit gate for conversation ingest, estimated from the transcript length.
+
+    ``infer=false`` stores raw messages atomically (no credits). With
+    ``infer=true`` the whole transcript is metered per 8,000-character chunk
+    BEFORE the extraction call; if the reservation does not fit, the ingest is
+    degraded to raw atomic storage of the messages instead of being rejected.
+    """
+    messages = [m.content for m in body.messages]
+    if not body.options.infer:
+        return await gate_write(
+            request,
+            response,
+            user_id,
+            messages,
+            atomic=[True] * len(messages),
+            project_ids=[body.project_id or "default"],
+            enforce_batch_limit=False,
+            enforce_content_limit=False,
+        )
+    grant = await gate_write(
+        request,
+        response,
+        user_id,
+        ["\n".join(messages)],
+        project_ids=[body.project_id or "default"],
+        memories_added=1,
+        enforce_batch_limit=False,
+        enforce_content_limit=False,
+    )
+    if not grant.enrich:
+        body.options.infer = False  # degrade: keep every message verbatim, no LLM
+    return grant
 
 
 def get_memory_service(request: Request) -> MemoryService:
@@ -144,6 +187,7 @@ async def ingest_changelog(
     pii_detector: PIIDetectorDep,
     current_user: CurrentUser,
     settings: SettingsDep,
+    response: Response,
 ) -> ChangelogIngestResponse:
     """
     Parse a CHANGELOG.md and store each release as a memory.
@@ -193,59 +237,73 @@ async def ingest_changelog(
 
     releases = releases[: body.max_releases]
 
-    # Plan limits apply to every write path (SEC-11).
-    await enforce_store_quota(request, current_user.user_id, len(releases))
+    def _release_content(release: ChangelogRelease) -> str:
+        content = release.to_memory_content()
+        return f"Project {body.project_name} - {content}" if body.project_name else content
+
+    # Plan limits apply to every write path (SEC-11): memory cap + one
+    # chunk-aware credit reservation for all releases, before any LLM call.
+    grant = await gate_write(
+        request,
+        response,
+        current_user.user_id,
+        [_release_content(r) for r in releases],
+        project_ids=[project_id],
+        enforce_batch_limit=False,
+        enforce_content_limit=False,
+    )
 
     # Store each release as a memory
     memory_ids: list[str] = []
 
-    for release in releases:
-        try:
-            # Build content string
-            content = release.to_memory_content()
-            if body.project_name:
-                content = f"Project {body.project_name} - {content}"
+    with grant.activate():
+        for release in releases:
+            try:
+                content = _release_content(release)
 
-            # Same PII + injection policy as single store; caller-supplied text
-            # is not "trusted" just because it is a changelog (SEC-13).
-            prepared = prepare_content(
-                request.app.state,
-                content,
-                source="changelog_ingestion",
-                sanitization_enabled=settings.sanitization_enabled,
-            )
-            if prepared.blocked:
-                errors.append(f"Release {release.version} blocked: PII detected ({', '.join(prepared.blocked_pii_types or [])})")
-                continue
+                # Same PII + injection policy as single store; caller-supplied text
+                # is not "trusted" just because it is a changelog (SEC-13).
+                prepared = prepare_content(
+                    request.app.state,
+                    content,
+                    source="changelog_ingestion",
+                    sanitization_enabled=settings.sanitization_enabled,
+                )
+                if prepared.blocked:
+                    blocked = ", ".join(prepared.blocked_pii_types or [])
+                    errors.append(f"Release {release.version} blocked: PII detected ({blocked})")
+                    continue
 
-            # Build metadata
-            metadata = release.to_metadata()
-            if body.project_name:
-                metadata["project_name"] = body.project_name
+                # Build metadata
+                metadata = release.to_metadata()
+                if body.project_name:
+                    metadata["project_name"] = body.project_name
 
-            # Store via memory service
-            store_request = StoreRequest(
-                user_id=current_user.user_id,
-                content=prepared.content,
-                project_id=project_id,
-                metadata=metadata,
-            )
+                # Store via memory service
+                store_request = StoreRequest(
+                    user_id=current_user.user_id,
+                    content=prepared.content,
+                    project_id=project_id,
+                    metadata=metadata,
+                )
 
-            result = await memory_service.store(
-                store_request,
-                source="changelog_ingestion",
-                trust_score=prepared.trust_score,
-                checksum=prepared.checksum,
-            )
+                result = await memory_service.store(
+                    store_request,
+                    source="changelog_ingestion",
+                    trust_score=prepared.trust_score,
+                    checksum=prepared.checksum,
+                    skip_extraction=not grant.enrich,
+                )
 
-            if result.id:
-                memory_ids.append(result.id)
+                if result.id:
+                    memory_ids.append(result.id)
 
-        except Exception as e:
-            log.warning("changelog_release_store_failed", version=release.version, error_type=type(e).__name__)
-            errors.append(f"Failed to store release {release.version}")
+            except Exception as e:
+                log.warning("changelog_release_store_failed", version=release.version, error_type=type(e).__name__)
+                errors.append(f"Failed to store release {release.version}")
 
     await record_store_usage(request, current_user.user_id, len(memory_ids))
+    await grant.record_degraded(len(memory_ids))
 
     # Audit log
     await audit_logger.log_memory_store(
@@ -285,6 +343,7 @@ async def ingest_conversation(
     sanitizer: SanitizerDep,
     current_user: CurrentUser,
     settings: SettingsDep,
+    response: Response,
 ) -> ConversationIngestResponse:
     """
     Parse a conversation and automatically extract memorable facts.
@@ -332,12 +391,14 @@ async def ingest_conversation(
     # PII + injection policy on every message; the sanitized text is what gets
     # ingested (previously it was computed and then discarded).
     _apply_message_policy(request, body, settings.sanitization_enabled)
-    await enforce_store_quota(request, current_user.user_id)
+    grant = await _gate_conversation(request, response, current_user.user_id, body)
 
     try:
         # Process conversation through the ingest service
-        result = await conversation_ingest.ingest(body)
+        with grant.activate():
+            result = await conversation_ingest.ingest(body)
         await record_store_usage(request, current_user.user_id, result.stats.facts_stored)
+        await grant.record_degraded(result.stats.facts_stored)
 
         # Audit log
         await audit_logger.log_memory_store(
@@ -444,7 +505,7 @@ async def ingest_conversation_stream(
     body.user_id = current_user.user_id
 
     _apply_message_policy(request, body, settings.sanitization_enabled)
-    await enforce_store_quota(request, current_user.user_id)
+    grant = await _gate_conversation(request, None, current_user.user_id, body)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         start = time.time()
@@ -455,9 +516,12 @@ async def ingest_conversation_stream(
             # Phase 2: Extraction
             yield f"data: {json.dumps({'phase': 'extracting_facts', 'progress': 20})}\n\n"
 
-            # Run the actual ingestion
-            result = await conversation_ingest.ingest(body)
+            # Run the actual ingestion (no yield inside: the spend job is
+            # published only around the ingest call itself)
+            with grant.activate():
+                result = await conversation_ingest.ingest(body)
             await record_store_usage(request, current_user.user_id, result.stats.facts_stored)
+            await grant.record_degraded(result.stats.facts_stored)
 
             # Phase 3: Storing
             yield f"data: {json.dumps({'phase': 'storing', 'progress': 80})}\n\n"
@@ -483,13 +547,15 @@ async def ingest_conversation_stream(
             log.error("conversation_stream_ingest_failed", error_type=type(e).__name__, error=str(e))
             yield f"data: {json.dumps({'phase': 'error', 'error': 'Conversation ingestion failed.'})}\n\n"
 
+    headers = {"Cache-Control": "no-cache", "Connection": "keep-alive"}
+    if grant.mode != "unmetered":
+        headers[ENRICHMENT_HEADER] = grant.mode
+        if grant.credits_remaining is not None:
+            headers[CREDITS_HEADER] = str(grant.credits_remaining)
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        },
+        headers=headers,
     )
 
 

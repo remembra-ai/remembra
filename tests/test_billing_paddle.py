@@ -26,19 +26,23 @@ import pytest
 # Set sandbox environment before imports
 os.environ["PADDLE_ENVIRONMENT"] = "sandbox"
 
+import remembra.config as config_module
 from remembra.cloud.billing_paddle import PaddleBillingManager, WebhookResult
 from remembra.cloud.paddle_config import (
-    SANDBOX_CONFIG,
     PRODUCTION_CONFIG,
+    SANDBOX_CONFIG,
+    CheckoutUnavailableError,
     PaddleEnvironment,
     get_paddle_config,
     get_price_id_for_plan,
 )
-from remembra.cloud.plans_paddle import (
+from remembra.cloud.plans import (
+    BillingInterval,
     PlanTier,
     UsageSnapshot,
     get_plan,
 )
+from remembra.config import Settings
 
 
 # =============================================================================
@@ -101,59 +105,83 @@ def test_email():
 # =============================================================================
 
 
+NEW_PRICES = {
+    "paddle_price_solo_monthly": "pri_solo_m",
+    "paddle_price_solo_annual": "pri_solo_y",
+    "paddle_price_pro_monthly": "pri_pro_m",
+    "paddle_price_pro_annual": "pri_pro_y",
+    "paddle_price_team_seat_monthly": "pri_team_m",
+    "paddle_price_team_seat_annual": "pri_team_y",
+    "paddle_price_founding_annual": "pri_founding",
+}
+
+
+@pytest.fixture
+def catalog_prices():
+    """Settings carrying the 2026-09 price IDs (as the owner will set them via env)."""
+    previous = config_module._settings
+    config_module._settings = Settings(**NEW_PRICES)
+    yield
+    config_module._settings = previous
+
+
+@pytest.fixture
+def no_catalog_prices():
+    previous = config_module._settings
+    config_module._settings = Settings()
+    yield
+    config_module._settings = previous
+
+
 class TestPaddleConfig:
-    """Test Paddle configuration management."""
+    """Paddle configuration: legacy prices fixed, new catalog from settings."""
 
     def test_sandbox_config_has_correct_api_base(self):
-        """Sandbox config should point to sandbox API."""
         assert SANDBOX_CONFIG.api_base == "https://sandbox-api.paddle.com"
         assert SANDBOX_CONFIG.is_sandbox is True
 
     def test_production_config_has_correct_api_base(self):
-        """Production config should point to production API."""
         assert PRODUCTION_CONFIG.api_base == "https://api.paddle.com"
         assert PRODUCTION_CONFIG.is_sandbox is False
 
-    def test_get_config_by_string(self):
-        """Should get config using string environment name."""
-        config = get_paddle_config("sandbox")
-        assert config == SANDBOX_CONFIG
+    def test_legacy_price_ids_stay_mapped_to_grandfathered_tiers(self):
+        assert SANDBOX_CONFIG.legacy_pro_prices.monthly == "pri_01kmeq0ss2j2b74w9f1xwmvbc0"
+        assert SANDBOX_CONFIG.legacy_team_prices.monthly == "pri_01kmeq5y8ch8zfy2kw9qnrz6s1"
+        assert PRODUCTION_CONFIG.legacy_pro_prices.monthly == "pri_01kmepby4nfy150jbfjkpkev5h"
+        assert PRODUCTION_CONFIG.legacy_team_prices.monthly == "pri_01kmepewmfpqdz413hc4f4fr3r"
+        prod = get_paddle_config("production")
+        assert prod.resolve_price("pri_01kmepby4nfy150jbfjkpkev5h").tier == PlanTier.LEGACY_PRO
+        assert prod.resolve_price("pri_01kmepewmfpqdz413hc4f4fr3r").tier == PlanTier.LEGACY_TEAM
 
+    def test_catalog_prices_come_from_settings(self, catalog_prices):
         config = get_paddle_config("production")
-        assert config == PRODUCTION_CONFIG
+        assert config.price_for(PlanTier.SOLO, BillingInterval.MONTH) == "pri_solo_m"
+        assert config.price_for(PlanTier.SOLO, BillingInterval.YEAR) == "pri_solo_y"
+        assert config.price_for(PlanTier.TEAM, BillingInterval.YEAR) == "pri_team_y"
+        assert config.price_for(PlanTier.SOLO, BillingInterval.YEAR, founding=True) == "pri_founding"
+        assert config.price_for(PlanTier.SOLO, BillingInterval.MONTH, founding=True) is None  # annual only
+        mapping = config.resolve_price("pri_founding")
+        assert (mapping.tier, mapping.interval, mapping.founding) == (PlanTier.SOLO, BillingInterval.YEAR, True)
+        assert config.resolve_price("pri_pro_y").interval == BillingInterval.YEAR
+        assert get_price_id_for_plan("pro", "annual", PaddleEnvironment.SANDBOX) == "pri_pro_y"
+        assert get_price_id_for_plan("founding", "yearly") == "pri_founding"
 
-    def test_sandbox_has_pro_price_ids(self):
-        """Sandbox should have Pro price IDs configured."""
-        assert SANDBOX_CONFIG.pro_product_id == "pro_01kmepzj0fnha19eznjanme5v4"
-        assert SANDBOX_CONFIG.pro_prices.monthly == "pri_01kmeq0ss2j2b74w9f1xwmvbc0"
+    def test_missing_price_means_checkout_unavailable(self, no_catalog_prices):
+        config = get_paddle_config("production")
+        assert config.price_for(PlanTier.SOLO, BillingInterval.MONTH) is None
+        with pytest.raises(CheckoutUnavailableError, match="not available yet"):
+            config.require_price(PlanTier.PRO, BillingInterval.YEAR)
 
-    def test_sandbox_has_team_price_ids(self):
-        """Sandbox should have Team price IDs configured."""
-        assert SANDBOX_CONFIG.team_product_id == "pro_01kmeq4v9ww2znyhg8ypnnm6gd"
-        assert SANDBOX_CONFIG.team_prices.monthly == "pri_01kmeq5y8ch8zfy2kw9qnrz6s1"
-
-    def test_production_has_pro_price_ids(self):
-        """Production should have Pro price IDs configured."""
-        assert PRODUCTION_CONFIG.pro_product_id == "pro_01kmepaakyc11xgj8j2j863y3z"
-        assert PRODUCTION_CONFIG.pro_prices.monthly == "pri_01kmepby4nfy150jbfjkpkev5h"
-
-    def test_production_has_team_price_ids(self):
-        """Production should have Team price IDs configured."""
-        assert PRODUCTION_CONFIG.team_product_id == "pro_01kmepdm9jg61b75z4w3p355dy"
-        assert PRODUCTION_CONFIG.team_prices.monthly == "pri_01kmepewmfpqdz413hc4f4fr3r"
-
-    def test_get_price_id_for_plan(self):
-        """Should get correct price ID for plan and environment."""
-        pro_sandbox = get_price_id_for_plan("pro", "monthly", PaddleEnvironment.SANDBOX)
-        assert pro_sandbox == "pri_01kmeq0ss2j2b74w9f1xwmvbc0"
-
-        team_prod = get_price_id_for_plan("team", "monthly", PaddleEnvironment.PRODUCTION)
-        assert team_prod == "pri_01kmepewmfpqdz413hc4f4fr3r"
+    def test_invalid_price_id_is_treated_as_unset(self):
+        previous = config_module._settings
+        config_module._settings = Settings(paddle_price_solo_monthly="price_1Stripe")
+        try:
+            assert get_paddle_config("production").price_for(PlanTier.SOLO, BillingInterval.MONTH) is None
+        finally:
+            config_module._settings = previous
 
     def test_invalid_plan_returns_none(self):
-        """Should return None for invalid plan names."""
-        price = get_price_id_for_plan("invalid", "monthly", PaddleEnvironment.SANDBOX)
-        assert price is None
+        assert get_price_id_for_plan("invalid", "monthly", PaddleEnvironment.SANDBOX) is None
 
 
 # =============================================================================
@@ -162,144 +190,101 @@ class TestPaddleConfig:
 
 
 class TestPlanLimits:
-    """Test plan limit definitions and enforcement."""
+    """The owner-approved 2026-09 catalog."""
 
     def test_free_plan_limits(self):
-        """Free plan should have restricted limits."""
         plan = get_plan(PlanTier.FREE)
-        assert plan.max_memories == 25_000
-        assert plan.max_users == 1
-        assert plan.max_projects == 1
+        assert plan.max_memories == 10_000
+        assert plan.max_smart_credits_per_month == 500
+        assert plan.unverified_credit_cap == 25
+        assert plan.llm_ceiling_usd_month == 1.25
+        assert (plan.max_content_chars, plan.max_batch_items, plan.max_projects, plan.max_api_keys) == (8_000, 10, 3, 3)
+        assert (plan.recall_burst_per_min, plan.relay_burst_per_min, plan.enrichment_concurrency) == (20, 30, 2)
         assert plan.has_webhooks is False
-        assert plan.has_sso is False
+
+    def test_solo_plan_limits(self):
+        plan = get_plan(PlanTier.SOLO)
+        assert (plan.price_monthly_cents, plan.price_annual_cents) == (1_200, 12_000)
+        assert plan.max_smart_credits_per_month == 2_200 and plan.llm_ceiling_usd_month == 5.5
+        assert plan.max_memories == 50_000 and plan.max_recalls_per_month == 50_000
+        assert plan.max_relay_events_per_month == 25_000
+        assert (plan.max_content_chars, plan.max_batch_items, plan.max_api_keys) == (50_000, 100, 10)
+        assert plan.enrichment_concurrency == 4
 
     def test_pro_plan_limits(self):
-        """Pro plan should have higher limits."""
         plan = get_plan(PlanTier.PRO)
-        assert plan.max_memories == 500_000
-        assert plan.max_users == 5
-        assert plan.max_projects == 5
-        assert plan.has_webhooks is True
+        assert (plan.price_monthly_cents, plan.price_annual_cents) == (2_900, 29_000)
+        assert plan.max_smart_credits_per_month == 5_000 and plan.llm_ceiling_usd_month == 12.5
+        assert plan.max_memories == 125_000 and plan.max_recalls_per_month == 250_000
+        assert plan.max_api_keys == 25 and plan.enrichment_concurrency == 8
         assert plan.has_observability is True
 
-    def test_team_plan_limits(self):
-        """Team plan should have team-level limits."""
+    def test_team_plan_is_per_seat_with_three_seat_minimum(self):
         plan = get_plan(PlanTier.TEAM)
-        assert plan.max_memories == 2_000_000
-        assert plan.max_users == 25
-        assert plan.has_priority_support is True
+        assert plan.per_seat and plan.min_seats == 3
+        assert (plan.price_monthly_cents, plan.price_annual_cents) == (1_500, 15_000)
+        pooled = plan.scaled(1)  # never below the minimum
+        assert pooled.max_users == 3 and pooled.max_smart_credits_per_month == 6_600
+        five = plan.scaled(5)
+        assert five.max_memories == 250_000 and five.max_api_keys == 50 and five.max_users == 5
 
-    def test_enterprise_plan_limits(self):
-        """Enterprise plan should have highest limits."""
+    def test_enterprise_has_explicit_ceiling(self):
         plan = get_plan(PlanTier.ENTERPRISE)
-        assert plan.max_memories == 10_000_000
         assert plan.has_sso is True
+        assert plan.max_smart_credits_per_month > 0  # no uncapped plans
 
-    def test_plan_has_paddle_price_id(self):
-        """Paid plans should have Paddle price IDs."""
-        pro = get_plan(PlanTier.PRO)
-        team = get_plan(PlanTier.TEAM)
+    def test_legacy_tiers_have_grandfathered_ceilings(self):
+        pro49 = get_plan(PlanTier.LEGACY_PRO)
+        team199 = get_plan(PlanTier.LEGACY_TEAM)
+        assert pro49.max_smart_credits_per_month == 12_000 and pro49.llm_ceiling_usd_month == 30.0
+        assert team199.max_smart_credits_per_month == 60_000 and team199.llm_ceiling_usd_month == 150.0
+        assert pro49.max_memories == 250_000 and team199.max_memories == 600_000
+        assert PlanTier("legacy_pro_49") is PlanTier.LEGACY_PRO
 
-        # In sandbox env, these should return sandbox price IDs
-        assert pro.paddle_price_id is not None
-        assert team.paddle_price_id is not None
-        assert pro.paddle_price_id.startswith("pri_")
-        assert team.paddle_price_id.startswith("pri_")
-
-    def test_free_plan_has_no_price_id(self):
-        """Free plan should not have a Paddle price ID."""
-        free = get_plan(PlanTier.FREE)
-        assert free.paddle_price_id is None
+    def test_annual_plans_bank_twelve_months_of_credits(self):
+        assert get_plan(PlanTier.SOLO).credit_allowance(BillingInterval.YEAR) == 26_400
+        assert get_plan(PlanTier.SOLO).credit_allowance(BillingInterval.MONTH) == 2_200
 
     def test_get_plan_by_string(self):
-        """Should get plan using string tier name."""
-        plan = get_plan("pro")
-        assert plan.tier == PlanTier.PRO
+        assert get_plan("pro").tier == PlanTier.PRO
+        assert get_plan("legacy_team_199").tier == PlanTier.LEGACY_TEAM
 
 
 class TestUsageLimits:
-    """Test usage limit checking."""
+    """Stores are only rejected at the memory cap; recalls at the monthly cap."""
 
     def test_store_within_limit(self):
-        """Should allow store when within limit."""
-        usage = UsageSnapshot(
-            user_id="test",
-            plan=PlanTier.FREE,
-            memories_stored=1000,
-            stores_this_month=1000,
-        )
-        result = usage.check_limit("store")
-        assert result.allowed is True
+        usage = UsageSnapshot(user_id="test", plan=PlanTier.FREE, memories_stored=1000, stores_this_month=99_999)
+        assert usage.check_limit("store").allowed is True  # no monthly store cap any more
 
     def test_store_at_memory_limit(self):
-        """Should deny store when at memory limit."""
-        usage = UsageSnapshot(
-            user_id="test",
-            plan=PlanTier.FREE,
-            memories_stored=25_000,  # At free limit
-            stores_this_month=1000,
-        )
+        usage = UsageSnapshot(user_id="test", plan=PlanTier.FREE, memories_stored=10_000)
         result = usage.check_limit("store")
         assert result.allowed is False
         assert "Memory limit reached" in result.reason
         assert result.upgrade_hint is not None
 
-    def test_store_at_monthly_limit(self):
-        """Should deny store when at monthly limit."""
-        usage = UsageSnapshot(
-            user_id="test",
-            plan=PlanTier.FREE,
-            memories_stored=1000,
-            stores_this_month=25_000,  # At monthly limit
-        )
-        result = usage.check_limit("store")
-        assert result.allowed is False
-        assert "Monthly store limit" in result.reason
+    def test_effective_memory_cap_overrides_catalog(self):
+        usage = UsageSnapshot(user_id="test", plan=PlanTier.FREE, memories_stored=10_000, max_memories=25_000)
+        assert usage.check_limit("store").allowed is True
 
     def test_recall_within_limit(self):
-        """Should allow recall when within limit."""
-        usage = UsageSnapshot(
-            user_id="test",
-            plan=PlanTier.FREE,
-            recalls_this_month=10_000,
-        )
-        result = usage.check_limit("recall")
-        assert result.allowed is True
+        usage = UsageSnapshot(user_id="test", plan=PlanTier.FREE, recalls_this_month=9_999)
+        assert usage.check_limit("recall").allowed is True
 
     def test_recall_at_limit(self):
-        """Should deny recall when at limit."""
-        usage = UsageSnapshot(
-            user_id="test",
-            plan=PlanTier.FREE,
-            recalls_this_month=50_000,  # At free limit
-        )
+        usage = UsageSnapshot(user_id="test", plan=PlanTier.FREE, recalls_this_month=10_000)
         result = usage.check_limit("recall")
         assert result.allowed is False
         assert "Monthly recall limit" in result.reason
 
     def test_pro_plan_has_higher_limits(self):
-        """Pro plan should allow more operations."""
-        usage = UsageSnapshot(
-            user_id="test",
-            plan=PlanTier.PRO,
-            memories_stored=100_000,  # Over free limit
-            stores_this_month=100_000,  # Over free limit
-        )
-        result = usage.check_limit("store")
-        assert result.allowed is True
+        usage = UsageSnapshot(user_id="test", plan=PlanTier.PRO, memories_stored=100_000)
+        assert usage.check_limit("store").allowed is True
 
     def test_limit_check_result_to_dict(self):
-        """Should convert limit check result to dict."""
-        result = UsageSnapshot(
-            user_id="test",
-            plan=PlanTier.FREE,
-            memories_stored=25_000,
-        ).check_limit("store")
-
-        d = result.to_dict()
-        assert "allowed" in d
-        assert "reason" in d
-        assert "limit" in d
+        d = UsageSnapshot(user_id="test", plan=PlanTier.FREE, memories_stored=10_000).check_limit("store").to_dict()
+        assert "allowed" in d and "reason" in d and "limit" in d
 
 
 # =============================================================================

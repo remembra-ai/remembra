@@ -8,9 +8,10 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from remembra.auth.middleware import authenticate_jwt
+from remembra.auth.middleware import authenticate_jwt, get_client_ip
 from remembra.auth.superadmin import account_is_owner
 from remembra.auth.users import UserManager
+from remembra.cloud.signup_guard import TURNSTILE_HEADER, guard_signup
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
 from remembra.core.time import utcnow
@@ -45,6 +46,9 @@ class SignupRequest(BaseModel):
         min_length=8, description="Password must be at least 8 chars: uppercase, lowercase, number, special char"
     )
     name: str | None = Field(None, max_length=100, description="User's display name")
+    turnstile_token: str | None = Field(
+        None, max_length=4096, description="Cloudflare Turnstile token (required when Turnstile is enabled)"
+    )
 
     @field_validator("password")
     @classmethod
@@ -301,7 +305,17 @@ async def signup(
     - **email**: Valid email address (will be lowercased)
     - **password**: At least 8 characters
     - **name**: Optional display name
+    - **turnstile_token**: Cloudflare Turnstile token (or the ``CF-Turnstile-Response``
+      header) — required when Turnstile is enabled on this server
+
+    Hardening: 3 signups/hour per client /24, 20/day per email domain. Free
+    accounts get 25 smart credits until the email is verified.
     """
+    await guard_signup(
+        client_ip=get_client_ip(request),
+        email=str(body.email),
+        turnstile_token=body.turnstile_token or request.headers.get(TURNSTILE_HEADER),
+    )
     user_manager = await get_user_manager(request)
 
     user, error = await user_manager.create_user(

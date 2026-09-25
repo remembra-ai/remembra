@@ -147,8 +147,11 @@ async def test_entity_matching_threshold_setting_is_wired(tmp_path) -> None:
 async def test_store_reports_entities_status_honestly(tmp_path) -> None:
     service, *_ = await make_service(tmp_path, enable_entity_resolution=True)
     service.entity_extractor = _Extractor(ExtractionResult(entities=[], relationships=[]))  # type: ignore[assignment]
-    resp = await service.store(StoreRequest(content="Suzan lives in Kingston", user_id="u1"), skip_extraction=True)
+    resp = await service.store(StoreRequest(content="Suzan lives in Kingston", user_id="u1"))
     assert resp.entities_status == "pending" and resp.entities == []
+    # Atomic stores never run the (LLM) entity pass, and say so.
+    resp = await service.store(StoreRequest(content="Suzan moved to Montego Bay", user_id="u1"), skip_extraction=True)
+    assert resp.entities_status == "disabled" and resp.entities == []
 
 
 # ---------------------------------------------------------------------------

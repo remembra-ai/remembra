@@ -3,11 +3,11 @@
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from remembra.auth.middleware import CurrentUser, RequireMasterKey
-from remembra.cloud.metering import UsageMeter
-from remembra.cloud.plans import PlanTier, get_plan
+from remembra.cloud.metering import AccountState, CreditPeriod, UsageMeter, now_utc
+from remembra.cloud.plans import CREDIT_USD, RESERVE_CREDITS_PER_CHUNK, PlanLimits, PlanTier, get_plan
 from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
 from remembra.teams.manager import TeamManager
@@ -77,6 +77,22 @@ class SignupRequest(BaseModel):
     email: str = Field(description="User's email address")
     name: str | None = Field(None, description="Display name")
     user_id: str | None = Field(None, description="Custom user ID (auto-generated if omitted)")
+    turnstile_token: str | None = Field(
+        None, max_length=4096, description="Cloudflare Turnstile token (required when Turnstile is enabled)"
+    )
+    client_ip: str | None = Field(
+        None,
+        description="End user's IP as seen by the calling signup backend (used for the per-network signup limit)",
+    )
+
+    @field_validator("client_ip")
+    @classmethod
+    def valid_ip(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        import ipaddress
+
+        return str(ipaddress.ip_address(v.strip()))
 
 
 class SignupResponse(BaseModel):
@@ -112,6 +128,99 @@ class BillingContextResponse(BaseModel):
     usage: dict[str, Any] = Field(default_factory=dict)
 
 
+class UsagePeriod(BaseModel):
+    key: str
+    type: Literal["month", "year"]
+    start: str
+    end: str
+
+
+class CreditsUsage(BaseModel):
+    limit: int = Field(description="Credits in this period (monthly allowance or the yearly bank)")
+    used: int
+    reserved: int = Field(description="Held for enrichment still running; refunded when it settles")
+    remaining: int
+    bank: Literal["monthly", "yearly"]
+    llm_usd_used: float = Field(description="Actual AI spend this period (USD)")
+    ceiling_usd: float = Field(description="Hard AI-spend ceiling for this period (USD)")
+    unverified_cap_applied: bool = Field(description="Free credits held at the unverified-email cap")
+
+
+class EnrichmentStatus(BaseModel):
+    status: Literal["full", "degraded"]
+    reason: str | None = Field(None, description="credits_exhausted | free_breaker_open")
+
+
+class RelayUsage(BaseModel):
+    this_month: int
+    soft_cap: int
+    over_soft_cap: bool
+    burst_per_min: int
+    free: bool = Field(True, description="Relay events never consume smart credits")
+
+
+class RecallUsage(BaseModel):
+    this_month: int
+    limit: int
+    burst_per_min: int
+
+
+class MemoryUsage(BaseModel):
+    stored: int
+    cap: int
+
+
+class StoreUsage(BaseModel):
+    this_month: int
+    degraded_this_month: int = Field(description="Stores saved without enrichment (out of credits / paused)")
+
+
+class UsageSummaryResponse(BaseModel):
+    plan: str
+    plan_name: str
+    interval: Literal["month", "year"]
+    seats: int
+    founding: bool
+    email_verified: bool
+    period: UsagePeriod
+    credits: CreditsUsage
+    enrichment: EnrichmentStatus
+    relay_events: RelayUsage
+    recalls: RecallUsage
+    memories: MemoryUsage
+    stores: StoreUsage
+
+
+def _catalog_limits_dict(plan_limits: PlanLimits) -> dict[str, Any]:
+    return {
+        "max_memories": plan_limits.max_memories,
+        "smart_credits_per_month": plan_limits.max_smart_credits_per_month,
+        "llm_ceiling_usd_month": plan_limits.llm_ceiling_usd_month,
+        "max_recalls_per_month": plan_limits.max_recalls_per_month,
+        "relay_events_soft_cap": plan_limits.max_relay_events_per_month,
+        "max_content_chars": plan_limits.max_content_chars,
+        "max_batch_items": plan_limits.max_batch_items,
+        "max_api_keys": plan_limits.max_api_keys,
+        "max_users": plan_limits.max_users,
+        "max_projects": plan_limits.max_projects,
+        "max_storage_mb": plan_limits.max_storage_mb,
+        "retention_days": plan_limits.retention_days,
+        "has_webhooks": plan_limits.has_webhooks,
+        "has_sso": plan_limits.has_sso,
+        "has_observability": plan_limits.has_observability,
+    }
+
+
+def _limits_dict(account: AccountState) -> dict[str, Any]:
+    """Effective limits for an account (seat-scaled, notice-aware memory cap, period credits)."""
+    return {
+        **_catalog_limits_dict(account.limits),
+        "max_memories": account.memory_cap,
+        "smart_credits": account.credit_limit,
+        "credit_bank": "yearly" if account.interval.value == "year" else "monthly",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Signup / Provisioning
 # ---------------------------------------------------------------------------
@@ -135,9 +244,19 @@ async def signup(
 
     **Requires master key** (used by the signup page backend).
 
+    Hardening: 3 signups/hour per client /24 and 20/day per email domain
+    (``client_ip`` from the calling backend, else the connection's IP), and a
+    Cloudflare Turnstile check when ``REMEMBRA_TURNSTILE_SECRET`` is set.
+    New Free accounts get 25 smart credits until their email is verified.
+
     Returns the API key — it is only shown once.
     """
+    from remembra.auth.middleware import get_client_ip
     from remembra.cloud.provisioning import TenantProvisioner
+    from remembra.cloud.signup_guard import guard_signup
+
+    client_ip = body.client_ip or get_client_ip(request)
+    await guard_signup(client_ip=client_ip, email=body.email, turnstile_token=body.turnstile_token)
 
     key_manager = request.app.state.api_key_manager
 
@@ -197,26 +316,97 @@ async def get_usage(
     current_user: CurrentUser,
     meter: UsageMeterDep,
 ) -> UsageResponse:
-    """Get usage statistics for the current billing period."""
+    """Get usage statistics for the current calendar month."""
     monthly = await meter.get_monthly_usage(current_user.user_id)
-    plan = await meter.get_tenant_plan(current_user.user_id)
-    plan_limits = get_plan(plan)
+    account = await meter.get_account(current_user.user_id)
 
     return UsageResponse(
         user_id=current_user.user_id,
-        plan=plan.value,
+        plan=account.tier.value,
         period=monthly["period"],
         stores=monthly["stores"],
         recalls=monthly["recalls"],
         deletes=monthly["deletes"],
         active_days=monthly["active_days"],
-        limits={
-            "max_memories": plan_limits.max_memories,
-            "max_stores_per_month": plan_limits.max_stores_per_month,
-            "max_recalls_per_month": plan_limits.max_recalls_per_month,
-            "max_api_keys": plan_limits.max_api_keys,
-            "max_storage_mb": plan_limits.max_storage_mb,
-        },
+        limits=_limits_dict(account),
+    )
+
+
+@router.get(
+    "/usage/summary",
+    response_model=UsageSummaryResponse,
+    summary="Plan, smart credits, relay, recalls and memories for the dashboard",
+)
+@limiter.limit("60/minute")
+async def get_usage_summary(
+    request: Request,
+    current_user: CurrentUser,
+    meter: UsageMeterDep,
+) -> UsageSummaryResponse:
+    """Everything the billing panel shows.
+
+    Smart credits are reported for the current billing period: a calendar
+    month, or the subscription year on annual plans (the whole year's credits
+    are banked up front). Relay events, pickups, trail reads and recalls never
+    consume credits. ``enrichment.status`` is ``degraded`` when new stores will
+    be saved without AI enrichment (credits exhausted or the platform's free
+    tier budget paused).
+    """
+    user_id = current_user.user_id
+    account = await meter.get_account(user_id)
+    balance = await meter.get_credit_balance(account)
+    month = await meter.get_period_counters(user_id, CreditPeriod.monthly(now_utc()).start)
+    limits = account.limits
+
+    reason: str | None = None
+    if account.free_group and await meter.free_breaker_open():
+        reason = "free_breaker_open"
+    elif balance.remaining < RESERVE_CREDITS_PER_CHUNK:
+        reason = "credits_exhausted"
+
+    unverified_cap = limits.unverified_credit_cap
+    return UsageSummaryResponse(
+        plan=account.tier.value,
+        plan_name=limits.display_name,
+        interval=account.interval.value,
+        seats=account.seats,
+        founding=account.founding,
+        email_verified=account.email_verified,
+        period=UsagePeriod(
+            key=account.period.key,
+            type=account.period.interval.value,
+            start=account.period.start.isoformat(),
+            end=account.period.end.isoformat(),
+        ),
+        credits=CreditsUsage(
+            limit=balance.limit,
+            used=balance.used,
+            reserved=balance.reserved,
+            remaining=balance.remaining,
+            bank="yearly" if account.interval.value == "year" else "monthly",
+            llm_usd_used=round(balance.llm_usd, 4),
+            ceiling_usd=round(balance.limit * CREDIT_USD, 2),
+            unverified_cap_applied=bool(
+                account.tier == PlanTier.FREE
+                and not account.email_verified
+                and unverified_cap is not None
+                and balance.limit <= unverified_cap
+            ),
+        ),
+        enrichment=EnrichmentStatus(status="degraded" if reason else "full", reason=reason),
+        relay_events=RelayUsage(
+            this_month=month["relay_events"],
+            soft_cap=limits.max_relay_events_per_month,
+            over_soft_cap=month["relay_events"] >= limits.max_relay_events_per_month,
+            burst_per_min=limits.relay_burst_per_min,
+        ),
+        recalls=RecallUsage(
+            this_month=month["recalls"],
+            limit=limits.max_recalls_per_month,
+            burst_per_min=limits.recall_burst_per_min,
+        ),
+        memories=MemoryUsage(stored=await meter.count_memories(user_id), cap=account.memory_cap),
+        stores=StoreUsage(this_month=month["stores"], degraded_this_month=month["degraded_stores"]),
     )
 
 
@@ -253,7 +443,8 @@ async def get_plan_info(
 ) -> PlanInfoResponse:
     """Get current plan details, usage snapshot, and limit check results."""
     snapshot = await meter.get_usage_snapshot(current_user.user_id)
-    plan_limits = get_plan(snapshot.plan)
+    account = await meter.get_account(current_user.user_id)
+    balance = await meter.get_credit_balance(account)
 
     store_check = snapshot.check_limit("store")
     recall_check = snapshot.check_limit("recall")
@@ -261,23 +452,14 @@ async def get_plan_info(
 
     return PlanInfoResponse(
         plan=snapshot.plan.value,
-        limits={
-            "max_memories": plan_limits.max_memories,
-            "max_stores_per_month": plan_limits.max_stores_per_month,
-            "max_recalls_per_month": plan_limits.max_recalls_per_month,
-            "max_api_keys": plan_limits.max_api_keys,
-            "max_users": plan_limits.max_users,
-            "max_projects": plan_limits.max_projects,
-            "retention_days": plan_limits.retention_days,
-            "has_webhooks": plan_limits.has_webhooks,
-            "has_sso": plan_limits.has_sso,
-            "has_observability": plan_limits.has_observability,
-        },
+        limits=_limits_dict(account),
         usage={
             "memories_stored": snapshot.memories_stored,
             "stores_this_month": snapshot.stores_this_month,
             "recalls_this_month": snapshot.recalls_this_month,
             "api_keys_active": snapshot.api_keys_active,
+            "smart_credits_used": balance.used,
+            "smart_credits_remaining": balance.remaining,
         },
         limit_checks={
             "store": store_check.to_dict(),
@@ -325,11 +507,13 @@ async def get_billing_context(
         # Only owners can manage billing (industry standard)
         can_manage = role == "owner"
 
-        # Get team plan limits
+        # Team plan limits, pooled over the owner's billed seats
         try:
             plan_limits = get_plan(PlanTier(team_plan))
         except ValueError:
-            plan_limits = get_plan(PlanTier.PRO)
+            plan_limits = get_plan(PlanTier.TEAM)
+        owner_tenant = await meter.get_tenant(team.get("owner_id", "")) if team.get("owner_id") else None
+        plan_limits = plan_limits.scaled(int((owner_tenant or {}).get("seats") or plan_limits.min_seats))
 
         # Get owner email for "contact admin" messaging
         owner_email = None
@@ -362,37 +546,19 @@ async def get_billing_context(
             role=role,
             can_manage_billing=can_manage,
             owner_email=owner_email,
-            limits={
-                "max_memories": plan_limits.max_memories,
-                "max_stores_per_month": plan_limits.max_stores_per_month,
-                "max_recalls_per_month": plan_limits.max_recalls_per_month,
-                "max_api_keys": plan_limits.max_api_keys,
-                "max_users": plan_limits.max_users,
-                "max_projects": plan_limits.max_projects,
-                "has_webhooks": plan_limits.has_webhooks,
-                "has_sso": plan_limits.has_sso,
-            },
+            limits=_catalog_limits_dict(plan_limits),
             usage=usage,
         )
 
     # No team — personal context
     snapshot = await meter.get_usage_snapshot(current_user.user_id)
-    plan_limits = get_plan(snapshot.plan)
+    account = await meter.get_account(current_user.user_id)
 
     return BillingContextResponse(
         context="personal",
         plan=snapshot.plan.value,
         can_manage_billing=True,  # Personal accounts always manage their own billing
-        limits={
-            "max_memories": plan_limits.max_memories,
-            "max_stores_per_month": plan_limits.max_stores_per_month,
-            "max_recalls_per_month": plan_limits.max_recalls_per_month,
-            "max_api_keys": plan_limits.max_api_keys,
-            "max_users": plan_limits.max_users,
-            "max_projects": plan_limits.max_projects,
-            "has_webhooks": plan_limits.has_webhooks,
-            "has_sso": plan_limits.has_sso,
-        },
+        limits=_limits_dict(account),
         usage={
             "memories_stored": snapshot.memories_stored,
             "stores_this_month": snapshot.stores_this_month,

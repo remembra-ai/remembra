@@ -20,6 +20,7 @@ import structlog
 from openai import AsyncOpenAI
 
 from remembra.config import Settings
+from remembra.core.ai_spend import record_llm_usage
 from remembra.core.time import utcnow
 from remembra.extraction.prompting import reference_date_line, wrap_untrusted
 from remembra.extraction.prompts.conversation import (
@@ -355,6 +356,7 @@ class ConversationIngestService:
             )
         except Exception as e:
             raise ConversationExtractionError(type(e).__name__) from e
+        record_llm_usage(response, self.settings.extraction_model)
 
         result_text = response.choices[0].message.content
         if not result_text:

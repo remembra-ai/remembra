@@ -19,11 +19,13 @@ import hmac
 import json
 import logging
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
 
-from remembra.cloud.plans_paddle import PlanTier, get_plan
+from remembra.cloud.paddle_config import CheckoutUnavailableError, PriceMapping, get_paddle_config
+from remembra.cloud.plans import BillingInterval, PlanTier, get_plan
 
 # Paddle recommends rejecting webhooks whose signed timestamp is >5 min off.
 WEBHOOK_TOLERANCE_SECONDS = 300
@@ -148,32 +150,48 @@ class PaddleBillingManager:
     # Checkout - Transactions
     # -----------------------------------------------------------------------
 
+    def _price_for(
+        self,
+        plan: PlanTier,
+        interval: BillingInterval,
+        founding: bool,
+    ) -> str:
+        """Configured Paddle price for this environment (CheckoutUnavailableError if missing)."""
+        config = get_paddle_config("sandbox" if self._sandbox else "production")
+        return config.require_price(plan, interval, founding=founding)
+
     async def create_checkout_transaction(
         self,
         paddle_customer_id: str | None,
         plan: PlanTier,
         user_id: str,
         customer_email: str | None = None,
+        *,
+        interval: BillingInterval = BillingInterval.MONTH,
+        quantity: int = 1,
+        founding: bool = False,
     ) -> dict[str, Any]:
         """Create a Paddle transaction for checkout.
 
         Returns transaction_id and checkout URL (for hosted checkout).
         For overlay checkout, use transaction_id with Paddle.js.
+
+        Raises:
+            CheckoutUnavailableError: no Paddle price is configured for the plan/interval.
         """
-        plan_limits = get_plan(plan)
-        if not plan_limits.paddle_price_id:
-            raise ValueError(f"No Paddle price configured for {plan.value} plan")
+        if plan.value not in ("solo", "pro", "team"):
+            raise CheckoutUnavailableError(f"The {plan.value} plan is not sold through self-serve checkout.")
+        price_id = self._price_for(plan, interval, founding)
+        limits = get_plan(plan)
+        quantity = max(limits.min_seats, quantity) if limits.per_seat else 1
 
         payload: dict[str, Any] = {
-            "items": [
-                {
-                    "price_id": plan_limits.paddle_price_id,
-                    "quantity": 1,
-                }
-            ],
+            "items": [{"price_id": price_id, "quantity": quantity}],
             "custom_data": {
                 "remembra_user_id": user_id,
                 "plan": plan.value,
+                "interval": interval.value,
+                "founding": founding,
             },
             "checkout": {
                 "url": self._success_url,
@@ -189,10 +207,13 @@ class PaddleBillingManager:
         data = result["data"]
 
         logger.info(
-            "Created Paddle transaction %s for user %s (plan: %s)",
+            "Created Paddle transaction %s for user %s (plan: %s, interval: %s, qty: %s, founding: %s)",
             data["id"],
             user_id,
             plan.value,
+            interval.value,
+            quantity,
+            founding,
         )
 
         return {
@@ -206,21 +227,26 @@ class PaddleBillingManager:
         plan: PlanTier,
         user_id: str,
         email: str | None = None,
+        *,
+        interval: BillingInterval = BillingInterval.MONTH,
+        quantity: int = 1,
+        founding: bool = False,
     ) -> dict[str, Any]:
         """Create a checkout session (alias for create_checkout_transaction).
 
         Returns dict with:
           - transaction_id: For Paddle.js overlay checkout
           - checkout_url: For redirect-based checkout (fallback)
-          - client_token: Not used by Paddle v2, but included for compatibility
         """
-        result = await self.create_checkout_transaction(
+        return await self.create_checkout_transaction(
             paddle_customer_id=customer_id,
             plan=plan,
             user_id=user_id,
             customer_email=email,
+            interval=interval,
+            quantity=quantity,
+            founding=founding,
         )
-        return result
 
     # -----------------------------------------------------------------------
     # Customer lookup
@@ -318,6 +344,9 @@ class PaddleBillingManager:
         subscription_id: str,
         new_plan: PlanTier,
         proration: str = "prorated_immediately",
+        *,
+        interval: BillingInterval = BillingInterval.MONTH,
+        quantity: int = 1,
     ) -> None:
         """Change subscription to a different plan.
 
@@ -327,31 +356,28 @@ class PaddleBillingManager:
             proration: "prorated_immediately", "prorated_next_billing_period",
                       "full_immediately", "full_next_billing_period",
                       "do_not_bill"
+            interval: Billing interval of the target price.
+            quantity: Seats (Team; at least the plan minimum).
         """
-        plan_limits = get_plan(new_plan)
-        if not plan_limits.paddle_price_id:
-            raise ValueError(f"No Paddle price for {new_plan.value}")
+        price_id = self._price_for(new_plan, interval, founding=False)
+        limits = get_plan(new_plan)
+        quantity = max(limits.min_seats, quantity) if limits.per_seat else 1
 
         await self._request(
             "PATCH",
             f"/subscriptions/{subscription_id}",
             {
-                "items": [
-                    {
-                        "price_id": plan_limits.paddle_price_id,
-                        "quantity": 1,
-                    }
-                ],
+                "items": [{"price_id": price_id, "quantity": quantity}],
                 "proration_billing_mode": proration,
-                "custom_data": {
-                    "plan": new_plan.value,
-                },
+                "custom_data": {"plan": new_plan.value, "interval": interval.value},
             },
         )
         logger.info(
-            "Updated subscription %s to plan %s",
+            "Updated subscription %s to plan %s (%s, qty %s)",
             subscription_id,
             new_plan.value,
+            interval.value,
+            quantity,
         )
 
     # -----------------------------------------------------------------------
@@ -415,6 +441,84 @@ class PaddleBillingManager:
         event: dict[str, Any] = json.loads(payload)
         return event
 
+    def _resolve_purchase(self, data: dict[str, Any]) -> tuple[PriceMapping | None, int, bool]:
+        """(what the items buy, quantity, whether it came from a known price ID).
+
+        The price ID is authoritative: renewals of the grandfathered $49/$199
+        prices keep mapping to the legacy tiers whatever custom_data says. Falls
+        back to our own checkout custom_data (plan / interval / founding).
+        """
+        config = get_paddle_config("sandbox" if self._sandbox else "production")
+        for item in data.get("items") or []:
+            if not isinstance(item, dict):
+                continue
+            price = item.get("price")
+            price_id = (price.get("id") if isinstance(price, dict) else None) or item.get("price_id")
+            mapping = config.resolve_price(price_id)
+            if mapping is not None:
+                quantity = item.get("quantity")
+                return mapping, quantity if isinstance(quantity, int) and quantity > 0 else 1, True
+
+        custom = data.get("custom_data") or {}
+        plan_name = str(custom.get("plan") or "").strip().lower()
+        try:
+            interval = BillingInterval.parse(custom.get("interval"))
+        except ValueError:
+            interval = BillingInterval.MONTH
+        founding = bool(custom.get("founding")) or plan_name == "founding"
+        if founding:
+            return PriceMapping(PlanTier.SOLO, BillingInterval.YEAR, founding=True), 1, False
+        try:
+            tier = PlanTier(plan_name)
+        except ValueError:
+            return None, 1, False
+        return PriceMapping(tier, interval), 1, False
+
+    @staticmethod
+    def _period_anchor(data: dict[str, Any]) -> datetime | None:
+        period = data.get("current_billing_period") or data.get("billing_period") or {}
+        starts = period.get("starts_at") if isinstance(period, dict) else None
+        if not starts:
+            return None
+        try:
+            parsed = datetime.fromisoformat(str(starts).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+    @staticmethod
+    def _net_revenue_usd(data: dict[str, Any]) -> float | None:
+        """Net earnings (after Paddle fees and tax) of a completed USD transaction, in dollars."""
+        if str(data.get("currency_code") or "").upper() != "USD":
+            return None
+        totals = (data.get("details") or {}).get("totals") or {}
+        earnings = totals.get("earnings")
+        try:
+            return int(str(earnings)) / 100 if earnings is not None else None
+        except ValueError:
+            return None
+
+    def _subscription_result(
+        self, action: str, data: dict[str, Any], user_id: str | None, subscription_id: str | None, **extra: Any
+    ) -> WebhookResult:
+        mapping, quantity, from_price = self._resolve_purchase(data)
+        if mapping is None:
+            logger.warning("paddle_event_without_known_plan action=%s", action)
+            return WebhookResult(action="ignored", event_type=action, user_id=user_id)
+        limits = get_plan(mapping.tier)
+        return WebhookResult(
+            action=action,
+            user_id=user_id,
+            plan=mapping.tier,
+            paddle_subscription_id=subscription_id,
+            interval=mapping.interval,
+            seats=max(limits.min_seats, quantity) if limits.per_seat else None,
+            founding=mapping.founding,
+            period_anchor=self._period_anchor(data),
+            plan_from_price=from_price,
+            **extra,
+        )
+
     async def handle_webhook_event(
         self,
         event: dict[str, Any],
@@ -422,84 +526,55 @@ class PaddleBillingManager:
         """Process a verified Paddle webhook event.
 
         Handles:
-        - transaction.completed → activate subscription (for one-time or first payment)
+        - transaction.completed → activate subscription (+ record net revenue)
         - subscription.activated → subscription active
-        - subscription.updated → plan change
-        - subscription.canceled → cancel subscription
+        - subscription.updated → plan / seat / interval change
+        - subscription.canceled → back to Free
         - subscription.past_due → payment issue
 
         Returns:
             WebhookResult with action taken and user_id affected.
         """
         event_type = event.get("event_type", "")
-        data = event.get("data", {})
+        data = event.get("data", {}) or {}
+        custom_data = data.get("custom_data") or {}
+        user_id = custom_data.get("remembra_user_id")
 
         if event_type == "transaction.completed":
-            custom_data = data.get("custom_data", {})
-            user_id = custom_data.get("remembra_user_id")
-            plan = custom_data.get("plan", "pro")
+            customer = data.get("customer") or {}
             subscription_id = data.get("subscription_id")
-            customer_id = data.get("customer_id")
-
-            # Get customer email from details
-            customer = data.get("customer", {})
-            customer_email = customer.get("email")
-            customer_name = customer.get("name")
-
             logger.info(
-                "Transaction completed: user=%s email=%s plan=%s sub=%s",
+                "Transaction completed: user=%s plan=%s sub=%s",
                 user_id,
-                customer_email,
-                plan,
+                custom_data.get("plan"),
                 subscription_id,
             )
-            return WebhookResult(
-                action="activate_subscription",
-                user_id=user_id,
-                plan=PlanTier(plan) if plan in [p.value for p in PlanTier] else PlanTier.PRO,
-                paddle_customer_id=customer_id,
-                paddle_subscription_id=subscription_id,
-                customer_email=customer_email,
-                customer_name=customer_name,
+            result = self._subscription_result(
+                "activate_subscription",
+                data,
+                user_id,
+                subscription_id,
+                paddle_customer_id=data.get("customer_id"),
+                customer_email=customer.get("email"),
+                customer_name=customer.get("name"),
             )
+            result.transaction_id = data.get("id")
+            result.revenue_usd = self._net_revenue_usd(data)
+            return result
 
         if event_type == "subscription.activated":
-            custom_data = data.get("custom_data", {})
-            user_id = custom_data.get("remembra_user_id")
-            plan = custom_data.get("plan", "pro")
-            subscription_id = data.get("id")
-
-            return WebhookResult(
-                action="activate_subscription",
-                user_id=user_id,
-                plan=PlanTier(plan) if plan in [p.value for p in PlanTier] else PlanTier.PRO,
-                paddle_subscription_id=subscription_id,
+            return self._subscription_result(
+                "activate_subscription", data, user_id, data.get("id"), paddle_customer_id=data.get("customer_id")
             )
 
         if event_type == "subscription.updated":
-            custom_data = data.get("custom_data", {})
-            user_id = custom_data.get("remembra_user_id")
             status = data.get("status")
-            plan = custom_data.get("plan", "pro")
-
             if status == "active":
-                return WebhookResult(
-                    action="update_subscription",
-                    user_id=user_id,
-                    plan=PlanTier(plan) if plan in [p.value for p in PlanTier] else PlanTier.PRO,
-                    paddle_subscription_id=data.get("id"),
-                )
-            elif status == "past_due":
-                return WebhookResult(
-                    action="payment_issue",
-                    user_id=user_id,
-                    plan=PlanTier(plan) if plan in [p.value for p in PlanTier] else PlanTier.PRO,
-                )
+                return self._subscription_result("update_subscription", data, user_id, data.get("id"))
+            if status == "past_due":
+                return WebhookResult(action="payment_issue", user_id=user_id)
 
         if event_type == "subscription.canceled":
-            custom_data = data.get("custom_data", {})
-            user_id = custom_data.get("remembra_user_id")
-
             logger.info("Subscription cancelled for user %s", user_id)
             return WebhookResult(
                 action="cancel_subscription",
@@ -508,9 +583,6 @@ class PaddleBillingManager:
             )
 
         if event_type == "subscription.past_due":
-            custom_data = data.get("custom_data", {})
-            user_id = custom_data.get("remembra_user_id")
-
             logger.warning("Subscription past due for user %s", user_id)
             return WebhookResult(
                 action="payment_failed",
@@ -534,6 +606,13 @@ class WebhookResult:
         event_type: str | None = None,
         customer_email: str | None = None,
         customer_name: str | None = None,
+        interval: BillingInterval | None = None,
+        seats: int | None = None,
+        founding: bool = False,
+        period_anchor: datetime | None = None,
+        plan_from_price: bool = False,
+        transaction_id: str | None = None,
+        revenue_usd: float | None = None,
     ) -> None:
         self.action = action
         self.user_id = user_id
@@ -543,6 +622,13 @@ class WebhookResult:
         self.event_type = event_type
         self.customer_email = customer_email
         self.customer_name = customer_name
+        self.interval = interval
+        self.seats = seats
+        self.founding = founding
+        self.period_anchor = period_anchor
+        self.plan_from_price = plan_from_price
+        self.transaction_id = transaction_id
+        self.revenue_usd = revenue_usd
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"action": self.action}
@@ -550,6 +636,12 @@ class WebhookResult:
             d["user_id"] = self.user_id
         if self.plan:
             d["plan"] = self.plan.value
+        if self.interval:
+            d["interval"] = self.interval.value
+        if self.seats:
+            d["seats"] = self.seats
+        if self.founding:
+            d["founding"] = True
         if self.event_type:
             d["event_type"] = self.event_type
         if self.customer_email:

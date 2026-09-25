@@ -13,6 +13,7 @@ from typing import Any
 import structlog
 from openai import AsyncOpenAI
 
+from remembra.core.ai_spend import record_llm_usage
 from remembra.core.llm_guard import classify_llm_exception, make_llm_client, mark_llm_fallback
 from remembra.extraction.prompting import reference_date_line, wrap_untrusted
 
@@ -251,6 +252,7 @@ class FactExtractor:
                 response_format={"type": "json_object"},
                 timeout=self.config.timeout,
             )
+            record_llm_usage(response, self.config.model)
             result_text = response.choices[0].message.content
             if not result_text:
                 log.warning("empty_extraction_response")

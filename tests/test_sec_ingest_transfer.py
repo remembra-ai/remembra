@@ -103,15 +103,20 @@ async def test_import_applies_pii_block_sanitizer_and_quota(tmp_path):
         # Cloud plan limits now apply to imports (SEC-11).
         meter = UsageMeter(h.db)
         h.app.state.usage_meter = meter
-        today = datetime.now(UTC).strftime("%Y-%m-%d")
-        await h.db.conn.execute("INSERT INTO cloud_usage_daily (user_id, date, stores) VALUES ('tenant-a', ?, 24999)", (today,))
+        # The memory cap (Free keeps 25K until the reduction notice) is the only 429.
+        now = datetime.now(UTC).isoformat()
+        await h.db.conn.executemany(
+            "INSERT INTO memories (id, user_id, project_id, content, created_at, updated_at)"
+            " VALUES (?, 'tenant-a', 'default', 'x', ?, ?)",
+            [(f"fill-{i}", now, now) for i in range(24_999)],
+        )
         await h.db.conn.commit()
         before = len(recorder.calls)
         r = await h.client.post("/api/v1/transfer/import", json={"format": "plaintext", "data": TWO_PARAGRAPHS}, headers=hdr)
         assert r.status_code == 429
         assert len(recorder.calls) == before
 
-        await h.db.conn.execute("UPDATE cloud_usage_daily SET stores = 0 WHERE user_id = 'tenant-a'")
+        await h.db.conn.execute("DELETE FROM memories WHERE id LIKE 'fill-%'")
         await h.db.conn.commit()
         r = await h.client.post("/api/v1/transfer/import", json={"format": "plaintext", "data": TWO_PARAGRAPHS}, headers=hdr)
         assert r.status_code == 200

@@ -1,6 +1,7 @@
 """Application settings resolved from environment variables."""
 
 import warnings
+from datetime import datetime
 
 from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -328,6 +329,70 @@ class Settings(BaseSettings):
         default_factory=list,
         description="Email addresses that get automatic Enterprise access (owner bypass)",
     )
+    memory_cap_notice_effective_at: datetime | None = Field(
+        None,
+        description=(
+            "When reduced memory caps (Free 25K->10K, legacy Pro 500K->250K, legacy Team 2M->600K) take "
+            "effect. Unset = the previous caps stay in force. Set it to the notice email date + 30 days."
+        ),
+    )
+
+    # Smart-credit metering and cost protection
+    free_breaker_enabled: bool = Field(
+        True,
+        description="Global free-tier circuit breaker: degrade ALL free enrichment once monthly free AI spend passes the budget",
+    )
+    free_breaker_min_usd: float = Field(50.0, ge=0, description="Free-tier AI budget floor per calendar month (USD)")
+    free_breaker_revenue_pct: float = Field(
+        0.20,
+        ge=0,
+        le=1,
+        description="Free-tier AI budget as a share of last month's net paid revenue, when that revenue is known",
+    )
+    credit_reservation_stale_minutes: int = Field(
+        15,
+        ge=1,
+        description="Open credit reservations older than this are settled at their chunk minimum (lost worker/restart)",
+    )
+    enrichment_global_concurrency: int = Field(
+        16, ge=1, description="Max enrichment jobs (extraction / entity resolution) running at once across all tenants"
+    )
+    enrichment_default_concurrency: int = Field(
+        4, ge=1, description="Per-tenant enrichment concurrency when no plan applies (self-hosted)"
+    )
+    enrichment_max_pending_per_tenant: int = Field(
+        200,
+        ge=1,
+        description="Queued + running enrichment jobs allowed per tenant; beyond it enrichment is skipped (memory still stored)",
+    )
+
+    # Signup hardening
+    turnstile_secret: str | None = Field(
+        None,
+        description="Cloudflare Turnstile secret. When set, signup requires a valid Turnstile token (server-side siteverify).",
+    )
+    turnstile_verify_url: str = Field(
+        "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+        description="Turnstile siteverify endpoint",
+    )
+    signup_ip_rate_limit: str = Field("3/hour", description="Signups allowed per client IP /24 (IPv6: /56)")
+    signup_domain_rate_limit: str = Field("20/day", description="Signups allowed per email domain")
+    signup_domain_limit_exempt: list[str] = Field(
+        default_factory=lambda: [
+            "gmail.com",
+            "googlemail.com",
+            "outlook.com",
+            "hotmail.com",
+            "live.com",
+            "yahoo.com",
+            "icloud.com",
+            "me.com",
+            "proton.me",
+            "protonmail.com",
+        ],
+        description="Large mailbox providers exempt from the per-domain signup limit (the per-IP limit still applies)",
+    )
+
     # -----------------------------------------------------------------------
     # Paddle (sole billing provider)
     # -----------------------------------------------------------------------
@@ -351,6 +416,17 @@ class Settings(BaseSettings):
         description="Use Paddle sandbox environment",
         validation_alias=AliasChoices("REMEMBRA_PADDLE_SANDBOX", "PADDLE_SANDBOX"),
     )
+    # Paddle price IDs for the 2026-09 catalog (pri_...). They are created in the
+    # Paddle dashboard by the owner; a missing ID makes checkout for that plan
+    # unavailable (clear 503) instead of guessing. The grandfathered $49 / $199
+    # price IDs are fixed in remembra.cloud.paddle_config.
+    paddle_price_solo_monthly: str | None = Field(None, description="Paddle price ID: Solo $12/mo")
+    paddle_price_solo_annual: str | None = Field(None, description="Paddle price ID: Solo $120/yr")
+    paddle_price_pro_monthly: str | None = Field(None, description="Paddle price ID: Pro $29/mo")
+    paddle_price_pro_annual: str | None = Field(None, description="Paddle price ID: Pro $290/yr")
+    paddle_price_team_seat_monthly: str | None = Field(None, description="Paddle price ID: Team $15/seat/mo (qty >= 3)")
+    paddle_price_team_seat_annual: str | None = Field(None, description="Paddle price ID: Team $150/seat/yr (qty >= 3)")
+    paddle_price_founding_annual: str | None = Field(None, description="Paddle price ID: Founding 100 Solo $108/yr")
 
     # -----------------------------------------------------------------------
     # Email (Resend)
