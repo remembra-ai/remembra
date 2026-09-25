@@ -46,8 +46,8 @@ export function MemoryCard({ memory, onClick, showRelevance = false, compact = f
       width: '100%'
     };
     if (score >= 0.6) return { 
-      bar: 'bg-[#8B5CF6]', 
-      text: 'text-[#A78BFA]',
+      bar: 'bg-accent', 
+      text: 'text-signal-ink',
       width: '75%'
     };
     if (score >= 0.4) return { 
@@ -78,17 +78,17 @@ export function MemoryCard({ memory, onClick, showRelevance = false, compact = f
         'transition-[border-color,box-shadow] duration-200 ease-out',
         onClick && [
           'cursor-pointer',
-          'hover:border-[#8B5CF6]/40',
+          'hover:border-signal/40',
           'hover:shadow-lg hover:shadow-purple-500/5',
         ],
         compact ? 'p-3' : 'p-4'
       )}
     >
       {/* Hover gradient overlay */}
-      <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-[#8B5CF6]/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+      <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-signal/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
       
       {/* Active indicator */}
-      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-8 bg-[#8B5CF6] rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
+      <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-8 bg-accent rounded-r opacity-0 group-hover:opacity-100 transition-opacity" />
 
       <div className="relative">
         {/* Content */}
@@ -116,8 +116,8 @@ export function MemoryCard({ memory, onClick, showRelevance = false, compact = f
                 className={clsx(
                   'inline-flex items-center gap-1 px-2 py-0.5 rounded-md',
                   'text-xs font-medium',
-                  'bg-[#8B5CF6]/10 text-[#A78BFA]',
-                  'border border-[#8B5CF6]/20'
+                  'bg-signal/10 text-signal-ink',
+                  'border border-signal/20'
                 )}
               >
                 <User className="w-3 h-3" />

@@ -211,7 +211,7 @@ export function MemoryDetail({ memory, onClose, onDelete }: MemoryDetailProps) {
                 {memory.entities.map((entity, index) => (
                   <span
                     key={index}
-                    className="px-3 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-[#7C3AED] dark:text-blue-300 text-sm"
+                    className="px-3 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-signal-ink dark:text-blue-300 text-sm"
                   >
                     {entity}
                   </span>

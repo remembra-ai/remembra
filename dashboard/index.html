@@ -3,10 +3,29 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="icon" type="image/png" href="/favicon.png" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Remembra Dashboard</title>
-    <meta name="description" content="Manage your AI memories - view, search, and organize memories stored in Remembra" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#ECEDE8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#131416" media="(prefers-color-scheme: dark)" />
+    <title>Remembra</title>
+    <meta name="description" content="Mission control for your AI agents: the handoff trail, agent activity, inbox and shared memory." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      /* Apply the saved (or system) theme before first paint. Storage may be unavailable. */
+      (function () {
+        var dark;
+        try {
+          var saved = localStorage.getItem('darkMode');
+          if (saved === 'true' || saved === 'false') dark = saved === 'true';
+        } catch (e) {}
+        if (dark === undefined) dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) document.documentElement.classList.add('dark');
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

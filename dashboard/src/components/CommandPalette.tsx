@@ -21,17 +21,26 @@ import {
   Loader2,
   Sparkles,
   Command,
+  House,
+  GitCommitVertical,
+  Bot,
+  Inbox,
+  PenLine,
+  Keyboard,
+  Brain,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { api } from '../lib/api';
 import type { Memory } from '../lib/api';
-import type { TabType } from './Sidebar';
+import { navigate, type TabType } from '../lib/nav';
 
 interface CommandPaletteProps {
   isOpen: boolean;
   onClose: () => void;
   onNavigate: (tab: TabType) => void;
   onNewMemory: () => void;
+  onShowShortcuts?: () => void;
+  isAdmin?: boolean;
 }
 
 interface CommandItem {
@@ -42,6 +51,7 @@ interface CommandItem {
   section: string;
   action: () => void;
   keywords?: string[];
+  shortcut?: string;
 }
 
 const overlayVariants = {
@@ -72,7 +82,7 @@ const panelVariants = {
   },
 };
 
-export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory }: CommandPaletteProps) {
+export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onShowShortcuts, isAdmin = false }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [mode, setMode] = useState<'commands' | 'search'>('commands');
@@ -81,26 +91,37 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory }: Com
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
+  const go = (tab: TabType) => () => {
+    onNavigate(tab);
+    onClose();
+  };
   const commands: CommandItem[] = [
     // Quick Actions
-    { id: 'new-memory', label: 'Store New Memory', description: 'Create a new memory entry', icon: Plus, section: 'Actions', action: () => { onNewMemory(); onClose(); }, keywords: ['add', 'create', 'store'] },
-    { id: 'search-memories', label: 'Search Memories', description: 'Semantic search across all memories', icon: Search, section: 'Actions', action: () => { setMode('search'); setQuery(''); }, keywords: ['find', 'recall', 'query'] },
-    // Navigate
-    { id: 'nav-memories', label: 'Memories', description: 'View all stored memories', icon: Database, section: 'Navigate', action: () => { onNavigate('memories'); onClose(); }, keywords: ['list', 'browse'] },
-    { id: 'nav-entities', label: 'Entity Atlas', description: 'People, concepts, and products', icon: Users, section: 'Navigate', action: () => { onNavigate('entities'); onClose(); }, keywords: ['people', 'concepts'] },
-    { id: 'nav-graph', label: 'Knowledge Graph', description: 'Visual entity relationships', icon: Orbit, section: 'Navigate', action: () => { onNavigate('graph'); onClose(); }, keywords: ['network', 'connections'] },
-    { id: 'nav-timeline', label: 'Timeline', description: 'Memory creation over time', icon: History, section: 'Navigate', action: () => { onNavigate('timeline'); onClose(); } },
-    { id: 'nav-analytics', label: 'Analytics', description: 'Usage metrics and trends', icon: BarChart3, section: 'Navigate', action: () => { onNavigate('analytics'); onClose(); }, keywords: ['usage', 'metrics', 'stats'] },
-    { id: 'nav-projects', label: 'Projects', description: 'Memory workspaces', icon: FolderOpen, section: 'Navigate', action: () => { onNavigate('projects'); onClose(); } },
-    // Developer
-    { id: 'nav-decay', label: 'Decay Report', description: 'Memory retention analysis', icon: TrendingDown, section: 'Developer', action: () => { onNavigate('decay'); onClose(); } },
-    { id: 'nav-debugger', label: 'Query Debugger', description: 'Inspect recall quality', icon: Bug, section: 'Developer', action: () => { onNavigate('debugger'); onClose(); } },
-    // Account
-    { id: 'nav-keys', label: 'API Keys', description: 'Manage access tokens', icon: Key, section: 'Account', action: () => { onNavigate('keys'); onClose(); } },
-    { id: 'nav-billing', label: 'Billing', description: 'Plan and usage', icon: CreditCard, section: 'Account', action: () => { onNavigate('billing'); onClose(); } },
-    { id: 'nav-teams', label: 'Teams', description: 'Collaboration settings', icon: UsersRound, section: 'Account', action: () => { onNavigate('teams'); onClose(); } },
-    { id: 'nav-settings', label: 'Settings', description: 'Preferences', icon: Settings, section: 'Account', action: () => { onNavigate('settings'); onClose(); } },
-    { id: 'nav-admin', label: 'Admin', description: 'Control plane', icon: Shield, section: 'Account', action: () => { onNavigate('admin'); onClose(); } },
+    { id: 'write-agent', label: 'Write to an agent', description: 'Leads its next session brief', icon: PenLine, section: 'Actions', action: () => { navigate('inbox', { compose: '1' }); onClose(); }, keywords: ['message', 'inbox', 'send', 'note'], shortcut: 'c' },
+    { id: 'search-memories', label: 'Search memories', description: 'Semantic search across all memories', icon: Search, section: 'Actions', action: () => { setMode('search'); setQuery(''); }, keywords: ['find', 'recall', 'query'], shortcut: '/' },
+    { id: 'new-memory', label: 'Store a memory', description: 'Create a new memory entry', icon: Plus, section: 'Actions', action: () => { onNewMemory(); onClose(); }, keywords: ['add', 'create', 'store'] },
+    ...(onShowShortcuts ? [{ id: 'shortcuts', label: 'Keyboard shortcuts', icon: Keyboard, section: 'Actions', action: () => onShowShortcuts(), keywords: ['keys', 'help'], shortcut: '?' }] : []),
+    // Relay
+    { id: 'nav-home', label: 'Home', description: 'Mission control', icon: House, section: 'Relay', action: go('home'), keywords: ['mission', 'dashboard', 'overview'], shortcut: 'g h' },
+    { id: 'nav-trail', label: 'Trail', description: 'Every handoff, newest first', icon: GitCommitVertical, section: 'Relay', action: go('trail'), keywords: ['handoff', 'log', 'history', 'sessions'], shortcut: 'g t' },
+    { id: 'nav-agents', label: 'Agents', description: 'Activity per agent', icon: Bot, section: 'Relay', action: go('agents'), keywords: ['claude', 'codex', 'cursor', 'gemini'], shortcut: 'g a' },
+    { id: 'nav-inbox', label: 'Inbox', description: 'Messages between agents', icon: Inbox, section: 'Relay', action: go('inbox'), keywords: ['messages', 'notes'], shortcut: 'g i' },
+    // Memory + graph
+    { id: 'nav-memories', label: 'Memories', description: 'Browse stored memories', icon: Database, section: 'Memory', action: go('memories'), keywords: ['list', 'browse'], shortcut: 'g m' },
+    { id: 'nav-timeline', label: 'Timeline', description: 'Memory creation over time', icon: History, section: 'Memory', action: go('timeline') },
+    { id: 'nav-analytics', label: 'Analytics', description: 'Usage metrics and trends', icon: BarChart3, section: 'Memory', action: go('analytics'), keywords: ['usage', 'metrics', 'stats'] },
+    { id: 'nav-decay', label: 'Decay report', description: 'Memory retention analysis', icon: TrendingDown, section: 'Memory', action: go('decay') },
+    { id: 'nav-debugger', label: 'Query debugger', description: 'Inspect recall quality', icon: Bug, section: 'Memory', action: go('debugger') },
+    { id: 'nav-graph', label: 'Knowledge graph', description: 'Visual entity relationships', icon: Orbit, section: 'Graph', action: go('graph'), keywords: ['network', 'connections'], shortcut: 'g g' },
+    { id: 'nav-entities', label: 'Entities', description: 'People, concepts, and products', icon: Users, section: 'Graph', action: go('entities'), keywords: ['people', 'concepts'] },
+    { id: 'nav-brain', label: 'Brain', description: 'Themes and surprising links', icon: Brain, section: 'Graph', action: go('brain'), keywords: ['insights', 'communities'] },
+    // Settings
+    { id: 'nav-settings', label: 'Settings', description: 'Profile and preferences', icon: Settings, section: 'Settings', action: go('settings'), shortcut: 'g s' },
+    { id: 'nav-keys', label: 'API keys', description: 'Keys for agents and apps', icon: Key, section: 'Settings', action: go('keys'), keywords: ['token', 'access'] },
+    { id: 'nav-billing', label: 'Billing', description: 'Plan and usage', icon: CreditCard, section: 'Settings', action: go('billing'), keywords: ['plan', 'credits', 'upgrade'] },
+    { id: 'nav-teams', label: 'Teams', description: 'Collaboration', icon: UsersRound, section: 'Settings', action: go('teams') },
+    { id: 'nav-projects', label: 'Projects', description: 'Memory workspaces', icon: FolderOpen, section: 'Settings', action: go('projects') },
+    ...(isAdmin ? [{ id: 'nav-admin', label: 'Admin', description: 'Operate the service', icon: Shield, section: 'Settings', action: go('admin') }] : []),
   ];
 
   // Filter commands based on query
@@ -214,9 +235,12 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory }: Com
           exit="hidden"
           transition={{ duration: 0.15 }}
           onClick={onClose}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Search and commands"
         >
           <motion.div
-            className="w-full max-w-[560px] modal-surface rounded-2xl overflow-hidden"
+            className="w-full max-w-[560px] modal-surface rounded-[3px] overflow-hidden"
             variants={panelVariants}
             initial="hidden"
             animate="visible"
@@ -240,6 +264,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory }: Com
                 }}
                 placeholder={mode === 'search' ? 'Search memories semantically...' : 'Type a command or search...'}
                 className="cmdk-input"
+                aria-label={mode === 'search' ? 'Search memories' : 'Type a command'}
                 autoComplete="off"
                 spellCheck={false}
               />
@@ -283,12 +308,15 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory }: Com
                             <div className="flex-1 min-w-0">
                               <span className="text-sm">{item.label}</span>
                               {item.description && (
-                                <span className="ml-2 text-xs text-[hsl(var(--muted-foreground))]">
+                                <span className="ml-2 hidden text-xs text-[hsl(var(--muted-foreground))] sm:inline">
                                   {item.description}
                                 </span>
                               )}
                             </div>
-                            {isSelected && <ArrowRight className="w-3.5 h-3.5 flex-shrink-0 text-[hsl(var(--primary))]" />}
+                            {item.shortcut && (
+                              <kbd className="flex-shrink-0 rounded-[2px] border border-rule px-1.5 font-mono text-[10px] text-ink-3">{item.shortcut}</kbd>
+                            )}
+                            {isSelected && <ArrowRight className="w-3.5 h-3.5 flex-shrink-0 text-signal-ink" />}
                           </button>
                         );
                       })}

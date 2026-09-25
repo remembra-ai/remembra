@@ -200,6 +200,97 @@ async def get_inbox(
     return [InboxRow(**row) for row in rows]
 
 
+class InboxListResponse(BaseModel):
+    items: list[InboxRow]
+    total: int
+    status: str
+    agent_id: str | None = None
+
+
+class InboxAgentCounts(BaseModel):
+    agent_id: str
+    unread: int
+    open: int
+    received: int
+    sent: int
+    last_at: str | None = None
+
+
+class InboxSummaryResponse(BaseModel):
+    unread_total: int
+    open_total: int
+    agents: list[InboxAgentCounts]
+
+
+@router.get(
+    "/messages",
+    response_model=InboxListResponse,
+    summary="List inbox messages across all agents (dashboard view)",
+    dependencies=[require_memory_recall()],
+)
+@limiter.limit("240/minute")
+async def list_inbox_messages(
+    request: Request,
+    current_user: CurrentUserDep,
+    inbox: Annotated[InboxManager, Depends(get_inbox_manager)],
+    status_filter: Annotated[
+        Literal["unread", "open", "all"],
+        Query(alias="status", description="'open' (default: unread or read), 'unread' or 'all'."),
+    ] = "open",
+    agent_id: Annotated[str | None, Query(max_length=128, description="Only messages to or from this agent")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> InboxListResponse:
+    """Every message of the authenticated owner, newest first. Read-only: listing
+    never marks anything read."""
+    try:
+        result = await inbox.list_messages(
+            owner_user_id=current_user.user_id,
+            status=status_filter,
+            agent_id=agent_id,
+            limit=limit,
+            offset=offset,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+    except Exception as e:
+        log.exception("inbox_list_failed user=%s", current_user.user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to read inbox. Please try again later.",
+        ) from e
+    return InboxListResponse(
+        items=[InboxRow(**row) for row in result["items"]],
+        total=result["total"],
+        status=status_filter,
+        agent_id=(agent_id or "").strip() or None,
+    )
+
+
+@router.get(
+    "/summary",
+    response_model=InboxSummaryResponse,
+    summary="Unread / open message counts per agent",
+    dependencies=[require_memory_recall()],
+)
+@limiter.limit("240/minute")
+async def inbox_summary(
+    request: Request,
+    current_user: CurrentUserDep,
+    inbox: Annotated[InboxManager, Depends(get_inbox_manager)],
+) -> InboxSummaryResponse:
+    """Counts per agent id (as recipient and as sender) for the authenticated owner."""
+    try:
+        result = await inbox.summary(current_user.user_id)
+    except Exception as e:
+        log.exception("inbox_summary_failed user=%s", current_user.user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to read inbox. Please try again later.",
+        ) from e
+    return InboxSummaryResponse(**result)
+
+
 @router.post(
     "/{inbox_id}/ack",
     response_model=AckInboxResponse,

@@ -296,7 +296,7 @@ export function EntityGraphUniverse({ projectId }: EntityGraphUniverseProps) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-[600px] bg-[#05060f] rounded-[30px]">
+      <div className="flex items-center justify-center h-[600px] bg-[#05060f] rounded-[4px]">
         <div className="text-center">
           <Sparkles className="w-8 h-8 animate-pulse text-purple-400 mx-auto mb-3" />
           <span className="text-purple-200/70">Igniting the memory universe…</span>
@@ -307,7 +307,7 @@ export function EntityGraphUniverse({ projectId }: EntityGraphUniverseProps) {
 
   if (error) {
     return (
-      <div className="flex items-center justify-center h-[600px] bg-red-900/20 rounded-[30px]">
+      <div className="flex items-center justify-center h-[600px] bg-red-900/20 rounded-[4px]">
         <span className="text-red-400">{error}</span>
         <button onClick={fetchGraphData} className="ml-4 px-3 py-1 bg-red-600 rounded text-white text-sm">
           Retry
@@ -318,7 +318,7 @@ export function EntityGraphUniverse({ projectId }: EntityGraphUniverseProps) {
 
   if (graphData.nodes.length === 0) {
     return (
-      <div className="flex items-center justify-center h-[600px] bg-[#05060f] rounded-[30px]">
+      <div className="flex items-center justify-center h-[600px] bg-[#05060f] rounded-[4px]">
         <div className="text-center">
           <Sparkles className="w-12 h-12 text-purple-400/50 mx-auto mb-4" />
           <p className="text-white text-lg font-medium mb-2">Your universe is empty</p>
@@ -331,7 +331,7 @@ export function EntityGraphUniverse({ projectId }: EntityGraphUniverseProps) {
   return (
     <div
       ref={containerRef}
-      className="relative isolate w-full overflow-hidden rounded-[30px]"
+      className="relative isolate w-full overflow-hidden rounded-[4px]"
       style={{ height: 'clamp(680px, calc(100vh - 11rem), 880px)', background: 'radial-gradient(ellipse at center, #0a0a1f 0%, #03030a 70%)' }}
     >
       {/* Controls */}

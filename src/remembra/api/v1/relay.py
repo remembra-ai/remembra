@@ -7,6 +7,7 @@
 - ``POST   /api/v1/session/close``     session facts -> ONE structured handoff (idempotent per agent+session)
 - ``GET    /api/v1/session/brief``     pickup brief (accepts a project id or a location)
 - ``GET    /api/v1/trail``             handoffs + checkpoints across agents, newest first
+- ``GET    /api/v1/trail/summary``     per-agent / per-project activity (dashboard)
 
 Attribution: when the API key is agent-scoped, the agent id comes from the key
 and a different id in the body or the ``X-Remembra-Agent-Id`` header is
@@ -27,6 +28,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Callable
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, status
@@ -67,6 +69,23 @@ def _clean_agent(value: str | None, source: str) -> str | None:
             detail=f"Invalid agent id in {source}: use 1-128 chars of letters, digits and ._:@/+-",
         )
     return agent
+
+
+def _trail_cursor(before: str | None, before_id: str | None) -> tuple[datetime, str | None] | None:
+    """Parse the trail's keyset cursor (``before`` time, optional ``before_id``)."""
+    raw = (before or "").strip()
+    cursor_id = (before_id or "").strip() or None
+    if not raw:
+        if cursor_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="before_id needs before (the entry's created_at)")
+        return None
+    try:
+        return datetime.fromisoformat(raw), cursor_id
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid before: use an ISO 8601 time, such as an entry's created_at",
+        ) from None
 
 
 def effective_agent(
@@ -562,6 +581,15 @@ async def trail(
     project: Annotated[str | None, Query(max_length=128, description="Alias of project_id")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
+    agent_id: Annotated[str | None, Query(max_length=128, description="Only this agent's entries")] = None,
+    before: Annotated[
+        str | None,
+        Query(max_length=64, description="Cursor: only entries older than this created_at (the oldest entry already shown)"),
+    ] = None,
+    before_id: Annotated[
+        str | None,
+        Query(max_length=128, description="Cursor tie-break: that entry's id (entries at the same time sort by id)"),
+    ] = None,
     git_remote: Annotated[str | None, Query(max_length=2000)] = None,
     root_commit: Annotated[str | None, Query(max_length=64)] = None,
     root_path: Annotated[str | None, Query(max_length=4096)] = None,
@@ -571,8 +599,33 @@ async def trail(
 ) -> dict[str, Any]:
     """Read-only: a location the server has not seen resolves (hint first) without being recorded."""
     _require(current_user, "memory:recall")
+    agent_filter = _clean_agent(agent_id, "agent_id")
+    cursor = _trail_cursor(before, before_id)
     locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host)
     resolved, resolution = await _project_from_query(request, current_user, project_id or project, locator, hint_project)
-    result = await _service(request).trail(current_user.user_id, resolved, limit=limit, offset=offset)
+    result = await _service(request).trail(
+        current_user.user_id, resolved, limit=limit, offset=offset, agent_id=agent_filter, before=cursor
+    )
     result["resolution"] = resolution
     return result
+
+
+@router.get("/trail/summary", summary="Activity per agent and per project (handoffs + checkpoints)")
+@limiter.limit("60/minute")
+async def trail_summary(
+    request: Request,
+    current_user: CurrentUser,
+    days: Annotated[int, Query(ge=1, le=90, description="Length of the daily series")] = 14,
+    tz_offset_minutes: Annotated[
+        int, Query(ge=-840, le=840, description="Minutes east of UTC for day boundaries (JS: -getTimezoneOffset())")
+    ] = 0,
+) -> dict[str, Any]:
+    """Every agent and project seen in the trail, with last activity, sessions in
+    the last 7 days and a daily series, plus a 7-day recap. Read-only."""
+    _require(current_user, "memory:recall")
+    return await _service(request).activity_summary(
+        current_user.user_id,
+        days=days,
+        tz_offset_minutes=tz_offset_minutes,
+        allowed=current_user.project_ids or None,
+    )

@@ -404,6 +404,41 @@ def test_connect_unverified_adapters_need_explicit_opt_in(home):
     assert (home / ".kimi" / "config.toml").read_text() == kimi
 
 
+def test_connect_without_a_key_warns_and_fails_but_still_writes_hooks(home):
+    settings = _claude_settings(home)
+    relay_cmd = "/opt/bin/remembra-relay"
+    no_key = {"REMEMBRA_API_KEY": "", "REMEMBRA_URL": ""}
+    dry = relay(home, "", "connect", "--agent", "claude-code", "--relay-command", relay_cmd, env=no_key)
+    assert dry.returncode == 1
+    assert '"api_key": "missing"' in dry.stdout
+    assert dry.stderr.count("no Remembra API key found") == 2  # at the top and again at the end
+    assert "remembra-install --all --api-key <your key>" in dry.stderr
+    assert "\033[" not in dry.stderr  # not a terminal: no color codes
+
+    applied = relay(home, "", "connect", "--agent", "claude-code", "--apply", "--relay-command", relay_cmd, env=no_key)
+    assert applied.returncode == 1 and "no Remembra API key found" in applied.stderr
+    assert "written" in applied.stdout  # the hooks read the key at run time, so they are still installed
+    assert json.loads(settings.read_text())["hooks"]["SessionEnd"][0]["hooks"][0]["command"].startswith(relay_cmd)
+
+    # With the credentials file remembra-install writes, the same command is clean.
+    creds = home / ".remembra" / "credentials"
+    creds.parent.mkdir(parents=True, exist_ok=True)
+    creds.write_text(json.dumps({"api_key": "rem_from_credentials", "url": "http://x"}))
+    ok = relay(home, "", "connect", "--agent", "claude-code", "--relay-command", relay_cmd, env=no_key)
+    assert ok.returncode == 0 and ok.stderr == "", ok.stderr
+    assert '"api_key": "set"' in ok.stdout and "rem_from_credentials" not in ok.stdout
+
+
+def test_connect_apply_lists_the_unverified_adapters_it_skipped(home):
+    relay_cmd = "/opt/bin/remembra-relay"
+    out = relay(home, "http://x", "connect", "--agent", "codex", "--agent", "gemini", "--apply", "--relay-command", relay_cmd)
+    assert out.returncode == 0, out.stderr
+    assert "Not written (unverified adapters): codex, gemini." in out.stdout
+    assert "remembra-relay connect --apply --include-unverified --agent codex --agent gemini" in out.stdout
+    dry = relay(home, "http://x", "connect", "--agent", "codex", "--relay-command", relay_cmd)
+    assert "Not written (unverified adapters)" not in dry.stdout  # a dry run writes nothing anyway
+
+
 def test_connect_agents_md_block_is_idempotent(home, tmp_path):
     md = tmp_path / "AGENTS.md"
     md.write_text("# Project rules\n\nBe nice.\n")

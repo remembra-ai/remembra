@@ -39,6 +39,16 @@ export function SettingsPanel({ isOpen, onClose, onLogout, onOpenApiKeys }: Sett
     }
   }, [isOpen]);
 
+  // Escape closes the panel.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isOpen, onClose]);
+
   useEffect(() => {
     if (!isOpen) {
       return;
@@ -139,7 +149,12 @@ export function SettingsPanel({ isOpen, onClose, onLogout, onOpenApiKeys }: Sett
       />
 
       {/* Panel */}
-      <div className="fixed inset-y-0 right-0 w-full max-w-md dashboard-surface border-l border-[hsl(var(--border))/0.72] z-50 overflow-y-auto">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="connection-panel-title"
+        className="fixed inset-y-0 right-0 w-full max-w-md dashboard-surface border-l border-[hsl(var(--border))/0.72] z-50 overflow-y-auto"
+      >
         {/* Header */}
         <div className="sticky top-0 dashboard-surface border-b border-[hsl(var(--border))/0.72] px-6 py-4">
           <div className="flex items-center justify-between">
@@ -148,16 +163,17 @@ export function SettingsPanel({ isOpen, onClose, onLogout, onOpenApiKeys }: Sett
                 <SettingsIcon className="w-5 h-5 text-[hsl(var(--primary))]" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold text-[hsl(var(--foreground))]">
-                  Settings
+                <h2 id="connection-panel-title" className="font-display text-lg font-bold text-[hsl(var(--foreground))]">
+                  Connection
                 </h2>
                 <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  Connection & Account
+                  Server, project and credentials for your agents
                 </p>
               </div>
             </div>
             <button
               onClick={onClose}
+              aria-label="Close"
               className="p-2 rounded-lg hover:bg-[hsl(var(--muted))/0.78] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
             >
               <X className="w-5 h-5" />

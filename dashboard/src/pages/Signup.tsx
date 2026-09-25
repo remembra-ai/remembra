@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { UserPlus, Loader2, Eye, EyeOff, Check, X } from 'lucide-react';
 import { API_V1 } from '../config';
+import { BrandMark } from '../components/relay/ui';
 
 interface SignupProps {
   onSignup: (user: { id: string; email: string; name?: string }) => void;
@@ -78,12 +79,11 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
     <div className="min-h-screen flex items-center justify-center bg-[hsl(var(--background))] px-4 py-8">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <img 
-            src="/logo.jpg" 
-            alt="Remembra" 
-            className="w-16 h-16 rounded-2xl mx-auto mb-4"
-          />
-          <h1 className="text-2xl font-bold text-[hsl(var(--foreground))]">
+          <div className="mb-5 flex items-center justify-center gap-2.5" role="img" aria-label="Remembra">
+            <BrandMark size={40} className="text-ink" />
+            <span className="font-display text-2xl font-extrabold tracking-[-0.02em] text-ink">Remembra</span>
+          </div>
+          <h1 className="font-display text-3xl font-extrabold tracking-[-0.03em] text-[hsl(var(--foreground))]">
             Create your account
           </h1>
           <p className="text-[hsl(var(--muted-foreground))] mt-2">
@@ -104,7 +104,7 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name"
                 autoComplete="name"
-                className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+                className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
               />
             </div>
 
@@ -120,7 +120,7 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
                 placeholder="you@example.com"
                 autoComplete="email"
                 required
-                className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+                className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
               />
             </div>
 
@@ -137,7 +137,7 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
                   placeholder="••••••••"
                   autoComplete="new-password"
                   required
-                  className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent pr-12"
+                  className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent pr-12"
                 />
                 <button
                   type="button"
@@ -161,7 +161,7 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
                 placeholder="••••••••"
                 autoComplete="new-password"
                 required
-                className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+                className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
               />
             </div>
 
@@ -180,7 +180,7 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
             <button
               type="submit"
               disabled={loading || !isPasswordValid}
-              className="w-full py-3 px-4 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:bg-[#8B5CF6]/50 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-2"
+              className="w-full py-3 px-4 rounded-lg bg-accent hover:bg-accent-hover disabled:bg-accent/50 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>
@@ -201,7 +201,7 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
           Already have an account?{' '}
           <button
             onClick={onSwitchToLogin}
-            className="text-[#8B5CF6] hover:text-[#A78BFA] font-medium"
+            className="text-signal-ink hover:text-signal-ink font-medium"
           >
             Sign in
           </button>

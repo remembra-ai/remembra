@@ -71,19 +71,19 @@ export function EmptyState({ type, searchQuery, onAction, actionLabel }: EmptySt
       <div className={clsx(
         'relative mb-6',
         'w-20 h-20 rounded-2xl',
-        'bg-gradient-to-br from-[#8B5CF6]/20 to-[#6D28D9]/10',
-        'border border-[#8B5CF6]/20',
+        'bg-gradient-to-br from-signal/20 to-accent/10',
+        'border border-signal/20',
         'flex items-center justify-center',
         'shadow-lg shadow-purple-500/10'
       )}>
         {/* Glow effect */}
-        <div className="absolute inset-0 rounded-2xl bg-[#8B5CF6]/20 blur-xl" />
+        <div className="absolute inset-0 rounded-2xl bg-signal/20 blur-xl" />
         
-        <Icon className="relative w-10 h-10 text-[#A78BFA]" />
+        <Icon className="relative w-10 h-10 text-signal-ink" />
         
         {/* Floating particles */}
-        <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-[#8B5CF6]/40 animate-pulse" />
-        <div className="absolute -bottom-2 -left-2 w-2 h-2 rounded-full bg-[#A78BFA]/40 animate-pulse delay-300" />
+        <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-signal/40 animate-pulse" />
+        <div className="absolute -bottom-2 -left-2 w-2 h-2 rounded-full bg-signal/40 animate-pulse delay-300" />
       </div>
 
       {/* Title */}
@@ -119,7 +119,7 @@ export function EmptyState({ type, searchQuery, onAction, actionLabel }: EmptySt
           
           {/* Code content */}
           <pre className="p-4 text-sm overflow-x-auto">
-            <code className="text-[#A78BFA]">
+            <code className="text-signal-ink">
               {state.codeSnippet.split('\n').map((line, i) => (
                 <div key={i} className="leading-relaxed">
                   {highlightCode(line)}
@@ -136,7 +136,7 @@ export function EmptyState({ type, searchQuery, onAction, actionLabel }: EmptySt
           onClick={onAction}
           className={clsx(
             'inline-flex items-center gap-2 px-5 py-2.5 rounded-lg',
-            'bg-[#8B5CF6] hover:bg-[#7C3AED]',
+            'bg-accent hover:bg-accent-hover',
             'text-white font-medium text-sm',
             'transition-all duration-200',
             'shadow-lg shadow-purple-500/25 hover:shadow-purple-500/40',
@@ -154,7 +154,7 @@ export function EmptyState({ type, searchQuery, onAction, actionLabel }: EmptySt
           href="https://docs.remembra.dev"
           target="_blank"
           rel="noopener noreferrer"
-          className="mt-4 text-sm text-[#A78BFA] hover:text-[#8B5CF6] transition-colors"
+          className="mt-4 text-sm text-signal-ink hover:text-signal-ink transition-colors"
         >
           Read the documentation →
         </a>

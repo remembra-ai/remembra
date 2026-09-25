@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Mail, Loader2, ArrowLeft, Check, Eye, EyeOff, X } from 'lucide-react';
 import { API_V1 } from '../config';
+import { BrandMark } from '../components/relay/ui';
 
 interface ForgotPasswordProps {
   onBackToLogin: () => void;
@@ -126,7 +127,7 @@ export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordPro
           <div className="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center mx-auto mb-4">
             <Check className="w-8 h-8 text-green-600 dark:text-green-400" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+          <h1 className="font-display text-3xl font-extrabold tracking-[-0.03em] text-gray-900 dark:text-white mb-2">
             Password reset successful
           </h1>
           <p className="text-gray-500 dark:text-gray-400 mb-6">
@@ -134,7 +135,7 @@ export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordPro
           </p>
           <button
             onClick={onBackToLogin}
-            className="py-3 px-6 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-medium transition-colors"
+            className="py-3 px-6 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium transition-colors"
           >
             Sign in
           </button>
@@ -147,11 +148,10 @@ export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordPro
     <div className="min-h-screen flex items-center justify-center bg-[hsl(var(--background))] px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <img 
-            src="/logo.jpg" 
-            alt="Remembra" 
-            className="w-16 h-16 rounded-2xl mx-auto mb-4"
-          />
+          <div className="mb-5 flex items-center justify-center gap-2.5" role="img" aria-label="Remembra">
+            <BrandMark size={40} className="text-ink" />
+            <span className="font-display text-2xl font-extrabold tracking-[-0.02em] text-ink">Remembra</span>
+          </div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
             {step === 'request' ? 'Reset your password' : 'Enter new password'}
           </h1>
@@ -177,7 +177,7 @@ export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordPro
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@example.com"
                   autoComplete="email"
-                  className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+                  className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
                 />
               </div>
 
@@ -190,7 +190,7 @@ export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordPro
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 px-4 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:bg-[#A78BFA] text-white font-medium transition-colors flex items-center justify-center gap-2"
+                className="w-full py-3 px-4 rounded-lg bg-accent hover:bg-accent-hover disabled:bg-accent/50 text-white font-medium transition-colors flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>
@@ -211,7 +211,7 @@ export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordPro
             <div className="space-y-4">
               {message && (
                 <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800">
-                  <p className="text-sm text-[#8B5CF6] dark:text-[#A78BFA]">{message}</p>
+                  <p className="text-sm text-signal-ink dark:text-signal-ink">{message}</p>
                 </div>
               )}
 
@@ -225,7 +225,7 @@ export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordPro
                   value={token}
                   onChange={(e) => setToken(e.target.value)}
                   placeholder="Paste your reset token"
-                  className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent font-mono text-sm"
+                  className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent font-mono text-sm"
                 />
                 <p className="mt-1 text-xs text-gray-400">
                   Check your email or server logs for the reset token
@@ -244,7 +244,7 @@ export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordPro
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="••••••••"
                     autoComplete="new-password"
-                    className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent pr-12"
+                    className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent pr-12"
                   />
                   <button
                     type="button"
@@ -267,7 +267,7 @@ export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordPro
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="••••••••"
                   autoComplete="new-password"
-                  className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+                  className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
                 />
               </div>
 
@@ -286,7 +286,7 @@ export function ForgotPassword({ onBackToLogin, initialStep }: ForgotPasswordPro
               <button
                 type="submit"
                 disabled={loading || !isPasswordValid}
-                className="w-full py-3 px-4 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:bg-[#A78BFA] disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-2"
+                className="w-full py-3 px-4 rounded-lg bg-accent hover:bg-accent-hover disabled:bg-accent/50 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-2"
               >
                 {loading ? (
                   <>

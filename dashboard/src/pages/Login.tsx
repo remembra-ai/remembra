@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { LogIn, Loader2, Eye, EyeOff } from 'lucide-react';
 import { API_V1 } from '../config';
+import { BrandMark } from '../components/relay/ui';
 
 interface LoginProps {
   onLogin: (token: string, user: { id: string; email: string; name?: string; is_admin?: boolean }) => void;
@@ -53,12 +54,11 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProp
     <div className="min-h-screen flex items-center justify-center bg-[hsl(var(--background))] px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <img 
-            src="/logo.jpg" 
-            alt="Remembra" 
-            className="w-16 h-16 rounded-2xl mx-auto mb-4"
-          />
-          <h1 className="text-2xl font-bold text-[hsl(var(--foreground))]">
+          <div className="mb-5 flex items-center justify-center gap-2.5" role="img" aria-label="Remembra">
+            <BrandMark size={40} className="text-ink" />
+            <span className="font-display text-2xl font-extrabold tracking-[-0.02em] text-ink">Remembra</span>
+          </div>
+          <h1 className="font-display text-3xl font-extrabold tracking-[-0.03em] text-[hsl(var(--foreground))]">
             Welcome back
           </h1>
           <p className="text-[hsl(var(--muted-foreground))] mt-2">
@@ -79,7 +79,7 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProp
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="you@example.com"
                 autoComplete="email"
-                className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+                className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
               />
             </div>
 
@@ -95,7 +95,7 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProp
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   autoComplete="current-password"
-                  className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent pr-12"
+                  className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent pr-12"
                 />
                 <button
                   type="button"
@@ -111,7 +111,7 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProp
               <button
                 type="button"
                 onClick={onForgotPassword}
-                className="text-sm text-[#8B5CF6] hover:text-[#A78BFA]"
+                className="text-sm text-signal-ink hover:text-signal-ink"
               >
                 Forgot password?
               </button>
@@ -126,7 +126,7 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProp
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:bg-[#8B5CF6]/50 text-white font-medium transition-colors flex items-center justify-center gap-2"
+              className="w-full py-3 px-4 rounded-lg bg-accent hover:bg-accent-hover disabled:bg-accent/50 text-white font-medium transition-colors flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>
@@ -147,7 +147,7 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProp
           Don't have an account?{' '}
           <button
             onClick={onSwitchToSignup}
-            className="text-[#8B5CF6] hover:text-[#A78BFA] font-medium"
+            className="text-signal-ink hover:text-signal-ink font-medium"
           >
             Sign up
           </button>

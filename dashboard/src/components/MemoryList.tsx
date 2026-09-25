@@ -77,7 +77,7 @@ export function MemoryList({
           onClick={onLoadMore}
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.99 }}
-          className="w-full py-3 text-sm font-medium text-[#8B5CF6] dark:text-[#A78BFA] hover:bg-[hsl(var(--muted))] rounded-lg transition-colors"
+          className="w-full py-3 text-sm font-medium text-signal-ink dark:text-signal-ink hover:bg-[hsl(var(--muted))] rounded-lg transition-colors"
         >
           Load more
         </motion.button>

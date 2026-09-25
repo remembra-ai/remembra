@@ -17,7 +17,7 @@ const ENTITY_ICONS: Record<string, React.ReactNode> = {
 };
 
 const ENTITY_COLORS: Record<string, string> = {
-  person: 'bg-blue-100 dark:bg-blue-900/30 text-[#7C3AED] dark:text-blue-300 border-blue-200 dark:border-blue-800',
+  person: 'bg-blue-100 dark:bg-blue-900/30 text-signal-ink dark:text-blue-300 border-blue-200 dark:border-blue-800',
   organization: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800',
   company: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800',
   location: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 border-green-200 dark:border-green-800',
@@ -206,7 +206,7 @@ interface StatBoxProps {
 
 function StatBox({ icon, label, value, color }: StatBoxProps) {
   const colors = {
-    blue: 'bg-blue-50 dark:bg-blue-900/20 text-[#8B5CF6] dark:text-[#A78BFA]',
+    blue: 'bg-blue-50 dark:bg-blue-900/20 text-signal-ink dark:text-signal-ink',
     purple: 'bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400',
     green: 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400',
     yellow: 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400',
@@ -240,7 +240,7 @@ function EntityCard({ entity, onClick, isSelected }: EntityCardProps) {
       className={clsx(
         'w-full p-4 rounded-lg border text-left transition-all',
         colorClass,
-        isSelected && 'ring-2 ring-[#8B5CF6]',
+        isSelected && 'ring-2 ring-signal',
         'hover:shadow-md'
       )}
     >
@@ -361,7 +361,7 @@ function EntityDetail({ entity, relationships, loadingRelationships, onClose }: 
                       {rel.from_entity_id === entity.id ? entity.canonical_name : rel.from_entity_name}
                     </span>
                     <span className="text-gray-500 dark:text-gray-400">→</span>
-                    <span className="text-[#8B5CF6] dark:text-[#A78BFA]">{rel.type}</span>
+                    <span className="text-signal-ink dark:text-signal-ink">{rel.type}</span>
                     <span className="text-gray-500 dark:text-gray-400">→</span>
                     <span className="font-medium">
                       {rel.to_entity_id === entity.id ? entity.canonical_name : rel.to_entity_name}

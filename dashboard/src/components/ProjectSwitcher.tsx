@@ -29,7 +29,7 @@ export function ProjectSwitcher({ onProjectChange }: ProjectSwitcherProps) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
     const token = api.getJwtToken();
     if (token) {
       return { 'Authorization': `Bearer ${token}` };
