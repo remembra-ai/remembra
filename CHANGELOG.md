@@ -5,6 +5,29 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Remembra Relay: session continuity across agents.** Every agent leaves a structured handoff
+  when it stops, and any agent picks it up at session start, whatever the tool, machine or checkout location.
+  - Location-independent project identity: `POST /api/v1/projects/resolve` maps a normalized git
+    remote (then root commit, then path) to a per-user project id. The same repo on any machine,
+    drive or worktree gets the same id. Adds project links (`/api/v1/projects/links`); a brief shows
+    linked projects' latest handoff headlines.
+  - `POST /api/v1/session/close`: session facts become ONE deterministic handoff
+    (Done / Not done / Failing / Next step). The optional agent summary is grounding-checked against the facts.
+    Idempotent per (agent, session). Upserts `last_agent:<project>` and `branch:<project>`.
+  - `GET /api/v1/session/brief` accepts a location, leads with a "Last session: …" line and returns a
+    compact `rendered` text (~1500 tokens). `GET /api/v1/trail` lists handoffs and checkpoints.
+  - `remembra-relay` CLI (`brief`, `close`, `trail`, `resolve`, `connect`) gathers facts from git and
+    Claude Code transcripts without uploading them. It is hook-safe (≤10 s, always exits 0). `connect` wires
+    agent hooks through an adapter registry (Claude Code verified; Codex, Cursor, Gemini, Qwen and Kimi
+    shipped unverified and dry-run only).
+  - MCP: new `close_session` and `resolve_project` tools. `session_brief` is compact by default
+    (`verbose=True` for the full JSON). The server instructions tell every MCP agent to brief at start and close before finishing.
+  - Agent-scoped API keys (`agent_id` on key creation). Relay attribution comes from the key, not the request body.
+- Migration 4: `project_fingerprints`, `project_links`, `api_keys.agent_id`.
+
 ## [0.16.0] - 2026-07-16
 
 **Lossless memory + production reliability.** The theme of this release: what you
