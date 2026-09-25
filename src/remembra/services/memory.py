@@ -978,61 +978,60 @@ class MemoryService:
         Returns:
             Dict with stored count and any errors
         """
-        import uuid
-
-        from remembra.models.memory import Memory
-
         if not items:
             return {"stored": 0, "errors": []}
 
         now = utcnow()
-        errors = []
+        errors: list[str] = []
+        contents = [item.content.strip() for item in items]
 
-        # Use pre-computed embeddings or generate them
+        # Use pre-computed embeddings or generate them (one batch call)
+        computed: list[list[float]] | None
+        pending_reason: str | None = None
         if embeddings and len(embeddings) == len(items):
             log.info("bulk_using_precomputed_embeddings", count=len(embeddings))
-            computed_embeddings = embeddings
+            computed = embeddings
         else:
-            # Extract all contents for batch embedding
-            contents = [item.content.strip() for item in items]
-
-            # Batch embed all at once (single OpenAI call!)
             try:
-                computed_embeddings = await self.embeddings.embed_batch(contents)
+                computed = await self.embeddings.embed_batch(contents)
+            except EmbeddingProviderError as e:
+                if not self.settings.store_pending_on_embedding_failure:
+                    log.error("bulk_embed_failed", error=str(e), count=len(contents))
+                    return {"stored": 0, "errors": [f"Embedding failed: {e.kind.value}"]}
+                # REL-4: keep the rows (keyword-searchable), vectors come later.
+                computed = None
+                pending_reason = "circuit_open" if e.circuit_open else f"embedding_{e.kind.value}"
+                log.warning("bulk_embed_deferred", reason=pending_reason, count=len(contents))
             except Exception as e:
                 log.error("bulk_embed_failed", error=str(e), count=len(contents))
-                return {"stored": 0, "errors": [f"Embedding failed: {str(e)}"]}
+                return {"stored": 0, "errors": ["Embedding failed"]}
 
-        # Build Memory objects
-        memories = []
-        memory_dicts = []
-
-        for item, embedding in zip(items, computed_embeddings, strict=False):
-            memory_id = str(uuid.uuid4())
+        memories: list[Memory] = []
+        memory_dicts: list[dict[str, Any]] = []
+        for index, item in enumerate(items):
             expires_at = self._resolve_expiry(item.expires_at, item.ttl, now, self.settings.default_ttl_days)
-
             memory = Memory(
-                id=memory_id,
+                id=str(uuid.uuid4()),
                 user_id=user_id,
                 project_id=project_id,
-                content=item.content.strip(),
-                embedding=embedding,
-                extracted_facts=[item.content.strip()],
+                content=contents[index],
+                embedding=computed[index] if computed is not None else [],
+                extracted_facts=[contents[index]],
                 entities=[],
                 metadata=item.metadata or {},
                 created_at=now,
                 expires_at=expires_at,
+                valid_from=now,
             )
             memories.append(memory)
-
             memory_dicts.append(
                 {
-                    "id": memory_id,
+                    "id": memory.id,
                     "user_id": user_id,
                     "project_id": project_id,
-                    "content": item.content.strip(),
-                    "extracted_facts": [item.content.strip()],
-                    "metadata": item.metadata or {},
+                    "content": memory.content,
+                    "extracted_facts": memory.extracted_facts,
+                    "metadata": memory.metadata,
                     "created_at": now,
                     "expires_at": expires_at,
                     "source": "bulk_import",
@@ -1044,22 +1043,30 @@ class MemoryService:
                 }
             )
 
-        # Bulk upsert to Qdrant
-        try:
-            qdrant_count = await self.qdrant.upsert_batch(memories)
-        except Exception as e:
-            log.error("bulk_qdrant_failed", error=str(e))
-            errors.append(f"Qdrant bulk insert failed: {str(e)}")
-            return {"stored": 0, "errors": errors}
-
-        # Bulk insert to SQLite
-        db_count = 0
-        try:
+        # ING-19 / REL-10: SQLite rows + FTS (+ queue entries when there are no
+        # vectors) in ONE transaction, before any vector is written.
+        async with self.db.transaction():
             db_count = await self.db.save_memories_bulk(memory_dicts)
-        except Exception as e:
-            log.error("bulk_db_failed", error=str(e))
-            errors.append(f"Database bulk insert failed: {str(e)}")
-            # Note: Qdrant already has the data, might be inconsistent
+            for memory in memories:
+                await self.db.index_memory_fts(memory.id, user_id, project_id, memory.content)
+            if computed is None:
+                for memory in memories:
+                    await self.pending_queue.enqueue(memory.id, user_id, project_id, reason=pending_reason or "embedding_failed")
+
+        qdrant_count = 0
+        pending = len(memories) if computed is None else 0
+        if computed is not None:
+            try:
+                qdrant_count = await self.qdrant.upsert_batch(memories)
+            except Exception as e:
+                log.error("bulk_qdrant_failed", error=str(e))
+                if not self.settings.store_pending_on_embedding_failure:
+                    for memory in memories:
+                        await self.db.delete_memory(memory.id)
+                    return {"stored": 0, "qdrant_count": 0, "db_count": 0, "errors": ["Vector store bulk insert failed"]}
+                for memory in memories:
+                    await self.pending_queue.enqueue(memory.id, user_id, project_id, reason="vector_store_failed")
+                pending = len(memories)
 
         log.info(
             "bulk_import_complete",
@@ -1068,10 +1075,12 @@ class MemoryService:
             total=len(items),
             qdrant_stored=qdrant_count,
             db_stored=db_count,
+            pending=pending,
         )
 
         return {
-            "stored": min(qdrant_count, db_count) if not errors else 0,
+            "stored": db_count,
+            "pending": pending,
             "qdrant_count": qdrant_count,
             "db_count": db_count,
             "errors": errors,

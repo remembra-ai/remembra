@@ -404,3 +404,11 @@ async def test_spaces_recall_scores_with_real_cosine_and_filters_rows(stack) -> 
     assert resp.memories[0].semantic_score == pytest.approx(0.9, abs=0.01)
     assert resp.memories[0].relevance != 0.5
     assert "Notion" in resp.context
+
+
+async def test_metadata_pushdown_is_never_stricter_than_the_python_filter(stack) -> None:
+    stack.emb.vectors["price list"] = unit(1)
+    typed = await stack.seed("Beef patty price", vector=with_cosine(0.9), metadata={"price": 1.5, "n": 3, "hot": True})
+    for flt in ({"price": "1.5"}, {"n": "3"}, {"hot": "True"}):
+        resp = await _recall(stack, "price list", filters=flt)
+        assert [m.id for m in resp.memories] == [typed], flt

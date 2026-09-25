@@ -377,3 +377,37 @@ async def test_background_spawn_uses_task_registry() -> None:
     release.set()
     await task
     assert "ret_probe" not in registry.names()
+
+
+# ---------------------------------------------------------------------------
+# ING-19: bulk import writes SQLite + FTS first; provider/vector failures -> pending
+# ---------------------------------------------------------------------------
+
+
+async def test_bulk_import_is_sqlite_first_keyword_searchable_and_vectorised(stack) -> None:
+    items = [StoreRequest(content=f"bulk fact number {i} about Negril", project_id="p") for i in range(3)]
+    result = await stack.service.bulk_import(items, user_id=USER, project_id="p")
+    assert (result["stored"], result["pending"], result["qdrant_count"]) == (3, 0, 3)
+    ids = [r["id"] for r in await _all_rows(stack.db)]
+    assert len(await stack.db.search_fts("Negril", USER, "p")) == 3
+    assert await stack.qdrant.existing_ids(ids) == set(ids)
+
+
+async def test_bulk_import_during_quota_outage_queues_everything(stack) -> None:
+    stack.emb.fail = quota_error()
+    items = [StoreRequest(content=f"outage fact {i}", project_id="p") for i in range(2)]
+    result = await stack.service.bulk_import(items, user_id=USER, project_id="p")
+    assert (result["stored"], result["pending"], result["qdrant_count"]) == (2, 2, 0)
+    for row in await _all_rows(stack.db):
+        assert (await stack.service.pending_queue.get(row["id"])).reason == "embedding_quota_exhausted"  # type: ignore[union-attr]
+
+
+async def test_bulk_import_vector_store_failure_keeps_rows_and_queues(stack) -> None:
+    async def broken(memories: Any) -> int:
+        raise ConnectionError("qdrant down")
+
+    stack.qdrant.upsert_batch = broken  # type: ignore[method-assign]
+    result = await stack.service.bulk_import([StoreRequest(content="kept anyway")], user_id=USER, project_id="p")
+    assert (result["stored"], result["pending"]) == (1, 1)
+    [row] = await _all_rows(stack.db)
+    assert (await stack.service.pending_queue.get(row["id"])).reason == "vector_store_failed"  # type: ignore[union-attr]

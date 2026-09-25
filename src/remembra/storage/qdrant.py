@@ -355,10 +355,12 @@ class QdrantStore:
         if low in ("true", "false"):
             forms.append(low == "true")
         else:
-            try:
-                forms.append(int(value))
-            except ValueError:
-                pass
+            for cast in (int, float):
+                try:
+                    forms.append(cast(value))
+                    break
+                except ValueError:
+                    continue
         return forms
 
     def build_filter(
@@ -384,8 +386,19 @@ class QdrantStore:
                 must.append(qmodels.FieldCondition(key=key, match=qmodels.MatchValue(value=value)))
         if metadata_match and self.metadata_filterable:
             for key, value in metadata_match.items():
+                if value is None or str(value) == "None":
+                    # Python's str(None) == "None" also matches a MISSING key;
+                    # Qdrant can't express that, so leave it to the caller.
+                    continue
                 forms = self._match_values(value)
-                conds = [qmodels.FieldCondition(key=f"{FIELD_METADATA}.{key}", match=qmodels.MatchValue(value=f)) for f in forms]
+                field_key = f"{FIELD_METADATA}.{key}"
+                conds: list[Any] = [
+                    # MatchValue has no float form: exact numeric match is a closed range.
+                    qmodels.FieldCondition(key=field_key, range=qmodels.Range(gte=f, lte=f))
+                    if isinstance(f, float)
+                    else qmodels.FieldCondition(key=field_key, match=qmodels.MatchValue(value=f))
+                    for f in forms
+                ]
                 must.append(conds[0] if len(conds) == 1 else qmodels.Filter(should=conds))
         if active_at is not None:
             # RET-2: never return a memory whose expiry has passed.
