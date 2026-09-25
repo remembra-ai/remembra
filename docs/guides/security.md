@@ -340,11 +340,34 @@ Remembra includes controls that align with the following OWASP AI Security Initi
 
 ## Encryption at Rest
 
-**NEW in v0.8.1** — AES-256-GCM field-level encryption for memory content.
+AES-256-GCM field-level encryption is available, **with a limited scope**.
 
-All memory content and metadata can be encrypted before storage using AES-256-GCM authenticated encryption.
+### What is encrypted
 
-### Enable Encryption
+With `REMEMBRA_ENCRYPTION_KEY` set:
+
+- Memory `content` and `metadata` in the **Qdrant** point payload
+- TOTP 2FA secrets in SQLite
+
+### What is not encrypted
+
+- Memory `content`, `extracted_facts` and `metadata` in **SQLite**
+  (`memories`, `archived_memories`) — stored in plaintext
+- The SQLite FTS5 keyword index (`memories_fts`)
+- Entities, relationships and communities
+- `extracted_facts` and entity refs in the Qdrant payload
+- Embedding vectors
+
+The SQLite database and its backups (e.g. Litestream replicas) therefore hold
+memory text in plaintext. Use volume/disk encryption for the data volume and
+backup storage, and restrict host access.
+
+Credentials are never stored in memory text regardless of encryption: API
+keys, tokens, private keys and passwords are replaced with
+`[REDACTED:<kind>]` on write and on read. See
+`scripts/maintenance/redact_stored_secrets.py` to backfill existing data.
+
+### Enable field encryption
 
 ```bash
 # Generate a secure key
@@ -354,34 +377,22 @@ python -c "import secrets; print(secrets.token_urlsafe(32))"
 REMEMBRA_ENCRYPTION_KEY=your-generated-key-here
 ```
 
-### How It Works
-
 - **Algorithm:** AES-256-GCM (authenticated encryption)
 - **Key derivation:** PBKDF2-HMAC-SHA256 with 480,000 iterations
-- **Nonce:** 96-bit random nonce per operation (never reused)
-- **Scope:** Memory `content` and `metadata` fields
-- **Embeddings:** Not encrypted (vectors are not reversible to source content)
+- **Nonce:** 96-bit random nonce per operation
 
-### Migration
-
-Encryption is backwards-compatible. When enabled:
-
-- New memories are encrypted before storage
-- Existing unencrypted memories are read normally (auto-detected)
-- No migration step required — mixed-mode reads work transparently
-
-### Install
+Enabling it is backwards-compatible: new Qdrant payloads are encrypted and
+existing plaintext payloads are still read (auto-detected).
 
 Encryption requires the `cryptography` package:
 
 ```bash
 pip install "remembra[encryption]"
-# or
-pip install cryptography
 ```
 
 !!! warning "Production"
-    Always set `REMEMBRA_ENCRYPTION_KEY` in production. Without it, memory content is stored in plaintext.
+    Set `REMEMBRA_ENCRYPTION_KEY` **and** encrypt the volume that holds the
+    SQLite database. The key alone does not protect SQLite data.
 
 ---
 

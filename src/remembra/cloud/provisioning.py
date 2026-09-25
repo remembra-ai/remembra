@@ -143,10 +143,10 @@ class TenantProvisioner:
                     user_id=user_id,
                     plan=plan.value,
                 )
-                logger.info("Welcome email sent to %s", email)
+                logger.info("Welcome email sent")
             except Exception as e:
                 # Don't fail provisioning if email fails
-                logger.error("Failed to send welcome email to %s: %s", email, str(e))
+                logger.error("Failed to send welcome email: %s", type(e).__name__)
 
         return ProvisionResult(
             user_id=user_id,

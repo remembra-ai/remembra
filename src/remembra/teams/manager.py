@@ -590,9 +590,8 @@ class TeamManager:
         await self._db.conn.commit()
 
         logger.info(
-            "Invite created: team=%s email=%s role=%s by=%s",
+            "Invite created: team=%s role=%s by=%s",
             team_id,
-            email,
             role,
             invited_by,
         )
@@ -696,14 +695,24 @@ class TeamManager:
         self,
         token: str,
         user_id: str,
+        user_email: str | None = None,
     ) -> dict[str, Any]:
-        """Accept a team invite."""
+        """Accept a team invite.
+
+        The invite is bound to the address it was sent to: only an account with
+        that email may accept it, so a leaked/forwarded link cannot be used to
+        join as someone else.
+        """
         invite = await self.get_invite_by_token(token)
         if not invite:
             raise ValueError("Invalid or expired invite token")
 
         if invite["status"] != "pending":
             raise ValueError(f"Invite already {invite['status']}")
+
+        invited_email = (invite.get("email") or "").strip().lower()
+        if invited_email and invited_email != (user_email or "").strip().lower():
+            raise ValueError("This invite was sent to a different email address")
 
         # Check expiry
         expires_at = datetime.fromisoformat(invite["expires_at"].replace("Z", "+00:00"))
@@ -784,9 +793,21 @@ class TeamManager:
         space_id: str,
         linked_by: str,
     ) -> dict[str, Any]:
-        """Link a space to a team (admin/owner only)."""
+        """Link a space to a team (team admin/owner who also administers the space)."""
         if not await self._has_permission(team_id, linked_by, "admin"):
             raise PermissionError("Admin access required to link spaces")
+        # The linker must administer the space itself; otherwise any team admin
+        # could attach (and expose) someone else's space by id.
+        try:
+            cursor = await self._db.conn.execute(
+                "SELECT permission FROM space_access WHERE space_id = ? AND agent_id = ?",
+                (space_id, linked_by),
+            )
+            row = await cursor.fetchone()
+        except Exception:
+            row = None
+        if row is None or row[0] != "admin":
+            raise PermissionError("You must be an admin of the space to link it")
 
         now = datetime.now(UTC).isoformat()
         await self._db.conn.execute(

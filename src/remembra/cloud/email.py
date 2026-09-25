@@ -96,8 +96,7 @@ class ResendBackend(EmailBackend):
             response = resend.Emails.send(cast("resend.Emails.SendParams", params))
 
             logger.info(
-                "Email sent via Resend: to=%s subject=%s id=%s",
-                message.to,
+                "Email sent via Resend: subject=%s id=%s",
                 message.subject,
                 response.get("id"),
             )
@@ -109,8 +108,7 @@ class ResendBackend(EmailBackend):
 
         except Exception as e:
             logger.error(
-                "Failed to send email via Resend: to=%s error=%s",
-                message.to,
+                "Failed to send email via Resend: error=%s",
                 str(e),
             )
             return EmailResult(
@@ -179,8 +177,7 @@ class SMTPBackend(EmailBackend):
             )
 
             logger.info(
-                "Email sent via SMTP: to=%s subject=%s",
-                message.to,
+                "Email sent via SMTP: subject=%s",
                 message.subject,
             )
 
@@ -188,8 +185,7 @@ class SMTPBackend(EmailBackend):
 
         except Exception as e:
             logger.error(
-                "Failed to send email via SMTP: to=%s error=%s",
-                message.to,
+                "Failed to send email via SMTP: error=%s",
                 str(e),
             )
             return EmailResult(
@@ -309,14 +305,12 @@ class EmailService:
 
             if result.success:
                 logger.info(
-                    "Email sent successfully: to=%s template=%s",
-                    to,
+                    "Email sent successfully: template=%s",
                     template_name,
                 )
             else:
                 logger.warning(
-                    "Email send failed: to=%s template=%s error=%s",
-                    to,
+                    "Email send failed: template=%s error=%s",
                     template_name,
                     result.error,
                 )
@@ -325,8 +319,7 @@ class EmailService:
 
         except Exception as e:
             logger.error(
-                "Email send error: to=%s template=%s error=%s",
-                to,
+                "Email send error: template=%s error=%s",
                 template_name,
                 str(e),
             )
@@ -521,6 +514,23 @@ class EmailService:
             dashboard_url="https://app.remembra.dev",
             support_email="support@remembra.dev",
         )
+
+    async def send_email_verification_email(self, to: str, verify_url: str) -> EmailResult:
+        """Send an email-address verification link (inline HTML; no template file)."""
+        import html as _html
+
+        safe_url = _html.escape(verify_url, quote=True)
+        message = EmailMessage(
+            to=to,
+            subject="Remembra: verify your email address",
+            html=(
+                "<p>Confirm this email address for your Remembra account.</p>"
+                f'<p><a href="{safe_url}">Verify email address</a></p>'
+                "<p>The link expires in 24 hours. If you did not request this, ignore this email.</p>"
+            ),
+            tags={"template": "email_verification"},
+        )
+        return await self.backend.send(message)
 
     async def send_team_invite_email(
         self,

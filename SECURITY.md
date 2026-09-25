@@ -34,8 +34,8 @@ Remembra implements multiple independent security layers. No single point of fai
 │              PII Detection & Redaction               │
 │     (13 pattern types, detect/redact/block modes)   │
 ├─────────────────────────────────────────────────────┤
-│             Encryption at Rest                       │
-│          (AES-256-GCM field-level encryption)       │
+│      Encryption at Rest (partial — see below)       │
+│   (AES-256-GCM on vector-store content/metadata)    │
 ├─────────────────────────────────────────────────────┤
 │              Anomaly Detection                       │
 │    (rate anomalies, source anomalies, bulk ops)     │
@@ -52,27 +52,53 @@ Remembra implements multiple independent security layers. No single point of fai
 
 ## Encryption
 
-### Encryption at Rest (AES-256-GCM)
+### Encryption at Rest (AES-256-GCM) — current scope
 
-All memory content and metadata stored in the database are encrypted using AES-256-GCM authenticated encryption before being written to disk.
+When `REMEMBRA_ENCRYPTION_KEY` is set, Remembra applies AES-256-GCM
+field-level encryption to a **limited set of fields**. Be precise about what
+is and is not covered:
+
+| Data | Where | Encrypted with `REMEMBRA_ENCRYPTION_KEY`? |
+|------|-------|-------------------------------------------|
+| Memory `content` | Qdrant point payload | Yes |
+| Memory `metadata` | Qdrant point payload | Yes |
+| Memory `extracted_facts`, entity refs | Qdrant point payload | **No** |
+| Memory `content`, `extracted_facts`, `metadata` | SQLite `memories` / `archived_memories` | **No** (plaintext) |
+| Keyword index | SQLite `memories_fts` (FTS5) | **No** (plaintext) |
+| Entities, relationships, communities | SQLite | **No** (plaintext) |
+| TOTP 2FA secrets | SQLite `users` | Yes (key: `REMEMBRA_ENCRYPTION_KEY`, else derived from the JWT secret) |
+| API keys, passwords, reset tokens | SQLite | Hashed (bcrypt / SHA-256), not reversible |
+| Embedding vectors | Qdrant | No |
+
+In other words, **the SQLite database (and any backup or Litestream replica
+of it) contains memory text in plaintext** even when the encryption key is
+set. Protect it with volume/disk-level encryption and restricted access to
+the host, the data volume, and backup storage.
+
+Credentials are additionally never persisted in memory text: API keys, tokens,
+private keys and passwords are replaced with `[REDACTED:<kind>]` on every write
+and read path (`REMEMBRA_SECRET_REDACTION_ENABLED`, default on). Existing rows
+can be backfilled with `scripts/maintenance/redact_stored_secrets.py`.
+
+Field encryption details (where applied):
 
 - **Algorithm:** AES-256-GCM (Galois/Counter Mode)
 - **Key derivation:** PBKDF2-HMAC-SHA256 with 480,000 iterations
-- **Nonce:** 96-bit random nonce per encryption operation (never reused)
-- **Authentication:** GCM tag prevents tampering — any modification is detected
-- **Scope:** Memory `content` and `metadata` fields in both SQLite and Qdrant payloads
+- **Nonce:** 96-bit random nonce per encryption operation
+- **Authentication:** GCM tag detects tampering
 
 **Configuration:**
 
 ```bash
-# Enable encryption at rest (strongly recommended for production)
+# Enable field encryption for vector-store payloads and TOTP secrets
 REMEMBRA_ENCRYPTION_KEY=your-256-bit-key-here
 
 # Generate a secure key:
 python -c "import secrets; print(secrets.token_urlsafe(32))"
 ```
 
-When `REMEMBRA_ENCRYPTION_KEY` is set, all memory content is automatically encrypted before storage and decrypted on retrieval. Embeddings remain unencrypted (they are not reversible to source content).
+Extending field-level encryption to SQLite (content, facts, FTS) is an open
+follow-up; until then volume-level encryption is the control for SQLite data.
 
 ### Encryption in Transit
 
@@ -341,7 +367,7 @@ Export all memories in JSON, CSV, or JSONL format via the admin API.
 - [x] Full audit logging (11 event types)
 - [x] Anomaly detection (3 check types)
 - [x] Content sanitization (26 injection patterns)
-- [x] Encryption at rest (AES-256-GCM)
+- [~] Encryption at rest — partial: AES-256-GCM on Qdrant content/metadata payloads and TOTP secrets; SQLite memory text is plaintext (use volume encryption)
 - [x] Encryption in transit (TLS 1.2+)
 - [x] GDPR-compliant deletion
 - [x] OWASP ASI06 (Memory Poisoning) compliance
@@ -375,7 +401,8 @@ Export all memories in JSON, CSV, or JSONL format via the admin API.
 [x] Set REMEMBRA_AUTH_ENABLED=true
 [x] Generate strong master key (32+ chars, random)
 [x] Set unique REMEMBRA_JWT_SECRET (32+ chars)
-[x] Set REMEMBRA_ENCRYPTION_KEY for encryption at rest
+[x] Set REMEMBRA_ENCRYPTION_KEY (encrypts Qdrant content/metadata payloads + TOTP secrets)
+[x] Encrypt the data volume holding the SQLite database and its backups (memory text is plaintext in SQLite)
 [x] Enable rate limiting (REMEMBRA_RATE_LIMIT_ENABLED=true)
 [x] Set PII mode to redact or block (REMEMBRA_PII_MODE=redact)
 [x] Enable anomaly detection
@@ -391,14 +418,13 @@ Export all memories in JSON, CSV, or JSONL format via the admin API.
 
 ## Architecture Decisions
 
-### Why Field-Level Encryption (Not Full-Disk)
+### Field-Level Encryption Scope
 
-We encrypt individual fields (content, metadata) rather than relying on full-disk encryption because:
-
-1. **Defense in depth:** Even if disk encryption is compromised, memory content remains protected
-2. **Backup safety:** Database backups contain encrypted content
-3. **Multi-tenant isolation:** Different encryption keys per tenant (future)
-4. **Cloud portability:** Encryption travels with the data, not tied to infrastructure
+Field-level encryption currently covers the vector-store payload (content and
+metadata) and TOTP secrets only. It travels with Qdrant snapshots and keeps
+those payloads opaque to anyone with raw Qdrant access. It does **not** cover
+the SQLite database, FTS index, extracted facts or entity graph, so it is not
+a substitute for disk/volume encryption of the SQLite data and its backups.
 
 ### Why bcrypt for API Keys
 

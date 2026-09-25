@@ -5,14 +5,18 @@ Register, list, enable/disable, and configure plugins.
 
 from typing import Annotated, Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from remembra.auth.middleware import CurrentUser
+from remembra.auth.superadmin import RequireSuperadmin
 from remembra.core.limiter import limiter
 from remembra.plugins.manager import PluginManager
 
 router = APIRouter(prefix="/plugins", tags=["plugins"])
+
+log = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -105,8 +109,11 @@ async def activate_plugin(
     body: ActivatePluginRequest,
     plugin_manager: PluginManagerDep,
     current_user: CurrentUser,
+    _superadmin: RequireSuperadmin,
 ) -> PluginInfo:
     """Activate a plugin from the registry with optional configuration.
+
+    Plugins run process-wide for every tenant, so this is superadmin-only.
 
     The plugin must be registered in the global registry (built-in
     plugins are auto-registered).
@@ -138,12 +145,13 @@ async def activate_plugin(
         instance = plugin_cls(config=body.config)
         await plugin_manager.register(instance)
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Plugin is already registered") from e
     except Exception as e:
+        log.warning("plugin_activation_failed", plugin=body.name, error_type=type(e).__name__, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Plugin activation failed: {e}",
-        )
+            detail="Plugin activation failed. Check the plugin configuration.",
+        ) from e
 
     return PluginInfo(**instance.to_dict())
 
@@ -158,6 +166,7 @@ async def deactivate_plugin(
     plugin_name: str,
     plugin_manager: PluginManagerDep,
     current_user: CurrentUser,
+    _superadmin: RequireSuperadmin,
 ) -> dict[str, Any]:
     """Deactivate and remove a running plugin."""
     removed = await plugin_manager.unregister(plugin_name)
@@ -180,6 +189,7 @@ async def toggle_plugin(
     body: TogglePluginRequest,
     plugin_manager: PluginManagerDep,
     current_user: CurrentUser,
+    _superadmin: RequireSuperadmin,
 ) -> dict[str, Any]:
     """Enable or disable a plugin without removing it."""
     plugin = plugin_manager.get_plugin(plugin_name)

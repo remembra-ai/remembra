@@ -7,9 +7,11 @@ via HTTP POST with retry logic.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 import socket
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -20,68 +22,111 @@ from remembra.webhooks.events import ALL_EVENT_TYPES, WebhookEvent
 logger = logging.getLogger(__name__)
 
 
-# Blocked IP ranges for SSRF protection
-_BLOCKED_NETWORKS = [
-    ipaddress.ip_network("127.0.0.0/8"),  # Loopback
-    ipaddress.ip_network("10.0.0.0/8"),  # Private Class A
-    ipaddress.ip_network("172.16.0.0/12"),  # Private Class B
-    ipaddress.ip_network("192.168.0.0/16"),  # Private Class C
-    ipaddress.ip_network("169.254.0.0/16"),  # Link-local
-    ipaddress.ip_network("::1/128"),  # IPv6 loopback
-    ipaddress.ip_network("fc00::/7"),  # IPv6 private
-    ipaddress.ip_network("fe80::/10"),  # IPv6 link-local
-]
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+_NAT64_LOCAL = ipaddress.ip_network("64:ff9b:1::/48")
+
+IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
 
-def validate_webhook_url(url: str) -> tuple[bool, str | None]:
+def is_public_ip(ip: IPAddress) -> bool:
+    """True only for globally routable unicast addresses.
+
+    Unwraps IPv4-mapped, NAT64, 6to4 and Teredo IPv6 forms so an internal IPv4
+    target cannot be smuggled inside an IPv6 literal. Blocks loopback, RFC1918,
+    link-local (incl. cloud metadata 169.254.169.254), CGNAT 100.64/10,
+    0.0.0.0/8, multicast, reserved and unspecified addresses.
     """
-    Validate a webhook URL for SSRF protection.
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            ip = ip.ipv4_mapped
+        elif ip in _NAT64:
+            ip = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)
+        elif ip in _NAT64_LOCAL:
+            return False
+        elif ip.sixtofour is not None:
+            ip = ip.sixtofour
+        elif ip.teredo is not None:
+            return False
+    return bool(
+        ip.is_global
+        and not ip.is_multicast
+        and not ip.is_reserved
+        and not ip.is_loopback
+        and not ip.is_link_local
+        and not ip.is_private
+        and not ip.is_unspecified
+    )
 
-    Returns (is_valid, error_message).
+
+async def _resolve(hostname: str, port: int) -> list[str]:
+    """Resolve ``hostname`` to IP strings (patched in tests; no network there)."""
+    loop = asyncio.get_running_loop()
+    infos = await loop.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    return [str(info[4][0]) for info in infos]
+
+
+@dataclass(frozen=True)
+class ResolvedTarget:
+    url: str
+    scheme: str
+    hostname: str
+    port: int
+    ips: tuple[str, ...]
+
+
+async def resolve_webhook_target(url: str) -> ResolvedTarget:
+    """Validate a webhook URL and resolve it to public IPs (deny by default).
+
+    Raises ``ValueError`` when the URL is malformed, not http(s), does not
+    resolve, or resolves to *any* non-public address. Callers must connect to
+    one of the returned IPs (not re-resolve) so DNS rebinding cannot swap in an
+    internal address between check and use.
     """
     try:
         parsed = urlparse(url)
-    except Exception:
-        return False, "Invalid URL format"
-
-    # Only allow HTTP/HTTPS
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    except ValueError:
+        raise ValueError("Invalid URL format") from None
     if parsed.scheme not in ("http", "https"):
-        return False, "Only HTTP and HTTPS URLs are allowed"
-
-    # Must have a hostname
+        raise ValueError("Only HTTP and HTTPS URLs are allowed")
     if not parsed.hostname:
-        return False, "URL must have a hostname"
+        raise ValueError("URL must have a hostname")
+    hostname = parsed.hostname.lower().rstrip(".")
+    if hostname == "localhost" or hostname.endswith((".localhost", ".internal", ".local")):
+        raise ValueError("Internal hostnames are not allowed")
 
-    hostname = parsed.hostname.lower()
-
-    # Block localhost variants
-    if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
-        return False, "Localhost URLs are not allowed"
-
-    # Block cloud metadata endpoints
-    if hostname in ("169.254.169.254", "metadata.google.internal"):
-        return False, "Cloud metadata endpoints are not allowed"
-
-    # Resolve hostname and check IP
     try:
-        # Get all IP addresses for the hostname
-        ips = socket.getaddrinfo(hostname, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
+        literal = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal = None
+    if literal is not None:
+        candidates = [str(literal)]
+    else:
+        try:
+            candidates = await _resolve(hostname, port)
+        except (OSError, UnicodeError):
+            raise ValueError("Hostname could not be resolved") from None
+    if not candidates:
+        raise ValueError("Hostname could not be resolved")
 
-        for _family, _, _, _, sockaddr in ips:
-            ip_str = sockaddr[0]
-            try:
-                ip = ipaddress.ip_address(ip_str)
-                for blocked in _BLOCKED_NETWORKS:
-                    if ip in blocked:
-                        return False, f"URL resolves to blocked IP range ({blocked})"
-            except ValueError:
-                continue
+    ips: list[str] = []
+    for candidate in candidates:
+        try:
+            ip = ipaddress.ip_address(candidate.split("%", 1)[0])
+        except ValueError:
+            raise ValueError("Hostname resolved to an invalid address") from None
+        if not is_public_ip(ip):
+            raise ValueError("URL resolves to a non-public address")
+        ips.append(str(ip))
+    return ResolvedTarget(url=url, scheme=parsed.scheme, hostname=hostname, port=port, ips=tuple(dict.fromkeys(ips)))
 
-    except socket.gaierror:
-        # Can't resolve - might be a temporary DNS issue, allow it
-        # The actual delivery will fail if the host doesn't exist
-        logger.warning("Could not resolve hostname for validation: %s", hostname)
 
+async def validate_webhook_url(url: str) -> tuple[bool, str | None]:
+    """Validate a webhook URL for SSRF protection. Returns (is_valid, error_message)."""
+    try:
+        await resolve_webhook_target(url)
+    except ValueError as e:
+        return False, str(e)
     return True, None
 
 
@@ -162,7 +207,7 @@ class WebhookManager:
             ValueError: If URL is invalid or points to blocked network.
         """
         # Validate URL for SSRF protection
-        is_valid, error = validate_webhook_url(url)
+        is_valid, error = await validate_webhook_url(url)
         if not is_valid:
             raise ValueError(f"Invalid webhook URL: {error}")
 
@@ -184,7 +229,7 @@ class WebhookManager:
         )
         await self._db.conn.commit()
 
-        logger.info("Webhook registered: id=%s user=%s url=%s events=%s", webhook_id, user_id, url, events_str)
+        logger.info("Webhook registered: id=%s user=%s events=%s", webhook_id, user_id, events_str)
 
         return {
             "id": webhook_id,
@@ -263,6 +308,10 @@ class WebhookManager:
         params: list[Any] = [now]
 
         if url is not None:
+            # Same SSRF validation as registration (previously skipped on update).
+            is_valid, error = await validate_webhook_url(url)
+            if not is_valid:
+                raise ValueError(f"Invalid webhook URL: {error}")
             updates.append("url = ?")
             params.append(url)
 

@@ -5,6 +5,7 @@ Paddle is the sole billing provider.
 
 from typing import Annotated, Any
 
+import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
@@ -13,6 +14,8 @@ from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
 
 router = APIRouter(prefix="/billing", tags=["billing"])
+
+log = structlog.get_logger(__name__)
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
@@ -363,9 +366,16 @@ async def paddle_webhook(request: Request) -> dict[str, str]:
     from remembra.cloud.paddle_config import get_paddle_settings
 
     paddle_settings = get_paddle_settings()
+    if not paddle_settings.webhook_secret:
+        # Fail closed: without a secret the signature check is meaningless.
+        log.error("paddle_webhook_secret_missing")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Paddle webhook verification is not configured.",
+        )
     billing = PaddleBillingManager(
         api_key=paddle_settings.api_key,
-        webhook_secret=paddle_settings.webhook_secret or "",
+        webhook_secret=paddle_settings.webhook_secret,
         sandbox=paddle_settings.sandbox,
     )
 
@@ -376,14 +386,66 @@ async def paddle_webhook(request: Request) -> dict[str, str]:
     try:
         event = billing.verify_webhook(payload, signature)
     except ValueError as e:
+        log.warning("paddle_webhook_rejected", reason=str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid webhook signature: {e}",
+            detail="Invalid webhook signature.",
+        ) from e
+
+    # Process the event and apply it to the tenant's plan.
+    result = await billing.handle_webhook_event(event)
+    applied = await _apply_paddle_result(request, result)
+
+    return {"status": "ok", "action": result.action if result else "ignored", "applied": applied}
+
+
+async def _apply_paddle_result(request: Request, result: Any) -> str:
+    """Persist a verified Paddle lifecycle event to the tenant record.
+
+    Returns a short status: ``applied``, ``no_change`` or ``unmatched``.
+    Raises 503 when metering is unavailable so Paddle retries later.
+    """
+    if result is None or result.action in ("ignored", "payment_failed", "payment_issue"):
+        if result is not None and result.action in ("payment_failed", "payment_issue"):
+            log.warning("paddle_payment_problem", user_id=result.user_id, action=result.action)
+        return "no_change"
+
+    meter = getattr(request.app.state, "usage_meter", None)
+    if meter is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Usage metering is not available; retry later.",
         )
 
-    # Process the event
-    result = await billing.handle_webhook_event(event)
+    from remembra.cloud.plans import PlanTier as CloudPlanTier
 
-    # TODO: Apply result to metering system (similar to Stripe webhook)
+    user_id = result.user_id
+    db = request.app.state.db
+    known = bool(user_id) and (await db.get_user_by_id(user_id) is not None or await meter.get_tenant(user_id) is not None)
+    if not known:
+        log.warning("paddle_event_unmatched_user", action=result.action)
+        return "unmatched"
 
-    return {"status": "ok", "action": result.action if result else "ignored"}
+    plan = CloudPlanTier.FREE if result.action == "cancel_subscription" else CloudPlanTier(result.plan.value)
+    await meter.register_tenant(
+        user_id,
+        plan=plan,
+        stripe_customer_id=result.paddle_customer_id,
+        stripe_subscription_id=result.paddle_subscription_id,
+        email=result.customer_email,
+        name=result.customer_name,
+    )
+
+    team_manager = getattr(request.app.state, "team_manager", None)
+    if team_manager is not None:
+        try:
+            from remembra.cloud.plans import get_plan as get_cloud_plan
+
+            await team_manager.update_owner_teams_plan(
+                owner_id=user_id, plan=plan.value, max_seats=get_cloud_plan(plan).max_users
+            )
+        except Exception as e:  # team sync is best-effort; the tenant plan is authoritative
+            log.warning("paddle_team_plan_sync_failed", user_id=user_id, error_type=type(e).__name__)
+
+    log.info("paddle_plan_applied", user_id=user_id, plan=plan.value, action=result.action)
+    return "applied"

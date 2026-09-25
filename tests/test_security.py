@@ -1,7 +1,7 @@
 """Security tests for Week 7 - Authentication, Rate Limiting, Memory Protection."""
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from fastapi import HTTPException
 
 from remembra.auth.keys import APIKeyManager, KEY_PREFIX
@@ -459,29 +459,34 @@ class TestCrossUserAccess:
 class TestRateLimiting:
     """Tests for rate limiting (integration tests with FastAPI)."""
 
-    def test_rate_limit_key_with_api_key(self):
-        """Rate limit should use API key when present."""
+    def test_rate_limit_key_uses_validated_identity(self):
+        """Authenticated requests are bucketed by the validated account, not a header."""
+        from types import SimpleNamespace
+
         from remembra.core.limiter import get_key_func as get_rate_limit_key
 
-        mock_request = MagicMock()
-        mock_request.headers.get.return_value = "rem_abc123456789"
+        request = SimpleNamespace(
+            state=SimpleNamespace(rate_limit_identity="user:tenant-a"),
+            headers={"X-API-Key": "rem_attacker_controlled"},
+            client=SimpleNamespace(host="203.0.113.9"),
+        )
+        assert get_rate_limit_key(request) == "user:tenant-a"
 
-        key = get_rate_limit_key(mock_request)
+    def test_raw_api_key_header_is_not_a_rate_limit_bucket(self):
+        """An unvalidated X-API-Key must not create a fresh bucket (SEC-6)."""
+        from types import SimpleNamespace
 
-        assert key.startswith("key:")
-        assert "rem_abc1" in key  # First 8 chars
-
-    def test_rate_limit_key_without_api_key(self):
-        """Rate limit should fall back to IP without API key."""
         from remembra.core.limiter import get_key_func as get_rate_limit_key
 
-        mock_request = MagicMock()
-        mock_request.headers.get.return_value = None
-        mock_request.client.host = "192.168.1.100"
-
-        key = get_rate_limit_key(mock_request)
-
-        assert key == "192.168.1.100"
+        keys = set()
+        for i in range(5):
+            request = SimpleNamespace(
+                state=SimpleNamespace(),
+                headers={"X-API-Key": f"rem_random{i}"},
+                client=SimpleNamespace(host="203.0.113.9"),
+            )
+            keys.add(get_rate_limit_key(request))
+        assert keys == {"ip:203.0.113.9"}
 
 
 # ---------------------------------------------------------------------------

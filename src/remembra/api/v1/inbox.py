@@ -16,7 +16,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field, field_validator
 
-from remembra.auth.middleware import AuthenticatedUser, get_current_user
+from remembra.auth.middleware import AuthenticatedUser, get_current_user, require_memory_recall, require_memory_store
 from remembra.core.limiter import limiter
 from remembra.inbox.manager import TERMINAL_STATUSES, InboxManager
 
@@ -123,6 +123,7 @@ class AckInboxResponse(BaseModel):
     response_model=SendInboxResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Send a targeted message to an agent inbox",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("120/minute")
 async def send_to_inbox(
@@ -162,6 +163,7 @@ async def send_to_inbox(
     "",
     response_model=list[InboxRow],
     summary="List inbox items addressed to a given agent_id",
+    dependencies=[require_memory_recall()],
 )
 @limiter.limit("240/minute")
 async def get_inbox(
@@ -201,6 +203,7 @@ async def get_inbox(
     "/{inbox_id}/ack",
     response_model=AckInboxResponse,
     summary="Acknowledge an inbox item",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("240/minute")
 async def ack_inbox(

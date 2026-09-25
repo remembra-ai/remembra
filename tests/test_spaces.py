@@ -15,7 +15,20 @@ async def space_manager(in_memory_db):
     """SpaceManager backed by a real in-memory SQLite database."""
     mgr = SpaceManager(in_memory_db)
     await mgr.init_schema()
+    # Memories referenced by the membership tests, with real owners.
+    await in_memory_db.conn.execute("CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, user_id TEXT)")
+    rows = [(f"mem-{i}", "user-1") for i in range(6)] + [("mem-u2", "user-2")]
+    await in_memory_db.conn.executemany("INSERT INTO memories (id, user_id) VALUES (?, ?)", rows)
+    await in_memory_db.conn.commit()
     return mgr
+
+
+async def grant(mgr, space_id, agent_id, permission, granted_by="user-1"):
+    """Grant access the consented way: invite, then the grantee accepts."""
+    result = await mgr.grant_access(space_id, agent_id, permission, granted_by=granted_by)
+    if result["status"] == "pending":
+        result = await mgr.accept_invite(space_id, agent_id)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -115,14 +128,18 @@ class TestAccessControl:
 
     async def test_grant_read_access(self, space_manager):
         space = await space_manager.create_space(name="s1", owner_id="user-1")
-        grant = await space_manager.grant_access(space["id"], "user-2", "read", granted_by="user-1")
-        assert grant["permission"] == "read"
+        pending = await space_manager.grant_access(space["id"], "user-2", "read", granted_by="user-1")
+        assert pending["status"] == "pending"
+        # No access until the invitee accepts (consent).
+        assert await space_manager.check_access(space["id"], "user-2", "read") is False
+        result = await space_manager.accept_invite(space["id"], "user-2")
+        assert result["permission"] == "read"
         assert await space_manager.check_access(space["id"], "user-2", "read") is True
         assert await space_manager.check_access(space["id"], "user-2", "write") is False
 
     async def test_grant_write_includes_read(self, space_manager):
         space = await space_manager.create_space(name="s1", owner_id="user-1")
-        await space_manager.grant_access(space["id"], "user-2", "write", granted_by="user-1")
+        await grant(space_manager, space["id"], "user-2", "write")
         assert await space_manager.check_access(space["id"], "user-2", "read") is True
         assert await space_manager.check_access(space["id"], "user-2", "write") is True
         assert await space_manager.check_access(space["id"], "user-2", "admin") is False
@@ -140,16 +157,17 @@ class TestAccessControl:
 
     async def test_update_permission(self, space_manager):
         space = await space_manager.create_space(name="s1", owner_id="user-1")
-        await space_manager.grant_access(space["id"], "user-2", "read", granted_by="user-1")
+        await grant(space_manager, space["id"], "user-2", "read")
         assert await space_manager.check_access(space["id"], "user-2", "write") is False
 
-        # Upgrade to write
-        await space_manager.grant_access(space["id"], "user-2", "write", granted_by="user-1")
+        # Upgrade an existing member directly (they already consented)
+        upgraded = await space_manager.grant_access(space["id"], "user-2", "write", granted_by="user-1")
+        assert upgraded["status"] == "active"
         assert await space_manager.check_access(space["id"], "user-2", "write") is True
 
     async def test_revoke_access(self, space_manager):
         space = await space_manager.create_space(name="s1", owner_id="user-1")
-        await space_manager.grant_access(space["id"], "user-2", "read", granted_by="user-1")
+        await grant(space_manager, space["id"], "user-2", "read")
         assert await space_manager.check_access(space["id"], "user-2", "read") is True
 
         revoked = await space_manager.revoke_access(space["id"], "user-2", revoked_by="user-1")
@@ -158,15 +176,15 @@ class TestAccessControl:
 
     async def test_revoke_by_non_admin_raises(self, space_manager):
         space = await space_manager.create_space(name="s1", owner_id="user-1")
-        await space_manager.grant_access(space["id"], "user-2", "read", granted_by="user-1")
+        await grant(space_manager, space["id"], "user-2", "read")
 
         with pytest.raises(PermissionError):
             await space_manager.revoke_access(space["id"], "user-2", revoked_by="user-3")
 
     async def test_list_members(self, space_manager):
         space = await space_manager.create_space(name="s1", owner_id="user-1")
-        await space_manager.grant_access(space["id"], "user-2", "read", granted_by="user-1")
-        await space_manager.grant_access(space["id"], "user-3", "write", granted_by="user-1")
+        await grant(space_manager, space["id"], "user-2", "read")
+        await grant(space_manager, space["id"], "user-3", "write")
 
         members = await space_manager.list_members(space["id"])
         assert len(members) == 3  # owner + 2 grantees
@@ -198,15 +216,18 @@ class TestMemoryMembership:
 
     async def test_add_memory_with_read_only_raises(self, space_manager):
         space = await space_manager.create_space(name="s1", owner_id="user-1")
-        await space_manager.grant_access(space["id"], "user-2", "read", granted_by="user-1")
+        await grant(space_manager, space["id"], "user-2", "read")
         with pytest.raises(PermissionError, match="Write access required"):
             await space_manager.add_memory_to_space("mem-1", space["id"], "user-2")
 
     async def test_add_memory_with_write_access(self, space_manager):
         space = await space_manager.create_space(name="s1", owner_id="user-1")
-        await space_manager.grant_access(space["id"], "user-2", "write", granted_by="user-1")
-        added = await space_manager.add_memory_to_space("mem-1", space["id"], "user-2")
+        await grant(space_manager, space["id"], "user-2", "write")
+        added = await space_manager.add_memory_to_space("mem-u2", space["id"], "user-2")
         assert added is True
+        # ...but never someone else's memory.
+        with pytest.raises(LookupError):
+            await space_manager.add_memory_to_space("mem-1", space["id"], "user-2")
 
     async def test_add_duplicate_memory_idempotent(self, space_manager):
         space = await space_manager.create_space(name="s1", owner_id="user-1")

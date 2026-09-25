@@ -161,7 +161,8 @@ class GuardedConnection:
     ``total_changes`` ...) passes straight through to the raw connection.
     """
 
-    __slots__ = ("_raw", "_coord")
+    # __weakref__: callers cache per-connection state in WeakSets (security.state).
+    __slots__ = ("_raw", "_coord", "__weakref__")
 
     def __init__(self, raw: aiosqlite.Connection, coord: TxCoordinator) -> None:
         object.__setattr__(self, "_raw", raw)

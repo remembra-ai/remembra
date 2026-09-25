@@ -3,22 +3,30 @@
 import hmac
 from typing import Annotated
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from slowapi import Limiter
 
 from remembra.auth.keys import APIKeyManager
 from remembra.auth.middleware import (
+    AuthenticatedUser,
     JWTOrAPIKeyUser,
     get_client_ip,
 )
-from remembra.auth.rbac import Role, RoleManager
+from remembra.auth.rbac import ROLE_LEVEL, Role, RoleManager
 from remembra.cloud.limits import EnforceKeyLimit
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
 from remembra.security.audit import AuditLogger
 
 router = APIRouter(prefix="/keys", tags=["api-keys"])
+
+log = structlog.get_logger(__name__)
+
+# Roles a caller may mint for themselves. ``admin`` keys are provisioned only
+# with the master key — never self-service.
+_SELF_SERVICE_MAX_ROLE = Role.EDITOR
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +169,39 @@ def validate_role(role_str: str) -> Role:
         )
 
 
+def _caller_role(user: AuthenticatedUser) -> Role:
+    try:
+        return Role(user.role)
+    except ValueError:
+        return Role.VIEWER
+
+
+def _is_session(user: AuthenticatedUser) -> bool:
+    """Dashboard (JWT) session rather than an API key."""
+    return user.api_key_id == "jwt_auth"
+
+
+def _check_grant_allowed(
+    user: AuthenticatedUser,
+    role: Role,
+    project_ids: list[str] | None,
+) -> None:
+    """Reject any key creation/update that would exceed what the caller holds."""
+    ceiling = _SELF_SERVICE_MAX_ROLE if _is_session(user) else _caller_role(user)
+    if ROLE_LEVEL[ceiling] > ROLE_LEVEL[_SELF_SERVICE_MAX_ROLE]:
+        ceiling = _SELF_SERVICE_MAX_ROLE
+    if ROLE_LEVEL[role] > ROLE_LEVEL[ceiling]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"You cannot create or grant the '{role.value}' role.",
+        )
+    if user.project_ids and (not project_ids or not set(project_ids) <= set(user.project_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="A project-restricted key can only grant access to its own projects.",
+        )
+
+
 def generate_key_preview(key_id: str) -> str:
     """Generate a display preview from key ID (e.g., 'ErBdukTD')."""
     # Extract the random part after 'key_' and take first 8 chars
@@ -238,7 +279,7 @@ async def create_api_key(
     """
     # Determine user_id based on auth method
     if current_user:
-        # JWT auth - create key for authenticated user
+        # JWT / API-key auth - create key for the authenticated user only
         user_id = current_user.user_id
     elif body.user_id:
         # Master key auth - create a key on behalf of an arbitrary user_id.
@@ -261,6 +302,15 @@ async def create_api_key(
     role_str = body.permission or body.role
     role = validate_role(role_str)
 
+    inherited_scopes: list[str] | None = None
+    if current_user:
+        # Self-service: never above the caller (and never admin), projects ⊆ caller's.
+        # A restricted caller that omits project_ids gets its own restriction, never "all".
+        if current_user.project_ids and not body.project_ids:
+            body.project_ids = list(current_user.project_ids)
+        _check_grant_allowed(current_user, role, body.project_ids)
+        inherited_scopes = current_user.scopes or None
+
     try:
         api_key = await key_manager.create_key(
             user_id=user_id,
@@ -272,6 +322,7 @@ async def create_api_key(
         await role_manager.assign_role(
             api_key_id=api_key.id,
             role=role,
+            scopes=inherited_scopes,
             project_ids=body.project_ids,
         )
 
@@ -293,10 +344,11 @@ async def create_api_key(
         )
 
     except Exception as e:
+        log.error("api_key_create_failed", user_id=user_id, error_type=type(e).__name__, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create API key: {str(e)}",
-        )
+            detail="Failed to create API key.",
+        ) from e
 
 
 # ---------------------------------------------------------------------------
@@ -474,6 +526,16 @@ async def update_api_key(
             detail="Cannot update a revoked key",
         )
 
+    # Role / project changes are account-owner (dashboard session) operations.
+    # An API key must never be able to widen its own or a sibling key's access.
+    if (body.role is not None or body.project_ids is not None) and not _is_session(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Role and project changes require a dashboard session.",
+        )
+    if body.role is not None:
+        _check_grant_allowed(current_user, validate_role(body.role), body.project_ids)
+
     # Update name if provided
     if body.name is not None:
         await key_manager.update_key_name(key_id, body.name)
@@ -557,6 +619,18 @@ async def revoke_api_key(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Authentication required. Use JWT token or API key.",
         )
+
+    if not _is_session(current_user) and key_id != current_user.api_key_id:
+        # An API key may only revoke keys that hold no more access than itself.
+        target_role = await role_manager.get_role(key_id)
+        if ROLE_LEVEL[target_role.role] > ROLE_LEVEL[_caller_role(current_user)] or (
+            current_user.project_ids
+            and (not target_role.project_ids or not set(target_role.project_ids) <= set(current_user.project_ids))
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="This key cannot revoke a key with broader access.",
+            )
 
     if hard:
         # Permanently delete the key
