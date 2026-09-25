@@ -64,7 +64,9 @@ export class ConstellationEngine {
   private packets: Packet[] = [];
   private queue: GraphEvent[] = [];
   private nextLaunch = 0;
+  /** Edge key -> the time (performance.now / rAF clock) it stops being lit. */
   private litEdges = new Map<string, number>();
+  private litTimer = 0;
   private bursts: Burst[] = [];
   private still = false;
   private raf = 0;
@@ -123,6 +125,8 @@ export class ConstellationEngine {
   destroy(): void {
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
+    if (this.litTimer) window.clearTimeout(this.litTimer);
+    this.litTimer = 0;
     for (const fn of this.cleanup) fn();
     this.cleanup = [];
   }
@@ -164,6 +168,8 @@ export class ConstellationEngine {
     if (still) {
       this.packets = [];
       this.queue = [];
+      this.bursts = [];
+      this.litEdges.clear();
       this.layout.settle();
       if (!this.fitted) this.fit(false);
     }
@@ -178,7 +184,13 @@ export class ConstellationEngine {
       for (let i = 0; i + 1 < event.path.length; i += 1) this.litEdges.set(this.edgeKey(event.path[i], event.path[i + 1]), until);
       this.cb.onEventStart?.(event);
       this.requestDraw();
-      window.setTimeout(() => this.requestDraw(), 2600);
+      // One redraw just after the latest expiry turns every lit path dark again
+      // (draw() only lights edges whose time has not run out).
+      if (this.litTimer) window.clearTimeout(this.litTimer);
+      this.litTimer = window.setTimeout(() => {
+        this.litTimer = 0;
+        this.requestDraw();
+      }, 2600);
       return;
     }
     this.queue.push(event);
@@ -549,6 +561,8 @@ export class ConstellationEngine {
       { kind: 'inbox', dash: [8, 5], color: this.tones.ink, width: 1, alpha: 0.5 },
     ];
     const lit: [number, number, number, number][] = [];
+    // Lit paths expire here too, not only in stepPackets (which Still mode never runs).
+    for (const [key, until] of this.litEdges) if (until <= time) this.litEdges.delete(key);
     for (const style of styles) {
       if (style.kind === 'link' && this.quality === 2 && k < 0.5) continue;
       for (const pass of [false, true]) {
@@ -564,7 +578,8 @@ export class ConstellationEngine {
           const [ax, ay] = this.toScreen(a.x, a.y);
           const [bx, by] = this.toScreen(b.x, b.y);
           if ((ax < 0 && bx < 0) || (ay < 0 && by < 0) || (ax > this.W && bx > this.W) || (ay > this.H && by > this.H)) continue;
-          if (this.litEdges.has(this.edgeKey(e.source, e.target))) {
+          const litUntil = this.litEdges.get(this.edgeKey(e.source, e.target));
+          if (litUntil !== undefined && litUntil > time) {
             lit.push([ax, ay, bx, by]);
             continue;
           }

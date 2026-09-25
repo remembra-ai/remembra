@@ -16,7 +16,7 @@ import { watchReducedMotion } from '../brand/pixel';
 import { agentMeta } from '../lib/agents';
 import { ErrorNotice } from '../components/relay/ui';
 import { ConstellationEngine } from './engine';
-import { buildGraph, messageEvent, newEvents, trailEvent, type GNode, type GraphEvent } from './model';
+import { buildGraph, eventInView, graphSignature, messageEvent, newEvents, trailEvent, type GNode, type GraphEvent } from './model';
 import { NodeDrawer } from './NodeDrawer';
 
 const WINDOWS = [
@@ -104,8 +104,17 @@ export function Constellation() {
     [summary.data, trailItems, messages, entities.data, project, agent, sinceMs],
   );
 
+  // Polls (and the 30 s clock tick that moves the window) rebuild `graph` even
+  // when nothing changed; hand the engine a new picture only when the content
+  // differs, so an identical poll never touches the layout.
+  const fed = useRef<{ engine: ConstellationEngine; signature: string } | null>(null);
   useEffect(() => {
-    engineRef.current?.setData(graph);
+    const engine = engineRef.current;
+    if (!engine) return;
+    const signature = graphSignature(graph);
+    if (fed.current && fed.current.engine === engine && fed.current.signature === signature) return;
+    fed.current = { engine, signature };
+    engine.setData(graph);
   }, [graph]);
 
   useEffect(() => {
@@ -114,22 +123,28 @@ export function Constellation() {
 
   // Events: replay the three most recent on first load (real ones, with their
   // age in the strip), then play whatever arrives while the page is open.
+  // `seen` tracks every loaded event whatever the filter, so changing the
+  // project never replays history as live; the filter only decides what plays.
   useEffect(() => {
     if (!trail.data || !inbox.data) return;
     const events = [
       ...trailItems.map((item) => trailEvent(item, summary.data)).filter((e): e is GraphEvent => !!e),
       ...messages.map(messageEvent),
-    ].filter((e) => (project ? e.path.includes(`p:${project}`) || e.kind === 'message' : true));
+    ];
     if (seen.current === null) {
       seen.current = new Set(events.map((e) => e.key));
-      const recent = [...events].sort((a, b) => b.at - a.at).slice(0, 3).reverse();
+      const recent = events
+        .filter((e) => eventInView(e, project))
+        .sort((a, b) => b.at - a.at)
+        .slice(0, 3)
+        .reverse();
       for (const e of recent) engineRef.current?.play({ ...e, live: false });
       return;
     }
     const fresh = newEvents(seen.current, events);
     for (const e of fresh) {
       seen.current.add(e.key);
-      engineRef.current?.play({ ...e, live: true });
+      if (eventInView(e, project)) engineRef.current?.play({ ...e, live: true });
     }
   }, [trail.data, inbox.data, trailItems, messages, summary.data, project]);
 

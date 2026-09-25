@@ -31,6 +31,7 @@ export class ForceLayout {
   nodes: LNode[] = [];
   private byId = new Map<string, LNode>();
   private springs: { a: LNode; b: LNode; rest: number; k: number }[] = [];
+  private springKeys = new Set<string>();
   private ring = new Map<string, { x: number; y: number }>();
   alpha = 1;
   /** Canvas width / height: the project ring is an ellipse that matches it. */
@@ -66,10 +67,12 @@ export class ForceLayout {
     );
     const next = new Map<string, LNode>();
     let fresh = 0;
+    let moved = 0;
     for (const n of nodes) {
       const anchor = n.kind === 'project' || n.kind === 'agent' ? null : n.project ? `p:${n.project}` : null;
       const old = previous.get(n.id);
       if (old) {
+        if (old.anchor !== anchor) moved += 1;
         old.anchor = anchor;
         next.set(n.id, old);
         continue;
@@ -91,16 +94,28 @@ export class ForceLayout {
       };
       next.set(n.id, node);
     }
+    const removed = previous.size - (next.size - fresh);
     this.byId = next;
     this.nodes = [...next.values()];
     this.springs = [];
+    const springKeys = new Set<string>();
     for (const e of edges) {
       const a = next.get(e.source);
       const b = next.get(e.target);
-      if (a && b) this.springs.push({ a, b, rest: REST[e.kind], k: STIFF[e.kind] });
+      if (!a || !b) continue;
+      this.springs.push({ a, b, rest: REST[e.kind], k: STIFF[e.kind] });
+      springKeys.add(`${e.kind}|${a.id}|${b.id}`);
     }
-    // Reheat: fully for a new picture, gently when a few nodes arrived.
-    this.alpha = previous.size === 0 ? 1 : Math.max(this.alpha, Math.min(0.6, 0.12 + fresh / Math.max(10, this.nodes.length)));
+    let springsChanged = springKeys.size !== this.springKeys.size;
+    if (!springsChanged) for (const k of springKeys) if (!this.springKeys.has(k)) springsChanged = true;
+    this.springKeys = springKeys;
+    // Reheat: fully for a new picture, gently when the structure changed
+    // (nodes or springs came or went, or a node changed cluster). A poll that
+    // brings the same graph leaves the layout at rest, so it costs nothing.
+    if (previous.size === 0) this.alpha = nodes.length ? 1 : this.alpha;
+    else if (fresh > 0 || removed > 0 || moved > 0 || springsChanged) {
+      this.alpha = Math.max(this.alpha, Math.min(0.6, 0.12 + (fresh + removed + moved) / Math.max(10, this.nodes.length)));
+    }
   }
 
   get(id: string): LNode | undefined {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EntityGraphDataResponse } from '../../lib/api';
 import type { ActivitySummary, InboxMessage, TrailItem } from '../../lib/relay';
-import { buildGraph, messageEvent, newEvents, nextAgentIn, trailEvent } from '../model';
+import { buildGraph, eventInView, graphSignature, messageEvent, newEvents, nextAgentIn, trailEvent } from '../model';
 import { ForceLayout } from '../layout';
 
 const NOW = Date.parse('2026-09-25T12:00:00Z');
@@ -122,6 +122,30 @@ describe('buildGraph', () => {
     expect(ids.has('m:h3')).toBe(true);
   });
 
+  it('keeps a recent note from you in the default 7d window, even with no trail behind it', () => {
+    const note: InboxMessage = { ...inbox[0], inbox_id: 'i2', from_agent: 'dashboard', to_agent: 'codex', subject: 'Ship it', created_at: new Date(NOW - 60e3).toISOString() };
+    // An agent that only ever sends notes, no trail entry or summary row.
+    const lone: InboxMessage = { ...inbox[0], inbox_id: 'i3', from_agent: 'kimi', to_agent: 'claude-code', subject: 'ping', created_at: iso(5) };
+    const old: InboxMessage = { ...inbox[0], inbox_id: 'i4', from_agent: 'gemini', to_agent: 'codex', subject: 'old', created_at: iso(24 * 30) };
+    const g = buildGraph({ summary, trail, inbox: [...inbox, note, lone, old], entities }, { ...all, sinceMs: NOW - 7 * 24 * 3600e3 });
+    const ids = new Set(g.nodes.map((n) => n.id));
+    expect(ids.has('a:dashboard')).toBe(true);
+    expect(ids.has('a:kimi')).toBe(true);
+    expect(g.edges.some((e) => e.kind === 'inbox' && e.source === 'a:dashboard' && e.target === 'a:codex')).toBe(true);
+    expect(g.edges.some((e) => e.kind === 'inbox' && e.source === 'a:kimi' && e.target === 'a:claude-code')).toBe(true);
+    // Outside the window: still filtered.
+    expect(ids.has('a:gemini')).toBe(false);
+  });
+
+  it('with a project filter, keeps notes that touch an agent in play there', () => {
+    const toCursor: InboxMessage = { ...inbox[0], inbox_id: 'i5', from_agent: 'dashboard', to_agent: 'cursor', subject: 'hi', created_at: iso(1) };
+    const g = buildGraph({ summary, trail, inbox: [...inbox, toCursor], entities }, { ...all, project: 'landing-site', sinceMs: NOW - 7 * 24 * 3600e3 });
+    const ids = new Set(g.nodes.map((n) => n.id));
+    expect(ids.has('a:dashboard')).toBe(true);
+    expect(ids.has('a:claude-code')).toBe(false);
+    expect(g.edges.some((e) => e.kind === 'inbox' && e.source === 'a:dashboard' && e.target === 'a:cursor')).toBe(true);
+  });
+
   it('copes with empty and partial data', () => {
     expect(buildGraph({}, all)).toEqual({ nodes: [], edges: [] });
     const g = buildGraph({ trail: [item('x', 'kimi', '', 1)] }, all);
@@ -147,6 +171,26 @@ describe('events', () => {
     const m = messageEvent(inbox[0]);
     expect(m.path).toEqual(['a:claude-code', 'a:dashboard']);
     expect(m.text).toBe('claude-code → you: Staging needs PADDLE_API_KEY');
+  });
+
+  it('decides what plays by project; notes always play', () => {
+    expect(eventInView(trailEvent(trail[3], summary)!, 'landing-site')).toBe(true);
+    expect(eventInView(trailEvent(trail[0], summary)!, 'landing-site')).toBe(false);
+    expect(eventInView(messageEvent(inbox[0]), 'landing-site')).toBe(true);
+    expect(eventInView(trailEvent(trail[0], summary)!, null)).toBe(true);
+  });
+
+  it('switching the project filter finds nothing new when seen covers every loaded event', () => {
+    const events = [...trail.map((t) => trailEvent(t, summary)!), messageEvent(inbox[0])];
+    // First load happened under ?project=landing-site; seen still holds everything.
+    const seen = new Set(events.map((e) => e.key));
+    expect(newEvents(seen, events)).toEqual([]);
+    // A genuinely new handoff is still found, and plays only if it is in view.
+    const fresh = trailEvent(item('h9', 'codex', 'invoices-api', 0), summary)!;
+    const found = newEvents(seen, [...events, fresh]);
+    expect(found.map((e) => e.key)).toEqual(['t:h9']);
+    expect(eventInView(found[0], 'landing-site')).toBe(false);
+    expect(eventInView(found[0], null)).toBe(true);
   });
 
   it('reports only unseen events, oldest first', () => {
@@ -187,6 +231,30 @@ describe('ForceLayout', () => {
     expect(Math.hypot(p0.x - p4.x, p0.y - p4.y)).toBeGreaterThan(400);
   });
 
+  it('does not reheat when a poll brings the same graph, and does when it changes', () => {
+    const g = buildGraph({ summary, trail, inbox, entities }, all);
+    const layout = new ForceLayout();
+    layout.setGraph(g.nodes, g.edges);
+    layout.settle(2000);
+    expect(layout.settled).toBe(true);
+    // Same content, new arrays (what every poll produces).
+    const again = buildGraph({ summary, trail: trail.map((t) => ({ ...t })), inbox, entities }, all);
+    layout.setGraph(again.nodes, again.edges);
+    expect(layout.settled).toBe(true);
+    // settle() is then a no-op: nothing moves.
+    const before = layout.nodes.map((n) => [n.x, n.y]);
+    layout.settle();
+    expect(layout.nodes.map((n) => [n.x, n.y])).toEqual(before);
+    // A new handoff: structure changed, so the layout warms up to place it.
+    const more = buildGraph({ summary, trail: [...trail, item('h9', 'codex', 'invoices-api', 0)], inbox, entities }, all);
+    layout.setGraph(more.nodes, more.edges);
+    expect(layout.settled).toBe(false);
+    layout.settle(2000);
+    // A node leaving also warms it.
+    layout.setGraph(g.nodes, g.edges);
+    expect(layout.settled).toBe(false);
+  });
+
   it('keeps positions when data refreshes', () => {
     const layout = new ForceLayout();
     const n = [{ id: 'p:A', kind: 'project' as const, label: 'A', ref: 'A', project: 'A', agent: null, weight: 3, lastAt: null }];
@@ -196,5 +264,17 @@ describe('ForceLayout', () => {
     layout.setGraph(n, []);
     expect(layout.get('p:A')!.x).toBe(before.x);
     expect(layout.get('p:A')!.y).toBe(before.y);
+  });
+});
+
+describe('graphSignature', () => {
+  it('is equal for an identical rebuild and differs when anything drawn changes', () => {
+    const a = buildGraph({ summary, trail, inbox, entities }, all);
+    const b = buildGraph({ summary, trail: trail.map((t) => ({ ...t })), inbox: inbox.map((m) => ({ ...m })), entities }, all);
+    expect(graphSignature(a)).toBe(graphSignature(b));
+    const failing = buildGraph({ summary, trail: trail.map((t) => (t.id === 'h2' ? { ...t, failing: 3 } : t)), inbox, entities }, all);
+    expect(graphSignature(failing)).not.toBe(graphSignature(a));
+    const windowed = buildGraph({ summary, trail, inbox, entities }, { ...all, sinceMs: NOW - 24 * 3600e3 });
+    expect(graphSignature(windowed)).not.toBe(graphSignature(a));
   });
 });

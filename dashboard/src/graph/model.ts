@@ -227,12 +227,19 @@ export function applyFilter(graph: GraphData, filter: GraphFilter): GraphData {
   }
   if (project && byId.has(projectNodeId(project))) keep.add(projectNodeId(project));
   if (agentId && byId.has(agentId)) keep.add(agentId);
-  // 3. Inbox messages between kept agents (or to/from the filtered agent).
+  // 3. Inbox notes inside the window. With an agent filter: notes to or from
+  //    that agent. With a project filter: notes touching an agent already in
+  //    play there. Otherwise every recent note, so a note between agents with
+  //    no trail yet (or from you, on the dashboard) still has an edge to travel.
+  //    Decided against the set as it stood before this step, so the result does
+  //    not depend on the order of the notes.
+  const inPlay = new Set(keep);
   for (const e of graph.edges) {
     if (e.kind !== 'inbox') continue;
     if (sinceMs !== null && (e.lastAt === null || e.lastAt < sinceMs)) continue;
-    if (agentId && e.source !== agentId && e.target !== agentId) continue;
-    if (!agentId && !(keep.has(e.source) && keep.has(e.target))) continue;
+    if (agentId) {
+      if (e.source !== agentId && e.target !== agentId) continue;
+    } else if (project && !inPlay.has(e.source) && !inPlay.has(e.target)) continue;
     keep.add(e.source);
     keep.add(e.target);
   }
@@ -316,6 +323,28 @@ export function messageEvent(message: InboxMessage): GraphEvent {
     path: [agentNodeId(message.from_agent), agentNodeId(message.to_agent)],
     text: `${agentLabel(message.from_agent)} → ${agentLabel(message.to_agent)}: ${subject}`,
   };
+}
+
+/**
+ * Whether an event belongs in the current view. Notes between agents are not
+ * tied to a project, so they always play.
+ */
+export function eventInView(event: GraphEvent, project: string | null): boolean {
+  return !project || event.kind === 'message' || event.path.includes(projectNodeId(project));
+}
+
+/**
+ * A content fingerprint of a graph: equal fingerprints draw the same picture,
+ * so an identical poll can skip the engine (and the layout) entirely.
+ */
+export function graphSignature(graph: GraphData): string {
+  const parts: string[] = [];
+  for (const n of graph.nodes) {
+    parts.push(`${n.id}\u0001${n.kind}\u0001${n.label}\u0001${n.project ?? ''}\u0001${n.agent ?? ''}\u0001${n.weight}\u0001${n.lastAt ?? ''}\u0001${n.detail ?? ''}\u0001${n.color ?? ''}\u0001${n.failing ?? ''}\u0001${n.open ?? ''}`);
+  }
+  parts.push('\u0002');
+  for (const e of graph.edges) parts.push(`${e.id}\u0001${e.source}\u0001${e.target}\u0001${e.lastAt ?? ''}\u0001${e.label ?? ''}`);
+  return parts.join('\u0003');
 }
 
 /** Events in `next` that were not in `seen`, oldest first. */
