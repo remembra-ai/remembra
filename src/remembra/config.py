@@ -400,6 +400,26 @@ class Settings(BaseSettings):
         "https://challenges.cloudflare.com/turnstile/v0/siteverify",
         description="Turnstile siteverify endpoint",
     )
+    turnstile_site_key: str | None = Field(
+        None,
+        description=(
+            "Cloudflare Turnstile SITE key (public). Exposed by GET /api/v1/auth/providers so the dashboard "
+            "renders the widget on signup. Only published while turnstile_secret is also set."
+        ),
+    )
+
+    # Sign in with GitHub / Google (dashboard social login)
+    public_dashboard_url: str | None = Field(
+        None,
+        description=(
+            "Public HTTPS origin of the dashboard, e.g. https://app.remembra.dev. Social sign-in only ever "
+            "redirects here; required (with public_url) for any sign-in provider to be enabled."
+        ),
+    )
+    github_client_id: str | None = Field(None, description="GitHub OAuth app client ID (Sign in with GitHub)")
+    github_client_secret: str | None = Field(None, description="GitHub OAuth app client secret")
+    google_client_id: str | None = Field(None, description="Google OAuth 2.0 web client ID (Sign in with Google)")
+    google_client_secret: str | None = Field(None, description="Google OAuth 2.0 web client secret")
     signup_ip_rate_limit: str = Field("3/hour", description="Signups allowed per client IP /24 (IPv6: /56)")
     signup_attempt_ip_rate_limit: str = Field(
         "30/hour",
@@ -721,6 +741,15 @@ class Settings(BaseSettings):
             from remembra.connector.policy import normalize_public_url
 
             object.__setattr__(self, "public_url", normalize_public_url(self.public_url))
+        if self.public_dashboard_url is not None and not self.public_dashboard_url.strip():
+            object.__setattr__(self, "public_dashboard_url", None)
+        if self.public_dashboard_url is not None:
+            from remembra.connector.policy import normalize_public_url
+
+            try:
+                object.__setattr__(self, "public_dashboard_url", normalize_public_url(self.public_dashboard_url))
+            except ValueError as e:
+                raise ValueError(str(e).replace("public_url", "public_dashboard_url")) from e
         if self.connector_enabled and not self.public_url:
             raise ValueError("connector_enabled requires public_url (e.g. REMEMBRA_PUBLIC_URL=https://api.example.com)")
 

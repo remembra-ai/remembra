@@ -91,6 +91,10 @@ class AppState:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     configure_logging(settings.log_level)
+    # OAuth callback URLs carry single-use codes: keep them out of access logs.
+    from remembra.auth.social import install_access_log_redaction
+
+    install_access_log_redaction()
 
     # Initialize OpenTelemetry tracing (soft dependency)
     from remembra.core.tracing import setup_tracing

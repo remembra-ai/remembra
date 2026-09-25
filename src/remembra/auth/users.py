@@ -303,6 +303,13 @@ class UserManager:
         # Delete the used reset token
         await self.db.delete_password_reset_token(user_data["id"])
 
+        # The token was only ever sent to the account address, so using it
+        # proves control of that mailbox: the email is now verified. This is
+        # also how the owner of an unverified password account can later
+        # attach Sign in with GitHub / Google to it.
+        if not user_data.get("email_verified"):
+            await self.db.update_user_email_verified(user_data["id"], True)
+
         # A reset means the old password may be compromised: kill every session.
         await security_state.invalidate_user_sessions(self.db, user_data["id"])
 
