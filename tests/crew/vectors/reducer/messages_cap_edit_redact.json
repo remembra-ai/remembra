@@ -1,0 +1,5425 @@
+{
+ "name": "messages_cap_edit_redact",
+ "description": "The last 100 messages by seq are kept; edits replace, redaction blanks the body; edits of evicted messages are ignored.",
+ "snapshot": {
+  "crew": {
+   "id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "name": "YaadBooks",
+   "mode": "multi",
+   "enforcement": "enforce",
+   "settings_version": 1,
+   "last_seq": 10
+  },
+  "server_time": "2026-09-25T20:00:10.000Z",
+  "as_of_seq": 10,
+  "etag": "\"10\"",
+  "sessions": [
+   {
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "member_key": "claude-code:mbp:2c784ed4",
+    "agent_verified": true,
+    "adapter": "claude-code",
+    "adapter_enforcement": "enforced",
+    "client_kind": "hook",
+    "model": null,
+    "host_id": "hst_mbp",
+    "state": "active",
+    "quiet_reason": null,
+    "state_reason": null,
+    "stuck": false,
+    "branch": "feat/cc-1",
+    "head_commit": null,
+    "worktree_id": "wt-cc-1",
+    "githook_state": "ok",
+    "current_task_id": "tsk_14",
+    "limit": null,
+    "joined_at": "2026-09-25T20:00:00.000Z",
+    "last_activity_at": "2026-09-25T20:00:00.000Z",
+    "ended_at": null,
+    "end_reason": null
+   },
+   {
+    "id": "cs_b",
+    "callsign": "codex-1",
+    "agent_id": "codex",
+    "member_key": "codex:mbp:40166117",
+    "agent_verified": true,
+    "adapter": "codex",
+    "adapter_enforcement": "advisory",
+    "client_kind": "hook",
+    "model": null,
+    "host_id": "hst_mbp",
+    "state": "active",
+    "quiet_reason": null,
+    "state_reason": null,
+    "stuck": false,
+    "branch": "feat/codex-1",
+    "head_commit": null,
+    "worktree_id": "wt-codex-1",
+    "githook_state": "ok",
+    "current_task_id": null,
+    "limit": null,
+    "joined_at": "2026-09-25T20:00:00.000Z",
+    "last_activity_at": "2026-09-25T20:00:00.000Z",
+    "ended_at": null,
+    "end_reason": null
+   }
+  ],
+  "claims": [
+   {
+    "id": "clm_pos",
+    "zone_id": "zn_pos",
+    "path_glob": null,
+    "resource": null,
+    "mode": "exclusive",
+    "holder_kind": "session",
+    "holder_session_id": "cs_a",
+    "holder_agent_id": "claude-code",
+    "holder_user_id": "u_mani",
+    "task_id": "tsk_14",
+    "state": "active",
+    "source": "task",
+    "epoch": 1,
+    "unconfirmed": false,
+    "fenced": false,
+    "lease_expires_at": "2026-09-25T20:10:00.000Z",
+    "reserve_reason": null,
+    "reserved_for": null,
+    "offered_to": null,
+    "queue_pos": null,
+    "baton_ref": null,
+    "granted_at": "2026-09-25T20:00:00.000Z",
+    "version": 1
+   },
+   {
+    "id": "clm_old",
+    "zone_id": "zn_reports",
+    "path_glob": null,
+    "resource": null,
+    "mode": "exclusive",
+    "holder_kind": "session",
+    "holder_session_id": "cs_b",
+    "holder_agent_id": "claude-code",
+    "holder_user_id": "u_mani",
+    "task_id": null,
+    "state": "released",
+    "source": "first_write",
+    "epoch": 1,
+    "unconfirmed": false,
+    "fenced": false,
+    "lease_expires_at": null,
+    "reserve_reason": null,
+    "reserved_for": null,
+    "offered_to": null,
+    "queue_pos": null,
+    "baton_ref": null,
+    "granted_at": null,
+    "version": 1
+   }
+  ],
+  "zones": [
+   {
+    "id": "zn_pos",
+    "slug": "pos",
+    "title": "POS section",
+    "parent_id": null,
+    "is_leaf": true,
+    "builtin": false,
+    "include_globs": [
+     "src/app/pos/**"
+    ],
+    "exclude_globs": [],
+    "services": [],
+    "command_patterns": [],
+    "mcp_tools": [],
+    "mode": "exclusive",
+    "auto_claim": true,
+    "protected": false,
+    "reserve_for": null,
+    "fail_closed": false,
+    "frozen_by": null,
+    "frozen_note": null,
+    "frozen_until": null,
+    "source": "repo",
+    "version": 1
+   },
+   {
+    "id": "zn_reports",
+    "slug": "reports",
+    "title": "REPORTS section",
+    "parent_id": null,
+    "is_leaf": true,
+    "builtin": false,
+    "include_globs": [
+     "src/app/reports/**"
+    ],
+    "exclude_globs": [],
+    "services": [],
+    "command_patterns": [],
+    "mcp_tools": [],
+    "mode": "exclusive",
+    "auto_claim": true,
+    "protected": false,
+    "reserve_for": null,
+    "fail_closed": false,
+    "frozen_by": null,
+    "frozen_note": null,
+    "frozen_until": null,
+    "source": "repo",
+    "version": 1
+   }
+  ],
+  "commons": [
+   {
+    "glob": "package.json",
+    "kind": "plain"
+   },
+   {
+    "glob": "package-lock.json",
+    "kind": "serialize"
+   }
+  ],
+  "ignore": [
+   "docs/**"
+  ],
+  "tasks": [
+   {
+    "id": "tsk_14",
+    "number": 14,
+    "title": "Task 14",
+    "status": "in_progress",
+    "status_before_stall": null,
+    "phase": null,
+    "priority": 2,
+    "zone_ids": [
+     "zn_pos"
+    ],
+    "owner_session_id": "cs_a",
+    "owner_agent_id": "claude-code",
+    "reviewer": null,
+    "depends_on": [],
+    "acceptance": [],
+    "acceptance_locked": true,
+    "started_head": null,
+    "current_report_id": null,
+    "blocked_reason": null,
+    "version": 1
+   },
+   {
+    "id": "tsk_9",
+    "number": 9,
+    "title": "Task 9",
+    "status": "ready",
+    "status_before_stall": null,
+    "phase": null,
+    "priority": 2,
+    "zone_ids": [],
+    "owner_session_id": null,
+    "owner_agent_id": null,
+    "reviewer": null,
+    "depends_on": [],
+    "acceptance": [],
+    "acceptance_locked": false,
+    "started_head": null,
+    "current_report_id": null,
+    "blocked_reason": null,
+    "version": 1
+   }
+  ],
+  "collisions": [
+   {
+    "id": "col_1",
+    "kind": "same_file",
+    "severity": "medium",
+    "subject": "src/app/pos/cart.ts",
+    "zone_id": "zn_pos",
+    "session_a": "cs_a",
+    "session_b": "cs_b",
+    "claim_id": null,
+    "attribution": "certain",
+    "state": "open",
+    "escalated": false,
+    "resolution": null
+   },
+   {
+    "id": "col_2",
+    "kind": "same_file",
+    "severity": "medium",
+    "subject": "src/app/pos/cart.ts",
+    "zone_id": "zn_pos",
+    "session_a": "cs_a",
+    "session_b": "cs_b",
+    "claim_id": null,
+    "attribution": "certain",
+    "state": "resolved",
+    "escalated": false,
+    "resolution": null
+   }
+  ],
+  "decisions": [
+   {
+    "id": "dec_1",
+    "number": 1,
+    "title": "Decision 1",
+    "decision": "GCT rounding half-up per line",
+    "state": "in_force",
+    "source": "direct",
+    "decided_by_kind": "human",
+    "decided_by": "u_mani",
+    "confirmed_by": "u_mani",
+    "task_id": null,
+    "zone_id": null,
+    "supersedes_id": null
+   },
+   {
+    "id": "dec_2",
+    "number": 2,
+    "title": "Decision 2",
+    "decision": "GCT rounding half-up per line",
+    "state": "proposed",
+    "source": "direct",
+    "decided_by_kind": "agent",
+    "decided_by": "cs_a",
+    "confirmed_by": null,
+    "task_id": null,
+    "zone_id": null,
+    "supersedes_id": null
+   },
+   {
+    "id": "dec_3",
+    "number": 3,
+    "title": "Decision 3",
+    "decision": "GCT rounding half-up per line",
+    "state": "rejected",
+    "source": "direct",
+    "decided_by_kind": "agent",
+    "decided_by": "cs_a",
+    "confirmed_by": null,
+    "task_id": null,
+    "zone_id": null,
+    "supersedes_id": null
+   }
+  ],
+  "offers": [],
+  "footprints": [],
+  "inbox_counts": {
+   "project": 2,
+   "crew": 1
+  },
+  "pending_zone_changes": [
+   "zch_1"
+  ]
+ },
+ "frames": [
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 11,
+    "id": "evt_00000011",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:11.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #11",
+    "payload": {
+     "message": {
+      "id": "msg_0001",
+      "seq": 11,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m1",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 12,
+    "id": "evt_00000012",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:12.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #12",
+    "payload": {
+     "message": {
+      "id": "msg_0002",
+      "seq": 12,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m2",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 13,
+    "id": "evt_00000013",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:13.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #13",
+    "payload": {
+     "message": {
+      "id": "msg_0003",
+      "seq": 13,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m3",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 14,
+    "id": "evt_00000014",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:14.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #14",
+    "payload": {
+     "message": {
+      "id": "msg_0004",
+      "seq": 14,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m4",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 15,
+    "id": "evt_00000015",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:15.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #15",
+    "payload": {
+     "message": {
+      "id": "msg_0005",
+      "seq": 15,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m5",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 16,
+    "id": "evt_00000016",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:16.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #16",
+    "payload": {
+     "message": {
+      "id": "msg_0006",
+      "seq": 16,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m6",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 17,
+    "id": "evt_00000017",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:17.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #17",
+    "payload": {
+     "message": {
+      "id": "msg_0007",
+      "seq": 17,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m7",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 18,
+    "id": "evt_00000018",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:18.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #18",
+    "payload": {
+     "message": {
+      "id": "msg_0008",
+      "seq": 18,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m8",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 19,
+    "id": "evt_00000019",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:19.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #19",
+    "payload": {
+     "message": {
+      "id": "msg_0009",
+      "seq": 19,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m9",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 20,
+    "id": "evt_00000020",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:20.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #20",
+    "payload": {
+     "message": {
+      "id": "msg_0010",
+      "seq": 20,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m10",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 21,
+    "id": "evt_00000021",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:21.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #21",
+    "payload": {
+     "message": {
+      "id": "msg_0011",
+      "seq": 21,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m11",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 22,
+    "id": "evt_00000022",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:22.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #22",
+    "payload": {
+     "message": {
+      "id": "msg_0012",
+      "seq": 22,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m12",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 23,
+    "id": "evt_00000023",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:23.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #23",
+    "payload": {
+     "message": {
+      "id": "msg_0013",
+      "seq": 23,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m13",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 24,
+    "id": "evt_00000024",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:24.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #24",
+    "payload": {
+     "message": {
+      "id": "msg_0014",
+      "seq": 24,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m14",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 25,
+    "id": "evt_00000025",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:25.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #25",
+    "payload": {
+     "message": {
+      "id": "msg_0015",
+      "seq": 25,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m15",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 26,
+    "id": "evt_00000026",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:26.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #26",
+    "payload": {
+     "message": {
+      "id": "msg_0016",
+      "seq": 26,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m16",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 27,
+    "id": "evt_00000027",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:27.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #27",
+    "payload": {
+     "message": {
+      "id": "msg_0017",
+      "seq": 27,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m17",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 28,
+    "id": "evt_00000028",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:28.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #28",
+    "payload": {
+     "message": {
+      "id": "msg_0018",
+      "seq": 28,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m18",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 29,
+    "id": "evt_00000029",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:29.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #29",
+    "payload": {
+     "message": {
+      "id": "msg_0019",
+      "seq": 29,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m19",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 30,
+    "id": "evt_00000030",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:30.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #30",
+    "payload": {
+     "message": {
+      "id": "msg_0020",
+      "seq": 30,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m20",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 31,
+    "id": "evt_00000031",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:31.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #31",
+    "payload": {
+     "message": {
+      "id": "msg_0021",
+      "seq": 31,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m21",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 32,
+    "id": "evt_00000032",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:32.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #32",
+    "payload": {
+     "message": {
+      "id": "msg_0022",
+      "seq": 32,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m22",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 33,
+    "id": "evt_00000033",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:33.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #33",
+    "payload": {
+     "message": {
+      "id": "msg_0023",
+      "seq": 33,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m23",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 34,
+    "id": "evt_00000034",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:34.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #34",
+    "payload": {
+     "message": {
+      "id": "msg_0024",
+      "seq": 34,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m24",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 35,
+    "id": "evt_00000035",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:35.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #35",
+    "payload": {
+     "message": {
+      "id": "msg_0025",
+      "seq": 35,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m25",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 36,
+    "id": "evt_00000036",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:36.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #36",
+    "payload": {
+     "message": {
+      "id": "msg_0026",
+      "seq": 36,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m26",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 37,
+    "id": "evt_00000037",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:37.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #37",
+    "payload": {
+     "message": {
+      "id": "msg_0027",
+      "seq": 37,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m27",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 38,
+    "id": "evt_00000038",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:38.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #38",
+    "payload": {
+     "message": {
+      "id": "msg_0028",
+      "seq": 38,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m28",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 39,
+    "id": "evt_00000039",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:39.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #39",
+    "payload": {
+     "message": {
+      "id": "msg_0029",
+      "seq": 39,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m29",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 40,
+    "id": "evt_00000040",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:40.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #40",
+    "payload": {
+     "message": {
+      "id": "msg_0030",
+      "seq": 40,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m30",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 41,
+    "id": "evt_00000041",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:41.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #41",
+    "payload": {
+     "message": {
+      "id": "msg_0031",
+      "seq": 41,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m31",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 42,
+    "id": "evt_00000042",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:42.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #42",
+    "payload": {
+     "message": {
+      "id": "msg_0032",
+      "seq": 42,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m32",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 43,
+    "id": "evt_00000043",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:43.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #43",
+    "payload": {
+     "message": {
+      "id": "msg_0033",
+      "seq": 43,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m33",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 44,
+    "id": "evt_00000044",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:44.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #44",
+    "payload": {
+     "message": {
+      "id": "msg_0034",
+      "seq": 44,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m34",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 45,
+    "id": "evt_00000045",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:45.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #45",
+    "payload": {
+     "message": {
+      "id": "msg_0035",
+      "seq": 45,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m35",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 46,
+    "id": "evt_00000046",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:46.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #46",
+    "payload": {
+     "message": {
+      "id": "msg_0036",
+      "seq": 46,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m36",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 47,
+    "id": "evt_00000047",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:47.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #47",
+    "payload": {
+     "message": {
+      "id": "msg_0037",
+      "seq": 47,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m37",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 48,
+    "id": "evt_00000048",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:48.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #48",
+    "payload": {
+     "message": {
+      "id": "msg_0038",
+      "seq": 48,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m38",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 49,
+    "id": "evt_00000049",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:49.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #49",
+    "payload": {
+     "message": {
+      "id": "msg_0039",
+      "seq": 49,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m39",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 50,
+    "id": "evt_00000050",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:50.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #50",
+    "payload": {
+     "message": {
+      "id": "msg_0040",
+      "seq": 50,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m40",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 51,
+    "id": "evt_00000051",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:51.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #51",
+    "payload": {
+     "message": {
+      "id": "msg_0041",
+      "seq": 51,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m41",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 52,
+    "id": "evt_00000052",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:52.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #52",
+    "payload": {
+     "message": {
+      "id": "msg_0042",
+      "seq": 52,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m42",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 53,
+    "id": "evt_00000053",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:53.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #53",
+    "payload": {
+     "message": {
+      "id": "msg_0043",
+      "seq": 53,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m43",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 54,
+    "id": "evt_00000054",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:54.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #54",
+    "payload": {
+     "message": {
+      "id": "msg_0044",
+      "seq": 54,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m44",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 55,
+    "id": "evt_00000055",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:55.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #55",
+    "payload": {
+     "message": {
+      "id": "msg_0045",
+      "seq": 55,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m45",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 56,
+    "id": "evt_00000056",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:56.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #56",
+    "payload": {
+     "message": {
+      "id": "msg_0046",
+      "seq": 56,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m46",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 57,
+    "id": "evt_00000057",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:57.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #57",
+    "payload": {
+     "message": {
+      "id": "msg_0047",
+      "seq": 57,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m47",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 58,
+    "id": "evt_00000058",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:58.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #58",
+    "payload": {
+     "message": {
+      "id": "msg_0048",
+      "seq": 58,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m48",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 59,
+    "id": "evt_00000059",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:59.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #59",
+    "payload": {
+     "message": {
+      "id": "msg_0049",
+      "seq": 59,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m49",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 60,
+    "id": "evt_00000060",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:00.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #60",
+    "payload": {
+     "message": {
+      "id": "msg_0050",
+      "seq": 60,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m50",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 61,
+    "id": "evt_00000061",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:01.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #61",
+    "payload": {
+     "message": {
+      "id": "msg_0051",
+      "seq": 61,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m51",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 62,
+    "id": "evt_00000062",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:02.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #62",
+    "payload": {
+     "message": {
+      "id": "msg_0052",
+      "seq": 62,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m52",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 63,
+    "id": "evt_00000063",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:03.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #63",
+    "payload": {
+     "message": {
+      "id": "msg_0053",
+      "seq": 63,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m53",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 64,
+    "id": "evt_00000064",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:04.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #64",
+    "payload": {
+     "message": {
+      "id": "msg_0054",
+      "seq": 64,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m54",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 65,
+    "id": "evt_00000065",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:05.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #65",
+    "payload": {
+     "message": {
+      "id": "msg_0055",
+      "seq": 65,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m55",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 66,
+    "id": "evt_00000066",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:06.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #66",
+    "payload": {
+     "message": {
+      "id": "msg_0056",
+      "seq": 66,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m56",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 67,
+    "id": "evt_00000067",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:07.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #67",
+    "payload": {
+     "message": {
+      "id": "msg_0057",
+      "seq": 67,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m57",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 68,
+    "id": "evt_00000068",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:08.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #68",
+    "payload": {
+     "message": {
+      "id": "msg_0058",
+      "seq": 68,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m58",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 69,
+    "id": "evt_00000069",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:09.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #69",
+    "payload": {
+     "message": {
+      "id": "msg_0059",
+      "seq": 69,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m59",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 70,
+    "id": "evt_00000070",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:10.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #70",
+    "payload": {
+     "message": {
+      "id": "msg_0060",
+      "seq": 70,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m60",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 71,
+    "id": "evt_00000071",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:11.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #71",
+    "payload": {
+     "message": {
+      "id": "msg_0061",
+      "seq": 71,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m61",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 72,
+    "id": "evt_00000072",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:12.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #72",
+    "payload": {
+     "message": {
+      "id": "msg_0062",
+      "seq": 72,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m62",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 73,
+    "id": "evt_00000073",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:13.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #73",
+    "payload": {
+     "message": {
+      "id": "msg_0063",
+      "seq": 73,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m63",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 74,
+    "id": "evt_00000074",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:14.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #74",
+    "payload": {
+     "message": {
+      "id": "msg_0064",
+      "seq": 74,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m64",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 75,
+    "id": "evt_00000075",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:15.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #75",
+    "payload": {
+     "message": {
+      "id": "msg_0065",
+      "seq": 75,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m65",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 76,
+    "id": "evt_00000076",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:16.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #76",
+    "payload": {
+     "message": {
+      "id": "msg_0066",
+      "seq": 76,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m66",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 77,
+    "id": "evt_00000077",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:17.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #77",
+    "payload": {
+     "message": {
+      "id": "msg_0067",
+      "seq": 77,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m67",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 78,
+    "id": "evt_00000078",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:18.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #78",
+    "payload": {
+     "message": {
+      "id": "msg_0068",
+      "seq": 78,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m68",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 79,
+    "id": "evt_00000079",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:19.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #79",
+    "payload": {
+     "message": {
+      "id": "msg_0069",
+      "seq": 79,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m69",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 80,
+    "id": "evt_00000080",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:20.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #80",
+    "payload": {
+     "message": {
+      "id": "msg_0070",
+      "seq": 80,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m70",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 81,
+    "id": "evt_00000081",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:21.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #81",
+    "payload": {
+     "message": {
+      "id": "msg_0071",
+      "seq": 81,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m71",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 82,
+    "id": "evt_00000082",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:22.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #82",
+    "payload": {
+     "message": {
+      "id": "msg_0072",
+      "seq": 82,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m72",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 83,
+    "id": "evt_00000083",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:23.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #83",
+    "payload": {
+     "message": {
+      "id": "msg_0073",
+      "seq": 83,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m73",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 84,
+    "id": "evt_00000084",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:24.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #84",
+    "payload": {
+     "message": {
+      "id": "msg_0074",
+      "seq": 84,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m74",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 85,
+    "id": "evt_00000085",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:25.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #85",
+    "payload": {
+     "message": {
+      "id": "msg_0075",
+      "seq": 85,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m75",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 86,
+    "id": "evt_00000086",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:26.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #86",
+    "payload": {
+     "message": {
+      "id": "msg_0076",
+      "seq": 86,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m76",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 87,
+    "id": "evt_00000087",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:27.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #87",
+    "payload": {
+     "message": {
+      "id": "msg_0077",
+      "seq": 87,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m77",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 88,
+    "id": "evt_00000088",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:28.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #88",
+    "payload": {
+     "message": {
+      "id": "msg_0078",
+      "seq": 88,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m78",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 89,
+    "id": "evt_00000089",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:29.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #89",
+    "payload": {
+     "message": {
+      "id": "msg_0079",
+      "seq": 89,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m79",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 90,
+    "id": "evt_00000090",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:30.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #90",
+    "payload": {
+     "message": {
+      "id": "msg_0080",
+      "seq": 90,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m80",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 91,
+    "id": "evt_00000091",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:31.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #91",
+    "payload": {
+     "message": {
+      "id": "msg_0081",
+      "seq": 91,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m81",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 92,
+    "id": "evt_00000092",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:32.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #92",
+    "payload": {
+     "message": {
+      "id": "msg_0082",
+      "seq": 92,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m82",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 93,
+    "id": "evt_00000093",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:33.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #93",
+    "payload": {
+     "message": {
+      "id": "msg_0083",
+      "seq": 93,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m83",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 94,
+    "id": "evt_00000094",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:34.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #94",
+    "payload": {
+     "message": {
+      "id": "msg_0084",
+      "seq": 94,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m84",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 95,
+    "id": "evt_00000095",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:35.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #95",
+    "payload": {
+     "message": {
+      "id": "msg_0085",
+      "seq": 95,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m85",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 96,
+    "id": "evt_00000096",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:36.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #96",
+    "payload": {
+     "message": {
+      "id": "msg_0086",
+      "seq": 96,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m86",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 97,
+    "id": "evt_00000097",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:37.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #97",
+    "payload": {
+     "message": {
+      "id": "msg_0087",
+      "seq": 97,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m87",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 98,
+    "id": "evt_00000098",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:38.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #98",
+    "payload": {
+     "message": {
+      "id": "msg_0088",
+      "seq": 98,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m88",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 99,
+    "id": "evt_00000099",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:39.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #99",
+    "payload": {
+     "message": {
+      "id": "msg_0089",
+      "seq": 99,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m89",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 100,
+    "id": "evt_00000100",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:40.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #100",
+    "payload": {
+     "message": {
+      "id": "msg_0090",
+      "seq": 100,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m90",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 101,
+    "id": "evt_00000101",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:41.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #101",
+    "payload": {
+     "message": {
+      "id": "msg_0091",
+      "seq": 101,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m91",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 102,
+    "id": "evt_00000102",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:42.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #102",
+    "payload": {
+     "message": {
+      "id": "msg_0092",
+      "seq": 102,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m92",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 103,
+    "id": "evt_00000103",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:43.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #103",
+    "payload": {
+     "message": {
+      "id": "msg_0093",
+      "seq": 103,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m93",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 104,
+    "id": "evt_00000104",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:44.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #104",
+    "payload": {
+     "message": {
+      "id": "msg_0094",
+      "seq": 104,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m94",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 105,
+    "id": "evt_00000105",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:45.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #105",
+    "payload": {
+     "message": {
+      "id": "msg_0095",
+      "seq": 105,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m95",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 106,
+    "id": "evt_00000106",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:46.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #106",
+    "payload": {
+     "message": {
+      "id": "msg_0096",
+      "seq": 106,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m96",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 107,
+    "id": "evt_00000107",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:47.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #107",
+    "payload": {
+     "message": {
+      "id": "msg_0097",
+      "seq": 107,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m97",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 108,
+    "id": "evt_00000108",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:48.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #108",
+    "payload": {
+     "message": {
+      "id": "msg_0098",
+      "seq": 108,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m98",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 109,
+    "id": "evt_00000109",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:49.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #109",
+    "payload": {
+     "message": {
+      "id": "msg_0099",
+      "seq": 109,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m99",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 110,
+    "id": "evt_00000110",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:50.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #110",
+    "payload": {
+     "message": {
+      "id": "msg_0100",
+      "seq": 110,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m100",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 111,
+    "id": "evt_00000111",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:51.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #111",
+    "payload": {
+     "message": {
+      "id": "msg_0101",
+      "seq": 111,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m101",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 112,
+    "id": "evt_00000112",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:52.000Z",
+    "type": "message.posted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.posted #112",
+    "payload": {
+     "message": {
+      "id": "msg_0102",
+      "seq": 112,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "m102",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": false,
+      "redacted": false,
+      "pinned": false
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 113,
+    "id": "evt_00000113",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:53.000Z",
+    "type": "message.edited",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.edited #113",
+    "payload": {
+     "message": {
+      "id": "msg_0100",
+      "seq": 110,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "edited",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": true,
+      "redacted": false,
+      "pinned": false
+     },
+     "after_delivery": true
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 114,
+    "id": "evt_00000114",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:54.000Z",
+    "type": "message.redacted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "human",
+     "id": "u_mani",
+     "callsign": null,
+     "agent_id": null,
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {},
+    "severity": "info",
+    "moment": true,
+    "summary": "message.redacted #114",
+    "payload": {
+     "message_id": "msg_0101"
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 115,
+    "id": "evt_00000115",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:01:55.000Z",
+    "type": "message.edited",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "message.edited #115",
+    "payload": {
+     "message": {
+      "id": "msg_0001",
+      "seq": 11,
+      "thread_root_id": null,
+      "reply_to_id": null,
+      "kind": "chat",
+      "author_kind": "agent",
+      "author_session_id": "cs_a",
+      "author_agent_id": "claude-code",
+      "author_verified": true,
+      "body": "gone",
+      "body_truncated": false,
+      "mentions": [],
+      "refs": [],
+      "edited": true,
+      "redacted": false,
+      "pinned": false
+     },
+     "after_delivery": false
+    }
+   }
+  }
+ ],
+ "expect": [
+  {
+   "path": [
+    "messages"
+   ],
+   "length": 100
+  },
+  {
+   "path": [
+    "messages",
+    0,
+    "id"
+   ],
+   "equals": "msg_0003"
+  },
+  {
+   "path": [
+    "messages",
+    99,
+    "id"
+   ],
+   "equals": "msg_0102"
+  },
+  {
+   "path": [
+    "messages",
+    97,
+    "id"
+   ],
+   "equals": "msg_0100"
+  },
+  {
+   "path": [
+    "messages",
+    97,
+    "body"
+   ],
+   "equals": "edited"
+  },
+  {
+   "path": [
+    "messages",
+    97,
+    "edited"
+   ],
+   "equals": true
+  },
+  {
+   "path": [
+    "messages",
+    98,
+    "body"
+   ],
+   "equals": ""
+  },
+  {
+   "path": [
+    "messages",
+    98,
+    "redacted"
+   ],
+   "equals": true
+  },
+  {
+   "path": [
+    "last_seq"
+   ],
+   "equals": 115
+  },
+  {
+   "path": [
+    "moments"
+   ],
+   "length": 1
+  },
+  {
+   "path": [
+    "moments",
+    0,
+    "type"
+   ],
+   "equals": "message.redacted"
+  }
+ ]
+}

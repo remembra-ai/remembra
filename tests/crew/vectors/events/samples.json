@@ -1,0 +1,4344 @@
+{
+ "description": "valid: one envelope per L0 event type (validate_envelope → []). invalid: must be rejected; error_contains is a substring of one error.",
+ "valid": [
+  {
+   "seq": 1,
+   "id": "evt_00000001",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:01.000Z",
+   "type": "crew.created",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "crew.created #1",
+   "payload": {
+    "crew": {
+     "id": "crw_0a1b2c3d4e5f6a7b",
+     "project_id": "yaadbooks",
+     "name": "YaadBooks",
+     "mode": "solo",
+     "enforcement": "enforce",
+     "settings_version": 1,
+     "last_seq": 0
+    }
+   }
+  },
+  {
+   "seq": 2,
+   "id": "evt_00000002",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:02.000Z",
+   "type": "crew.settings_changed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "crew.settings_changed #2",
+   "payload": {
+    "settings_version": 2,
+    "changed_keys": [
+     "strict_reports"
+    ],
+    "enforcement": null
+   }
+  },
+  {
+   "seq": 3,
+   "id": "evt_00000003",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:03.000Z",
+   "type": "crew.mode_changed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "crew.mode_changed #3",
+   "payload": {
+    "from": "solo",
+    "to": "multi",
+    "live_sessions": 2
+   }
+  },
+  {
+   "seq": 4,
+   "id": "evt_00000004",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:04.000Z",
+   "type": "crew.shift_started",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "crew.shift_started #4",
+   "payload": {
+    "shift_id": "shift_1",
+    "live_sessions": 1
+   }
+  },
+  {
+   "seq": 5,
+   "id": "evt_00000005",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:05.000Z",
+   "type": "crew.shift_ended",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "crew.shift_ended #5",
+   "payload": {
+    "shift_id": "shift_1",
+    "duration_s": 3600
+   }
+  },
+  {
+   "seq": 6,
+   "id": "evt_00000006",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:06.000Z",
+   "type": "host.registered",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "host.registered #6",
+   "payload": {
+    "host": {
+     "id": "hst_mbp",
+     "host_label": "mbp",
+     "platform": "darwin",
+     "crewd_version": "1.0.0",
+     "state": "online"
+    }
+   }
+  },
+  {
+   "seq": 7,
+   "id": "evt_00000007",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:07.000Z",
+   "type": "host.unreachable",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "host.unreachable #7",
+   "payload": {
+    "host_id": "hst_mbp",
+    "silent_s": 200,
+    "session_ids": [
+     "cs_a"
+    ]
+   }
+  },
+  {
+   "seq": 8,
+   "id": "evt_00000008",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:08.000Z",
+   "type": "host.recovered",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "host.recovered #8",
+   "payload": {
+    "host_id": "hst_mbp",
+    "down_s": 300
+   }
+  },
+  {
+   "seq": 9,
+   "id": "evt_00000009",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:09.000Z",
+   "type": "session.joined",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "session.joined #9",
+   "payload": {
+    "session": {
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "member_key": "claude-code:mbp:2c784ed4",
+     "agent_verified": true,
+     "adapter": "claude-code",
+     "adapter_enforcement": "enforced",
+     "client_kind": "hook",
+     "model": null,
+     "host_id": "hst_mbp",
+     "state": "active",
+     "quiet_reason": null,
+     "state_reason": null,
+     "stuck": false,
+     "branch": "feat/cc-1",
+     "head_commit": null,
+     "worktree_id": "wt-cc-1",
+     "githook_state": "ok",
+     "current_task_id": null,
+     "limit": null,
+     "joined_at": "2026-09-25T20:00:00.000Z",
+     "last_activity_at": "2026-09-25T20:00:00.000Z",
+     "ended_at": null,
+     "end_reason": null
+    },
+    "resume_of": null,
+    "observe_only": false
+   }
+  },
+  {
+   "seq": 10,
+   "id": "evt_00000010",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:10.000Z",
+   "type": "session.state_changed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "session.state_changed #10",
+   "payload": {
+    "from": "active",
+    "to": "idle",
+    "reason": "no_activity",
+    "quiet_reason": null
+   }
+  },
+  {
+   "seq": 11,
+   "id": "evt_00000011",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:11.000Z",
+   "type": "session.recovered",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "session.recovered #11",
+   "payload": {
+    "from": "lost",
+    "down_s": 60,
+    "claims_retaken": [
+     "clm_pos"
+    ],
+    "tasks_restored": [
+     "tsk_14"
+    ],
+    "superseded_report_ids": []
+   }
+  },
+  {
+   "seq": 12,
+   "id": "evt_00000012",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:12.000Z",
+   "type": "session.quota_blocked",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": true,
+   "summary": "session.quota_blocked #12",
+   "payload": {
+    "error": "billing_error",
+    "source": "reported",
+    "baton_ref": "refs/remembra/baton/T-14/7",
+    "claims_reserved": [
+     "clm_pos"
+    ]
+   }
+  },
+  {
+   "seq": 13,
+   "id": "evt_00000013",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:13.000Z",
+   "type": "session.limit_warning",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "session.limit_warning #13",
+   "payload": {
+    "level": "warn",
+    "pct": 0.8,
+    "source": "detected"
+   }
+  },
+  {
+   "seq": 14,
+   "id": "evt_00000014",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:14.000Z",
+   "type": "session.stuck",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "session.stuck #14",
+   "payload": {
+    "signal": "no_progress",
+    "stuck": true
+   }
+  },
+  {
+   "seq": 15,
+   "id": "evt_00000015",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:15.000Z",
+   "type": "session.paused",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "session.paused #15",
+   "payload": {
+    "reason": "checking"
+   }
+  },
+  {
+   "seq": 16,
+   "id": "evt_00000016",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:16.000Z",
+   "type": "session.resumed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "session.resumed #16",
+   "payload": {
+    "to": "active",
+    "reason": null
+   }
+  },
+  {
+   "seq": 17,
+   "id": "evt_00000017",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:17.000Z",
+   "type": "session.left",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "session.left #17",
+   "payload": {
+    "reason": "other",
+    "claims_released": [
+     "clm_pos"
+    ],
+    "claims_reserved": []
+   }
+  },
+  {
+   "seq": 18,
+   "id": "evt_00000018",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:18.000Z",
+   "type": "session.lost",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "session.lost #18",
+   "payload": {
+    "reason": "host_lost",
+    "last_signal_age_s": 1800
+   }
+  },
+  {
+   "seq": 19,
+   "id": "evt_00000019",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:19.000Z",
+   "type": "session.token_rotated",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "session.token_rotated #19",
+   "payload": {
+    "token_version": 2
+   }
+  },
+  {
+   "seq": 20,
+   "id": "evt_00000020",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:20.000Z",
+   "type": "activity.burst",
+   "v": 1,
+   "origin": "client",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "activity.burst #20",
+   "payload": {
+    "files_touched": [
+     "src/app/pos/cart.ts"
+    ],
+    "command_verbs": [
+     "npm",
+     "git"
+    ],
+    "tests": {
+     "pass": 41,
+     "fail": 0
+    }
+   }
+  },
+  {
+   "seq": 21,
+   "id": "evt_00000021",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:21.000Z",
+   "type": "activity.commit",
+   "v": 1,
+   "origin": "client",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "activity.commit #21",
+   "payload": {
+    "sha": "a1b2c3d4e5f6",
+    "subject_hash": "0123456789abcdef",
+    "files": [
+     "src/app/pos/cart.ts"
+    ],
+    "branch": "feat/pos"
+   }
+  },
+  {
+   "seq": 22,
+   "id": "evt_00000022",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:22.000Z",
+   "type": "activity.push",
+   "v": 1,
+   "origin": "client",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": true,
+   "summary": "activity.push #22",
+   "payload": {
+    "upstream": "origin/main",
+    "count": 2,
+    "default_branch": true,
+    "head": "a1b2c3d4e5f6"
+   }
+  },
+  {
+   "seq": 23,
+   "id": "evt_00000023",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:23.000Z",
+   "type": "activity.deploy",
+   "v": 1,
+   "origin": "client",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": true,
+   "summary": "activity.deploy #23",
+   "payload": {
+    "target": "vercel",
+    "status": "observed"
+   }
+  },
+  {
+   "seq": 24,
+   "id": "evt_00000024",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:24.000Z",
+   "type": "activity.test_verdict_changed",
+   "v": 1,
+   "origin": "client",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "activity.test_verdict_changed #24",
+   "payload": {
+    "fingerprint": "npm test -- pos",
+    "from": "fail",
+    "to": "pass",
+    "passed": 41,
+    "failed": 0
+   }
+  },
+  {
+   "seq": 25,
+   "id": "evt_00000025",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:25.000Z",
+   "type": "zone.created",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "zone.created #25",
+   "payload": {
+    "zone": {
+     "id": "zn_pos",
+     "slug": "pos",
+     "title": "POS section",
+     "parent_id": null,
+     "is_leaf": true,
+     "builtin": false,
+     "include_globs": [
+      "src/app/pos/**"
+     ],
+     "exclude_globs": [],
+     "services": [],
+     "command_patterns": [],
+     "mcp_tools": [],
+     "mode": "exclusive",
+     "auto_claim": true,
+     "protected": false,
+     "reserve_for": null,
+     "fail_closed": false,
+     "frozen_by": null,
+     "frozen_note": null,
+     "frozen_until": null,
+     "source": "repo",
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 26,
+   "id": "evt_00000026",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:26.000Z",
+   "type": "zone.updated",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "zone.updated #26",
+   "payload": {
+    "zone": {
+     "id": "zn_pos",
+     "slug": "pos",
+     "title": "POS section",
+     "parent_id": null,
+     "is_leaf": true,
+     "builtin": false,
+     "include_globs": [
+      "src/app/pos/**"
+     ],
+     "exclude_globs": [],
+     "services": [],
+     "command_patterns": [],
+     "mcp_tools": [],
+     "mode": "exclusive",
+     "auto_claim": true,
+     "protected": false,
+     "reserve_for": null,
+     "fail_closed": false,
+     "frozen_by": null,
+     "frozen_note": null,
+     "frozen_until": null,
+     "source": "repo",
+     "version": 2
+    }
+   }
+  },
+  {
+   "seq": 27,
+   "id": "evt_00000027",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:27.000Z",
+   "type": "zone.archived",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "zone.archived #27",
+   "payload": {
+    "zone": {
+     "id": "zn_pos",
+     "slug": "pos",
+     "title": "POS section",
+     "parent_id": null,
+     "is_leaf": true,
+     "builtin": false,
+     "include_globs": [
+      "src/app/pos/**"
+     ],
+     "exclude_globs": [],
+     "services": [],
+     "command_patterns": [],
+     "mcp_tools": [],
+     "mode": "exclusive",
+     "auto_claim": true,
+     "protected": false,
+     "reserve_for": null,
+     "fail_closed": false,
+     "frozen_by": null,
+     "frozen_note": null,
+     "frozen_until": null,
+     "source": "repo",
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 28,
+   "id": "evt_00000028",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:28.000Z",
+   "type": "zone.frozen",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "zone.frozen #28",
+   "payload": {
+    "zone": {
+     "id": "zn_pos",
+     "slug": "pos",
+     "title": "POS section",
+     "parent_id": null,
+     "is_leaf": true,
+     "builtin": false,
+     "include_globs": [
+      "src/app/pos/**"
+     ],
+     "exclude_globs": [],
+     "services": [],
+     "command_patterns": [],
+     "mcp_tools": [],
+     "mode": "exclusive",
+     "auto_claim": true,
+     "protected": false,
+     "reserve_for": null,
+     "fail_closed": false,
+     "frozen_by": "u_mani",
+     "frozen_note": null,
+     "frozen_until": null,
+     "source": "repo",
+     "version": 1
+    },
+    "reason": "Mani editing POS"
+   }
+  },
+  {
+   "seq": 29,
+   "id": "evt_00000029",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:29.000Z",
+   "type": "zone.unfrozen",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "zone.unfrozen #29",
+   "payload": {
+    "zone": {
+     "id": "zn_pos",
+     "slug": "pos",
+     "title": "POS section",
+     "parent_id": null,
+     "is_leaf": true,
+     "builtin": false,
+     "include_globs": [
+      "src/app/pos/**"
+     ],
+     "exclude_globs": [],
+     "services": [],
+     "command_patterns": [],
+     "mcp_tools": [],
+     "mode": "exclusive",
+     "auto_claim": true,
+     "protected": false,
+     "reserve_for": null,
+     "fail_closed": false,
+     "frozen_by": null,
+     "frozen_note": null,
+     "frozen_until": null,
+     "source": "repo",
+     "version": 1
+    },
+    "reason": "done"
+   }
+  },
+  {
+   "seq": 30,
+   "id": "evt_00000030",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:30.000Z",
+   "type": "zone.synced",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "zone.synced #30",
+   "payload": {
+    "sha": "abc1234",
+    "branch": "main",
+    "diff_summary": "+zone payroll",
+    "policy_changed": true,
+    "zone_ids": [
+     "zn_pay"
+    ]
+   }
+  },
+  {
+   "seq": 31,
+   "id": "evt_00000031",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:31.000Z",
+   "type": "zone.change_pending",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "zone.change_pending #31",
+   "payload": {
+    "change_id": "zch_1",
+    "sha": "abc1234",
+    "loosening": true,
+    "diff_summary": "-zone pos"
+   }
+  },
+  {
+   "seq": 32,
+   "id": "evt_00000032",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:32.000Z",
+   "type": "zone.change_decided",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "zone.change_decided #32",
+   "payload": {
+    "change_id": "zch_1",
+    "decision": "rejected"
+   }
+  },
+  {
+   "seq": 33,
+   "id": "evt_00000033",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:33.000Z",
+   "type": "zone.suggested_applied",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "zone.suggested_applied #33",
+   "payload": {
+    "zone_ids": [
+     "zn_app",
+     "zn_lib"
+    ],
+    "undo_available": true
+   }
+  },
+  {
+   "seq": 34,
+   "id": "evt_00000034",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:34.000Z",
+   "type": "claim.requested",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.requested #34",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_a",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "requested",
+     "source": "task",
+     "epoch": 1,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": null,
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 35,
+   "id": "evt_00000035",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:35.000Z",
+   "type": "claim.granted",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.granted #35",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_a",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "active",
+     "source": "task",
+     "epoch": 1,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 36,
+   "id": "evt_00000036",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:36.000Z",
+   "type": "claim.queued",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_b",
+    "callsign": "codex-1",
+    "agent_id": "codex",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_b"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.queued #36",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_a",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "queued",
+     "source": "task",
+     "epoch": 1,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": 1,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 37,
+   "id": "evt_00000037",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:37.000Z",
+   "type": "claim.denied",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_b",
+    "callsign": "codex-1",
+    "agent_id": "codex",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_b"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.denied #37",
+   "payload": {
+    "claim": null,
+    "blockers": [
+     {
+      "claim_id": "clm_pos",
+      "zone_id": "zn_pos",
+      "holder_session_id": "cs_a",
+      "holder_callsign": "cc-1",
+      "task_id": "tsk_14",
+      "reason": "exclusive"
+     }
+    ]
+   }
+  },
+  {
+   "seq": 38,
+   "id": "evt_00000038",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:38.000Z",
+   "type": "claim.released",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.released #38",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_a",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "released",
+     "source": "task",
+     "epoch": 1,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    },
+    "baton": false
+   }
+  },
+  {
+   "seq": 39,
+   "id": "evt_00000039",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:39.000Z",
+   "type": "claim.expired",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.expired #39",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_a",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "expired",
+     "source": "task",
+     "epoch": 1,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 40,
+   "id": "evt_00000040",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:40.000Z",
+   "type": "claim.reserved",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.reserved #40",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_a",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "reserved",
+     "source": "task",
+     "epoch": 1,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": "lost",
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    },
+    "reason": "lost"
+   }
+  },
+  {
+   "seq": 41,
+   "id": "evt_00000041",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:41.000Z",
+   "type": "claim.adopted",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_c",
+    "callsign": "cc-2",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_c"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.adopted #41",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_c",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "active",
+     "source": "task",
+     "epoch": 2,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    },
+    "cross_checkout": false,
+    "from_session": "cs_a"
+   }
+  },
+  {
+   "seq": 42,
+   "id": "evt_00000042",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:42.000Z",
+   "type": "claim.offered_in_brief",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_c",
+    "callsign": "cc-2",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_c"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.offered_in_brief #42",
+   "payload": {
+    "offer": {
+     "id": "off_1",
+     "claim_id": "clm_pos",
+     "task_id": "tsk_14",
+     "to_session": "cs_c",
+     "via": "brief"
+    }
+   }
+  },
+  {
+   "seq": 43,
+   "id": "evt_00000043",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:43.000Z",
+   "type": "claim.handover_offered",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.handover_offered #43",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_a",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "offered",
+     "source": "task",
+     "epoch": 1,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": "cs_c",
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    },
+    "to_session": "cs_c"
+   }
+  },
+  {
+   "seq": 44,
+   "id": "evt_00000044",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:44.000Z",
+   "type": "claim.handover_accepted",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_c",
+    "callsign": "cc-2",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_c"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.handover_accepted #44",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_c",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "active",
+     "source": "task",
+     "epoch": 2,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 45,
+   "id": "evt_00000045",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:45.000Z",
+   "type": "claim.handover_declined",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.handover_declined #45",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_a",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "active",
+     "source": "task",
+     "epoch": 1,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    },
+    "reason": "timeout"
+   }
+  },
+  {
+   "seq": 46,
+   "id": "evt_00000046",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:46.000Z",
+   "type": "claim.revoked",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "claim.revoked #46",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_a",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "revoked",
+     "source": "task",
+     "epoch": 1,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    },
+    "reason": "Mani took POS"
+   }
+  },
+  {
+   "seq": 47,
+   "id": "evt_00000047",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:47.000Z",
+   "type": "claim.transferred",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "claim.transferred #47",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_c",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "active",
+     "source": "task",
+     "epoch": 2,
+     "unconfirmed": false,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    },
+    "from_session": "cs_a",
+    "reason": "hand over"
+   }
+  },
+  {
+   "seq": 48,
+   "id": "evt_00000048",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:48.000Z",
+   "type": "claim.fenced",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.fenced #48",
+   "payload": {
+    "claim_id": "clm_pos",
+    "horizon_at": "2026-09-25T20:09:00.000Z"
+   }
+  },
+  {
+   "seq": 49,
+   "id": "evt_00000049",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:49.000Z",
+   "type": "claim.unconfirmed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "claim.unconfirmed #49",
+   "payload": {
+    "claim": {
+     "id": "clm_pos",
+     "zone_id": "zn_pos",
+     "path_glob": null,
+     "resource": null,
+     "mode": "exclusive",
+     "holder_kind": "session",
+     "holder_session_id": "cs_a",
+     "holder_agent_id": "claude-code",
+     "holder_user_id": "u_mani",
+     "task_id": "tsk_14",
+     "state": "active",
+     "source": "task",
+     "epoch": 1,
+     "unconfirmed": true,
+     "fenced": false,
+     "lease_expires_at": "2026-09-25T20:10:00.000Z",
+     "reserve_reason": null,
+     "reserved_for": null,
+     "offered_to": null,
+     "queue_pos": null,
+     "baton_ref": null,
+     "granted_at": "2026-09-25T20:00:00.000Z",
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 50,
+   "id": "evt_00000050",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:50.000Z",
+   "type": "baton.passed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_c",
+    "callsign": "cc-2",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_c"
+   },
+   "severity": "info",
+   "moment": true,
+   "summary": "baton.passed #50",
+   "payload": {
+    "baton_id": "bat_1",
+    "task_id": "tsk_14",
+    "from_session": "cs_a",
+    "to_session": "cs_c",
+    "kind": "same_checkout",
+    "handoff_id": null,
+    "zones": [
+     "zn_pos"
+    ],
+    "baton_ref": null,
+    "restored": null
+   }
+  },
+  {
+   "seq": 51,
+   "id": "evt_00000051",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:51.000Z",
+   "type": "baton.ref_created",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "baton.ref_created #51",
+   "payload": {
+    "ref": "refs/remembra/baton/T-14/7",
+    "task_id": "tsk_14",
+    "dirty_files": 3,
+    "unpushed": 0,
+    "skipped_files": 1
+   }
+  },
+  {
+   "seq": 52,
+   "id": "evt_00000052",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:52.000Z",
+   "type": "guard.blocked",
+   "v": 1,
+   "origin": "client",
+   "actor": {
+    "kind": "session",
+    "id": "cs_b",
+    "callsign": "codex-1",
+    "agent_id": "codex",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_b"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "guard.blocked #52",
+   "payload": {
+    "path_rel": "src/app/pos/cart.ts",
+    "zone": "pos",
+    "holder": "cc-1",
+    "rule": 9,
+    "op": "write",
+    "decision": "would_deny",
+    "surface": "pretool",
+    "coalesced": 1
+   }
+  },
+  {
+   "seq": 53,
+   "id": "evt_00000053",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:53.000Z",
+   "type": "guard.bypass_used",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": true,
+   "summary": "guard.bypass_used #53",
+   "payload": {
+    "code_id": "byp_1",
+    "scope": "push"
+   }
+  },
+  {
+   "seq": 54,
+   "id": "evt_00000054",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:54.000Z",
+   "type": "guard.tamper_blocked",
+   "v": 1,
+   "origin": "client",
+   "actor": {
+    "kind": "session",
+    "id": "cs_b",
+    "callsign": "codex-1",
+    "agent_id": "codex",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_b"
+   },
+   "severity": "info",
+   "moment": true,
+   "summary": "guard.tamper_blocked #54",
+   "payload": {
+    "kind": "crew_policy_write",
+    "surface": "pretool"
+   }
+  },
+  {
+   "seq": 55,
+   "id": "evt_00000055",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:55.000Z",
+   "type": "gate.error",
+   "v": 1,
+   "origin": "client",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "gate.error #55",
+   "payload": {
+    "stage": "pretool",
+    "error_class": "JSONDecodeError"
+   }
+  },
+  {
+   "seq": 56,
+   "id": "evt_00000056",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:56.000Z",
+   "type": "gate.deadline",
+   "v": 1,
+   "origin": "client",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "gate.deadline #56",
+   "payload": {
+    "stage": "auto_claim",
+    "elapsed_ms": 910,
+    "unconfirmed_zone": "pos"
+   }
+  },
+  {
+   "seq": 57,
+   "id": "evt_00000057",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:57.000Z",
+   "type": "gate.tampered",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "gate.tampered #57",
+   "payload": {
+    "expected_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "actual_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "restored": true
+   }
+  },
+  {
+   "seq": 58,
+   "id": "evt_00000058",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:58.000Z",
+   "type": "githook.missing",
+   "v": 1,
+   "origin": "client",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "githook.missing #58",
+   "payload": {
+    "hook": "pre-commit",
+    "state": "missing",
+    "worktree_id": "wt-a"
+   }
+  },
+  {
+   "seq": 59,
+   "id": "evt_00000059",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:59.000Z",
+   "type": "collision.detected",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "collision.detected #59",
+   "payload": {
+    "collision": {
+     "id": "col_1",
+     "kind": "exclusive_breach",
+     "severity": "high",
+     "subject": "src/app/pos/cart.ts",
+     "zone_id": "zn_pos",
+     "session_a": "cs_a",
+     "session_b": "cs_b",
+     "claim_id": null,
+     "attribution": "certain",
+     "state": "open",
+     "escalated": false,
+     "resolution": null
+    }
+   }
+  },
+  {
+   "seq": 60,
+   "id": "evt_00000060",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:00.000Z",
+   "type": "collision.acknowledged",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "collision.acknowledged #60",
+   "payload": {
+    "collision": {
+     "id": "col_1",
+     "kind": "exclusive_breach",
+     "severity": "high",
+     "subject": "src/app/pos/cart.ts",
+     "zone_id": "zn_pos",
+     "session_a": "cs_a",
+     "session_b": "cs_b",
+     "claim_id": null,
+     "attribution": "certain",
+     "state": "acknowledged",
+     "escalated": false,
+     "resolution": null
+    }
+   }
+  },
+  {
+   "seq": 61,
+   "id": "evt_00000061",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:01.000Z",
+   "type": "collision.resolved",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "collision.resolved #61",
+   "payload": {
+    "collision": {
+     "id": "col_1",
+     "kind": "exclusive_breach",
+     "severity": "high",
+     "subject": "src/app/pos/cart.ts",
+     "zone_id": "zn_pos",
+     "session_a": "cs_a",
+     "session_b": "cs_b",
+     "claim_id": null,
+     "attribution": "certain",
+     "state": "resolved",
+     "escalated": false,
+     "resolution": "overlap_gone"
+    }
+   }
+  },
+  {
+   "seq": 62,
+   "id": "evt_00000062",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:02.000Z",
+   "type": "collision.dismissed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "collision.dismissed #62",
+   "payload": {
+    "collision": {
+     "id": "col_1",
+     "kind": "exclusive_breach",
+     "severity": "high",
+     "subject": "src/app/pos/cart.ts",
+     "zone_id": "zn_pos",
+     "session_a": "cs_a",
+     "session_b": "cs_b",
+     "claim_id": null,
+     "attribution": "certain",
+     "state": "dismissed",
+     "escalated": false,
+     "resolution": null
+    }
+   }
+  },
+  {
+   "seq": 63,
+   "id": "evt_00000063",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:03.000Z",
+   "type": "collision.escalated",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "collision.escalated #63",
+   "payload": {
+    "collision": {
+     "id": "col_1",
+     "kind": "exclusive_breach",
+     "severity": "high",
+     "subject": "src/app/pos/cart.ts",
+     "zone_id": "zn_pos",
+     "session_a": "cs_a",
+     "session_b": "cs_b",
+     "claim_id": null,
+     "attribution": "certain",
+     "state": "open",
+     "escalated": true,
+     "resolution": null
+    }
+   }
+  },
+  {
+   "seq": 64,
+   "id": "evt_00000064",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:04.000Z",
+   "type": "task.created",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "task.created #64",
+   "payload": {
+    "task": {
+     "id": "tsk_2",
+     "number": 2,
+     "title": "Task 2",
+     "status": "ready",
+     "status_before_stall": null,
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [],
+     "owner_session_id": null,
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [],
+     "acceptance": [],
+     "acceptance_locked": false,
+     "started_head": null,
+     "current_report_id": null,
+     "blocked_reason": null,
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 65,
+   "id": "evt_00000065",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:05.000Z",
+   "type": "task.updated",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "task.updated #65",
+   "payload": {
+    "task": {
+     "id": "tsk_14",
+     "number": 14,
+     "title": "Task 14",
+     "status": "in_progress",
+     "status_before_stall": null,
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [
+      "zn_pos"
+     ],
+     "owner_session_id": "cs_a",
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [],
+     "acceptance": [],
+     "acceptance_locked": true,
+     "started_head": null,
+     "current_report_id": null,
+     "blocked_reason": null,
+     "version": 1
+    },
+    "changed": [
+     "phase"
+    ]
+   }
+  },
+  {
+   "seq": 66,
+   "id": "evt_00000066",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:06.000Z",
+   "type": "task.status_changed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "task.status_changed #66",
+   "payload": {
+    "task": {
+     "id": "tsk_14",
+     "number": 14,
+     "title": "Task 14",
+     "status": "in_progress",
+     "status_before_stall": null,
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [
+      "zn_pos"
+     ],
+     "owner_session_id": "cs_a",
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [],
+     "acceptance": [],
+     "acceptance_locked": true,
+     "started_head": null,
+     "current_report_id": null,
+     "blocked_reason": null,
+     "version": 1
+    },
+    "from": "claimed",
+    "to": "in_progress"
+   }
+  },
+  {
+   "seq": 67,
+   "id": "evt_00000067",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:07.000Z",
+   "type": "task.assigned",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "task.assigned #67",
+   "payload": {
+    "task": {
+     "id": "tsk_14",
+     "number": 14,
+     "title": "Task 14",
+     "status": "in_progress",
+     "status_before_stall": null,
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [
+      "zn_pos"
+     ],
+     "owner_session_id": "cs_a",
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [],
+     "acceptance": [],
+     "acceptance_locked": true,
+     "started_head": null,
+     "current_report_id": null,
+     "blocked_reason": null,
+     "version": 1
+    },
+    "to_session": "cs_a"
+   }
+  },
+  {
+   "seq": 68,
+   "id": "evt_00000068",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:08.000Z",
+   "type": "task.stalled",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "task.stalled #68",
+   "payload": {
+    "task": {
+     "id": "tsk_14",
+     "number": 14,
+     "title": "Task 14",
+     "status": "stalled",
+     "status_before_stall": "in_progress",
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [
+      "zn_pos"
+     ],
+     "owner_session_id": "cs_a",
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [],
+     "acceptance": [],
+     "acceptance_locked": true,
+     "started_head": null,
+     "current_report_id": null,
+     "blocked_reason": null,
+     "version": 1
+    },
+    "reason": "lost"
+   }
+  },
+  {
+   "seq": 69,
+   "id": "evt_00000069",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:09.000Z",
+   "type": "task.recovered",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "task.recovered #69",
+   "payload": {
+    "task": {
+     "id": "tsk_14",
+     "number": 14,
+     "title": "Task 14",
+     "status": "in_progress",
+     "status_before_stall": null,
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [
+      "zn_pos"
+     ],
+     "owner_session_id": "cs_a",
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [],
+     "acceptance": [],
+     "acceptance_locked": true,
+     "started_head": null,
+     "current_report_id": null,
+     "blocked_reason": null,
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 70,
+   "id": "evt_00000070",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:10.000Z",
+   "type": "task.review_requested",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "task.review_requested #70",
+   "payload": {
+    "task": {
+     "id": "tsk_14",
+     "number": 14,
+     "title": "Task 14",
+     "status": "review",
+     "status_before_stall": null,
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [
+      "zn_pos"
+     ],
+     "owner_session_id": "cs_a",
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [],
+     "acceptance": [],
+     "acceptance_locked": true,
+     "started_head": null,
+     "current_report_id": null,
+     "blocked_reason": null,
+     "version": 1
+    },
+    "report_id": "rpt_1"
+   }
+  },
+  {
+   "seq": 71,
+   "id": "evt_00000071",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:11.000Z",
+   "type": "task.review_decided",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "task.review_decided #71",
+   "payload": {
+    "task": {
+     "id": "tsk_14",
+     "number": 14,
+     "title": "Task 14",
+     "status": "done",
+     "status_before_stall": null,
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [
+      "zn_pos"
+     ],
+     "owner_session_id": "cs_a",
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [],
+     "acceptance": [],
+     "acceptance_locked": true,
+     "started_head": null,
+     "current_report_id": null,
+     "blocked_reason": null,
+     "version": 1
+    },
+    "report_id": "rpt_1",
+    "decision": "approve"
+   }
+  },
+  {
+   "seq": 72,
+   "id": "evt_00000072",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:12.000Z",
+   "type": "task.done",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "task.done #72",
+   "payload": {
+    "task": {
+     "id": "tsk_14",
+     "number": 14,
+     "title": "Task 14",
+     "status": "done",
+     "status_before_stall": null,
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [
+      "zn_pos"
+     ],
+     "owner_session_id": "cs_a",
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [],
+     "acceptance": [],
+     "acceptance_locked": true,
+     "started_head": null,
+     "current_report_id": "rpt_1",
+     "blocked_reason": null,
+     "version": 1
+    },
+    "report_id": "rpt_1"
+   }
+  },
+  {
+   "seq": 73,
+   "id": "evt_00000073",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:13.000Z",
+   "type": "task.reopened",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "task.reopened #73",
+   "payload": {
+    "task": {
+     "id": "tsk_14",
+     "number": 14,
+     "title": "Task 14",
+     "status": "ready",
+     "status_before_stall": null,
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [
+      "zn_pos"
+     ],
+     "owner_session_id": "cs_a",
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [],
+     "acceptance": [],
+     "acceptance_locked": true,
+     "started_head": null,
+     "current_report_id": null,
+     "blocked_reason": null,
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 74,
+   "id": "evt_00000074",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:14.000Z",
+   "type": "task.deps_changed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "task.deps_changed #74",
+   "payload": {
+    "task": {
+     "id": "tsk_14",
+     "number": 14,
+     "title": "Task 14",
+     "status": "in_progress",
+     "status_before_stall": null,
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [
+      "zn_pos"
+     ],
+     "owner_session_id": "cs_a",
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [
+      "tsk_9"
+     ],
+     "acceptance": [],
+     "acceptance_locked": true,
+     "started_head": null,
+     "current_report_id": null,
+     "blocked_reason": null,
+     "version": 1
+    }
+   }
+  },
+  {
+   "seq": 75,
+   "id": "evt_00000075",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:15.000Z",
+   "type": "task.acceptance_changed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "task.acceptance_changed #75",
+   "payload": {
+    "task": {
+     "id": "tsk_14",
+     "number": 14,
+     "title": "Task 14",
+     "status": "in_progress",
+     "status_before_stall": null,
+     "phase": null,
+     "priority": 2,
+     "zone_ids": [
+      "zn_pos"
+     ],
+     "owner_session_id": "cs_a",
+     "owner_agent_id": null,
+     "reviewer": null,
+     "depends_on": [],
+     "acceptance": [],
+     "acceptance_locked": true,
+     "started_head": null,
+     "current_report_id": null,
+     "blocked_reason": null,
+     "version": 1
+    },
+    "criteria_count": 2
+   }
+  },
+  {
+   "seq": 76,
+   "id": "evt_00000076",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:16.000Z",
+   "type": "checkpoint.created",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "checkpoint.created #76",
+   "payload": {
+    "checkpoint": {
+     "id": "ckp_1",
+     "session_id": "cs_a",
+     "task_id": "tsk_14",
+     "trigger": "commit",
+     "headline": "a1b2c3d fix rounding · 41/41 tests",
+     "facts_source": "relay-cli"
+    }
+   }
+  },
+  {
+   "seq": 77,
+   "id": "evt_00000077",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:17.000Z",
+   "type": "checkpoint.missed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "checkpoint.missed #77",
+   "payload": {
+    "overdue_s": 1300,
+    "nudge": true
+   }
+  },
+  {
+   "seq": 78,
+   "id": "evt_00000078",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:18.000Z",
+   "type": "report.submitted",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "report.submitted #78",
+   "payload": {
+    "report": {
+     "id": "rpt_1",
+     "task_id": "tsk_14",
+     "session_id": "cs_a",
+     "kind": "completion",
+     "verdict": "complete",
+     "review_state": null,
+     "is_current": true,
+     "superseded_reason": null,
+     "facts_source": "relay-cli",
+     "criteria": [],
+     "baton_ref": null,
+     "handoff_id": null
+    }
+   }
+  },
+  {
+   "seq": 79,
+   "id": "evt_00000079",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:19.000Z",
+   "type": "report.accepted",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "report.accepted #79",
+   "payload": {
+    "report": {
+     "id": "rpt_1",
+     "task_id": "tsk_14",
+     "session_id": "cs_a",
+     "kind": "completion",
+     "verdict": "complete",
+     "review_state": "accepted",
+     "is_current": true,
+     "superseded_reason": null,
+     "facts_source": "relay-cli",
+     "criteria": [],
+     "baton_ref": null,
+     "handoff_id": null
+    }
+   }
+  },
+  {
+   "seq": 80,
+   "id": "evt_00000080",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:20.000Z",
+   "type": "report.rejected",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "report.rejected #80",
+   "payload": {
+    "report": {
+     "id": "rpt_1",
+     "task_id": "tsk_14",
+     "session_id": "cs_a",
+     "kind": "completion",
+     "verdict": "complete",
+     "review_state": "rejected",
+     "is_current": true,
+     "superseded_reason": null,
+     "facts_source": "relay-cli",
+     "criteria": [],
+     "baton_ref": null,
+     "handoff_id": null
+    }
+   }
+  },
+  {
+   "seq": 81,
+   "id": "evt_00000081",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:21.000Z",
+   "type": "report.waived",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "report.waived #81",
+   "payload": {
+    "report": {
+     "id": "rpt_1",
+     "task_id": "tsk_14",
+     "session_id": "cs_a",
+     "kind": "waived",
+     "verdict": null,
+     "review_state": "waived",
+     "is_current": true,
+     "superseded_reason": null,
+     "facts_source": "relay-cli",
+     "criteria": [],
+     "baton_ref": null,
+     "handoff_id": null
+    }
+   }
+  },
+  {
+   "seq": 82,
+   "id": "evt_00000082",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:22.000Z",
+   "type": "report.superseded",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "report.superseded #82",
+   "payload": {
+    "report": {
+     "id": "rpt_1",
+     "task_id": "tsk_14",
+     "session_id": "cs_a",
+     "kind": "completion",
+     "verdict": "complete",
+     "review_state": null,
+     "is_current": false,
+     "superseded_reason": "recovered",
+     "facts_source": "relay-cli",
+     "criteria": [],
+     "baton_ref": null,
+     "handoff_id": null
+    }
+   }
+  },
+  {
+   "seq": 83,
+   "id": "evt_00000083",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:23.000Z",
+   "type": "handoff.created",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "handoff.created #83",
+   "payload": {
+    "handoff_id": "mem_42",
+    "end_reason": "stalled:billing_error",
+    "facts_source": "relay-cli",
+    "task_id": "tsk_14"
+   }
+  },
+  {
+   "seq": 84,
+   "id": "evt_00000084",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:24.000Z",
+   "type": "message.posted",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "message.posted #84",
+   "payload": {
+    "message": {
+     "id": "msg_1",
+     "seq": 1,
+     "thread_root_id": null,
+     "reply_to_id": null,
+     "kind": "chat",
+     "author_kind": "agent",
+     "author_session_id": "cs_a",
+     "author_agent_id": "claude-code",
+     "author_verified": true,
+     "body": "hello",
+     "body_truncated": false,
+     "mentions": [],
+     "refs": [],
+     "edited": false,
+     "redacted": false,
+     "pinned": false
+    }
+   }
+  },
+  {
+   "seq": 85,
+   "id": "evt_00000085",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:25.000Z",
+   "type": "message.edited",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "message.edited #85",
+   "payload": {
+    "message": {
+     "id": "msg_1",
+     "seq": 1,
+     "thread_root_id": null,
+     "reply_to_id": null,
+     "kind": "chat",
+     "author_kind": "agent",
+     "author_session_id": "cs_a",
+     "author_agent_id": "claude-code",
+     "author_verified": true,
+     "body": "hello again",
+     "body_truncated": false,
+     "mentions": [],
+     "refs": [],
+     "edited": true,
+     "redacted": false,
+     "pinned": false
+    },
+    "after_delivery": false
+   }
+  },
+  {
+   "seq": 86,
+   "id": "evt_00000086",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:26.000Z",
+   "type": "message.redacted",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "message.redacted #86",
+   "payload": {
+    "message_id": "msg_1"
+   }
+  },
+  {
+   "seq": 87,
+   "id": "evt_00000087",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:27.000Z",
+   "type": "decision.proposed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_a"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "decision.proposed #87",
+   "payload": {
+    "decision": {
+     "id": "dec_2",
+     "number": 2,
+     "title": "Decision 2",
+     "decision": "GCT rounding half-up per line",
+     "state": "proposed",
+     "source": "direct",
+     "decided_by_kind": "agent",
+     "decided_by": "cs_a",
+     "confirmed_by": null,
+     "task_id": null,
+     "zone_id": null,
+     "supersedes_id": null
+    }
+   }
+  },
+  {
+   "seq": 88,
+   "id": "evt_00000088",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:28.000Z",
+   "type": "decision.confirmed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "decision.confirmed #88",
+   "payload": {
+    "decision": {
+     "id": "dec_1",
+     "number": 1,
+     "title": "Decision 1",
+     "decision": "GCT rounding half-up per line",
+     "state": "in_force",
+     "source": "direct",
+     "decided_by_kind": "human",
+     "decided_by": "u_mani",
+     "confirmed_by": "u_mani",
+     "task_id": null,
+     "zone_id": null,
+     "supersedes_id": null
+    }
+   }
+  },
+  {
+   "seq": 89,
+   "id": "evt_00000089",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:29.000Z",
+   "type": "decision.rejected",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "decision.rejected #89",
+   "payload": {
+    "decision": {
+     "id": "dec_2",
+     "number": 2,
+     "title": "Decision 2",
+     "decision": "GCT rounding half-up per line",
+     "state": "rejected",
+     "source": "direct",
+     "decided_by_kind": "agent",
+     "decided_by": "cs_a",
+     "confirmed_by": null,
+     "task_id": null,
+     "zone_id": null,
+     "supersedes_id": null
+    }
+   }
+  },
+  {
+   "seq": 90,
+   "id": "evt_00000090",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:30.000Z",
+   "type": "decision.superseded",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "decision.superseded #90",
+   "payload": {
+    "decision": {
+     "id": "dec_1",
+     "number": 1,
+     "title": "Decision 1",
+     "decision": "GCT rounding half-up per line",
+     "state": "superseded",
+     "source": "direct",
+     "decided_by_kind": "human",
+     "decided_by": "u_mani",
+     "confirmed_by": "u_mani",
+     "task_id": null,
+     "zone_id": null,
+     "supersedes_id": null
+    }
+   }
+  },
+  {
+   "seq": 91,
+   "id": "evt_00000091",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:31.000Z",
+   "type": "inbox.item_created",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "inbox.item_created #91",
+   "payload": {
+    "item": {
+     "id": "inb_1",
+     "audience": "project",
+     "recipient": null,
+     "kind": "review_report",
+     "origin": "server",
+     "ref_type": null,
+     "ref_id": null,
+     "priority": 2,
+     "title": "Review T-14",
+     "primary_action": null,
+     "state": "open",
+     "claimed_by": null,
+     "coalesced_count": 1
+    }
+   }
+  },
+  {
+   "seq": 92,
+   "id": "evt_00000092",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:32.000Z",
+   "type": "inbox.item_claimed",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_b",
+    "callsign": "codex-1",
+    "agent_id": "codex",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_b"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "inbox.item_claimed #92",
+   "payload": {
+    "item": {
+     "id": "inb_1",
+     "audience": "project",
+     "recipient": null,
+     "kind": "review_report",
+     "origin": "server",
+     "ref_type": null,
+     "ref_id": null,
+     "priority": 2,
+     "title": "Review T-14",
+     "primary_action": null,
+     "state": "claimed",
+     "claimed_by": "cs_b",
+     "coalesced_count": 1
+    }
+   }
+  },
+  {
+   "seq": 93,
+   "id": "evt_00000093",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:33.000Z",
+   "type": "inbox.item_resolved",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "inbox.item_resolved #93",
+   "payload": {
+    "item": {
+     "id": "inb_1",
+     "audience": "project",
+     "recipient": null,
+     "kind": "review_report",
+     "origin": "server",
+     "ref_type": null,
+     "ref_id": null,
+     "priority": 2,
+     "title": "Review T-14",
+     "primary_action": null,
+     "state": "resolved",
+     "claimed_by": null,
+     "coalesced_count": 1
+    }
+   }
+  },
+  {
+   "seq": 94,
+   "id": "evt_00000094",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:34.000Z",
+   "type": "human.override",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "human",
+    "id": "u_mani",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": true,
+   "summary": "human.override #94",
+   "payload": {
+    "action": "revoke",
+    "reason": "Mani took POS",
+    "target_kind": "claim",
+    "target_id": "clm_pos"
+   }
+  },
+  {
+   "seq": 95,
+   "id": "evt_00000095",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:35.000Z",
+   "type": "budget.warning",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "budget.warning #95",
+   "payload": {
+    "metric": "events_per_day",
+    "used": 4000,
+    "limit": 5000
+   }
+  },
+  {
+   "seq": 96,
+   "id": "evt_00000096",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:01:36.000Z",
+   "type": "budget.cap_reached",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "system",
+    "id": "server",
+    "callsign": null,
+    "agent_id": null,
+    "user_id": null,
+    "verified": true
+   },
+   "refs": {},
+   "severity": "info",
+   "moment": false,
+   "summary": "budget.cap_reached #96",
+   "payload": {
+    "metric": "events_per_day",
+    "used": 5000,
+    "limit": 5000
+   }
+  }
+ ],
+ "invalid_envelopes": [
+  {
+   "name": "unknown_type",
+   "value": {
+    "seq": 1,
+    "id": "evt_00000001",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:01.000Z",
+    "type": "crew.hacked",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "system",
+     "id": "server",
+     "callsign": null,
+     "agent_id": null,
+     "user_id": null,
+     "verified": true
+    },
+    "refs": {},
+    "severity": "info",
+    "moment": false,
+    "summary": "crew.created #1",
+    "payload": {
+     "crew": {
+      "id": "crw_0a1b2c3d4e5f6a7b",
+      "project_id": "yaadbooks",
+      "name": "YaadBooks",
+      "mode": "solo",
+      "enforcement": "enforce",
+      "settings_version": 1,
+      "last_seq": 0
+     }
+    }
+   },
+   "error_contains": "closed event set"
+  },
+  {
+   "name": "l1_type_in_l0",
+   "value": {
+    "seq": 1,
+    "id": "evt_00000001",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:01.000Z",
+    "type": "vote.cast",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "system",
+     "id": "server",
+     "callsign": null,
+     "agent_id": null,
+     "user_id": null,
+     "verified": true
+    },
+    "refs": {},
+    "severity": "info",
+    "moment": false,
+    "summary": "crew.created #1",
+    "payload": {
+     "proposal_id": "prp_1",
+     "choice": "a",
+     "verified": true
+    }
+   },
+   "error_contains": "reserved for L1"
+  },
+  {
+   "name": "extra_payload_field",
+   "value": {
+    "seq": 1,
+    "id": "evt_00000001",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:01.000Z",
+    "type": "crew.created",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "system",
+     "id": "server",
+     "callsign": null,
+     "agent_id": null,
+     "user_id": null,
+     "verified": true
+    },
+    "refs": {},
+    "severity": "info",
+    "moment": false,
+    "summary": "crew.created #1",
+    "payload": {
+     "crew": {
+      "id": "crw_0a1b2c3d4e5f6a7b",
+      "project_id": "yaadbooks",
+      "name": "YaadBooks",
+      "mode": "solo",
+      "enforcement": "enforce",
+      "settings_version": 1,
+      "last_seq": 0
+     },
+     "token": "x"
+    }
+   },
+   "error_contains": "unknown field"
+  },
+  {
+   "name": "token_in_session_view",
+   "value": {
+    "seq": 1,
+    "id": "evt_00000001",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:01.000Z",
+    "type": "session.joined",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "session.joined #1",
+    "payload": {
+     "session": {
+      "id": "cs_a",
+      "callsign": "cc-1",
+      "agent_id": "claude-code",
+      "member_key": "claude-code:mbp:2c784ed4",
+      "agent_verified": true,
+      "adapter": "claude-code",
+      "adapter_enforcement": "enforced",
+      "client_kind": "hook",
+      "model": null,
+      "host_id": "hst_mbp",
+      "state": "active",
+      "quiet_reason": null,
+      "state_reason": null,
+      "stuck": false,
+      "branch": "feat/cc-1",
+      "head_commit": null,
+      "worktree_id": "wt-cc-1",
+      "githook_state": "ok",
+      "current_task_id": null,
+      "limit": null,
+      "joined_at": "2026-09-25T20:00:00.000Z",
+      "last_activity_at": "2026-09-25T20:00:00.000Z",
+      "ended_at": null,
+      "end_reason": null,
+      "token": "st_secret"
+     },
+     "resume_of": null,
+     "observe_only": false
+    }
+   },
+   "error_contains": "unknown field"
+  },
+  {
+   "name": "wrong_moment_flag",
+   "value": {
+    "seq": 1,
+    "id": "evt_00000001",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:01.000Z",
+    "type": "crew.created",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "system",
+     "id": "server",
+     "callsign": null,
+     "agent_id": null,
+     "user_id": null,
+     "verified": true
+    },
+    "refs": {},
+    "severity": "info",
+    "moment": true,
+    "summary": "crew.created #1",
+    "payload": {
+     "crew": {
+      "id": "crw_0a1b2c3d4e5f6a7b",
+      "project_id": "yaadbooks",
+      "name": "YaadBooks",
+      "mode": "solo",
+      "enforcement": "enforce",
+      "settings_version": 1,
+      "last_seq": 0
+     }
+    }
+   },
+   "error_contains": "$.moment"
+  },
+  {
+   "name": "server_type_from_client",
+   "value": {
+    "seq": 1,
+    "id": "evt_00000001",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:01.000Z",
+    "type": "baton.passed",
+    "v": 1,
+    "origin": "client",
+    "actor": {
+     "kind": "session",
+     "id": "cs_c",
+     "callsign": "cc-2",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_c"
+    },
+    "severity": "info",
+    "moment": true,
+    "summary": "baton.passed #1",
+    "payload": {
+     "baton_id": "bat_1",
+     "task_id": "tsk_14",
+     "from_session": "cs_a",
+     "to_session": "cs_c",
+     "kind": "same_checkout",
+     "handoff_id": null,
+     "zones": [
+      "zn_pos"
+     ],
+     "baton_ref": null,
+     "restored": null
+    }
+   },
+   "error_contains": "server-emitted only"
+  },
+  {
+   "name": "absolute_path_leaves_host",
+   "value": {
+    "seq": 21,
+    "id": "evt_00000021",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:21.000Z",
+    "type": "activity.commit",
+    "v": 1,
+    "origin": "client",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "activity.commit #21",
+    "payload": {
+     "sha": "a1b2c3d4e5f6",
+     "subject_hash": "0123456789abcdef",
+     "files": [
+      "/Users/mani/code/yaadbooks/src/app/pos/cart.ts"
+     ],
+     "branch": "feat/pos"
+    }
+   },
+   "error_contains": "does not match"
+  },
+  {
+   "name": "dotdot_path_leaves_repo",
+   "value": {
+    "seq": 21,
+    "id": "evt_00000021",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:21.000Z",
+    "type": "activity.commit",
+    "v": 1,
+    "origin": "client",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "activity.commit #21",
+    "payload": {
+     "sha": "a1b2c3d4e5f6",
+     "subject_hash": "0123456789abcdef",
+     "files": [
+      "../other/secret.ts"
+     ],
+     "branch": "feat/pos"
+    }
+   },
+   "error_contains": "does not match"
+  },
+  {
+   "name": "home_path_leaves_host",
+   "value": {
+    "seq": 21,
+    "id": "evt_00000021",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:21.000Z",
+    "type": "activity.commit",
+    "v": 1,
+    "origin": "client",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "activity.commit #21",
+    "payload": {
+     "sha": "a1b2c3d4e5f6",
+     "subject_hash": "0123456789abcdef",
+     "files": [
+      "~/.ssh/id_rsa"
+     ],
+     "branch": "feat/pos"
+    }
+   },
+   "error_contains": "does not match"
+  },
+  {
+   "name": "payload_too_large",
+   "value": {
+    "seq": 21,
+    "id": "evt_00000021",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:21.000Z",
+    "type": "activity.commit",
+    "v": 1,
+    "origin": "client",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "activity.commit #21",
+    "payload": {
+     "sha": "a1b2c3d4e5f6",
+     "subject_hash": "0123456789abcdef",
+     "files": [
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/0.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/1.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/2.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/3.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/4.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/5.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/6.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/7.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/8.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/9.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/10.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/11.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/12.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/13.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/14.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/15.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/16.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/17.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/18.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/19.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/20.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/21.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/22.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/23.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/24.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/25.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/26.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/27.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/28.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/29.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/30.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/31.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/32.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/33.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/34.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/35.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/36.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/37.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/38.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/39.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/40.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/41.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/42.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/43.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/44.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/45.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/46.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/47.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/48.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/49.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/50.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/51.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/52.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/53.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/54.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/55.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/56.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/57.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/58.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/59.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/60.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/61.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/62.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/63.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/64.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/65.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/66.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/67.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/68.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/69.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/70.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/71.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/72.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/73.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/74.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/75.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/76.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/77.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/78.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/79.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/80.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/81.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/82.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/83.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/84.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/85.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/86.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/87.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/88.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/89.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/90.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/91.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/92.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/93.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/94.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/95.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/96.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/97.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/98.ts",
+      "src/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/99.ts"
+     ],
+     "branch": "feat/pos"
+    }
+   },
+   "error_contains": "8192 bytes"
+  },
+  {
+   "name": "bad_seq",
+   "value": {
+    "seq": 0,
+    "id": "evt_00000001",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:01.000Z",
+    "type": "crew.created",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "system",
+     "id": "server",
+     "callsign": null,
+     "agent_id": null,
+     "user_id": null,
+     "verified": true
+    },
+    "refs": {},
+    "severity": "info",
+    "moment": false,
+    "summary": "crew.created #1",
+    "payload": {
+     "crew": {
+      "id": "crw_0a1b2c3d4e5f6a7b",
+      "project_id": "yaadbooks",
+      "name": "YaadBooks",
+      "mode": "solo",
+      "enforcement": "enforce",
+      "settings_version": 1,
+      "last_seq": 0
+     }
+    }
+   },
+   "error_contains": "$.seq"
+  },
+  {
+   "name": "bad_ts",
+   "value": {
+    "seq": 1,
+    "id": "evt_00000001",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25 20:00:00",
+    "type": "crew.created",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "system",
+     "id": "server",
+     "callsign": null,
+     "agent_id": null,
+     "user_id": null,
+     "verified": true
+    },
+    "refs": {},
+    "severity": "info",
+    "moment": false,
+    "summary": "crew.created #1",
+    "payload": {
+     "crew": {
+      "id": "crw_0a1b2c3d4e5f6a7b",
+      "project_id": "yaadbooks",
+      "name": "YaadBooks",
+      "mode": "solo",
+      "enforcement": "enforce",
+      "settings_version": 1,
+      "last_seq": 0
+     }
+    }
+   },
+   "error_contains": "$.ts"
+  },
+  {
+   "name": "summary_too_long",
+   "value": {
+    "seq": 1,
+    "id": "evt_00000001",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:01.000Z",
+    "type": "crew.created",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "system",
+     "id": "server",
+     "callsign": null,
+     "agent_id": null,
+     "user_id": null,
+     "verified": true
+    },
+    "refs": {},
+    "severity": "info",
+    "moment": false,
+    "summary": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "payload": {
+     "crew": {
+      "id": "crw_0a1b2c3d4e5f6a7b",
+      "project_id": "yaadbooks",
+      "name": "YaadBooks",
+      "mode": "solo",
+      "enforcement": "enforce",
+      "settings_version": 1,
+      "last_seq": 0
+     }
+    }
+   },
+   "error_contains": "$.summary"
+  },
+  {
+   "name": "bool_is_not_int",
+   "value": {
+    "seq": true,
+    "id": "evt_00000001",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:01.000Z",
+    "type": "crew.created",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "system",
+     "id": "server",
+     "callsign": null,
+     "agent_id": null,
+     "user_id": null,
+     "verified": true
+    },
+    "refs": {},
+    "severity": "info",
+    "moment": false,
+    "summary": "crew.created #1",
+    "payload": {
+     "crew": {
+      "id": "crw_0a1b2c3d4e5f6a7b",
+      "project_id": "yaadbooks",
+      "name": "YaadBooks",
+      "mode": "solo",
+      "enforcement": "enforce",
+      "settings_version": 1,
+      "last_seq": 0
+     }
+    }
+   },
+   "error_contains": "expected integer"
+  }
+ ],
+ "invalid_client_events": [
+  {
+   "name": "server_only_type",
+   "value": {
+    "id": "c0000001",
+    "type": "human.override",
+    "payload": {}
+   },
+   "error_contains": "not client-submittable"
+  },
+  {
+   "name": "baton_passed",
+   "value": {
+    "id": "c0000002",
+    "type": "baton.passed",
+    "payload": {}
+   },
+   "error_contains": "not client-submittable"
+  },
+  {
+   "name": "actor_in_body",
+   "value": {
+    "id": "c0000003",
+    "type": "gate.error",
+    "payload": {
+     "stage": "pretool",
+     "error_class": "X"
+    },
+    "actor": {
+     "kind": "human"
+    }
+   },
+   "error_contains": "unknown field"
+  },
+  {
+   "name": "short_id",
+   "value": {
+    "id": "c1",
+    "type": "gate.error",
+    "payload": {
+     "stage": "pretool",
+     "error_class": "X"
+    }
+   },
+   "error_contains": "$.id"
+  },
+  {
+   "name": "bad_payload",
+   "value": {
+    "id": "c0000004",
+    "type": "guard.blocked",
+    "payload": {
+     "rule": 30
+    }
+   },
+   "error_contains": "$.payload"
+  }
+ ],
+ "valid_client_events": [
+  {
+   "id": "c0000010",
+   "type": "gate.deadline",
+   "age_s": 2,
+   "payload": {
+    "stage": "auto_claim",
+    "elapsed_ms": 910,
+    "unconfirmed_zone": "pos"
+   }
+  },
+  {
+   "id": "c0000011",
+   "type": "guard.tamper_blocked",
+   "payload": {
+    "kind": "no_verify",
+    "surface": "pretool"
+   }
+  }
+ ]
+}

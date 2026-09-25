@@ -1,0 +1,1293 @@
+{
+ "description": "Facts → §5.2 first-match outcome. rule 0 never appears here (fast exit happens before the table).",
+ "cases": [
+  {
+   "name": "row1_session_paused_enforce",
+   "mode": "enforce",
+   "facts": {
+    "session_paused": true
+   },
+   "expect": {
+    "rule": 1,
+    "decision": "deny",
+    "variant": "paused",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row1_session_paused_observe",
+   "mode": "observe",
+   "facts": {
+    "session_paused": true
+   },
+   "expect": {
+    "rule": 1,
+    "decision": "deny",
+    "variant": "paused",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row2_crew_policy_target_enforce",
+   "mode": "enforce",
+   "facts": {
+    "crew_policy_target": true
+   },
+   "expect": {
+    "rule": 2,
+    "decision": "deny",
+    "variant": "crew_policy",
+    "effects": [
+     "guard.tamper_blocked"
+    ]
+   }
+  },
+  {
+   "name": "row2_crew_policy_target_observe",
+   "mode": "observe",
+   "facts": {
+    "crew_policy_target": true
+   },
+   "expect": {
+    "rule": 2,
+    "decision": "deny",
+    "variant": "crew_policy",
+    "effects": [
+     "guard.tamper_blocked"
+    ]
+   }
+  },
+  {
+   "name": "row3_zone_protected_no_grant_enforce",
+   "mode": "enforce",
+   "facts": {
+    "zone_protected_no_grant": true
+   },
+   "expect": {
+    "rule": 3,
+    "decision": "deny",
+    "variant": "protected",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row3_zone_protected_no_grant_observe",
+   "mode": "observe",
+   "facts": {
+    "zone_protected_no_grant": true
+   },
+   "expect": {
+    "rule": 3,
+    "decision": "deny",
+    "variant": "protected",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row4_foreign_checkout_enforce",
+   "mode": "enforce",
+   "facts": {
+    "foreign_checkout": true
+   },
+   "expect": {
+    "rule": 4,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row4_foreign_checkout_observe",
+   "mode": "observe",
+   "facts": {
+    "foreign_checkout": true
+   },
+   "expect": {
+    "rule": 4,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row5_same_worktree_dirty_elsewhere_enforce",
+   "mode": "enforce",
+   "facts": {
+    "same_worktree_dirty_elsewhere": true
+   },
+   "expect": {
+    "rule": 5,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row5_same_worktree_dirty_elsewhere_observe",
+   "mode": "observe",
+   "facts": {
+    "same_worktree_dirty_elsewhere": true
+   },
+   "expect": {
+    "rule": 5,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row6_path_ignored_enforce",
+   "mode": "enforce",
+   "facts": {
+    "path_ignored": true
+   },
+   "expect": {
+    "rule": 6,
+    "decision": "allow",
+    "variant": "",
+    "effects": []
+   }
+  },
+  {
+   "name": "row6_path_ignored_observe",
+   "mode": "observe",
+   "facts": {
+    "path_ignored": true
+   },
+   "expect": {
+    "rule": 6,
+    "decision": "allow",
+    "variant": "",
+    "effects": []
+   }
+  },
+  {
+   "name": "row7_own_claim_lease_ok_enforce",
+   "mode": "enforce",
+   "facts": {
+    "own_claim_lease_ok": true
+   },
+   "expect": {
+    "rule": 7,
+    "decision": "allow",
+    "variant": "",
+    "effects": []
+   }
+  },
+  {
+   "name": "row7_own_claim_lease_ok_observe",
+   "mode": "observe",
+   "facts": {
+    "own_claim_lease_ok": true
+   },
+   "expect": {
+    "rule": 7,
+    "decision": "allow",
+    "variant": "",
+    "effects": []
+   }
+  },
+  {
+   "name": "row8_own_claim_lease_passed_enforce",
+   "mode": "enforce",
+   "facts": {
+    "own_claim_lease_passed": true
+   },
+   "expect": {
+    "rule": 8,
+    "decision": "deny",
+    "variant": "lease_unconfirmed",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row8_own_claim_lease_passed_observe",
+   "mode": "observe",
+   "facts": {
+    "own_claim_lease_passed": true
+   },
+   "expect": {
+    "rule": 8,
+    "decision": "warn",
+    "variant": "lease_unconfirmed",
+    "effects": [
+     "would_deny"
+    ]
+   }
+  },
+  {
+   "name": "row9_exclusive_held_by_other_enforce",
+   "mode": "enforce",
+   "facts": {
+    "exclusive_held_by_other": true
+   },
+   "expect": {
+    "rule": 9,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row9_exclusive_held_by_other_observe",
+   "mode": "observe",
+   "facts": {
+    "exclusive_held_by_other": true
+   },
+   "expect": {
+    "rule": 9,
+    "decision": "warn",
+    "variant": "",
+    "effects": [
+     "would_deny"
+    ]
+   }
+  },
+  {
+   "name": "row11_append_only_edit_existing_enforce",
+   "mode": "enforce",
+   "facts": {
+    "append_only_edit_existing": true
+   },
+   "expect": {
+    "rule": 11,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row11_append_only_edit_existing_observe",
+   "mode": "observe",
+   "facts": {
+    "append_only_edit_existing": true
+   },
+   "expect": {
+    "rule": 11,
+    "decision": "warn",
+    "variant": "",
+    "effects": [
+     "would_deny"
+    ]
+   }
+  },
+  {
+   "name": "row13_tree_writer_other_exclusive_enforce",
+   "mode": "enforce",
+   "facts": {
+    "tree_writer_other_exclusive": true
+   },
+   "expect": {
+    "rule": 13,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row13_tree_writer_other_exclusive_observe",
+   "mode": "observe",
+   "facts": {
+    "tree_writer_other_exclusive": true
+   },
+   "expect": {
+    "rule": 13,
+    "decision": "warn",
+    "variant": "",
+    "effects": [
+     "would_deny"
+    ]
+   }
+  },
+  {
+   "name": "row14_service_claimed_by_other_enforce",
+   "mode": "enforce",
+   "facts": {
+    "service_claimed_by_other": true
+   },
+   "expect": {
+    "rule": 14,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row14_service_claimed_by_other_observe",
+   "mode": "observe",
+   "facts": {
+    "service_claimed_by_other": true
+   },
+   "expect": {
+    "rule": 14,
+    "decision": "warn",
+    "variant": "",
+    "effects": [
+     "would_deny"
+    ]
+   }
+  },
+  {
+   "name": "row15_tree_git_op_other_live_same_checkout_enforce",
+   "mode": "enforce",
+   "facts": {
+    "tree_git_op_other_live_same_checkout": true
+   },
+   "expect": {
+    "rule": 15,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row15_tree_git_op_other_live_same_checkout_observe",
+   "mode": "observe",
+   "facts": {
+    "tree_git_op_other_live_same_checkout": true
+   },
+   "expect": {
+    "rule": 15,
+    "decision": "warn",
+    "variant": "",
+    "effects": [
+     "would_deny"
+    ]
+   }
+  },
+  {
+   "name": "row18_parent_zone_unclaimed_enforce",
+   "mode": "enforce",
+   "facts": {
+    "parent_zone_unclaimed": true
+   },
+   "expect": {
+    "rule": 18,
+    "decision": "deny",
+    "variant": "task_required",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row18_parent_zone_unclaimed_observe",
+   "mode": "observe",
+   "facts": {
+    "parent_zone_unclaimed": true
+   },
+   "expect": {
+    "rule": 18,
+    "decision": "warn",
+    "variant": "task_required",
+    "effects": [
+     "would_deny"
+    ]
+   }
+  },
+  {
+   "name": "row2_tamper_command",
+   "mode": "enforce",
+   "facts": {
+    "tamper_command": true
+   },
+   "expect": {
+    "rule": 2,
+    "decision": "deny",
+    "variant": "tamper",
+    "effects": [
+     "guard.tamper_blocked"
+    ]
+   }
+  },
+  {
+   "name": "row3_frozen",
+   "mode": "enforce",
+   "facts": {
+    "zone_frozen": true
+   },
+   "expect": {
+    "rule": 3,
+    "decision": "deny",
+    "variant": "frozen",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row3_frozen_wins_variant",
+   "mode": "observe",
+   "facts": {
+    "zone_frozen": true,
+    "zone_protected_no_grant": true
+   },
+   "expect": {
+    "rule": 3,
+    "decision": "deny",
+    "variant": "frozen",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row10_reserved_not_offered",
+   "mode": "enforce",
+   "facts": {
+    "reserved_for_other": true
+   },
+   "expect": {
+    "rule": 10,
+    "decision": "deny",
+    "variant": "reserved_not_offered",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row10_reserved_offered",
+   "mode": "enforce",
+   "facts": {
+    "reserved_for_other": true,
+    "holds_offer": true
+   },
+   "expect": {
+    "rule": 10,
+    "decision": "deny",
+    "variant": "reserved_offered",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row10_observe",
+   "mode": "observe",
+   "facts": {
+    "reserved_for_other": true
+   },
+   "expect": {
+    "rule": 10,
+    "decision": "warn",
+    "variant": "reserved_not_offered",
+    "effects": [
+     "would_deny"
+    ]
+   }
+  },
+  {
+   "name": "row12_plain",
+   "mode": "enforce",
+   "facts": {
+    "commons": true
+   },
+   "expect": {
+    "rule": 12,
+    "decision": "allow",
+    "variant": "",
+    "effects": [
+     "notify_watchers"
+    ]
+   }
+  },
+  {
+   "name": "row12_plain_explicit",
+   "mode": "observe",
+   "facts": {
+    "commons": true,
+    "commons_kind": "plain",
+    "creates_file": true
+   },
+   "expect": {
+    "rule": 12,
+    "decision": "allow",
+    "variant": "",
+    "effects": [
+     "notify_watchers"
+    ]
+   }
+  },
+  {
+   "name": "row12_serialize",
+   "mode": "enforce",
+   "facts": {
+    "commons": true,
+    "commons_kind": "serialize"
+   },
+   "expect": {
+    "rule": 12,
+    "decision": "allow",
+    "variant": "",
+    "effects": [
+     "notify_watchers",
+     "micro_lease"
+    ]
+   }
+  },
+  {
+   "name": "row12_append_only_new",
+   "mode": "enforce",
+   "facts": {
+    "commons": true,
+    "commons_kind": "append_only",
+    "creates_file": true
+   },
+   "expect": {
+    "rule": 12,
+    "decision": "allow",
+    "variant": "",
+    "effects": [
+     "notify_watchers",
+     "micro_lease"
+    ]
+   }
+  },
+  {
+   "name": "row12_append_only_migration",
+   "mode": "enforce",
+   "facts": {
+    "commons": true,
+    "commons_kind": "append_only",
+    "creates_file": true,
+    "migration": true
+   },
+   "expect": {
+    "rule": 12,
+    "decision": "allow",
+    "variant": "",
+    "effects": [
+     "notify_watchers",
+     "micro_lease",
+     "schema_claim"
+    ]
+   }
+  },
+  {
+   "name": "row16_shared_claim",
+   "mode": "enforce",
+   "facts": {
+    "shared_claim_by_others": true
+   },
+   "expect": {
+    "rule": 16,
+    "decision": "allow",
+    "variant": "",
+    "effects": [
+     "collision:same_zone_shared"
+    ]
+   }
+  },
+  {
+   "name": "row16_dirty_elsewhere",
+   "mode": "observe",
+   "facts": {
+    "dirty_in_other_checkout": true
+   },
+   "expect": {
+    "rule": 16,
+    "decision": "allow",
+    "variant": "",
+    "effects": [
+     "collision:same_file"
+    ]
+   }
+  },
+  {
+   "name": "row17_granted",
+   "mode": "enforce",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "auto_claim_result": "granted"
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "allow",
+    "variant": "auto_claimed",
+    "effects": [
+     "claim.granted"
+    ]
+   }
+  },
+  {
+   "name": "row17_granted_observe",
+   "mode": "observe",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "auto_claim_result": "granted"
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "allow",
+    "variant": "auto_claimed",
+    "effects": [
+     "claim.granted"
+    ]
+   }
+  },
+  {
+   "name": "row17_conflict",
+   "mode": "enforce",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "auto_claim_result": "conflict"
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "deny",
+    "variant": "claim_conflict",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row17_conflict_observe",
+   "mode": "observe",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "auto_claim_result": "conflict"
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "warn",
+    "variant": "claim_conflict",
+    "effects": [
+     "would_deny"
+    ]
+   }
+  },
+  {
+   "name": "row17_cap",
+   "mode": "enforce",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "auto_claim_result": "cap"
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "deny",
+    "variant": "claim_cap",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row17_timeout_first_write",
+   "mode": "enforce",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "auto_claim_result": "timeout"
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "allow",
+    "variant": "allowed_unconfirmed",
+    "effects": [
+     "claim.unconfirmed",
+     "gate.deadline"
+    ]
+   }
+  },
+  {
+   "name": "row17_rate_limited_first_write",
+   "mode": "enforce",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "auto_claim_result": "rate_limited"
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "allow",
+    "variant": "allowed_unconfirmed",
+    "effects": [
+     "claim.unconfirmed"
+    ]
+   }
+  },
+  {
+   "name": "row17_timeout_second_write_denied",
+   "mode": "enforce",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "auto_claim_result": "timeout",
+    "unconfirmed_pending": true
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "deny",
+    "variant": "unconfirmed_pending",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row17_rate_limited_second_write_denied",
+   "mode": "enforce",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "auto_claim_result": "rate_limited",
+    "unconfirmed_pending": true
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "deny",
+    "variant": "unconfirmed_pending",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row17_disabled",
+   "mode": "enforce",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "auto_claim_enabled": false
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "deny",
+    "variant": "claim_required",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "row17_disabled_observe",
+   "mode": "observe",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "auto_claim_enabled": false
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "warn",
+    "variant": "claim_required",
+    "effects": [
+     "would_deny"
+    ]
+   }
+  },
+  {
+   "name": "row19_no_zone",
+   "mode": "enforce",
+   "facts": {
+    "no_zone_match": true
+   },
+   "expect": {
+    "rule": 19,
+    "decision": "allow",
+    "variant": "footprint",
+    "effects": [
+     "footprint"
+    ]
+   }
+  },
+  {
+   "name": "row19_empty_facts",
+   "mode": "enforce",
+   "facts": {},
+   "expect": {
+    "rule": 19,
+    "decision": "allow",
+    "variant": "footprint",
+    "effects": [
+     "footprint"
+    ]
+   }
+  },
+  {
+   "name": "row19_file_claim_granted",
+   "mode": "enforce",
+   "facts": {
+    "no_zone_match": true,
+    "undeclared_policy": "file_claim",
+    "auto_claim_result": "granted"
+   },
+   "expect": {
+    "rule": 19,
+    "decision": "allow",
+    "variant": "file_auto_claimed",
+    "effects": [
+     "claim.granted"
+    ]
+   }
+  },
+  {
+   "name": "row19_file_claim_conflict",
+   "mode": "enforce",
+   "facts": {
+    "no_zone_match": true,
+    "undeclared_policy": "file_claim",
+    "auto_claim_result": "conflict"
+   },
+   "expect": {
+    "rule": 19,
+    "decision": "deny",
+    "variant": "file_claim_conflict",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "order_paused_over_own_claim",
+   "mode": "enforce",
+   "facts": {
+    "session_paused": true,
+    "own_claim_lease_ok": true
+   },
+   "expect": {
+    "rule": 1,
+    "decision": "deny",
+    "variant": "paused",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "order_policy_over_ignored",
+   "mode": "enforce",
+   "facts": {
+    "crew_policy_target": true,
+    "path_ignored": true
+   },
+   "expect": {
+    "rule": 2,
+    "decision": "deny",
+    "variant": "crew_policy",
+    "effects": [
+     "guard.tamper_blocked"
+    ]
+   }
+  },
+  {
+   "name": "order_frozen_over_clobber",
+   "mode": "enforce",
+   "facts": {
+    "zone_frozen": true,
+    "same_worktree_dirty_elsewhere": true
+   },
+   "expect": {
+    "rule": 3,
+    "decision": "deny",
+    "variant": "frozen",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "order_foreign_over_exclusive",
+   "mode": "observe",
+   "facts": {
+    "foreign_checkout": true,
+    "exclusive_held_by_other": true
+   },
+   "expect": {
+    "rule": 4,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "order_clobber_over_ignored",
+   "mode": "enforce",
+   "facts": {
+    "same_worktree_dirty_elsewhere": true,
+    "path_ignored": true
+   },
+   "expect": {
+    "rule": 5,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "order_ignored_over_exclusive",
+   "mode": "enforce",
+   "facts": {
+    "path_ignored": true,
+    "exclusive_held_by_other": true
+   },
+   "expect": {
+    "rule": 6,
+    "decision": "allow",
+    "variant": "",
+    "effects": []
+   }
+  },
+  {
+   "name": "order_own_claim_over_exclusive",
+   "mode": "enforce",
+   "facts": {
+    "own_claim_lease_ok": true,
+    "exclusive_held_by_other": true
+   },
+   "expect": {
+    "rule": 7,
+    "decision": "allow",
+    "variant": "",
+    "effects": []
+   }
+  },
+  {
+   "name": "order_fenced_over_exclusive",
+   "mode": "enforce",
+   "facts": {
+    "own_claim_lease_passed": true,
+    "exclusive_held_by_other": true
+   },
+   "expect": {
+    "rule": 8,
+    "decision": "deny",
+    "variant": "lease_unconfirmed",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "order_exclusive_over_reserved",
+   "mode": "enforce",
+   "facts": {
+    "exclusive_held_by_other": true,
+    "reserved_for_other": true
+   },
+   "expect": {
+    "rule": 9,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "order_append_only_over_commons",
+   "mode": "enforce",
+   "facts": {
+    "append_only_edit_existing": true,
+    "commons": true
+   },
+   "expect": {
+    "rule": 11,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "order_commons_over_tree_writer",
+   "mode": "enforce",
+   "facts": {
+    "commons": true,
+    "tree_writer_other_exclusive": true
+   },
+   "expect": {
+    "rule": 12,
+    "decision": "allow",
+    "variant": "",
+    "effects": [
+     "notify_watchers"
+    ]
+   }
+  },
+  {
+   "name": "order_tree_writer_over_service",
+   "mode": "enforce",
+   "facts": {
+    "tree_writer_other_exclusive": true,
+    "service_claimed_by_other": true
+   },
+   "expect": {
+    "rule": 13,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "order_shared_over_leaf",
+   "mode": "enforce",
+   "facts": {
+    "shared_claim_by_others": true,
+    "leaf_zone_unclaimed": true
+   },
+   "expect": {
+    "rule": 16,
+    "decision": "allow",
+    "variant": "",
+    "effects": [
+     "collision:same_zone_shared"
+    ]
+   }
+  },
+  {
+   "name": "order_leaf_over_parent",
+   "mode": "enforce",
+   "facts": {
+    "leaf_zone_unclaimed": true,
+    "parent_zone_unclaimed": true,
+    "auto_claim_result": "granted"
+   },
+   "expect": {
+    "rule": 17,
+    "decision": "allow",
+    "variant": "auto_claimed",
+    "effects": [
+     "claim.granted"
+    ]
+   }
+  },
+  {
+   "name": "order_parent_over_no_zone",
+   "mode": "enforce",
+   "facts": {
+    "parent_zone_unclaimed": true,
+    "no_zone_match": true
+   },
+   "expect": {
+    "rule": 18,
+    "decision": "deny",
+    "variant": "task_required",
+    "effects": [
+     "guard.blocked"
+    ]
+   }
+  },
+  {
+   "name": "ask_row9",
+   "mode": "enforce",
+   "facts": {
+    "exclusive_held_by_other": true
+   },
+   "expect": {
+    "rule": 9,
+    "decision": "ask",
+    "variant": "",
+    "effects": []
+   },
+   "interactive_override": true,
+   "permission_mode": "default"
+  },
+  {
+   "name": "ask_row13",
+   "mode": "enforce",
+   "facts": {
+    "tree_writer_other_exclusive": true
+   },
+   "expect": {
+    "rule": 13,
+    "decision": "ask",
+    "variant": "",
+    "effects": []
+   },
+   "interactive_override": true,
+   "permission_mode": "default"
+  },
+  {
+   "name": "ask_row14",
+   "mode": "enforce",
+   "facts": {
+    "service_claimed_by_other": true
+   },
+   "expect": {
+    "rule": 14,
+    "decision": "ask",
+    "variant": "",
+    "effects": []
+   },
+   "interactive_override": true,
+   "permission_mode": "default"
+  },
+  {
+   "name": "ask_row15",
+   "mode": "enforce",
+   "facts": {
+    "tree_git_op_other_live_same_checkout": true
+   },
+   "expect": {
+    "rule": 15,
+    "decision": "ask",
+    "variant": "",
+    "effects": []
+   },
+   "interactive_override": true,
+   "permission_mode": "default"
+  },
+  {
+   "name": "ask_row10_offered",
+   "mode": "enforce",
+   "facts": {
+    "reserved_for_other": true,
+    "holds_offer": true
+   },
+   "expect": {
+    "rule": 10,
+    "decision": "ask",
+    "variant": "reserved_offered",
+    "effects": []
+   },
+   "interactive_override": true
+  },
+  {
+   "name": "ask_not_in_bypass_permissions",
+   "mode": "enforce",
+   "facts": {
+    "exclusive_held_by_other": true
+   },
+   "expect": {
+    "rule": 9,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   },
+   "interactive_override": true,
+   "permission_mode": "bypassPermissions"
+  },
+  {
+   "name": "ask_never_rows_1_to_5",
+   "mode": "enforce",
+   "facts": {
+    "zone_protected_no_grant": true
+   },
+   "expect": {
+    "rule": 3,
+    "decision": "deny",
+    "variant": "protected",
+    "effects": [
+     "guard.blocked"
+    ]
+   },
+   "interactive_override": true
+  },
+  {
+   "name": "ask_never_foreign_checkout",
+   "mode": "enforce",
+   "facts": {
+    "foreign_checkout": true
+   },
+   "expect": {
+    "rule": 4,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   },
+   "interactive_override": true
+  },
+  {
+   "name": "ask_not_row8",
+   "mode": "enforce",
+   "facts": {
+    "own_claim_lease_passed": true
+   },
+   "expect": {
+    "rule": 8,
+    "decision": "deny",
+    "variant": "lease_unconfirmed",
+    "effects": [
+     "guard.blocked"
+    ]
+   },
+   "interactive_override": true
+  },
+  {
+   "name": "ask_not_row18",
+   "mode": "enforce",
+   "facts": {
+    "parent_zone_unclaimed": true
+   },
+   "expect": {
+    "rule": 18,
+    "decision": "deny",
+    "variant": "task_required",
+    "effects": [
+     "guard.blocked"
+    ]
+   },
+   "interactive_override": true
+  },
+  {
+   "name": "ask_observe_stays_warn",
+   "mode": "observe",
+   "facts": {
+    "exclusive_held_by_other": true
+   },
+   "expect": {
+    "rule": 9,
+    "decision": "warn",
+    "variant": "",
+    "effects": [
+     "would_deny"
+    ]
+   },
+   "interactive_override": true
+  },
+  {
+   "name": "ask_off_by_default",
+   "mode": "enforce",
+   "facts": {
+    "exclusive_held_by_other": true
+   },
+   "expect": {
+    "rule": 9,
+    "decision": "deny",
+    "variant": "",
+    "effects": [
+     "guard.blocked"
+    ]
+   },
+   "interactive_override": false,
+   "permission_mode": "default"
+  }
+ ]
+}

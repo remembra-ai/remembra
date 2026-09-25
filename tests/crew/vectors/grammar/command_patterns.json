@@ -1,0 +1,266 @@
+{
+ "description": "argv-prefix token patterns: validation (server rejects regex/oversize) and matching over normalised argv.",
+ "valid": [
+  "supabase db push *",
+  "supabase db push",
+  "prisma migrate dev",
+  "vercel deploy --prod",
+  "npm run deploy",
+  "fly deploy -a yaadbooks",
+  "git push origin main",
+  "kubectl apply -f *",
+  "terraform apply",
+  "psql * -c *",
+  "c++ -o app",
+  "node scripts/deploy.mjs"
+ ],
+ "invalid": [
+  {
+   "pattern": "",
+   "error_contains": "empty"
+  },
+  {
+   "pattern": "* deploy",
+   "error_contains": "first token"
+  },
+  {
+   "pattern": "supabase db push.*",
+   "error_contains": "whole token"
+  },
+  {
+   "pattern": "vercel*",
+   "error_contains": "whole token"
+  },
+  {
+   "pattern": "npm run deploy:*",
+   "error_contains": "whole token"
+  },
+  {
+   "pattern": "^supabase",
+   "error_contains": "no regex"
+  },
+  {
+   "pattern": "supabase (db|migration) push",
+   "error_contains": "no regex"
+  },
+  {
+   "pattern": "deploy [a-z]+",
+   "error_contains": "no regex"
+  },
+  {
+   "pattern": "a|b",
+   "error_contains": "no regex"
+  },
+  {
+   "pattern": "npm  run",
+   "error_contains": "single spaces"
+  },
+  {
+   "pattern": " npm run",
+   "error_contains": "single spaces"
+  },
+  {
+   "pattern": "npm\trun",
+   "error_contains": "single spaces"
+  },
+  {
+   "pattern": "rm -rf $HOME",
+   "error_contains": "no regex"
+  },
+  {
+   "pattern": "echo 'x'",
+   "error_contains": "no regex"
+  },
+  {
+   "pattern": "a a a a a a a a a a a a a a a a a",
+   "error_contains": "16 tokens"
+  },
+  {
+   "pattern": "a bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "error_contains": "256 chars"
+  },
+  {
+   "pattern": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "error_contains": "no regex"
+  }
+ ],
+ "invalid_lists": [
+  {
+   "patterns": [
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy",
+    "deploy"
+   ],
+   "error_contains": "20 command patterns"
+  },
+  {
+   "patterns": "deploy",
+   "error_contains": "must be a list"
+  }
+ ],
+ "match": [
+  {
+   "pattern": "supabase db push *",
+   "argv": [
+    "supabase",
+    "db",
+    "push"
+   ],
+   "match": true
+  },
+  {
+   "pattern": "supabase db push *",
+   "argv": [
+    "supabase",
+    "db",
+    "push",
+    "--linked"
+   ],
+   "match": true
+  },
+  {
+   "pattern": "supabase db push",
+   "argv": [
+    "supabase",
+    "db",
+    "push",
+    "--linked"
+   ],
+   "match": true
+  },
+  {
+   "pattern": "supabase db push",
+   "argv": [
+    "supabase",
+    "db"
+   ],
+   "match": false
+  },
+  {
+   "pattern": "supabase db push",
+   "argv": [
+    "supabase",
+    "--debug",
+    "db",
+    "push"
+   ],
+   "match": false
+  },
+  {
+   "pattern": "supabase db push",
+   "argv": [
+    "supabase",
+    "db",
+    "pull"
+   ],
+   "match": false
+  },
+  {
+   "pattern": "psql * -c *",
+   "argv": [
+    "psql",
+    "prod",
+    "-c",
+    "select 1"
+   ],
+   "match": true
+  },
+  {
+   "pattern": "psql * -c *",
+   "argv": [
+    "psql",
+    "-c",
+    "select 1"
+   ],
+   "match": false
+  },
+  {
+   "pattern": "psql * -c",
+   "argv": [
+    "psql",
+    "prod"
+   ],
+   "match": false
+  },
+  {
+   "pattern": "npm run deploy",
+   "argv": [
+    "npm",
+    "run",
+    "deploy:prod"
+   ],
+   "match": false
+  },
+  {
+   "pattern": "npm run *",
+   "argv": [
+    "npm",
+    "run",
+    "deploy:prod",
+    "--x"
+   ],
+   "match": true
+  },
+  {
+   "pattern": "vercel deploy --prod",
+   "argv": [
+    "vercel",
+    "deploy",
+    "--prod"
+   ],
+   "match": true
+  },
+  {
+   "pattern": "vercel deploy --prod",
+   "argv": [
+    "vercel",
+    "deploy"
+   ],
+   "match": false
+  },
+  {
+   "pattern": "Vercel deploy",
+   "argv": [
+    "vercel",
+    "deploy"
+   ],
+   "match": false
+  },
+  {
+   "pattern": "terraform apply",
+   "argv": [
+    "terraform",
+    "apply",
+    "-auto-approve"
+   ],
+   "match": true
+  },
+  {
+   "pattern": "kubectl apply -f *",
+   "argv": [
+    "kubectl",
+    "apply",
+    "-f"
+   ],
+   "match": true
+  }
+ ]
+}
