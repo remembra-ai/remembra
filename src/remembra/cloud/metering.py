@@ -57,6 +57,8 @@ EMBEDDING_CHARS_PER_TOKEN = 4
 _POOLED_MIN_USERS = 2
 
 _LEGACY_MIGRATION = "2026_09_plans_v2_legacy_tiers"
+# cloud_tenants.signup_source for tenants created by POST /api/v1/cloud/signup.
+TENANT_SIGNUP_SOURCE = "cloud_signup"
 
 
 def now_utc() -> datetime:
@@ -278,6 +280,10 @@ class UsageMeter:
         # Something about the account needs the owner's attention (e.g. a
         # Founding 100 charge past the cap that must be refunded).
         await self._add_column("cloud_tenants", "billing_flag TEXT")
+        # Tenants from the master-key /cloud/signup backend have no users row:
+        # their email verification lives here (see verify_tenant_email).
+        await self._add_column("cloud_tenants", "email_verified INTEGER DEFAULT 0")
+        await self._add_column("cloud_tenants", "signup_source TEXT")
         for column in ("relay_events", "credits_used", "degraded_stores", "unenriched_writes"):
             await self._add_column("cloud_usage_daily", f"{column} INTEGER DEFAULT 0")
         await self._add_column("cloud_usage_daily", "llm_usd REAL DEFAULT 0")
@@ -431,6 +437,39 @@ class UsageMeter:
             return None
         return dict(row)
 
+    async def mark_tenant_signup(self, user_id: str, source: str = TENANT_SIGNUP_SOURCE) -> None:
+        """Record where a tenant came from (the unverified-email hold keys off it)."""
+        await self._db.conn.execute("UPDATE cloud_tenants SET signup_source = ? WHERE user_id = ?", (source, user_id))
+        await self._db.conn.commit()
+
+    async def email_has_verified_account(self, email: str, *, exclude_user_id: str) -> bool:
+        """True when another account already holds ``email`` as a VERIFIED address.
+
+        One free account per verified email: a second API-signup tenant (or a
+        dashboard account) cannot claim an address someone already verified.
+        """
+        address = email.strip().lower()
+        try:
+            cursor = await self._db.conn.execute(
+                "SELECT 1 FROM users WHERE email = ? AND email_verified AND id != ? LIMIT 1", (address, exclude_user_id)
+            )
+            if await cursor.fetchone():
+                return True
+        except Exception:  # no users table in minimal deployments
+            pass
+        cursor = await self._db.conn.execute(
+            "SELECT 1 FROM cloud_tenants WHERE lower(email) = ? AND email_verified = 1 AND user_id != ? LIMIT 1",
+            (address, exclude_user_id),
+        )
+        return await cursor.fetchone() is not None
+
+    async def set_tenant_email_verified(self, user_id: str) -> None:
+        await self._db.conn.execute(
+            "UPDATE cloud_tenants SET email_verified = 1, updated_at = ? WHERE user_id = ?",
+            (now_utc().isoformat(), user_id),
+        )
+        await self._db.conn.commit()
+
     async def get_user_email(self, user_id: str) -> str | None:
         """Get user's email from user_id.
 
@@ -554,7 +593,10 @@ class UsageMeter:
         tier = await self.get_tenant_plan(user_id)
         tenant = await self.get_tenant(user_id)
         user_row = await self._user_row(user_id)
-        verified = bool(user_row and user_row.get("email_verified"))
+        if user_row is not None:
+            verified = bool(user_row.get("email_verified"))
+        else:
+            verified = bool((tenant or {}).get("email_verified"))
         created_at = _parse_dt((user_row or {}).get("created_at")) or _parse_dt((tenant or {}).get("created_at"))
 
         paid = tier not in (PlanTier.FREE,)
@@ -572,7 +614,7 @@ class UsageMeter:
             period = CreditPeriod.monthly(now)
             credit_limit = limits.credit_allowance(interval)
 
-        if tier == PlanTier.FREE and self._unverified_cap_applies(user_row, verified, created_at):
+        if tier == PlanTier.FREE and self._unverified_cap_applies(user_row, tenant, verified, created_at):
             if limits.unverified_credit_cap is not None:
                 credit_limit = min(credit_limit, limits.unverified_credit_cap)
 
@@ -597,17 +639,27 @@ class UsageMeter:
         )
 
     @staticmethod
-    def _unverified_cap_applies(user_row: dict[str, Any] | None, verified: bool, created_at: datetime | None) -> bool:
+    def _unverified_cap_applies(
+        user_row: dict[str, Any] | None,
+        tenant: dict[str, Any] | None,
+        verified: bool,
+        created_at: datetime | None,
+    ) -> bool:
         """The 25-credit hold for unverified Free accounts.
 
         Off until ``unverified_credit_cap_effective_at`` is set (the dashboard
         verify-email flow must be live first); then it applies only to accounts
         created at or after that time (existing users are grandfathered).
-        Tenants provisioned by the master-key ``/cloud/signup`` backend have no
-        user record and no way to verify, so they are exempt (that backend runs
-        its own Turnstile and signup limits).
+
+        Dashboard accounts verify through ``/auth/verify-email``. Tenants
+        provisioned by the master-key ``/cloud/signup`` backend have no user
+        record; they verify through ``/cloud/verify-email`` and are held too.
+        Any other tenant-only record (admin-assigned plans, legacy rows, no
+        email to verify) stays exempt.
         """
-        if verified or user_row is None:
+        if verified:
+            return False
+        if user_row is None and not (tenant and tenant.get("signup_source") == TENANT_SIGNUP_SOURCE and tenant.get("email")):
             return False
         effective = get_settings().unverified_credit_cap_effective_at
         if effective is None:

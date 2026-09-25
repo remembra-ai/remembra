@@ -32,6 +32,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # HTTP Bearer token security
 bearer_scheme = HTTPBearer(auto_error=False)
 
+DEFAULT_DASHBOARD_URL = "https://app.remembra.dev"
+
+
+def dashboard_link(path: str) -> str:
+    """Absolute dashboard URL for emailed links (``REMEMBRA_PUBLIC_DASHBOARD_URL``, else the hosted app)."""
+    return f"{get_settings().public_dashboard_url or DEFAULT_DASHBOARD_URL}{path}"
+
 
 # ---------------------------------------------------------------------------
 # Request/Response models
@@ -1066,7 +1073,7 @@ async def request_email_verification(
         email_service = EmailService.create(provider=EmailProvider.RESEND)
         result = await email_service.send_email_verification_email(
             to=user_row["email"],
-            verify_url=f"https://app.remembra.dev/verify-email?token={token}",
+            verify_url=dashboard_link(f"/verify-email?token={token}"),
         )
     except Exception as e:
         log.error("verification_email_error", error_type=type(e).__name__)

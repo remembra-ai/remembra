@@ -101,6 +101,18 @@ class SignupResponse(BaseModel):
     api_key_id: str
     plan: str
     message: str
+    email_verification_sent: bool = Field(
+        False, description="A verification link was emailed (verify to lift the unverified-email credit hold)"
+    )
+
+
+class TenantVerifyEmailConfirmRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=256, description="Token from the emailed verification link")
+
+
+class TenantVerifyEmailResponse(BaseModel):
+    message: str
+    email_verified: bool
 
 
 class BillingContextResponse(BaseModel):
@@ -247,8 +259,10 @@ async def signup(
     Hardening: 3 signups/hour per client /24 and 20/day per email domain
     (``client_ip`` from the calling backend, else the connection's IP), and a
     Cloudflare Turnstile check when ``REMEMBRA_TURNSTILE_SECRET`` is set.
-    Tenants created here have no user record, so the unverified-email credit
-    hold does not apply to them.
+    Tenants created here have no dashboard user record: a verification link is
+    emailed to them (``/cloud/verify-email``), and once
+    ``unverified_credit_cap_effective_at`` is set they are held at the
+    unverified-email credit cap until they confirm it.
 
     Returns the API key — it is only shown once.
     """
@@ -292,13 +306,128 @@ async def signup(
             detail=str(e),
         )
 
+    await meter.mark_tenant_signup(result.user_id)
+    verification_sent = False
+    if email_service is not None and body.email and "@" in body.email:
+        from remembra.security import state as security_state
+
+        try:
+            token = await security_state.create_email_verification(request.app.state.db, result.user_id, body.email)
+            verification_sent = await _send_tenant_verification(email_service, body.email, token)
+        except Exception as e:  # never fail a completed signup over the email
+            import logging
+
+            logging.getLogger(__name__).warning("Tenant verification email not sent: %s", type(e).__name__)
+
     return SignupResponse(
         user_id=result.user_id,
         api_key=result.api_key,
         api_key_id=result.api_key_id,
         plan=result.plan.value,
         message="Store the API key securely — it cannot be retrieved again.",
+        email_verification_sent=verification_sent,
     )
+
+
+async def _send_tenant_verification(email_service: Any, email: str, token: str) -> bool:
+    from urllib.parse import urlencode
+
+    from remembra.api.v1.auth import dashboard_link
+
+    url = dashboard_link("/verify-email") + "?" + urlencode({"token": token, "account": "api"})
+    result = await email_service.send_email_verification_email(to=email, verify_url=url)
+    return bool(result.success)
+
+
+# ---------------------------------------------------------------------------
+# Email verification for API-signup tenants (no dashboard user record)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/verify-email/request",
+    response_model=TenantVerifyEmailResponse,
+    summary="Email a verification link to an API-signup account",
+)
+@limiter.limit("3/minute")
+async def request_tenant_email_verification(
+    request: Request,
+    current_user: CurrentUser,
+    meter: UsageMeterDep,
+) -> TenantVerifyEmailResponse:
+    """For accounts created by ``POST /cloud/signup`` (authenticate with the account's API key).
+
+    Dashboard accounts use ``POST /api/v1/auth/verify-email/request`` instead.
+    The link (valid 24h, single use) opens the dashboard's /verify-email page.
+    """
+    from remembra.security import state as security_state
+
+    db = request.app.state.db
+    if await db.get_user_by_id(current_user.user_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This account signs in to the dashboard: use POST /api/v1/auth/verify-email/request.",
+        )
+    tenant = await meter.get_tenant(current_user.user_id)
+    email = str((tenant or {}).get("email") or "").strip()
+    if not tenant or "@" not in email:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This account has no email address to verify.")
+    if tenant.get("email_verified"):
+        return TenantVerifyEmailResponse(message="Email already verified", email_verified=True)
+    try:
+        from remembra.cloud.email import EmailProvider, EmailService
+
+        email_service = EmailService.create(provider=EmailProvider.RESEND)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Email delivery is not configured") from e
+    token = await security_state.create_email_verification(db, current_user.user_id, email)
+    try:
+        sent = await _send_tenant_verification(email_service, email, token)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not send verification email") from e
+    if not sent:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not send verification email")
+    return TenantVerifyEmailResponse(message="Verification email sent", email_verified=False)
+
+
+@router.post(
+    "/verify-email/confirm",
+    response_model=TenantVerifyEmailResponse,
+    summary="Confirm an API-signup account's email with the emailed token",
+)
+@limiter.limit("10/minute")
+async def confirm_tenant_email_verification(
+    request: Request,
+    body: Annotated[TenantVerifyEmailConfirmRequest, Body(...)],
+    meter: UsageMeterDep,
+) -> TenantVerifyEmailResponse:
+    """Token-only (the account has no dashboard session). The token is single use and bound
+    to the account and the address it was sent to. Refused when another account already
+    verified the same address (one free account per verified email)."""
+    from remembra.security import state as security_state
+
+    db = request.app.state.db
+    invalid = HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")
+    found = await security_state.find_email_verification(db, body.token)
+    if found is None:
+        raise invalid
+    user_id, email = found
+    if await db.get_user_by_id(user_id):
+        raise invalid  # dashboard accounts confirm while signed in (/auth/verify-email/confirm)
+    tenant = await meter.get_tenant(user_id)
+    if not tenant or str(tenant.get("email") or "").strip().lower() != email:
+        raise invalid
+    if tenant.get("email_verified"):
+        return TenantVerifyEmailResponse(message="Email already verified", email_verified=True)
+    if await meter.email_has_verified_account(email, exclude_user_id=user_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This email address is already verified on another Remembra account.",
+        )
+    if not await security_state.consume_email_verification(db, user_id, email, body.token):
+        raise invalid
+    await meter.set_tenant_email_verified(user_id)
+    return TenantVerifyEmailResponse(message="Email verified", email_verified=True)
 
 
 # ---------------------------------------------------------------------------

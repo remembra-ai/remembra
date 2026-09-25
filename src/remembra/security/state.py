@@ -217,6 +217,23 @@ async def create_email_verification(db: Any, user_id: str, email: str) -> str:
     return token
 
 
+async def find_email_verification(db: Any, token: str) -> tuple[str, str] | None:
+    """Return ``(user_id, email)`` for an unexpired verification token without consuming it.
+
+    For the token-only confirm path (API-signup tenants have no dashboard
+    session). The caller still consumes it with :func:`consume_email_verification`.
+    """
+    await _ensure_schema(db)
+    cursor = await db.conn.execute(
+        "SELECT user_id, email, expires_at FROM security_email_verifications WHERE token_hash = ?",
+        (_hash(token),),
+    )
+    row = await cursor.fetchone()
+    if not row or datetime.fromisoformat(row[2]) < datetime.now(UTC):
+        return None
+    return str(row[0]), str(row[1])
+
+
 async def consume_email_verification(db: Any, user_id: str, email: str, token: str) -> bool:
     """Validate and consume a verification token. The email must still match the account."""
     await _ensure_schema(db)
