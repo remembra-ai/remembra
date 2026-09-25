@@ -1501,7 +1501,7 @@ def send_to_inbox(
         to_agent: Recipient agent id. Unknown ids are delivered but warned about.
         subject: One-line subject.
         body: Message body with full context.
-        metadata: Optional key/value metadata.
+        metadata: Optional key/value metadata. project_id defaults to this client's project.
         from_agent: Sender id; defaults to REMEMBRA_AGENT_ID.
         expires_in: Optional expiry ("12h", "7d", "2w"); expired rows are hidden.
 
@@ -1520,11 +1520,17 @@ def send_to_inbox(
             )
         if sender == "unknown":
             warnings.append("Sender is 'unknown' because REMEMBRA_AGENT_ID is not set; the recipient cannot reply.")
+        # Tag the message with this client's project so project-restricted
+        # readers (e.g. the Claude/ChatGPT connector) can see it.
+        tagged = dict(metadata or {})
+        project = getattr(client, "project", None)
+        if project and not tagged.get("project_id"):
+            tagged["project_id"] = project
         result = client.send_to_inbox(
             to_agent=to_agent.strip(),
             subject=subject,
             body=body,
-            metadata=metadata,
+            metadata=tagged,
             from_agent=sender,
             expires_at=expires_at,
         )

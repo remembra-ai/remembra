@@ -522,6 +522,35 @@ class Settings(BaseSettings):
         description="Redact credentials (API keys, tokens, private keys) from memory content on write and on read.",
     )
 
+    # -----------------------------------------------------------------------
+    # Remote MCP connector for the Claude apps and ChatGPT (OAuth 2.1)
+    # -----------------------------------------------------------------------
+    connector_enabled: bool = Field(
+        False,
+        description=(
+            "Serve the remote MCP connector at /mcp with its OAuth 2.1 authorization server "
+            "(/oauth/*, /.well-known/oauth-*). Requires auth_enabled and public_url."
+        ),
+    )
+    public_url: str | None = Field(
+        None,
+        description=(
+            "Public HTTPS origin of this API as clients reach it, e.g. https://api.remembra.dev. "
+            "It is the OAuth issuer and the base of the connector resource URL (<public_url>/mcp). "
+            "Never derived from request headers."
+        ),
+    )
+    connector_redirect_uris: list[str] = Field(
+        default_factory=list,
+        description="Extra exact redirect URIs dynamic client registration accepts, on top of the built-in Claude/ChatGPT ones.",
+    )
+    connector_allow_loopback_redirects: bool = Field(
+        True,
+        description="Accept http://localhost / 127.0.0.1 / [::1] redirect URIs (any port) for local clients such as Claude Code.",
+    )
+    connector_access_token_ttl_seconds: int = Field(3600, ge=60, le=86400, description="Connector access-token lifetime.")
+    connector_refresh_token_ttl_days: int = Field(30, ge=1, le=365, description="Connector refresh-token lifetime (sliding).")
+
     # Input Sanitization
     sanitization_enabled: bool = Field(True, description="Enable input sanitization and trust scoring")
     trust_score_threshold: float = Field(0.5, description="Content below this trust score is flagged as suspicious")
@@ -687,6 +716,13 @@ class Settings(BaseSettings):
             object.__setattr__(self, "typesafe_mode", mode)
         if self.grounding_action not in {"drop", "flag"}:
             raise ValueError("grounding_action must be 'drop' or 'flag'")
+
+        if self.public_url is not None:
+            from remembra.connector.policy import normalize_public_url
+
+            object.__setattr__(self, "public_url", normalize_public_url(self.public_url))
+        if self.connector_enabled and not self.public_url:
+            raise ValueError("connector_enabled requires public_url (e.g. REMEMBRA_PUBLIC_URL=https://api.example.com)")
 
         # Filter out localhost from CORS origins in production mode
         if not self.debug and self.cors_filter_localhost_in_production:

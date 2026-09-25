@@ -832,7 +832,14 @@ class RelayService:
         handoff's failing/next items as possibly stale when it differs.
         """
         brief = await self.sessions.brief(
-            user_id=user_id, project_id=project_id, agent_id=agent_id, recent_n=recent_n, inbox_limit=inbox_limit
+            user_id=user_id,
+            project_id=project_id,
+            agent_id=agent_id,
+            recent_n=recent_n,
+            inbox_limit=inbox_limit,
+            # Project-restricted callers (scoped keys, connector grants) only see
+            # inbox messages tagged with a project they may access.
+            inbox_project_ids=list(allowed) if allowed else None,
         )
         linked = await self.linked_with_headlines(user_id, project_id, allowed) if project_id else []
         warnings: list[str] = list(brief.get("warnings") or [])

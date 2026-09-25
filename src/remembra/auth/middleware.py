@@ -1,7 +1,10 @@
 """FastAPI authentication middleware and dependencies."""
 
+import contextvars
 import hmac
 import ipaddress
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Annotated, Any
@@ -31,6 +34,29 @@ class AuthenticatedUser:
     scopes: list[str] | None = None  # Explicit scope restrictions
     project_ids: list[str] | None = None  # Optional project restrictions
     agent_id: str | None = None  # Agent-scoped key: relay writes are attributed to this agent
+
+
+# In-process principal for the remote MCP connector (remembra.connector).
+#
+# Connector tools call the REST routes in-process (ASGI, no network) so every
+# policy those routes enforce — RBAC, project restriction, PII, sanitizer,
+# limits, audit — applies unchanged. The connector's OAuth access tokens are
+# NOT accepted as HTTP credentials anywhere: only code in this process can set
+# this variable, for the duration of one in-process call, with a principal it
+# built from a validated grant (least-privilege scopes, bound projects).
+_connector_principal: contextvars.ContextVar["AuthenticatedUser | None"] = contextvars.ContextVar(
+    "remembra_connector_principal", default=None
+)
+
+
+@contextmanager
+def connector_principal(user: "AuthenticatedUser") -> Iterator[None]:
+    """Authenticate in-process REST calls made inside this block as ``user``."""
+    token = _connector_principal.set(user)
+    try:
+        yield
+    finally:
+        _connector_principal.reset(token)
 
 
 def resolve_api_key(request: Request, api_key: str | None) -> str | None:
@@ -276,6 +302,11 @@ async def get_current_user(
 
     If auth is disabled (dev mode), returns a default user.
     """
+    principal = _connector_principal.get()
+    if principal is not None:
+        _mark_rate_limit_identity(request, principal.user_id)
+        return principal
+
     settings = get_settings()
 
     # If auth is disabled (development), use default user
