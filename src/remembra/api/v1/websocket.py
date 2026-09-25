@@ -1,21 +1,45 @@
-"""WebSocket endpoint for real-time memory updates.
+"""WebSocket endpoint for real-time memory updates and crew streams.
 
 Security model (SEC-1):
 
 * Every connection is authenticated exactly like REST (API key or dashboard
-  JWT, including revocation / deactivation checks) and needs ``memory:recall``.
-* Events are routed by the server-derived owner ``user_id`` — never by a
+  JWT, including revocation / deactivation checks) and needs ``memory:recall``
+  (memory events) or ``crew:read`` (crew subscriptions).
+* Memory events are routed by the server-derived owner ``user_id`` — never by a
   client-chosen namespace — so a client can only ever receive its own tenant's
   events. Project-restricted keys only receive events for their projects, and
   subscribing to a project outside the key's allow-list is refused.
 * Credentials may be sent as headers (``X-API-Key`` / ``Authorization``) or in a
   first ``{"type": "auth", ...}`` message, so browsers never have to put a token
-  in the URL. Query-string credentials are still accepted for older clients.
+  in the URL. Query-string credentials are still accepted for older memory
+  clients, but **refused for crew subscriptions**.
+* The credential is re-validated every 60 s (key revoked, account deactivated,
+  JWT blacklisted or invalidated, crew membership or project access lost); a
+  failure closes the socket with 4003. ``ConnectionManager.revoke`` closes
+  affected sockets immediately (key revocation, membership changes).
+
+Crew streams (Crew mode §4.4, contract ``docs/crew/snapshot.md``):
+
+* ``{"type":"subscribe","channel":"crew","crew_id":"crw_…","since_seq":N,"topics":["crew"]}``
+  requires ``crew:read`` and crew membership (unknown and forbidden crews look
+  the same). The server replays events after ``since_seq`` (at most 500, else
+  ``resync_required``), then streams live events strictly by seq.
+* ``{"type":"subscribe","channel":"crew","crew_id":"*","topics":["crew.summary"]}``
+  streams counts only for every readable crew (filtered by ``project_ids``).
+* ``{"type":"presence","crew_id":…,"lanes":[…]}`` from crewd (``crew:write``)
+  is fanned out to that crew's subscribers, at most once per session per 5 s;
+  ``state``/``stuck`` are always the server's values. Never stored or replayed.
+* Limits: 20 crew subscriptions per connection, 10 crew connections per user,
+  30 replay subscribes per minute per user; each subscription queues at most
+  1000 frames (overflow → ``resync_required``).
 """
 
 import asyncio
 import json
-from dataclasses import dataclass
+import time
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
@@ -31,6 +55,9 @@ from remembra.auth.middleware import (
 )
 from remembra.config import get_settings
 from remembra.core.time import utcnow
+from remembra.crew import schemas as crew_schemas
+from remembra.crew.bus import CrewBus, CrewRef, crew_for_reader, presence_sessions, readable_crews, summary_items
+from remembra.crew.events import CrewDatabase, crew_head, fetch_events
 
 log = structlog.get_logger(__name__)
 
@@ -41,6 +68,22 @@ AUTH_MESSAGE_TIMEOUT_SECONDS = 10.0
 CLOSE_UNAUTHORIZED = 4001
 CLOSE_FORBIDDEN = 4003
 
+CREW_READ = "crew:read"
+CREW_WRITE = "crew:write"
+
+REVALIDATE_INTERVAL_S = 60.0
+CREW_QUEUE_MAX = 1000
+MAX_CREW_SUBS_PER_CONNECTION = 20
+MAX_CREW_CONNECTIONS_PER_USER = 10
+REPLAY_SUBSCRIBES_PER_MINUTE = 30
+PRESENCE_MIN_INTERVAL_S = 5.0
+SUMMARY_DEBOUNCE_S = 1.0
+REPLAY_MAX = crew_schemas.REPLAY_MAX_EVENTS
+
+
+def _now_iso() -> str:
+    return utcnow().isoformat() + "Z"
+
 
 @dataclass(eq=False)
 class _Subscriber:
@@ -48,6 +91,7 @@ class _Subscriber:
     user_id: str
     allowed_projects: tuple[str, ...] | None  # None = unrestricted key
     project_filter: str | None
+    send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def wants(self, project_id: str | None) -> bool:
         if self.allowed_projects is not None and project_id not in self.allowed_projects:
@@ -55,12 +99,205 @@ class _Subscriber:
         return not (self.project_filter and project_id and project_id != self.project_filter)
 
 
+@dataclass(frozen=True)
+class _Credential:
+    api_key: str | None
+    token: str | None
+    source: str  # header | message | query | none
+
+
+class _Connection:
+    """One /ws socket: its principal, credential (for re-validation) and crew subscriptions."""
+
+    def __init__(self, websocket: WebSocket, user: AuthenticatedUser, credential: _Credential, send_lock: asyncio.Lock) -> None:
+        self.websocket = websocket
+        self.user = user
+        self.credential = credential
+        self.send_lock = send_lock
+        self.subs: dict[str, _CrewSub] = {}
+        self.summary: _SummarySub | None = None
+        self.memory_subscriber: _Subscriber | None = None
+        self.closed = False
+        self.close_code: int | None = None
+
+    @property
+    def crew_sub_count(self) -> int:
+        return len(self.subs) + (1 if self.summary is not None else 0)
+
+    async def send_json(self, obj: Any) -> bool:
+        return await self.send_text(json.dumps(obj))
+
+    async def send_text(self, text: str) -> bool:
+        if self.closed:
+            return False
+        try:
+            async with self.send_lock:
+                if self.websocket.client_state != WebSocketState.CONNECTED:
+                    return False
+                await self.websocket.send_text(text)
+            return True
+        except Exception as e:
+            log.warning("websocket_send_failed", error_type=type(e).__name__)
+            return False
+
+    async def close(self, code: int, reason: str) -> None:
+        if self.closed:
+            return
+        self.closed = True
+        self.close_code = code
+        try:
+            async with self.send_lock:
+                if self.websocket.client_state == WebSocketState.CONNECTED:
+                    await self.websocket.close(code=code, reason=reason)
+        except Exception as e:
+            log.warning("websocket_close_failed", error_type=type(e).__name__)
+
+    async def crew_error(self, crew_id: Any, code: str, message: str, **extra: Any) -> None:
+        data: dict[str, Any] = {"channel": "crew", "crew_id": crew_id, "code": code, "message": message, **extra}
+        await self.send_json({"type": "error", "data": data, "timestamp": _now_iso()})
+
+
+_OVERFLOW = object()
+
+
+class _CrewSub:
+    """One crew subscription: a bounded queue drained by a pump task, strictly by seq."""
+
+    def __init__(self, conn: _Connection, crew: CrewRef, db: CrewDatabase, manager: "ConnectionManager") -> None:
+        self.conn = conn
+        self.crew_id = crew.crew_id
+        self.project_id = crew.project_id
+        self.db = db
+        self.manager = manager
+        self.queue: asyncio.Queue[Any] = asyncio.Queue(maxsize=CREW_QUEUE_MAX)
+        self.next_seq = 0
+        self.pump: asyncio.Task[None] | None = None
+        self.overflowed = False
+        self.active = True
+
+    def offer(self, item: Any) -> None:
+        if not self.active or self.overflowed:
+            return
+        try:
+            self.queue.put_nowait(item)
+        except asyncio.QueueFull:
+            self.overflowed = True
+            while not self.queue.empty():
+                self.queue.get_nowait()
+            self.queue.put_nowait(_OVERFLOW)
+
+    def start(self) -> None:
+        self.pump = asyncio.create_task(self._run(), name=f"crew-ws-pump-{self.crew_id}")
+
+    async def _send_event(self, env: Any) -> bool:
+        return await self.conn.send_json({"type": "crew.event", "crew_id": self.crew_id, "data": env})
+
+    async def resync(self, reason: str) -> None:
+        head = await crew_head(self.db.conn, self.crew_id)
+        await self.conn.send_json(
+            {"type": "resync_required", "crew_id": self.crew_id, "reason": reason, "last_seq": head.last_seq if head else 0}
+        )
+        self.manager.remove_crew_sub(self, cancel=False)
+
+    async def _run(self) -> None:
+        try:
+            while self.active:
+                item = await self.queue.get()
+                if item is _OVERFLOW:
+                    await self.resync("overflow")
+                    return
+                kind, frame = item
+                if kind == "presence":
+                    await self.conn.send_json(frame)
+                    continue
+                seq = int(frame["seq"])
+                if seq < self.next_seq:
+                    continue  # already replayed
+                if seq > self.next_seq:
+                    missing = await fetch_events(
+                        self.db.conn, self.crew_id, after_seq=self.next_seq - 1, upto_seq=seq - 1, limit=REPLAY_MAX
+                    )
+                    if len(missing) != seq - self.next_seq:
+                        await self.resync("gap_too_large")
+                        return
+                    for env in missing:
+                        if not await self._send_event(env):
+                            return
+                if not await self._send_event(frame):
+                    return
+                self.next_seq = seq + 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            log.error("crew_ws_pump_failed", crew_id=self.crew_id, error_type=type(e).__name__, error=str(e))
+            self.manager.remove_crew_sub(self, cancel=False)
+            # Tell the client its stream stopped so it refetches the snapshot and resubscribes.
+            await self.conn.send_json(
+                {"type": "resync_required", "crew_id": self.crew_id, "reason": "overflow", "last_seq": max(0, self.next_seq - 1)}
+            )
+
+
+class _SummarySub:
+    """``crew_id="*"`` subscription: counts only, pushed (debounced) when a readable crew changes."""
+
+    def __init__(self, conn: _Connection, db: CrewDatabase, manager: "ConnectionManager") -> None:
+        self.conn = conn
+        self.db = db
+        self.manager = manager
+        self.crews: dict[str, CrewRef] = {}
+        self.dirty: set[str] = set()
+        self.timer: asyncio.TimerHandle | None = None
+
+    async def refresh(self) -> None:
+        """Recompute the readable crews and send the full summary."""
+        user = self.conn.user
+        crews = await readable_crews(self.db.conn, user.user_id, user.project_ids or None)
+        self.crews = {c.crew_id: c for c in crews}
+        items = await summary_items(self.db.conn, crews)
+        await self.conn.send_json({"type": "crew.summary", "crews": items})
+
+    def mark_dirty(self, crew_id: str) -> None:
+        self.dirty.add(crew_id)
+        if self.timer is None:
+            loop = asyncio.get_running_loop()
+            self.timer = loop.call_later(SUMMARY_DEBOUNCE_S, self._fire)
+
+    def _fire(self) -> None:
+        self.timer = None
+        self.manager.spawn(self.flush(), name="crew-summary-flush")
+
+    async def flush(self) -> None:
+        ids, self.dirty = self.dirty, set()
+        crews = [self.crews[i] for i in sorted(ids) if i in self.crews]
+        if not crews or self.conn.closed:
+            return
+        items = await summary_items(self.db.conn, crews)
+        await self.conn.send_json({"type": "crew.summary", "crews": items})
+
+    def cancel(self) -> None:
+        if self.timer is not None:
+            self.timer.cancel()
+            self.timer = None
+
+
 class ConnectionManager:
-    """Tenant-isolated fan-out of memory events to WebSocket subscribers."""
+    """Tenant-isolated fan-out of memory events and crew streams to WebSocket subscribers."""
 
     def __init__(self) -> None:
         self._by_user: dict[str, set[_Subscriber]] = {}
         self._lock = asyncio.Lock()
+        # Crew mode (§4.4)
+        self._connections: set[_Connection] = set()
+        self._by_crew: dict[str, set[_CrewSub]] = {}
+        self._summary_subs: set[_SummarySub] = set()
+        self._crew_conns: dict[str, set[_Connection]] = {}
+        self._replays: dict[str, deque[float]] = {}
+        self._presence_last: dict[tuple[str, str], float] = {}
+        self._presence_pending: dict[str, dict[str, dict[str, Any]]] = {}
+        self._presence_timers: dict[str, asyncio.TimerHandle] = {}
+        self._bg: set[asyncio.Task[Any]] = set()
+
+    # ---- memory events -------------------------------------------------
 
     async def register(self, subscriber: _Subscriber) -> None:
         async with self._lock:
@@ -96,7 +333,7 @@ class ConnectionManager:
             {
                 "type": event_type,
                 "data": data,
-                "timestamp": utcnow().isoformat() + "Z",
+                "timestamp": _now_iso(),
                 "namespace": f"{user_id}:{project_id or '*'}",
                 "project_id": project_id,
             }
@@ -111,9 +348,10 @@ class ConnectionManager:
             if not sub.wants(project_id):
                 continue
             try:
-                if sub.websocket.client_state == WebSocketState.CONNECTED:
-                    await sub.websocket.send_text(message)
-                    sent += 1
+                async with sub.send_lock:
+                    if sub.websocket.client_state == WebSocketState.CONNECTED:
+                        await sub.websocket.send_text(message)
+                        sent += 1
             except Exception as e:
                 log.warning("websocket_send_failed", error_type=type(e).__name__)
                 dead.append(sub)
@@ -130,6 +368,165 @@ class ConnectionManager:
             if user_id is not None:
                 return {"connections": len(self._by_user.get(user_id, ()))}
             return {"total_connections": self._count_all(), "tenants": len(self._by_user)}
+
+    # ---- connections and revocation -----------------------------------
+
+    def spawn(self, coro: Any, *, name: str) -> None:
+        task = asyncio.create_task(coro, name=name)
+        self._bg.add(task)
+        task.add_done_callback(self._bg.discard)
+
+    def add_connection(self, conn: _Connection) -> None:
+        self._connections.add(conn)
+
+    def remove_connection(self, conn: _Connection) -> None:
+        for sub in list(conn.subs.values()):
+            self.remove_crew_sub(sub)
+        self.remove_summary_sub(conn)
+        self._connections.discard(conn)
+
+    async def close_connection(self, conn: _Connection, code: int, reason: str) -> None:
+        for sub in list(conn.subs.values()):
+            self.remove_crew_sub(sub)
+        self.remove_summary_sub(conn)
+        await conn.close(code, reason)
+        log.info("websocket_closed_by_server", user_id=conn.user.user_id, code=code, reason=reason)
+
+    async def revoke(
+        self,
+        *,
+        user_id: str | None = None,
+        api_key_id: str | None = None,
+        crew_id: str | None = None,
+        reason: str = "access revoked",
+    ) -> int:
+        """Close (4003) every socket matching all given filters. Returns how many were closed.
+
+        Call on key revocation (``api_key_id``), crew membership or share changes
+        (``user_id`` + ``crew_id``) and account deactivation (``user_id``).
+        """
+        if user_id is None and api_key_id is None and crew_id is None:
+            return 0
+        targets = []
+        for conn in list(self._connections):
+            if conn.closed:
+                continue
+            if user_id is not None and conn.user.user_id != user_id:
+                continue
+            if api_key_id is not None and conn.user.api_key_id != api_key_id:
+                continue
+            if crew_id is not None and crew_id not in conn.subs and not (conn.summary and crew_id in conn.summary.crews):
+                continue
+            targets.append(conn)
+        for conn in targets:
+            await self.close_connection(conn, CLOSE_FORBIDDEN, reason)
+        return len(targets)
+
+    # ---- crew subscriptions -------------------------------------------
+
+    def attach_crew_bus(self, bus: CrewBus) -> Callable[[], None]:
+        return bus.subscribe(self.dispatch_crew_event)
+
+    def dispatch_crew_event(self, envelope: Any) -> None:
+        """CrewBus listener: enqueue a committed event for every subscriber of its crew (non-blocking)."""
+        crew_id = envelope["crew_id"]
+        for sub in list(self._by_crew.get(crew_id, ())):
+            sub.offer(("event", envelope))
+        for summary in list(self._summary_subs):
+            if crew_id in summary.crews:
+                summary.mark_dirty(crew_id)
+
+    def crew_connection_count(self, user_id: str) -> int:
+        return len(self._crew_conns.get(user_id, ()))
+
+    def add_crew_sub(self, sub: _CrewSub) -> None:
+        sub.conn.subs[sub.crew_id] = sub
+        self._by_crew.setdefault(sub.crew_id, set()).add(sub)
+        self._crew_conns.setdefault(sub.conn.user.user_id, set()).add(sub.conn)
+
+    def remove_crew_sub(self, sub: _CrewSub, *, cancel: bool = True) -> None:
+        sub.active = False
+        if sub.conn.subs.get(sub.crew_id) is sub:
+            del sub.conn.subs[sub.crew_id]
+        subs = self._by_crew.get(sub.crew_id)
+        if subs is not None:
+            subs.discard(sub)
+            if not subs:
+                del self._by_crew[sub.crew_id]
+        if cancel and sub.pump is not None and sub.pump is not asyncio.current_task():
+            sub.pump.cancel()
+        self._drop_crew_conn_if_idle(sub.conn)
+
+    def add_summary_sub(self, summary: _SummarySub) -> None:
+        summary.conn.summary = summary
+        self._summary_subs.add(summary)
+        self._crew_conns.setdefault(summary.conn.user.user_id, set()).add(summary.conn)
+
+    def remove_summary_sub(self, conn: _Connection) -> None:
+        if conn.summary is not None:
+            conn.summary.cancel()
+            self._summary_subs.discard(conn.summary)
+            conn.summary = None
+        self._drop_crew_conn_if_idle(conn)
+
+    def _drop_crew_conn_if_idle(self, conn: _Connection) -> None:
+        if conn.crew_sub_count:
+            return
+        conns = self._crew_conns.get(conn.user.user_id)
+        if conns is not None:
+            conns.discard(conn)
+            if not conns:
+                del self._crew_conns[conn.user.user_id]
+
+    def allow_replay(self, user_id: str, now: float | None = None) -> float:
+        """0 if a replay subscribe is allowed (and counted), else seconds until the next one is."""
+        now = time.monotonic() if now is None else now
+        window = self._replays.setdefault(user_id, deque())
+        while window and now - window[0] >= 60.0:
+            window.popleft()
+        if len(window) >= REPLAY_SUBSCRIBES_PER_MINUTE:
+            return max(0.001, 60.0 - (now - window[0]))
+        window.append(now)
+        return 0.0
+
+    # ---- presence ------------------------------------------------------
+
+    def offer_presence(self, crew_id: str, lanes: list[dict[str, Any]], now: float | None = None) -> int:
+        """Fan out lanes now, or hold the latest per session until its 5 s window opens. Returns lanes sent now."""
+        now = time.monotonic() if now is None else now
+        immediate: list[dict[str, Any]] = []
+        for lane in lanes:
+            sid = lane["session_id"]
+            key = (crew_id, sid)
+            last = self._presence_last.get(key)
+            if last is None or now - last >= PRESENCE_MIN_INTERVAL_S:
+                immediate.append(lane)
+                self._presence_last[key] = now
+                self._presence_pending.get(crew_id, {}).pop(sid, None)
+            else:
+                self._presence_pending.setdefault(crew_id, {})[sid] = lane
+                self._schedule_presence_flush(crew_id, last + PRESENCE_MIN_INTERVAL_S - now)
+        if len(self._presence_last) > 10_000:
+            stale = [k for k, t in self._presence_last.items() if now - t > 600]
+            for k in stale:
+                del self._presence_last[k]
+        if immediate:
+            frame = {"type": "presence", "crew_id": crew_id, "lanes": immediate}
+            for sub in list(self._by_crew.get(crew_id, ())):
+                sub.offer(("presence", frame))
+        return len(immediate)
+
+    def _schedule_presence_flush(self, crew_id: str, delay: float) -> None:
+        if crew_id in self._presence_timers:
+            return
+        loop = asyncio.get_running_loop()
+        self._presence_timers[crew_id] = loop.call_later(max(0.0, delay), self._flush_presence, crew_id)
+
+    def _flush_presence(self, crew_id: str) -> None:
+        self._presence_timers.pop(crew_id, None)
+        pending = self._presence_pending.pop(crew_id, {})
+        if pending:
+            self.offer_presence(crew_id, list(pending.values()))
 
 
 # Global connection manager instance
@@ -173,6 +570,190 @@ def _project_allowed(user: AuthenticatedUser, project_id: str | None) -> bool:
     return not (project_id and user.project_ids and project_id not in user.project_ids)
 
 
+def _crew_db(websocket: WebSocket) -> CrewDatabase | None:
+    db: CrewDatabase | None = getattr(websocket.app.state, "crew_db", None)
+    return db
+
+
+# ---- crew handlers ----------------------------------------------------------
+
+
+async def _handle_crew_subscribe(conn: _Connection, msg: dict[str, Any]) -> None:
+    crew_id = msg.get("crew_id")
+    errors = crew_schemas.validate(msg, crew_schemas.WS_SUBSCRIBE)
+    if errors:
+        await conn.crew_error(crew_id, "invalid", "invalid crew subscription", errors=errors[:5])
+        return
+    if conn.credential.source == "query":
+        await conn.crew_error(crew_id, "query_credentials", "crew subscriptions require header or first-message credentials")
+        return
+    if not has_permission(conn.user, CREW_READ):
+        await conn.crew_error(crew_id, "forbidden", "crew:read permission required")
+        return
+    db = _crew_db(conn.websocket)
+    if db is None:
+        await conn.crew_error(crew_id, "unavailable", "crew mode is not enabled")
+        return
+    topics = set(msg["topics"])
+    replacing = crew_id in conn.subs or (crew_id == "*" and conn.summary is not None)
+    if not replacing and conn.crew_sub_count >= MAX_CREW_SUBS_PER_CONNECTION:
+        await conn.crew_error(crew_id, "limit", f"at most {MAX_CREW_SUBS_PER_CONNECTION} crew subscriptions per connection")
+        return
+    if conn.crew_sub_count == 0 and connection_manager.crew_connection_count(conn.user.user_id) >= MAX_CREW_CONNECTIONS_PER_USER:
+        await conn.crew_error(crew_id, "limit", f"at most {MAX_CREW_CONNECTIONS_PER_USER} crew connections per user")
+        return
+    if crew_id == "*":
+        if topics != {"crew.summary"}:
+            await conn.crew_error(crew_id, "invalid", 'crew_id "*" supports only the crew.summary topic')
+            return
+        await _subscribe_summary(conn, db)
+        return
+    if topics != {"crew"}:
+        await conn.crew_error(crew_id, "invalid", "a crew subscription supports only the crew topic")
+        return
+    await _subscribe_crew(conn, db, str(crew_id), msg.get("since_seq"))
+
+
+async def _subscribe_summary(conn: _Connection, db: CrewDatabase) -> None:
+    connection_manager.remove_summary_sub(conn)
+    summary = _SummarySub(conn, db, connection_manager)
+    connection_manager.add_summary_sub(summary)
+    await conn.send_json({"type": "crew.subscribed", "crew_id": "*", "since_seq": 0, "replayed": 0})
+    await summary.refresh()
+
+
+async def _subscribe_crew(conn: _Connection, db: CrewDatabase, crew_id: str, since_seq: int | None) -> None:
+    user = conn.user
+    crew = await crew_for_reader(db.conn, crew_id, user.user_id, user.project_ids or None)
+    if crew is None:
+        await conn.crew_error(crew_id, "not_found", "crew not found")
+        return
+    if since_seq is not None:
+        wait = connection_manager.allow_replay(user.user_id)
+        if wait:
+            await conn.crew_error(crew_id, "rate_limited", "too many replay subscribes", retry_after_s=round(wait, 3))
+            return
+    old = conn.subs.get(crew_id)
+    if old is not None:
+        connection_manager.remove_crew_sub(old)
+    sub = _CrewSub(conn, crew, db, connection_manager)
+    connection_manager.add_crew_sub(sub)  # live events queue from here on; replay overlap is skipped by seq
+    head = await crew_head(db.conn, crew_id)
+    last = head.last_seq if head else 0
+    start = last if since_seq is None else int(since_seq)
+    if start > last:
+        await sub.resync("server_restart")
+        return
+    if last - start > REPLAY_MAX:
+        await sub.resync("gap_too_large")
+        return
+    events = await fetch_events(db.conn, crew_id, after_seq=start, upto_seq=last, limit=REPLAY_MAX) if last > start else []
+    if len(events) != last - start:  # part of the range was pruned by retention
+        await sub.resync("gap_too_large")
+        return
+    await conn.send_json({"type": "crew.subscribed", "crew_id": crew_id, "since_seq": start, "replayed": len(events)})
+    for env in events:
+        await conn.send_json({"type": "crew.event", "crew_id": crew_id, "data": env})
+    sub.next_seq = last + 1
+    if sub.active:
+        sub.start()
+
+
+async def _handle_crew_unsubscribe(conn: _Connection, msg: dict[str, Any]) -> None:
+    crew_id = msg.get("crew_id")
+    if crew_id == "*":
+        connection_manager.remove_summary_sub(conn)
+    elif isinstance(crew_id, str) and crew_id in conn.subs:
+        connection_manager.remove_crew_sub(conn.subs[crew_id])
+
+
+async def _handle_presence(conn: _Connection, msg: dict[str, Any]) -> None:
+    crew_id = msg.get("crew_id")
+    errors = crew_schemas.validate(msg, crew_schemas.WS_FRAMES["presence"])
+    if errors:
+        await conn.crew_error(crew_id, "invalid", "invalid presence frame", errors=errors[:5])
+        return
+    if conn.credential.source == "query":
+        await conn.crew_error(crew_id, "query_credentials", "presence requires header or first-message credentials")
+        return
+    if not has_permission(conn.user, CREW_WRITE):
+        await conn.crew_error(crew_id, "forbidden", "crew:write permission required")
+        return
+    db = _crew_db(conn.websocket)
+    if db is None:
+        await conn.crew_error(crew_id, "unavailable", "crew mode is not enabled")
+        return
+    user = conn.user
+    crew = await crew_for_reader(db.conn, str(crew_id), user.user_id, user.project_ids or None)
+    if crew is None:
+        await conn.crew_error(crew_id, "not_found", "crew not found")
+        return
+    lanes_in: list[dict[str, Any]] = msg["lanes"]
+    rows = await presence_sessions(db.conn, crew.crew_id, [lane["session_id"] for lane in lanes_in])
+    lanes: list[dict[str, Any]] = []
+    rejected: list[str] = []
+    for lane in lanes_in:
+        row = rows.get(lane["session_id"])
+        if row is None or row.user_id != user.user_id or row.state in ("ended", "lost"):
+            rejected.append(lane["session_id"])
+            continue
+        # Presence state is server-computed (§10.1): never trust the client's state/stuck.
+        lanes.append({**lane, "state": row.state, "stuck": row.stuck})
+    if lanes:
+        connection_manager.offer_presence(crew.crew_id, lanes)
+    if rejected:
+        await conn.crew_error(crew_id, "invalid", "presence lanes rejected", session_ids=rejected[:20])
+
+
+# ---- re-validation ----------------------------------------------------------
+
+
+async def _revalidate(conn: _Connection) -> str | None:
+    """Re-check the credential and every grant it relies on. Returns a failure reason or None."""
+    cred = conn.credential
+    user = await _authenticate(conn.websocket, cred.api_key, cred.token)
+    if user is None or user.user_id != conn.user.user_id:
+        return "credential no longer valid"
+    conn.user = user
+    sub = conn.memory_subscriber
+    if sub is not None:
+        if not has_permission(user, "memory:recall") or not _project_allowed(user, sub.project_filter):
+            return "memory access revoked"
+        sub.allowed_projects = tuple(user.project_ids) if user.project_ids else None
+    if conn.subs or conn.summary is not None:
+        if not has_permission(user, CREW_READ):
+            return "crew access revoked"
+        db = _crew_db(conn.websocket)
+        if db is None:
+            return "crew mode disabled"
+        for crew_id in list(conn.subs):
+            if await crew_for_reader(db.conn, crew_id, user.user_id, user.project_ids or None) is None:
+                return "crew access revoked"
+        if conn.summary is not None:
+            await conn.summary.refresh()
+    return None
+
+
+async def _revalidate_loop(conn: _Connection) -> None:
+    while not conn.closed:
+        await asyncio.sleep(REVALIDATE_INTERVAL_S)
+        if conn.closed:
+            return
+        try:
+            reason = await _revalidate(conn)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # fail closed
+            log.error("websocket_revalidate_failed", error_type=type(e).__name__)
+            reason = "credential check failed"
+        if reason is not None:
+            await connection_manager.close_connection(conn, CLOSE_FORBIDDEN, reason)
+            return
+
+
+# ---- endpoint ---------------------------------------------------------------
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(
     websocket: WebSocket,
@@ -181,15 +762,19 @@ async def websocket_endpoint(
     api_key: str | None = Query(None, description="Deprecated: prefer header or auth message"),
     token: str | None = Query(None, description="Deprecated: prefer header or auth message"),
 ) -> None:
-    """Real-time memory events for the authenticated tenant.
+    """Real-time memory events and crew streams for the authenticated principal.
 
-    Events: ``memory.created``, ``memory.updated``, ``memory.superseded``,
+    Memory events: ``memory.created``, ``memory.updated``, ``memory.superseded``,
     ``memory.deleted``. Send ``ping`` for ``pong``; send
     ``{"type": "subscribe", "project_id": "..."}`` to change the project filter.
+    Crew frames: see the module docstring.
     """
     await websocket.accept()
 
     header_key, header_token = _credentials_from_headers(websocket)
+    source = "header" if (header_key or header_token) else "none"
+    if source == "none" and (api_key or token):
+        source = "query"
     api_key = header_key or api_key
     token = header_token or token
     if websocket.query_params.get("api_key") or websocket.query_params.get("token"):
@@ -204,6 +789,7 @@ async def websocket_endpoint(
                 api_key = msg.get("api_key") or None
                 token = msg.get("token") or None
                 project_id = msg.get("project_id", project_id)
+                source = "message"
         except (TimeoutError, json.JSONDecodeError, WebSocketDisconnect):
             pass
 
@@ -211,74 +797,100 @@ async def websocket_endpoint(
     if user is None:
         await websocket.close(code=CLOSE_UNAUTHORIZED, reason="Authentication required")
         return
-    if not has_permission(user, "memory:recall"):
+    can_memory = has_permission(user, "memory:recall")
+    if not can_memory and not has_permission(user, CREW_READ):
         await websocket.close(code=CLOSE_FORBIDDEN, reason="memory:recall permission required")
         return
     if not _project_allowed(user, project_id):
         await websocket.close(code=CLOSE_FORBIDDEN, reason="No access to project")
         return
 
-    subscriber = _Subscriber(
-        websocket=websocket,
-        user_id=user.user_id,
-        allowed_projects=tuple(user.project_ids) if user.project_ids else None,
-        project_filter=project_id,
-    )
-    await connection_manager.register(subscriber)
+    send_lock = asyncio.Lock()
+    conn = _Connection(websocket, user, _Credential(api_key, token, source), send_lock)
+    connection_manager.add_connection(conn)
+    subscriber: _Subscriber | None = None
+    if can_memory:
+        subscriber = _Subscriber(
+            websocket=websocket,
+            user_id=user.user_id,
+            allowed_projects=tuple(user.project_ids) if user.project_ids else None,
+            project_filter=project_id,
+            send_lock=send_lock,
+        )
+        conn.memory_subscriber = subscriber
+        await connection_manager.register(subscriber)
+    revalidator = asyncio.create_task(_revalidate_loop(conn), name="ws-revalidate")
 
     def _ns() -> str:
-        return f"{user.user_id}:{subscriber.project_filter or '*'}"
+        return f"{user.user_id}:{subscriber.project_filter if subscriber and subscriber.project_filter else '*'}"
 
     try:
-        await websocket.send_json(
+        await conn.send_json(
             {
                 "type": "connected",
                 "data": {
                     "namespace": _ns(),
-                    "project_id": subscriber.project_filter,
+                    "project_id": subscriber.project_filter if subscriber else None,
                     "message": "Connected to Remembra real-time updates",
                 },
-                "timestamp": utcnow().isoformat() + "Z",
+                "timestamp": _now_iso(),
             }
         )
 
-        while True:
+        while not conn.closed:
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=60.0)
             except TimeoutError:
-                try:
-                    await websocket.send_text("ping")
-                except Exception:
+                if not await conn.send_text("ping"):
                     break
                 continue
+            if conn.closed:
+                break
 
             if data == "ping":
-                await websocket.send_text("pong")
+                await conn.send_text("pong")
                 continue
 
             try:
                 msg = json.loads(data)
             except json.JSONDecodeError:
                 continue
-            if not isinstance(msg, dict) or msg.get("type") != "subscribe":
+            if not isinstance(msg, dict):
+                continue
+            mtype = msg.get("type")
+            if msg.get("channel") == "crew" and mtype == "subscribe":
+                await _handle_crew_subscribe(conn, msg)
+                continue
+            if msg.get("channel") == "crew" and mtype == "unsubscribe":
+                await _handle_crew_unsubscribe(conn, msg)
+                continue
+            if mtype == "presence":
+                await _handle_presence(conn, msg)
+                continue
+            if mtype != "subscribe":
                 continue
 
+            if subscriber is None:
+                await conn.send_json(
+                    {"type": "error", "data": {"message": "memory:recall permission required"}, "timestamp": _now_iso()}
+                )
+                continue
             new_project = msg.get("project_id", subscriber.project_filter)
-            if not _project_allowed(user, new_project):
-                await websocket.send_json(
+            if not _project_allowed(conn.user, new_project):
+                await conn.send_json(
                     {
                         "type": "error",
                         "data": {"message": "No access to project", "project_id": new_project},
-                        "timestamp": utcnow().isoformat() + "Z",
+                        "timestamp": _now_iso(),
                     }
                 )
                 continue
             subscriber.project_filter = new_project
-            await websocket.send_json(
+            await conn.send_json(
                 {
                     "type": "subscribed",
                     "data": {"namespace": _ns(), "project_id": subscriber.project_filter},
-                    "timestamp": utcnow().isoformat() + "Z",
+                    "timestamp": _now_iso(),
                 }
             )
 
@@ -287,7 +899,10 @@ async def websocket_endpoint(
     except Exception as e:
         log.warning("websocket_error", error_type=type(e).__name__)
     finally:
-        await connection_manager.unregister(subscriber)
+        revalidator.cancel()
+        connection_manager.remove_connection(conn)
+        if subscriber is not None:
+            await connection_manager.unregister(subscriber)
 
 
 @router.get("/ws/stats", tags=["websocket"])
