@@ -1,0 +1,17 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-stopfailure_model/repo"
+  },
+  "event": "StopFailure",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-stopfailure_model/repo",
+    "error": "model_not_found",
+    "hook_event_name": "StopFailure",
+    "last_assistant_message": "There's an issue with the selected model (claude-sonnet-4-5). It may not exist or you may not have access to it. Run --model to pick a different model.",
+    "session_id": "76160f36-a0f4-410c-b112-b68066d4c3b1",
+    "transcript_path": "<S0_TMP>/mock-stopfailure_model/config/projects/-S0-TMP-mock-stopfailure-model-repo/76160f36-a0f4-410c-b112-b68066d4c3b1.jsonl"
+  },
+  "received_at": 1790375309.134901
+}

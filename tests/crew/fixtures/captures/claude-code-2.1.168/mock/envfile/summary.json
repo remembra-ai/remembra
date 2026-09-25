@@ -1,0 +1,152 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "SessionStart",
+      "hook_id": "a208432f-2a85-46ea-bdae-e9ce10cbda4e",
+      "hook_name": "SessionStart:startup",
+      "session_id": "a8bf48a9-e194-41cd-86e9-0abcf0bd4c55",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "48fe9eac-742a-4a3d-bae6-c831449320f5"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "SessionStart",
+      "hook_id": "a208432f-2a85-46ea-bdae-e9ce10cbda4e",
+      "hook_name": "SessionStart:startup",
+      "outcome": "success",
+      "output": "",
+      "session_id": "a8bf48a9-e194-41cd-86e9-0abcf0bd4c55",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "017a1157-3552-42d6-9013-b1697ae8e96c"
+    },
+    {
+      "hook_event": "PreToolUse",
+      "hook_id": "906567d4-50f8-480c-b924-963cb4ef4d5b",
+      "hook_name": "PreToolUse:Bash",
+      "session_id": "a8bf48a9-e194-41cd-86e9-0abcf0bd4c55",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "fcc26334-3794-450b-8945-5c66778ca9e4"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "PreToolUse",
+      "hook_id": "906567d4-50f8-480c-b924-963cb4ef4d5b",
+      "hook_name": "PreToolUse:Bash",
+      "outcome": "success",
+      "output": "",
+      "session_id": "a8bf48a9-e194-41cd-86e9-0abcf0bd4c55",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "a4133d09-1ffc-4f9c-8c50-6e242fd9727f"
+    },
+    {
+      "hook_event": "PostToolUse",
+      "hook_id": "428b099a-4568-481f-8786-3008475c7286",
+      "hook_name": "PostToolUse:Bash",
+      "session_id": "a8bf48a9-e194-41cd-86e9-0abcf0bd4c55",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "a74b637f-8a92-48bc-982a-2232a6cac6a2"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "PostToolUse",
+      "hook_id": "428b099a-4568-481f-8786-3008475c7286",
+      "hook_name": "PostToolUse:Bash",
+      "outcome": "success",
+      "output": "",
+      "session_id": "a8bf48a9-e194-41cd-86e9-0abcf0bd4c55",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "584b3f99-da37-4fa5-b0b3-e5c9172c00f8"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 115,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    },
+    {
+      "i": 1,
+      "last_message": {
+        "content": [
+          {
+            "cache_control": {
+              "type": "ephemeral"
+            },
+            "content": "<HOME>/.zshenv:.:1: no such file or directory: <HOME>/.cargo/env\ns0env7574289d",
+            "is_error": false,
+            "tool_use_id": "toolu_s0_fa8c105bcdd1",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 3,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "S0 ack",
+  "scenario": "envfile",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [
+    {
+      "cache_control": {
+        "type": "ephemeral"
+      },
+      "content": "<HOME>/.zshenv:.:1: no such file or directory: <HOME>/.cargo/env\ns0env7574289d",
+      "is_error": false,
+      "tool_use_id": "toolu_s0_fa8c105bcdd1",
+      "type": "tool_result"
+    }
+  ],
+  "verdict": {
+    "claude_env_file_set_for_sessionstart": true,
+    "duration_s": 0.7,
+    "env_value_in_bash_output": true,
+    "events": [
+      "SessionStart",
+      "PreToolUse",
+      "PostToolUse",
+      "SessionEnd"
+    ],
+    "ok": true,
+    "request_gaps_s": [
+      0.2
+    ],
+    "returncode": 0,
+    "sessionend_fired": true
+  }
+}

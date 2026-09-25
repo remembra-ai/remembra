@@ -1,0 +1,17 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-stopfailure_overloaded/repo"
+  },
+  "event": "StopFailure",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-stopfailure_overloaded/repo",
+    "error": "server_error",
+    "hook_event_name": "StopFailure",
+    "last_assistant_message": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment. If it persists, check your inference gateway (127.0.0.1:56550).",
+    "session_id": "be51e339-9ec4-4e3f-a996-58717d5700db",
+    "transcript_path": "<S0_TMP>/mock-stopfailure_overloaded/config/projects/-S0-TMP-mock-stopfailure-overloaded-repo/be51e339-9ec4-4e3f-a996-58717d5700db.jsonl"
+  },
+  "received_at": 1790375308.057429
+}

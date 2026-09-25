@@ -1,0 +1,20 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-async_rewake_quiet/repo"
+  },
+  "event": "Stop",
+  "payload": {
+    "background_tasks": [],
+    "cwd": "<S0_TMP>/mock-async_rewake_quiet/repo",
+    "hook_event_name": "Stop",
+    "last_assistant_message": "S0 ack",
+    "permission_mode": "acceptEdits",
+    "session_crons": [],
+    "session_id": "198799d3-5c8d-43df-b3f5-723f4010d695",
+    "stop_hook_active": false,
+    "transcript_path": "<S0_TMP>/mock-async_rewake_quiet/config/projects/-S0-TMP-mock-async-rewake-quiet-repo/198799d3-5c8d-43df-b3f5-723f4010d695.jsonl"
+  },
+  "received_at": 1790375283.944581
+}

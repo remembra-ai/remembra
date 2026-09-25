@@ -1,0 +1,16 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-stopfailure_billing/repo"
+  },
+  "event": "SessionEnd",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-stopfailure_billing/repo",
+    "hook_event_name": "SessionEnd",
+    "reason": "other",
+    "session_id": "36ebda65-84cb-4c9e-b329-e3ba18f97ac2",
+    "transcript_path": "<S0_TMP>/mock-stopfailure_billing/config/projects/-S0-TMP-mock-stopfailure-billing-repo/36ebda65-84cb-4c9e-b329-e3ba18f97ac2.jsonl"
+  },
+  "received_at": 1790375306.917131
+}

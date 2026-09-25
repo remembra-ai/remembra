@@ -1,0 +1,142 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "36dbcb58-9810-429c-908f-fc01372faaec",
+      "hook_name": "UserPromptSubmit",
+      "session_id": "f8ce960e-d0db-497b-a110-d781bdce2b9a",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "45fe4107-6d06-4632-8a45-d8f649ff15df"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "36dbcb58-9810-429c-908f-fc01372faaec",
+      "hook_name": "UserPromptSubmit",
+      "outcome": "success",
+      "output": "",
+      "session_id": "f8ce960e-d0db-497b-a110-d781bdce2b9a",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "21313c07-b979-402a-9c85-cc6326274177"
+    },
+    {
+      "hook_event": "Stop",
+      "hook_id": "a59ab0d1-0848-418e-a19f-12c7b6cd2806",
+      "hook_name": "Stop",
+      "session_id": "f8ce960e-d0db-497b-a110-d781bdce2b9a",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "45632c58-d05d-439a-a4f5-c22d8d73808b"
+    },
+    {
+      "exit_code": 2,
+      "hook_event": "Stop",
+      "hook_id": "a59ab0d1-0848-418e-a19f-12c7b6cd2806",
+      "hook_name": "Stop",
+      "outcome": "error",
+      "output": "S0-REWAKE-7574289d: claim on zone pos granted to you\n",
+      "session_id": "f8ce960e-d0db-497b-a110-d781bdce2b9a",
+      "stderr": "S0-REWAKE-7574289d: claim on zone pos granted to you\n",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "1db06120-6aad-4a26-b321-d55785ef79a5"
+    },
+    {
+      "hook_event": "Stop",
+      "hook_id": "137fd188-28d0-4b43-a5d3-bc6bede77b59",
+      "hook_name": "Stop",
+      "session_id": "f8ce960e-d0db-497b-a110-d781bdce2b9a",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "70a104cd-a7a1-4f61-9c0a-7d0ecc2b4827"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "Stop",
+      "hook_id": "137fd188-28d0-4b43-a5d3-bc6bede77b59",
+      "hook_name": "Stop",
+      "outcome": "success",
+      "output": "",
+      "session_id": "f8ce960e-d0db-497b-a110-d781bdce2b9a",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "b10f2f47-ea44-4ad1-bd5f-30acae226c10"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 85,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    },
+    {
+      "i": 1,
+      "last_message": {
+        "content": [
+          {
+            "cache_control": {
+              "type": "ephemeral"
+            },
+            "text": "Stop hook feedback:\n[<PYTHON> <S0_HOOK> <S0_TMP>/mock-async_rewake_idle/raw Stop rewake_once 3 'S0-REWAKE-7574289d: claim on zone pos granted to you' # remembra-crew-s0]: S0-REWAKE-7574289d: claim on zone pos granted to you\n",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 3,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "S0 ack",
+  "scenario": "async_rewake_idle",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [],
+  "verdict": {
+    "duration_s": 3.57,
+    "events": [
+      "UserPromptSubmit",
+      "Stop",
+      "Stop",
+      "SessionEnd"
+    ],
+    "marker_at_exit": true,
+    "messages_requests": 2,
+    "ok": true,
+    "request_gaps_s": [
+      3.07
+    ],
+    "returncode": 0,
+    "rewake_msg_reached_model": true,
+    "sessionend_fired": true,
+    "stop_count": 2
+  }
+}

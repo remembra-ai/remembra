@@ -1,0 +1,22 @@
+{
+  "action": "deny",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-deny/repo"
+  },
+  "event": "PreToolUse",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-deny/repo",
+    "hook_event_name": "PreToolUse",
+    "permission_mode": "acceptEdits",
+    "session_id": "78f4d722-de8e-4c95-854d-3b4a57d95ef2",
+    "tool_input": {
+      "content": "s0 write\n",
+      "file_path": "<S0_TMP>/mock-deny/repo/pos/cart.txt"
+    },
+    "tool_name": "Write",
+    "tool_use_id": "toolu_s0_63707ad14dcc",
+    "transcript_path": "<S0_TMP>/mock-deny/config/projects/-S0-TMP-mock-deny-repo/78f4d722-de8e-4c95-854d-3b4a57d95ef2.jsonl"
+  },
+  "received_at": 1790375250.6656551
+}

@@ -1,0 +1,129 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "PostToolUse",
+      "hook_id": "b592e592-326b-4b71-8a63-652ce100ac15",
+      "hook_name": "PostToolUse:Write",
+      "session_id": "198799d3-5c8d-43df-b3f5-723f4010d695",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "e0863600-a450-4227-ade3-418d25e4a48a"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "PostToolUse",
+      "hook_id": "b592e592-326b-4b71-8a63-652ce100ac15",
+      "hook_name": "PostToolUse:Write",
+      "outcome": "success",
+      "output": "{\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"S0-ASYNC-POST-CTX-7574289d\"}}\n",
+      "session_id": "198799d3-5c8d-43df-b3f5-723f4010d695",
+      "stderr": "",
+      "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"S0-ASYNC-POST-CTX-7574289d\"}}\n",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "2b05f4c0-a967-4828-9f30-09e5e31e9040"
+    },
+    {
+      "hook_event": "Stop",
+      "hook_id": "6d7ace20-b209-4b22-85e8-a790d76f1edd",
+      "hook_name": "Stop",
+      "session_id": "198799d3-5c8d-43df-b3f5-723f4010d695",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "40694279-112b-4cee-a08d-82dcddb2f15b"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "Stop",
+      "hook_id": "6d7ace20-b209-4b22-85e8-a790d76f1edd",
+      "hook_name": "Stop",
+      "outcome": "success",
+      "output": "",
+      "session_id": "198799d3-5c8d-43df-b3f5-723f4010d695",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "aa62e717-69d9-4ff2-a5b4-2a4f37e02d4a"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 166,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    },
+    {
+      "i": 1,
+      "last_message": {
+        "content": [
+          {
+            "content": "File created successfully at: <S0_TMP>/mock-async_rewake_quiet/repo/pos/cart.txt (file state is current in your context \u2014 no need to Read it back)",
+            "tool_use_id": "toolu_s0_de023ac0dd6b",
+            "type": "tool_result"
+          },
+          {
+            "cache_control": {
+              "type": "ephemeral"
+            },
+            "text": "<system-reminder>\nPostToolUse:Write hook additional context: S0-ASYNC-POST-CTX-7574289d\n</system-reminder>",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 3,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "S0 ack",
+  "scenario": "async_rewake_quiet",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [
+    {
+      "content": "File created successfully at: <S0_TMP>/mock-async_rewake_quiet/repo/pos/cart.txt (file state is current in your context \u2014 no need to Read it back)",
+      "tool_use_id": "toolu_s0_de023ac0dd6b",
+      "type": "tool_result"
+    }
+  ],
+  "verdict": {
+    "async_ctx_reached_model": true,
+    "duration_s": 3.69,
+    "events": [
+      "PostToolUse",
+      "Stop",
+      "SessionEnd"
+    ],
+    "file_written": true,
+    "marker_at_exit": true,
+    "messages_requests": 2,
+    "ok": true,
+    "request_gaps_s": [
+      3.13
+    ],
+    "returncode": 0,
+    "sessionend_fired": true
+  }
+}

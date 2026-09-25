@@ -1,0 +1,17 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": true,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/interactive-interactive_deny_rewake/repo"
+  },
+  "event": "SessionStart",
+  "payload": {
+    "cwd": "<S0_TMP>/interactive-interactive_deny_rewake/repo",
+    "hook_event_name": "SessionStart",
+    "model": "claude-sonnet-4-5",
+    "session_id": "8162cd02-1a29-4c4a-815a-120cf786776e",
+    "source": "startup",
+    "transcript_path": "<S0_TMP>/interactive-interactive_deny_rewake/config/projects/-S0-TMP-interactive-interactive-deny-rewake-repo/8162cd02-1a29-4c4a-815a-120cf786776e.jsonl"
+  },
+  "received_at": 1790375310.9333801
+}

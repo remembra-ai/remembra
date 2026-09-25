@@ -1,0 +1,22 @@
+{
+  "action": "ctx",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-context/repo"
+  },
+  "event": "PreToolUse",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-context/repo",
+    "hook_event_name": "PreToolUse",
+    "permission_mode": "acceptEdits",
+    "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+    "tool_input": {
+      "content": "s0 write\n",
+      "file_path": "<S0_TMP>/mock-context/repo/pos/cart.txt"
+    },
+    "tool_name": "Write",
+    "tool_use_id": "toolu_s0_5da6255bd1ef",
+    "transcript_path": "<S0_TMP>/mock-context/config/projects/-S0-TMP-mock-context-repo/e1159370-3902-493b-92bd-33e8e543e6f8.jsonl"
+  },
+  "received_at": 1790375251.838503
+}

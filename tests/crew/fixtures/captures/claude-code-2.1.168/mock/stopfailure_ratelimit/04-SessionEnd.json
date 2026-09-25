@@ -1,0 +1,16 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-stopfailure_ratelimit/repo"
+  },
+  "event": "SessionEnd",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-stopfailure_ratelimit/repo",
+    "hook_event_name": "SessionEnd",
+    "reason": "other",
+    "session_id": "5eba79cf-f4bf-45fe-a76c-c347ec8373da",
+    "transcript_path": "<S0_TMP>/mock-stopfailure_ratelimit/config/projects/-S0-TMP-mock-stopfailure-ratelimit-repo/5eba79cf-f4bf-45fe-a76c-c347ec8373da.jsonl"
+  },
+  "received_at": 1790375307.485771
+}

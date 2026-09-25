@@ -1,0 +1,74 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "SessionStart",
+      "hook_id": "750910e8-b4c3-4027-973a-48d64dfa9a2d",
+      "hook_name": "SessionStart:startup",
+      "session_id": "20b06609-39fd-4a97-956b-7db893415274",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "538cd17a-f49b-4f83-95fc-b932f6e9179e"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "SessionStart",
+      "hook_id": "750910e8-b4c3-4027-973a-48d64dfa9a2d",
+      "hook_name": "SessionStart:startup",
+      "outcome": "success",
+      "output": "",
+      "session_id": "20b06609-39fd-4a97-956b-7db893415274",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "ba8720d2-dd6e-468d-9bc0-e495ad2a7e04"
+    },
+    {
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "ce1dfe82-525d-4aef-8e80-0aeb5342cf29",
+      "hook_name": "UserPromptSubmit",
+      "session_id": "20b06609-39fd-4a97-956b-7db893415274",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "9377cf43-e4f9-42bd-b768-3c79da6e94d1"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "ce1dfe82-525d-4aef-8e80-0aeb5342cf29",
+      "hook_name": "UserPromptSubmit",
+      "outcome": "success",
+      "output": "",
+      "session_id": "20b06609-39fd-4a97-956b-7db893415274",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "122691ff-d7f6-428a-99cd-8e13bb966095"
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "API Error: Unable to connect to API (ConnectionRefused)",
+  "scenario": "stopfailure_network",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [],
+  "verdict": {
+    "duration_s": 0.41,
+    "error": "unknown",
+    "error_details": null,
+    "events": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "SessionEnd",
+      "StopFailure"
+    ],
+    "last_assistant_message": "API Error: Unable to connect to API (ConnectionRefused)",
+    "ok": true,
+    "returncode": 1,
+    "sessionend_fired": true,
+    "stop_fired": false,
+    "stopfailure_fired": true
+  }
+}
