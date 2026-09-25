@@ -250,7 +250,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         qdrant=app.state.qdrant,
         db=app.state.db,
         embeddings=app.state.embeddings,
+        pending_queue=app.state.pending_embeddings,
     )
+    app.state.readiness.reranker = app.state.memory_service.reranker
 
     # Cloud services (billing, metering, limits)
     if settings.cloud_enabled:

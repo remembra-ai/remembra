@@ -46,6 +46,7 @@ class ReadinessChecker:
         qdrant: Any = None,
         embeddings: Any = None,
         pending_queue: Any = None,
+        reranker: Any = None,
         probe_interval: float = 300.0,
         probe_timeout: float = 15.0,
         clock: Callable[[], float] = time.monotonic,
@@ -55,6 +56,9 @@ class ReadinessChecker:
         self.qdrant = qdrant
         self.embeddings = embeddings
         self.pending_queue = pending_queue
+        # The recall service's CrossEncoderReranker (RET-4): reports whether the
+        # model actually loaded, not just whether the package is importable.
+        self.reranker = reranker
         self.probe_interval = probe_interval
         self.probe_timeout = probe_timeout
         self._clock = clock
@@ -214,7 +218,24 @@ class ReadinessChecker:
                 "installed": False,
                 "reason": "sentence-transformers not installed (reranking silently skipped)",
             }
-        return {"status": OK, "enabled": True, "installed": True, "model": getattr(self.settings, "rerank_model", None)}
+        result: dict[str, Any] = {
+            "status": OK,
+            "enabled": True,
+            "installed": True,
+            "model": getattr(self.settings, "rerank_model", None),
+        }
+        if self.reranker is not None and hasattr(self.reranker, "status"):
+            state = self.reranker.status()
+            result.update(
+                state=state.get("state"),
+                min_logit=state.get("min_logit"),
+                last_error=state.get("last_error"),
+                last_run=state.get("last_run"),
+            )
+            if state.get("state") == "unavailable":
+                result["status"] = DEGRADED
+                result["reason"] = state.get("last_error") or "model failed to load (reranking skipped)"
+        return result
 
     async def _check_pending(self) -> dict[str, Any]:
         if self.pending_queue is None:

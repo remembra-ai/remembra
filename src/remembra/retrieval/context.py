@@ -225,7 +225,9 @@ class ContextOptimizer:
                 parts.append(f"[{date_match.group(1)}]")
 
         if relevance is not None:
-            parts.append(f"({relevance:.0%})")
+            # RET-9: this is the composite rank score (similarity + recency +
+            # entity + keyword), not a probability - never print it as a %.
+            parts.append(f"(rank {relevance:.2f})")
 
         if parts:
             header = " ".join(parts)

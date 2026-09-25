@@ -14,6 +14,7 @@ Performance limits are applied to prevent explosion on large graphs:
 
 import asyncio
 import hashlib
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -30,6 +31,127 @@ log = structlog.get_logger(__name__)
 _query_cache: dict[str, tuple[float, Any]] = {}
 _cache_ttl_seconds: float = 5.0  # Cache results for 5 seconds
 _cache_lock = asyncio.Lock()
+
+# RET-3: entity names that must never be matched as a mention. Extraction has
+# produced entities like "A", "I", "bot" and "user"; substring matching them
+# pulled unrelated memories into every query containing the word.
+ENTITY_MENTION_STOPLIST: frozenset[str] = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "i",
+        "me",
+        "my",
+        "we",
+        "us",
+        "our",
+        "you",
+        "your",
+        "he",
+        "she",
+        "it",
+        "its",
+        "they",
+        "them",
+        "this",
+        "that",
+        "these",
+        "those",
+        "and",
+        "or",
+        "but",
+        "not",
+        "no",
+        "yes",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "by",
+        "for",
+        "from",
+        "with",
+        "as",
+        "is",
+        "am",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "do",
+        "did",
+        "done",
+        "have",
+        "has",
+        "had",
+        "will",
+        "would",
+        "can",
+        "could",
+        "should",
+        "may",
+        "might",
+        "must",
+        "one",
+        "two",
+        "all",
+        "any",
+        "some",
+        "new",
+        "now",
+        "today",
+        "time",
+        "day",
+        "week",
+        "thing",
+        "things",
+        "stuff",
+        "item",
+        "items",
+        "bot",
+        "bots",
+        "user",
+        "users",
+        "system",
+        "systems",
+        "app",
+        "apps",
+        "data",
+        "info",
+        "memory",
+        "memories",
+        "note",
+        "notes",
+        "project",
+        "projects",
+        "task",
+        "tasks",
+        "work",
+        "file",
+        "files",
+        "code",
+        "test",
+        "tests",
+        "thing",
+        "api",
+    ]
+)
+MIN_MENTION_LEN = 3
+# Two-character names (e.g. "AI", "HP") only count for explicitly typed
+# organisations/products that are well established.
+ACRONYM_ENTITY_TYPES = frozenset({"org", "organization", "company", "product", "brand", "tool", "technology", "software"})
+ACRONYM_MIN_MEMORIES = 3
+
+
+def mention_in_query(name: str, query: str, *, case_sensitive: bool = False) -> bool:
+    """True if ``name`` occurs in ``query`` as a whole word (no substring hits)."""
+    if not name:
+        return False
+    flags = 0 if case_sensitive else re.IGNORECASE
+    return re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", query, flags) is not None
 
 
 @dataclass
@@ -84,42 +206,53 @@ class GraphRetriever:
         query: str,
         user_id: str,
         project_id: str = "default",
+        entities: list[Entity] | None = None,
     ) -> list[Entity]:
         """
-        Find all entities mentioned in the query.
+        Find the user's entities (in this project) that the query mentions.
 
-        Checks canonical names and aliases for matches.
+        A name or alias matches only as a whole word (RET-3), never as a
+        substring, and must be at least 3 characters and not a stopword.
+        Two-character names match (case-sensitively) only for typed
+        organisations/products linked to at least 3 memories.
 
         Args:
             query: Search query text
             user_id: User ID for scoping
             project_id: Project ID for scoping
+            entities: Pre-loaded entities for (user, project), to avoid a reload
 
         Returns:
             List of matched Entity objects
         """
-        all_entities = await self.db.get_user_entities(user_id, project_id)
-        query_lower = query.lower()
+        all_entities = entities if entities is not None else await self.db.get_user_entities(user_id, project_id)
 
         matched: list[Entity] = []
-        matched_ids: set[str] = set()
+        acronym_candidates: list[Entity] = []
 
         for entity in all_entities:
-            if entity.id in matched_ids:
-                continue
-
-            # Check canonical name
-            if entity.canonical_name.lower() in query_lower:
+            names = [entity.canonical_name, *entity.aliases]
+            hit = False
+            short_hit = False
+            for raw in names:
+                name = (raw or "").strip()
+                if not name or name.casefold() in ENTITY_MENTION_STOPLIST:
+                    continue
+                if len(name) >= MIN_MENTION_LEN:
+                    if mention_in_query(name, query):
+                        hit = True
+                        break
+                elif len(name) == 2 and (entity.type or "").lower() in ACRONYM_ENTITY_TYPES:
+                    if mention_in_query(name, query, case_sensitive=True):
+                        short_hit = True
+            if hit:
                 matched.append(entity)
-                matched_ids.add(entity.id)
-                continue
+            elif short_hit:
+                acronym_candidates.append(entity)
 
-            # Check aliases
-            for alias in entity.aliases:
-                if alias.lower() in query_lower:
-                    matched.append(entity)
-                    matched_ids.add(entity.id)
-                    break
+        if acronym_candidates:
+            counts = await self.db.get_entity_memory_counts([e.id for e in acronym_candidates])
+            matched.extend(e for e in acronym_candidates if counts.get(e.id, 0) >= ACRONYM_MIN_MEMORIES)
 
         return matched
 
@@ -129,6 +262,7 @@ class GraphRetriever:
         depth: int = 1,
         visited: set[str] | None = None,
         as_of: datetime | None = None,
+        allowed_ids: set[str] | None = None,
     ) -> list[tuple[Entity, Relationship]]:
         """
         Get entities related to the given entity up to specified depth.
@@ -194,6 +328,9 @@ class GraphRetriever:
 
             if other_id in visited:
                 continue
+            # RET-3: never traverse into another user's or project's entities.
+            if allowed_ids is not None and other_id not in allowed_ids:
+                continue
 
             other_entity = await self.db.get_entity(other_id)
             if other_entity:
@@ -201,7 +338,7 @@ class GraphRetriever:
 
                 # Recursive traversal for deeper relationships (only if under limit)
                 if depth < self.max_depth and len(visited) + len(related) < self.max_entities:
-                    deeper = await self.get_related_entities(other_id, depth + 1, visited, as_of)
+                    deeper = await self.get_related_entities(other_id, depth + 1, visited, as_of, allowed_ids)
                     related.extend(deeper)
 
         return related
@@ -211,6 +348,7 @@ class GraphRetriever:
         entity: Entity,
         user_id: str,
         project_id: str = "default",
+        all_entities: list[Entity] | None = None,
     ) -> set[str]:
         """
         Get all entity IDs in the neighborhood of an entity.
@@ -229,15 +367,17 @@ class GraphRetriever:
             Set of entity IDs in the neighborhood
         """
         neighborhood = {entity.id}
+        if all_entities is None:
+            all_entities = await self.db.get_user_entities(user_id, project_id)
+        allowed = {e.id for e in all_entities}
 
         # Add related entities
-        related = await self.get_related_entities(entity.id)
+        related = await self.get_related_entities(entity.id, allowed_ids=allowed)
         for related_entity, _ in related:
             neighborhood.add(related_entity.id)
 
         # Also check for other entities with overlapping aliases
         # This catches cases where the same person might be stored twice
-        all_entities = await self.db.get_user_entities(user_id, project_id)
         entity_names = {entity.canonical_name.lower()} | {a.lower() for a in entity.aliases}
 
         for other in all_entities:
@@ -281,7 +421,7 @@ class GraphRetriever:
             GraphSearchResult with memory IDs and entity info
         """
         # Build cache key from query + user + project
-        cache_key = hashlib.md5(f"{query}:{user_id}:{project_id}".encode()).hexdigest()
+        cache_key = hashlib.md5(f"{id(self.db)}:{query}:{user_id}:{project_id}".encode()).hexdigest()
 
         # Check cache first (deduplicate rapid-fire identical queries)
         async with _cache_lock:
@@ -297,8 +437,10 @@ class GraphRetriever:
 
         result = GraphSearchResult()
 
-        # Step 1: Find entity mentions
-        matched_entities = await self.find_entity_mentions(query, user_id, project_id)
+        # Step 1: Find entity mentions (entities loaded ONCE per search - RET-16)
+        project_entities = await self.db.get_user_entities(user_id, project_id)
+        allowed_ids = {e.id for e in project_entities}
+        matched_entities = await self.find_entity_mentions(query, user_id, project_id, entities=project_entities)
 
         if not matched_entities:
             log.debug("graph_search_no_entities", query=query[:50])
@@ -339,7 +481,7 @@ class GraphRetriever:
                 break
 
             # Get neighborhood (limited traversal)
-            neighborhood = await self.get_entity_neighborhood(entity, user_id, project_id)
+            neighborhood = await self.get_entity_neighborhood(entity, user_id, project_id, all_entities=project_entities)
 
             # Only add up to the limit
             for eid in neighborhood:
@@ -348,7 +490,7 @@ class GraphRetriever:
                 all_entity_ids.add(eid)
 
             # Track related entities (not the directly matched ones)
-            related = await self.get_related_entities(entity.id, visited=global_visited)
+            related = await self.get_related_entities(entity.id, visited=global_visited, allowed_ids=allowed_ids)
 
             for related_entity, rel in related:
                 # Respect entity limit for related entities too
@@ -383,7 +525,8 @@ class GraphRetriever:
                 )
                 break
 
-            memory_ids = await self.db.get_memories_by_entity(entity_id)
+            # RET-3: scoped to the caller's user AND project.
+            memory_ids = await self.db.get_memories_by_entity(entity_id, user_id=user_id, project_id=project_id)
 
             # Add only up to the limit
             for mid in memory_ids:
@@ -432,12 +575,12 @@ async def entity_boost_score(
     if not entity_refs:
         return 0.0
 
-    query_lower = query.lower()
     boost = 0.0
 
     for ref in entity_refs:
-        # Check if entity name appears in query
-        if ref.canonical_name.lower() in query_lower:
+        # Check if entity name appears in query (whole word, no junk names)
+        name = (ref.canonical_name or "").strip()
+        if len(name) >= MIN_MENTION_LEN and name.casefold() not in ENTITY_MENTION_STOPLIST and mention_in_query(name, query):
             boost += boost_factor * ref.confidence
 
     return min(boost, 0.5)  # Cap at 0.5 to prevent over-boosting

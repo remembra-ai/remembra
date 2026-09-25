@@ -1,18 +1,22 @@
 """Memory service - core business logic for store, recall, update, forget."""
 
 import asyncio
+import contextvars
 import hashlib
 import json
 import math
 import re
+import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
 
 from remembra.config import Settings
+from remembra.core import metrics as core_metrics
+from remembra.core.llm_guard import llm_fallback_scope, mark_llm_fallback
 from remembra.core.time import utcnow
 from remembra.extraction import metrics
 from remembra.extraction.background import spawn
@@ -56,10 +60,12 @@ from remembra.retrieval.graph import GraphRetriever
 
 # Advanced retrieval (Week 6)
 from remembra.retrieval.hybrid import HybridSearchConfig, HybridSearcher
+from remembra.retrieval.intent import IntentRouter, ModeDecision
 from remembra.retrieval.ranking import RankingConfig, RelevanceRanker
 from remembra.retrieval.reranker import CrossEncoderReranker
 from remembra.storage.database import Database
-from remembra.storage.embeddings import EmbeddingService
+from remembra.storage.embeddings import EmbeddingProviderError, EmbeddingService
+from remembra.storage.pending_embeddings import PendingEmbeddingQueue
 from remembra.storage.qdrant import QdrantStore
 
 log = structlog.get_logger(__name__)
@@ -99,6 +105,57 @@ class _FactResult:
     confidence: float | None = None
     reason: str | None = None
     grounding_score: float | None = None
+    # True when the fact is stored in SQLite + FTS but its vector is queued
+    # for the re-embedding worker (provider down / store budget exhausted).
+    pending: bool = False
+
+
+class _StoreRun:
+    """Per-store() bookkeeping: time budget and what this request wrote.
+
+    Carried in a ContextVar so every nested step (source record, each fact)
+    can check the budget and record its writes without threading extra
+    parameters through the pipeline. On a hard failure store() rolls back
+    exactly what this run wrote (REL-4: no orphan source rows).
+    """
+
+    def __init__(self, budget_seconds: float) -> None:
+        self.deadline = time.monotonic() + budget_seconds
+        self.created_ids: list[str] = []  # rows (and maybe vectors) written, in order
+        self.superseded: list[tuple[str, str]] = []  # (old_id, new_id)
+
+    def remaining(self) -> float:
+        return self.deadline - time.monotonic()
+
+    @property
+    def expired(self) -> bool:
+        return self.remaining() <= 0
+
+
+_STORE_RUN: contextvars.ContextVar[_StoreRun | None] = contextvars.ContextVar("remembra_store_run", default=None)
+
+
+class _BudgetExceeded(Exception):
+    """The overall store time budget ran out before an optional step."""
+
+
+async def _within_budget(coro: Any) -> Any:
+    """Await ``coro`` bounded by the current store budget (REL-17).
+
+    Raises _BudgetExceeded when the budget is already spent or runs out.
+    Outside a store() (no run), the coroutine is awaited unbounded.
+    """
+    run = _STORE_RUN.get()
+    if run is None:
+        return await coro
+    remaining = run.remaining()
+    if remaining <= 0:
+        coro.close()
+        raise _BudgetExceeded()
+    try:
+        return await asyncio.wait_for(coro, timeout=remaining)
+    except TimeoutError as e:
+        raise _BudgetExceeded() from e
 
 
 @dataclass
@@ -128,8 +185,12 @@ class _StoreOutcome:
     def to_response(self, expires_at: datetime | None, entities_status: str) -> StoreResponse:
         stored = self.stored
         noops = self.decided
+        enrichment: str | None = None
         if stored:
             status, rid, dup = "stored", stored[0].memory_id or "", None
+            if any(r.pending for r in stored):
+                # REL-4: saved (SQLite + keyword search) but the vector is queued.
+                status, enrichment = "pending", "pending"
         elif noops:
             # ING-24: nothing new was stored; say so instead of passing the
             # pre-existing id off as a fresh store.
@@ -163,7 +224,70 @@ class _StoreOutcome:
             extraction=self.extraction,
             expires_at=expires_at,
             source_id=self.source_id,
+            enrichment=enrichment,
         )
+
+
+def _naive_utc(value: datetime | None) -> datetime | None:
+    """Normalise an aware datetime to naive UTC (storage convention); pass naive through."""
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(UTC).replace(tzinfo=None)
+    return value
+
+
+def _row_time(row: dict[str, Any]) -> datetime:
+    return _parse_date(row.get("valid_from")) or _parse_date(row.get("created_at")) or datetime.min
+
+
+@dataclass
+class _RecallCtx:
+    """What a recall is allowed to return (see MemoryService._row_eligible)."""
+
+    user_id: str
+    project_id: str | None
+    active_at: datetime
+    as_of: datetime | None
+    include_superseded: bool
+    scope: str | None
+    filters: dict[str, str]
+    exclude: set[str]
+
+
+@dataclass
+class _Candidate:
+    """A recall candidate, hydrated from its SQLite row."""
+
+    id: str
+    row: dict[str, Any]
+    semantic: float | None = None  # cosine similarity to the query
+    keyword_raw: float = 0.0  # BM25 (higher = better)
+    sources: set[str] = field(default_factory=set)
+
+
+_WORDS_RE = re.compile(r"\w+", re.UNICODE)
+
+
+def _drop_near_duplicates(ranked: list[Any], threshold: float) -> list[Any]:
+    """RET-15: drop lower-ranked results whose words almost entirely overlap a
+    higher-ranked one (Jaccard >= threshold). Order is otherwise preserved."""
+    if threshold >= 1.0 or len(ranked) < 2:
+        return ranked
+    kept: list[Any] = []
+    kept_words: list[set[str]] = []
+    for item in ranked:
+        words = set(_WORDS_RE.findall((item.content or "").casefold()))
+        duplicate = False
+        for other in kept_words:
+            union = words | other
+            if union and len(words & other) / len(union) >= threshold:
+                duplicate = True
+                break
+        if not duplicate:
+            kept.append(item)
+            kept_words.append(words)
+    return kept
 
 
 def _coerce_metadata(value: Any) -> dict[str, Any]:
@@ -303,11 +427,15 @@ class MemoryService:
         embeddings: EmbeddingService,
         conflict_manager: ConflictManager | None = None,
         space_manager: Any | None = None,
+        pending_queue: PendingEmbeddingQueue | None = None,
     ) -> None:
         self.settings = settings
         self.qdrant = qdrant
         self.db = db
         self.embeddings = embeddings
+        # REL-4: facts whose vector could not be written are queued here; the
+        # app's PendingEmbeddingWorker drains the same table.
+        self.pending_queue = pending_queue or PendingEmbeddingQueue(db)
         self.conflict_manager = conflict_manager
         self.space_manager = space_manager  # Injected after init
 
@@ -372,11 +500,15 @@ class MemoryService:
             )
         )
 
-        # CrossEncoder reranking (optional, gracefully degrades)
+        # CrossEncoder reranking (optional, gracefully degrades; runs in a thread)
         self.reranker = CrossEncoderReranker(
             model_name=settings.rerank_model,
             enabled=settings.enable_reranking,
+            min_logit=settings.rerank_min_logit,
         )
+
+        # Query intent -> ranking mode (RET-1): rules first, Jev optional.
+        self.intent_router = IntentRouter(settings, self.jev, log_decision=self._log_decision, spawn=spawn)
 
     # -----------------------------------------------------------------------
     # Store
@@ -485,6 +617,9 @@ class MemoryService:
             memory_type="source",
             scope=request.scope,
         )
+        run = _STORE_RUN.get()
+        if run is not None:
+            run.created_ids.append(record.id)
         log.info("source_record_stored", memory_id=record.id, chars=len(record.content))
         return record.id
 
@@ -560,6 +695,51 @@ class MemoryService:
         expires_at = self._resolve_expiry(request.expires_at, request.ttl, now, self.settings.default_ttl_days)
         self._apply_metadata_type(request)
 
+        # REL-17: one time budget for the whole store; REL-4: everything this
+        # request writes is rolled back if it fails hard part-way.
+        run = _StoreRun(self.settings.store_time_budget_seconds)
+        token = _STORE_RUN.set(run)
+        try:
+            return await self._store_with_run(request, now, expires_at, source, trust_score, checksum, skip_extraction)
+        except Exception:
+            await self._rollback_store(run)
+            raise
+        finally:
+            _STORE_RUN.reset(token)
+
+    async def _rollback_store(self, run: _StoreRun) -> None:
+        """Undo the writes of a failed store: supersession marks, then rows,
+        FTS entries, queued embeddings and vectors it created (newest first)."""
+        if not run.created_ids and not run.superseded:
+            return
+        for old_id, new_id in reversed(run.superseded):
+            try:
+                await self.db.unmark_memory_superseded(old_id, new_id)
+            except Exception as e:  # noqa: BLE001 - keep rolling back the rest
+                log.error("store_rollback_unmark_failed", memory_id=old_id, error=str(e))
+        for memory_id in reversed(run.created_ids):
+            try:
+                await self.pending_queue.mark_done(memory_id)
+                await self.db.delete_memory(memory_id)
+            except Exception as e:  # noqa: BLE001
+                log.error("store_rollback_row_failed", memory_id=memory_id, error=str(e))
+            try:
+                await self.qdrant.delete(memory_id)
+            except Exception as e:  # noqa: BLE001 - reconcile reports any leftover vector
+                log.warning("store_rollback_vector_failed", memory_id=memory_id, error=str(e))
+        metrics.incr("store_rollbacks_total")
+        log.warning("store_rolled_back", rows=len(run.created_ids), supersessions=len(run.superseded))
+
+    async def _store_with_run(
+        self,
+        request: StoreRequest,
+        now: datetime,
+        expires_at: datetime | None,
+        source: str,
+        trust_score: float,
+        checksum: str | None,
+        skip_extraction: bool,
+    ) -> StoreResponse:
         # ── Lossless memory: async fast path ─────────────────────────────
         # Persist the verbatim source immediately and enrich in background.
         if self.settings.async_enrichment and self.settings.enable_source_records and not skip_extraction:
@@ -573,6 +753,10 @@ class MemoryService:
             )
 
             async def _bg_enrichment() -> None:
+                # Own budget and journal: a failure rolls back only the facts
+                # this task wrote, never the already-acknowledged source row.
+                bg_run = _StoreRun(self.settings.store_time_budget_seconds)
+                _STORE_RUN.set(bg_run)
                 try:
                     await self._extract_and_store_facts(
                         request=request,
@@ -586,6 +770,7 @@ class MemoryService:
                     )
                     log.info("bg_enrichment_done", source_id=source_id)
                 except Exception as e:
+                    await self._rollback_store(bg_run)
                     metrics.incr("enrichment_failures_total")
                     log.error("bg_enrichment_failed", source_id=source_id, error=str(e))
 
@@ -651,14 +836,23 @@ class MemoryService:
         content = request.content.strip()
 
         extraction_method = "skipped"
+        extraction_error_kind: str | None = None
         if skip_extraction:
             extracted_facts = [content]
         else:
-            extraction = await self.extractor.extract_detailed(request.content, reference_date=now)
-            extraction_method = extraction.method
-            extracted_facts = extraction.facts or [content]
-            if extraction.method == "fallback":
+            with llm_fallback_scope() as fallbacks:
+                try:
+                    extraction = await _within_budget(self.extractor.extract_detailed(request.content, reference_date=now))
+                    extraction_method = extraction.method
+                    extracted_facts = extraction.facts or [content]
+                except _BudgetExceeded:
+                    # REL-17: out of time - keep the caller's text verbatim and
+                    # mark it for the reprocess job.
+                    mark_llm_fallback("extraction", "store_budget_exceeded")
+                    extraction_method, extracted_facts = "fallback", [content]
+            if extraction_method == "fallback":
                 metrics.incr("extraction_fallbacks_total")
+                extraction_error_kind = fallbacks.get("extraction") or "unknown"
             log.debug("facts_extracted", count=len(extracted_facts), method=extraction_method)
 
         derived = extracted_facts != [content]
@@ -682,6 +876,8 @@ class MemoryService:
             if extraction_method in ("fallback", "disabled"):
                 # Sentence-split fallback: mark for reprocessing (REL-7).
                 fact_metadata["extraction"] = extraction_method
+                if extraction_error_kind:
+                    fact_metadata["extraction_error_kind"] = extraction_error_kind
             result = await self._store_single_fact(
                 fact=fact,
                 user_id=request.user_id or "",
@@ -1116,13 +1312,38 @@ class MemoryService:
                 grounding_score=overlap,
             )
 
+        # ── Embedding (REL-4: a provider failure defers it, never loses the fact)
+        embedding: list[float] | None = None
+        pending_reason: str | None = None
+        try:
+            embedding = await _within_budget(self.embeddings.embed(fact))
+        except EmbeddingProviderError as e:
+            if not self.settings.store_pending_on_embedding_failure:
+                raise
+            pending_reason = "circuit_open" if e.circuit_open else f"embedding_{e.kind.value}"
+            log.warning("store_embedding_deferred", reason=pending_reason, kind=e.kind.value)
+        except _BudgetExceeded:
+            if not self.settings.store_pending_on_embedding_failure:
+                raise TimeoutError("store time budget exceeded before the fact could be embedded") from None
+            pending_reason = "store_budget_exceeded"
+            log.warning("store_embedding_deferred", reason=pending_reason)
+
         # ── Candidates + decision ─────────────────────────────────────────
-        embedding = await self.embeddings.embed(fact)
         candidates: list[ExistingMemory] = []
         rows: dict[str, dict[str, Any]] = {}
         jev_grounding: float | None = None
         if skip_consolidation:
             result = ConsolidationResult(ConsolidationAction.ADD, None, reason="atomic", decided_by="atomic")
+        elif embedding is None:
+            # No vector -> no candidate search. Store as new and flag it so a
+            # later pass can dedupe; never guess a supersession blind.
+            result = ConsolidationResult(
+                ConsolidationAction.ADD,
+                None,
+                reason="embedding deferred; consolidation skipped",
+                decided_by="fallback",
+            )
+            metadata["consolidation"] = "skipped_embedding_pending"
         else:
             candidates, rows = await self._consolidation_candidates(
                 embedding, user_id, project_id, visibility, space_id, team_id, now, exclude_ids
@@ -1192,40 +1413,73 @@ class MemoryService:
             user_id=user_id,
             project_id=project_id,
             content=fact,
+            memory_type=memory_type,
+            scope=scope,
             extracted_facts=[fact],
             entities=[],
-            embedding=embedding,
+            embedding=embedding or [],
             metadata=metadata,
             created_at=now,
             updated_at=now,
             expires_at=expires_at,
+            valid_from=now,
         )
 
-        await self.qdrant.upsert(memory)
-        await self.db.save_memory_metadata(
-            memory_id=memory.id,
-            user_id=memory.user_id,
-            project_id=memory.project_id,
-            content=memory.content,
-            extracted_facts=memory.extracted_facts,
-            metadata=memory.metadata,
-            created_at=memory.created_at,
-            expires_at=memory.expires_at,
-            source=source,
-            trust_score=trust_score,
-            checksum=checksum,
-            visibility=visibility,
-            space_id=space_id,
-            team_id=team_id,
-            memory_type=memory_type,
-            scope=scope,
-            supersedes=(target_id if retire_target else None) or supersedes,
-            contradicts=(target_id if target_id and not retire_target else None) or contradicts,
-        )
+        # REL-10: SQLite row + FTS first (one transaction; the source of truth
+        # and what keyword recall needs), then the vector. A deferred vector
+        # is queued in the same transaction so it can never be forgotten.
+        async with self.db.transaction():
+            await self.db.save_memory_metadata(
+                memory_id=memory.id,
+                user_id=memory.user_id,
+                project_id=memory.project_id,
+                content=memory.content,
+                extracted_facts=memory.extracted_facts,
+                metadata=memory.metadata,
+                created_at=memory.created_at,
+                expires_at=memory.expires_at,
+                source=source,
+                trust_score=trust_score,
+                checksum=checksum,
+                visibility=visibility,
+                space_id=space_id,
+                team_id=team_id,
+                memory_type=memory_type,
+                scope=scope,
+                supersedes=(target_id if retire_target else None) or supersedes,
+                contradicts=(target_id if target_id and not retire_target else None) or contradicts,
+            )
+            if self.settings.enable_hybrid_search or embedding is None:
+                await self.db.index_memory_fts(
+                    memory_id=memory.id,
+                    user_id=memory.user_id,
+                    project_id=memory.project_id,
+                    content=memory.content,
+                )
+            if embedding is None:
+                await self.pending_queue.enqueue(memory.id, user_id, project_id, reason=pending_reason or "embedding_failed")
+        run = _STORE_RUN.get()
+        if run is not None:
+            run.created_ids.append(memory.id)
+
+        pending = embedding is None
+        if embedding is not None:
+            try:
+                await self.qdrant.upsert(memory)
+            except Exception as e:
+                if not self.settings.store_pending_on_embedding_failure:
+                    raise
+                # The row is safe; the worker re-embeds and upserts it later.
+                await self.pending_queue.enqueue(memory.id, user_id, project_id, reason="vector_store_failed")
+                pending = True
+                log.warning("store_vector_deferred", memory_id=memory.id, error=str(e))
 
         if retire_target and target_id:
             # Mark, never delete: the old memory stays queryable as history.
+            # UPG-1: this also closes the old memory's validity window.
             await self.db.mark_memory_superseded(target_id, memory.id)
+            if run is not None:
+                run.superseded.append((target_id, memory.id))
 
         if target_id and self.conflict_manager is not None:
             try:
@@ -1245,17 +1499,6 @@ class MemoryService:
                 )
             except Exception as exc:
                 log.warning("conflict_recording_failed", error=str(exc))
-
-        if self.settings.enable_hybrid_search:
-            try:
-                await self.db.index_memory_fts(
-                    memory_id=memory.id,
-                    user_id=memory.user_id,
-                    project_id=memory.project_id,
-                    content=memory.content,
-                )
-            except Exception as e:
-                log.warning("fts_indexing_failed", error=str(e), memory_id=memory.id)
 
         if self.settings.enable_entity_resolution:
             spawn(self._bg_entities(memory.id, fact, user_id, project_id), "entity_resolution")
@@ -1287,6 +1530,7 @@ class MemoryService:
             decided_by=result.decided_by,
             reason=result.reason,
             grounding_score=grounding_score,
+            pending=pending,
         )
 
     async def _decide(
@@ -1312,7 +1556,8 @@ class MemoryService:
             )
             return dup, None
 
-        if self.jev.enforcing and (candidates or grounding_source is not None):
+        run = _STORE_RUN.get()
+        if self.jev.enforcing and (candidates or grounding_source is not None) and not (run and run.expired):
             assessment = await self.jev.assess_fact(fact, grounding_source, [(c.id, c.content) for c in candidates])
             if assessment is not None:
                 pinned = {cid for cid, row in rows.items() if row.get("pinned")}
@@ -1350,7 +1595,21 @@ class MemoryService:
         if not candidates:
             add = ConsolidationResult(ConsolidationAction.ADD, None, reason="No similar existing memories", decided_by="rule")
             return add, None
-        result = await self.consolidator.consolidate(fact, candidates)
+        try:
+            result = await _within_budget(self.consolidator.consolidate(fact, candidates))
+        except _BudgetExceeded:
+            # REL-17: out of time - add without a model decision rather than
+            # fail the store or guess a supersession.
+            mark_llm_fallback("consolidation", "store_budget_exceeded")
+            return (
+                ConsolidationResult(
+                    ConsolidationAction.ADD,
+                    None,
+                    reason="store time budget exceeded; added without a consolidation decision",
+                    decided_by="fallback",
+                ),
+                None,
+            )
         return self._apply_guardrails(result, candidates, rows, expires_at, gate_confidence=True), None
 
     # -- Entities -------------------------------------------------------------
@@ -1549,463 +1808,345 @@ class MemoryService:
                 await self.db.update_entity_aliases(entity_id, new_aliases)
 
     # -----------------------------------------------------------------------
-    # Recall (v0.4.0 - Advanced Retrieval)
+    # Recall (RET stream rewrite, 2026-09-25)
     # -----------------------------------------------------------------------
+
+    def _recall_ctx(self, request: RecallRequest) -> "_RecallCtx":
+        assert request.user_id is not None
+        as_of = _naive_utc(request.as_of)
+        return _RecallCtx(
+            user_id=request.user_id,
+            project_id=request.project_id,
+            active_at=as_of or utcnow(),
+            as_of=as_of,
+            include_superseded=bool(request.include_superseded),
+            scope=request.scope or None,
+            filters=dict(request.filters or {}),
+            exclude=set(request.exclude or []),
+        )
+
+    @staticmethod
+    def _row_eligible(row: dict[str, Any], ctx: "_RecallCtx") -> bool:
+        """Single source-of-truth gate for every recall path (semantic, keyword,
+        graph, filter-only). Uses the SQLite row, never the Qdrant payload."""
+        if row.get("user_id") != ctx.user_id:
+            return False
+        if ctx.project_id is not None and row.get("project_id") != ctx.project_id:
+            return False
+        if row.get("id") in ctx.exclude:
+            return False
+        meta = _coerce_metadata(row.get("metadata"))
+        if row.get("memory_type") == "source" or meta.get("record_kind") == "source":
+            return False
+        expires = _parse_date(row.get("expires_at"))
+        if expires is not None and expires <= ctx.active_at:
+            return False  # RET-2: expired memories are never returned
+        if ctx.as_of is not None:
+            # UPG-1: what was known and valid at as_of (superseded rows included
+            # when their validity window covered as_of).
+            created = _parse_date(row.get("created_at"))
+            if created is not None and created > ctx.as_of:
+                return False
+            valid_from = _parse_date(row.get("valid_from")) or created
+            if valid_from is not None and valid_from > ctx.as_of:
+                return False
+            valid_to = _parse_date(row.get("valid_to"))
+            if valid_to is None and row.get("superseded_by"):
+                valid_to = _parse_date(row.get("superseded_at"))
+            if valid_to is not None and valid_to <= ctx.as_of:
+                return False
+        elif not ctx.include_superseded and row.get("superseded_by"):
+            return False
+        if ctx.scope:
+            mem_scope = row.get("scope") or meta.get("scope")
+            if not mem_scope or not (mem_scope == ctx.scope or str(mem_scope).startswith(ctx.scope + ":")):
+                return False
+        # RET-18: metadata is coerced from the row's JSON text before matching.
+        return not (ctx.filters and not metadata_filters_match(meta, ctx.filters))
+
+    @staticmethod
+    def _dedupe_status(candidates: dict[str, "_Candidate"]) -> None:
+        """RET-2: for status memories only the newest value per (project, key) survives."""
+        best: dict[tuple[str, str], _Candidate] = {}
+        for cand in candidates.values():
+            if cand.row.get("memory_type") != "status":
+                continue
+            key = _coerce_metadata(cand.row.get("metadata")).get("status_key")
+            if not key:
+                continue
+            slot = (str(cand.row.get("project_id")), str(key))
+            current = best.get(slot)
+            if current is None or _row_time(cand.row) > _row_time(current.row):
+                best[slot] = cand
+        keep = {c.id for c in best.values()}
+        for cand in list(candidates.values()):
+            if cand.row.get("memory_type") == "status" and _coerce_metadata(cand.row.get("metadata")).get("status_key"):
+                if cand.id not in keep:
+                    del candidates[cand.id]
+
+    def _stale_after_days(self, memory_type: str | None) -> float:
+        if memory_type == "status":
+            return float(self.settings.status_stale_days)
+        if memory_type == "checkpoint":
+            return float(self.settings.checkpoint_stale_days)
+        return float(self.settings.ranking_recency_decay_days)
+
+    async def _semantic_candidates(
+        self,
+        query_vector: list[float],
+        ctx: "_RecallCtx",
+        want: int,
+        threshold: float,
+    ) -> dict[str, "_Candidate"]:
+        """Vector hits, over-fetched page by page until ``want`` eligible
+        memories are found or the search is exhausted (RET-3). User, project,
+        expiry and (plaintext) metadata filters run inside Qdrant; every hit is
+        re-validated against its SQLite row."""
+        out: dict[str, _Candidate] = {}
+        page = max(want * 3, 20)
+        cap = max(page, int(self.settings.recall_max_candidates))
+        offset = 0
+        while True:
+            hits = await self.qdrant.search(
+                query_vector=query_vector,
+                user_id=ctx.user_id,
+                project_id=ctx.project_id,
+                limit=page,
+                score_threshold=threshold,
+                offset=offset,
+                active_at=ctx.active_at,
+                metadata_match=ctx.filters or None,
+            )
+            rows = await self.db.get_memories_by_ids([str(mid) for mid, _, _ in hits])
+            for mid, score, _payload in hits:
+                row = rows.get(str(mid))
+                if row is None or not self._row_eligible(row, ctx):
+                    continue
+                out[str(mid)] = _Candidate(id=str(mid), row=row, semantic=float(score), sources={"semantic"})
+            offset += len(hits)
+            if len(out) >= want or len(hits) < page or offset >= cap:
+                return out
+
+    async def _resolve_mode(self, request: RecallRequest) -> ModeDecision:
+        assert request.user_id is not None
+        return await self.intent_router.resolve(request.retrieval_mode, request.query or "", request.user_id, request.project_id)
 
     async def recall(self, request: RecallRequest) -> RecallResponse:
         """
-        Recall memories relevant to a query using advanced retrieval.
+        Recall memories relevant to a query.
 
-        v0.4.0 Features:
-        1. Hybrid search (semantic + keyword via FTS5/BM25)
-        2. Graph-aware retrieval (entity relationships)
-        3. CrossEncoder reranking (optional, reduces hallucinations)
-        4. Advanced relevance ranking (recency, entity, keyword boosts)
-        5. Context window optimization (smart truncation with tiktoken)
-
-        Args:
-            request: RecallRequest with query, user_id, project_id, etc.
-
-        Returns:
-            RecallResponse with context, memories, and entities
+        Pipeline (every candidate is validated against its SQLite row):
+        1. Ranking mode: caller's, else inferred from the query (RET-1).
+        2. Semantic search, over-fetched until ``limit`` eligible memories
+           are found (filters pushed into Qdrant where possible). If the query
+           cannot be embedded, recall degrades to keyword + graph and says so
+           (``degraded='keyword_only'``, REL-5).
+        3. Keyword (FTS5/BM25) search - always, even with no semantic hits.
+        4. Entity-graph search, scoped to user AND project (RET-3).
+        5. Expired, superseded (unless requested / as_of) and source rows are
+           dropped; status memories keep only the newest value per key.
+        6. Optional CrossEncoder rerank (off the event loop), mode-weighted
+           ranking with absolute similarity, feedback weight, near-duplicate
+           removal, then the top ``limit`` - and the context is built from
+           exactly those.
         """
-        # The API layer overrides request.user_id with the authenticated user_id
-        # before calling recall (memories.py: body.user_id = current_user.user_id),
-        # so it is always set here despite the model default of None.
+        # The API layer overrides request.user_id with the authenticated user_id.
         assert request.user_id is not None, "user_id must be set by the API layer before recall"
 
-        # Resolve feature flags
-        use_hybrid = self.settings.enable_hybrid_search
-        use_rerank = self.settings.enable_reranking
-        # slim mode caps context at 800 tokens
-        slim_mode = getattr(request, "slim", False)
+        slim_mode = bool(request.slim)
         max_tokens = 800 if slim_mode else (request.max_tokens or self.settings.context_max_tokens)
+        ctx = self._recall_ctx(request)
 
         # ----- Filter-only recall (no semantic query) -----
         if not request.query:
             return await self._recall_by_filters(request, max_tokens=max_tokens, slim_mode=slim_mode)
 
+        use_hybrid = self.settings.enable_hybrid_search if request.enable_hybrid is None else bool(request.enable_hybrid)
+        use_rerank = self.settings.enable_reranking if request.enable_rerank is None else bool(request.enable_rerank)
+        mode = await self._resolve_mode(request)
+        want = request.limit * 2  # ranking pool
+
         log.info(
-            "recalling_memories_v2",
+            "recalling_memories_v3",
             user_id=request.user_id,
             project_id=request.project_id,
             cross_project=request.project_id is None,
             query_length=len(request.query),
-            hybrid_enabled=use_hybrid,
-            graph_enabled=self.settings.enable_graph_retrieval,
-            rerank_enabled=use_rerank,
-            max_tokens=max_tokens,
+            retrieval_mode=mode.mode,
+            mode_source=mode.source,
+            hybrid=use_hybrid,
+            rerank=use_rerank,
+            as_of=ctx.as_of.isoformat() if ctx.as_of else None,
         )
 
-        # Step 1: Embed query for semantic search
-        query_vector = await self.embeddings.embed(request.query)
+        # Step 1: embed the query (degrade to keyword-only on provider failure)
+        degraded: str | None = None
+        query_vector: list[float] | None = None
+        try:
+            query_vector = await self.embeddings.embed(request.query)
+        except EmbeddingProviderError as e:
+            if not self.settings.recall_keyword_fallback:
+                raise
+            degraded = "keyword_only"
+            core_metrics.recall_degraded(degraded)
+            log.warning(
+                "recall_degraded_keyword_only",
+                kind=e.kind.value,
+                circuit_open=e.circuit_open,
+                user_id=request.user_id,
+            )
 
-        # Step 2: Semantic search in Qdrant
-        semantic_results = await self.qdrant.search(
-            query_vector=query_vector,
-            user_id=request.user_id,
-            project_id=request.project_id,
-            limit=request.limit * 2,  # Get more for hybrid fusion
-            score_threshold=request.threshold,
-        )
+        candidates: dict[str, _Candidate] = {}
 
-        log.debug("semantic_search_done", count=len(semantic_results))
+        # Step 2: semantic
+        if query_vector is not None:
+            candidates.update(await self._semantic_candidates(query_vector, ctx, want, request.threshold))
 
-        # Step 3: Graph-aware retrieval (entity relationships)
-        graph_memory_ids: set[str] = set()
-        matched_entities: list[EntityRef] = []
-        related_entities: list[EntityRef] = []
-
-        # Graph retrieval requires a concrete project_id. When the caller
-        # requested cross-project recall (project_id=None) we skip this
-        # branch; semantic + FTS already span all projects in that case.
-        if self.settings.enable_graph_retrieval and request.project_id is not None:
+        # Step 3: keyword - always when hybrid is on, and always when degraded
+        if use_hybrid or degraded:
             try:
-                graph_result = await self.graph_retriever.search(
+                fts = await self.db.search_fts(
                     query=request.query,
                     user_id=request.user_id,
                     project_id=request.project_id,
+                    limit=max(want * 2, 20),
+                    active_at=ctx.active_at,
+                    exclude_superseded=not ctx.include_superseded and ctx.as_of is None,
                 )
-                graph_memory_ids = graph_result.memory_ids
-                matched_entities = graph_result.matched_entities
-                related_entities = graph_result.related_entities
+                missing = [mid for mid, _ in fts if mid not in candidates]
+                rows = await self.db.get_memories_by_ids(missing)
+                for mid, bm25 in fts:
+                    cand = candidates.get(mid)
+                    if cand is None:
+                        row = rows.get(mid)
+                        if row is None or not self._row_eligible(row, ctx):
+                            continue
+                        cand = _Candidate(id=mid, row=row)
+                        candidates[mid] = cand
+                    cand.keyword_raw = float(bm25)
+                    cand.sources.add("keyword")
+            except Exception as e:
+                log.warning("fts_search_failed", error=str(e))
 
-                log.debug(
-                    "graph_retrieval_done",
-                    matched_entities=len(matched_entities),
-                    related_entities=len(related_entities),
-                    memory_ids=len(graph_memory_ids),
+        # Step 4: entity graph (scoped to user + project)
+        matched_entities: list[EntityRef] = []
+        related_entities: list[EntityRef] = []
+        if self.settings.enable_graph_retrieval and request.project_id is not None:
+            try:
+                graph = await self.graph_retriever.search(
+                    query=request.query, user_id=request.user_id, project_id=request.project_id
                 )
+                matched_entities = graph.matched_entities
+                related_entities = graph.related_entities
+                missing = [mid for mid in graph.memory_ids if mid not in candidates]
+                rows = await self.db.get_memories_by_ids(missing)
+                for mid in graph.memory_ids:
+                    cand = candidates.get(mid)
+                    if cand is None:
+                        row = rows.get(mid)
+                        if row is None or not self._row_eligible(row, ctx):
+                            continue
+                        cand = _Candidate(id=mid, row=row)
+                        candidates[mid] = cand
+                    cand.sources.add("graph")
             except Exception as e:
                 log.warning("graph_retrieval_failed", error=str(e))
 
-        # Step 4: Hybrid search (combine semantic + keyword via FTS5)
-        hybrid_results: list[dict[str, Any]] = []
+        self._dedupe_status(candidates)
 
-        if use_hybrid and semantic_results:
-            try:
-                # Build payload map from semantic results
-                payload_map: dict[str, dict[str, Any]] = {}
-                for memory_id, score, payload in semantic_results:
-                    mid = str(memory_id)
-                    payload_map[mid] = {**payload, "semantic_score": score}
-
-                # Add graph memories
-                for mem_id in graph_memory_ids:
-                    if mem_id not in payload_map:
-                        mem_data = await self.db.get_memory(mem_id)
-                        if mem_data:
-                            payload_map[mem_id] = {
-                                **mem_data,
-                                "semantic_score": 0.4,  # Default for graph-only
-                            }
-
-                # Try FTS5 search first (persistent, accurate BM25)
-                fts_results: list[tuple[str, float]] = []
+        # Real similarity for keyword/graph-only hits (one filtered query).
+        if query_vector is not None:
+            unscored = [c.id for c in candidates.values() if c.semantic is None]
+            if unscored:
                 try:
-                    fts_results = await self.db.search_fts(
-                        query=request.query,
-                        user_id=request.user_id,
-                        project_id=request.project_id,
-                        limit=request.limit * 2,
-                    )
-                    log.debug("fts5_search_done", count=len(fts_results))
+                    scores = await self.qdrant.score_ids(query_vector, unscored, request.user_id)
+                    for mid, sim in scores.items():
+                        if mid in candidates:
+                            candidates[mid].semantic = float(sim)
                 except Exception as e:
-                    log.debug("fts5_search_failed_fallback_bm25", error=str(e))
+                    log.warning("candidate_scoring_failed", error=str(e))
 
-                # Fall back to in-memory BM25 if FTS5 fails or returns nothing
-                if not fts_results:
-                    all_docs = [(mid, p.get("content", "")) for mid, p in payload_map.items()]
-                    self.hybrid_searcher.index_documents(all_docs)
-                    # Get BM25 keyword results from in-memory index
-                    kw_raw = self.hybrid_searcher.keyword_search(request.query, limit=request.limit * 2)
-                    kw_for_fusion = [(doc_id, score) for doc_id, score, _ in kw_raw]
-                    fused = await self.hybrid_searcher.search(
-                        semantic_results=semantic_results,
-                        keyword_results=kw_for_fusion,
-                        limit=request.limit * 2,
-                    )
-                    for result in fused:
-                        hybrid_results.append(
-                            {
-                                "id": result.id,
-                                "content": result.content,
-                                "semantic_score": result.semantic_score,
-                                "keyword_score": result.keyword_score,
-                                "relevance": result.combined_score,
-                                "created_at": payload_map.get(result.id, {}).get("created_at"),
-                                "matched_keywords": [],  # BM25 fallback doesn't track individual terms
-                                "payload": result.payload or payload_map.get(result.id, {}),
-                            }
-                        )
-                else:
-                    # Fuse FTS5 results with semantic results
-                    # Normalize scores with min-max scaling
-                    semantic_scores = {str(mid): score for mid, score, _ in semantic_results}
-                    max_semantic = max(semantic_scores.values()) if semantic_scores else 1.0
-                    max_keyword = max(s for _, s in fts_results) if fts_results else 1.0
-
-                    keyword_scores = {mid: score for mid, score in fts_results}
-                    all_ids = set(semantic_scores.keys()) | set(keyword_scores.keys()) | set(payload_map.keys())
-
-                    alpha = self.settings.hybrid_alpha  # Keyword weight
-
-                    for mid in all_ids:
-                        sem = semantic_scores.get(mid, 0.0) / max_semantic if max_semantic > 0 else 0
-                        kw = keyword_scores.get(mid, 0.0) / max_keyword if max_keyword > 0 else 0
-                        combined = alpha * kw + (1 - alpha) * sem
-
-                        payload = payload_map.get(mid, {})
-                        hybrid_results.append(
-                            {
-                                "id": mid,
-                                "content": payload.get("content", ""),
-                                "semantic_score": sem,
-                                "keyword_score": kw,
-                                "relevance": combined,
-                                "created_at": payload.get("created_at"),
-                                "payload": payload,
-                            }
-                        )
-
-                    # Sort by combined score
-                    hybrid_results.sort(key=lambda x: x["relevance"], reverse=True)
-
-                log.debug("hybrid_search_done", count=len(hybrid_results))
-
-            except Exception as e:
-                log.warning("hybrid_search_failed", error=str(e))
-                # Fall back to semantic results
-                hybrid_results = [
-                    {
-                        "id": str(mid),
-                        "content": payload.get("content", ""),
-                        "relevance": score,
-                        "semantic_score": score,
-                        "keyword_score": 0.0,
-                        "created_at": payload.get("created_at"),
-                        "payload": payload,
-                    }
-                    for mid, score, payload in semantic_results
-                ]
-        else:
-            # No hybrid search - use semantic results directly
-            hybrid_results = [
-                {
-                    "id": str(mid),
-                    "content": payload.get("content", ""),
-                    "relevance": score,
-                    "semantic_score": score,
-                    "keyword_score": 0.0,
-                    "created_at": payload.get("created_at"),
-                    "payload": payload,
-                }
-                for mid, score, payload in semantic_results
-            ]
-
-        # Add graph-only memories that weren't in hybrid results
-        seen_ids = {r["id"] for r in hybrid_results}
-        for mem_id in graph_memory_ids:
-            if mem_id not in seen_ids:
-                mem_data = await self.db.get_memory(mem_id)
-                if mem_data:
-                    hybrid_results.append(
-                        {
-                            "id": mem_id,
-                            "content": mem_data.get("content", ""),
-                            "relevance": 0.5,  # Default for graph-only
-                            "semantic_score": 0.4,
-                            "keyword_score": 0.0,
-                            "created_at": mem_data.get("created_at"),
-                            "payload": mem_data,
-                        }
-                    )
-
-        # Step 4b: Metadata filter (Issue 3)
-        # AND-combined exact-match over decrypted payload["metadata"].
-        # Applied before ranking so downstream stages see the filtered set.
-        requested_filters = getattr(request, "filters", None) or {}
-        if requested_filters:
-            before_count = len(hybrid_results)
-
-            def _matches(r: dict[str, Any]) -> bool:
-                meta = (r.get("payload") or {}).get("metadata") or {}
-                return metadata_filters_match(meta, requested_filters)
-
-            hybrid_results = [r for r in hybrid_results if _matches(r)]
-            log.info(
-                "recall_metadata_filtered",
-                filters=requested_filters,
-                before=before_count,
-                after=len(hybrid_results),
+        if not candidates:
+            log.info("recall_no_results", user_id=request.user_id, degraded=degraded)
+            return RecallResponse(
+                context="",
+                memories=[],
+                entities=[],
+                degraded=degraded,
+                retrieval_mode=mode.mode,
+                retrieval_mode_source=mode.source,
             )
 
-        # Supersession filter: drop memories retired by a newer belief so stale
-        # facts ("I use Stripe" after switching to Paddle) never surface. One
-        # indexed query over the candidate ids; opt back in via include_superseded
-        # to query belief history. The marker is the source-of-truth column, so
-        # this is robust even if a Qdrant payload is stale.
-        if not getattr(request, "include_superseded", False) and hybrid_results:
-            candidate_ids = [r["id"] for r in hybrid_results]
-            active_ids = await self.db.filter_active_memory_ids(candidate_ids)
-            if len(active_ids) != len(candidate_ids):
-                before_sup = len(hybrid_results)
-                hybrid_results = [r for r in hybrid_results if r["id"] in active_ids]
-                log.info(
-                    "recall_superseded_filtered",
-                    before=before_sup,
-                    after=len(hybrid_results),
-                )
-
-        # Exclude filter: remove specific memory IDs
-        exclude_ids = set(getattr(request, "exclude", None) or [])
-        if exclude_ids:
-            hybrid_results = [r for r in hybrid_results if r["id"] not in exclude_ids]
-
-        # Scope filter: restrict to memories whose scope starts with the requested prefix
-        requested_scope = getattr(request, "scope", None)
-        if requested_scope:
-
-            def _scope_matches(r: dict[str, Any]) -> bool:
-                mem_scope = (r.get("payload") or {}).get("scope") or r.get("scope")
-                if not mem_scope:
-                    return False
-                matches: bool = mem_scope == requested_scope or mem_scope.startswith(requested_scope + ":")
-                return matches
-
-            hybrid_results = [r for r in hybrid_results if _scope_matches(r)]
-
-        if not hybrid_results:
-            log.info("recall_no_results", user_id=request.user_id)
-            return RecallResponse(context="", memories=[], entities=[])
-
-        # Step 5: CrossEncoder reranking (optional, reduces hallucinations)
-        if use_rerank and hybrid_results:
+        # Step 5: optional CrossEncoder rerank, off the event loop (RET-4)
+        rerank_scores: dict[str, float] = {}
+        if use_rerank and self.reranker.enabled:
+            docs = [
+                {"id": c.id, "content": c.row.get("content") or "", "relevance": c.semantic or 0.0} for c in candidates.values()
+            ]
             try:
-                reranked = self.reranker.rerank(
-                    query=request.query,
-                    documents=hybrid_results,
-                    top_k=request.limit * 2,
-                    content_key="content",
-                    score_key="relevance",
-                )
-                # Update hybrid_results with rerank scores
-                hybrid_results = [
-                    {
-                        **(r.payload or {}),
-                        "id": r.id,
-                        "content": r.content,
-                        "relevance": r.final_score,
-                        "rerank_score": r.rerank_score,
-                    }
-                    for r in reranked
-                ]
-                log.debug("reranking_done", count=len(hybrid_results))
+                reranked = await self.reranker.arerank(request.query, docs)
+                if any(r.raw_score is not None for r in reranked):
+                    kept = {r.id for r in reranked}
+                    for mid in [m for m in candidates if m not in kept]:
+                        del candidates[mid]  # below the absolute logit cutoff
+                    rerank_scores = {r.id: r.rerank_score for r in reranked if r.raw_score is not None}
             except Exception as e:
                 log.warning("reranking_failed", error=str(e))
 
-        # Step 6: Advanced relevance ranking (recency, entity, keyword boosts)
-        # Uses retrieval_mode to adjust ranking weights (debug/operational/strategic)
+        ids = list(candidates)
+        entity_map = await self.db.get_memory_entities_many(ids)
+        feedback = await self.db.get_feedback_scores(ids, request.user_id) if self.settings.ranking_feedback_weight else {}
+        max_kw = max((c.keyword_raw for c in candidates.values()), default=0.0) or 1.0
+
+        # Step 6: mode-weighted ranking with absolute similarity
         ranked = self.relevance_ranker.rank(
-            memories=hybrid_results,
+            memories=[
+                {
+                    "id": c.id,
+                    "content": c.row.get("content") or "",
+                    "semantic_score": c.semantic or 0.0,
+                    "keyword_score": c.keyword_raw / max_kw,
+                    "created_at": c.row.get("created_at"),
+                    "entities": entity_map.get(c.id, []),
+                    "access_count": c.row.get("access_count") or 0,
+                    "rerank_score": rerank_scores.get(c.id),
+                    "feedback_score": feedback.get(c.id, 0.0),
+                    "payload": c.row,
+                }
+                for c in candidates.values()
+            ],
             query=request.query,
             query_entities=matched_entities,
-            retrieval_mode=getattr(request, "retrieval_mode", "balanced"),
+            retrieval_mode=mode.mode,
+            feedback_weight=self.settings.ranking_feedback_weight,
         )
-
-        log.debug(
-            "ranking_done",
-            count=len(ranked),
-            top_score=ranked[0].final_score if ranked else 0,
-        )
-
-        # Step 7: Context window optimization with token budgeting
-        # Create optimizer with request-specific token limit
-        context_optimizer = ContextOptimizer(max_tokens=max_tokens)
-
-        # Prepare memories for context optimizer
-        memories_for_context = [
-            {
-                "id": r.id,
-                "content": r.content,
-                "relevance": r.final_score,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-            }
-            for r in ranked
-        ]
-
-        optimized = context_optimizer.optimize(
-            memories=memories_for_context,
-            sort_by_relevance=False,  # Already sorted by ranker
-        )
-
-        log.debug(
-            "context_optimized",
-            total_tokens=optimized.total_tokens,
-            chunks=len(optimized.chunks),
-            truncated=optimized.truncated_count,
-            dropped=optimized.dropped_count,
-        )
-
-        # Step 8: Build final response
-        # Use top N from ranked results (respecting limit)
+        ranked = _drop_near_duplicates(ranked, self.settings.recall_dedup_similarity)
         final_ranked = ranked[: request.limit]
 
-        # Step 8a: Divergence Detection (v0.13)
-        # Compare top result by semantic vs top result by recency
-        divergence_detected = False
-        divergence_details = None
-        staleness_threshold_days = self.settings.ranking_recency_decay_days
+        divergence_detected, divergence_details = self._detect_divergence(ranked)
 
-        if len(ranked) >= 2:
-            # Find top by semantic score
-            semantic_sorted = sorted(ranked, key=lambda r: r.semantic_score, reverse=True)
-            semantic_top = semantic_sorted[0]
-
-            # Find top by recency score
-            recency_sorted = sorted(ranked, key=lambda r: r.recency_score, reverse=True)
-            recency_top = recency_sorted[0]
-
-            # Check for divergence: different memories AND both have meaningful scores
-            if semantic_top.id != recency_top.id and semantic_top.semantic_score > 0.5 and recency_top.recency_score > 0.5:
-                # Calculate divergence score (how much they disagree)
-                divergence_score = abs(semantic_top.semantic_score - recency_top.semantic_score)
-                divergence_score += abs(semantic_top.recency_score - recency_top.recency_score)
-                divergence_score = min(1.0, divergence_score / 2.0)
-
-                if divergence_score > 0.3:  # Threshold for flagging
-                    divergence_detected = True
-                    divergence_details = DivergenceDetail(
-                        semantic_top_id=semantic_top.id,
-                        recency_top_id=recency_top.id,
-                        semantic_content=semantic_top.content[:200],
-                        recency_content=recency_top.content[:200],
-                        divergence_score=divergence_score,
-                        recommendation=(
-                            "The most semantically relevant memory differs from the most recent. "
-                            "Consider reviewing both - they may represent evolving information."
-                        ),
-                    )
-                    log.info(
-                        "divergence_detected",
-                        semantic_top_id=semantic_top.id,
-                        recency_top_id=recency_top.id,
-                        divergence_score=divergence_score,
-                    )
-
-        # Step 8b: Build memory results with freshness scores
         now = utcnow()
         memories: list[RecallResult] = []
         for r in final_ranked:
-            created = r.created_at or now
-            age_days = (now - created).days
+            cand = candidates[r.id]
+            memories.append(self._recall_result(cand, r, now, request.include_decay_score))
 
-            # Freshness score: 1.0 = today, decays to 0 over staleness_threshold_days
-            freshness = max(0.0, 1.0 - (age_days / (staleness_threshold_days * 2)))
+        # Context is built from exactly the returned memories (RET-8).
+        optimized = ContextOptimizer(max_tokens=max_tokens, include_metadata=self.settings.context_include_metadata).optimize(
+            memories=[
+                {
+                    "id": m.id,
+                    "content": m.content,
+                    "relevance": m.relevance,
+                    "created_at": m.created_at.isoformat() if m.created_at else None,
+                }
+                for m in memories
+            ],
+            sort_by_relevance=False,
+        )
 
-            # why_relevant: synthesise a brief explanation from available signals
-            why_parts = []
-            if r.semantic_score > 0.7:
-                why_parts.append("high semantic match")
-            elif r.semantic_score > 0.5:
-                why_parts.append("semantic match")
-            if r.recency_score > 0.8:
-                why_parts.append("very recent")
-            elif r.recency_score > 0.5:
-                why_parts.append("recent")
-            if age_days > staleness_threshold_days:
-                why_parts.append("may be stale")
-            why_relevant = "; ".join(why_parts) if why_parts else "matched query"
+        await self.db.update_access_many([m.id for m in memories])
 
-            # Extract memory_type, scope, and metadata from payload if available
-            payload = getattr(r, "payload", {}) or {}
-            mem_type = payload.get("memory_type")
-            mem_scope = payload.get("scope")
-            # Metadata may arrive as a JSON string from DB-backed fetch paths
-            # (e.g. graph retrieval) — coerce so it never 500s recall.
-            mem_metadata = _coerce_metadata(payload.get("metadata"))
-
-            memories.append(
-                RecallResult(
-                    id=r.id,
-                    relevance=r.final_score,
-                    content=r.content,
-                    created_at=created,
-                    freshness_score=round(freshness, 3),
-                    age_days=age_days,
-                    staleness_warning=age_days > staleness_threshold_days,
-                    semantic_score=round(r.semantic_score, 3),
-                    recency_score=round(r.recency_score, 3),
-                    why_relevant=why_relevant,
-                    memory_type=mem_type,
-                    scope=mem_scope,
-                    metadata=mem_metadata,
-                )
-            )
-            # Update access tracking
-            await self.db.update_access(r.id)
-
-        # Combine all entities (matched + related)
         all_entities = list(matched_entities)
         seen_entity_ids = {e.id for e in all_entities}
         for entity in related_entities:
@@ -2014,12 +2155,14 @@ class MemoryService:
                 seen_entity_ids.add(entity.id)
 
         log.info(
-            "recall_complete_v2",
+            "recall_complete_v3",
             user_id=request.user_id,
             results_count=len(memories),
+            candidates=len(candidates),
             entities_count=len(all_entities),
             context_tokens=optimized.total_tokens,
             divergence_detected=divergence_detected,
+            degraded=degraded,
         )
 
         return RecallResponse(
@@ -2029,6 +2172,101 @@ class MemoryService:
             context_budget_used=optimized.total_tokens,
             divergence_detected=divergence_detected,
             divergence_details=divergence_details,
+            degraded=degraded,
+            retrieval_mode=mode.mode,
+            retrieval_mode_source=mode.source,
+        )
+
+    def _detect_divergence(self, ranked: list[Any]) -> tuple[bool, DivergenceDetail | None]:
+        """Flag when the most similar and the most recent memory disagree."""
+        if len(ranked) < 2:
+            return False, None
+        semantic_top = max(ranked, key=lambda r: r.semantic_score)
+        recency_top = max(ranked, key=lambda r: r.recency_score)
+        if semantic_top.id == recency_top.id or semantic_top.semantic_score <= 0.5 or recency_top.recency_score <= 0.5:
+            return False, None
+        score = abs(semantic_top.semantic_score - recency_top.semantic_score)
+        score += abs(semantic_top.recency_score - recency_top.recency_score)
+        score = min(1.0, score / 2.0)
+        if score <= 0.3:
+            return False, None
+        log.info(
+            "divergence_detected",
+            semantic_top_id=semantic_top.id,
+            recency_top_id=recency_top.id,
+            divergence_score=score,
+        )
+        return True, DivergenceDetail(
+            semantic_top_id=semantic_top.id,
+            recency_top_id=recency_top.id,
+            semantic_content=semantic_top.content[:200],
+            recency_content=recency_top.content[:200],
+            divergence_score=score,
+            recommendation=(
+                "The most semantically relevant memory differs from the most recent. "
+                "Consider reviewing both - they may represent evolving information."
+            ),
+        )
+
+    def _recall_result(self, cand: "_Candidate", r: Any, now: datetime, include_decay: bool) -> RecallResult:
+        row = cand.row
+        meta = _coerce_metadata(row.get("metadata"))
+        created = _parse_date(row.get("created_at")) or now
+        age_days = max(0, (now - created).days)
+        mem_type = row.get("memory_type") or meta.get("memory_type")
+        stale_days = self._stale_after_days(mem_type)
+        freshness = max(0.0, min(1.0, 1.0 - (age_days / (stale_days * 2))))
+        stale = age_days > stale_days
+
+        why_parts: list[str] = []
+        if r.semantic_score > 0.7:
+            why_parts.append("high semantic match")
+        elif r.semantic_score > 0.5:
+            why_parts.append("semantic match")
+        if "keyword" in cand.sources:
+            why_parts.append("keyword match")
+        if "graph" in cand.sources:
+            why_parts.append("linked entity")
+        if r.recency_score > 0.8:
+            why_parts.append("very recent")
+        elif r.recency_score > 0.5:
+            why_parts.append("recent")
+        if stale:
+            why_parts.append("may be stale")
+
+        decay: float | None = None
+        if include_decay:
+            decay = round(
+                self.calculate_decay_score(
+                    created_at=created,
+                    last_accessed=_parse_date(row.get("last_accessed")),
+                    access_count=int(row.get("access_count") or 0),
+                    half_life_days=self.settings.ranking_recency_decay_days,
+                ),
+                4,
+            )
+
+        return RecallResult(
+            id=cand.id,
+            relevance=round(r.final_score, 4),
+            content=row.get("content") or "",
+            created_at=created,
+            freshness_score=round(freshness, 3),
+            age_days=age_days,
+            staleness_warning=stale,
+            semantic_score=round(r.semantic_score, 3),
+            recency_score=round(r.recency_score, 3),
+            why_relevant="; ".join(why_parts) if why_parts else "matched query",
+            memory_type=mem_type,
+            scope=row.get("scope") or meta.get("scope"),
+            metadata=meta,
+            project_id=row.get("project_id"),
+            match_sources=sorted(cand.sources),
+            valid_from=_parse_date(row.get("valid_from")) or created,
+            valid_to=_parse_date(row.get("valid_to")),
+            superseded_by=row.get("superseded_by"),
+            expires_at=_parse_date(row.get("expires_at")),
+            decay_score=decay,
         )
 
     # -----------------------------------------------------------------------
@@ -2044,12 +2282,11 @@ class MemoryService:
     ) -> RecallResponse:
         """Retrieve memories by metadata filters only, sorted by created_at DESC.
 
-        Used when the caller omits ``query`` but supplies ``filters``.
-        Skips embedding, semantic search, graph retrieval, and reranking —
-        returns a chronological list of matching memories.
+        Used when the caller omits ``query`` but supplies ``filters``. Skips
+        embedding, semantic search, graph retrieval and reranking. Applies the
+        same row gate as query recall (RET-14): no source records, no
+        superseded memories unless asked, as_of validity, scope from the row.
         """
-        import json as _json
-
         if not request.user_id:
             raise ValueError("RecallRequest.user_id must be set for filter-only recall.")
 
@@ -2060,32 +2297,15 @@ class MemoryService:
             filters=request.filters,
             limit=request.limit,
         )
+        ctx = self._recall_ctx(request)
 
-        def _parse_created(value: Any) -> datetime:
-            if isinstance(value, datetime):
-                return value
-            if isinstance(value, str):
-                try:
-                    return datetime.fromisoformat(value.replace("Z", "+00:00"))
-                except (ValueError, TypeError):
-                    return utcnow()
-            return utcnow()
-
-        filters = request.filters or {}
-        exclude_ids = set(getattr(request, "exclude", None) or [])
-        requested_scope = getattr(request, "scope", None)
-        as_of = getattr(request, "as_of", None)
-
-        # Scan through SQLite in pages. The previous implementation only
-        # checked the most recent (limit * 3) rows, which could miss older
-        # matches and made "filter-only recall" unreliable for long-lived
-        # trading journals and rule libraries.
+        # Scan through SQLite in pages until the limit is met (bounded).
         batch_size = max(200, request.limit * 10)
         max_scan = 5000
         offset = 0
         scanned = 0
 
-        matched: list[dict[str, Any]] = []
+        matched: dict[str, _Candidate] = {}
         while len(matched) < request.limit and scanned < max_scan:
             rows = await self.db.list_memories(
                 user_id=request.user_id,
@@ -2095,95 +2315,66 @@ class MemoryService:
             )
             if not rows:
                 break
-
             for row in rows:
                 scanned += 1
                 if scanned > max_scan:
                     break
-
-                memory_id = row.get("id")
-                if memory_id and memory_id in exclude_ids:
+                row = dict(row)
+                row.setdefault("user_id", request.user_id)
+                if not self._row_eligible(row, ctx):
                     continue
-
-                created_dt = _parse_created(row.get("created_at", ""))
-                if as_of and created_dt > as_of:
-                    continue
-
-                raw_meta = row.get("metadata")
-                if isinstance(raw_meta, str):
-                    try:
-                        meta = _json.loads(raw_meta)
-                    except (ValueError, TypeError):
-                        meta = {}
-                elif isinstance(raw_meta, dict):
-                    meta = raw_meta
-                else:
-                    meta = {}
-
-                if requested_scope:
-                    mem_scope = meta.get("scope")
-                    if not mem_scope:
-                        continue
-                    if mem_scope != requested_scope and not str(mem_scope).startswith(str(requested_scope) + ":"):
-                        continue
-
-                if filters and not metadata_filters_match(meta, filters):
-                    continue
-
-                matched.append(
-                    {
-                        **row,
-                        "_parsed_metadata": meta,
-                        "_created_dt": created_dt,
-                    }
-                )
+                matched[row["id"]] = _Candidate(id=row["id"], row=row, sources={"filter"})
                 if len(matched) >= request.limit:
                     break
-
             offset += batch_size
 
-        # Build RecallResult objects
+        self._dedupe_status(matched)
+
+        now = utcnow()
         memories: list[RecallResult] = []
         memories_for_context: list[dict[str, Any]] = []
-        for row in matched:
-            created_dt = row.get("_created_dt") or _parse_created(row.get("created_at", ""))
-
-            meta = row.get("_parsed_metadata", {})
+        for cand in matched.values():
+            row = cand.row
+            meta = _coerce_metadata(row.get("metadata"))
+            created_dt = _parse_date(row.get("created_at")) or now
+            age_days = max(0, (now - created_dt).days)
+            mem_type = row.get("memory_type") or meta.get("memory_type")
+            stale_days = self._stale_after_days(mem_type)
             content = row.get("content", "")
-
             memories.append(
                 RecallResult(
                     id=row["id"],
                     relevance=1.0,  # filter-only = exact match
                     content=content,
                     created_at=created_dt,
-                    freshness_score=1.0,
-                    age_days=0,
-                    staleness_warning=False,
+                    freshness_score=round(max(0.0, min(1.0, 1.0 - age_days / (stale_days * 2))), 3),
+                    age_days=age_days,
+                    staleness_warning=age_days > stale_days,
                     semantic_score=0.0,
-                    recency_score=1.0,
+                    recency_score=round(self.relevance_ranker._compute_recency_score(created_dt), 3),
                     why_relevant="matched metadata filters",
-                    memory_type=meta.get("memory_type"),
-                    scope=meta.get("scope"),
+                    memory_type=mem_type,
+                    scope=row.get("scope") or meta.get("scope"),
                     metadata=meta,
+                    project_id=row.get("project_id"),
+                    match_sources=["filter"],
+                    valid_from=_parse_date(row.get("valid_from")) or created_dt,
+                    valid_to=_parse_date(row.get("valid_to")),
+                    superseded_by=row.get("superseded_by"),
+                    expires_at=_parse_date(row.get("expires_at")),
                 )
             )
-            date_str = created_dt.strftime("%Y-%m-%d") if hasattr(created_dt, "strftime") else str(created_dt)[:10]
             memories_for_context.append(
                 {
                     "id": row["id"],
-                    "content": f"[{date_str}] {content}",
+                    "content": f"[{created_dt.strftime('%Y-%m-%d')}] {content}",
                     "relevance": 1.0,
                     "created_at": None,  # date embedded above
                 }
             )
 
         # Apply token budgeting consistent with semantic recall.
-        context_optimizer = ContextOptimizer(
-            max_tokens=max_tokens,
-            include_metadata=False,  # we embed [YYYY-MM-DD] ourselves
-        )
-        optimized = context_optimizer.optimize(
+        optimized = ContextOptimizer(max_tokens=max_tokens, include_metadata=False).optimize(
             memories=memories_for_context,
             sort_by_relevance=False,  # preserve created_at DESC ordering
         )
@@ -2209,123 +2400,107 @@ class MemoryService:
         threshold: float = 0.4,
         max_tokens: int | None = None,
     ) -> RecallResponse:
-        """Recall memories from all spaces the agent has access to.
+        """Recall the agent's own memories plus memories shared into spaces it can read.
 
-        This enables cross-agent knowledge sharing: if agent A stores
-        memories in a space that agent B can read, agent B will surface
-        those memories alongside its own.
+        Space memories are scored with their real cosine similarity (one
+        filtered Qdrant query - RET-5), pass the same expired / superseded /
+        source gate as normal recall, and are ranked with the same ranker so
+        their scores are comparable with the agent's own results.
 
-        Steps:
-        1. Get all space IDs the agent has read access to
-        2. Collect all memory IDs across those spaces
-        3. Run standard recall scoped to those memory IDs + the agent's
-           own memories
-        4. De-duplicate and rank
+        Permission/ownership checks on spaces are enforced by the API/space
+        layer (SEC-3), not here.
         """
+        own_request = RecallRequest(
+            query=query,
+            user_id=agent_id,
+            project_id=project_id,
+            limit=limit,
+            threshold=threshold,
+            max_tokens=max_tokens,
+        )
+        own_result = await self.recall(own_request)
         if self.space_manager is None:
-            # Spaces not enabled — fall back to standard recall
-            return await self.recall(
-                RecallRequest(
-                    query=query,
-                    user_id=agent_id,
-                    project_id=project_id,
-                    limit=limit,
-                    threshold=threshold,
-                    max_tokens=max_tokens,
-                )
-            )
-
-        log.info(
-            "recall_across_spaces",
-            agent_id=agent_id,
-            query_length=len(query),
-        )
-
-        # 1. Get accessible spaces
-        space_ids = await self.space_manager.get_accessible_space_ids(agent_id)
-
-        # 2. Collect memory IDs from all accessible spaces
-        space_memory_ids: set[str] = set()
-        for sid in space_ids:
-            mids = await self.space_manager.get_space_memory_ids(sid, limit=500)
-            space_memory_ids.update(mids)
-
-        # 3. Run the agent's own recall first
-        own_result = await self.recall(
-            RecallRequest(
-                query=query,
-                user_id=agent_id,
-                project_id=project_id,
-                limit=limit,
-                threshold=threshold,
-                max_tokens=max_tokens,
-            )
-        )
-
-        if not space_memory_ids:
             return own_result
 
-        # 4. Embed the query and search space memories
-        query_vector = await self.embeddings.embed(query)
+        log.info("recall_across_spaces", agent_id=agent_id, query_length=len(query))
 
-        # Fetch each space memory from Qdrant and compute similarity
-        space_results: list[RecallResult] = []
-        seen_ids = {m.id for m in (own_result.memories or [])}
+        space_memory_ids: set[str] = set()
+        for sid in await self.space_manager.get_accessible_space_ids(agent_id):
+            space_memory_ids.update(await self.space_manager.get_space_memory_ids(sid, limit=500))
 
-        for mem_id in space_memory_ids:
-            if mem_id in seen_ids:
+        seen_ids = {m.id for m in own_result.memories}
+        rows = await self.db.get_memories_by_ids([mid for mid in space_memory_ids if mid not in seen_ids])
+        now = utcnow()
+        eligible: dict[str, dict[str, Any]] = {}
+        for mid, row in rows.items():
+            meta = _coerce_metadata(row.get("metadata"))
+            if row.get("memory_type") == "source" or meta.get("record_kind") == "source" or row.get("superseded_by"):
                 continue
-            try:
-                mem_data = await self.qdrant.get_by_id(mem_id)
-                if mem_data is None:
-                    continue
-                # Compute cosine similarity using the stored embedding
-                stored_vec = mem_data.get("embedding")
-                if stored_vec:
-                    from numpy import dot
-                    from numpy.linalg import norm
-
-                    sim = float(dot(query_vector, stored_vec) / (norm(query_vector) * norm(stored_vec) + 1e-9))
-                else:
-                    sim = 0.5  # Default if no embedding stored
-                if sim < threshold:
-                    continue
-                space_results.append(
-                    RecallResult(
-                        id=mem_id,
-                        content=mem_data.get("content", ""),
-                        relevance=sim,
-                        created_at=(datetime.fromisoformat(mem_data["created_at"]) if mem_data.get("created_at") else utcnow()),
-                    )
-                )
-                seen_ids.add(mem_id)
-            except Exception as e:
-                log.debug("space_memory_fetch_failed", mem_id=mem_id, error=str(e))
+            expires = _parse_date(row.get("expires_at"))
+            if expires is not None and expires <= now:
                 continue
+            eligible[mid] = row
+        if not eligible or own_result.degraded:
+            return own_result
 
-        # 5. Merge and re-sort by relevance
-        all_memories = list(own_result.memories or []) + space_results
+        try:
+            query_vector = await self.embeddings.embed(query)
+        except EmbeddingProviderError:
+            return own_result
+        # No user filter: shared memories belong to other users by design.
+        sims = await self.qdrant.score_ids(query_vector, list(eligible))
+        space_cands = {
+            mid: _Candidate(id=mid, row=eligible[mid], semantic=sim, sources={"space"})
+            for mid, sim in sims.items()
+            if sim >= threshold and mid in eligible
+        }
+        mode = ModeDecision(own_result.retrieval_mode or "balanced", own_result.retrieval_mode_source or "default")
+        ranked_space = self.relevance_ranker.rank(
+            memories=[
+                {
+                    "id": c.id,
+                    "content": c.row.get("content") or "",
+                    "semantic_score": c.semantic or 0.0,
+                    "created_at": c.row.get("created_at"),
+                    "payload": c.row,
+                }
+                for c in space_cands.values()
+            ],
+            query=query,
+            retrieval_mode=mode.mode,
+        )
+        space_results = [self._recall_result(space_cands[r.id], r, now, False) for r in ranked_space]
+
+        all_memories = list(own_result.memories) + space_results
         all_memories.sort(key=lambda m: m.relevance, reverse=True)
         final_memories = all_memories[:limit]
 
-        # Rebuild context from merged results
-        context_parts = []
-        for m in final_memories:
-            context_parts.append(m.content)
-        merged_context = "\n\n".join(context_parts)
+        optimized = ContextOptimizer(
+            max_tokens=max_tokens or self.settings.context_max_tokens,
+            include_metadata=self.settings.context_include_metadata,
+        ).optimize(
+            memories=[
+                {"id": m.id, "content": m.content, "relevance": m.relevance, "created_at": m.created_at.isoformat()}
+                for m in final_memories
+            ],
+            sort_by_relevance=False,
+        )
 
         log.info(
             "recall_across_spaces_done",
             agent_id=agent_id,
-            own_count=len(own_result.memories or []),
+            own_count=len(own_result.memories),
             space_count=len(space_results),
             total=len(final_memories),
         )
 
         return RecallResponse(
-            context=merged_context,
+            context=optimized.context,
             memories=final_memories,
             entities=own_result.entities or [],
+            context_budget_used=optimized.total_tokens,
+            retrieval_mode=own_result.retrieval_mode,
+            retrieval_mode_source=own_result.retrieval_mode_source,
         )
 
     # -----------------------------------------------------------------------
@@ -2800,70 +2975,13 @@ class MemoryService:
         project_id: str = "default",
         limit: int = 5,
     ) -> RecallResponse:
+        """Recall memories as they were known and valid at ``as_of`` (UPG-1).
+
+        Thin wrapper over :meth:`recall` with ``as_of``: memories created
+        after ``as_of`` are hidden, and memories superseded since then are
+        returned if their validity window covered ``as_of``.
         """
-        Recall memories as they existed at a specific point in time.
-
-        This enables "time travel" queries - seeing what the memory
-        state was in the past. Useful for:
-        - Auditing what an AI knew at a specific time
-        - Debugging memory changes
-        - Historical analysis
-
-        Args:
-            user_id: User ID
-            query: Natural language query
-            as_of: The point in time to query from
-            project_id: Project namespace
-            limit: Maximum results
-
-        Returns:
-            RecallResponse with memories that existed at as_of time
-        """
-        log.info(
-            "recall_as_of",
-            user_id=user_id,
-            as_of=as_of.isoformat(),
-            query=query[:50],
-        )
-
-        # Get memories that existed at that time
-        historical_memories = await self.db.get_memories_as_of(
-            user_id=user_id,
-            project_id=project_id,
-            as_of=as_of,
-            limit=limit * 2,  # Get more for filtering
-        )
-
-        if not historical_memories:
-            return RecallResponse(context="", memories=[], entities=[])
-
-        # Embed query and find most relevant among historical
-        await self.embeddings.embed(query)
-
-        # Re-embed historical memories for comparison
-        # (In production, we'd store embeddings - this is for correctness)
-        results: list[RecallResult] = []
-        for mem in historical_memories[:limit]:
-            results.append(
-                RecallResult(
-                    id=mem["id"],
-                    content=mem["content"],
-                    relevance=0.8,  # Simplified - historical queries don't rank
-                    created_at=datetime.fromisoformat(mem["created_at"]),
-                )
-            )
-
-        # Build context string
-        context_parts = []
-        for r in results:
-            context_parts.append(f"[{r.created_at.strftime('%Y-%m-%d')}] {r.content}")
-        context = "\n".join(context_parts)
-
-        return RecallResponse(
-            context=context,
-            memories=results,
-            entities=[],
-        )
+        return await self.recall(RecallRequest(query=query, user_id=user_id, project_id=project_id, limit=limit, as_of=as_of))
 
     async def cleanup_expired(
         self,
