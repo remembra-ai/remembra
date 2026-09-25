@@ -120,16 +120,22 @@ Result:
 
 ### forget_memories
 
-Delete memories from persistent storage. GDPR-compliant.
+Delete memories from persistent storage. Prefer deleting one memory by id.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `memory_id` | string | ❌ | Delete specific memory by ID |
-| `entity` | string | ❌ | Delete all memories about an entity |
-| `all_memories` | bool | ❌ | Delete ALL memories (use with caution!) |
+| `memory_id` | string | ❌ | Delete one memory by ID |
+| `entity` | string | ❌ | Not implemented server-side: returns `status: "not_supported"` and deletes nothing |
+| `all_memories` | bool | ❌ | Delete every memory in ONE project (guarded, see below) |
+| `project_id` | string | with `all_memories` | The project to wipe. There is no user-wide wipe via MCP |
+| `dry_run` | bool | ❌ | `all_memories` preview only. Default `true` |
+| `confirm` | string | with `all_memories` | Must equal `DELETE ALL MEMORIES IN <project_id>` |
 
 !!! warning
-    Exactly one parameter must be provided. `all_memories=true` is destructive!
+    Exactly one of `memory_id`, `entity`, `all_memories` must be provided.
+    `all_memories` first returns a dry-run preview (`would_delete`, a sample,
+    and the exact `confirm_phrase`). It deletes only when called again with
+    `dry_run: false` and the matching `confirm` phrase.
 
 **Examples:**
 ```
@@ -137,13 +143,17 @@ Delete memories from persistent storage. GDPR-compliant.
 [Tool: forget_memories]
 memory_id: "mem_abc123"
 
-# Delete all about a person
-[Tool: forget_memories]
-entity: "John Smith"
-
-# Nuclear option
+# Preview a project wipe (deletes nothing)
 [Tool: forget_memories]
 all_memories: true
+project_id: "scratch"
+
+# Confirmed project wipe
+[Tool: forget_memories]
+all_memories: true
+project_id: "scratch"
+dry_run: false
+confirm: "DELETE ALL MEMORIES IN scratch"
 ```
 
 ---
@@ -356,14 +366,21 @@ Result:
 
 ### timeline <span class="md-tag">v0.9.0</span>
 
-Browse memories chronologically, optionally filtered by entity and date range.
+Browse memories in time order. The date range is filtered server-side
+(`GET /api/v1/timeline`), so results are exactly the memories created in the
+range. Before v0.16 this tool ran a semantic query and ignored the dates.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
-| `entity_name` | string | ❌ | - | Filter by entity (person, org, etc.) |
-| `start_date` | string | ❌ | - | Start of range (ISO format, e.g., `2024-01-01`) |
-| `end_date` | string | ❌ | - | End of range (ISO format) |
-| `limit` | int | ❌ | 20 | Max memories to return |
+| `entity_name` | string | ❌ | - | Exact entity name or alias (case-insensitive, no substring matches) |
+| `start_date` | string | ❌ | - | Inclusive start (ISO date/time, e.g., `2024-01-01`) |
+| `end_date` | string | ❌ | - | Exclusive end (ISO date/time) |
+| `limit` | int | ❌ | 20 | Max memories to return (1-100) |
+| `offset` | int | ❌ | 0 | Pagination offset |
+| `order` | string | ❌ | `asc` | `asc` (oldest first) or `desc` |
+| `project_id` | string | ❌ | configured project | Project to browse |
+| `all_projects` | bool | ❌ | false | Browse every project you own |
+| `memory_type` | string | ❌ | - | e.g. `handoff`, `checkpoint` |
 
 **Example:**
 ```
@@ -480,6 +497,40 @@ Returns server status and configuration.
 
 ---
 
+## Agent session tools <span class="md-tag">v0.16.0</span>
+
+| Tool | Purpose |
+|------|---------|
+| `session_brief(project_id?, agent_id?, recent_n=10)` | Call first at session start. Returns the latest `handoff` for the project, this agent's unread inbox (count + previews), current `status_items`, and the most recent memories **by time**. |
+| `store_status(key, value, project_id?, ttl?)` | Set the current value of a key (deploy status, active sprint). The previous value for the same key+project is superseded (kept as history, hidden from recall). Re-sending the current value is a no-op. |
+| `list_status(project_id?)` | Current value per key. |
+| `list_spaces()` / `create_space(name, ...)` | Find or create a space id for `share_memory`. |
+
+`store_memory` accepts `memory_type`:
+
+- `checkpoint`: progress note. Expires after `REMEMBRA_CHECKPOINT_DEFAULT_TTL` (server setting, default `7d`) unless you pass `ttl`. Stored as one unit and never merged into permanent memories.
+- `handoff`: end-of-session snapshot, stored verbatim as ONE memory. The newest one appears in the next agent's `session_brief`.
+- `fact`, `observation`, `inference`, `task`.
+- `status` is rejected. Use `store_status`.
+
+If every extracted fact already exists, `store_memory` returns `status: "duplicate"` with `duplicate_of` instead of `stored`.
+
+Every store is stamped with provenance metadata: `agent_id`, `session_id`, `host`,
+`client_version`, and `source: "mcp"`. Keys you pass in `metadata` take precedence.
+Recall, timeline and list results include `metadata`, `memory_type`, `source_id` and `agent_id`.
+
+`recall_memories` also accepts `retrieval_mode` (`balanced`, `debug` for recent-first,
+`operational`, `strategic`), `scope`, `as_of`, `max_tokens`, `include_superseded` and
+`project_id`. `slim` is sent to the server, which caps the context at 800 tokens. The
+full response lists only entities that are named in the returned memories
+(`entities_total` holds the unfiltered count).
+
+`get_inbox(summary=true)` returns subject, sender and a 200-character preview instead of full bodies.
+`send_to_inbox` warns when the recipient is not in `REMEMBRA_KNOWN_AGENTS` and accepts `expires_in` (`12h`, `7d`, `2w`).
+`list_memories` accepts `offset` and returns `next_offset`.
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -487,8 +538,16 @@ Returns server status and configuration.
 | `REMEMBRA_URL` | `http://localhost:8787` | Remembra server URL |
 | `REMEMBRA_API_KEY` | - | API key for authentication |
 | `REMEMBRA_USER_ID` | `default` | User ID for memory isolation |
-| `REMEMBRA_PROJECT` | `default` | Project namespace |
+| `REMEMBRA_PROJECT` | `default` | Project namespace. Use the same value for every agent |
+| `REMEMBRA_AGENT_ID` | - | This agent's id (`claude-code`, `claude-desktop`, `codex`, `gemini`, `clawdbot`). Required for the inbox. Stamped on every store. `health_check` warns when it is missing |
+| `REMEMBRA_PROJECT_ALIASES` | - | `alias=canonical,...`. For example `clawdbot=clawbot` makes both names resolve to `clawbot`. Case is kept for ids that are not aliases |
+| `REMEMBRA_SESSION_ID` | random per process | Session id stamped on stores |
+| `REMEMBRA_KNOWN_AGENTS` | `claude-code,claude-desktop,codex,gemini,clawdbot` | Valid agent ids. Used for typo warnings |
 | `REMEMBRA_MCP_TRANSPORT` | `stdio` | Transport: `stdio`, `sse`, or `streamable-http` |
+
+Remote transports read each caller's key from `X-API-Key` / `Authorization: Bearer`
+on **every** HTTP request (not only the first request of a session). They read the
+project from `?project=` and the agent id from `X-Remembra-Agent-Id` or `?agent_id=`.
 
 ---
 
