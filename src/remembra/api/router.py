@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from remembra.api.v1 import (
     admin,
+    agent_session,
     audio,
     auth,
     billing,
@@ -51,4 +52,5 @@ api_router.include_router(websocket.router, prefix="/v1")
 api_router.include_router(meetings.router, prefix="/v1")
 api_router.include_router(audio.router, prefix="/v1")
 api_router.include_router(inbox.router, prefix="/v1")
+api_router.include_router(agent_session.router, prefix="/v1")
 api_router.include_router(brain.router, prefix="/v1")

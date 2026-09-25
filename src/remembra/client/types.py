@@ -25,15 +25,27 @@ class MemoryItem:
     created_at: datetime
     metadata: dict[str, Any] = field(default_factory=dict)
     memory_type: str | None = None
+    scope: str | None = None
+    source_id: str | None = None
+    staleness_warning: bool = False
+    age_days: int = 0
 
 
 @dataclass
 class StoreResult:
-    """Result from storing a memory."""
+    """Result from storing a memory.
+
+    ``duplicate_of`` is set when nothing new was stored because every
+    extracted fact duplicated an existing memory (``id`` is then that memory).
+    """
 
     id: str
     extracted_facts: list[str]
     entities: list[EntityItem]
+    duplicate_of: str | None = None
+    expires_at: str | None = None
+    source_id: str | None = None
+    enrichment: str | None = None
 
 
 @dataclass

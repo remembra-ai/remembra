@@ -36,6 +36,65 @@ claude mcp add remembra \
   -- remembra-mcp
 ```
 
+### Set the agent id and project
+
+Other agents address Claude Code's inbox by its agent id. Give every agent the same project:
+
+```bash
+claude mcp add remembra \
+  -e REMEMBRA_URL=https://api.remembra.dev \
+  -e REMEMBRA_API_KEY=your_key_here \
+  -e REMEMBRA_PROJECT=your-shared-project \
+  -e REMEMBRA_AGENT_ID=claude-code \
+  -- remembra-mcp
+```
+
+If `REMEMBRA_AGENT_ID` is missing, `health_check` returns a warning and the server prints a warning to stderr at startup.
+
+### Load context automatically at session start
+
+`integrations/claude-code/session_start.py` is a SessionStart hook. It calls
+`GET /api/v1/session/brief` and prints the latest handoff, your unread inbox,
+current status values, and recent memories. Claude Code adds that output to the
+session context. The script uses only the Python standard library. It reads its
+settings from the environment. If those are not set, it reads the `env` block of
+the `remembra` MCP server in `~/.claude.json`, so the API key stays in one place.
+If the brief can't be fetched, it prints one line and exits 0, so it never blocks
+a session.
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /path/to/remembra/integrations/claude-code/session_start.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+### Keep the MCP server in step with the API
+
+If you run from a checkout, install the MCP server in editable mode. Then the
+`remembra-mcp` binary always runs the code you have checked out:
+
+```bash
+pipx install --force --editable "/path/to/remembra[mcp]"
+# or: uv tool install --force --editable "/path/to/remembra[mcp]"
+```
+
+`health_check` reports `client_version`. It warns when that version differs from
+the API's version.
+
 ## Verify
 
 ```bash

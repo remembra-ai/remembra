@@ -177,37 +177,40 @@ REMEMBRA_USER_ID = "user_YOUR_USER_ID"
 
 ---
 
-## Auto-Recall Instruction Files (Optional)
+## Session Start and Memory Hygiene
 
-Create instruction files so agents automatically recall memory at session start.
+### Identity: one project, one agent id per client
 
-### Claude Code: `~/.claude/CLAUDE.md`
+Every client uses the **same** `REMEMBRA_PROJECT`. Each client gets its own
+`REMEMBRA_AGENT_ID` (`claude-code`, `claude-desktop`, `codex`, `gemini`,
+`clawdbot`). The agent id is the inbox address, and it is stamped on every
+memory the client stores. If clients picked different spellings in the past,
+set `REMEMBRA_PROJECT_ALIASES=clawdbot=clawbot` on every client so both
+spellings resolve to one namespace.
 
-```markdown
-# Shared Memory Protocol
+### Automatic session start
 
-You are connected to Remembra, a shared memory system.
+- **Claude Code:** install the SessionStart hook
+  `integrations/claude-code/session_start.py`
+  (see [Claude Code](../integrations/claude-code.md)).
+- **Clawdbot:** `integrations/clawd-hooks/session-recall/handler.ts`
+  injects the brief as `_SESSION_BRIEF.md` at `agent:bootstrap`.
+- **Other MCP clients:** call the `session_brief` tool first. It returns the
+  latest handoff, your unread inbox, current status values, and recent
+  memories ordered by time.
 
-## On Session Start
-BEFORE doing anything else, recall recent context:
-- Use `recall_memories` with query: "what was I just working on"
+### What to store
 
-## During Session
-Store important context continuously:
-- Use `store_memory` after significant actions
-- Format: "[AGENT] [TASK] - Did X. Next: Y."
+| Situation | Tool |
+|---|---|
+| A decision, an outcome, a durable fact | `store_memory` |
+| State that changes (deploy status, active branch, current blocker) | `store_status(key, value)`, which replaces the previous value |
+| A progress note mid-task | `store_memory(..., memory_type="checkpoint")`, which expires after 7 days by default |
+| End of session | `store_memory(snapshot, memory_type="handoff")`, stored as one unit |
+| A directive for another agent | `send_to_inbox(to_agent, subject, body)`. The receiver calls `ack_inbox` when it is done |
 
-## Connected Agents
-All share the same memory: Claude Desktop, Claude Code, Codex, Gemini, Clawdbot.
-```
-
-### Codex CLI: `~/.codex/instructions.md`
-
-Same content, adapted for Codex.
-
-### Gemini CLI: `~/.gemini/GEMINI.md`
-
-Same content, adapted for Gemini.
+Do not store ritual entries such as "session started" or "recalled context".
+Do not repeat facts that are already stored.
 
 ---
 

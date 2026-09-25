@@ -39,12 +39,19 @@ Usage:
 from __future__ import annotations
 
 import builtins
+import socket
+import uuid
+from collections.abc import Mapping
 from datetime import datetime
-from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
+# The package's own __version__ is authoritative. Installed dist metadata can be
+# stale (an editable/pipx install made before a version bump), which is how the
+# MCP server ended up reporting 0.13.2 against a 0.16.0 API (AGT-12).
+from remembra import __version__ as USER_AGENT_VERSION
+from remembra.client.project import normalize_project_id
 from remembra.client.shadow_ttl import ShadowTTLCache, parse_ttl_string
 from remembra.client.temporal_parser import TemporalParser
 from remembra.client.types import (
@@ -59,11 +66,6 @@ from remembra.client.types import (
     RecallResult,
     StoreResult,
 )
-
-try:
-    USER_AGENT_VERSION = version("remembra")
-except PackageNotFoundError:
-    USER_AGENT_VERSION = "0.13.2"
 
 if TYPE_CHECKING:
     pass
@@ -94,6 +96,14 @@ class Memory:
         temporal_min_confidence: Minimum confidence for temporal detection (0.0-1.0)
         enable_shadow_ttl: Enable client-side TTL caching for lower latency (v0.12+)
         shadow_ttl_max_entries: Maximum entries in shadow TTL cache
+        agent_id: Logical id of the agent using this client (e.g. "claude-code").
+            Stamped on every store and used as the default inbox/brief agent.
+        session_id: Session id stamped on stores (default: random per client).
+        provenance: Auto-stamp ``{agent_id, session_id, host, client_version,
+            source}`` into store metadata. Caller-supplied keys always win.
+        provenance_source: Value of the ``source`` provenance key ("sdk", "mcp", ...).
+        project_aliases: ``{alias: canonical}`` map applied to every project id
+            (e.g. ``{"clawdbot": "clawbot"}``) so agents share one namespace.
 
     Example:
         >>> memory = Memory(base_url="http://localhost:8787", user_id="user_123")
@@ -119,12 +129,23 @@ class Memory:
         temporal_min_confidence: float = 0.6,
         enable_shadow_ttl: bool = False,
         shadow_ttl_max_entries: int = 10000,
+        # Agent integration (AGT-4 / AGT-6)
+        agent_id: str | None = None,
+        session_id: str | None = None,
+        provenance: bool = True,
+        provenance_source: str = "sdk",
+        project_aliases: Mapping[str, str] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
         self.user_id = user_id
-        self.project = project
+        self._project_aliases = dict(project_aliases or {})
+        self.project = normalize_project_id(project, self._project_aliases)
         self.timeout = timeout
+        self.agent_id = (agent_id or "").strip() or None
+        self.session_id = session_id or uuid.uuid4().hex
+        self._provenance_enabled = provenance
+        self._provenance_source = provenance_source
 
         # v0.12: Smart Auto-Forgetting
         self._auto_expire_temporal = auto_expire_temporal
@@ -185,6 +206,31 @@ class Memory:
 
         return cast("dict[str, Any]", response.json())
 
+    def _project(self, project_id: str | None) -> str:
+        """Normalize a per-call project id, defaulting to the client's project."""
+        if project_id is None:
+            return self.project
+        return normalize_project_id(project_id, getattr(self, "_project_aliases", None))
+
+    def provenance(self) -> dict[str, Any]:
+        """Provenance keys stamped into store metadata (AGT-4)."""
+        stamp: dict[str, Any] = {
+            "session_id": self.session_id,
+            "host": socket.gethostname(),
+            "client_version": USER_AGENT_VERSION,
+            "source": self._provenance_source,
+        }
+        if self.agent_id:
+            stamp["agent_id"] = self.agent_id
+        return stamp
+
+    def _stamp(self, metadata: dict[str, Any] | None) -> dict[str, Any]:
+        stamped = dict(metadata or {})
+        if getattr(self, "_provenance_enabled", False):
+            for key, value in self.provenance().items():
+                stamped.setdefault(key, value)
+        return stamped
+
     def store(
         self,
         content: str,
@@ -192,6 +238,7 @@ class Memory:
         ttl: str | None = None,
         auto_expire: bool | None = None,
         skip_extraction: bool = False,
+        memory_type: str | None = None,
     ) -> StoreResult:
         """
         Store a new memory.
@@ -204,9 +251,14 @@ class Memory:
             metadata: Optional key-value metadata to attach
             ttl: Optional time-to-live (e.g., "30d", "1y")
             auto_expire: Override auto_expire_temporal for this call (v0.12+)
+            skip_extraction: Store as one atomic memory (no fact split/merge)
+            memory_type: Optional type. Agent hygiene types: "checkpoint"
+                (server applies a default TTL), "handoff" (stored verbatim as
+                one unit). For current-state values use ``store_status``.
 
         Returns:
-            StoreResult with the memory ID, extracted facts, and entities
+            StoreResult with the memory ID, extracted facts, and entities.
+            ``duplicate_of`` is set when nothing new was stored.
 
         Example:
             >>> result = memory.store("John started as CEO of Acme Corp in 2024")
@@ -235,12 +287,14 @@ class Memory:
             "user_id": self.user_id,
             "project_id": self.project,
             "content": content,
-            "metadata": metadata or {},
+            "metadata": self._stamp(metadata),
         }
         if effective_ttl:
             payload["ttl"] = effective_ttl
         if skip_extraction:
             payload["skip_extraction"] = True
+        if memory_type:
+            payload["memory_type"] = memory_type
 
         data = self._request("POST", "/api/v1/memories", json=payload)
 
@@ -266,6 +320,10 @@ class Memory:
             id=memory_id,
             extracted_facts=data.get("extracted_facts", []),
             entities=entities,
+            duplicate_of=data.get("duplicate_of"),
+            expires_at=data.get("expires_at"),
+            source_id=data.get("source_id"),
+            enrichment=data.get("enrichment"),
         )
 
     def update(
@@ -321,6 +379,13 @@ class Memory:
         limit: int = 5,
         threshold: float = 0.70,
         filters: dict[str, str] | None = None,
+        retrieval_mode: str | None = None,
+        scope: str | None = None,
+        as_of: str | datetime | None = None,
+        max_tokens: int | None = None,
+        slim: bool = False,
+        include_superseded: bool = False,
+        project_id: str | None = None,
     ) -> RecallResult:
         """
         Recall memories relevant to a query and/or metadata filters.
@@ -338,6 +403,14 @@ class Memory:
             threshold: Minimum relevance score (0.0-1.0)
             filters: Optional metadata filters (AND-combined exact-match),
                      e.g. {"project": "trademind", "type": "deploy-config"}.
+            retrieval_mode: "balanced" | "debug" (recency-heavy) |
+                     "operational" | "strategic". Server default when None.
+            scope: Only memories whose scope starts with this label.
+            as_of: Point-in-time query (ISO string or datetime).
+            max_tokens: Cap on the server-built context string.
+            slim: Server-side slim mode (context capped at 800 tokens).
+            include_superseded: Also return memories replaced by newer ones.
+            project_id: Override the client's project for this call.
 
         Returns:
             RecallResult with context string, matching memories, and entities
@@ -355,7 +428,7 @@ class Memory:
 
         payload: dict[str, Any] = {
             "user_id": self.user_id,
-            "project_id": self.project,
+            "project_id": self._project(project_id),
             "limit": limit,
             "threshold": threshold,
         }
@@ -363,6 +436,18 @@ class Memory:
             payload["query"] = query
         if filters:
             payload["filters"] = filters
+        if retrieval_mode:
+            payload["retrieval_mode"] = retrieval_mode
+        if scope:
+            payload["scope"] = scope
+        if as_of is not None:
+            payload["as_of"] = as_of.isoformat() if isinstance(as_of, datetime) else as_of
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+        if slim:
+            payload["slim"] = True
+        if include_superseded:
+            payload["include_superseded"] = True
 
         data = self._request("POST", "/api/v1/memories/recall", json=payload)
 
@@ -374,6 +459,10 @@ class Memory:
                 created_at=datetime.fromisoformat(m["created_at"]),
                 metadata=m.get("metadata") or {},
                 memory_type=m.get("memory_type"),
+                scope=m.get("scope"),
+                source_id=(m.get("metadata") or {}).get("source_id"),
+                staleness_warning=bool(m.get("staleness_warning", False)),
+                age_days=int(m.get("age_days") or 0),
             )
             for m in data.get("memories", [])
         ]
@@ -496,7 +585,7 @@ class Memory:
         """
         params: dict[str, Any] = {"limit": limit, "offset": offset}
         if project_id is not None:
-            params["project_id"] = project_id
+            params["project_id"] = self._project(project_id)
         result = self._request("GET", "/api/v1/memories", params=params)
         # Server returns a JSON array, which _request returns verbatim.
         return result if isinstance(result, list) else []
@@ -675,6 +764,131 @@ class Memory:
             stats=stats,
         )
 
+    # -------------------------------------------------------------------------
+    # Agent session: brief, status upsert, timeline, scoped forget (AGT-3/5/7/11)
+    # -------------------------------------------------------------------------
+
+    def session_brief(
+        self,
+        project_id: str | None = None,
+        agent_id: str | None = None,
+        recent_n: int = 10,
+        inbox_limit: int = 10,
+    ) -> dict[str, Any]:
+        """Session-start brief: latest handoff, unread inbox, status, recent-by-time.
+
+        Args:
+            project_id: Project to brief on (default: the client's project).
+            agent_id: Inbox owner (default: the client's ``agent_id``).
+            recent_n: Number of most recent memories (by creation time).
+            inbox_limit: Max unread inbox previews.
+        """
+        params: dict[str, Any] = {
+            "project_id": self._project(project_id),
+            "recent_n": recent_n,
+            "inbox_limit": inbox_limit,
+        }
+        agent = (agent_id or self.agent_id or "").strip()
+        if agent:
+            params["agent_id"] = agent
+        return self._request("GET", "/api/v1/session/brief", params=params)
+
+    def store_status(
+        self,
+        key: str,
+        value: str,
+        metadata: dict[str, Any] | None = None,
+        ttl: str | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Set the current value for a status key; the prior value is superseded.
+
+        Returns ``{key, value, memory_id, changed, superseded, project_id}``.
+        Writing the value that is already current returns ``changed=False``.
+        """
+        payload: dict[str, Any] = {
+            "key": key,
+            "value": value,
+            "project_id": self._project(project_id),
+            "metadata": self._stamp(metadata),
+        }
+        if ttl:
+            payload["ttl"] = ttl
+        return self._request("POST", "/api/v1/session/status", json=payload)
+
+    def list_status(self, project_id: str | None = None) -> builtins.list[dict[str, Any]]:
+        """Current status values for a project."""
+        data = self._request("GET", "/api/v1/session/status", params={"project_id": self._project(project_id)})
+        items = data.get("items", [])
+        return items if isinstance(items, builtins.list) else []
+
+    def timeline(
+        self,
+        start: str | datetime | None = None,
+        end: str | datetime | None = None,
+        entity: str | None = None,
+        memory_types: builtins.list[str] | None = None,
+        project_id: str | None = None,
+        all_projects: bool = False,
+        limit: int = 20,
+        offset: int = 0,
+        order: str = "asc",
+        include_superseded: bool = False,
+    ) -> dict[str, Any]:
+        """Chronological memories filtered server-side by created_at range.
+
+        ``start`` is inclusive and ``end`` exclusive. ``entity`` is an exact
+        (case-insensitive) entity name or alias. Returns ``{memories, total, ...}``.
+        """
+        params: dict[str, Any] = {"limit": limit, "offset": offset, "order": order}
+        if not all_projects:
+            params["project_id"] = self._project(project_id)
+        if start is not None:
+            params["start"] = start.isoformat() if isinstance(start, datetime) else start
+        if end is not None:
+            params["end"] = end.isoformat() if isinstance(end, datetime) else end
+        if entity:
+            params["entity"] = entity
+        if memory_types:
+            params["memory_type"] = memory_types
+        if include_superseded:
+            params["include_superseded"] = "true"
+        return self._request("GET", "/api/v1/timeline", params=params)
+
+    def forget_project(self, project_id: str) -> ForgetResult:
+        """Delete every memory in ONE project (never user-wide).
+
+        The project id is required and explicit — there is no default — so a
+        caller can't wipe the wrong namespace by omission.
+        """
+        if not project_id or not project_id.strip():
+            raise MemoryError("forget_project requires an explicit project_id")
+        if self._shadow_cache is not None:
+            self._shadow_cache.clear()
+        data = self._request("DELETE", "/api/v1/memories", params={"project_id": self._project(project_id)})
+        return ForgetResult(
+            deleted_memories=data.get("deleted_memories", 0),
+            deleted_entities=data.get("deleted_entities", 0),
+            deleted_relationships=data.get("deleted_relationships", 0),
+        )
+
+    # -------------------------------------------------------------------------
+    # Spaces (AGT-10: share_memory needs a way to find/create a space)
+    # -------------------------------------------------------------------------
+
+    def list_spaces(self) -> builtins.list[dict[str, Any]]:
+        """Spaces the caller can access (id, name, permission, ...)."""
+        result = self._request("GET", "/api/v1/spaces")
+        return result if isinstance(result, builtins.list) else []
+
+    def create_space(self, name: str, description: str = "", project_id: str | None = None) -> dict[str, Any]:
+        """Create a space owned by the caller (the caller gets admin access)."""
+        return self._request(
+            "POST",
+            "/api/v1/spaces",
+            json={"name": name, "description": description, "project_id": self._project(project_id)},
+        )
+
     def close(self) -> None:
         """Close the persistent HTTP client and clean up resources."""
         self._client.close()
@@ -702,7 +916,8 @@ class Memory:
             subject: Short subject line.
             body: Message body.
             metadata: Optional key/value metadata.
-            from_agent: Optional sender id. Defaults to 'unknown' server-side.
+            from_agent: Optional sender id. Defaults to the client's ``agent_id``,
+                then 'unknown' server-side.
             expires_at: Optional ISO-8601 expiry timestamp.
 
         Returns:
@@ -714,8 +929,9 @@ class Memory:
             "body": body,
             "metadata": metadata or {},
         }
-        if from_agent:
-            payload["from_agent"] = from_agent
+        sender = from_agent or getattr(self, "agent_id", None)
+        if sender:
+            payload["from_agent"] = sender
         if expires_at:
             payload["expires_at"] = expires_at
         return self._request("POST", "/api/v1/inbox/send", json=payload)

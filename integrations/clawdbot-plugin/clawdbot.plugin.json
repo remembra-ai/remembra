@@ -1,0 +1,27 @@
+{
+  "id": "remembra",
+  "name": "Remembra",
+  "version": "2.0.0",
+  "description": "Shared agent memory: session brief, inbox, status upsert, hybrid recall, timeline, guarded forget.",
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "apiUrl": { "type": "string", "description": "Remembra server URL" },
+      "apiKey": { "type": "string", "description": "Remembra API key" },
+      "projectId": { "type": "string", "description": "Shared project namespace (same value for every agent)" },
+      "agentId": { "type": "string", "description": "This agent's id for inbox + provenance (default: clawdbot)" },
+      "projectAliases": {
+        "type": "object",
+        "description": "Alias -> canonical project id map, e.g. {\"clawdbot\": \"clawbot\"}",
+        "additionalProperties": { "type": "string" }
+      }
+    },
+    "required": ["apiUrl", "apiKey"]
+  },
+  "uiHints": {
+    "apiKey": { "label": "API Key", "sensitive": true },
+    "apiUrl": { "label": "Server URL", "placeholder": "https://api.remembra.dev" },
+    "projectId": { "label": "Project ID", "placeholder": "clawbot" },
+    "agentId": { "label": "Agent ID", "placeholder": "clawdbot" }
+  }
+}
