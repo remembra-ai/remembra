@@ -303,12 +303,21 @@ class UserManager:
         # Delete the used reset token
         await self.db.delete_password_reset_token(user_data["id"])
 
-        # The token was only ever sent to the account address, so using it
-        # proves control of that mailbox: the email is now verified. This is
-        # also how the owner of an unverified password account can later
-        # attach Sign in with GitHub / Google to it.
         if not user_data.get("email_verified"):
-            await self.db.update_user_email_verified(user_data["id"], True)
+            # The token was only ever sent to the account address, so using it
+            # proves control of that mailbox. Nobody had proven that before, so
+            # whoever created this account (and its keys, 2FA, connector
+            # grants, webhooks) may not be the mailbox owner: someone can
+            # pre-register a victim's address and wait. Treat the mailbox
+            # owner as a new owner and clear every credential set up before.
+            await reset_credentials_for_new_owner(self.db, user_data["id"])
+            # The email is now verified (which also lets Sign in with Google
+            # link to it), unless another account already verified the same
+            # address: one free account per verified email.
+            if await email_verified_on_another_account(self.db, user_data["email"], exclude_user_id=user_data["id"]):
+                log.warning("password_reset_email_verified_elsewhere", user_id=user_data["id"])
+            else:
+                await self.db.update_user_email_verified(user_data["id"], True)
 
         # A reset means the old password may be compromised: kill every session.
         await security_state.invalidate_user_sessions(self.db, user_data["id"])
@@ -607,3 +616,83 @@ async def revoke_user_access(db: Database, user_id: str) -> int:
     await security_state.invalidate_user_sessions(db, user_id)
     log.info("user_access_revoked", user_id=user_id, keys_revoked=revoked)
     return revoked
+
+
+def _missing_table(error: Exception) -> bool:
+    return "no such table" in str(error).lower()
+
+
+async def email_verified_on_another_account(db: Any, email: str, *, exclude_user_id: str) -> bool:
+    """True when an account other than ``exclude_user_id`` holds ``email`` as a VERIFIED address.
+
+    The single check behind "one free account per verified email". It looks
+    at both kinds of account: dashboard users (``users``) and API-signup
+    tenants (``cloud_tenants``, which have no users row). Every path that
+    marks an address verified or creates a pre-verified account calls it:
+    dashboard verify-email, API-signup verify-email, password reset, and
+    Sign in with Google / GitHub account creation.
+    """
+    import sqlite3
+
+    address = email.strip().lower()
+    if not address:
+        return False
+    queries = (
+        "SELECT 1 FROM users WHERE lower(email) = ? AND email_verified AND id != ? LIMIT 1",
+        "SELECT 1 FROM cloud_tenants WHERE lower(email) = ? AND email_verified = 1 AND user_id != ? LIMIT 1",
+    )
+    for sql in queries:
+        try:
+            cursor = await db.conn.execute(sql, (address, exclude_user_id))
+        except sqlite3.OperationalError as e:
+            if _missing_table(e) or "no such column" in str(e).lower():
+                continue  # minimal deployments: no tenant table (or no verification column yet)
+            raise
+        if await cursor.fetchone():
+            return True
+    return False
+
+
+async def reset_credentials_for_new_owner(db: Database, user_id: str) -> dict[str, int]:
+    """Clear every credential set up on an account before its mailbox owner took it over.
+
+    Called when control of the address is proven for the first time (a
+    password reset on an unverified account). Revokes API keys and every
+    dashboard session, turns 2FA off (the authenticator may be someone
+    else's), revokes MCP connector grants and their tokens, pauses webhooks
+    (they push memory contents to a URL someone else chose), and drops any
+    provider identity links. Returns counts per kind, for the log.
+    """
+    import sqlite3
+
+    counts = {"api_keys": await revoke_user_access(db, user_id)}
+    await db.disable_totp(user_id)
+    now = time.time()
+    statements = (
+        (
+            "connector_tokens",
+            "UPDATE oauth_tokens SET revoked_at = ? WHERE revoked_at IS NULL"
+            " AND grant_id IN (SELECT grant_id FROM oauth_grants WHERE user_id = ?)",
+            (now, user_id),
+        ),
+        (
+            "connector_grants",
+            "UPDATE oauth_grants SET revoked_at = ?, revoke_reason = 'email_owner_verified'"
+            " WHERE user_id = ? AND revoked_at IS NULL",
+            (now, user_id),
+        ),
+        ("webhooks", "UPDATE webhooks SET active = 0 WHERE user_id = ? AND active = 1", (user_id,)),
+        ("identities", "DELETE FROM user_identities WHERE user_id = ?", (user_id,)),
+    )
+    for name, sql, args in statements:
+        try:
+            cursor = await db.conn.execute(sql, args)
+        except sqlite3.OperationalError as e:
+            if not _missing_table(e):
+                raise
+            counts[name] = 0
+            continue
+        counts[name] = cursor.rowcount or 0
+    await db.conn.commit()
+    log.warning("account_credentials_reset_for_verified_owner", user_id=user_id, **counts)
+    return counts

@@ -10,7 +10,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from remembra.auth.middleware import authenticate_jwt, get_client_ip
 from remembra.auth.superadmin import account_is_owner
-from remembra.auth.users import UserManager
+from remembra.auth.users import UserManager, email_verified_on_another_account
 from remembra.cloud.signup_guard import TURNSTILE_HEADER, guard_signup
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
@@ -1117,6 +1117,16 @@ async def confirm_email_verification(
     user_row = await user_manager.db.get_user_by_id(current_user["id"])
     if not user_row:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    found = await security_state.find_email_verification(user_manager.db, body.token)
+    if found is None or found != (user_row["id"], str(user_row["email"]).strip().lower()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")
+    # One free account per verified email: an API-signup tenant (or another
+    # dashboard account) may already have verified this address.
+    if await email_verified_on_another_account(user_manager.db, user_row["email"], exclude_user_id=user_row["id"]):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This email address is already verified on another Remembra account.",
+        )
     ok = await security_state.consume_email_verification(user_manager.db, user_row["id"], user_row["email"], body.token)
     if not ok:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")

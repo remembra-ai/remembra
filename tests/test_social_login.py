@@ -511,12 +511,13 @@ async def test_verified_account_is_linked_not_duplicated(tmp_path, providers) ->
         # Password sign-in still works for the same account.
         r = await h.client.post("/api/v1/auth/login", json={"email": "person@gmail.com", "password": "Str0ng!Passw0rd"})
         assert r.status_code == 200 and r.json()["user"]["id"] == uid
-        # GitHub with the same verified email links to the SAME account (one account per email).
+        # GitHub with the same verified email is NOT linked by email (GitHub never
+        # re-verifies addresses) and does not create a second account either.
         providers.github_emails = [{"email": "person@gmail.com", "primary": True, "verified": True}]
-        gh = (await exchange(h, (await sign_in(h, providers, "github", code="auth-code-2"))["code"])).json()
-        assert gh["user"]["id"] == uid
+        frag = await sign_in(h, providers, "github", code="auth-code-2")
+        assert frag == {"error": "account_exists_link_required", "provider": "github", "from": "login"}
         assert await count(h, "SELECT COUNT(*) FROM users") == 1
-        assert await count(h, "SELECT COUNT(*) FROM user_identities WHERE user_id = ?", uid) == 2
+        assert await count(h, "SELECT COUNT(*) FROM user_identities WHERE user_id = ?", uid) == 1
 
 
 async def test_unverified_password_account_is_never_taken_over(tmp_path, providers) -> None:

@@ -20,17 +20,28 @@ Flow (the API is the OAuth client; the dashboard never sees provider tokens):
      (``@gmail.com`` or a Workspace ``hd``), per Google's guidance.
 
 3. The identity is resolved to ONE account: an existing identity link signs
-   in; otherwise an existing account with that email is linked only if that
-   account's email is already verified (a verified provider email never
-   takes over an unverified password account); otherwise a new account is
-   created with ``email_verified = true`` under the normal signup limits.
-   ``user_identities`` is unique on ``(provider, provider_user_id)`` and on
-   ``(user_id, provider)``, and ``users.email`` is unique, so a verified
-   email or a provider account can back at most one Remembra account.
+   in; otherwise, for Google only, an existing account with that email is
+   linked if that account's email is already verified (a verified provider
+   email never takes over an unverified password account). GitHub is never
+   linked by email: GitHub does not re-verify addresses, so a "verified"
+   primary can belong to a former owner of the mailbox. A GitHub account is
+   connected to an existing Remembra account only from a signed-in session
+   (Settings, ``POST /auth/oauth/{provider}/link``). Otherwise a new account
+   is created with ``email_verified = true`` under the normal signup limits,
+   unless another account (dashboard or API signup) already verified that
+   address. ``user_identities`` is unique on ``(provider, provider_user_id)``
+   and on ``(user_id, provider)``, and ``users.email`` is unique, so a
+   verified email or a provider account can back at most one account.
 4. The callback redirects to ``<public_dashboard_url>/oauth/callback`` with a
-   single-use, 5-minute login code in the URL fragment; the dashboard trades
-   it at ``POST /api/v1/auth/oauth/exchange`` for the normal dashboard JWT
-   (a TOTP code is required there when the account has 2FA on).
+   single-use, 5-minute login code in the URL fragment, and sets a second
+   HttpOnly cookie that binds the code to this browser. The dashboard trades
+   the code at ``POST /api/v1/auth/oauth/exchange`` (``credentials:
+   'include'``) for the normal dashboard JWT; the exchange refuses (and burns)
+   a code presented without the matching cookie, so a code minted in an
+   attacker's browser cannot sign a victim in (login CSRF / session swap).
+   A TOTP code is required there when the account has 2FA on. The dashboard
+   and the API must therefore be same-site (``app.`` / ``api.`` of one
+   registrable domain), or the browser will not send the cookie.
 
 Provider access tokens, codes, states, verifiers and nonces are never logged
 and never stored in plaintext beyond the few minutes a flow is open.
@@ -45,7 +56,7 @@ import secrets
 import sqlite3
 import time
 import weakref
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -60,6 +71,9 @@ log = structlog.get_logger(__name__)
 
 STATE_TTL_SECONDS = 600  # GitHub codes expire after 10 minutes; so does our state
 LOGIN_CODE_TTL_SECONDS = 300
+LINK_TICKET_TTL_SECONDS = 120
+# Connecting a provider to an account needs a session issued this recently.
+LINK_REAUTH_SECONDS = 900
 GITHUB_API = "https://api.github.com"
 GITHUB_API_VERSION = "2022-11-28"
 GITHUB_NOREPLY_SUFFIX = "@users.noreply.github.com"
@@ -68,7 +82,11 @@ GOOGLE_ISSUERS = ("https://accounts.google.com", "accounts.google.com")
 ID_TOKEN_LEEWAY_SECONDS = 60
 JWKS_TTL_SECONDS = 3600
 JWKS_MIN_REFRESH_SECONDS = 30
-FROM_PAGES = ("login", "signup")
+FROM_PAGES = ("login", "signup", "settings")
+# Providers whose verified email may link into an existing verified account.
+# Google is authoritative for the addresses it accepts (Gmail / Workspace);
+# GitHub is not (see _resolve_once).
+EMAIL_LINK_PROVIDERS = frozenset({"google"})
 
 
 @dataclass(frozen=True)
@@ -109,7 +127,10 @@ class SocialLoginError(Exception):
             "email_unverified",
             "email_not_authoritative",
             "account_exists_unverified",
+            "account_exists_link_required",
+            "email_in_use",
             "identity_conflict",
+            "identity_in_use",
             "account_disabled",
             "rate_limited",
         }
@@ -136,6 +157,8 @@ class LoginState:
     code_verifier: str
     nonce: str
     from_page: str
+    # Set when a signed-in user is connecting this provider from Settings.
+    link_user_id: str | None = None
 
 
 def _default_http_client() -> httpx.AsyncClient:
@@ -202,6 +225,11 @@ def cookie_secure() -> bool:
     return (get_settings().public_url or "").startswith("https://")
 
 
+def login_cookie_name() -> str:
+    """Cookie that binds an issued login code to the browser the callback ran in."""
+    return f"{'__Host-' if cookie_secure() else ''}remembra_oauth_login"
+
+
 # ---------------------------------------------------------------------------
 # Storage (created lazily, like the security-state tables)
 # ---------------------------------------------------------------------------
@@ -228,7 +256,8 @@ CREATE TABLE IF NOT EXISTS oauth_login_states (
     code_verifier TEXT NOT NULL,
     nonce TEXT NOT NULL,
     from_page TEXT NOT NULL,
-    expires_at REAL NOT NULL
+    expires_at REAL NOT NULL,
+    link_user_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS oauth_login_codes (
@@ -236,9 +265,23 @@ CREATE TABLE IF NOT EXISTS oauth_login_codes (
     user_id TEXT NOT NULL,
     provider TEXT NOT NULL,
     new_account INTEGER NOT NULL DEFAULT 0,
+    expires_at REAL NOT NULL,
+    browser_hash TEXT
+);
+
+CREATE TABLE IF NOT EXISTS oauth_link_tickets (
+    ticket_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
     expires_at REAL NOT NULL
 );
 """
+
+# Columns added after the tables first shipped: (table, column, declaration).
+_ADDED_COLUMNS = (
+    ("oauth_login_states", "link_user_id", "TEXT"),
+    ("oauth_login_codes", "browser_hash", "TEXT"),
+)
 
 _initialized: weakref.WeakSet[Any] = weakref.WeakSet()
 
@@ -248,6 +291,10 @@ async def ensure_schema(db: Any) -> None:
     if conn in _initialized:
         return
     await conn.executescript(_SCHEMA)
+    for table, column, declaration in _ADDED_COLUMNS:
+        cursor = await conn.execute(f"PRAGMA table_info({table})")
+        if column not in {str(row[1]) for row in await cursor.fetchall()}:
+            await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
     await conn.commit()
     _initialized.add(conn)
 
@@ -267,7 +314,9 @@ def pkce_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
-async def create_login_state(db: Any, provider: str, from_page: str) -> tuple[str, str, str, str]:
+async def create_login_state(
+    db: Any, provider: str, from_page: str, *, link_user_id: str | None = None
+) -> tuple[str, str, str, str]:
     """New flow: returns ``(state, browser_secret, code_verifier, nonce)``; stores hashes."""
     await ensure_schema(db)
     state = secrets.token_urlsafe(32)
@@ -277,9 +326,10 @@ async def create_login_state(db: Any, provider: str, from_page: str) -> tuple[st
     now = time.time()
     await db.conn.execute("DELETE FROM oauth_login_states WHERE expires_at < ?", (now,))
     await db.conn.execute(
-        "INSERT INTO oauth_login_states (state_hash, provider, browser_hash, code_verifier, nonce, from_page, expires_at)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (_hash(state), provider, _hash(browser_secret), verifier, nonce, from_page, now + STATE_TTL_SECONDS),
+        "INSERT INTO oauth_login_states"
+        " (state_hash, provider, browser_hash, code_verifier, nonce, from_page, expires_at, link_user_id)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (_hash(state), provider, _hash(browser_secret), verifier, nonce, from_page, now + STATE_TTL_SECONDS, link_user_id),
     )
     await db.conn.commit()
     return state, browser_secret, verifier, nonce
@@ -292,7 +342,8 @@ async def consume_login_state(db: Any, provider: str, state: str | None, browser
         raise SocialLoginError("invalid_state")
     key = _hash(state)
     cursor = await db.conn.execute(
-        "SELECT provider, browser_hash, code_verifier, nonce, from_page, expires_at FROM oauth_login_states WHERE state_hash = ?",
+        "SELECT provider, browser_hash, code_verifier, nonce, from_page, expires_at, link_user_id"
+        " FROM oauth_login_states WHERE state_hash = ?",
         (key,),
     )
     row = await cursor.fetchone()
@@ -302,13 +353,19 @@ async def consume_login_state(db: Any, provider: str, state: str | None, browser
     await db.conn.commit()
     if (deleted.rowcount or 0) != 1:  # a concurrent callback already used it
         raise SocialLoginError("invalid_state")
-    row_provider, browser_hash, verifier, nonce, from_page, expires_at = row
+    row_provider, browser_hash, verifier, nonce, from_page, expires_at, link_user_id = row
     if row_provider != provider or float(expires_at) < time.time():
         raise SocialLoginError("invalid_state")
     if not browser_secret or not secrets.compare_digest(str(browser_hash), _hash(browser_secret)):
         # Login CSRF: the callback did not come from the browser that started the flow.
         raise SocialLoginError("invalid_state")
-    return LoginState(provider=provider, code_verifier=str(verifier), nonce=str(nonce), from_page=str(from_page))
+    return LoginState(
+        provider=provider,
+        code_verifier=str(verifier),
+        nonce=str(nonce),
+        from_page=str(from_page),
+        link_user_id=str(link_user_id) if link_user_id else None,
+    )
 
 
 async def peek_login_state_page(db: Any, state: str | None) -> str:
@@ -332,28 +389,49 @@ async def discard_login_state(db: Any, state: str | None) -> None:
     await db.conn.commit()
 
 
-async def issue_login_code(db: Any, user_id: str, provider: str, *, new_account: bool) -> str:
+async def issue_login_code(db: Any, user_id: str, provider: str, *, new_account: bool) -> tuple[str, str]:
+    """Returns ``(code, browser_secret)``: the code goes in the redirect, the secret in a cookie.
+
+    Only hashes are stored. The exchange needs both, so a code that leaves the
+    browser it was issued to (or is planted in another one) is useless.
+    """
     await ensure_schema(db)
     code = secrets.token_urlsafe(32)
+    browser_secret = secrets.token_urlsafe(32)
     now = time.time()
     await db.conn.execute("DELETE FROM oauth_login_codes WHERE expires_at < ?", (now,))
     await db.conn.execute(
-        "INSERT INTO oauth_login_codes (code_hash, user_id, provider, new_account, expires_at) VALUES (?, ?, ?, ?, ?)",
-        (_hash(code), user_id, provider, int(new_account), now + LOGIN_CODE_TTL_SECONDS),
+        "INSERT INTO oauth_login_codes (code_hash, user_id, provider, new_account, expires_at, browser_hash)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (_hash(code), user_id, provider, int(new_account), now + LOGIN_CODE_TTL_SECONDS, _hash(browser_secret)),
     )
     await db.conn.commit()
-    return code
+    return code, browser_secret
 
 
 async def peek_login_code(db: Any, code: str) -> dict[str, Any] | None:
     await ensure_schema(db)
     cursor = await db.conn.execute(
-        "SELECT user_id, provider, new_account, expires_at FROM oauth_login_codes WHERE code_hash = ?", (_hash(code),)
+        "SELECT user_id, provider, new_account, expires_at, browser_hash FROM oauth_login_codes WHERE code_hash = ?",
+        (_hash(code),),
     )
     row = await cursor.fetchone()
     if row is None or float(row[3]) < time.time():
         return None
-    return {"user_id": str(row[0]), "provider": str(row[1]), "new_account": bool(row[2])}
+    return {
+        "user_id": str(row[0]),
+        "provider": str(row[1]),
+        "new_account": bool(row[2]),
+        "browser_hash": str(row[4]) if row[4] else None,
+    }
+
+
+def login_code_bound_to_browser(info: dict[str, Any], browser_secret: str | None) -> bool:
+    """True only when the cookie sent with the exchange is the one set with this code."""
+    expected = info.get("browser_hash")
+    if not expected or not browser_secret or len(browser_secret) > 512:
+        return False
+    return secrets.compare_digest(str(expected), _hash(browser_secret))
 
 
 async def consume_login_code(db: Any, code: str) -> bool:
@@ -371,6 +449,56 @@ async def list_identities(db: Any, user_id: str) -> list[dict[str, Any]]:
         (user_id,),
     )
     return [dict(zip(("provider", "email", "created_at", "last_login_at"), row, strict=True)) for row in await cursor.fetchall()]
+
+
+async def unlink_identity(db: Any, user_id: str, provider: str) -> bool:
+    await ensure_schema(db)
+    cursor = await db.conn.execute("DELETE FROM user_identities WHERE user_id = ? AND provider = ?", (user_id, provider))
+    await db.conn.commit()
+    removed = (cursor.rowcount or 0) > 0
+    if removed:
+        log.info("oauth_identity_unlinked", provider=provider, user_id=user_id)
+    return removed
+
+
+async def create_link_ticket(db: Any, user_id: str, provider: str) -> str:
+    """Single-use, short-lived ticket that lets ``/start`` begin a connect flow for ``user_id``.
+
+    Issued only to a signed-in session (``POST /auth/oauth/{provider}/link``).
+    ``/start`` consumes it at once in the same browser, which is then bound
+    to the flow by the state cookie, so a ticket seen later (browser history)
+    is already spent.
+    """
+    await ensure_schema(db)
+    ticket = secrets.token_urlsafe(32)
+    now = time.time()
+    await db.conn.execute("DELETE FROM oauth_link_tickets WHERE expires_at < ?", (now,))
+    await db.conn.execute(
+        "INSERT INTO oauth_link_tickets (ticket_hash, user_id, provider, expires_at) VALUES (?, ?, ?, ?)",
+        (_hash(ticket), user_id, provider, now + LINK_TICKET_TTL_SECONDS),
+    )
+    await db.conn.commit()
+    return ticket
+
+
+async def consume_link_ticket(db: Any, provider: str, ticket: str | None) -> str | None:
+    """The user id the ticket was issued to, or None. Single use: deleted either way."""
+    if not ticket or len(ticket) > 512:
+        return None
+    await ensure_schema(db)
+    key = _hash(ticket)
+    cursor = await db.conn.execute(
+        "SELECT user_id, provider, expires_at FROM oauth_link_tickets WHERE ticket_hash = ?",
+        (key,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return None
+    deleted = await db.conn.execute("DELETE FROM oauth_link_tickets WHERE ticket_hash = ?", (key,))
+    await db.conn.commit()
+    if (deleted.rowcount or 0) != 1 or row[1] != provider or float(row[2]) < time.time():
+        return None
+    return str(row[0])
 
 
 # ---------------------------------------------------------------------------
@@ -652,6 +780,12 @@ async def _resolve_once(db: Any, identity: ProviderIdentity, client_ip: str) -> 
             # The account is already linked to a DIFFERENT account at this provider.
             log.warning("oauth_link_refused_other_identity", provider=identity.provider, user_id=existing["id"])
             raise SocialLoginError("identity_conflict")
+        if identity.provider not in EMAIL_LINK_PROVIDERS:
+            # GitHub never re-verifies an address: its "verified" primary may be
+            # a mailbox that has since changed hands (a former employer's
+            # domain). It is connected only from the owner's signed-in session.
+            log.warning("oauth_link_refused_needs_session", provider=identity.provider, user_id=existing["id"])
+            raise SocialLoginError("account_exists_link_required")
         now = _now_iso()
         await db.conn.execute(
             "INSERT INTO user_identities (provider, provider_user_id, user_id, email, created_at, last_login_at)"
@@ -660,18 +794,99 @@ async def _resolve_once(db: Any, identity: ProviderIdentity, client_ip: str) -> 
         )
         await db.conn.commit()
         log.info("oauth_identity_linked", provider=identity.provider, user_id=existing["id"])
+        await _notify_linked(str(existing["email"]), identity)
         return str(existing["id"]), False
 
     return await _create_account(db, identity, client_ip), True
 
 
+async def link_identity(db: Any, identity: ProviderIdentity, user_id: str) -> None:
+    """Connect ``identity`` to the signed-in account ``user_id`` (the Settings flow).
+
+    The provider email does not have to match the account email: the owner
+    proved both sides (their session, and the provider's consent in the same
+    browser). Refuses a provider account that already backs another Remembra
+    account, and a second account at the same provider.
+    """
+    await ensure_schema(db)
+    user = await db.get_user_by_id(user_id)
+    if user is None or not user.get("is_active", True):
+        raise SocialLoginError("account_disabled")
+    cursor = await db.conn.execute(
+        "SELECT user_id FROM user_identities WHERE provider = ? AND provider_user_id = ?",
+        (identity.provider, identity.subject),
+    )
+    row = await cursor.fetchone()
+    if row is not None:
+        if str(row[0]) != user_id:
+            log.warning("oauth_connect_refused_identity_in_use", provider=identity.provider, user_id=user_id)
+            raise SocialLoginError("identity_in_use")
+        return  # already connected to this account
+    cursor = await db.conn.execute(
+        "SELECT 1 FROM user_identities WHERE user_id = ? AND provider = ?", (user_id, identity.provider)
+    )
+    if await cursor.fetchone() is not None:
+        raise SocialLoginError("identity_conflict")
+    now = _now_iso()
+    try:
+        await db.conn.execute(
+            "INSERT INTO user_identities (provider, provider_user_id, user_id, email, created_at, last_login_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (identity.provider, identity.subject, user_id, identity.email, now, None),
+        )
+        await db.conn.commit()
+    except sqlite3.IntegrityError as e:  # lost a race with a concurrent connect / sign-up
+        await db.conn.rollback()
+        raise SocialLoginError("identity_in_use") from e
+    log.info("oauth_identity_connected", provider=identity.provider, user_id=user_id)
+    await _notify_linked(str(user["email"]), identity)
+
+
+async def _send_link_notice(to: str, provider_name: str, provider_email: str) -> None:
+    """Tell the account owner a sign-in method was added (best effort)."""
+    if not get_settings().resend_api_key:
+        return
+    import html as _html
+
+    from remembra.cloud.email import EmailMessage, EmailProvider, EmailService
+
+    service = EmailService.create(provider=EmailProvider.RESEND)
+    body = (
+        f"<p>{_html.escape(provider_name)} sign-in ({_html.escape(provider_email)}) was just added to your Remembra account.</p>"
+        "<p>If this was not you, sign in, remove it under Settings, Security, and change your password.</p>"
+    )
+    message = EmailMessage(
+        to=to,
+        subject=f"Remembra: {provider_name} sign-in added to your account",
+        html=body,
+        tags={"template": "identity_linked"},
+    )
+    await service.backend.send(message)
+
+
+# Swapped in tests; called with (account_email, provider_display_name, provider_email).
+link_notifier: Callable[[str, str, str], Awaitable[None]] = _send_link_notice
+
+
+async def _notify_linked(account_email: str, identity: ProviderIdentity) -> None:
+    try:
+        await link_notifier(account_email, PROVIDERS[identity.provider].name, identity.email)
+    except Exception as e:  # a notice never fails the sign-in
+        log.warning("oauth_link_notice_failed", provider=identity.provider, error_type=type(e).__name__)
+
+
 async def _create_account(db: Any, identity: ProviderIdentity, client_ip: str) -> str:
     from fastapi import HTTPException
 
-    from remembra.auth.users import UserManager
+    from remembra.auth.users import UserManager, email_verified_on_another_account
     from remembra.cloud.signup_guard import enforce_signup_rate_limits
     from remembra.core.time import utcnow
 
+    # One free account per verified email, whichever door it came in through:
+    # an API-signup tenant (no users row) may already have verified it.
+    if await email_verified_on_another_account(db, identity.email, exclude_user_id=""):
+        log.warning("oauth_signup_refused_email_in_use", provider=identity.provider)
+        raise SocialLoginError("email_in_use")
     try:
         # Same per-network / per-email-domain limits as password signup.
         enforce_signup_rate_limits(client_ip, identity.email)
@@ -704,7 +919,7 @@ async def _create_account(db: Any, identity: ProviderIdentity, client_ip: str) -
 # Access-log redaction
 # ---------------------------------------------------------------------------
 
-_SENSITIVE_QUERY_KEYS = frozenset({"code", "state", "token", "access_token", "id_token", "code_verifier"})
+_SENSITIVE_QUERY_KEYS = frozenset({"code", "state", "token", "access_token", "id_token", "code_verifier", "link"})
 
 
 def redact_url(url: str) -> str:

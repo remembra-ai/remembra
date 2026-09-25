@@ -447,21 +447,11 @@ class UsageMeter:
 
         One free account per verified email: a second API-signup tenant (or a
         dashboard account) cannot claim an address someone already verified.
+        Same check as every other verify path (:func:`remembra.auth.users.email_verified_on_another_account`).
         """
-        address = email.strip().lower()
-        try:
-            cursor = await self._db.conn.execute(
-                "SELECT 1 FROM users WHERE email = ? AND email_verified AND id != ? LIMIT 1", (address, exclude_user_id)
-            )
-            if await cursor.fetchone():
-                return True
-        except Exception:  # no users table in minimal deployments
-            pass
-        cursor = await self._db.conn.execute(
-            "SELECT 1 FROM cloud_tenants WHERE lower(email) = ? AND email_verified = 1 AND user_id != ? LIMIT 1",
-            (address, exclude_user_id),
-        )
-        return await cursor.fetchone() is not None
+        from remembra.auth.users import email_verified_on_another_account
+
+        return await email_verified_on_another_account(self._db, email, exclude_user_id=exclude_user_id)
 
     async def set_tenant_email_verified(self, user_id: str) -> None:
         await self._db.conn.execute(
