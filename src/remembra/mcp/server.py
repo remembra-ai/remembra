@@ -1132,7 +1132,7 @@ def relationships_at(
             params["as_of"] = as_of
         if relationship_type:
             params["relationship_type"] = relationship_type
-        result = client._request("GET", "/api/v1/entities/relationships", params=params)
+        result = client._request("GET", "/api/v1/entities/relationship-search", params=params)
         relationships = result.get("relationships", [])
         return _dump(
             {

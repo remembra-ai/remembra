@@ -364,3 +364,24 @@ def test_update_memory_reads_real_response_keys(monkeypatch):
     out = _j(server.update_memory("m1", "Alice now works at Acme"))
     assert out["id"] == "m1"
     assert out["updated_entities"] == [{"name": "Acme", "type": "organization", "confidence": 0.9}]
+
+
+def test_relationships_at_hits_the_real_search_route(mcp_env):
+    """Regression: the tool called /entities/relationships, which the router
+    resolves as GET /entities/{entity_id} -> 404. It must use /relationship-search."""
+    from remembra.models.memory import Entity, Relationship
+
+    alice = Entity(canonical_name="Alice", type="person")
+    acme = Entity(canonical_name="Acme", type="organization")
+
+    async def _seed() -> None:
+        db = mcp_env["app"].state.db
+        await db.save_entity(alice, user_id="default_user", project_id="alpha")
+        await db.save_entity(acme, user_id="default_user", project_id="alpha")
+        await db.save_relationship(Relationship(from_entity_id=alice.id, to_entity_id=acme.id, type="WORKS_AT"))
+
+    mcp_env["http"].portal.call(_seed)
+    out = _j(server.relationships_at("Alice"))
+    assert out["status"] == "ok", out
+    assert out["count"] == 1
+    assert out["relationships"][0]["from"] == "Alice" and out["relationships"][0]["to"] == "Acme"
