@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from collections.abc import Awaitable, Callable
+from typing import Any, Literal, NoReturn, TypeVar
 
 import httpx
 import structlog
 
 from remembra.config import Settings
+from remembra.core.circuit_breaker import CircuitBreaker, CircuitOpenError
+from remembra.core.metrics import EMBEDDING_ERRORS
+from remembra.core.provider_errors import (
+    ProviderErrorKind,
+    classify_http_error,
+    retry_after_from_headers,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -30,17 +39,111 @@ EmbeddingProvider = Literal[
 MAX_EMBED_CHARS = 24_000
 
 
+# Per-request HTTP timeout for embedding providers (seconds). Kept well under
+# typical client timeouts so one slow provider call can't eat a whole request.
+DEFAULT_EMBED_TIMEOUT = 20.0
+DEFAULT_OLLAMA_TIMEOUT = 60.0
+
+T = TypeVar("T")
+
+
+def _http_timeout(seconds: float) -> httpx.Timeout:
+    return httpx.Timeout(seconds, connect=min(5.0, seconds))
+
+
 class EmbeddingProviderError(RuntimeError):
     """An upstream embedding provider rejected or failed the request.
 
-    Carries the upstream HTTP status so API endpoints can map it to an
-    honest client-facing status (429 rate limit, 502 upstream failure)
-    instead of collapsing everything into a generic 500.
+    Attributes:
+        status_code: upstream HTTP status (None for timeouts / connection errors
+            and for circuit-open fast failures).
+        kind: a :class:`ProviderErrorKind` value — ``quota_exhausted``,
+            ``rate_limited``, ``auth``, ``bad_request`` or ``unavailable`` —
+            parsed from the provider's status AND response body, so billing
+            exhaustion is never reported as a transient rate limit.
+        retry_after: upstream retry hint in seconds (``Retry-After`` /
+            ``x-ratelimit-reset-*``), or the breaker's remaining open time.
+        provider: provider label (openai, cohere, ...).
+        circuit_open: True when the call was rejected locally by the circuit
+            breaker without contacting the provider.
     """
 
-    def __init__(self, message: str, status_code: int | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        *,
+        kind: ProviderErrorKind | str | None = None,
+        retry_after: float | None = None,
+        provider: str | None = None,
+        circuit_open: bool = False,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        resolved = kind if kind is not None else classify_http_error(status_code)
+        self.kind = ProviderErrorKind(resolved)
+        self.retry_after = retry_after
+        self.provider = provider
+        self.circuit_open = circuit_open
+
+
+class EmbeddingConfigError(EmbeddingProviderError, ValueError):
+    """The embedding provider is not configured (e.g. missing API key).
+
+    A ValueError for backwards compatibility, and an EmbeddingProviderError
+    (kind ``auth``) so API endpoints report it as a 503 operator problem.
+    """
+
+    def __init__(self, message: str, provider: str | None = None) -> None:
+        super().__init__(message, None, kind=ProviderErrorKind.AUTH, provider=provider)
+
+
+def _response_body(response: httpx.Response) -> Any:
+    try:
+        return response.json()
+    except Exception:
+        try:
+            return response.text[:4000]
+        except Exception:
+            return None
+
+
+def _raise_http_error(provider: str, exc: httpx.HTTPStatusError) -> NoReturn:
+    """Translate an upstream HTTP error into a typed, sanitized error."""
+    response = exc.response
+    kind = classify_http_error(response.status_code, _response_body(response))
+    retry_after = retry_after_from_headers(response.headers)
+    log.error(
+        f"{provider}_embedding_http_error",
+        status_code=response.status_code,
+        kind=kind.value,
+        retry_after=retry_after,
+    )
+    raise EmbeddingProviderError(
+        f"Embedding service error (status {response.status_code}, {kind.value})",
+        status_code=response.status_code,
+        kind=kind,
+        retry_after=retry_after,
+        provider=provider,
+    ) from None
+
+
+def _raise_request_error(provider: str, exc: httpx.RequestError) -> NoReturn:
+    """Connection/timeout errors — never expose URLs."""
+    log.error(f"{provider}_embedding_request_error", error_type=type(exc).__name__)
+    raise EmbeddingProviderError(
+        "Embedding service unavailable",
+        kind=ProviderErrorKind.UNAVAILABLE,
+        provider=provider,
+    ) from None
+
+
+def _setting_num(settings: Any, name: str, default: float) -> float:
+    """Read a numeric setting, tolerating mocks / missing attributes."""
+    value = getattr(settings, name, default)
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return default
+    return float(value)
 
 
 def _truncate_for_embedding(text: str) -> str:
@@ -125,13 +228,14 @@ class OpenAIEmbedder(BaseEmbedder):
         api_key: str,
         model: str = "text-embedding-3-small",
         dimensions: int | None = None,
+        timeout: float = DEFAULT_EMBED_TIMEOUT,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.dimensions = dimensions
         self.base_url = "https://api.openai.com/v1"
         self._client = httpx.AsyncClient(
-            timeout=30.0,
+            timeout=_http_timeout(timeout),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -162,20 +266,9 @@ class OpenAIEmbedder(BaseEmbedder):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            # Log full error internally, raise sanitized typed error
-            log.error(
-                "openai_embedding_http_error",
-                status_code=e.response.status_code,
-                model=self.model,
-            )
-            raise EmbeddingProviderError(
-                f"Embedding service error (status {e.response.status_code})",
-                status_code=e.response.status_code,
-            ) from None
+            _raise_http_error("openai", e)
         except httpx.RequestError as e:
-            # Connection/timeout errors - don't expose URLs
-            log.error("openai_embedding_request_error", error_type=type(e).__name__)
-            raise EmbeddingProviderError("Embedding service unavailable") from None
+            _raise_request_error("openai", e)
 
         data = response.json()
 
@@ -204,13 +297,14 @@ class AzureOpenAIEmbedder(BaseEmbedder):
         endpoint: str,
         deployment: str,
         api_version: str = "2024-02-01",
+        timeout: float = DEFAULT_EMBED_TIMEOUT,
     ) -> None:
         self.api_key = api_key
         self.endpoint = endpoint.rstrip("/")
         self.deployment = deployment
         self.api_version = api_version
         self._client = httpx.AsyncClient(
-            timeout=30.0,
+            timeout=_http_timeout(timeout),
             headers={
                 "api-key": self.api_key,
                 "Content-Type": "application/json",
@@ -233,14 +327,9 @@ class AzureOpenAIEmbedder(BaseEmbedder):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            log.error("azure_embedding_http_error", status_code=e.response.status_code)
-            raise EmbeddingProviderError(
-                f"Embedding service error (status {e.response.status_code})",
-                status_code=e.response.status_code,
-            ) from None
+            _raise_http_error("azure", e)
         except httpx.RequestError as e:
-            log.error("azure_embedding_request_error", error_type=type(e).__name__)
-            raise EmbeddingProviderError("Embedding service unavailable") from None
+            _raise_request_error("azure", e)
 
         data = response.json()
 
@@ -259,10 +348,15 @@ class AzureOpenAIEmbedder(BaseEmbedder):
 class OllamaEmbedder(BaseEmbedder):
     """Ollama local embedding provider."""
 
-    def __init__(self, base_url: str = "http://localhost:11434", model: str = "nomic-embed-text") -> None:
+    def __init__(
+        self,
+        base_url: str = "http://localhost:11434",
+        model: str = "nomic-embed-text",
+        timeout: float = DEFAULT_OLLAMA_TIMEOUT,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self._client = httpx.AsyncClient(timeout=60.0)
+        self._client = httpx.AsyncClient(timeout=_http_timeout(timeout))
 
     async def embed(self, text: str) -> list[float]:
         if not text or not text.strip():
@@ -278,14 +372,9 @@ class OllamaEmbedder(BaseEmbedder):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            log.error("ollama_embedding_http_error", status_code=e.response.status_code)
-            raise EmbeddingProviderError(
-                f"Embedding service error (status {e.response.status_code})",
-                status_code=e.response.status_code,
-            ) from None
+            _raise_http_error("ollama", e)
         except httpx.RequestError as e:
-            log.error("ollama_embedding_request_error", error_type=type(e).__name__)
-            raise EmbeddingProviderError("Embedding service unavailable") from None
+            _raise_request_error("ollama", e)
 
         data = response.json()
 
@@ -314,12 +403,12 @@ class OllamaEmbedder(BaseEmbedder):
 class CohereEmbedder(BaseEmbedder):
     """Cohere embedding provider."""
 
-    def __init__(self, api_key: str, model: str = "embed-english-v3.0") -> None:
+    def __init__(self, api_key: str, model: str = "embed-english-v3.0", timeout: float = DEFAULT_EMBED_TIMEOUT) -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = "https://api.cohere.ai/v1"
         self._client = httpx.AsyncClient(
-            timeout=30.0,
+            timeout=_http_timeout(timeout),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -345,14 +434,9 @@ class CohereEmbedder(BaseEmbedder):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            log.error("cohere_embedding_http_error", status_code=e.response.status_code)
-            raise EmbeddingProviderError(
-                f"Embedding service error (status {e.response.status_code})",
-                status_code=e.response.status_code,
-            ) from None
+            _raise_http_error("cohere", e)
         except httpx.RequestError as e:
-            log.error("cohere_embedding_request_error", error_type=type(e).__name__)
-            raise EmbeddingProviderError("Embedding service unavailable") from None
+            _raise_request_error("cohere", e)
 
         data = response.json()
 
@@ -375,12 +459,12 @@ class VoyageEmbedder(BaseEmbedder):
     Models: voyage-3, voyage-3-lite, voyage-code-3
     """
 
-    def __init__(self, api_key: str, model: str = "voyage-3") -> None:
+    def __init__(self, api_key: str, model: str = "voyage-3", timeout: float = DEFAULT_EMBED_TIMEOUT) -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = "https://api.voyageai.com/v1"
         self._client = httpx.AsyncClient(
-            timeout=30.0,
+            timeout=_http_timeout(timeout),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -406,14 +490,9 @@ class VoyageEmbedder(BaseEmbedder):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            log.error("voyage_embedding_http_error", status_code=e.response.status_code)
-            raise EmbeddingProviderError(
-                f"Embedding service error (status {e.response.status_code})",
-                status_code=e.response.status_code,
-            ) from None
+            _raise_http_error("voyage", e)
         except httpx.RequestError as e:
-            log.error("voyage_embedding_request_error", error_type=type(e).__name__)
-            raise EmbeddingProviderError("Embedding service unavailable") from None
+            _raise_request_error("voyage", e)
 
         data = response.json()
 
@@ -436,12 +515,12 @@ class JinaEmbedder(BaseEmbedder):
     Models: jina-embeddings-v3, jina-embeddings-v2-base-en
     """
 
-    def __init__(self, api_key: str, model: str = "jina-embeddings-v3") -> None:
+    def __init__(self, api_key: str, model: str = "jina-embeddings-v3", timeout: float = DEFAULT_EMBED_TIMEOUT) -> None:
         self.api_key = api_key
         self.model = model
         self.base_url = "https://api.jina.ai/v1"
         self._client = httpx.AsyncClient(
-            timeout=30.0,
+            timeout=_http_timeout(timeout),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
@@ -466,14 +545,9 @@ class JinaEmbedder(BaseEmbedder):
             )
             response.raise_for_status()
         except httpx.HTTPStatusError as e:
-            log.error("jina_embedding_http_error", status_code=e.response.status_code)
-            raise EmbeddingProviderError(
-                f"Embedding service error (status {e.response.status_code})",
-                status_code=e.response.status_code,
-            ) from None
+            _raise_http_error("jina", e)
         except httpx.RequestError as e:
-            log.error("jina_embedding_request_error", error_type=type(e).__name__)
-            raise EmbeddingProviderError("Embedding service unavailable") from None
+            _raise_request_error("jina", e)
 
         data = response.json()
 
@@ -510,6 +584,15 @@ class EmbeddingService:
         # Track current config for change detection
         self._current_provider: str = settings.embedding_provider
         self._current_model: str = settings.embedding_model
+        # One breaker per service (the app has exactly one EmbeddingService).
+        # Quota exhaustion opens it immediately for the long reset window;
+        # 5xx / timeouts / 429 open it after ``failure_threshold`` in a row.
+        self.breaker = CircuitBreaker(
+            name="embeddings",
+            failure_threshold=int(_setting_num(settings, "embedding_breaker_failure_threshold", 5)),
+            reset_timeout=_setting_num(settings, "embedding_breaker_reset_seconds", 30.0),
+            quota_reset_timeout=_setting_num(settings, "provider_quota_reset_seconds", 900.0),
+        )
 
     @property
     def provider(self) -> str:
@@ -529,46 +612,52 @@ class EmbeddingService:
 
         if provider == "openai":
             if not self.settings.openai_api_key:
-                raise ValueError("REMEMBRA_OPENAI_API_KEY is required for OpenAI embeddings")
+                raise EmbeddingConfigError("REMEMBRA_OPENAI_API_KEY is required for OpenAI embeddings", provider="openai")
             self._embedder = OpenAIEmbedder(
                 api_key=self.settings.openai_api_key,
                 model=model,
                 dimensions=self.settings.embedding_dimensions,
+                timeout=self._timeout(),
             )
         elif provider == "azure_openai":
             if not self.settings.azure_openai_api_key:
-                raise ValueError("REMEMBRA_AZURE_OPENAI_API_KEY is required")
+                raise EmbeddingConfigError("REMEMBRA_AZURE_OPENAI_API_KEY is required", provider="azure_openai")
             self._embedder = AzureOpenAIEmbedder(
                 api_key=self.settings.azure_openai_api_key,
                 endpoint=self.settings.azure_openai_endpoint,
                 deployment=self.settings.azure_openai_deployment,
                 api_version=self.settings.azure_openai_api_version,
+                timeout=self._timeout(),
             )
         elif provider == "ollama":
             self._embedder = OllamaEmbedder(
                 base_url=self.settings.ollama_url,
                 model=model,
+                timeout=max(self._timeout(), DEFAULT_OLLAMA_TIMEOUT),
             )
         elif provider == "cohere":
             if not self.settings.cohere_api_key:
-                raise ValueError("REMEMBRA_COHERE_API_KEY is required for Cohere embeddings")
+                raise EmbeddingConfigError("REMEMBRA_COHERE_API_KEY is required for Cohere embeddings", provider="cohere")
             self._embedder = CohereEmbedder(
                 api_key=self.settings.cohere_api_key,
                 model=model,
+                timeout=self._timeout(),
             )
         elif provider == "voyage":
             if not self.settings.voyage_api_key:
-                raise ValueError("REMEMBRA_VOYAGE_API_KEY is required for Voyage AI embeddings")
+                raise EmbeddingConfigError("REMEMBRA_VOYAGE_API_KEY is required for Voyage AI embeddings", provider="voyage")
             self._embedder = VoyageEmbedder(
                 api_key=self.settings.voyage_api_key,
                 model=model,
+                timeout=self._timeout(),
             )
         elif provider == "jina":
             if not self.settings.jina_api_key:
-                raise ValueError("REMEMBRA_JINA_API_KEY is required for Jina embeddings")
+                raise EmbeddingConfigError("REMEMBRA_JINA_API_KEY is required for Jina embeddings", provider="jina")
             self._embedder = JinaEmbedder(
                 api_key=self.settings.jina_api_key,
                 model=model,
+                timeout=self._timeout(),
             )
         else:
             raise ValueError(f"Unknown embedding provider: {provider}")
@@ -609,6 +698,7 @@ class EmbeddingService:
         # Note: old embedder's client will be garbage collected.
         # For explicit cleanup, call close() before switch_provider().
         self._embedder = None  # Force re-init on next embed call
+        self.breaker.reset()  # failures of the old provider say nothing about the new one
 
         # Store API key override if provided
         if api_key:
@@ -654,16 +744,71 @@ class EmbeddingService:
         if cached is not None:
             return cached
 
-        embedder = self._get_embedder()
-        result = await embedder.embed(text)
+        result = await self._guarded(lambda: self._get_embedder().embed(text))
         await embedding_cache.set_by_key(cache_key, result)
         return result
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for multiple texts."""
+        """Generate embeddings for multiple texts (circuit-breaker protected)."""
         texts = [_truncate_for_embedding(t) for t in texts]
-        embedder = self._get_embedder()
-        return await embedder.embed_batch(texts)
+        return await self._guarded(lambda: self._get_embedder().embed_batch(texts))
+
+    async def probe(self, text: str = "remembra readiness probe") -> int:
+        """Embed a fixed string, bypassing the cache, through the breaker.
+
+        Used by ``/health/ready``'s cached active probe. Returns the vector
+        dimension. Raises EmbeddingProviderError on failure.
+        """
+        vector = await self._guarded(lambda: self._get_embedder().embed(text))
+        return len(vector)
+
+    def config_problem(self) -> str | None:
+        """Describe a missing-credential problem without calling the provider."""
+        try:
+            self._get_embedder()
+        except EmbeddingConfigError as e:
+            return str(e)
+        except ValueError as e:
+            return str(e)
+        return None
+
+    async def _guarded(self, call: Callable[[], Awaitable[T]]) -> T:
+        """Run one provider call under the circuit breaker, with typed errors.
+
+        * Breaker open  -> EmbeddingProviderError(circuit_open=True) carrying the
+          kind that opened it (so quota stays quota) and the remaining wait.
+        * Provider error -> counted by kind in metrics, fed to the breaker.
+        """
+        try:
+            is_probe = self.breaker.acquire()
+        except CircuitOpenError as e:
+            kind = e.last_error_kind or ProviderErrorKind.UNAVAILABLE.value
+            raise EmbeddingProviderError(
+                f"Embedding provider unavailable (circuit open: {kind})",
+                kind=kind,
+                retry_after=e.retry_after,
+                provider=self._current_provider,
+                circuit_open=True,
+            ) from None
+        try:
+            result = await call()
+        except asyncio.CancelledError:
+            self.breaker.release(is_probe)
+            raise
+        except EmbeddingProviderError as e:
+            if e.provider is None:
+                e.provider = self._current_provider
+            EMBEDDING_ERRORS.inc(provider=self._current_provider, kind=e.kind.value)
+            self.breaker.record_failure(e, is_probe=is_probe)
+            raise
+        except BaseException as e:
+            self.breaker.record_failure(e, is_probe=is_probe)
+            raise
+        self.breaker.record_success(is_probe=is_probe)
+        return result
+
+    def _timeout(self) -> float:
+        return _setting_num(self.settings, "embedding_timeout_seconds", DEFAULT_EMBED_TIMEOUT)
 
     @property
     def dimensions(self) -> int:

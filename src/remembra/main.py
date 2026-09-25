@@ -369,6 +369,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # ---------------------------------------------------------------------------
 
 
+def register_provider_error_handlers(app: FastAPI) -> None:
+    """Map upstream embedding failures honestly on every route (REL-1).
+
+    Store/recall catch these themselves; this covers every other route that
+    embeds (batch, ingest, spaces, update, ...), which would otherwise turn a
+    quota outage into an opaque 500.
+    """
+    from remembra.core.http_errors import embedding_error_response
+    from remembra.storage.embeddings import EmbeddingProviderError
+
+    async def _embedding_provider_error(request: Request, exc: Exception) -> JSONResponse:
+        code, body, headers = embedding_error_response(exc, operation="other")
+        headers = {**headers, "X-Remembra-Error-Kind": body["error"]["kind"]}
+        log.error(
+            "embedding_provider_error",
+            path=request.url.path,
+            kind=body["error"]["kind"],
+            circuit_open=body["error"]["circuit_open"],
+        )
+        return JSONResponse(status_code=code, content=body, headers=headers)
+
+    app.add_exception_handler(EmbeddingProviderError, _embedding_provider_error)
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
 
@@ -400,6 +424,8 @@ def create_app() -> FastAPI:
         RateLimitExceeded,
         cast(Callable[[Request, Exception], Response], _rate_limit_exceeded_handler),
     )
+
+    register_provider_error_handlers(app)
 
     # Validation error handler - sanitize validation messages
     @app.exception_handler(RequestValidationError)
