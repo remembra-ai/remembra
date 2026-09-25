@@ -40,6 +40,7 @@ def test_stdio_uses_env_key(monkeypatch):
     monkeypatch.setattr(server, "REMEMBRA_MCP_TRANSPORT", "stdio")
     monkeypatch.setattr(server, "REMEMBRA_API_KEY", "rem_env")
     monkeypatch.setattr(server, "_client", None)
+    monkeypatch.setattr(server, "_session_projects", {})
     assert server._get_client().api_key == "rem_env"
 
 

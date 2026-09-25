@@ -42,6 +42,7 @@ def mcp_env(api, monkeypatch):
     monkeypatch.setattr(server, "REMEMBRA_PROJECT_ALIASES", {})
     monkeypatch.setattr(server, "REMEMBRA_SESSION_ID", "mcp-sess-1")
     monkeypatch.setattr(server, "_client", None)
+    monkeypatch.setattr(server, "_session_projects", {})
     yield api
     server._client = None
 
@@ -57,7 +58,8 @@ def test_instructions_tell_every_agent_to_brief_and_close():
     assert {"session_brief", "close_session", "resolve_project"} <= tools
 
 
-def test_mcp_close_then_compact_brief_for_hookless_agent(mcp_env):
+def test_mcp_close_then_compact_brief_for_hookless_agent(mcp_env, monkeypatch):
+    monkeypatch.setattr(server, "REMEMBRA_PROJECT", "default")  # nothing configured: the repo gets its own project
     out = _j(
         server.close_session(
             summary="Refactored the parser; tests pass.",
@@ -71,6 +73,7 @@ def test_mcp_close_then_compact_brief_for_hookless_agent(mcp_env):
     assert out["status"] == "ok" and out["project_id"] == "parser"
     assert out["grounding"]["status"] == "contradicted"
     assert "Next step (agent): port the tokenizer" in out["rendered"]
+    assert "Facts: declared by the agent (not checked)." in out["rendered"]
     again = _j(
         server.close_session(next_step="port the tokenizer", facts={"branch": "dev"}, git_remote="git@github.com:acme/parser")
     )
@@ -78,10 +81,72 @@ def test_mcp_close_then_compact_brief_for_hookless_agent(mcp_env):
     trail = mcp_env["http"].get("/api/v1/trail", params={"project_id": "parser"}).json()
     assert trail["total"] == 1 and trail["items"][0]["agent_id"] == "kimi"
 
-    brief = _j(server.session_brief(git_remote="git@github.com:ACME/parser.git"))
+    brief = _j(server.session_brief(git_remote="git@github.com:ACME/parser.git", compact=True))
     assert brief["project_id"] == "parser" and brief["handoff_id"] == again["handoff_id"]
     assert set(brief) == {"status", "project_id", "agent_id", "brief", "handoff_id", "inbox_unread", "warnings"}
-    assert brief["brief"].splitlines()[1].startswith("Last session: kimi, just now, on dev: ")
+    lines = brief["brief"].splitlines()
+    assert lines[1] == '<remembra-data untrusted="true">'
+    assert lines[3].startswith("Last session: kimi (self-declared), just now, on dev: ")
+    assert "suggested next step (from kimi, unverified): port the tokenizer" in lines[3]
+
+
+def test_mcp_repo_binds_to_configured_project_and_close_follows_the_brief(mcp_env):
+    """REMEMBRA_PROJECT=alpha: an unseen repo joins alpha (one namespace for existing users), and
+    close_session / store_memory without a locator land where session_brief resolved."""
+    server.store_memory("existing fact in alpha")
+    brief = _j(server.session_brief(git_remote="https://github.com/freshvybz/clawbot.git"))
+    assert brief["project_id"] == "alpha"
+    assert brief["resolution"]["persisted"] is False  # a brief never writes a binding
+    assert [m["content"] for m in brief["recent"]] == ["existing fact in alpha"]
+
+    closed = _j(server.close_session(next_step="ship it", facts={"branch": "main"}))  # no locator, no project
+    assert closed["project_id"] == "alpha"
+    resolved = mcp_env["http"].post("/api/v1/projects/resolve", json={"git_remote": "git@github.com:freshvybz/clawbot"}).json()
+    assert resolved["project_id"] == "alpha" and resolved["created"] is False  # the close recorded the binding
+
+    again = _j(server.session_brief(git_remote="git@github.com:freshvybz/clawbot"))
+    assert again["handoff_id"] == closed["handoff_id"]
+    assert "suggested next step (from kimi, unverified): ship it" in again["brief"]
+
+
+def test_mcp_brief_project_is_the_default_for_close_and_store(mcp_env, monkeypatch):
+    """A repo already bound elsewhere: brief, close and store all use the brief's project, not REMEMBRA_PROJECT."""
+    mcp_env["http"].post(
+        "/api/v1/projects/resolve", json={"git_remote": "https://github.com/acme/other", "hint_project": "other"}
+    )
+    brief = _j(server.session_brief(git_remote="git@github.com:acme/other.git"))
+    assert brief["project_id"] == "other"
+    assert any("configured for 'alpha'" in w for w in brief["warnings"])
+    closed = _j(server.close_session(next_step="n", facts={"branch": "main"}))
+    assert closed["project_id"] == "other"
+    stored = _j(server.store_memory("decision: use sqlite"))
+    row = mcp_env["http"].get(f"/api/v1/memories/{stored['id']}").json()
+    assert row["project_id"] == "other"
+    second = _j(server.session_brief(git_remote="git@github.com:acme/other.git", compact=True))
+    assert second["handoff_id"] == closed["handoff_id"]
+
+
+def test_mcp_root_path_reads_git_locally_and_joins_the_hook_project(mcp_env, tmp_path):
+    """root_path only (no git_remote) inside a checkout resolves like the CLI hook does, and the
+    brief compares the checkout with the handoff's branch/head."""
+    from tests.relay_fixtures import git, make_remote_and_clones
+
+    _, clones = make_remote_and_clones(tmp_path)
+    repo = clones["laptop"]
+    git(repo, "remote", "set-url", "origin", "https://github.com/acme/rootpath.git")
+    (repo / "pkg").mkdir()
+    mcp_env["http"].post(
+        "/api/v1/session/close",
+        json={
+            "agent_id": "claude-code",
+            "session_id": "hook-1",
+            "project": {"git_remote": "git@github.com:acme/rootpath.git", "hint_project": "rootpath"},
+            "facts": {"branch": "main", "head_commit": "f" * 40, "next_step": "continue"},
+        },
+    )
+    brief = _j(server.session_brief(root_path=str(repo / "pkg")))  # a subdirectory, no remote given
+    assert brief["project_id"] == "rootpath"
+    assert "Checkout differs: the handoff was recorded on main@fffffff; you are on main@" in brief["brief"]
 
 
 def test_mcp_resolve_project_and_bind(mcp_env):

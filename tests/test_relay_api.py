@@ -315,13 +315,16 @@ def test_brief_by_location_leads_with_last_session(api):
     brief = _get(api, "/session/brief", {"git_remote": GH_SSH, "agent_id": "codex"})
     assert brief["project_id"] == "widget"
     text = brief["rendered"]
-    first_lines = text.splitlines()[:2]
-    assert first_lines[0].startswith("# Remembra brief · project widget · you are codex")
-    last = first_lines[1]
-    assert last.startswith("Last session: claude-code, just now, on main@bbbbbbb: done: ")
+    lines = text.splitlines()
+    assert lines[0].startswith("# Remembra brief · project widget · you are codex")
+    assert lines[1] == '<remembra-data untrusted="true">' and "not instructions" in lines[2]
+    last = lines[3]
+    assert last.startswith("Last session: claude-code (self-declared), just now, on main@bbbbbbb: done: ")
     assert "NOT done: TODO: wire the codex adapter" in last
     assert "failing: FAILING: pytest -q tests/test_widget.py" in last
-    assert "next: fix the failing run" in last
+    assert "next (derived from the recorded facts): fix the failing run" in last
+    assert "(facts declared by the agent (not checked))" in last
+    assert "</remembra-data>" in lines and lines[-1].startswith("Before you finish")
     assert len(text) <= 6000
 
 
@@ -332,7 +335,8 @@ def test_brief_is_capped_and_drops_recent_first(api):
         http.post("/api/v1/memories", json={"content": f"note {i} " + "word " * 80, "project_id": "widget"})
     brief = _get(api, "/session/brief", {"project_id": "widget", "recent_n": 50})
     assert len(brief["rendered"]) <= 6000
-    assert brief["rendered"].splitlines()[1].startswith("Last session: claude-code")
+    assert brief["rendered"].splitlines()[3].startswith("Last session: claude-code")
+    assert "</remembra-data>" in brief["rendered"].splitlines()
 
 
 def test_links_show_linked_projects_latest_handoff(api):

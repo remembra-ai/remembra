@@ -48,7 +48,25 @@ _TEST_SUMMARY_RE = re.compile(
 _EXIT_RE = re.compile(r"^\s*(?:Error:\s*)?Exit code (\d+)")
 # `git commit` / cherry-pick / revert output: "[branch 1a2b3c4] subject" (or "(root-commit)").
 _COMMIT_LINE_RE = re.compile(r"^\[[^\]\n]+? (?:\(root-commit\) )?([0-9a-f]{7,40})\] \S", re.MULTILINE)
-_LEADING_CD_RE = re.compile(r"""^\s*cd\s+("[^"]+"|'[^']+'|[^\s;&|]+)\s*(?:&&|;|$)""")
+# A command that starts by changing directory: `cd X &&`, `(cd X && ...)`, `pushd X;`.
+_LEADING_CD_RE = re.compile(r"""^[\s(]*(?:cd|pushd)\s+("[^"]+"|'[^']+'|[^\s;&|()]+)\s*(?:&&|;|\)|$)""")
+# `git -C DIR ...` (optionally after `-c key=value` options).
+_GIT_C_RE = re.compile(r"""^[\s(]*git\s+(?:-c\s+\S+\s+)*-C\s+("[^"]+"|'[^']+'|[^\s;&|()]+)""")
+# Reflog actions that create a commit in this checkout (a pull, merge, checkout or reset does not).
+_OWN_REFLOG_RE = re.compile(
+    r"^(?:commit(?: \((?:amend|initial)\))?|cherry-pick|revert|rebase(?: -i)? \((?:pick|reword|edit|squash|fixup|continue)\))$"
+)
+_KNOWN_GIT_HOSTS = {
+    "github.com",
+    "gitlab.com",
+    "bitbucket.org",
+    "codeberg.org",
+    "ssh.dev.azure.com",
+    "vs-ssh.visualstudio.com",
+    "git.sr.ht",
+    "gitee.com",
+}
+_SCP_REMOTE_RE = re.compile(r"^(?:(?P<user>[^@/\s]+)@)?(?P<host>[A-Za-z0-9.\-]+):(?!//)(?P<path>.+)$")
 
 
 class Deadline:
@@ -89,11 +107,20 @@ class Git:
             "GIT_OPTIONAL_LOCKS": "0",  # never take index.lock from a hook
             "LC_ALL": "C",
         }
+        self.timed_out = False
+        self.timeouts = 0
 
     def run(self, *args: str) -> str | None:
-        """stdout of ``git -C cwd <args>`` or None on any failure/timeout."""
+        """stdout of ``git -C cwd <args>`` or None on any failure/timeout.
+
+        ``timed_out`` tells the two apart for the last call: a probe that ran
+        out of time must be reported as unknown, never as "nothing there".
+        """
+        self.timed_out = False
         timeout = self.deadline.remaining()
         if timeout <= 0.05:
+            self.timed_out = True
+            self.timeouts += 1
             return None
         try:
             proc = subprocess.run(
@@ -105,6 +132,10 @@ class Git:
                 stdin=subprocess.DEVNULL,
                 check=False,
             )
+        except subprocess.TimeoutExpired:
+            self.timed_out = True
+            self.timeouts += 1
+            return None
         except (OSError, subprocess.SubprocessError):
             return None
         return proc.stdout if proc.returncode == 0 else None
@@ -142,11 +173,12 @@ def repo_info(cwd: Path, deadline: Deadline) -> RepoInfo:
     if not toplevel:
         return RepoInfo(repo_name=cwd.name or None)
     info = RepoInfo(toplevel=toplevel, is_git=True)
-    remote = git.line("remote", "get-url", "origin")
-    if not remote:
-        names = (git.run("remote") or "").split()
-        remote = git.line("remote", "get-url", names[0]) if names else None
-    info.git_remote = _strip_url_credentials(remote) if remote else None
+    branch = git.line("rev-parse", "--abbrev-ref", "HEAD")
+    remote = _pick_remote(git, branch if branch and branch != "HEAD" else None)
+    if remote:
+        remote = _absolute_local_remote(_strip_url_credentials(remote), toplevel)
+        remote = _resolve_ssh_alias(remote, deadline)
+    info.git_remote = remote
     roots = sorted((git.run("rev-list", "--max-parents=0", "HEAD") or "").split())
     info.root_commit = roots[0] if roots else None
     common = git.line("rev-parse", "--path-format=absolute", "--git-common-dir")
@@ -154,7 +186,6 @@ def repo_info(cwd: Path, deadline: Deadline) -> RepoInfo:
         info.repo_name = Path(common).parent.name  # main checkout's name, also from a worktree
     else:
         info.repo_name = Path(toplevel).name
-    branch = git.line("rev-parse", "--abbrev-ref", "HEAD")
     info.branch = "(detached)" if branch == "HEAD" else branch
     info.head_commit = git.line("rev-parse", "HEAD")
     return info
@@ -162,6 +193,88 @@ def repo_info(cwd: Path, deadline: Deadline) -> RepoInfo:
 
 def _strip_url_credentials(url: str) -> str:
     return re.sub(r"(://)[^/@\s]+@", r"\1", url.strip())
+
+
+def _pick_remote(git: Git, branch: str | None) -> str | None:
+    """The remote URL that identifies this repository.
+
+    ``origin`` when it exists (stable across branches, so a fork's feature
+    branches and main agree); otherwise the remote the current branch tracks,
+    then ``remote.pushDefault``, then the only remote, then the first by name.
+    """
+    names = (git.run("remote") or "").split()
+    if not names:
+        return None
+    chosen: str | None = "origin" if "origin" in names else None
+    if chosen is None and branch:
+        tracked = git.line("config", "--get", f"branch.{branch}.remote")
+        chosen = tracked if tracked in names else None
+    if chosen is None:
+        push_default = git.line("config", "--get", "remote.pushDefault")
+        chosen = push_default if push_default in names else None
+    if chosen is None:
+        chosen = sorted(names)[0]
+    return git.line("remote", "get-url", chosen)
+
+
+def _is_local_path_remote(url: str) -> bool:
+    return "://" not in url and not _SCP_REMOTE_RE.match(url)
+
+
+def _absolute_local_remote(url: str, toplevel: str) -> str:
+    """A relative local remote (``../upstream``) made absolute, so two repos'
+    ``../upstream`` remotes never collapse to one fingerprint."""
+    if not _is_local_path_remote(url) or os.path.isabs(url) or url.startswith("~") or re.match(r"^[A-Za-z]:[\\/]", url):
+        return url
+    return os.path.normpath(os.path.join(toplevel, url))
+
+
+def _resolve_ssh_alias(url: str, deadline: Deadline) -> str:
+    """Replace an ssh config ``Host`` alias (``git@github-work:me/repo``) with
+    the real host name from ``ssh -G``, so the alias and the plain URL resolve
+    to one project. Known forge hosts are left alone; any failure keeps ``url``."""
+    host: str | None = None
+    rebuild = None
+    match = _SCP_REMOTE_RE.match(url) if "://" not in url else None
+    if match:
+        host = match.group("host")
+        user = f"{match.group('user')}@" if match.group("user") else ""
+
+        def rebuild(real: str) -> str:
+            return f"{user}{real}:{match.group('path')}"
+
+    elif url.lower().startswith("ssh://"):
+        parsed = re.match(r"^(ssh://(?:[^@/]+@)?)([^/:]+)(.*)$", url, re.IGNORECASE)
+        if parsed:
+            host = parsed.group(2)
+            prefix, rest = parsed.group(1), parsed.group(3)
+
+            def rebuild(real: str) -> str:
+                return f"{prefix}{real}{rest}"
+
+    if not host or rebuild is None or host.lower() in _KNOWN_GIT_HOSTS or not re.match(r"^[A-Za-z0-9.\-]+$", host):
+        return url
+    timeout = deadline.remaining(cap=1.5)
+    if timeout <= 0.05:
+        return url
+    try:
+        proc = subprocess.run(
+            ["ssh", "-G", host],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            stdin=subprocess.DEVNULL,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return url
+    if proc.returncode != 0:
+        return url
+    for line in proc.stdout.splitlines():
+        key, _, value = line.strip().partition(" ")
+        if key.lower() == "hostname" and value.strip() and value.strip().lower() != host.lower():
+            return rebuild(value.strip())
+    return url
 
 
 def _reachable(git: Git, shas: list[str]) -> list[str]:
@@ -174,30 +287,92 @@ def _reachable(git: Git, shas: list[str]) -> list[str]:
     return out
 
 
+def _own_commits_since(git: Git, start_head: str, started_at: float | None) -> list[str] | None:
+    """Commits THIS checkout created since the session started, oldest first, from ``git reflog``.
+
+    Keeps commit / amend / cherry-pick / revert / rebase-pick entries and
+    drops pull, merge, checkout and reset (their commits are someone else's
+    work arriving). Walks back to the session start time, or to the session's
+    start HEAD when no start time was recorded. None when the reflog cannot
+    be read (the caller falls back to other evidence).
+    """
+    out = git.run("reflog", "show", "--date=unix", "--format=%H%x1f%gd%x1f%gs", "HEAD", "--")
+    if not out or not out.strip():
+        return None  # no reflog (core.logAllRefUpdates=false, or it was expired): use other evidence
+    shas: list[str] = []
+    for line in out.splitlines():
+        sha, _, rest = line.partition("\x1f")
+        selector, _, subject = rest.partition("\x1f")
+        stamp = re.search(r"@\{(\d+)\}", selector)
+        if started_at is not None:
+            if stamp is None or int(stamp.group(1)) < int(started_at):
+                break
+        elif sha.strip() == start_head:
+            break  # the entry that produced the session's start HEAD predates the session
+        action = subject.split(":", 1)[0].strip()
+        if _OWN_REFLOG_RE.match(action):
+            shas.append(sha.strip())
+    shas.reverse()
+    return list(dict.fromkeys(shas))
+
+
+def _no_walk(shas_oldest_first: list[str]) -> list[str]:
+    """``git log`` args listing exactly these commits, newest first (the order ``git log`` normally prints)."""
+    return ["--no-walk=unsorted", *reversed(shas_oldest_first)]
+
+
 def _session_range(
-    git: Git, info: RepoInfo, start_head: str | None, session_commits: list[str] | None, hours: float
+    git: Git,
+    info: RepoInfo,
+    start_head: str | None,
+    session_commits: list[str] | None,
+    hours: float,
+    started_at: float | None = None,
 ) -> tuple[list[str], str]:
     """``git log`` args for "this session's commits" and how they were chosen.
 
-    Evidence order: the HEAD recorded at session start (``brief``), then the
-    commits the agent's own transcript shows it creating, then the branch's
-    merge-base with the default branch, then a time window. With a
-    transcript but no commit evidence, the agent committed nothing.
+    Evidence order: with the HEAD recorded at session start (``brief``), the
+    commits the reflog shows this checkout creating since then (a pulled or
+    merged teammate commit is not this session's work); then the commits the
+    agent's own transcript shows it creating; then the branch's merge-base
+    with the default branch, then a time window (both labeled as windows:
+    they may include other people's commits). With a transcript but no commit
+    evidence, the agent committed nothing.
     """
     if start_head and info.head_commit:
         if start_head == info.head_commit:
             return [], "session-start"
+        own = _own_commits_since(git, start_head, started_at)
+        if own is not None:
+            reachable = _reachable(git, own[-MAX_COMMITS:])
+            return (_no_walk(reachable), "session-reflog") if reachable else ([], "session-reflog")
+        if session_commits is not None:
+            reachable = _reachable(git, session_commits[-MAX_COMMITS:])
+            return (_no_walk(reachable), "transcript-commits") if reachable else ([], "transcript-no-commits")
         if git.run("merge-base", "--is-ancestor", start_head, "HEAD") is not None:
-            return [f"{start_head}..HEAD"], "session-start"
+            return [f"{start_head}..HEAD"], "session-start-range"
     if session_commits is not None:
         reachable = _reachable(git, session_commits[-MAX_COMMITS:])
-        return (["--no-walk=sorted", *reachable], "transcript-commits") if reachable else ([], "transcript-no-commits")
+        return (_no_walk(reachable), "transcript-commits") if reachable else ([], "transcript-no-commits")
     default = git.line("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     if default and info.branch and default.split("/", 1)[-1] != info.branch:
         base = git.line("merge-base", "HEAD", default)
         if base and base != info.head_commit:
             return [f"{base}..HEAD"], f"merge-base:{default}"
     return ["--since", f"{hours:g} hours ago", "HEAD"], f"last-{hours:g}h"
+
+
+def _numstat_totals(text: str) -> tuple[set[str], int, int]:
+    files: set[str] = set()
+    added = deleted = 0
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        files.add(parts[2])
+        added += int(parts[0]) if parts[0].isdigit() else 0
+        deleted += int(parts[1]) if parts[1].isdigit() else 0
+    return files, added, deleted
 
 
 def git_facts(
@@ -207,34 +382,57 @@ def git_facts(
     session_commits: list[str] | None = None,
     hours: float = 12.0,
     info: RepoInfo | None = None,
+    started_at: float | None = None,
 ) -> dict[str, Any]:
-    """Branch, head, this session's commits + files, uncommitted files, diff stat, push state."""
+    """Branch, head, this session's commits + files, uncommitted files, diff stat, push state.
+
+    ``incomplete`` lists the probes that did not finish in time (``log``,
+    ``status``, ``diff``, ``upstream``): their facts are unknown, not empty.
+    """
     info = info or repo_info(cwd, deadline)
     facts: dict[str, Any] = {}
     if not info.is_git:
         return facts
     git = Git(cwd, deadline)
+    incomplete: list[str] = []
+
+    def probe(name: str, *args: str) -> str | None:
+        out = git.run(*args)
+        if git.timed_out and name not in incomplete:
+            incomplete.append(name)
+        return out
+
     facts["branch"] = info.branch
     facts["head_commit"] = info.head_commit
 
     commits: list[dict[str, str]] = []
     files: list[str] = []
-    range_args, how = _session_range(git, info, start_head, session_commits, hours) if info.head_commit else ([], "empty-repo")
+    range_args, how = (
+        _session_range(git, info, start_head, session_commits, hours, started_at) if info.head_commit else ([], "empty-repo")
+    )
+    if git.timeouts:
+        incomplete.append("log")
     facts["commit_range"] = how
+    stat_files: set[str] = set()
+    added = deleted = 0
     if range_args:
-        log = git.run("log", f"--max-count={MAX_COMMITS}", "--no-merges", "--name-only", "--format=%x1e%H%x1f%s", *range_args)
+        log = probe("log", "log", f"--max-count={MAX_COMMITS}", "--no-merges", "--numstat", "--format=%x1e%H%x1f%s", *range_args)
         for block in (log or "").split("\x1e"):
             if not block.strip():
                 continue
             header, _, rest = block.partition("\n")
             sha, _, subject = header.partition("\x1f")
             commits.append({"sha": sha.strip(), "subject": _scrub(subject.strip())})
-            files.extend(p.strip() for p in rest.splitlines() if p.strip())
+            block_files, block_added, block_deleted = _numstat_totals(rest)
+            files.extend(sorted(block_files))
+            stat_files |= block_files
+            added += block_added
+            deleted += block_deleted
     commits.reverse()  # oldest first
     facts["commits"] = commits
 
     uncommitted: list[str] = []
-    status = git.run("status", "--porcelain=v1", "-z", "--untracked-files=normal")
+    status = probe("status", "status", "--porcelain=v1", "-z", "--untracked-files=normal")
     if status:
         entries = status.split("\0")
         i = 0
@@ -249,23 +447,29 @@ def git_facts(
     facts["uncommitted_files"] = sorted(dict.fromkeys(uncommitted))
     facts["files_changed"] = sorted(dict.fromkeys(files + uncommitted))
 
-    if commits:
-        first = commits[0]["sha"]
-        base = git.line("rev-parse", f"{first}^") or EMPTY_TREE
-        stat = git.line("diff", "--shortstat", base)
-    else:
-        stat = git.line("diff", "--shortstat", "HEAD") if info.head_commit else None
-    if stat:
-        facts["diff_stat"] = stat
+    # Diff stat of this session's own commits plus the working tree (summed per
+    # commit, so commits pulled in between are never counted).
+    if info.head_commit:
+        worktree = probe("diff", "diff", "--numstat", "HEAD")
+        wt_files, wt_added, wt_deleted = _numstat_totals(worktree or "")
+        stat_files |= wt_files
+        added += wt_added
+        deleted += wt_deleted
+    if stat_files:
+        facts["diff_stat"] = f"{len(stat_files)} files changed, {added} insertions(+), {deleted} deletions(-)"
 
-    upstream = git.line("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    upstream = probe("upstream", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+    if upstream:
+        upstream = upstream.strip().splitlines()[0] if upstream.strip() else None
     if upstream:
         facts["upstream"] = upstream
-        ahead = git.line("rev-list", "--count", "@{u}..HEAD")
-        if ahead is not None and ahead.isdigit():
-            facts["unpushed_commits"] = int(ahead)
-    elif info.head_commit and info.branch != "(detached)":
+        ahead = probe("upstream", "rev-list", "--count", "@{u}..HEAD")
+        if ahead is not None and ahead.strip().isdigit():
+            facts["unpushed_commits"] = int(ahead.strip())
+    elif info.head_commit and info.branch != "(detached)" and "upstream" not in incomplete:
         facts["no_upstream"] = True
+    if incomplete:
+        facts["incomplete"] = incomplete
     return facts
 
 
@@ -316,17 +520,33 @@ def _iter_lines(path: Path) -> Iterable[str]:
             yield raw.decode("utf-8", errors="replace")
 
 
-def _outside_root(command: str, root: str | None) -> bool:
-    """True when the command starts with ``cd <dir>`` to a directory outside ``root``."""
+def effective_dir(command: str, cwd: str | None) -> str | None:
+    """The directory ``command`` runs in: ``cwd`` (the shell's directory when the
+    agent issued it), moved by a leading ``cd X &&`` / ``(cd X && …)`` /
+    ``pushd X;`` or ``git -C X``. Relative targets resolve against ``cwd``.
+    None when unknown (no cwd and no absolute target)."""
+    target: str | None = None
+    for regex in (_LEADING_CD_RE, _GIT_C_RE):
+        match = regex.match(command)
+        if match:
+            target = match.group(1).strip("\"'")
+            break
+    if target is None:
+        return cwd
+    target = os.path.expanduser(target)
+    if os.path.isabs(target):
+        return os.path.normpath(target)
+    return os.path.normpath(os.path.join(cwd, target)) if cwd else None
+
+
+def _outside_root(command: str, root: str | None, cwd: str | None = None) -> bool:
+    """True when ``command`` runs in a directory outside the repository ``root``."""
     if not root:
         return False
-    match = _LEADING_CD_RE.match(command)
-    if not match:
+    where = effective_dir(command, cwd or root)
+    if where is None:
         return False
-    target = match.group(1).strip("\"'")
-    if not target.startswith(("/", "~")):
-        return False  # relative cd stays within the session's cwd
-    target_path = os.path.realpath(os.path.expanduser(target))
+    target_path = os.path.realpath(where)
     root_path = os.path.realpath(root)
     return not (target_path == root_path or target_path.startswith(root_path.rstrip(os.sep) + os.sep))
 
@@ -339,12 +559,15 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
     ``tool_result`` (``tool_use_id``, ``is_error``, ``content``) and a
     ``toolUseResult`` object. A failed Bash result starts with ``Exit code N``.
 
-    ``root`` (the repository top level) drops commands that ``cd`` elsewhere
-    first, so another repo's test runs are not reported for this project.
-    Commit ids printed by ``git commit`` are collected as commit evidence.
+    ``root`` (the repository top level) drops commands that ran in another
+    directory, so another repo's test runs and errors are not reported for
+    this project. Where a command ran is the ``cwd`` Claude Code records on
+    the tool_use line (the Bash tool keeps its directory between calls),
+    moved by a leading ``cd``/``pushd``/subshell or ``git -C``. Commit ids
+    printed by ``git commit`` inside the repository are commit evidence.
     """
     facts = TranscriptFacts()
-    uses: dict[str, tuple[str, dict[str, Any]]] = {}
+    uses: dict[str, tuple[str, dict[str, Any], str | None]] = {}
     todo_snapshot: list[dict[str, Any]] | None = None
     tasks: dict[str, dict[str, str]] = {}
     pending_task_creates: dict[str, str] = {}
@@ -384,7 +607,8 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
                 name = str(block.get("name") or "")
                 raw_input = block.get("input")
                 tool_input: dict[str, Any] = raw_input if isinstance(raw_input, dict) else {}
-                uses[str(block.get("id"))] = (name, tool_input)
+                line_cwd = entry.get("cwd")
+                uses[str(block.get("id"))] = (name, tool_input, line_cwd if isinstance(line_cwd, str) else None)
                 if name == "TodoWrite" and isinstance(tool_input.get("todos"), list):
                     todo_snapshot = [t for t in tool_input["todos"] if isinstance(t, dict)]
                 elif name == "TaskUpdate" and tool_input.get("taskId") is not None:
@@ -399,7 +623,7 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
                 use_id = str(block.get("tool_use_id"))
                 if use_id not in uses:
                     continue
-                name, tool_input = uses[use_id]
+                name, tool_input, use_cwd = uses[use_id]
                 is_error = bool(block.get("is_error"))
                 text = _result_text(block.get("content"))
                 if name == "Bash":
@@ -409,9 +633,9 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
                     match = _EXIT_RE.match(text)
                     if is_error and not match:
                         continue  # rejected / blocked / interrupted: no real exit code
-                    facts.commit_shas.extend(_COMMIT_LINE_RE.findall(text))
-                    if _outside_root(command, root):
+                    if _outside_root(command, root, use_cwd):
                         continue
+                    facts.commit_shas.extend(_COMMIT_LINE_RE.findall(text))
                     exit_code = int(match.group(1)) if match else 0
                     command_log.append({"cmd": command, "exit_code": exit_code, "output": text})
                 elif name in ("Edit", "Write", "MultiEdit", "NotebookEdit") and not is_error:
@@ -494,7 +718,9 @@ def relativize(paths: Iterable[str], root: str | None) -> list[str]:
 def merge_facts(git: dict[str, Any], transcript: TranscriptFacts | None, root: str | None) -> dict[str, Any]:
     """git facts + transcript facts -> the ``/session/close`` facts payload."""
     facts = dict(git)
-    facts.pop("commit_range", None)
+    how = facts.pop("commit_range", None)
+    if how:
+        facts["commit_evidence"] = how
     if transcript is not None:
         edited = relativize(transcript.files, root)
         if root:  # files the agent edited outside this repository are not this project's changes

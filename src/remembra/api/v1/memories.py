@@ -55,6 +55,7 @@ from remembra.security.pii_detector import PIIDetector
 from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.agent_session import MemoryTypePolicyError, apply_memory_type_policy
 from remembra.services.memory import MemoryService
+from remembra.services.relay import strip_reserved_metadata
 from remembra.storage.embeddings import EmbeddingProviderError
 from remembra.webhooks.events import (
     WebhookEvent,
@@ -219,6 +220,21 @@ async def _apply_trust_policy(
 # ---------------------------------------------------------------------------
 
 
+def _client_metadata(user: Any, metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Client-supplied metadata as it may be stored.
+
+    Relay-only keys (``relay``, ``relay_key``) are dropped: a handoff's relay
+    block is written by ``POST /session/close`` alone, so it cannot be forged
+    or edited here. With an agent-scoped key, ``agent_id`` is the key's agent
+    (attribution comes from the key, not the request).
+    """
+    cleaned = strip_reserved_metadata(metadata)
+    agent = getattr(user, "agent_id", None)
+    if agent:
+        cleaned = {**(cleaned or {}), "agent_id": agent}
+    return cleaned
+
+
 @router.get(
     "",
     response_model=list[MemorySummary],
@@ -310,6 +326,7 @@ async def store_memory(
     # Override user_id with authenticated user (security: prevent user spoofing)
     body.user_id = current_user.user_id
     body.project_id = resolve_project_access(current_user, body.project_id) or "default"
+    body.metadata = _client_metadata(current_user, body.metadata) or {}
 
     # Agent memory-type hygiene: checkpoint TTL, atomic handoff, status via upsert (AGT-5)
     try:
@@ -557,6 +574,7 @@ async def batch_store(
         item.user_id = current_user.user_id
         try:
             item.project_id = resolve_project_access(current_user, item.project_id) or "default"
+            item.metadata = _client_metadata(current_user, item.metadata) or {}
         except HTTPException as e:
             return BatchStoreResult(index=i, success=False, error=str(e.detail))
 
@@ -691,6 +709,7 @@ async def bulk_import(
     embeddings: list[list[float]] | None = [] if body.embeddings is not None else None
     policy_errors: list[dict[str, Any]] = []
     for i, item in enumerate(body.items):
+        item.metadata = _client_metadata(current_user, item.metadata) or {}
         prepared = prepare_content(
             request.app.state,
             item.content,
@@ -1107,7 +1126,7 @@ async def update_memory(
             memory_id=memory_id,
             user_id=current_user.user_id,
             new_content=sanitized_content,
-            new_metadata=body.metadata,
+            new_metadata=_client_metadata(current_user, body.metadata),
         )
         from remembra.security.audit import AuditAction
 
@@ -1213,7 +1232,7 @@ async def supersede_memory(
             user_id=current_user.user_id,
             new_content=sanitized_content,
             reason=body.reason,
-            metadata=body.metadata,
+            metadata=_client_metadata(current_user, body.metadata),
         )
 
         # Audit log

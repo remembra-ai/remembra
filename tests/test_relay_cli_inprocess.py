@@ -190,9 +190,13 @@ def test_cli_close_brief_trail_resolve_in_process(wired, monkeypatch, capsys, tm
 
     code, out, _ = _run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(b)])
     lines = out.splitlines()  # in-process, server log lines share stdout: anchor on the header
-    last = lines[lines.index("# Remembra brief · project inproc · you are codex") + 1]
-    assert last.startswith(f"Last session: claude-code, just now, on main@{sha[:7]}")
-    assert "failing: FAILING: pytest -q (1 failed in 0.1s)" in last and "next: fix it" in last
+    header = lines.index("# Remembra brief · project inproc · you are codex")
+    assert lines[header + 1] == '<remembra-data untrusted="true">'
+    last = lines[header + 3]
+    assert last.startswith(f"Last session: claude-code (self-declared), just now, on main@{sha[:7]}")
+    assert "failing: FAILING: pytest -q (1 failed in 0.1s)" in last
+    assert "suggested next step (from claude-code, unverified): fix it" in last
+    assert "(facts collected by remembra-relay from git and the session transcript)" in last
 
     code, out, _ = _run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(b), "--format", "json"])
     assert json.loads(out.splitlines()[-1])["project_id"] == "inproc"
@@ -209,7 +213,8 @@ def test_cli_close_brief_trail_resolve_in_process(wired, monkeypatch, capsys, tm
     code, out, err = _run(monkeypatch, capsys, ["close", "--agent", "bad agent", "--cwd", str(b)])
     assert code == 0 and "close failed: HTTP 400" in err
 
-    state_files = list((wired["home"] / ".remembra" / "relay" / "sessions").glob("*.json"))
+    sessions = wired["home"] / ".remembra" / "relay" / "sessions"
+    state_files = [p for p in sessions.glob("*.json") if not p.name.startswith("adhoc-")]
     assert len(state_files) == 1 and json.loads(state_files[0].read_text())["head"] != sha
 
 
@@ -225,3 +230,150 @@ def test_cli_connect_in_process(wired, monkeypatch, capsys):
     assert code == 1 and "cannot read" in out
     assert cli.main(["brief", "--bogus"]) == 0
     assert cli.main(["connect", "--bogus"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# Review fixes: ad-hoc sessions, configured project, whole-budget HTTP bound
+# ---------------------------------------------------------------------------
+
+
+def _trail(monkeypatch, capsys, cwd) -> dict:
+    _, out, _ = _run(monkeypatch, capsys, ["trail", "--cwd", str(cwd), "--format", "json"])
+    return json.loads(out[out.index("{\n") :])
+
+
+def test_sessions_without_an_id_each_keep_their_own_handoff(wired, monkeypatch, capsys, tmp_path):
+    _, clones = make_remote_and_clones(tmp_path)
+    repo = clones["laptop"]
+    git(repo, "remote", "set-url", "origin", "https://github.com/acme/adhoc.git")
+
+    _run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(repo)])
+    _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(repo), "--todo", "morning: migrate db"])
+    _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(repo), "--todo", "morning: migrate db"])
+    assert _trail(monkeypatch, capsys, repo)["total"] == 1  # a repeat close of the same session updates it
+
+    _run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(repo)])  # a new session starts
+    _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(repo), "--todo", "afternoon: api"])
+    trail = _trail(monkeypatch, capsys, repo)
+    assert trail["total"] == 2 and trail["items"][1]["open"] == 1  # the morning handoff and its TODO survive
+
+    # No brief at all (no marker): every close is its own session, never merged.
+    (wired["home"] / ".remembra").rename(wired["home"] / ".remembra-old")
+    _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(repo), "--todo", "x"])
+    _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(repo), "--todo", "y"])
+    assert _trail(monkeypatch, capsys, repo)["total"] == 4
+
+
+def test_configured_project_names_an_unseen_repository(wired, monkeypatch, capsys, tmp_path):
+    api = wired["api"]
+    api["http"].post("/api/v1/memories", json={"content": "pos cache decision", "project_id": "clawdbot"})
+    _, clones = make_remote_and_clones(tmp_path, ("a", "b"))
+    git(clones["a"], "remote", "set-url", "origin", "git@github.com:freshvybz/clawbot.git")
+    git(clones["b"], "remote", "set-url", "origin", "https://github.com/acme/newthing.git")
+
+    monkeypatch.setenv("REMEMBRA_PROJECT", "clawdbot")
+    _, out, _ = _run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(clones["a"]), "--format", "json"])
+    brief = json.loads(out.splitlines()[-1])
+    assert brief["project_id"] == "clawdbot" and [m["content"] for m in brief["recent"]] == ["pos cache decision"]
+    _, out, _ = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(clones["a"]), "--next", "n"])
+    assert "project clawdbot" in out
+
+    monkeypatch.setenv("REMEMBRA_PROJECT", "default")  # nothing configured: per-repository project
+    _, out, _ = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(clones["b"])])
+    assert "project newthing" in out
+    monkeypatch.delenv("REMEMBRA_PROJECT")
+    _, out, _ = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(clones["a"])])
+    assert "project clawdbot" in out  # the binding was recorded by the first close
+
+
+class _DripServer:
+    """Sends headers, then one body byte every ``interval`` seconds (never finishing in time)."""
+
+    def __init__(self, interval: float = 1.0) -> None:
+        import socket
+        import threading
+
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(8)
+        self.port = self.sock.getsockname()[1]
+        self.interval = interval
+        self.stop = threading.Event()
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self) -> None:
+        import threading
+
+        while not self.stop.is_set():
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._drip, args=(conn,), daemon=True).start()
+
+    def _drip(self, conn) -> None:
+        import time as _t
+
+        try:
+            conn.recv(65536)
+            conn.sendall(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100000\r\n\r\n")
+            while not self.stop.is_set():
+                conn.sendall(b" ")
+                _t.sleep(self.interval)
+        except OSError:
+            pass
+        finally:
+            conn.close()
+
+    def close(self) -> None:
+        self.stop.set()
+        self.sock.close()
+
+
+def test_dripping_server_cannot_hold_the_hook_past_the_budget(monkeypatch, capsys, tmp_path):
+    import time as _t
+
+    server = _DripServer()
+    try:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("REMEMBRA_API_KEY", "rem_x")
+        monkeypatch.setenv("REMEMBRA_URL", f"http://127.0.0.1:{server.port}")
+        monkeypatch.setattr(cli, "TOTAL_BUDGET_SECONDS", 2.0)
+        started = _t.monotonic()
+        code, out, err = _run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(tmp_path)])
+        assert code == 0 and _t.monotonic() - started < 3.5
+        assert "Remembra brief unavailable: TimeoutError" in out and "budget" in err
+    finally:
+        server.close()
+
+
+def test_dripping_server_real_process_exits_within_the_budget(tmp_path):
+    import os
+    import subprocess
+    import sys
+    import time as _t
+
+    server = _DripServer()
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    code = "import sys, remembra.relay.cli as c; c.TOTAL_BUDGET_SECONDS = 2.0; sys.exit(c.main(sys.argv[1:]))"
+    try:
+        started = _t.monotonic()
+        proc = subprocess.run(
+            [sys.executable, "-c", code, "brief", "--hook", "claude-code", "--cwd", str(tmp_path)],
+            input=json.dumps({"session_id": "s", "cwd": str(tmp_path)}),
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={
+                "PATH": os.environ["PATH"],
+                "HOME": str(tmp_path),
+                "PYTHONPATH": src,
+                "REMEMBRA_URL": f"http://127.0.0.1:{server.port}",
+                "REMEMBRA_API_KEY": "rem_x",
+            },
+        )
+        elapsed = _t.monotonic() - started
+    finally:
+        server.close()
+    assert proc.returncode == 0 and elapsed < 6, (elapsed, proc.stderr)
+    assert "Remembra brief unavailable" in proc.stdout

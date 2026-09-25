@@ -15,8 +15,15 @@ on stderr. With ``--hook NAME`` the agent's hook payload is read from stdin
 
 The project is resolved from the git repository in ``--cwd`` (remote URL,
 root commit), so every checkout of the same repo — any machine, drive or
-worktree — shares one trail. Outside git the working directory is used, with
-``REMEMBRA_PROJECT`` as the project name.
+worktree — shares one trail. Outside git the working directory is used. A
+configured project (``REMEMBRA_RELAY_PROJECT``, else ``REMEMBRA_PROJECT`` /
+the MCP env / credentials, unless it is ``default``) names a location the
+server has not seen yet, so existing users keep their one namespace; with
+nothing configured each repository gets its own project.
+
+The whole run is bounded by ``TOTAL_BUDGET_SECONDS``: HTTP runs in a worker
+thread that is abandoned (the fallback text is printed) when the budget runs
+out, so a slow or dripping server cannot hold the agent's session start.
 
 Configuration is discovered from the environment or existing agent config
 (see :mod:`remembra.relay.config`); this tool never writes API keys anywhere.
@@ -48,6 +55,7 @@ GIT_BUDGET_SECONDS = 4.0
 HTTP_TIMEOUT_SECONDS = 8.0
 STDIN_WAIT_SECONDS = 1.0
 STATE_TTL_SECONDS = 14 * 86400
+ADHOC_SESSION_MAX_AGE_SECONDS = 12 * 3600
 USER_AGENT = "remembra-relay"
 
 
@@ -136,6 +144,42 @@ def load_session_state(home: Path, agent: str, session_id: str) -> dict[str, Any
         return {}
 
 
+def _adhoc_marker_path(home: Path, agent: str, host: str, anchor: str) -> Path:
+    digest = hashlib.sha256(f"adhoc\x1f{agent}\x1f{host}\x1f{anchor}".encode()).hexdigest()[:24]
+    return _state_dir(home) / f"adhoc-{digest}.json"
+
+
+def _new_adhoc_session_id() -> str:
+    return f"adhoc-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}-{os.urandom(4).hex()}"
+
+
+def start_adhoc_session(home: Path, agent: str, host: str, anchor: str, state: dict[str, Any]) -> str:
+    """Record a new session for an agent that has no session id (``brief``
+    without a hook). ``close`` in the same place picks up its id, so each
+    session gets its own handoff instead of one per day."""
+    session_id = _new_adhoc_session_id()
+    path = _adhoc_marker_path(home, agent, host, anchor)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({**state, "session_id": session_id}))
+        os.chmod(path, 0o600)
+    except OSError as e:
+        _err(f"could not record session start ({e.__class__.__name__})")
+    return session_id
+
+
+def current_adhoc_session(home: Path, agent: str, host: str, anchor: str) -> dict[str, Any]:
+    """The session ``brief`` started here, if recent; {} otherwise."""
+    path = _adhoc_marker_path(home, agent, host, anchor)
+    try:
+        if time.time() - path.stat().st_mtime > ADHOC_SESSION_MAX_AGE_SECONDS:
+            return {}
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) and isinstance(data.get("session_id"), str) else {}
+
+
 # ---------------------------------------------------------------------------
 # Context
 # ---------------------------------------------------------------------------
@@ -162,18 +206,27 @@ class Context:
         git_deadline = factlib.Deadline(min(GIT_BUDGET_SECONDS, TOTAL_BUDGET_SECONDS))
         self.repo = factlib.repo_info(self.cwd, git_deadline)
 
+    def configured_project(self) -> str | None:
+        """The project this client is configured for, used to name a location
+        the server has not seen yet (``default`` does not count)."""
+        aliases = parse_project_aliases(self.config.project_aliases)
+        for value in (os.environ.get("REMEMBRA_RELAY_PROJECT"), self.config.project):
+            if value and value.strip():
+                project = normalize_project_id(value, aliases)
+                if project and project != "default":
+                    return project
+        return None
+
     def project_params(self) -> dict[str, Any]:
-        """Either ``project_id`` or a location to resolve server-side."""
+        """Either ``project_id`` or a location to resolve server-side (+ the configured project as hint)."""
         aliases = parse_project_aliases(self.config.project_aliases)
         explicit = getattr(self.args, "project", None)
         if explicit:
             return {"project_id": normalize_project_id(explicit, aliases)}
         locator = self.repo.locator(self.cwd, self.host)
-        hint = os.environ.get("REMEMBRA_RELAY_PROJECT")
-        if not self.repo.is_git and not hint and self.config.project:
-            hint = self.config.project  # outside git: keep today's configured namespace
+        hint = self.configured_project()
         if hint:
-            locator["hint_project"] = normalize_project_id(hint, aliases)
+            locator["hint_project"] = hint
         return locator
 
     def client(self) -> httpx.Client:
@@ -184,6 +237,37 @@ class Context:
             headers["X-Remembra-Agent-Id"] = self.agent
         timeout = max(0.5, min(HTTP_TIMEOUT_SECONDS, self.deadline.end - time.monotonic()))
         return httpx.Client(base_url=self.config.url, headers=headers, timeout=httpx.Timeout(timeout, connect=min(4.0, timeout)))
+
+    def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """One HTTP call bounded by the WHOLE remaining budget.
+
+        httpx timeouts apply per phase / per socket read, so a server that
+        drips one byte every few seconds never trips them. The call runs in a
+        daemon thread; when the budget runs out it is abandoned and
+        ``TimeoutError`` is raised (the process can still exit: the thread is
+        a daemon).
+        """
+        remaining = self.deadline.end - time.monotonic()
+        if remaining <= 0.1:
+            raise TimeoutError(f"the {TOTAL_BUDGET_SECONDS:g}s budget ran out before the request")
+        box: dict[str, Any] = {}
+
+        def run() -> None:
+            try:
+                with self.client() as http:
+                    box["response"] = http.request(method, path, **kwargs)
+            except BaseException as e:  # handed to the caller's thread
+                box["error"] = e
+
+        worker = threading.Thread(target=run, name="remembra-relay-http", daemon=True)
+        worker.start()
+        worker.join(remaining)
+        if worker.is_alive():
+            raise TimeoutError(f"no complete response from {self.config.url} within the {TOTAL_BUDGET_SECONDS:g}s budget")
+        if "error" in box:
+            raise box["error"]
+        response: httpx.Response = box["response"]
+        return response
 
 
 def _http_error(response: httpx.Response) -> str:
@@ -222,19 +306,26 @@ def cmd_brief(args: argparse.Namespace) -> int:
             )
             return 0
         session_id = ctx.hook_fields.get("session_id") or args.session_id
+        start = {
+            "head": ctx.repo.head_commit,
+            "started_at": datetime.now(UTC).isoformat(),
+            "started_ts": time.time(),
+            "cwd": str(ctx.cwd),
+        }
         if session_id and ctx.agent and ctx.repo.is_git:
-            save_session_state(
-                ctx.home,
-                ctx.agent,
-                session_id,
-                {"head": ctx.repo.head_commit, "started_at": datetime.now(UTC).isoformat(), "cwd": str(ctx.cwd)},
-            )
+            save_session_state(ctx.home, ctx.agent, session_id, start)
+        elif not session_id and not os.environ.get("REMEMBRA_SESSION_ID"):
+            # No session id (AGENTS.md / manual use): start a fresh ad-hoc session here.
+            start_adhoc_session(ctx.home, ctx.agent or "unknown-agent", ctx.host, ctx.repo.toplevel or str(ctx.cwd), start)
         params: dict[str, Any] = {"recent_n": args.recent}
         if ctx.agent:
             params["agent_id"] = ctx.agent
         params.update(ctx.project_params())
-        with ctx.client() as http:
-            response = http.get("/api/v1/session/brief", params=params)
+        if ctx.repo.branch:
+            params["branch"] = ctx.repo.branch
+        if ctx.repo.head_commit:
+            params["head_commit"] = ctx.repo.head_commit
+        response = ctx.request("GET", "/api/v1/session/brief", params=params)
         if response.status_code >= 400:
             message = f"Remembra brief unavailable: {_http_error(response)}"
             _err(message)
@@ -256,10 +347,14 @@ def cmd_brief(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _fallback_session_id(agent: str, ctx: Context) -> str:
-    anchor = ctx.repo.toplevel or str(ctx.cwd)
-    digest = hashlib.sha256(f"{ctx.host}\x1f{anchor}".encode()).hexdigest()[:10]
-    return f"adhoc-{datetime.now(UTC).strftime('%Y%m%d')}-{digest}"
+def _adhoc_session(agent: str, ctx: Context) -> tuple[str, dict[str, Any]]:
+    """Session id + start state when no id was given: the session ``brief``
+    started here (so a repeat close updates it), else a brand-new id (a close
+    without a brief never merges into another session's handoff)."""
+    marker = current_adhoc_session(ctx.home, agent, ctx.host, ctx.repo.toplevel or str(ctx.cwd))
+    if marker:
+        return str(marker["session_id"]), marker
+    return _new_adhoc_session_id(), {}
 
 
 def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any]:
@@ -283,9 +378,12 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
         or ctx.hook_fields.get("session_id")
         or os.environ.get("REMEMBRA_SESSION_ID")
         or (transcript.session_id if transcript else None)
-        or _fallback_session_id(agent, ctx)
     )
-    state = load_session_state(ctx.home, agent, session_id)
+    if session_id:
+        state = load_session_state(ctx.home, agent, session_id)
+    else:
+        session_id, state = _adhoc_session(agent, ctx)
+    started_ts = state.get("started_ts")
     git_facts = factlib.git_facts(
         ctx.cwd,
         factlib.Deadline(min(GIT_BUDGET_SECONDS, max(0.5, ctx.deadline.end - time.monotonic() - 2.0))),
@@ -293,8 +391,13 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
         session_commits=transcript.commit_shas if transcript else None,
         hours=args.hours,
         info=ctx.repo,
+        started_at=float(started_ts) if isinstance(started_ts, int | float) else None,
     )
     facts = factlib.merge_facts(git_facts, transcript, ctx.repo.toplevel)
+    if ctx.repo.is_git:
+        facts["facts_source"] = "relay-cli:git+transcript" if transcript is not None else "relay-cli:git"
+    else:
+        facts["facts_source"] = "agent-declared"  # no git: only what was typed (--notes/--todo/--next)
     if args.notes:
         facts["notes"] = args.notes
     if args.next:
@@ -326,8 +429,7 @@ def cmd_close(args: argparse.Namespace) -> int:
         if not ctx.config.api_key:
             _err("close skipped: no API key (set REMEMBRA_API_KEY or configure the remembra MCP server)")
             return 0
-        with ctx.client() as http:
-            response = http.post("/api/v1/session/close", json=payload)
+        response = ctx.request("POST", "/api/v1/session/close", json=payload)
         if response.status_code >= 400:
             _err(f"close failed: {_http_error(response)}")
             return 0
@@ -352,9 +454,7 @@ def cmd_trail(args: argparse.Namespace) -> int:
             return 0
         params: dict[str, Any] = {"limit": args.limit}
         params.update(ctx.project_params())
-        params.pop("hint_project", None)
-        with ctx.client() as http:
-            response = http.get("/api/v1/trail", params=params)
+        response = ctx.request("GET", "/api/v1/trail", params=params)
         if response.status_code >= 400:
             _err(f"trail failed: {_http_error(response)}")
             return 0
@@ -385,9 +485,10 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         locator = ctx.repo.locator(ctx.cwd, ctx.host)
         if args.project:
             locator["hint_project"] = normalize_project_id(args.project, parse_project_aliases(ctx.config.project_aliases))
+        elif not args.bind and ctx.configured_project():
+            locator["hint_project"] = ctx.configured_project()
         locator["bind"] = bool(args.bind)
-        with ctx.client() as http:
-            response = http.post("/api/v1/projects/resolve", json=locator)
+        response = ctx.request("POST", "/api/v1/projects/resolve", json=locator)
         if response.status_code >= 400:
             _err(f"resolve failed: {_http_error(response)}")
             return 1

@@ -39,6 +39,8 @@ Usage:
 from __future__ import annotations
 
 import builtins
+import logging
+import re
 import socket
 import uuid
 from collections.abc import Mapping
@@ -69,6 +71,34 @@ from remembra.client.types import (
 
 if TYPE_CHECKING:
     pass
+
+
+_AGENT_HEADER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$")
+_warned_agent_ids: set[str] = set()
+
+
+def _header_agent_id(agent: str | None) -> str | None:
+    """The agent id to send in ``X-Remembra-Agent-Id``, or None.
+
+    HTTP headers must be ASCII, and the relay endpoints only accept
+    ``[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}``. Any other id ("Claude Desktop",
+    "mani’s-agent") is not sent as a header (a warning is logged once): the
+    request still succeeds, and the id is still passed where endpoints take
+    it as a parameter.
+    """
+    value = (agent or "").strip()
+    if not value:
+        return None
+    if _AGENT_HEADER_RE.match(value):
+        return value
+    if value not in _warned_agent_ids:
+        _warned_agent_ids.add(value)
+        logging.getLogger(__name__).warning(
+            "agent_id %r is not a valid relay agent id (letters, digits and ._:@/+-); "
+            "it is not sent as the X-Remembra-Agent-Id header",
+            value,
+        )
+    return None
 
 
 class MemoryError(Exception):
@@ -188,7 +218,7 @@ class Memory:
         url = f"{self.base_url}{path}"
 
         kwargs: dict[str, Any] = {"method": method, "url": url, "json": json, "params": params}
-        agent = getattr(self, "agent_id", None)
+        agent = _header_agent_id(getattr(self, "agent_id", None))
         if agent:
             # Declared identity; an agent-scoped API key overrides it server-side.
             kwargs["headers"] = {"X-Remembra-Agent-Id": agent}
@@ -239,6 +269,7 @@ class Memory:
         auto_expire: bool | None = None,
         skip_extraction: bool = False,
         memory_type: str | None = None,
+        project_id: str | None = None,
     ) -> StoreResult:
         """
         Store a new memory.
@@ -255,6 +286,7 @@ class Memory:
             memory_type: Optional type. Agent hygiene types: "checkpoint"
                 (server applies a default TTL), "handoff" (stored verbatim as
                 one unit). For current-state values use ``store_status``.
+            project_id: Store into this project instead of the client's project.
 
         Returns:
             StoreResult with the memory ID, extracted facts, and entities.
@@ -285,7 +317,7 @@ class Memory:
 
         payload: dict[str, Any] = {
             "user_id": self.user_id,
-            "project_id": self.project,
+            "project_id": self._project(project_id),
             "content": content,
             "metadata": self._stamp(metadata),
         }
@@ -780,6 +812,8 @@ class Memory:
         recent_n: int = 10,
         inbox_limit: int = 10,
         locator: dict[str, Any] | None = None,
+        branch: str | None = None,
+        head_commit: str | None = None,
     ) -> dict[str, Any]:
         """Session-start brief: last session, unread inbox, status, linked projects, recent-by-time.
 
@@ -790,6 +824,8 @@ class Memory:
             inbox_limit: Max unread inbox previews.
             locator: Resolve the project from a location instead
                 (git_remote / root_commit / root_path / repo_name / host / hint_project).
+            branch, head_commit: The reader's checkout; a handoff recorded on a
+                different branch/commit is flagged as possibly stale.
         """
         params: dict[str, Any] = {
             "project_id": self._project(project_id),
@@ -802,6 +838,10 @@ class Memory:
         if locator:
             params.pop("project_id")
             params.update({k: v for k, v in locator.items() if v is not None})
+        if branch:
+            params["branch"] = branch
+        if head_commit:
+            params["head_commit"] = head_commit
         return self._request("GET", "/api/v1/session/brief", params=params)
 
     def resolve_project(

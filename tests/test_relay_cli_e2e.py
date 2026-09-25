@@ -175,13 +175,14 @@ def test_agent_a_closes_agent_b_picks_up_on_another_clone(server, home, tmp_path
     out = brief.stdout
     lines = out.splitlines()
     assert lines[0] == "# Remembra brief · project widget · you are codex"
-    last = lines[1]
-    assert last.startswith(f"Last session: claude-code, just now, on main@{head[:7]}: done: ")
+    assert lines[1] == '<remembra-data untrusted="true">'
+    last = lines[3]
+    assert last.startswith(f"Last session: claude-code (self-declared), just now, on main@{head[:7]}: done: ")
     assert "feat: widget api" in last and "test: widget api" in last
     assert "NOT done: TODO: make test_api pass" in last
     assert "uncommitted changes in 1 file(s): NOTES.md" in last
     assert "failing: FAILING: pytest -q tests/test_widget.py (1 failed, 2 passed in 0.10s)" in last
-    assert "next: fix the failing run: pytest -q tests/test_widget.py" in last
+    assert "next (derived from the recorded facts): fix the failing run: pytest -q tests/test_widget.py" in last
     assert SECRET not in out
 
     # The stored handoff: one memory, correct sections, no raw transcript, no secret.

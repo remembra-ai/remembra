@@ -45,8 +45,9 @@ def normalize_git_remote(url: str | None) -> str | None:
     ``https://github.com/Owner/Repo.git``, ``git@github.com:owner/repo``,
     ``ssh://git@github.com:22/owner/repo.git`` and
     ``https://user:token@github.com/owner/repo/`` all give
-    ``github.com/owner/repo``. Local-path remotes give ``local:<path>``.
-    Returns None for empty or unparseable input.
+    ``github.com/owner/repo``. Absolute local-path remotes give
+    ``local:<path>``. Returns None for empty or unparseable input and for a
+    relative local path (the client makes those absolute before sending).
     """
     raw = (url or "").strip()
     if not raw:
@@ -71,6 +72,8 @@ def normalize_git_remote(url: str | None) -> str | None:
         if match and not re.match(r"^[A-Za-z]:[\\/]", raw):  # not a Windows drive path
             host, path = match.group("host").lower(), match.group("path")
         else:
+            if not raw.startswith(("/", "~", "\\")) and not re.match(r"^[A-Za-z]:[\\/]", raw):
+                return None  # relative local path (../upstream): means nothing without its base directory
             local = _clean_repo_path(raw)
             return f"local:/{local.lower()}" if local else None
 

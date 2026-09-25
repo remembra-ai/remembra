@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import time
 from datetime import UTC, datetime
 
 import pytest
@@ -60,7 +63,7 @@ def test_git_facts_session_commits_uncommitted_and_push_state(tmp_path):
     assert info.root_commit == git(repo, "rev-list", "--max-parents=0", "HEAD")
     facts = git_facts(repo, Deadline(5), start_head=start, info=info)
     assert [c["subject"] for c in facts["commits"]] == ["feat: widget api", "test: widget"]
-    assert facts["commit_range"] == "session-start"
+    assert facts["commit_range"] == "session-reflog"
     assert facts["uncommitted_files"] == ["README.md", "scratch.txt"]
     assert set(facts["files_changed"]) == {"src/widget.py", "tests/test_widget.py", "README.md", "scratch.txt"}
     assert facts["upstream"] == "origin/main" and facts["unpushed_commits"] == 2
@@ -192,7 +195,7 @@ def test_grounding_and_brief_render_are_pure():
     unverifiable = check_summary_grounding("Deployed to prod.", facts)
     assert unverifiable["status"] == "consistent" and "unverifiable" in unverifiable["issues"][0]
     text = render_brief({"project_id": "p", "agent_id": "a", "handoff": None, "recent": []})
-    assert text.splitlines()[1] == "Last session: none recorded for this project."
+    assert text.splitlines()[3] == "Last session: none recorded for this project."
 
 
 def test_failing_commands_from_mcp_agents_skip_probes_and_fixed_runs():
@@ -224,6 +227,153 @@ def test_transcript_commit_evidence_limits_commits_to_this_agent(tmp_path):
     assert facts["files_changed"] == ["mine.py"]
     nothing = git_facts(repo, Deadline(5), session_commits=[], info=info)
     assert nothing["commits"] == [] and nothing["commit_range"] == "transcript-no-commits"
-    # A recorded session start wins over transcript evidence.
+    # A recorded session start wins over transcript evidence (the reflog shows what this checkout committed).
     ranged = git_facts(repo, Deadline(5), start_head=other, session_commits=[], info=info)
-    assert [c["sha"] for c in ranged["commits"]] == [mine] and ranged["commit_range"] == "session-start"
+    assert [c["sha"] for c in ranged["commits"]] == [mine] and ranged["commit_range"] == "session-reflog"
+
+
+# ---------------------------------------------------------------------------
+# Review fixes: only this checkout's commits, directory-aware transcripts,
+# remote choice / ssh aliases / relative remotes, git timeouts
+# ---------------------------------------------------------------------------
+
+
+def _teammate_pushes(tmp_path, clones, n=2):
+    mate = clones["mate"]
+    shas = [commit(mate, f"mate{i}.py", "m\n", f"OTHER PERSON: teammate change {i}") for i in range(n)]
+    git(mate, "push", "-q", "origin", "main")
+    return shas
+
+
+def test_pulled_commits_are_not_this_sessions_work(tmp_path):
+    _, clones = make_remote_and_clones(tmp_path, ("agent", "mate"))
+    repo = clones["agent"]
+    start, started = git(repo, "rev-parse", "HEAD"), time.time()
+    time.sleep(1.1)  # reflog timestamps have one-second resolution
+    mates = _teammate_pushes(tmp_path, clones)
+    git(repo, "pull", "-q", "--ff-only", "origin", "main")
+    mine = commit(repo, "mine.py", "one\ntwo\n", "agent: my work")
+
+    info = repo_info(repo, Deadline(5))
+    for started_at in (started, None):  # with the recorded start time, and walking back to the start HEAD
+        facts = git_facts(repo, Deadline(5), start_head=start, info=info, started_at=started_at)
+        assert facts["commit_range"] == "session-reflog"
+        assert [c["sha"] for c in facts["commits"]] == [mine], started_at
+        assert not set(mates) & {c["sha"] for c in facts["commits"]}
+        assert facts["files_changed"] == ["mine.py"]
+        assert facts["diff_stat"] == "1 files changed, 2 insertions(+), 0 deletions(-)"
+
+
+def test_merged_commits_are_not_this_sessions_work(tmp_path):
+    _, clones = make_remote_and_clones(tmp_path, ("agent", "mate"))
+    repo = clones["agent"]
+    git(repo, "checkout", "-q", "-b", "feat/x")
+    start, started = git(repo, "rev-parse", "HEAD"), time.time()
+    time.sleep(1.1)
+    first = commit(repo, "a.py", "a\n", "agent: first")
+    _teammate_pushes(tmp_path, clones)
+    git(repo, "fetch", "-q", "origin")
+    git(repo, "merge", "-q", "--no-edit", "origin/main")
+    second = commit(repo, "b.py", "b\n", "agent: second")
+    amended = commit(repo, "c.py", "c\n", "agent: third")
+    git(repo, "commit", "-q", "--amend", "-m", "agent: third (amended)")
+    final = git(repo, "rev-parse", "HEAD")
+    facts = git_facts(repo, Deadline(5), start_head=start, info=repo_info(repo, Deadline(5)), started_at=started)
+    assert [c["sha"] for c in facts["commits"]] == [first, second, final]
+    assert amended not in str(facts["commits"])
+    assert [c["subject"] for c in facts["commits"]][-1] == "agent: third (amended)"
+
+
+def test_commands_run_in_other_directories_are_not_this_projects(tmp_path):
+    _, clones = make_remote_and_clones(tmp_path)
+    repo = clones["laptop"]
+    other = tmp_path / "pull" / "a"
+    other.mkdir(parents=True)
+    t = Transcript("sess-dirs", repo)
+    t.bash("cd ../../pull/a && pytest", 1, "=== 3 failed in 0.1s ===")  # relative to the repo
+    t.bash(f"(cd {other} && npm test)", 1, "npm ERR! Test failed.")
+    t.bash(f"git -C {other} push", 1, "! [rejected] main -> main (fetch first)")
+    t.bash(f"cd {other}", 0, "")
+    t.cwd = str(other)  # Claude Code records the shell's new directory on the following lines
+    t.bash("cargo test", 101, "test result: FAILED. 0 passed; 2 failed")
+    t.bash("make deploy", 2, "no rule")
+    t.cwd = str(repo)
+    t.bash("pytest -q", 1, "=== 1 failed in 0.1s ===")
+    t.bash("./scripts/check.sh", 3, "check failed")
+    parsed = parse_claude_transcript(t.write(tmp_path / "dirs.jsonl"), root=str(repo))
+    assert [x["cmd"] for x in parsed.tests] == ["pytest -q"]
+    assert parsed.errors == ["`./scripts/check.sh` exited 3: check failed"]
+    assert {c["cmd"] for c in parsed.commands} == {"pytest -q", "./scripts/check.sh"}
+
+
+def test_remote_choice_prefers_origin_then_the_tracked_remote(tmp_path):
+    _, clones = make_remote_and_clones(tmp_path)
+    repo = clones["laptop"]
+    git(repo, "remote", "rename", "origin", "mine")
+    git(repo, "remote", "set-url", "mine", "https://github.com/mani/widget")
+    git(repo, "remote", "add", "acme", "https://github.com/acme/widget")
+    assert repo_info(repo, Deadline(5)).git_remote == "https://github.com/mani/widget"  # main tracks mine
+    git(repo, "remote", "add", "origin", "https://github.com/org/widget")
+    assert repo_info(repo, Deadline(5)).git_remote == "https://github.com/org/widget"
+
+
+def test_relative_local_remote_is_made_absolute(tmp_path):
+    _, clones = make_remote_and_clones(tmp_path)
+    repo = clones["laptop"]
+    git(repo, "remote", "set-url", "origin", "../upstream")
+    info = repo_info(repo, Deadline(5))
+    assert info.toplevel and info.git_remote == os.path.normpath(os.path.join(info.toplevel, "..", "upstream"))
+    assert os.path.isabs(info.git_remote) and normalize_git_remote(info.git_remote).startswith("local:/")
+    assert normalize_git_remote("../upstream") is None and normalize_git_remote("./x") is None
+
+
+def _shim(tmp_path, name: str, body: str) -> str:
+    shim_dir = tmp_path / "shim"
+    shim_dir.mkdir(exist_ok=True)
+    script = shim_dir / name
+    script.write_text("#!/bin/sh\n" + body)
+    script.chmod(0o755)
+    return str(shim_dir)
+
+
+def test_ssh_host_alias_resolves_to_the_real_host(tmp_path, monkeypatch):
+    _, clones = make_remote_and_clones(tmp_path)
+    repo = clones["laptop"]
+    git(repo, "remote", "set-url", "origin", "git@github-work:mani/widget.git")
+    shim = _shim(
+        tmp_path,
+        "ssh",
+        'if [ "$1" = "-G" ] && [ "$2" = "github-work" ]; then printf "user git\\nhostname github.com\\nport 22\\n"; exit 0; fi\n'
+        "exit 255\n",
+    )
+    monkeypatch.setenv("PATH", f"{shim}:{os.environ['PATH']}")
+    info = repo_info(repo, Deadline(5))
+    assert info.git_remote == "git@github.com:mani/widget.git"
+    assert normalize_git_remote(info.git_remote) == "github.com/mani/widget"
+
+
+def test_git_timeout_is_reported_as_unknown_not_clean(tmp_path, monkeypatch):
+    _, clones = make_remote_and_clones(tmp_path)
+    repo = clones["laptop"]
+    (repo / "dirty.txt").write_text("x\n")
+    info = repo_info(repo, Deadline(5))
+    real_git = shutil.which("git")
+    shim = _shim(tmp_path, "git", f'for a in "$@"; do [ "$a" = "status" ] && exec sleep 5; done\nexec {real_git} "$@"\n')
+    monkeypatch.setenv("PATH", f"{shim}:{os.environ['PATH']}")
+    facts = git_facts(repo, Deadline(1.5), info=info)
+    assert "status" in facts["incomplete"]
+    assert facts["uncommitted_files"] == []
+    sections = build_sections(facts)
+    assert "uncommitted changes: unknown (git status did not finish in time)" in sections["not_done"]
+
+
+def test_without_a_reflog_the_session_range_falls_back_and_is_labeled(tmp_path):
+    _, clones = make_remote_and_clones(tmp_path)
+    repo = clones["laptop"]
+    start = git(repo, "rev-parse", "HEAD")
+    mine = commit(repo, "m.py", "m\n", "feat: mine")
+    git(repo, "reflog", "expire", "--expire=now", "--all")
+    facts = git_facts(repo, Deadline(5), start_head=start, info=repo_info(repo, Deadline(5)))
+    assert facts["commit_range"] == "session-start-range" and [c["sha"] for c in facts["commits"]] == [mine]
+    sections = build_sections({**facts, "commit_evidence": facts["commit_range"]})
+    assert sections["done"][0].endswith("feat: mine")

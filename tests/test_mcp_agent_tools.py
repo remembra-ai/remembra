@@ -49,6 +49,7 @@ def mcp_env(api, monkeypatch):
     monkeypatch.setattr(server, "REMEMBRA_PROJECT_ALIASES", {"alpha-old": "alpha"})
     monkeypatch.setattr(server, "REMEMBRA_SESSION_ID", "sess-mcp")
     monkeypatch.setattr(server, "_client", None)
+    monkeypatch.setattr(server, "_session_projects", {})
     yield api
     server._client = None
 
@@ -75,6 +76,7 @@ def test_health_check_reports_agent_and_project(mcp_env):
 def test_health_check_warns_when_agent_id_missing_and_version_skew(mcp_env, monkeypatch):
     monkeypatch.setattr(server, "REMEMBRA_AGENT_ID", "")
     monkeypatch.setattr(server, "_client", None)
+    monkeypatch.setattr(server, "_session_projects", {})
     mcp_env["app"].state.reported_version = "9.9.9"
     out = _j(server.health_check())
     assert out["agent_id"] is None
@@ -167,7 +169,7 @@ def test_session_brief_and_status_tools(mcp_env):
     codex = mcp_env["make_client"](project="alpha", agent_id="codex")
     codex.send_to_inbox(to_agent="claude-code", subject="please review", body="details " * 60)
 
-    brief = _j(server.session_brief(verbose=True))
+    brief = _j(server.session_brief())
     assert brief["status"] == "ok"
     assert brief["agent_id"] == "claude-code"
     assert brief["project_id"] == "alpha"
@@ -175,11 +177,15 @@ def test_session_brief_and_status_tools(mcp_env):
     assert brief["inbox"]["unread_count"] == 1
     assert brief["inbox"]["items"][0]["body_preview"].endswith("...")
     assert [s["value"] for s in brief["status_items"]] == ["live"]
+    # Pre-relay keys stay in the default response; the compact text rides along.
+    assert {"handoff", "inbox", "status_items", "recent", "known_agents", "warnings"} <= set(brief)
+    assert "Last session: claude-code (self-declared)" in brief["brief"] and "[SESSION END] did X, next Y" in brief["brief"]
+    assert brief["handoff_id"] == handoff["id"] and brief["inbox_unread"] == 1
 
 
 def test_session_brief_project_alias_resolves(mcp_env):
     server.store_memory("fact in alpha")
-    brief = _j(server.session_brief(project_id="ALPHA-OLD", verbose=True))
+    brief = _j(server.session_brief(project_id="ALPHA-OLD"))
     assert brief["project_id"] == "alpha"
     assert len(brief["recent"]) == 1
 

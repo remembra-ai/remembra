@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import weakref
 from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
@@ -33,17 +34,45 @@ from remembra.relay.handoff import (
     render_brief,
     render_handoff,
 )
-from remembra.relay.identity import KIND_GIT, KIND_ROOT, Fingerprint, ProjectLocator, slugify_project
+from remembra.relay.identity import KIND_GIT, KIND_PATH, KIND_ROOT, Fingerprint, ProjectLocator, slugify_project
 from remembra.services.agent_session import AgentSessionService, _parse_metadata
 
 log = structlog.get_logger(__name__)
 
 RELAY_KEY_FIELD = "relay_key"
 MAX_LINKED_IN_BRIEF = 8
+FACTS_SOURCES = ("relay-cli:git+transcript", "relay-cli:git", "agent-declared")
 
-# Serialises close-outs in this process so two concurrent closes for the same
-# (agent, session) can't each supersede the other (leaving no current handoff).
-_close_lock = asyncio.Lock()
+# Keys a handoff's metadata carries that only the relay may write. Client
+# metadata on the generic memory endpoints is stripped of them (see
+# :func:`strip_reserved_metadata`), so a handoff cannot be forged with a
+# "verified" relay block through POST /memories or PATCH.
+RESERVED_METADATA_KEYS = ("relay", RELAY_KEY_FIELD)
+
+# Serialises close-outs for the same (user, project, agent+session) in this
+# process, so two concurrent closes of one session can't each supersede the
+# other (leaving no current handoff). Keyed rather than global: the lock is
+# held across memory_service.store (an embedding call with a budget of tens of
+# seconds), and one slow store must not queue every other tenant's close.
+_close_locks: weakref.WeakValueDictionary[tuple[str, str, str], asyncio.Lock] = weakref.WeakValueDictionary()
+
+
+def _close_lock_for(user_id: str, project_id: str, key: str) -> asyncio.Lock:
+    lock_key = (user_id, project_id, key)
+    lock = _close_locks.get(lock_key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _close_locks[lock_key] = lock
+    return lock
+
+
+def strip_reserved_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
+    """``metadata`` without the relay-only keys (a copy; None stays None)."""
+    if not metadata:
+        return metadata
+    if not any(k in metadata for k in RESERVED_METADATA_KEYS):
+        return metadata
+    return {k: v for k, v in metadata.items() if k not in RESERVED_METADATA_KEYS}
 
 
 def _now_iso() -> str:
@@ -56,6 +85,20 @@ class ProjectAccessDenied(Exception):
     def __init__(self, project_id: str) -> None:
         super().__init__(f"No access to project '{project_id}'.")
         self.project_id = project_id
+
+
+class BindingNotAllowed(Exception):
+    """Raised when a project-restricted key tries to (re)bind a location."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Binding a location to a project needs an unrestricted API key: bindings apply to every key of the account."
+        )
+
+
+def _repo_path(git_value: str) -> str:
+    """``owner/repo`` part of a normalized ``host/owner/repo`` remote."""
+    return git_value.split("/", 1)[1] if "/" in git_value else git_value
 
 
 class ProjectRegistry:
@@ -75,13 +118,6 @@ class ProjectRegistry:
         )
         return {r[0]: r[1] for r in await cursor.fetchall()}
 
-    async def _project_has_kind(self, user_id: str, project_id: str, kind: str) -> bool:
-        cursor = await self.db.conn.execute(
-            "SELECT 1 FROM project_fingerprints WHERE user_id = ? AND project_id = ? AND kind = ? LIMIT 1",
-            (user_id, project_id, kind),
-        )
-        return await cursor.fetchone() is not None
-
     async def _project_known(self, user_id: str, project_id: str) -> bool:
         cursor = await self.db.conn.execute(
             "SELECT 1 FROM project_fingerprints WHERE user_id = ? AND project_id = ? LIMIT 1",
@@ -89,11 +125,23 @@ class ProjectRegistry:
         )
         return await cursor.fetchone() is not None
 
-    async def _bind(self, user_id: str, fingerprints: list[Fingerprint], project_id: str, overwrite: bool) -> None:
+    async def _kinds_of(self, user_id: str, project_id: str) -> dict[str, list[str]]:
+        """Fingerprint values on record for a project, grouped by kind."""
+        cursor = await self.db.conn.execute(
+            "SELECT kind, fingerprint FROM project_fingerprints WHERE user_id = ? AND project_id = ?",
+            (user_id, project_id),
+        )
+        out: dict[str, list[str]] = {}
+        for kind, key in await cursor.fetchall():
+            out.setdefault(kind, []).append(str(key).split(":", 1)[1] if ":" in str(key) else str(key))
+        return out
+
+    async def _bind(self, user_id: str, fingerprints: list[Fingerprint], project_id: str, overwrite: set[str] | bool) -> None:
+        """Record fingerprints for ``project_id``. Keys in ``overwrite`` (or all, when True) move an existing binding."""
         now = _now_iso()
         async with self.db.transaction():
             for fp in fingerprints:
-                if overwrite:
+                if overwrite is True or (isinstance(overwrite, set) and fp.key in overwrite):
                     await self.db.conn.execute(
                         """
                         INSERT INTO project_fingerprints (user_id, fingerprint, kind, project_id, created_at, updated_at)
@@ -120,6 +168,33 @@ class ProjectRegistry:
         suffix = hashlib.sha256(primary.key.encode()).hexdigest()[:6]
         return f"{base[:57]}-{suffix}"
 
+    async def _adopt(
+        self, user_id: str, primary: Fingerprint, by_kind: dict[str, Fingerprint], known: dict[str, str]
+    ) -> str | None:
+        """An existing project a weaker fingerprint already names, when it is safe to join.
+
+        * root commit known, remote new: join when the project has no remote on
+          record (remote added later) or its remote has the same ``owner/repo``
+          path on another host name (an ssh ``Host`` alias or mirror). A fork
+          (same root, different owner) does not join.
+        * path known, remote/root new: join when that project has no remote and
+          no root commit yet (``git init`` in a folder seen before, or the
+          first commit of an empty repository).
+        """
+        root = by_kind.get(KIND_ROOT)
+        if primary.kind == KIND_GIT and root is not None and root.key in known:
+            candidate = known[root.key]
+            remotes = (await self._kinds_of(user_id, candidate)).get(KIND_GIT, [])
+            if not remotes or any(_repo_path(r) == _repo_path(primary.value) for r in remotes):
+                return candidate
+        path = by_kind.get(KIND_PATH)
+        if path is not None and path is not primary and path.key in known:
+            candidate = known[path.key]
+            kinds = await self._kinds_of(user_id, candidate)
+            if KIND_GIT not in kinds and KIND_ROOT not in kinds:
+                return candidate
+        return None
+
     async def resolve(
         self,
         user_id: str,
@@ -132,62 +207,95 @@ class ProjectRegistry:
         """Resolve a location to a stable project id.
 
         Lookup uses the strongest fingerprint the client sent (git remote, else
-        root commit, else path). A root commit only joins an existing project
-        when that project has no git remote on record (a fork shares its
-        upstream's root commit but not its remote).
+        root commit, else path); when that one is new, a weaker one may name an
+        existing project (see :meth:`_adopt`).
 
         ``hint_project`` names the project for a location seen for the first
-        time; with ``bind=True`` it re-binds an already-known location.
+        time (a hint for an already-bound location is reported in
+        ``warnings``, never applied); ``bind=True`` re-binds a known location.
         ``create=False`` computes the answer without writing anything.
-        ``allowed_projects`` (project-scoped keys) restricts the result.
+
+        ``allowed_projects`` (a project-restricted key) restricts the result
+        AND makes the call read-only: bindings are per user, so a restricted
+        key must not be able to claim or move a location for every other key
+        of the account. Such a key cannot bind at all
+        (:class:`BindingNotAllowed`); a new location resolves to the hint, or
+        to the key's only project, without being recorded.
         """
+        restricted = bool(allowed_projects)
+        if bind and restricted:
+            raise BindingNotAllowed()
+        if restricted:
+            create = False
         fingerprints = locator.fingerprints()
         hint = normalize_project_id(hint_project) if hint_project and hint_project.strip() else None
         if not fingerprints:
             if not hint:
                 raise ValueError("Provide git_remote, root_commit or root_path (or a project id).")
             self._check_allowed(hint, allowed_projects)
-            return {"project_id": hint, "created": False, "persisted": False, "fingerprint": None, "kind": None, "bound": False}
+            return {
+                "project_id": hint,
+                "created": False,
+                "persisted": False,
+                "fingerprint": None,
+                "kind": None,
+                "bound": False,
+                "source": "hint",
+                "warnings": [],
+            }
 
         primary = fingerprints[0]
         known = await self._lookup(user_id, fingerprints)
         by_kind = {fp.kind: fp for fp in fingerprints}
+        warnings: list[str] = []
 
         project_id: str | None = None
         created = False
         overwrite = False
+        source = "known"
         if hint and bind:
-            project_id, overwrite = hint, True
+            project_id, overwrite, source = hint, True, "bind"
         elif primary.key in known:
             project_id = known[primary.key]
-        elif primary.kind == KIND_GIT and KIND_ROOT in by_kind and by_kind[KIND_ROOT].key in known:
-            candidate = known[by_kind[KIND_ROOT].key]
-            if not await self._project_has_kind(user_id, candidate, KIND_GIT):
-                project_id = candidate  # same repo, remote added since it was first seen
+        else:
+            project_id = await self._adopt(user_id, primary, by_kind, known)
+            source = "adopted"
         if project_id is None:
             if hint:
-                project_id = hint
-            elif allowed_projects and len(allowed_projects) == 1:
-                project_id = allowed_projects[0]
+                project_id, source = hint, "hint"
+            elif restricted and allowed_projects and len(allowed_projects) == 1:
+                project_id, source = allowed_projects[0], "key-project"
             else:
-                project_id = await self._derive_new_id(user_id, locator, primary)
+                project_id, source = await self._derive_new_id(user_id, locator, primary), "derived"
             created = not await self._project_known(user_id, project_id)
+        elif hint and hint != project_id and not bind:
+            warnings.append(
+                f"hint_project '{hint}' was not applied: this location is already bound to project '{project_id}'. "
+                f"To move it run `remembra-relay resolve --project {hint} --bind` (or resolve with bind=true)."
+            )
 
         self._check_allowed(project_id, allowed_projects)
 
-        # Register the primary fingerprint, plus the root commit (so a later
-        # clone without a remote still resolves). Paths are only registered
-        # when they are the primary: they are machine-specific.
+        # Register the primary fingerprint, plus the root commit (a later clone
+        # without a remote still resolves) and the host-qualified checkout path
+        # (callers that only know their working directory, e.g. an MCP client
+        # passing root_path, find the same project). The path moves with
+        # whatever repository is checked out there now.
         to_bind = [primary]
         if primary.kind == KIND_GIT and KIND_ROOT in by_kind:
             to_bind.append(by_kind[KIND_ROOT])
+        path_fp = by_kind.get(KIND_PATH)
+        movable: set[str] = set()
+        if path_fp is not None and primary.kind != KIND_PATH and locator.host and locator.host.strip():
+            to_bind.append(path_fp)
+            movable.add(path_fp.key)
         missing = [fp for fp in to_bind if overwrite or known.get(fp.key) != project_id]
         persisted = False
         if create and missing:
-            await self._bind(user_id, missing, project_id, overwrite=overwrite)
+            await self._bind(user_id, missing, project_id, overwrite=True if overwrite else movable)
             persisted = True
             log.info("relay_project_bound", project_id=project_id, fingerprints=[fp.kind for fp in missing], rebind=overwrite)
-        elif not missing:
+        elif not missing or known.get(primary.key) == project_id:
             persisted = True  # already on record
         return {
             "project_id": project_id,
@@ -195,7 +303,9 @@ class ProjectRegistry:
             "persisted": persisted,
             "fingerprint": primary.key,
             "kind": primary.kind,
-            "bound": overwrite,
+            "bound": overwrite and persisted,
+            "source": source,
+            "warnings": warnings,
         }
 
     @staticmethod
@@ -340,11 +450,20 @@ class RelayService:
             text, trust_score, checksum = screen(text)
 
         key = relay_key(agent_id, session_id)
+        facts_source = facts.get("facts_source")
         relay_meta: dict[str, Any] = {
             "v": HANDOFF_FORMAT_VERSION,
             "agent_id": agent_id,
             "agent_verified": agent_verified,
             "session_id": session_id,
+            # Who gathered the facts. Declared by the client: the CLI reads git and
+            # the transcript itself, an MCP agent types them. Shown, never trusted.
+            "facts_source": facts_source if facts_source in FACTS_SOURCES else "agent-declared",
+            "commit_evidence": facts.get("commit_evidence"),
+            "incomplete": list(facts.get("incomplete") or []),
+            # Sanitizer verdict on the rendered text, which carries every free-text
+            # field shown in the brief (commit subjects, todos, errors, next, notes).
+            "trust_score": round(float(trust_score), 2),
             "branch": facts.get("branch"),
             "head_commit": facts.get("head_commit"),
             "upstream": facts.get("upstream"),
@@ -370,7 +489,7 @@ class RelayService:
             "relay": relay_meta,
         }
 
-        async with _close_lock:
+        async with _close_lock_for(user_id, project_id, key):
             current = await self._current_handoffs_for_key(user_id, project_id, key)
             if len(current) == 1:
                 # Identical re-close (hook retried, close called twice): the
@@ -479,6 +598,17 @@ class RelayService:
             )
         return {"project_id": project_id, "items": items, "total": result["total"]}
 
+    async def _latest_summary(self, user_id: str, project_id: str) -> dict[str, Any] | None:
+        latest = await self.sessions.latest_handoff(user_id, project_id)
+        if not latest:
+            return None
+        return {
+            "id": latest["id"],
+            "agent_id": latest.get("agent_id"),
+            "created_at": latest.get("created_at"),
+            "headline": handoff_headline(latest),
+        }
+
     async def linked_with_headlines(self, user_id: str, project_id: str, allowed: list[str] | None) -> list[dict[str, Any]]:
         linked = []
         seen: set[tuple[str, str]] = set()
@@ -489,18 +619,8 @@ class RelayService:
             if (other, link["relation"]) in seen:
                 continue
             seen.add((other, link["relation"]))
-            latest = await self.sessions.latest_handoff(user_id, other)
             link = dict(link)
-            link["latest_handoff"] = (
-                {
-                    "id": latest["id"],
-                    "agent_id": latest.get("agent_id"),
-                    "created_at": latest.get("created_at"),
-                    "headline": handoff_headline(latest),
-                }
-                if latest
-                else None
-            )
+            link["latest_handoff"] = await self._latest_summary(user_id, other)
             linked.append(link)
             if len(linked) >= MAX_LINKED_IN_BRIEF:
                 break
@@ -514,12 +634,49 @@ class RelayService:
         recent_n: int = 10,
         inbox_limit: int = 10,
         allowed: list[str] | None = None,
+        configured_project: str | None = None,
+        checkout: dict[str, Any] | None = None,
+        extra_warnings: list[str] | None = None,
     ) -> dict[str, Any]:
-        """The session brief plus linked projects and a compact rendered text."""
+        """The session brief plus linked projects and a compact rendered text.
+
+        ``configured_project`` is the project the client is configured for
+        (e.g. ``REMEMBRA_PROJECT``). When the location resolved to a different
+        project, the brief says so and lists the configured project's latest
+        handoff, so memories stored there are not silently out of view.
+        ``checkout`` (``{branch, head_commit}`` of the reader) marks the
+        handoff's failing/next items as possibly stale when it differs.
+        """
         brief = await self.sessions.brief(
             user_id=user_id, project_id=project_id, agent_id=agent_id, recent_n=recent_n, inbox_limit=inbox_limit
         )
-        brief["linked_projects"] = await self.linked_with_headlines(user_id, project_id, allowed) if project_id else []
+        linked = await self.linked_with_headlines(user_id, project_id, allowed) if project_id else []
+        warnings: list[str] = list(brief.get("warnings") or [])
+        warnings.extend(extra_warnings or [])
+        if (
+            configured_project
+            and project_id
+            and configured_project != project_id
+            and (not allowed or configured_project in allowed)
+        ):
+            warnings.append(
+                f"This location resolves to project '{project_id}', but this client is configured for "
+                f"'{configured_project}'; the configured project's latest handoff is listed under Linked projects. "
+                f"To use one project run `remembra-relay resolve --project {configured_project} --bind`."
+            )
+            if not any(link["project_id"] == configured_project for link in linked):
+                linked.insert(
+                    0,
+                    {
+                        "project_id": configured_project,
+                        "relation": "configured",
+                        "direction": "configured",
+                        "latest_handoff": await self._latest_summary(user_id, configured_project),
+                    },
+                )
+        brief["warnings"] = warnings
+        brief["linked_projects"] = linked
+        brief["checkout"] = checkout
         brief["rendered"] = render_brief(brief)
         return brief
 

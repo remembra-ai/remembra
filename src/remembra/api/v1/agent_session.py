@@ -45,13 +45,15 @@ def _require(current_user: Any, permission: str) -> None:
         )
 
 
-def screen_text(request: Request, text: str) -> tuple[str, float, str | None]:
+def screen_text(request: Request, text: str, apply_pii: bool = True) -> tuple[str, float, str | None]:
     """Same content protections as POST /memories: PII policy + sanitizer.
 
     Returns ``(text, trust_score, checksum)``; raises 400 when the PII policy
-    blocks the content outright.
+    blocks the content outright. ``apply_pii=False`` is for text assembled
+    from values that were already PII-scrubbed one by one (relay close-out):
+    only the sanitizer runs.
     """
-    pii_detector = getattr(request.app.state, "pii_detector", None)
+    pii_detector = getattr(request.app.state, "pii_detector", None) if apply_pii else None
     if pii_detector:
         pii_result = pii_detector.scan(text, source="user_input")
         if pii_result.has_pii:

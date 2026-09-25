@@ -11,8 +11,15 @@
 Attribution: when the API key is agent-scoped, the agent id comes from the key
 and a different id in the body or the ``X-Remembra-Agent-Id`` header is
 rejected. Unscoped keys may name the agent in the body or the header (they
-must agree). Every stored string passes ``redact_secrets``; access to each
-project is checked with the key's project restrictions.
+must agree). Writes (close, links) require a well-formed agent id; the brief
+is lenient (a malformed id is ignored for attribution and only used, as
+before, to look up the inbox). Every stored string passes ``redact_secrets``;
+access to each project is checked with the key's project restrictions, and
+project-restricted keys never create or move location bindings.
+
+Reads never write: GET brief and trail compute the project for an unseen
+location without recording it; only close and ``POST /projects/resolve``
+record bindings.
 """
 
 from __future__ import annotations
@@ -31,7 +38,7 @@ from remembra.client.project import normalize_project_id
 from remembra.cloud.limits import EnforceStoreLimit, record_store_usage
 from remembra.core.limiter import limiter
 from remembra.relay.identity import ProjectLocator
-from remembra.services.relay import ProjectAccessDenied, RelayService
+from remembra.services.relay import BindingNotAllowed, ProjectAccessDenied, RelayService
 
 router = APIRouter(tags=["relay"])
 
@@ -62,13 +69,28 @@ def _clean_agent(value: str | None, source: str) -> str | None:
     return agent
 
 
-def effective_agent(request: Request, user: AuthenticatedUser, body_agent: str | None) -> tuple[str | None, bool]:
+def effective_agent(
+    request: Request,
+    user: AuthenticatedUser,
+    body_agent: str | None,
+    *,
+    strict: bool = True,
+    warnings: list[str] | None = None,
+) -> tuple[str | None, bool]:
     """Resolve the agent a relay call acts as. Returns ``(agent_id, verified)``.
 
     ``verified`` is True when the id comes from an agent-scoped key.
+    ``strict=False`` (reads such as the brief): a malformed header is ignored
+    and a malformed body/query id is passed through unchanged for the inbox
+    lookup (the pre-relay behavior), with a note in ``warnings``; agent-scope
+    mismatches are still refused.
     """
-    header_agent = _clean_agent(request.headers.get(AGENT_HEADER), f"the {AGENT_HEADER} header")
-    claimed = _clean_agent(body_agent, "the request")
+    if strict:
+        header_agent = _clean_agent(request.headers.get(AGENT_HEADER), f"the {AGENT_HEADER} header")
+        claimed = _clean_agent(body_agent, "the request")
+    else:
+        header_agent = _lenient_agent(request.headers.get(AGENT_HEADER), f"the {AGENT_HEADER} header", warnings, keep=False)
+        claimed = _lenient_agent(body_agent, "agent_id", warnings, keep=True)
     scoped = getattr(user, "agent_id", None)
     if scoped:
         for other, where in ((claimed, "request"), (header_agent, f"{AGENT_HEADER} header")):
@@ -79,6 +101,8 @@ def effective_agent(request: Request, user: AuthenticatedUser, body_agent: str |
                 )
         return scoped, True
     if claimed and header_agent and claimed != header_agent:
+        if not strict:
+            return claimed, False
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"agent_id '{claimed}' does not match the {AGENT_HEADER} header '{header_agent}'.",
@@ -86,11 +110,28 @@ def effective_agent(request: Request, user: AuthenticatedUser, body_agent: str |
     return claimed or header_agent, False
 
 
+def _lenient_agent(value: str | None, source: str, warnings: list[str] | None, keep: bool) -> str | None:
+    agent = (value or "").strip()
+    if not agent:
+        return None
+    if _AGENT_RE.match(agent):
+        return agent
+    if warnings is not None:
+        warnings.append(
+            f"The agent id in {source} is not a valid relay agent id (1-128 chars of letters, digits and ._:@/+-); "
+            + ("it is used for the inbox only." if keep else "it was ignored.")
+        )
+    return agent[:128] if keep else None
+
+
 def pii_scrubber(request: Request) -> Callable[[str], str] | None:
     """Per-value PII scrub for close-out facts: redact, never reject.
 
     A blocked PII match in one commit subject must not lose the whole
-    handoff, so blocked values are replaced with ``[REDACTED:pii]``.
+    handoff, so blocked values are replaced with ``[REDACTED:pii]``. The
+    rendered handoff is built only from these scrubbed values plus ids that
+    passed their own validation, so it is not PII-screened a second time (a
+    session UUID such as ``…-202609251234`` must not reject the close).
     """
     detector = getattr(request.app.state, "pii_detector", None)
     if detector is None:
@@ -191,8 +232,18 @@ _LIST_CAPS = {
     "tests": 100,
     "errors": 50,
     "todos_open": 100,
+    "incomplete": 10,
 }
-_STR_CAPS = {"branch": 255, "head_commit": 64, "upstream": 255, "diff_stat": 300, "notes": 6000, "next_step": 1000}
+_STR_CAPS = {
+    "branch": 255,
+    "head_commit": 64,
+    "upstream": 255,
+    "diff_stat": 300,
+    "notes": 6000,
+    "next_step": 1000,
+    "facts_source": 40,
+    "commit_evidence": 80,
+}
 
 
 class FactsIn(BaseModel):
@@ -211,6 +262,11 @@ class FactsIn(BaseModel):
     todos_open: list[str] = Field(default_factory=list)
     notes: str | None = None
     next_step: str | None = None
+    facts_source: str | None = Field(
+        default=None, description="relay-cli:git+transcript | relay-cli:git | agent-declared (default)"
+    )
+    commit_evidence: str | None = Field(default=None, description="How commits were chosen (session-reflog, last-12h, ...)")
+    incomplete: list[str] = Field(default_factory=list, description="git probes that did not finish (log, status, ...)")
 
     @model_validator(mode="before")
     @classmethod
@@ -223,7 +279,7 @@ class FactsIn(BaseModel):
             if isinstance(value, list):
                 # Keep the most recent entries for event lists, the first ones for file lists.
                 value = value[-cap:] if name in ("commands", "tests", "errors") else value[:cap]
-                if name in ("files_changed", "uncommitted_files", "errors", "todos_open"):
+                if name in ("files_changed", "uncommitted_files", "errors", "todos_open", "incomplete"):
                     value = [_clip(v, 1000) for v in value if isinstance(v, str)]
                 data[name] = value
         for name, cap in _STR_CAPS.items():
@@ -276,7 +332,7 @@ async def _resolve(
             create=create,
             allowed_projects=user.project_ids,
         )
-    except ProjectAccessDenied as e:
+    except (ProjectAccessDenied, BindingNotAllowed) as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
@@ -287,8 +343,10 @@ async def _resolve(
 async def resolve_project(request: Request, body: ResolveRequest, current_user: CurrentUser) -> dict[str, Any]:
     """Same repo on any machine, drive or worktree -> the same project id.
 
-    A new location is registered (``created``) unless the key is read-only, in
-    which case the id is computed but not persisted (``persisted: false``).
+    A new location is registered (``created``) unless the key is read-only or
+    project-restricted, in which case the id is computed but not persisted
+    (``persisted: false``). ``bind`` needs an unrestricted key with
+    ``memory:store``. A hint that could not be applied is reported in ``warnings``.
     """
     _require(current_user, "memory:recall")
     can_write = has_permission(current_user, "memory:store")
@@ -403,7 +461,7 @@ async def close_session(
         summary=body.summary,
         end_reason=body.end_reason,
         agent_verified=verified,
-        screen=lambda text: screen_text(request, text),
+        screen=lambda text: screen_text(request, text, apply_pii=False),
         scrub=pii_scrubber(request),
     )
     if result["changed"]:
@@ -430,10 +488,11 @@ async def _project_from_query(
     locator: LocatorIn,
     hint_project: str | None,
 ) -> tuple[str | None, dict[str, Any] | None]:
+    """The project a read addresses. Never records a binding (a read has no side effects)."""
     if project_id:
         return resolve_project_access(user, project_id), None
     if not locator.locator().is_empty():
-        resolution = await _resolve(request, user, locator, hint_project, bind=False, create=has_permission(user, "memory:store"))
+        resolution = await _resolve(request, user, locator, hint_project, bind=False, create=False)
         return resolve_project_access(user, resolution["project_id"]), resolution
     if hint_project:
         return resolve_project_access(user, normalize_project_id(hint_project)), None
@@ -461,15 +520,24 @@ async def session_brief(
     repo_name: Annotated[str | None, Query(max_length=200)] = None,
     host: Annotated[str | None, Query(max_length=255)] = None,
     hint_project: Annotated[str | None, Query(max_length=128)] = None,
+    branch: Annotated[str | None, Query(max_length=255, description="The reader's current branch")] = None,
+    head_commit: Annotated[str | None, Query(max_length=64, description="The reader's current HEAD")] = None,
 ) -> dict[str, Any]:
     """Latest handoff ("Last session: ..."), unread inbox, status, linked
     projects and recent memories by time, plus ``rendered`` — a compact
     (~1500 token) text version. Pass ``project_id`` or a location
-    (``git_remote`` / ``root_commit`` / ``root_path``) to resolve it."""
+    (``git_remote`` / ``root_commit`` / ``root_path``) to resolve it;
+    ``hint_project`` is the client's configured project (used for a location
+    seen for the first time, and reported when the location resolves
+    elsewhere). ``branch`` / ``head_commit`` mark a handoff recorded on
+    another checkout as possibly stale. Read-only: nothing is recorded."""
     _require(current_user, "memory:recall")
-    agent, _ = effective_agent(request, current_user, agent_id)
+    notes: list[str] = []
+    agent, _ = effective_agent(request, current_user, agent_id, strict=False, warnings=notes)
     locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host)
     project, resolution = await _project_from_query(request, current_user, project_id, locator, hint_project)
+    configured = normalize_project_id(hint_project) if hint_project and hint_project.strip() else None
+    checkout = {"branch": branch, "head_commit": head_commit} if (branch or head_commit) else None
     brief = await _service(request).brief(
         user_id=current_user.user_id,
         project_id=project,
@@ -477,6 +545,9 @@ async def session_brief(
         recent_n=recent_n,
         inbox_limit=inbox_limit,
         allowed=current_user.project_ids,
+        configured_project=configured if resolution is not None else None,
+        checkout=checkout,
+        extra_warnings=notes,
     )
     brief["resolution"] = resolution
     return brief
@@ -496,10 +567,12 @@ async def trail(
     root_path: Annotated[str | None, Query(max_length=4096)] = None,
     repo_name: Annotated[str | None, Query(max_length=200)] = None,
     host: Annotated[str | None, Query(max_length=255)] = None,
+    hint_project: Annotated[str | None, Query(max_length=128)] = None,
 ) -> dict[str, Any]:
+    """Read-only: a location the server has not seen resolves (hint first) without being recorded."""
     _require(current_user, "memory:recall")
     locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host)
-    resolved, resolution = await _project_from_query(request, current_user, project_id or project, locator, None)
+    resolved, resolution = await _project_from_query(request, current_user, project_id or project, locator, hint_project)
     result = await _service(request).trail(current_user.user_id, resolved, limit=limit, offset=offset)
     result["resolution"] = resolution
     return result
