@@ -91,6 +91,7 @@ nav:
     - MCP Server: integrations/mcp-server.md
     - Claude Code: integrations/claude-code.md
     - Claude Desktop: integrations/claude-desktop.md
+    - Claude & ChatGPT Apps (Phone): integrations/claude-and-chatgpt-apps.md
     - Cursor: integrations/cursor.md
     - Windsurf: integrations/windsurf.md
     - Zed: integrations/zed.md
