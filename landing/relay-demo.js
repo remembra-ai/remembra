@@ -9,6 +9,27 @@
    picking up. Tapping an agent's name hands the work off to a
    different agent on a different machine, continuing the same trail.
 ------------------------------------------------------------------- */
+/* ------------------------------------------------------------------
+   The shared trail bus. The trail demo is the one source of truth for
+   which handoff is happening; the hero canvas and the constellation
+   subscribe to it, so the same handoff lights up everywhere at once.
+
+     RemembraTrail.on(fn)       fn(event) now (last event) and on every stage
+     RemembraTrail.watch(el)    keep the story moving while el is on screen
+     RemembraTrail.handOff(n)   hand the work to agent n (a tap anywhere)
+------------------------------------------------------------------- */
+var RemembraTrail = window.RemembraTrail = window.RemembraTrail || (function () {
+  var subs = [];
+  var bus = {
+    last: null,
+    on: function (fn) { subs.push(fn); if (bus.last) fn(bus.last); },
+    emit: function (ev) { bus.last = ev; subs.slice().forEach(function (fn) { try { fn(ev); } catch (e) { /* one view failing must not stop the others */ } }); },
+    watch: function () {},
+    handOff: function () {}
+  };
+  return bus;
+})();
+
 (function () {
   "use strict";
 
@@ -167,6 +188,7 @@
   var paused = reduce;
   var HOLD = 6200;
   var taps = 0;
+  var seq = 0;              /* one number per story played, so views can tell stories apart */
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -252,13 +274,26 @@
     baton.style.transform = "translateY(" + (holder - 13) + "px)";
   }
 
-  function setStage(n) {
+  /* What the other views need to draw this handoff. */
+  function publish(n, still) {
+    var id = function (a) { return AGENT_ID[a] || a.toLowerCase().replace(/\s+/g, "-"); };
+    RemembraTrail.emit({
+      stage: n, still: !!still, scenario: current, seq: seq,
+      repo: S.repo, branch: S.branch, kind: S.kind, id: S.id, stop: S.stop,
+      facts: S.facts.length, via: hooked(S.from.agent) ? "session hook" : "MCP",
+      from: { agent: S.from.agent, id: id(S.from.agent), host: S.from.host },
+      to: { agent: S.to.agent, id: id(S.to.agent), host: S.to.host }
+    });
+  }
+
+  function setStage(n, still) {
     stage = n;
     relay.setAttribute("data-stage", String(n));
     relay.querySelectorAll("[data-at]").forEach(function (x) {
       x.classList.toggle("on", Number(x.getAttribute("data-at")) <= n);
     });
     place();
+    publish(n, still);
   }
 
   function paintMeter(v, s) {
@@ -299,7 +334,7 @@
     relay.classList.add("no-tr");
     render(s);
     if (s.meter) paintMeter(s.meter.to, s);
-    setStage(6);
+    setStage(6, true);
     void relay.offsetWidth;
     relay.classList.remove("no-tr");
   }
@@ -319,6 +354,7 @@
   }
 
   function play(s) {
+    seq += 1;
     if (reduce) { showStill(s); return; }
     clearTimers();
     relay.classList.add("no-tr");
@@ -454,13 +490,28 @@
   else window.addEventListener("resize", relayout);
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(relayout);
 
+  /* The story keeps moving while any view of it is on screen: the trail
+     itself, the hero canvas or the constellation further down. */
+  var onScreen = new Map();
+  function watch(el, threshold) {
+    if (!el || !window.IntersectionObserver) return;
+    onScreen.set(el, false);
+    new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { onScreen.set(en.target, en.isIntersecting); });
+      var any = false;
+      onScreen.forEach(function (v) { any = any || v; });
+      visible = any;
+      if (visible && waiting) next();
+    }, { threshold: threshold == null ? 0.25 : threshold }).observe(el);
+  }
+  RemembraTrail.watch = function (el) { watch(el, 0.25); };
+  RemembraTrail.handOff = function (agent) {
+    if (AGENTS.indexOf(agent) === -1) return;
+    handOff(agent);
+  };
+
   if (!reduce) {
-    if (window.IntersectionObserver) {
-      new IntersectionObserver(function (entries) {
-        visible = entries[0].isIntersecting;
-        if (visible && waiting) next();
-      }, { threshold: 0.35 }).observe(relay);
-    }
+    watch(relay, 0.35);
     document.addEventListener("visibilitychange", function () { if (!document.hidden && waiting) next(); });
     /* Hold the still frame long enough to read, then show a different cause happening live. */
     startHold();

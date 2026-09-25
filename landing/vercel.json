@@ -24,6 +24,16 @@
       "source": "/blog/:slug",
       "destination": "/changelog/:slug",
       "permanent": false
+    },
+    {
+      "source": "/signup",
+      "destination": "https://app.remembra.dev/signup",
+      "permanent": false
+    },
+    {
+      "source": "/dashboard",
+      "destination": "https://app.remembra.dev",
+      "permanent": false
     }
   ]
 }
