@@ -374,6 +374,13 @@ class RecallResult(BaseModel):
         default_factory=dict,
         description="User-supplied metadata tags stored with this memory",
     )
+    trust_score: float | None = Field(
+        default=None,
+        description=(
+            "Prompt-injection trust score recorded when the memory was written (1.0 = clean). "
+            "Memories below the server threshold are withheld from recall unless include_low_trust=true."
+        ),
+    )
 
     @field_validator("content")
     @classmethod

@@ -14,6 +14,7 @@ import hmac
 import json
 import logging
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -42,7 +43,8 @@ class WebhookDelivery:
         self._timeout = timeout
         self._max_retries = max_retries
         self._user_agent = user_agent
-        self._client = httpx.AsyncClient(timeout=timeout)
+        # Redirects are never followed: a 30x to an internal host is an SSRF vector.
+        self._client = httpx.AsyncClient(timeout=timeout, follow_redirects=False)
 
     async def deliver(
         self,
@@ -79,11 +81,23 @@ class WebhookDelivery:
             ).hexdigest()
             headers["X-Remembra-Signature"] = f"sha256={signature}"
 
+        # SSRF: re-validate at delivery time and connect to the *validated* IP,
+        # so a DNS answer that changes after registration (rebinding) or a URL
+        # stored before validation existed can never reach an internal address.
+        from remembra.webhooks.manager import resolve_webhook_target
+
+        try:
+            target = await resolve_webhook_target(url)
+        except ValueError as e:
+            logger.warning("Webhook delivery blocked (SSRF policy): delivery=%s reason=%s", delivery_id, e)
+            return False
+        pinned_url, request_kwargs = _pinned_request(target, headers)
+
         # Attempt delivery with retries
         last_error: Exception | None = None
         for attempt in range(1, self._max_retries + 1):
             try:
-                response = await self._client.post(url, content=body, headers=headers)
+                response = await self._client.post(pinned_url, content=body, **request_kwargs)
 
                 if 200 <= response.status_code < 300:
                     logger.info(
@@ -158,3 +172,20 @@ class WebhookDelivery:
 
         provided = signature[7:]  # Strip "sha256=" prefix
         return hmac.compare_digest(expected, provided)
+
+
+def _pinned_request(target: Any, headers: dict[str, str]) -> tuple[str, dict[str, Any]]:
+    """Build a request to the validated IP while preserving Host/SNI for the real hostname."""
+    ip = target.ips[0]
+    parts = urlsplit(target.url)
+    host_for_url = f"[{ip}]" if ":" in ip else ip
+    default_port = 443 if target.scheme == "https" else 80
+    netloc = host_for_url if target.port == default_port else f"{host_for_url}:{target.port}"
+    pinned_url = urlunsplit((parts.scheme, netloc, parts.path or "/", parts.query, ""))
+    host_header = target.hostname if target.port == default_port else f"{target.hostname}:{target.port}"
+    request_headers = {**headers, "Host": host_header}
+    kwargs: dict[str, Any] = {"headers": request_headers}
+    if target.scheme == "https":
+        # TLS still verifies the certificate against the real hostname.
+        kwargs["extensions"] = {"sni_hostname": target.hostname}
+    return pinned_url, kwargs
