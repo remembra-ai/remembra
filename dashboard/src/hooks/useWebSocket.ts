@@ -92,15 +92,10 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     if (currentProjectIdRef.current) {
       params.set('project_id', currentProjectIdRef.current);
     }
-    if (apiKey) {
-      params.set('api_key', apiKey);
-    }
-    if (token) {
-      params.set('token', token);
-    }
-
+    // Credentials are never put in the URL (proxies/servers log URLs); they are
+    // sent as the first WebSocket message once the socket opens.
     return `${base}/ws?${params.toString()}`;
-  }, [baseUrl, apiKey, token]);
+  }, [baseUrl]);
 
   const connect = useCallback(() => {
     // Clean up existing connection
@@ -120,6 +115,13 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (token || apiKey) {
+          ws.send(JSON.stringify({
+            type: 'auth',
+            ...(token ? { token } : { api_key: apiKey }),
+            project_id: currentProjectIdRef.current,
+          }));
+        }
         setConnected(true);
         setError(null);
         onConnectionChange?.(true);
@@ -170,7 +172,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
     } catch (e) {
       setError(`Failed to connect: ${e}`);
     }
-  }, [getWebSocketUrl, autoReconnect, reconnectDelay, onMemoryEvent, onConnectionChange]);
+  }, [getWebSocketUrl, apiKey, token, autoReconnect, reconnectDelay, onMemoryEvent, onConnectionChange]);
 
   useEffect(() => {
     connectRef.current = connect;

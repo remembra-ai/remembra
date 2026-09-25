@@ -169,14 +169,14 @@ async def _broadcast_websocket(
     data: dict[str, Any],
     project_id: str = "default",
 ) -> None:
-    """Fire-and-forget WebSocket broadcast for real-time updates."""
+    """Fire-and-forget WebSocket broadcast, delivered only to the owning user's sockets."""
     try:
         from remembra.api.v1.websocket import connection_manager
 
         await connection_manager.broadcast(
             event_type=event_type,
             data=data,
-            namespace=project_id,
+            user_id=data.get("user_id"),
             project_id=project_id,
         )
     except Exception as exc:
