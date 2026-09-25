@@ -2267,6 +2267,7 @@ class MemoryService:
             superseded_by=row.get("superseded_by"),
             expires_at=_parse_date(row.get("expires_at")),
             decay_score=decay,
+            trust_score=float(row["trust_score"]) if row.get("trust_score") is not None else None,
         )
 
     # -----------------------------------------------------------------------

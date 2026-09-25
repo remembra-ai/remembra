@@ -133,7 +133,10 @@ async function searchMemories() {
   if (result.success && result.memories) {
     renderResults(result.memories);
   } else {
-    resultsEl.innerHTML = `<div class="error">${result.error || 'No results found'}</div>`;
+    const errorEl = document.createElement('div');
+    errorEl.className = 'error';
+    errorEl.textContent = result.error || 'No results found';
+    resultsEl.replaceChildren(errorEl);
   }
 }
 
@@ -145,14 +148,21 @@ function renderResults(memories) {
     return;
   }
   
-  resultsEl.innerHTML = memories.map(mem => `
-    <div class="result-item">
-      <div class="result-content">${escapeHtml(truncate(mem.content || mem.text, 120))}</div>
-      <button class="copy-btn" data-content="${escapeAttr(mem.content || mem.text)}">
-        Copy
-      </button>
-    </div>
-  `).join('');
+  // Untrusted memory text is only ever assigned via textContent/dataset.
+  resultsEl.replaceChildren(...memories.map(mem => {
+    const text = mem.content || mem.text || '';
+    const item = document.createElement('div');
+    item.className = 'result-item';
+    const content = document.createElement('div');
+    content.className = 'result-content';
+    content.textContent = truncate(text, 120);
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.dataset.content = text;
+    btn.textContent = 'Copy';
+    item.append(content, btn);
+    return item;
+  }));
   
   // Add copy handlers
   resultsEl.querySelectorAll('.copy-btn').forEach(btn => {
@@ -197,15 +207,6 @@ function showError(message) {
   alert(message);
 }
 
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function escapeAttr(text) {
-  return text.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
 
 function truncate(text, maxLength) {
   if (!text) return '';

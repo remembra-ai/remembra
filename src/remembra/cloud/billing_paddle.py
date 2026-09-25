@@ -18,11 +18,15 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
 
 from remembra.cloud.plans_paddle import PlanTier, get_plan
+
+# Paddle recommends rejecting webhooks whose signed timestamp is >5 min off.
+WEBHOOK_TOLERANCE_SECONDS = 300
 
 logger = logging.getLogger(__name__)
 
@@ -373,12 +377,31 @@ class PaddleBillingManager:
         Raises:
             ValueError: If signature verification fails.
         """
-        # Parse signature header: ts=xxx;h1=xxx
-        parts = dict(p.split("=", 1) for p in signature.split(";"))
-        ts = parts.get("ts", "")
-        h1 = parts.get("h1", "")
+        # Fail closed: with no secret every signature would be forgeable.
+        if not self._webhook_secret:
+            raise ValueError("Webhook secret is not configured")
 
-        # Compute expected signature
+        # Parse signature header: ts=xxx;h1=xxx (Paddle may send several h1 during rotation)
+        ts = ""
+        signatures: list[str] = []
+        for part in (signature or "").split(";"):
+            key, sep, value = part.strip().partition("=")
+            if not sep:
+                continue
+            if key == "ts":
+                ts = value
+            elif key == "h1":
+                signatures.append(value)
+        if not ts or not signatures:
+            raise ValueError("Invalid webhook signature")
+        try:
+            timestamp = int(ts)
+        except ValueError:
+            raise ValueError("Invalid webhook signature") from None
+        # Replay protection: reject events signed outside the tolerance window.
+        if abs(time.time() - timestamp) > WEBHOOK_TOLERANCE_SECONDS:
+            raise ValueError("Webhook timestamp outside tolerance")
+
         signed_payload = f"{ts}:{payload.decode()}"
         expected = hmac.new(
             self._webhook_secret.encode(),
@@ -386,7 +409,7 @@ class PaddleBillingManager:
             hashlib.sha256,
         ).hexdigest()
 
-        if not hmac.compare_digest(expected, h1):
+        if not any(hmac.compare_digest(expected, candidate) for candidate in signatures):
             raise ValueError("Invalid webhook signature")
 
         event: dict[str, Any] = json.loads(payload)

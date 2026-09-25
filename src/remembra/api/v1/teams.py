@@ -561,10 +561,20 @@ async def accept_invite(
     manager: TeamManagerDep,
     user: CurrentUser,
 ) -> AcceptInviteResponse:
+    user_email = None
+    db = getattr(request.app.state, "db", None)
+    if db is not None:
+        user_row = await db.get_user_by_id(user.user_id)
+        user_email = user_row.get("email") if user_row else None
+    if user_email is None:
+        meter = getattr(request.app.state, "usage_meter", None)
+        if meter is not None:
+            user_email = await meter.get_user_email(user.user_id)
     try:
         result = await manager.accept_invite(
             token=body.token,
             user_id=user.user_id,
+            user_email=user_email,
         )
         return AcceptInviteResponse(**result)
     except ValueError as e:

@@ -18,6 +18,8 @@ from remembra.auth.middleware import (
 from remembra.cloud.limits import (
     EnforceRecallLimit,
     EnforceStoreLimit,
+    enforce_recall_quota,
+    enforce_store_quota,
     record_delete_usage,
     record_recall_usage,
     record_store_usage,
@@ -48,6 +50,7 @@ from remembra.models.memory import (
     UpdateResponse,
 )
 from remembra.security.audit import AuditLogger
+from remembra.security.content_policy import prepare_content
 from remembra.security.pii_detector import PIIDetector
 from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.agent_session import MemoryTypePolicyError, apply_memory_type_policy
@@ -160,18 +163,55 @@ async def _broadcast_websocket(
     data: dict[str, Any],
     project_id: str = "default",
 ) -> None:
-    """Fire-and-forget WebSocket broadcast for real-time updates."""
+    """Fire-and-forget WebSocket broadcast, delivered only to the owning user's sockets."""
     try:
         from remembra.api.v1.websocket import connection_manager
 
         await connection_manager.broadcast(
             event_type=event_type,
             data=data,
-            namespace=project_id,
+            user_id=data.get("user_id"),
             project_id=project_id,
         )
     except Exception as exc:
         _webhook_log.warning("WebSocket broadcast failed: %s", exc)
+
+
+async def _apply_trust_policy(
+    memory_service: MemoryService,
+    result: RecallResponse,
+    include_low_trust: bool,
+) -> RecallResponse:
+    """Surface each memory's stored trust score; withhold low-trust memories (SEC-13).
+
+    Content that tripped the prompt-injection sanitizer when it was written is
+    kept out of agent-facing recall unless the caller explicitly opts in with
+    ``include_low_trust=true``. When anything is withheld the context string is
+    rebuilt from the remaining memories so the text is not leaked there either.
+    """
+    ids = [m.id for m in result.memories]
+    if not ids:
+        return result
+    placeholders = ",".join("?" for _ in ids)
+    cursor = await memory_service.db.conn.execute(
+        f"SELECT id, trust_score FROM memories WHERE id IN ({placeholders})",
+        ids,
+    )
+    trust = {row[0]: row[1] for row in await cursor.fetchall()}
+    threshold = get_settings().trust_score_threshold
+
+    kept = []
+    for memory in result.memories:
+        score = trust.get(memory.id)
+        memory.trust_score = float(score) if score is not None else None
+        if not include_low_trust and memory.trust_score is not None and memory.trust_score < threshold:
+            continue
+        kept.append(memory)
+    if len(kept) != len(result.memories):
+        _internal_log.info("recall_low_trust_withheld", withheld=len(result.memories) - len(kept))
+        result.memories = kept
+        result.context = "\n\n".join(m.content for m in kept)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -509,6 +549,9 @@ async def batch_store(
     items = body.items
     semaphore = asyncio.Semaphore(settings.batch_store_concurrency)
 
+    # Plan limits apply to the whole batch, not just single stores (SEC-11).
+    await enforce_store_quota(request, current_user.user_id, len(items))
+
     async def store_item(i: int, item: StoreRequest) -> BatchStoreResult:
         # Enforce authenticated user
         item.user_id = current_user.user_id
@@ -517,29 +560,25 @@ async def batch_store(
         except HTTPException as e:
             return BatchStoreResult(index=i, success=False, error=str(e.detail))
 
-        # PII Detection for batch items
-        if pii_detector:
-            pii_result = pii_detector.scan(item.content, source="batch_input")
-            if pii_result.has_pii:
-                if pii_result.blocked:
-                    return BatchStoreResult(index=i, success=False, error=f"PII_DETECTED: {[m.type for m in pii_result.matches]}")
-                elif pii_result.redacted_content:
-                    item.content = pii_result.redacted_content
-
-        # SECURITY: XSS sanitization; trust score + checksum are persisted like
-        # single stores (ING-21: previously dropped for batch items).
-        sanitization = None
-        if settings.sanitization_enabled:
-            sanitization = sanitizer.analyze(item.content, source="batch_input")
-            item.content = sanitization.content
+        # Same PII + injection policy as single store; trust score + checksum are
+        # persisted like single stores (SEC-13, ING-21).
+        prepared = prepare_content(
+            request.app.state,
+            item.content,
+            source="batch_input",
+            sanitization_enabled=settings.sanitization_enabled,
+        )
+        if prepared.blocked:
+            return BatchStoreResult(index=i, success=False, error=f"PII_DETECTED: {prepared.blocked_pii_types}")
+        item.content = prepared.content
 
         async with semaphore:
             try:
                 resp = await memory_service.store(
                     item,
                     source="user_input",
-                    trust_score=sanitization.trust_score if sanitization else 1.0,
-                    checksum=sanitization.checksum if sanitization else None,
+                    trust_score=prepared.trust_score,
+                    checksum=prepared.checksum,
                     skip_extraction=body.skip_extraction or item.skip_extraction,
                 )
                 return BatchStoreResult(index=i, success=True, response=resp)
@@ -555,6 +594,8 @@ async def batch_store(
 
     results = list(await asyncio.gather(*(store_item(i, item) for i, item in enumerate(items))))
     succeeded = sum(1 for r in results if r.success)
+
+    await record_store_usage(request, current_user.user_id, succeeded)
 
     await audit_logger.log_memory_store(
         user_id=current_user.user_id,
@@ -644,13 +685,36 @@ async def bulk_import(
     # Resolve project
     project_id = resolve_project_access(current_user, body.items[0].project_id if body.items else None) or "default"
 
+    # Plan limits + PII/injection policy apply to the fast path too (SEC-11/SEC-13).
+    await enforce_store_quota(request, current_user.user_id, len(body.items))
+    items = []
+    embeddings: list[list[float]] | None = [] if body.embeddings is not None else None
+    policy_errors: list[dict[str, Any]] = []
+    for i, item in enumerate(body.items):
+        prepared = prepare_content(
+            request.app.state,
+            item.content,
+            source="bulk_import",
+            sanitization_enabled=get_settings().sanitization_enabled,
+        )
+        if prepared.blocked:
+            policy_errors.append({"index": i, "error": f"PII_DETECTED: {prepared.blocked_pii_types}"})
+            continue
+        item.content = prepared.content
+        items.append(item)
+        if embeddings is not None and body.embeddings is not None:
+            embeddings.append(body.embeddings[i])
+    if not items:
+        return {"status": "ok", "stored": 0, "errors": policy_errors}
+
     try:
         result = await memory_service.bulk_import(
-            items=body.items,
+            items=items,
             user_id=current_user.user_id,
             project_id=project_id,
-            embeddings=body.embeddings,
+            embeddings=embeddings,
         )
+        await record_store_usage(request, current_user.user_id, int(result.get("stored", 0)))
 
         await audit_logger.log_memory_store(
             user_id=current_user.user_id,
@@ -663,14 +727,14 @@ async def bulk_import(
         return {
             "status": "ok",
             "stored": result.get("stored", 0),
-            "errors": result.get("errors", []),
+            "errors": policy_errors + list(result.get("errors", [])),
         }
 
     except Exception as e:
         log.error("bulk_import_failed", error=str(e), user_id=current_user.user_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Bulk import failed: {str(e)}",
+            detail="Bulk import failed.",
         ) from e
 
 
@@ -720,6 +784,9 @@ async def batch_recall(
 
     results: list[RecallResponse] = []
 
+    # Every query counts against the plan's recall limit (SEC-11).
+    await enforce_recall_quota(request, current_user.user_id, len(body.queries))
+
     for query in body.queries:
         # Enforce authenticated user
         query.user_id = current_user.user_id
@@ -730,7 +797,9 @@ async def batch_recall(
         query.project_id = resolve_project_access(current_user, query.project_id)
 
         resp = await memory_service.recall(query)
-        results.append(resp)
+        results.append(await _apply_trust_policy(memory_service, resp, include_low_trust=False))
+
+    await record_recall_usage(request, current_user.user_id, len(body.queries))
 
     return BatchRecallResponse(
         results=results,
@@ -756,6 +825,9 @@ async def recall_memories(
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
     _limit: EnforceRecallLimit = None,
+    include_low_trust: Annotated[
+        bool, Query(description="Include memories flagged as possible prompt injection (trust below threshold)")
+    ] = False,
 ) -> RecallResponse:
     """
     Embed the query, perform semantic search, synthesise a context string.
@@ -792,6 +864,7 @@ async def recall_memories(
 
     try:
         result = await memory_service.recall(body)
+        result = await _apply_trust_policy(memory_service, result, include_low_trust)
 
         # Audit log
         await audit_logger.log_memory_recall(
@@ -939,7 +1012,10 @@ async def get_memory(
     if project_id:
         resolve_project_access(current_user, project_id)
 
-    return result
+    # SEC-23: never hand back stored credentials (rows predating redaction).
+    from remembra.security.secrets import scrub_memory_record
+
+    return scrub_memory_record(result)
 
 
 # ---------------------------------------------------------------------------
@@ -1124,6 +1200,8 @@ async def supersede_memory(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Permission denied: memory:store required",
         )
+    # Ownership + project scope of the memory being superseded (SEC-14).
+    await _require_owned_memory(memory_service, memory_id, current_user)
 
     # SECURITY: XSS sanitization for new content
     sanitization = sanitizer.analyze(body.new_content, source="user_input")
@@ -1238,14 +1316,25 @@ async def submit_feedback(
 # ---------------------------------------------------------------------------
 
 
-async def _require_owned_memory(memory_service: Any, memory_id: str, user_id: str) -> dict[str, Any]:
-    """Fetch a memory and 404 unless it belongs to the caller."""
+async def _require_owned_memory(
+    memory_service: Any,
+    memory_id: str,
+    user: Any,
+    permission: str = "memory:store",
+) -> dict[str, Any]:
+    """Fetch a memory; 403 without ``permission``, 404 unless owned, 403 outside the key's projects."""
+    if not has_permission(user, permission):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied: {permission} required",
+        )
     memory = await memory_service.get(memory_id)
-    if not memory or memory.get("user_id") != user_id:
+    if not memory or memory.get("user_id") != user.user_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Memory {memory_id} not found",
         )
+    resolve_project_access(user, memory.get("project_id") or "default")
     result: dict[str, Any] = memory
     return result
 
@@ -1259,7 +1348,7 @@ async def pin_memory(
     current_user: CurrentUser,
 ) -> SalienceResponse:
     """Pin a memory so it is never pruned by temporal decay or TTL expiration."""
-    await _require_owned_memory(memory_service, memory_id, current_user.user_id)
+    await _require_owned_memory(memory_service, memory_id, current_user)
     await memory_service.db.set_memory_pin(memory_id, current_user.user_id, True)
     log.info("memory_pinned", memory_id=memory_id, user_id=current_user.user_id)
     return SalienceResponse(memory_id=memory_id, pinned=True)
@@ -1274,7 +1363,7 @@ async def unpin_memory(
     current_user: CurrentUser,
 ) -> SalienceResponse:
     """Remove decay protection from a previously pinned memory."""
-    await _require_owned_memory(memory_service, memory_id, current_user.user_id)
+    await _require_owned_memory(memory_service, memory_id, current_user)
     await memory_service.db.set_memory_pin(memory_id, current_user.user_id, False)
     log.info("memory_unpinned", memory_id=memory_id, user_id=current_user.user_id)
     return SalienceResponse(memory_id=memory_id, pinned=False)
@@ -1290,7 +1379,7 @@ async def set_memory_importance(
     current_user: CurrentUser,
 ) -> SalienceResponse:
     """Set a memory's importance (salience) in [0,1]. Higher importance decays slower."""
-    await _require_owned_memory(memory_service, memory_id, current_user.user_id)
+    await _require_owned_memory(memory_service, memory_id, current_user)
     await memory_service.db.set_memory_importance(memory_id, current_user.user_id, body.importance)
     log.info("memory_importance_set", memory_id=memory_id, importance=body.importance, user_id=current_user.user_id)
     return SalienceResponse(memory_id=memory_id, importance=body.importance)

@@ -1,15 +1,20 @@
 """User model and password hashing for authentication."""
 
 import hashlib
+import hmac
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import lru_cache
 from typing import Any
 
 import bcrypt
 import jwt
 import structlog
 
+from remembra.security import state as security_state
+from remembra.security.encryption import FieldEncryptor
 from remembra.storage.database import Database
 
 log = structlog.get_logger(__name__)
@@ -18,6 +23,22 @@ log = structlog.get_logger(__name__)
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24  # 24 hours (tightened from 7 days - March 22, 2026)
 PASSWORD_RESET_EXPIRATION_HOURS = 24
+
+_TOTP_KEY_CONTEXT = "remembra-totp-secret-v1"
+
+
+@lru_cache(maxsize=4)
+def _totp_encryptor(key_material: str) -> FieldEncryptor:
+    """AES-256-GCM encryptor for TOTP secrets (key derivation is expensive, so cache it)."""
+    return FieldEncryptor(key=f"{_TOTP_KEY_CONTEXT}:{key_material}")
+
+
+def _totp_key_material() -> str:
+    """Key for TOTP-secret encryption: the at-rest encryption key if set, else the JWT secret."""
+    from remembra.config import get_settings
+
+    settings = get_settings()
+    return settings.encryption_key or settings.jwt_secret
 
 
 @dataclass
@@ -86,6 +107,9 @@ class UserManager:
             "sub": user_id,
             "email": email,
             "iat": datetime.now(UTC),
+            # Millisecond issue time so a password change/logout-all can reject
+            # every token issued before it, even within the same second.
+            "iat_ms": int(time.time() * 1000),
             "exp": datetime.now(UTC) + timedelta(hours=JWT_EXPIRATION_HOURS),
             "type": "access",
         }
@@ -137,7 +161,7 @@ class UserManager:
             created_at=created_at,
         )
 
-        log.info("user_created", user_id=user_id, email=email)
+        log.info("user_created", user_id=user_id)
 
         return User(
             id=user_id,
@@ -161,15 +185,15 @@ class UserManager:
         user_data = await self.db.get_user_by_email(email.lower().strip())
 
         if not user_data:
-            log.warning("login_failed_user_not_found", email=email)
+            log.warning("login_failed_user_not_found")
             return None, None, "Invalid email or password"
 
         if not user_data.get("is_active", True):
-            log.warning("login_failed_user_inactive", email=email)
+            log.warning("login_failed_user_inactive", user_id=user_data["id"])
             return None, None, "Account is deactivated"
 
         if not self.verify_password(password, user_data["password_hash"]):
-            log.warning("login_failed_wrong_password", email=email)
+            log.warning("login_failed_wrong_password", user_id=user_data["id"])
             return None, None, "Invalid email or password"
 
         # Update last login
@@ -188,7 +212,7 @@ class UserManager:
 
         token = self.create_jwt_token(user.id, user.email)
 
-        log.info("user_logged_in", user_id=user.id, email=email)
+        log.info("user_logged_in", user_id=user.id)
 
         return user, token, None
 
@@ -219,7 +243,7 @@ class UserManager:
 
         if not user_data:
             # Don't reveal if email exists or not for security
-            log.debug("password_reset_requested_unknown_email", email=email)
+            log.debug("password_reset_requested_unknown_email")
             return None, None  # Return None for both - frontend shows generic message
 
         reset_token = self.generate_reset_token()
@@ -278,6 +302,9 @@ class UserManager:
 
         # Delete the used reset token
         await self.db.delete_password_reset_token(user_data["id"])
+
+        # A reset means the old password may be compromised: kill every session.
+        await security_state.invalidate_user_sessions(self.db, user_data["id"])
 
         log.info("password_reset_successful", user_id=user_data["id"])
 
@@ -361,6 +388,9 @@ class UserManager:
         new_password_hash = self.hash_password(new_password)
         await self.db.update_user_password(user_id, new_password_hash)
 
+        # Invalidate all previously issued tokens (including the caller's).
+        await security_state.invalidate_user_sessions(self.db, user_id)
+
         log.info("password_changed", user_id=user_id)
 
         return True, None
@@ -389,6 +419,9 @@ class UserManager:
         success = await self.db.deactivate_user(user_id)
         if not success:
             return False, "Failed to deactivate account"
+
+        # Cut off API access too: revoke keys and invalidate every session.
+        await revoke_user_access(self.db, user_id)
 
         log.info("account_deactivated", user_id=user_id)
 
@@ -421,8 +454,8 @@ class UserManager:
         totp = pyotp.TOTP(secret)
         provisioning_uri = totp.provisioning_uri(name=user_data["email"], issuer_name="Remembra")
 
-        # Store secret (not yet enabled)
-        await self.db.save_totp_secret(user_id, secret)
+        # Store secret encrypted at rest (not yet enabled)
+        await self.db.save_totp_secret(user_id, self.encrypt_totp_secret(secret))
 
         log.info("totp_setup_initiated", user_id=user_id)
 
@@ -443,13 +476,13 @@ class UserManager:
         if not user_data:
             return False, "User not found"
 
-        secret = user_data.get("totp_secret")
+        secret = self.decrypt_totp_secret(user_data.get("totp_secret"))
         if not secret:
             return False, "2FA setup not initiated. Call setup first."
 
-        # Verify the code
-        totp = pyotp.TOTP(secret)
-        if not totp.verify(code, valid_window=1):
+        # Verify the code (single use: a code cannot be replayed)
+        step = self._match_totp_step(pyotp.TOTP(secret), code)
+        if step is None or not await security_state.claim_totp_step(self.db, user_id, step):
             return False, "Invalid verification code"
 
         # Enable 2FA
@@ -495,14 +528,75 @@ class UserManager:
         if not user_data:
             return False
 
-        secret = user_data.get("totp_secret")
+        stored = user_data.get("totp_secret")
+        secret = self.decrypt_totp_secret(stored)
         if not secret:
             return False
 
-        totp = pyotp.TOTP(secret)
-        return totp.verify(code, valid_window=1)
+        step = self._match_totp_step(pyotp.TOTP(secret), code)
+        if step is None:
+            return False
+        # Replay protection: each time-step's code is accepted at most once.
+        if not await security_state.claim_totp_step(self.db, user_id, step):
+            log.warning("totp_replay_rejected", user_id=user_id)
+            return False
+        # Opportunistically migrate a legacy plaintext secret to ciphertext.
+        if stored and not str(stored).startswith("enc:v1:"):
+            await self.db.save_totp_secret(user_id, self.encrypt_totp_secret(secret))
+        return True
+
+    @staticmethod
+    def _match_totp_step(totp: Any, code: str) -> int | None:
+        """Return the time-step (±1 window) whose code equals ``code``, else None."""
+        if not code or not code.isdigit():
+            return None
+        now = datetime.now(UTC)
+        current = int(totp.timecode(now))
+        for offset in (0, -1, 1):
+            step = current + offset
+            if hmac.compare_digest(str(totp.generate_otp(step)), code):
+                return step
+        return None
+
+    @staticmethod
+    def encrypt_totp_secret(secret: str) -> str:
+        return _totp_encryptor(_totp_key_material()).encrypt(secret)
+
+    @staticmethod
+    def decrypt_totp_secret(stored: str | None) -> str | None:
+        """Decrypt a stored TOTP secret; legacy plaintext values are returned as-is."""
+        if not stored:
+            return None
+        if not str(stored).startswith("enc:v1:"):
+            return str(stored)
+        try:
+            return _totp_encryptor(_totp_key_material()).decrypt(stored)
+        except Exception:
+            log.error("totp_secret_decrypt_failed")
+            return None
 
     async def is_totp_enabled(self, user_id: str) -> bool:
         """Check if 2FA is enabled for user."""
         user_data = await self.db.get_user_by_id(user_id)
         return user_data.get("totp_enabled", False) if user_data else False
+
+
+async def revoke_user_access(db: Database, user_id: str) -> int:
+    """Revoke every active API key for ``user_id`` and invalidate all JWTs.
+
+    Used on account deactivation so neither dashboard sessions nor API keys keep
+    working. Keys are soft-revoked (``active = FALSE``), never deleted.
+    Returns the number of keys revoked.
+    """
+    from remembra.auth import keys as keys_module
+
+    cursor = await db.conn.execute(
+        "UPDATE api_keys SET active = FALSE WHERE user_id = ? AND active = TRUE",
+        (user_id,),
+    )
+    await db.conn.commit()
+    revoked: int = cursor.rowcount or 0
+    keys_module.evict_user_from_cache(user_id)
+    await security_state.invalidate_user_sessions(db, user_id)
+    log.info("user_access_revoked", user_id=user_id, keys_revoked=revoked)
+    return revoked

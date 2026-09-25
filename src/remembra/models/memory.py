@@ -6,6 +6,14 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+
+def _scrub_secrets(value: str) -> str:
+    """Redact credentials (SEC-23). Imported lazily: remembra.security imports storage, which imports these models."""
+    from remembra.security.secrets import scrub
+
+    return scrub(value)
+
+
 # Agent-hygiene types (AGT-5): "checkpoint" = short-lived progress note (default
 # TTL applied on store), "handoff" = a session snapshot stored as ONE unit (never
 # fact-split), "status" = current value for a key, upserted via the session
@@ -114,7 +122,13 @@ class Memory(BaseModel):
     def content_not_empty(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("content must not be empty")
-        return v.strip()
+        # SEC-23: credentials are never persisted (every write path builds a Memory).
+        return _scrub_secrets(v.strip())
+
+    @field_validator("extracted_facts")
+    @classmethod
+    def facts_without_secrets(cls, v: list[str]) -> list[str]:
+        return [_scrub_secrets(f) for f in v]
 
 
 RETRIEVAL_MODES = ("auto", "balanced", "debug", "operational", "strategic")
@@ -169,7 +183,9 @@ class StoreRequest(BaseModel):
         import re
 
         v = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", v)
-        return v.strip()
+        # SEC-23: redact credentials before anything (LLM extraction, embedding,
+        # source row, FTS) ever sees them.
+        return _scrub_secrets(v.strip())
 
     @field_validator("visibility")
     @classmethod
@@ -248,6 +264,12 @@ class StoreResponse(BaseModel):
     extraction: str | None = Field(
         default=None, description="How facts were produced: llm | fallback | disabled | verbatim | skipped"
     )
+
+    @field_validator("extracted_facts")
+    @classmethod
+    def facts_without_secrets(cls, v: list[str]) -> list[str]:
+        return [_scrub_secrets(f) for f in v]
+
     expires_at: datetime | None = Field(
         default=None,
         description="When this memory will expire (set when ttl was provided on store).",
@@ -450,6 +472,20 @@ class RecallResult(BaseModel):
     superseded_by: str | None = Field(default=None, description="Newer memory that replaced this one, if any")
     expires_at: datetime | None = Field(default=None, description="When this memory expires, if it has a TTL")
     decay_score: float | None = Field(default=None, description="Age/access decay score (only when include_decay_score=true)")
+    trust_score: float | None = Field(
+        default=None,
+        description=(
+            "Prompt-injection trust score recorded when the memory was written (1.0 = clean). "
+            "Memories below the server threshold are withheld from recall unless include_low_trust=true."
+        ),
+    )
+
+    @field_validator("content")
+    @classmethod
+    def content_without_secrets(cls, v: str) -> str:
+        # SEC-23 defense in depth: rows stored before redaction existed are
+        # scrubbed on the way out.
+        return _scrub_secrets(v)
 
 
 class DivergenceDetail(BaseModel):
@@ -468,6 +504,11 @@ class DivergenceDetail(BaseModel):
         default="Review both memories - they may represent evolving information",
         description="Guidance for the consumer on how to handle the divergence",
     )
+
+    @field_validator("semantic_content", "recency_content")
+    @classmethod
+    def content_without_secrets(cls, v: str) -> str:
+        return _scrub_secrets(v)
 
 
 class RecallResponse(BaseModel):
@@ -503,6 +544,11 @@ class RecallResponse(BaseModel):
         default=None, description="Where the mode came from: request | rules | jev | default"
     )
 
+    @field_validator("context")
+    @classmethod
+    def context_without_secrets(cls, v: str) -> str:
+        return _scrub_secrets(v)
+
 
 class MemorySummary(BaseModel):
     """Browsable memory shape used by dashboard list/detail surfaces."""
@@ -520,10 +566,20 @@ class MemorySummary(BaseModel):
     entities: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("content")
+    @classmethod
+    def content_without_secrets(cls, v: str) -> str:
+        return _scrub_secrets(v)
+
 
 class UpdateRequest(BaseModel):
     content: str
     metadata: dict[str, Any] | None = None
+
+    @field_validator("content")
+    @classmethod
+    def content_without_secrets(cls, v: str) -> str:
+        return _scrub_secrets(v)
 
 
 class UpdateResponse(BaseModel):
@@ -553,6 +609,11 @@ class SupersedeRequest(BaseModel):
         default=None,
         description="Optional metadata to attach to the new memory",
     )
+
+    @field_validator("new_content")
+    @classmethod
+    def content_without_secrets(cls, v: str) -> str:
+        return _scrub_secrets(v)
 
 
 class SupersedeResponse(BaseModel):
@@ -665,7 +726,8 @@ class ConversationMessage(BaseModel):
     def content_length_limit(cls, v: str) -> str:
         if len(v) > 50000:
             raise ValueError("Content exceeds maximum length of 50,000 characters")
-        return v
+        # SEC-23: redact before conversation extraction sends it to the LLM.
+        return _scrub_secrets(v)
 
 
 class IngestOptions(BaseModel):
@@ -726,6 +788,11 @@ class ExtractedFact(BaseModel):
     )
     action_reason: str | None = None
 
+    @field_validator("content")
+    @classmethod
+    def content_without_secrets(cls, v: str) -> str:
+        return _scrub_secrets(v)
+
 
 class ExtractedEntityResult(BaseModel):
     """An entity extracted from conversation."""
@@ -742,6 +809,11 @@ class DedupeResult(BaseModel):
     content: str
     existing_memory_id: str
     action: str = Field(description="'skipped' (already known) | 'superseded' (existing memory retired)")
+
+    @field_validator("content")
+    @classmethod
+    def content_without_secrets(cls, v: str) -> str:
+        return _scrub_secrets(v)
 
 
 class IngestStats(BaseModel):

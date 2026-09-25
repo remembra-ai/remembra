@@ -12,16 +12,36 @@ import time
 from datetime import UTC, datetime
 from typing import Annotated, Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, resolve_project_access
+from remembra.auth.middleware import CurrentUser, require_memory_recall, resolve_project_access
+from remembra.auth.superadmin import RequireSuperadmin
+from remembra.cloud.plans import get_plan
 from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
 from remembra.models.memory import RecallRequest
 from remembra.services.memory import MemoryService
 
-router = APIRouter(prefix="/debug", tags=["debug"])
+# Debug endpoints read the caller's memories/graph: memory:recall is required.
+router = APIRouter(prefix="/debug", tags=["debug"], dependencies=[require_memory_recall()])
+
+log = structlog.get_logger(__name__)
+
+
+async def require_observability_plan(request: Request, current_user: CurrentUser) -> None:
+    """Plan gate for scoring internals (``has_observability``); no-op when cloud billing is off."""
+    meter = getattr(request.app.state, "usage_meter", None)
+    if meter is None:
+        return
+    plan = await meter.get_tenant_plan(current_user.user_id)
+    if not get_plan(plan).has_observability:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Recall debugging requires a plan with observability (Pro or higher).",
+        )
+
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
@@ -144,6 +164,7 @@ class MemoryTimelineResponse(BaseModel):
     "/recall",
     response_model=DebugRecallResponse,
     summary="Debug a recall query with full scoring breakdown",
+    dependencies=[Depends(require_observability_plan)],
 )
 @limiter.limit("30/minute")
 async def debug_recall(
@@ -199,10 +220,11 @@ async def debug_recall(
     try:
         result = await memory_service.recall(body)
     except Exception as e:
+        log.error("debug_recall_failed", error_type=type(e).__name__, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Recall failed: {str(e)}",
-        )
+            detail="Recall failed.",
+        ) from e
 
     elapsed_ms = (time.monotonic() - start) * 1000
 
@@ -691,10 +713,12 @@ async def run_calibration_endpoint(
     request: Request,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
+    _superadmin: RequireSuperadmin,
     samples: int = Query(default=20, ge=5, le=100, description="Number of samples to run"),
 ) -> CalibrationRunResponse:
     """
-    Run calibration to measure p99 latency.
+    Run calibration to measure p99 latency. **Platform superadmin only** — the
+    result is a server-wide cache file used for every tenant.
 
     This performs multiple recall operations to measure performance.
     Results are cached to ~/.remembra/calibration.json.

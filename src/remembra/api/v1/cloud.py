@@ -443,7 +443,7 @@ async def validate_promo_code(
     """Validate a promo code without redeeming it."""
     from remembra.cloud.promocodes import PromoCodeManager
 
-    manager = PromoCodeManager()
+    manager = PromoCodeManager(request.app.state.db)
     result = await manager.validate(body.code, user.user_id)
 
     return PromoResponse(
@@ -472,16 +472,19 @@ async def redeem_promo_code(
     """Redeem a promo code for the current user."""
     from remembra.cloud.promocodes import PromoCodeManager
 
-    manager = PromoCodeManager()
+    db = request.app.state.db
+    manager = PromoCodeManager(db)
 
     # Get user's Stripe customer ID if they have one
     tenant_info = await meter.get_tenant(user.user_id)
     stripe_customer_id = tenant_info.get("stripe_customer_id") if tenant_info else None
 
     # Fetch email from database (AuthenticatedUser doesn't carry email)
-    db = request.app.state.db
     user_data = await db.get_user_by_id(user.user_id)
     user_email = user_data.get("email") if user_data else None
+    if tenant_info is None:
+        # update_plan only updates existing tenant rows.
+        await meter.register_tenant(user.user_id, plan=PlanTier.FREE, email=user_email)
 
     result = await manager.redeem(
         code=body.code,
@@ -519,8 +522,8 @@ async def list_promo_codes(request: Request) -> PromoListResponse:
     """List all active promo codes (admin only)."""
     from remembra.cloud.promocodes import PromoCodeManager
 
-    manager = PromoCodeManager()
-    codes = manager.list_active_codes()
+    manager = PromoCodeManager(request.app.state.db)
+    codes = await manager.list_active_codes()
 
     return PromoListResponse(codes=codes)
 
@@ -535,8 +538,8 @@ async def get_promo_stats(request: Request, code: str) -> dict[str, Any]:
     """Get stats for a specific promo code (admin only)."""
     from remembra.cloud.promocodes import PromoCodeManager
 
-    manager = PromoCodeManager()
-    stats = manager.get_stats(code)
+    manager = PromoCodeManager(request.app.state.db)
+    stats = await manager.get_stats(code)
 
     if not stats:
         raise HTTPException(

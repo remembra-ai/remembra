@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser
+from remembra.auth.middleware import CurrentUser, require_webhook_manage
 from remembra.core.limiter import limiter
 from remembra.webhooks.events import ALL_EVENT_TYPES
 from remembra.webhooks.manager import WebhookManager
@@ -80,6 +80,7 @@ class DeliveryResponse(BaseModel):
     "",
     status_code=status.HTTP_201_CREATED,
     summary="Register a webhook",
+    dependencies=[require_webhook_manage()],
 )
 @limiter.limit("10/minute")
 async def register_webhook(
@@ -108,6 +109,7 @@ async def register_webhook(
     "",
     response_model=WebhookListResponse,
     summary="List webhooks",
+    dependencies=[require_webhook_manage()],
 )
 @limiter.limit("30/minute")
 async def list_webhooks(
@@ -123,6 +125,7 @@ async def list_webhooks(
 @router.get(
     "/{webhook_id}",
     summary="Get webhook details",
+    dependencies=[require_webhook_manage()],
 )
 @limiter.limit("30/minute")
 async def get_webhook(
@@ -144,6 +147,7 @@ async def get_webhook(
 @router.patch(
     "/{webhook_id}",
     summary="Update a webhook",
+    dependencies=[require_webhook_manage()],
 )
 @limiter.limit("10/minute")
 async def update_webhook(
@@ -179,6 +183,7 @@ async def update_webhook(
 @router.delete(
     "/{webhook_id}",
     summary="Delete a webhook",
+    dependencies=[require_webhook_manage()],
 )
 @limiter.limit("10/minute")
 async def delete_webhook(
@@ -201,6 +206,7 @@ async def delete_webhook(
     "/{webhook_id}/deliveries",
     response_model=DeliveryResponse,
     summary="Get webhook delivery history",
+    dependencies=[require_webhook_manage()],
 )
 @limiter.limit("30/minute")
 async def get_deliveries(

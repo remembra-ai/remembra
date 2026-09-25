@@ -76,6 +76,15 @@ class UsageMeter:
         except Exception:
             pass  # Column already exists
 
+        # Promo trials store an expiry; update_plan() has always written it, but
+        # the column was never created, so every redemption failed.
+        try:
+            await self._db.conn.execute("ALTER TABLE cloud_tenants ADD COLUMN promo_expires_at TEXT")
+            await self._db.conn.commit()
+            logger.info("Added promo_expires_at column to cloud_tenants")
+        except Exception:
+            pass  # Column already exists
+
     # -----------------------------------------------------------------------
     # Tenant management
     # -----------------------------------------------------------------------
@@ -150,17 +159,31 @@ class UsageMeter:
         Owner emails configured via REMEMBRA_OWNER_EMAILS automatically
         get Enterprise access without requiring database entries.
         """
-        # Owner bypass: check if user's email is in owner_emails
+        # Owner bypass: only for a *verified* owner account (or an explicit
+        # superadmin user id) — an unverified signup claiming an owner address
+        # must not get Enterprise.
         settings = get_settings()
-        if settings.owner_emails:
-            email = await self.get_user_email(user_id)
-            if email and email.lower() in [e.lower() for e in settings.owner_emails]:
-                logger.info(f"Owner bypass: {email} → Enterprise")
+        if settings.owner_emails or settings.superadmin_user_ids:
+            from remembra.auth.superadmin import account_is_owner
+
+            cursor = await self._db.conn.execute("SELECT * FROM users WHERE id = ?", (user_id,))
+            user_row = await cursor.fetchone()
+            if user_row is not None and account_is_owner(dict(user_row)):
+                logger.debug("owner_plan_bypass user=%s", user_id)
                 return PlanTier.ENTERPRISE
 
         tenant = await self.get_tenant(user_id)
         if tenant is None:
             return PlanTier.FREE
+        # A promo trial ends at promo_expires_at unless a paid subscription exists.
+        promo_expires = tenant.get("promo_expires_at")
+        if promo_expires and not tenant.get("stripe_subscription_id"):
+            try:
+                expired = datetime.fromisoformat(str(promo_expires)).replace(tzinfo=None) < datetime.now(UTC).replace(tzinfo=None)
+            except ValueError:
+                expired = False
+            if expired:
+                return PlanTier.FREE
         return PlanTier(tenant["plan"])
 
     async def update_plan(
@@ -198,29 +221,33 @@ class UsageMeter:
     # Usage tracking
     # -----------------------------------------------------------------------
 
-    async def record_store(self, user_id: str) -> None:
-        """Record a memory store event."""
-        await self._increment(user_id, "stores")
+    async def record_store(self, user_id: str, count: int = 1) -> None:
+        """Record ``count`` memory store events."""
+        await self._increment(user_id, "stores", count)
 
-    async def record_recall(self, user_id: str) -> None:
-        """Record a memory recall event."""
-        await self._increment(user_id, "recalls")
+    async def record_recall(self, user_id: str, count: int = 1) -> None:
+        """Record ``count`` memory recall events."""
+        await self._increment(user_id, "recalls", count)
 
     async def record_delete(self, user_id: str) -> None:
         """Record a memory delete event."""
         await self._increment(user_id, "deletes")
 
-    async def _increment(self, user_id: str, column: str) -> None:
-        """Increment a daily usage counter."""
+    async def _increment(self, user_id: str, column: str, amount: int = 1) -> None:
+        """Increment a daily usage counter by ``amount``."""
+        if column not in ("stores", "recalls", "deletes"):
+            raise ValueError(f"Unknown usage counter: {column}")
+        if amount <= 0:
+            return
         today = datetime.now(UTC).strftime("%Y-%m-%d")
         await self._db.conn.execute(
             f"""
             INSERT INTO cloud_usage_daily (user_id, date, {column})
-            VALUES (?, ?, 1)
+            VALUES (?, ?, ?)
             ON CONFLICT(user_id, date) DO UPDATE SET
-                {column} = {column} + 1
+                {column} = {column} + excluded.{column}
             """,
-            (user_id, today),
+            (user_id, today, amount),
         )
         await self._db.conn.commit()
 

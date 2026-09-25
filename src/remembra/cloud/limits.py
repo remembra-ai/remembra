@@ -318,18 +318,63 @@ async def enforce_key_limit(
 # -----------------------------------------------------------------------
 
 
-async def record_store_usage(request: Request, user_id: str) -> None:
-    """Record a store event in usage metering (no-op if cloud disabled)."""
+async def record_store_usage(request: Request, user_id: str, count: int = 1) -> None:
+    """Record ``count`` store events in usage metering (no-op if cloud disabled)."""
     meter = _get_meter_or_none(request)
-    if meter is not None:
-        await meter.record_store(user_id)
+    if meter is not None and count > 0:
+        await meter.record_store(user_id, count)
 
 
-async def record_recall_usage(request: Request, user_id: str) -> None:
-    """Record a recall event in usage metering (no-op if cloud disabled)."""
+async def record_recall_usage(request: Request, user_id: str, count: int = 1) -> None:
+    """Record ``count`` recall events in usage metering (no-op if cloud disabled)."""
     meter = _get_meter_or_none(request)
-    if meter is not None:
-        await meter.record_recall(user_id)
+    if meter is not None and count > 0:
+        await meter.record_recall(user_id, count)
+
+
+def _quota_exceeded(reason: str, limit: int) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=reason,
+        headers={"X-RateLimit-Limit": str(limit), "X-RateLimit-Remaining": "0"},
+    )
+
+
+async def enforce_store_quota(request: Request, user_id: str, count: int = 1) -> None:
+    """Reject (429) a write of ``count`` memories that would exceed the plan.
+
+    Used by every multi-item write path (batch, bulk, import, ingest) so they
+    cannot bypass the per-request ``EnforceStoreLimit`` dependency.
+    No-op when cloud features are disabled.
+    """
+    meter = _get_meter_or_none(request)
+    if meter is None or count <= 0:
+        return
+    snapshot = await meter.get_usage_snapshot(user_id)
+    plan_limits = get_plan(snapshot.plan)
+    if snapshot.memories_stored + count > plan_limits.max_memories:
+        logger.warning("store_quota_exceeded", user_id=user_id, requested=count, plan=snapshot.plan.value)
+        raise _quota_exceeded(f"Memory limit reached ({plan_limits.max_memories:,} memories)", plan_limits.max_memories)
+    if snapshot.stores_this_month + count > plan_limits.max_stores_per_month:
+        logger.warning("monthly_store_quota_exceeded", user_id=user_id, requested=count, plan=snapshot.plan.value)
+        raise _quota_exceeded(
+            f"Monthly store limit reached ({plan_limits.max_stores_per_month:,}/mo)", plan_limits.max_stores_per_month
+        )
+
+
+async def enforce_recall_quota(request: Request, user_id: str, count: int = 1) -> None:
+    """Reject (429) ``count`` recalls that would exceed the plan's monthly recall limit."""
+    meter = _get_meter_or_none(request)
+    if meter is None or count <= 0:
+        return
+    snapshot = await meter.get_usage_snapshot(user_id)
+    plan_limits = get_plan(snapshot.plan)
+    if snapshot.recalls_this_month + count > plan_limits.max_recalls_per_month:
+        logger.warning("recall_quota_exceeded", user_id=user_id, requested=count, plan=snapshot.plan.value)
+        raise _quota_exceeded(
+            f"Monthly recall limit reached ({plan_limits.max_recalls_per_month:,}/mo)",
+            plan_limits.max_recalls_per_month,
+        )
 
 
 async def record_delete_usage(request: Request, user_id: str) -> None:

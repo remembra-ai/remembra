@@ -29,7 +29,7 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request, status
 
 from remembra.auth.middleware import AuthenticatedUser, get_current_user
-from remembra.auth.rbac import KeyRole, Permission, Role, RoleManager
+from remembra.auth.rbac import SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,11 @@ async def _get_key_role(
     user: AuthenticatedUser = Depends(get_current_user),
 ) -> KeyRole:
     """Resolve the KeyRole for the current authenticated user's API key."""
+    if user.api_key_id in SYNTHETIC_KEY_IDS:
+        # Dashboard (JWT) and dev sessions are not API keys: they must never pick up
+        # a role row stored under the shared synthetic id, which would apply to
+        # every such session at once.
+        return KeyRole(api_key_id=user.api_key_id, role=Role.EDITOR)
     manager = await _get_role_manager(request)
     if manager is None:
         # RBAC not enabled — grant full editor permissions (backwards-compatible)

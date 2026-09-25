@@ -393,6 +393,21 @@ class Settings(BaseSettings):
     # Rate Limiting
     rate_limit_enabled: bool = Field(True, description="Enable rate limiting")
     rate_limit_storage: str = Field("memory", description="Rate limit storage backend: 'memory' or 'redis://...'")
+    trusted_proxies: list[str] = Field(
+        default_factory=lambda: ["127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"],
+        description=(
+            "CIDRs of reverse proxies whose X-Forwarded-For / X-Real-IP headers are trusted. "
+            "Forwarding headers from any other peer are ignored. Set to [] when the API is exposed directly."
+        ),
+    )
+    superadmin_user_ids: list[str] = Field(
+        default_factory=list,
+        description="User IDs with platform superadmin access (in addition to verified owner_emails).",
+    )
+    secret_redaction_enabled: bool = Field(
+        True,
+        description="Redact credentials (API keys, tokens, private keys) from memory content on write and on read.",
+    )
 
     # Input Sanitization
     sanitization_enabled: bool = Field(True, description="Enable input sanitization and trust scoring")
@@ -501,7 +516,12 @@ class Settings(BaseSettings):
     pending_embeddings_batch_size: int = Field(20, description="Rows claimed per worker iteration")
     pending_embeddings_max_attempts: int = Field(12, description="Retryable failures before a pending embedding is dead-lettered")
     temporal_cleanup_enabled: bool = Field(
-        True, description="Run the TTL cleanup loop (expired memories are archived, not deleted)"
+        False,
+        description=(
+            "Run the TTL cleanup loop (expired memories are archived, not deleted). Off by default "
+            "until existing rows are audited: the pre-2026-09-25 consolidation bug (ING-5) could copy "
+            "a short TTL onto permanent memories."
+        ),
     )
     temporal_cleanup_interval_seconds: int = Field(3600, description="Seconds between TTL cleanup runs")
     qdrant_init_retries: int = Field(5, description="Attempts to reach Qdrant at startup (exponential backoff)")
