@@ -1,0 +1,49 @@
+<!doctype html>
+<!--
+  Remembra social card (1200 x 630) -> landing/social-preview.png
+
+  Drawn by the same hero canvas the home page uses (landing/hero.js), so the
+  pixel brain, wordmark and clouds match the site exactly. Render it from the
+  repo root with any static server, then screenshot at 1200 x 630 with
+  reduced motion so the frame is the finished still:
+
+    python3 -m http.server 8830 --bind 127.0.0.1 &
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
+      --force-prefers-reduced-motion --hide-scrollbars --window-size=1200,630 \
+      --screenshot=landing/social-preview.png \
+      http://127.0.0.1:8830/scripts/site-social-card.html
+-->
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Remembra social card</title>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../landing/site.css">
+<style>
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body.site { background: var(--paper); }
+  .hero { position: relative; width: 1200px; height: 630px; isolation: isolate; }
+  .hero-sky { position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; image-rendering: pixelated; }
+  .hero-copy { position: absolute; left: 64px; top: 58px; width: 1080px; }
+  .hero-copy .eyebrow { font-size: 15px; }
+  .hero-copy h1 { font-family: var(--f-display); font-weight: 800; font-size: 66px; line-height: .98; letter-spacing: -.035em; margin: 18px 0 0; }
+  .hero-copy h1 mark { background: var(--signal); color: var(--on-signal); padding: 0 .08em; }
+  .hero-copy p { margin: 18px 0 0; font-size: 22px; color: var(--ink-2); }
+  .hero-copy p b { color: var(--ink); }
+  #heroMark { position: absolute; left: 40px; right: 40px; top: 270px; bottom: 70px; }
+  .url { position: absolute; right: 64px; top: 66px; font-family: var(--f-mono); font-size: 16px; color: var(--ink-2); }
+</style>
+</head>
+<body class="site">
+  <section class="hero" id="hero">
+    <canvas class="hero-sky" id="heroSky" aria-hidden="true"></canvas>
+    <div class="hero-copy">
+      <p class="eyebrow">One cloud memory for all your AI agents</p>
+      <h1>One agent stops.<br>The next one <mark>already knows.</mark></h1>
+    </div>
+    <p class="url">remembra.dev</p>
+    <div id="heroMark"></div>
+  </section>
+  <script src="../landing/hero.js"></script>
+</body>
+</html>
