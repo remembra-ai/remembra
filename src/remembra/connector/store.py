@@ -18,6 +18,8 @@ comparisons.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
 import json
 import secrets
@@ -38,8 +40,9 @@ AUTH_REQUEST_TTL_SECONDS = 900
 CLIENT_IDLE_PRUNE_SECONDS = 30 * 86400
 # A rotated-out refresh token presented again within this window is treated as
 # a client retry (lost response, or a proactive and a reactive refresh racing
-# — Claude does both), not theft: it gets a fresh pair instead of ending the
-# connection. Outside the window, reuse revokes the whole grant.
+# — Claude does both), not theft: it gets the SAME successor pair the first
+# rotation issued (never an extra one, so a grant has one refresh chain), instead
+# of ending the connection. Outside the window, reuse revokes the whole grant.
 REFRESH_REUSE_GRACE_SECONDS = 30
 _LAST_USED_WRITE_INTERVAL = 60.0
 
@@ -112,6 +115,18 @@ class AuthRequest:
 
 def _new_secret(prefix: str) -> str:
     return prefix + secrets.token_urlsafe(32)
+
+
+def successor_key(server_secret: str) -> bytes:
+    """HMAC key for refresh rotation, derived from a server secret shared by every worker."""
+    if not server_secret:
+        raise ValueError("a server secret is required to derive the refresh rotation key")
+    return hmac.new(server_secret.encode("utf-8"), b"remembra-connector-refresh-successor-v1", hashlib.sha256).digest()
+
+
+def _derived_secret(key: bytes, prefix: str, label: bytes, parent: str) -> str:
+    digest = hmac.new(key, label + b"\0" + parent.encode("utf-8"), hashlib.sha256).digest()
+    return prefix + base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
 def _iso(ts: float | None) -> str | None:
@@ -191,11 +206,15 @@ class ConnectorStore:
         self,
         db: Any,
         *,
+        rotation_key: bytes,
         access_ttl_seconds: int = 3600,
         refresh_ttl_seconds: int = 30 * 86400,
         clock: Callable[[], float] = time.time,
     ) -> None:
+        if len(rotation_key) < 32:
+            raise ValueError("rotation_key must be at least 32 bytes")
         self._db = db
+        self._rotation_key = rotation_key
         self.access_ttl = int(access_ttl_seconds)
         self.refresh_ttl = int(refresh_ttl_seconds)
         self._clock = clock
@@ -432,10 +451,26 @@ class ConnectorStore:
         )
         return grant, (float(row[8]) if row[8] is not None else None)
 
-    async def _issue_pair(self, grant: Grant) -> TokenPair:
-        """Insert a fresh access + refresh token for ``grant`` (caller holds the transaction)."""
-        access = _new_secret(ACCESS_PREFIX)
-        refresh = _new_secret(REFRESH_PREFIX)
+    def _successor_of(self, refresh_token: str) -> tuple[str, str]:
+        """The (access, refresh) pair a rotation of ``refresh_token`` issues.
+
+        Derived with a server-side HMAC from the presented token, so a retry of
+        the same refresh returns exactly the same pair: rotation stays a single
+        chain per grant while nothing but hashes is stored. Unpredictable
+        without both the server key and the parent refresh token.
+        """
+        key = self._rotation_key
+        return (
+            _derived_secret(key, ACCESS_PREFIX, b"access", refresh_token),
+            _derived_secret(key, REFRESH_PREFIX, b"refresh", refresh_token),
+        )
+
+    async def _issue_pair(self, grant: Grant, pair: tuple[str, str] | None = None) -> TokenPair:
+        """Insert an access + refresh token for ``grant`` (caller holds the transaction).
+
+        Random unless ``pair`` supplies the (access, refresh) values to store.
+        """
+        access, refresh = pair or (_new_secret(ACCESS_PREFIX), _new_secret(REFRESH_PREFIX))
         now = self.now()
         await self._db.conn.execute(
             "INSERT INTO oauth_tokens (token_hash, grant_id, client_id, kind, created_at, expires_at) "
@@ -543,18 +578,59 @@ class ConnectorStore:
                         error = OAuthError("invalid_scope", "Requested scope exceeds the original grant.")
                     else:
                         grant = found[0]
+                        successor = self._successor_of(refresh_token)
                         if used_at is None:
                             await self._db.conn.execute(
                                 "UPDATE oauth_tokens SET used_at = ? WHERE token_hash = ?", (now, token_hash(refresh_token))
                             )
+                            result = (grant, await self._issue_pair(grant, successor))
+                            await self._touch_client(client_id)
                         else:
-                            log.info("oauth_refresh_retry_within_grace", grant_id=grant_id)
-                        result = (grant, await self._issue_pair(grant))
-                        await self._touch_client(client_id)
+                            retried = await self._reissue_successor(grant, successor, now)
+                            if retried is None:
+                                # The successor was already rotated (or is gone): the
+                                # presenter holds a stale token beside a live chain.
+                                await self._revoke_grant_tx(grant_id, "refresh_token_reused")
+                                log.warning("oauth_refresh_reuse_revoked_grant", grant_id=grant_id, within_grace=True)
+                                error = OAuthError("invalid_grant", "Refresh token was already used.")
+                            else:
+                                log.warning("oauth_refresh_retry_within_grace", grant_id=grant_id)
+                                result = (grant, retried)
+                                await self._touch_client(client_id)
         if error is not None:
             raise error
         assert result is not None
         return result
+
+    async def _reissue_successor(self, grant: Grant, successor: tuple[str, str], now: float) -> TokenPair | None:
+        """The pair the first rotation issued, for a retry inside the grace window.
+
+        None when that pair's refresh token has since been used, revoked, or is
+        missing: the retry can't be answered without forking the chain.
+        """
+        access, refresh = successor
+        cursor = await self._db.conn.execute(
+            "SELECT token_hash, kind, expires_at, used_at, revoked_at FROM oauth_tokens "
+            "WHERE token_hash IN (?, ?) AND grant_id = ?",
+            (token_hash(access), token_hash(refresh), grant.grant_id),
+        )
+        rows = {row[1]: row for row in await cursor.fetchall()}
+        live_refresh = rows.get("refresh")
+        live_access = rows.get("access")
+        if (
+            live_refresh is None
+            or live_access is None
+            or live_refresh[3] is not None
+            or live_refresh[4] is not None
+            or float(live_refresh[2]) <= now
+        ):
+            return None
+        return TokenPair(
+            access_token=access,
+            refresh_token=refresh,
+            expires_in=max(1, int(float(live_access[2]) - now)),
+            scopes=grant.scopes,
+        )
 
     async def grant_for_access_token(self, access_token: str) -> Grant | None:
         """Grant behind a live access token (not expired, token and grant not revoked)."""

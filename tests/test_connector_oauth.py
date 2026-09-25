@@ -308,17 +308,103 @@ async def test_refresh_token_reuse_revokes_the_connection(h):
         store._clock = real_clock
 
 
-async def test_refresh_retry_within_grace_does_not_end_the_connection(h):
-    """Claude refreshes proactively and reactively; a quick duplicate is a retry."""
+async def _live_refresh_tokens(h: ConnectorHarness) -> int:
+    cursor = await h.db.conn.execute(
+        "SELECT COUNT(*) FROM oauth_tokens WHERE kind = 'refresh' AND used_at IS NULL AND revoked_at IS NULL"
+    )
+    row = await cursor.fetchone()
+    return int(row[0])
+
+
+async def test_refresh_retry_within_grace_returns_the_same_pair(h):
+    """Claude refreshes proactively and reactively; a quick duplicate is a retry.
+    It gets the pair the first rotation issued, not a second live chain."""
     await _alice(h)
     conn = await h.connect("alice@example.com", ["alpha"])
     body = {"grant_type": "refresh_token", "refresh_token": conn.refresh_token, "client_id": conn.client_id}
     first = await h.token(body)
-    retry = await h.token(body)
-    assert first.status_code == 200 and retry.status_code == 200
-    assert retry.json()["access_token"] != first.json()["access_token"]
-    for pair in (first.json(), retry.json()):
-        assert (await h.tool(pair["access_token"], "list_projects"))["status"] == "ok"
+    retries = [await h.token(body) for _ in range(3)]
+    assert first.status_code == 200 and all(r.status_code == 200 for r in retries)
+    for retry in retries:
+        assert retry.json()["access_token"] == first.json()["access_token"]
+        assert retry.json()["refresh_token"] == first.json()["refresh_token"]
+        assert 0 < retry.json()["expires_in"] <= 3600
+    assert await _live_refresh_tokens(h) == 1
+    assert (await h.tool(first.json()["access_token"], "list_projects"))["status"] == "ok"
+    # The one chain keeps rotating normally.
+    nxt = await h.token({**body, "refresh_token": first.json()["refresh_token"]})
+    assert nxt.status_code == 200 and nxt.json()["refresh_token"] != first.json()["refresh_token"]
+    assert await _live_refresh_tokens(h) == 1
+
+
+async def test_refresh_replay_inside_grace_cannot_fork_a_second_chain(h):
+    """An attacker replaying a stolen refresh token inside the grace window gets the
+    same successor as the owner, so the first reuse of it by the other party is
+    detected and ends the connection for both."""
+    await _alice(h)
+    conn = await h.connect("alice@example.com", ["alpha"])
+    rt0 = {"grant_type": "refresh_token", "refresh_token": conn.refresh_token, "client_id": conn.client_id}
+    legit = (await h.token(rt0)).json()
+    attacker = (await h.token(rt0)).json()
+    assert attacker["refresh_token"] == legit["refresh_token"]
+
+    store = h.app.state.connector_store
+    real_clock = store._clock
+    offset = {"s": 120.0}
+    store._clock = lambda: real_clock() + offset["s"]
+    try:
+        owner_next = await h.token({**rt0, "refresh_token": legit["refresh_token"]})
+        assert owner_next.status_code == 200
+        # Even a replay inside this token's grace window yields the owner's pair, never a new chain.
+        shadow = await h.token({**rt0, "refresh_token": attacker["refresh_token"]})
+        assert shadow.json()["refresh_token"] == owner_next.json()["refresh_token"]
+        assert await _live_refresh_tokens(h) == 1
+        offset["s"] = 200.0
+        stolen_next = await h.token({**rt0, "refresh_token": attacker["refresh_token"]})
+        assert stolen_next.status_code == 400 and stolen_next.json()["error"] == "invalid_grant"
+        # Reuse ended the whole connection, including the chain that won the race.
+        dead = await h.mcp_post(owner_next.json()["access_token"], {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        assert dead.status_code == 401
+        again = await h.token({**rt0, "refresh_token": owner_next.json()["refresh_token"]})
+        assert again.status_code == 400
+    finally:
+        store._clock = real_clock
+    assert await _live_refresh_tokens(h) == 0
+
+
+async def test_grace_retry_after_the_successor_rotated_is_reuse(h):
+    await _alice(h)
+    conn = await h.connect("alice@example.com", ["alpha"])
+    rt0 = {"grant_type": "refresh_token", "refresh_token": conn.refresh_token, "client_id": conn.client_id}
+    rt1 = (await h.token(rt0)).json()["refresh_token"]
+    rt2_pair = (await h.token({**rt0, "refresh_token": rt1})).json()
+    # RT0 again, still inside its grace window, but its successor already rotated.
+    stale = await h.token(rt0)
+    assert stale.status_code == 400 and stale.json()["error"] == "invalid_grant"
+    dead = await h.mcp_post(rt2_pair["access_token"], {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    assert dead.status_code == 401
+
+
+async def test_rotated_tokens_depend_on_the_server_secret(h):
+    """Successors are HMAC-derived: another server key yields other tokens, and
+    the raw values are never stored."""
+    from remembra.connector.store import ConnectorStore, successor_key
+
+    await _alice(h)
+    conn = await h.connect("alice@example.com", ["alpha"])
+    body = {"grant_type": "refresh_token", "refresh_token": conn.refresh_token, "client_id": conn.client_id}
+    pair = (await h.token(body)).json()
+    same = ConnectorStore(h.db, rotation_key=successor_key(h.settings.jwt_secret))._successor_of(conn.refresh_token)
+    other = ConnectorStore(h.db, rotation_key=successor_key("another-secret"))._successor_of(conn.refresh_token)
+    assert same == (pair["access_token"], pair["refresh_token"])
+    assert other[0] != pair["access_token"] and other[1] != pair["refresh_token"]
+    cursor = await h.db.conn.execute("SELECT * FROM oauth_tokens")
+    dump = json.dumps([list(r) for r in await cursor.fetchall()], default=str)
+    assert pair["refresh_token"] not in dump and pair["access_token"] not in dump
+    with pytest.raises(ValueError):
+        ConnectorStore(h.db, rotation_key=b"short")
+    with pytest.raises(ValueError):
+        successor_key("")
 
 
 async def test_login_is_rate_limited(h):

@@ -49,10 +49,11 @@ async def connector_lifespan(app: Any, settings: Settings) -> AsyncIterator[None
         yield
         return
 
-    from remembra.connector.store import ConnectorStore
+    from remembra.connector.store import ConnectorStore, successor_key
 
     store = ConnectorStore(
         app.state.db,
+        rotation_key=successor_key(settings.jwt_secret),
         access_ttl_seconds=settings.connector_access_token_ttl_seconds,
         refresh_ttl_seconds=settings.connector_refresh_token_ttl_days * 86400,
     )
