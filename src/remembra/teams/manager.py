@@ -590,9 +590,8 @@ class TeamManager:
         await self._db.conn.commit()
 
         logger.info(
-            "Invite created: team=%s email=%s role=%s by=%s",
+            "Invite created: team=%s role=%s by=%s",
             team_id,
-            email,
             role,
             invited_by,
         )

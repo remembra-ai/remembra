@@ -450,3 +450,18 @@ async def test_email_verification_flow_enables_owner(tmp_path, monkeypatch):
         # Single use.
         again = await h.client.post("/api/v1/auth/verify-email/confirm", json={"token": sent["token"]}, headers=hdr)
         assert again.status_code == 400
+
+
+async def test_auth_logs_contain_no_emails_or_key_material(tmp_path, capsys, caplog):
+    async with secure_app(tmp_path, ROUTERS) as h:
+        email = "private.person@example.com"
+        await h.client.post("/api/v1/auth/signup", json={"email": email, "password": "Str0ng!Passw0rd"})
+        await h.client.post("/api/v1/auth/login", json={"email": email, "password": "wrong"})
+        await h.client.post("/api/v1/auth/login", json={"email": "ghost@example.com", "password": "wrong"})
+        forged = "rem_ForgedKeyMaterial0123456789abcdef"
+        await h.client.get("/api/v1/memories", headers={"X-API-Key": forged})
+        await h.client.post("/api/v1/auth/forgot-password", json={"email": email})
+    captured = capsys.readouterr()
+    logs = captured.out + captured.err + caplog.text
+    assert email not in logs and "ghost@example.com" not in logs
+    assert "rem_Forged" not in logs
