@@ -11,6 +11,8 @@ from enum import StrEnum
 import structlog
 from openai import AsyncOpenAI
 
+from remembra.core.llm_guard import classify_llm_exception, make_llm_client, mark_llm_fallback
+
 log = structlog.get_logger()
 
 
@@ -136,7 +138,8 @@ class MemoryConsolidator:
     def _get_client(self) -> AsyncOpenAI:
         """Get or create OpenAI client."""
         if self._client is None:
-            self._client = AsyncOpenAI(api_key=self.api_key)
+            # Low retries + shared LLM circuit breaker (REL-7)
+            self._client = make_llm_client(self.api_key)
         return self._client
 
     async def consolidate(
@@ -221,7 +224,9 @@ class MemoryConsolidator:
             )
 
         except Exception as e:
-            log.error("consolidation_error", error=str(e))
+            kind = classify_llm_exception(e)
+            log.error("consolidation_error", error=str(e), kind=kind)
+            mark_llm_fallback("consolidation", kind)
             return self._default_add(new_fact)
 
     def _default_add(self, fact: str) -> ConsolidationResult:
