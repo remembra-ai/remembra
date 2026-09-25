@@ -36,14 +36,17 @@ choice (`darkMode` in local storage) that always wins.
 ## Brand assets
 
 The mark, lockups, favicons and `src/brand/geometry.ts` are generated, not
-drawn by hand in an editor: `brand/geometry.py` builds the five-lobe brain as
-one compound path and the monoline wordmark; `brand/build.py` writes
-`public/brand/*.svg`, `public/favicon.svg` (a hand-hinted 16 px pixel tile),
-`favicon.ico`, the PNG icons and the TypeScript geometry the React mark, the
-sign-in pixel hero and the first-handoff scene draw from.
+drawn by hand in an editor, and they come from the same source as the
+marketing site's: `scripts/brand/geometry.py` (repo root) builds the five-lobe
+brain as one compound path, the monoline wordmark and the hand-placed 16 and
+32 px pixel grids; `scripts/brand/build.py` writes `public/brand/*.svg`,
+`public/favicon.svg` (the 16 px pixel tile), `favicon.ico`, the PNG icons and
+the TypeScript geometry the React mark, the sign-in pixel hero and the
+first-handoff scene draw from, and the identical set for `landing/`. Never
+edit these files here; change the geometry and rebuild both.
 
 ```bash
-python3 brand/build.py   # needs shapely, Pillow, rsvg-convert, ImageMagick
+python3 scripts/brand/build.py   # from the repo root; needs shapely, Pillow, rsvg-convert, ImageMagick
 ```
 
 ## Develop

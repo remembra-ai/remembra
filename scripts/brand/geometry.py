@@ -8,16 +8,26 @@ depends on an SVG mask. The orange baton is a flat horizontal capsule that
 sits on the lateral fold; in the lockup it lines up with the crossbar of the
 e in "mem".
 
-Requires shapely (dev tooling only; the dashboard never imports this).
+This is the ONE source of the Remembra mark. ``scripts/brand/build.py`` turns
+it into every asset the marketing site (landing/) and the dashboard
+(dashboard/public, dashboard/src/brand/geometry.ts) ship, so the two can never
+drift apart again. The 16 and 32 px favicons are not machine-rasterised: they
+are hand-placed pixel grids (PIXEL_16, PIXEL_32 below) drawn over this
+geometry, because an automatic downscale muddies the folds and the baton.
+
+Requires shapely (dev tooling only; neither the site nor the dashboard imports this).
 """
 
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 
 from shapely import affinity
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon
 from shapely.ops import unary_union
+
+Pt = tuple[float, float]
 
 # ---------------------------------------------------------------------------
 # Brain (0..100 design space, facing left: frontal lobe on the left)
@@ -42,7 +52,7 @@ BATON_X = (55.0, 70.0)
 BATON_W = 5.0
 
 
-def _bez(p0, p1, p2, p3, n=28):
+def _bez(p0: Pt, p1: Pt, p2: Pt, p3: Pt, n: int = 28) -> list[Pt]:
     pts = []
     for i in range(n + 1):
         t = i / n
@@ -54,7 +64,7 @@ def _bez(p0, p1, p2, p3, n=28):
     return pts
 
 
-def _quad(p0, p1, p2, n=20):
+def _quad(p0: Pt, p1: Pt, p2: Pt, n: int = 20) -> list[Pt]:
     return [
         (
             (1 - t) ** 2 * p0[0] + 2 * (1 - t) * t * p1[0] + t * t * p2[0],
@@ -84,14 +94,14 @@ FOLDS = {
 }
 
 
-def _ellipse(cx, cy, rx, ry, rot=0.0):
+def _ellipse(cx: float, cy: float, rx: float, ry: float, rot: float = 0.0) -> Polygon:
     e = Point(0, 0).buffer(1.0, resolution=64)
     e = affinity.scale(e, rx, ry, origin=(0, 0))
     e = affinity.rotate(e, rot, origin=(0, 0))
     return affinity.translate(e, cx, cy)
 
 
-def _stroke(points, width):
+def _stroke(points: Sequence[Pt], width: float) -> Polygon:
     return LineString(points).buffer(width / 2, cap_style="round", join_style="round", resolution=24)
 
 
@@ -107,7 +117,7 @@ def brain_polygon():
     return body.difference(cuts)
 
 
-def _bounds(geom):
+def _bounds(geom: Polygon | MultiPolygon) -> tuple[float, float, float, float]:
     return geom.bounds  # (minx, miny, maxx, maxy)
 
 
@@ -133,13 +143,13 @@ def mark_polygon():
 AXIS_Y = to_mark(0, BATON_Y)[1]
 
 
-def _ring_d(coords, nd=2):
+def _ring_d(coords: Sequence[Pt], nd: int = 2) -> str:
     pts = list(coords)
     if pts[0] == pts[-1]:
         pts = pts[:-1]
     fmt = f"{{:.{nd}f}}"
 
-    def f(v):
+    def f(v: float) -> str:
         s = fmt.format(v).rstrip("0").rstrip(".")
         return "0" if s in ("-0", "") else s
 
@@ -165,7 +175,7 @@ def capsule_d(x1, x2, y, w, nd=2):
     """A flat horizontal capsule (the baton) as a filled path."""
     r = w / 2
 
-    def f(v):
+    def f(v: float) -> str:
         return f"{v:.{nd}f}".rstrip("0").rstrip(".")
 
     return f"M{f(x1)} {f(y - r)}H{f(x2)}A{f(r)} {f(r)} 0 0 1 {f(x2)} {f(y + r)}H{f(x1)}A{f(r)} {f(r)} 0 0 1 {f(x1)} {f(y - r)}Z"
@@ -270,3 +280,89 @@ def wordmark_paths(gap=5.5):
     ink.append(d)
     x += w
     return ink, sig, x
+
+
+# ---------------------------------------------------------------------------
+# Fold centre lines and the baton line, in the 0..100 mark box. The site's
+# hero canvas re-cuts the folds wider along these lines at hero scale so each
+# lobe stays distinct once the mark is rasterised into large cells.
+# ---------------------------------------------------------------------------
+
+KNOCK = KW * SCALE  # fold width in the mark box
+
+
+def fold_paths(nd: int = 2) -> list[str]:
+    """Every fold as an SVG polyline ("M x y L x y ...") in the mark box."""
+    out = []
+    for pts in FOLDS.values():
+        mapped = [to_mark(x, y) for x, y in pts]
+        out.append("M" + " L".join(f"{x:.{nd}f} {y:.{nd}f}" for x, y in mapped))
+    return out
+
+
+def baton_line() -> tuple[tuple[float, float], tuple[float, float]]:
+    """The baton's centre line (flat, horizontal) in the mark box."""
+    return to_mark(BATON_X[0], BATON_Y), to_mark(BATON_X[1], BATON_Y)
+
+
+# ---------------------------------------------------------------------------
+# Hand-placed pixel grids, drawn over the geometry above. ' ' is clear (the
+# tile's rounded corners), '.' the graphite tile, '#' stone, 'o' the baton.
+# Rules they keep: every fold is at least one full pixel and opens to the
+# outline, the baton is flat (never stepped) and sits at the end of the
+# lateral fold, and the stem stays at least two pixels wide.
+# ---------------------------------------------------------------------------
+
+PIXEL_16 = [
+    "  ............  ",
+    " .............. ",
+    "................",
+    ".....##.####....",
+    "...####.####....",
+    "..##########.#..",
+    ".###########.##.",
+    "..#############.",
+    ".##############.",
+    ".#.....oooo####.",
+    "..############..",
+    "...#######.###..",
+    "........##.##...",
+    "........##......",
+    " .............. ",
+    "  ............  ",
+]
+
+PIXEL_32 = [
+    "    ........................    ",
+    "  ............................  ",
+    " .............................. ",
+    "................................",
+    "................................",
+    ".............###..#####.........",
+    "............####..#######.......",
+    "......####..####.#########......",
+    "....#######.####.##########.....",
+    "...########.###.#########..#....",
+    "...########.############..###...",
+    "..######################.#####..",
+    "....###################.######..",
+    "..############################..",
+    "..############################..",
+    "..############################..",
+    "...##########################...",
+    "...#########.....oooooo######...",
+    "...##............oooooo#####....",
+    "......#################.........",
+    "......###############..#####....",
+    ".......#############.#######....",
+    "...........#####..#########.....",
+    "..................########......",
+    "...................###..........",
+    "...................###..........",
+    "...................###..........",
+    "....................##..........",
+    "................................",
+    " .............................. ",
+    "  ............................  ",
+    "    ........................    ",
+]

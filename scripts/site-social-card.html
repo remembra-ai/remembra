@@ -3,15 +3,11 @@
   Remembra social card (1200 x 630) -> landing/social-preview.png
 
   Drawn by the same hero canvas the home page uses (landing/hero.js), so the
-  pixel brain, wordmark and clouds match the site exactly. Render it from the
-  repo root with any static server, then screenshot at 1200 x 630 with
-  reduced motion so the frame is the finished still:
+  pixel brain, wordmark and clouds match the site exactly. The brand build
+  renders it (headless Chrome, reduced motion, so the frame is the finished
+  still) along with every other asset:
 
-    python3 -m http.server 8830 --bind 127.0.0.1 &
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new \
-      --force-prefers-reduced-motion --hide-scrollbars --window-size=1200,630 \
-      --screenshot=landing/social-preview.png \
-      http://127.0.0.1:8830/scripts/site-social-card.html
+    python3 scripts/brand/build.py
 -->
 <html lang="en" data-theme="dark">
 <head>

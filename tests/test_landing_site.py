@@ -748,16 +748,83 @@ def test_predeploy_check_fails_on_a_docs_link_that_is_not_live() -> None:
 
 
 # ---------------------------------------------------------------------------
-# The hero brain: folds cut wide enough to read at hero scale
+# One mark: the site and the dashboard are built from one geometry
 # ---------------------------------------------------------------------------
+
+ROOT = Path(__file__).resolve().parent.parent
+DASH_PUBLIC = ROOT / "dashboard" / "public"
+BRAND_FILES = [
+    "mark.svg",
+    "mark-dark.svg",
+    "lockup-horizontal.svg",
+    "lockup-horizontal-dark.svg",
+    "lockup-stacked.svg",
+    "lockup-stacked-dark.svg",
+    "app-icon.svg",
+]
 
 
 def test_hero_carries_the_brand_geometry_with_its_folds() -> None:
     geo = json.loads((LANDING / "brand" / "geometry.json").read_text())
     hero = (LANDING / "hero.js").read_text()
     inline = re.search(r"/\*@geometry\*/(.*?)/\*@end\*/", hero, re.S)
-    assert inline and json.loads(inline.group(1)) == geo  # site_brand.py keeps the two in step
-    assert len(geo["folds"]) == 4 and geo["knock"] == 4.4
+    assert inline and json.loads(inline.group(1)) == geo  # scripts/brand/build.py keeps the two in step
+    assert len(geo["folds"]) == 6 and 4.5 < geo["knock"] < 5.5  # five lobes: six folds, one of them the trail
+    assert all(d.startswith("M") for d in geo["folds"])
+    (x1, y1), (x2, y2) = geo["batonLine"]
+    assert y1 == y2 and x2 > x1  # the baton is flat, never stepped
     fold_cells = float(re.search(r"var FOLD_CELLS = ([\d.]+);", hero).group(1))
     assert fold_cells >= 2.5  # at least two cells open once rasterised at >= 50% coverage
     assert 'cx.globalCompositeOperation = "destination-out"' in hero
+    assert "GEO.batonW" in hero and "15 * GEO.lockH.k" not in hero  # the flying baton is sized from the geometry
+    # as in the approved hero, the brain is drawn larger beside the wordmark than in the nav lockup
+    assert geo["lockHero"]["k"] > geo["lockH"]["k"] and "GEO.lockH." not in hero
+
+
+def test_site_and_dashboard_ship_the_identical_mark() -> None:
+    for name in BRAND_FILES:
+        assert (LANDING / "brand" / name).read_bytes() == (DASH_PUBLIC / "brand" / name).read_bytes(), name
+    for name in ("favicon.svg", "favicon.ico", "favicon-16.png", "favicon-32.png", "apple-touch-icon.png"):
+        assert (LANDING / name).read_bytes() == (DASH_PUBLIC / name).read_bytes(), name
+    geo = json.loads((LANDING / "brand" / "geometry.json").read_text())
+    ts = (ROOT / "dashboard" / "src" / "brand" / "geometry.ts").read_text()
+    assert json.loads(re.search(r"export const MARK_INK = (.*?) as const;", ts).group(1)) == geo["brain"]
+    assert json.loads(re.search(r"export const MARK_BATON = (.*?) as const;", ts).group(1)) == geo["baton"]
+    assert json.loads(re.search(r"export const WORD_SIG = (.*?) as const;", ts).group(1)) == geo["word"]["sig"]
+    partial = (LANDING / "brand" / "partials" / "mark-inline.svg").read_text()
+    assert geo["brain"] in partial and geo["baton"] in partial
+
+
+def test_one_brand_generator() -> None:
+    assert (ROOT / "scripts" / "brand" / "geometry.py").is_file() and (ROOT / "scripts" / "brand" / "build.py").is_file()
+    assert not (ROOT / "scripts" / "site_brand.py").exists()
+    assert not (ROOT / "dashboard" / "brand").exists() or not any((ROOT / "dashboard" / "brand").glob("*.py"))
+
+
+def test_pixel_grids_keep_the_hinting_rules() -> None:
+    grids = _pixel_grids()
+    assert set(grids) == {"PIXEL_16", "PIXEL_32"}
+    for grid in grids.values():
+        n = len(grid)
+        assert all(len(row) == n for row in grid)
+        assert set("".join(grid)) <= set(" .#o")
+        baton_rows = [y for y, row in enumerate(grid) if "o" in row]
+        spans = {(row.index("o"), row.rindex("o")) for row in (grid[y] for y in baton_rows)}
+        assert len(spans) == 1  # one flat capsule: every baton row starts and ends in the same column
+        assert all(set(grid[y][slice(*next(iter(spans)))]) == {"o"} for y in baton_rows)
+        start = next(iter(spans))[0]
+        assert grid[baton_rows[0]][start - 1] == "."  # the baton sits at the end of an open fold
+    svg = (LANDING / "favicon.svg").read_text()
+    assert 'viewBox="0 0 16 16"' in svg and 'shape-rendering="crispEdges"' in svg
+
+
+def _pixel_grids() -> dict[str, list[str]]:
+    """The hand-placed grids, read from geometry.py without importing it (it needs shapely)."""
+    import ast
+
+    tree = ast.parse((ROOT / "scripts" / "brand" / "geometry.py").read_text())
+    return {
+        node.targets[0].id: ast.literal_eval(node.value)
+        for node in tree.body
+        if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and node.targets[0].id.startswith("PIXEL_")
+    }
