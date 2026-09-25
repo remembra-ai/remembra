@@ -394,7 +394,10 @@ async def api_with_real_embeddings(tmp_path):
     """App wired with a real MemoryService + Database + EmbeddingService.
 
     Only Qdrant is mocked; the embedding provider is an httpx MockTransport
-    the test controls.
+    the test controls. Degradation is switched OFF here (store answers
+    'pending', recall answers 'keyword_only' by default - see
+    tests/test_ret_store_recall_degraded.py) so these tests pin the error
+    mapping clients get when an operator disables it.
     """
     import remembra.config
     import remembra.main as main
@@ -411,6 +414,8 @@ async def api_with_real_embeddings(tmp_path):
         enable_source_records=False,
         enable_entity_resolution=False,
         enable_reranking=False,
+        store_pending_on_embedding_failure=False,
+        recall_keyword_fallback=False,
     )
     db = Database(str(tmp_path / "rel.db"))
     await db.connect()

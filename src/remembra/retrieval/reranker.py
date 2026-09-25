@@ -8,12 +8,26 @@ The reranker is designed to be optional and gracefully degrades if
 sentence-transformers is not installed.
 """
 
+import asyncio
+import math
+import threading
 from dataclasses import dataclass
 from typing import Any
 
 import structlog
 
 log = structlog.get_logger(__name__)
+
+_LOAD_LOCK = threading.Lock()
+
+
+def sigmoid(x: float) -> float:
+    """Map a raw CrossEncoder logit to (0, 1) without looking at the other candidates."""
+    if x >= 0:
+        return 1.0 / (1.0 + math.exp(-x))
+    z = math.exp(x)
+    return z / (1.0 + z)
+
 
 # Lazy import for optional dependency
 _cross_encoder = None
@@ -54,6 +68,9 @@ class RerankedResult:
     rerank_score: float
     final_score: float
     payload: dict[str, Any] | None = None
+    # Raw CrossEncoder logit (None in pass-through mode). rerank_score is its
+    # sigmoid - an absolute value, not min-max scaled across the batch (RET-4).
+    raw_score: float | None = None
 
 
 class CrossEncoderReranker:
@@ -73,6 +90,7 @@ class CrossEncoderReranker:
         enabled: bool = True,
         blend_original: bool = True,
         original_weight: float = 0.3,
+        min_logit: float | None = None,
     ) -> None:
         """
         Initialize the reranker.
@@ -82,29 +100,66 @@ class CrossEncoderReranker:
             enabled: Whether reranking is enabled
             blend_original: Whether to blend rerank scores with original scores
             original_weight: Weight for original score when blending (0-1)
+            min_logit: Absolute cutoff on the raw logit; lower-scoring documents
+                are dropped. None keeps everything.
         """
         self.model_name = model_name
         self.enabled = enabled
         self.blend_original = blend_original
         self.original_weight = original_weight
+        self.min_logit = min_logit
         self._model: Any = None
         self._initialized = False
+        self.last_error: str | None = None
+        self.last_run: dict[str, Any] | None = None
 
     def _ensure_model(self) -> bool:
-        """Ensure model is loaded. Returns True if available."""
+        """Ensure model is loaded. Returns True if available. Thread-safe."""
         if not self.enabled:
             return False
 
         if self._initialized:
             return self._model is not None
 
-        self._model = _load_cross_encoder(self.model_name)
-        self._initialized = True
+        with _LOAD_LOCK:
+            if not self._initialized:
+                self._model = _load_cross_encoder(self.model_name)
+                if self._model is None:
+                    self.last_error = "model unavailable (sentence-transformers missing or load failed)"
+                self._initialized = True
         return self._model is not None
 
     def is_available(self) -> bool:
         """Check if reranking is available."""
         return self._ensure_model()
+
+    def status(self) -> dict[str, Any]:
+        """State for readiness: disabled | not_loaded | loaded | unavailable."""
+        if not self.enabled:
+            state = "disabled"
+        elif not self._initialized:
+            state = "not_loaded"
+        else:
+            state = "loaded" if self._model is not None else "unavailable"
+        return {
+            "state": state,
+            "model": self.model_name,
+            "min_logit": self.min_logit,
+            "last_error": self.last_error,
+            "last_run": self.last_run,
+        }
+
+    async def arerank(
+        self,
+        query: str,
+        documents: list[dict[str, Any]],
+        top_k: int | None = None,
+        content_key: str = "content",
+        score_key: str = "relevance",
+    ) -> list[RerankedResult]:
+        """:meth:`rerank` in a worker thread: model load and ``predict`` are
+        CPU-bound and would otherwise block the event loop (RET-4)."""
+        return await asyncio.to_thread(self.rerank, query, documents, top_k, content_key, score_key)
 
     def rerank(
         self,
@@ -155,39 +210,55 @@ class CrossEncoderReranker:
 
         # Get CrossEncoder scores
         try:
-            rerank_scores = self._model.predict(pairs)
+            logits: list[float | None] = [float(x) for x in self._model.predict(pairs)]
+            self.last_error = None
         except Exception as e:
             log.error("rerank_prediction_failed", error=str(e))
-            # Fall back to original scores
-            rerank_scores = [doc.get(score_key, 0.0) for doc in documents]
-
-        # Normalize rerank scores to 0-1 range
-        min_score = min(rerank_scores) if rerank_scores else 0
-        max_score = max(rerank_scores) if rerank_scores else 1
-        score_range = max_score - min_score if max_score != min_score else 1.0
+            self.last_error = f"predict failed: {type(e).__name__}"
+            logits = [None] * len(documents)
 
         results = []
+        dropped = 0
 
         for i, doc in enumerate(documents):
-            original_score = doc.get(score_key, 0.0)
-            raw_rerank = float(rerank_scores[i])
-            normalized_rerank = (raw_rerank - min_score) / score_range
-
+            original_score = float(doc.get(score_key, 0.0) or 0.0)
+            raw = logits[i]
+            if raw is None:
+                # Prediction failed: pass the original score through.
+                results.append(
+                    RerankedResult(
+                        id=str(doc.get("id", "")),
+                        content=doc.get(content_key, ""),
+                        original_score=original_score,
+                        rerank_score=original_score,
+                        final_score=original_score,
+                        payload=doc,
+                    )
+                )
+                continue
+            if self.min_logit is not None and raw < self.min_logit:
+                dropped += 1
+                continue
+            # Absolute probability, NOT min-max scaled: the best of a bad batch
+            # must not become 1.0 (RET-4).
+            prob = sigmoid(raw)
             if self.blend_original:
-                final_score = self.original_weight * original_score + (1 - self.original_weight) * normalized_rerank
+                final_score = self.original_weight * original_score + (1 - self.original_weight) * prob
             else:
-                final_score = normalized_rerank
+                final_score = prob
 
             results.append(
                 RerankedResult(
                     id=str(doc.get("id", "")),
                     content=doc.get(content_key, ""),
                     original_score=original_score,
-                    rerank_score=normalized_rerank,
+                    rerank_score=prob,
                     final_score=final_score,
                     payload=doc,
+                    raw_score=raw,
                 )
             )
+        self.last_run = {"input": len(documents), "dropped_below_min_logit": dropped}
 
         # Sort by final score
         results.sort(key=lambda r: r.final_score, reverse=True)

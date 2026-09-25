@@ -2,12 +2,12 @@
 
 ``asyncio.ensure_future`` without a stored reference lets the event loop
 garbage-collect a pending task mid-flight. Every background task the store
-path spawns (entity resolution, async enrichment, Jev shadow evaluation) goes
-through :func:`spawn` so a strong reference is held until it finishes and
-failures are logged instead of vanishing.
-
-The reliability stream (REL-16) is building an app-wide task registry in
-``remembra.core``; when it lands, :func:`spawn` should delegate to it.
+and recall paths spawn (entity resolution, async enrichment, Jev shadow
+evaluation) goes through :func:`spawn`, which delegates to the app-wide
+:class:`remembra.core.tasks.TaskRegistry` (REL-16): strong references,
+bounded concurrency (``limited=True``), logged failures and graceful
+shutdown. A local reference set is kept as well so :func:`drain` can wait for
+exactly the tasks spawned here.
 """
 
 from __future__ import annotations
@@ -24,8 +24,16 @@ _TASKS: set[asyncio.Task[Any]] = set()
 
 
 def spawn(coro: Coroutine[Any, Any, Any], name: str) -> asyncio.Task[Any]:
-    """Schedule ``coro`` and keep a strong reference until it completes."""
-    task = asyncio.ensure_future(coro)
+    """Schedule ``coro`` on the app task registry and keep a strong reference until it completes."""
+    from remembra.core.tasks import get_task_registry
+
+    try:
+        task = get_task_registry().spawn(coro, name=name, limited=True)
+    except RuntimeError:
+        # The registry is shut down (process stopping) and has closed the
+        # coroutine; record the drop instead of failing the caller.
+        log.warning("background_task_dropped_on_shutdown", task=name)
+        task = asyncio.ensure_future(asyncio.sleep(0))
     _TASKS.add(task)
 
     def _done(t: asyncio.Task[Any]) -> None:

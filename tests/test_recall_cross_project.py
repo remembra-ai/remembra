@@ -16,9 +16,10 @@ These tests pin the contract at three layers:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+
+from remembra.core.time import utcnow
 
 from remembra.models.memory import RecallRequest
 
@@ -76,55 +77,43 @@ class TestQdrantFilterBuilding:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_search_fts_omits_project_clause_when_none():
-    """When project_id is None, the SQL must NOT include 'AND project_id = ?'."""
+async def _fts_db(tmp_path):
     from remembra.storage.database import Database
 
-    # Build a bare Database with a mocked aiosqlite connection
-    db = Database.__new__(Database)
-    conn = MagicMock()
-    cursor = AsyncMock()
-    cursor.fetchall = AsyncMock(return_value=[])
-    conn.execute = AsyncMock(return_value=cursor)
-    db._connection = conn
-
-    await db.search_fts(query="hello world", user_id="user_x", project_id=None, limit=5)
-
-    sql = conn.execute.call_args.args[0]
-    params = conn.execute.call_args.args[1]
-
-    assert "project_id" not in sql, (
-        "FTS query must omit project_id clause when project_id is None so recall spans all of the user's projects."
-    )
-    # The query is sanitized into a safe FTS5 MATCH expression before binding.
-    from remembra.storage.database import _build_fts_match_query
-
-    assert params == ("user_x", _build_fts_match_query("hello world"), 5)
+    db = Database(str(tmp_path / "fts.db"))
+    await db.connect()
+    await db.init_schema()
+    now = utcnow()
+    for mid, user, project in [("a", "user_x", "trademind"), ("b", "user_x", "yaadbooks"), ("c", "other", "trademind")]:
+        await db.save_memory_metadata(
+            memory_id=mid,
+            user_id=user,
+            project_id=project,
+            content="hello world deploy notes",
+            extracted_facts=[],
+            metadata={},
+            created_at=now,
+        )
+        await db.index_memory_fts(mid, user, project, "hello world deploy notes")
+    return db
 
 
 @pytest.mark.asyncio
-async def test_search_fts_includes_project_clause_when_set():
-    from remembra.storage.database import Database
+async def test_search_fts_spans_all_projects_when_none(tmp_path):
+    """project_id=None searches every project of the user - and only that user."""
+    db = await _fts_db(tmp_path)
+    try:
+        hits = await db.search_fts(query="hello world", user_id="user_x", project_id=None, limit=5)
+        assert {mid for mid, _ in hits} == {"a", "b"}
+    finally:
+        await db.close()
 
-    db = Database.__new__(Database)
-    conn = MagicMock()
-    cursor = AsyncMock()
-    cursor.fetchall = AsyncMock(return_value=[])
-    conn.execute = AsyncMock(return_value=cursor)
-    db._connection = conn
 
-    await db.search_fts(
-        query="hello world",
-        user_id="user_x",
-        project_id="trademind",
-        limit=5,
-    )
-
-    sql = conn.execute.call_args.args[0]
-    params = conn.execute.call_args.args[1]
-
-    assert "project_id = ?" in sql
-    from remembra.storage.database import _build_fts_match_query
-
-    assert params == ("user_x", "trademind", _build_fts_match_query("hello world"), 5)
+@pytest.mark.asyncio
+async def test_search_fts_scopes_to_project_when_set(tmp_path):
+    db = await _fts_db(tmp_path)
+    try:
+        hits = await db.search_fts(query="hello world", user_id="user_x", project_id="trademind", limit=5)
+        assert [mid for mid, _ in hits] == ["a"]
+    finally:
+        await db.close()

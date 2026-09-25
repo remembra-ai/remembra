@@ -390,11 +390,13 @@ def recall_memories(
     Args:
         query: Natural language query. Optional when filters is provided.
         limit: Maximum memories to return (1-50, default 5).
-        threshold: Minimum relevance 0.0-1.0 (default 0.4).
+        threshold: Minimum cosine similarity 0.0-1.0 for vector hits (default 0.4).
+            Keyword/entity hits are not subject to it.
         slim: Return only the server-built context string (capped at 800 tokens).
         filters: Metadata exact-match filters, e.g. {"agent_id": "codex"}.
-        retrieval_mode: "balanced" (default), "debug" (favours recent),
+        retrieval_mode: "balanced", "debug" (favours recent),
             "operational" (entity-heavy), "strategic" (historical depth).
+            Omit to let the server infer it from the query.
         scope: Only memories whose scope starts with this label.
         as_of: Point-in-time query (ISO date/time).
         max_tokens: Cap on the context string size.
@@ -404,6 +406,10 @@ def recall_memories(
     Returns:
         JSON with context, memories (with metadata, memory_type, source_id,
         agent_id, staleness), and only the entities mentioned in them.
+        ``relevance`` is a composite rank score (similarity + recency +
+        entity + keyword), not a probability. ``degraded: "keyword_only"``
+        means the embedding provider was down and results come from keyword
+        and entity search only.
     """
     if not query and not filters:
         return json.dumps({"status": "error", "error": "Either query or filters (or both) must be provided."})
@@ -424,12 +430,19 @@ def recall_memories(
             project_id=project_id,
         )
 
+        extra: dict[str, Any] = {}
+        if getattr(result, "degraded", None):
+            extra["degraded"] = result.degraded
+        if getattr(result, "retrieval_mode", None):
+            extra["retrieval_mode"] = result.retrieval_mode
+
         if slim:
-            return _dump({"status": "ok", "context": result.context, "count": len(result.memories)})
+            return _dump({"status": "ok", "context": result.context, "count": len(result.memories), **extra})
 
         return _dump(
             {
                 "status": "ok",
+                **extra,
                 "context": result.context,
                 "count": len(result.memories),
                 "memories": [

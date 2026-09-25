@@ -11,6 +11,7 @@ The provenance guarantee under test:
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from typing import Any
 
 import pytest
@@ -32,6 +33,11 @@ class FakeDB:
 
     async def save_memory_metadata(self, **kwargs: Any) -> None:
         self.saved.append(kwargs)
+
+    @asynccontextmanager
+    async def transaction(self) -> Any:
+        # The store writes row + FTS in one SQLite transaction (REL-10).
+        yield
 
     async def index_memory_fts(self, **kwargs: Any) -> None:
         self.fts.append(kwargs)

@@ -377,7 +377,7 @@ class Memory:
         self,
         query: str | None = None,
         limit: int = 5,
-        threshold: float = 0.70,
+        threshold: float = 0.40,
         filters: dict[str, str] | None = None,
         retrieval_mode: str | None = None,
         scope: str | None = None,
@@ -400,11 +400,14 @@ class Memory:
         Args:
             query: Natural language query (optional when filters provided)
             limit: Maximum number of memories to return (1-50)
-            threshold: Minimum relevance score (0.0-1.0)
+            threshold: Minimum cosine similarity (0.0-1.0) for vector hits;
+                     same default (0.40) as the server and MCP. Keyword and
+                     entity-graph hits are not subject to it.
             filters: Optional metadata filters (AND-combined exact-match),
                      e.g. {"project": "trademind", "type": "deploy-config"}.
             retrieval_mode: "balanced" | "debug" (recency-heavy) |
-                     "operational" | "strategic". Server default when None.
+                     "operational" | "strategic" | "auto". When None the
+                     server infers it from the query.
             scope: Only memories whose scope starts with this label.
             as_of: Point-in-time query (ISO string or datetime).
             max_tokens: Cap on the server-built context string.
@@ -481,6 +484,8 @@ class Memory:
             context=data.get("context", ""),
             memories=memories,
             entities=entities,
+            degraded=data.get("degraded"),
+            retrieval_mode=data.get("retrieval_mode"),
         )
 
     def get(self, memory_id: str) -> dict[str, Any]:

@@ -55,6 +55,11 @@ class RecallResult:
     context: str
     memories: list[MemoryItem]
     entities: list[EntityItem]
+    # "keyword_only" when the server could not embed the query (provider
+    # outage) and answered from keyword + entity-graph search.
+    degraded: str | None = None
+    # Ranking mode the server used (inferred from the query when not given).
+    retrieval_mode: str | None = None
 
 
 @dataclass

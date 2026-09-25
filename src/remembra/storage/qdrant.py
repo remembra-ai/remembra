@@ -24,6 +24,44 @@ FIELD_CONTENT = "content"
 FIELD_CREATED_AT = "created_at"
 FIELD_EXPIRES_AT = "expires_at"
 FIELD_METADATA = "metadata"
+# RET-7 / UPG-1: plain (unencrypted) filterable fields
+FIELD_MEMORY_TYPE = "memory_type"
+FIELD_SCOPE = "scope"
+FIELD_SCOPE_PREFIXES = "scope_prefixes"
+FIELD_VALID_FROM = "valid_from"
+FIELD_VALID_TO = "valid_to"
+
+# Fields ``search(must_match=...)`` may filter on server-side. Anything else
+# (notably metadata values, which are encrypted when encryption is on) must
+# be filtered by the caller after retrieval.
+PLAIN_FILTER_FIELDS = frozenset({FIELD_MEMORY_TYPE, FIELD_SCOPE, FIELD_SCOPE_PREFIXES, FIELD_PROJECT_ID})
+
+
+def scope_prefixes(scope: str | None) -> list[str]:
+    """``"work:acme:q3"`` -> ``["work", "work:acme", "work:acme:q3"]``.
+
+    Stored in the payload so "scope starts with X" is an exact-match array
+    filter in Qdrant (a keyword index cannot do prefix matches).
+    """
+    if not scope:
+        return []
+    parts = [p for p in str(scope).split(":")]
+    return [":".join(parts[: i + 1]) for i in range(len(parts))]
+
+
+def _iso(value: Any) -> str | None:
+    return value.isoformat() if value is not None and hasattr(value, "isoformat") else None
+
+
+def filterable_payload(memory: Memory) -> dict[str, Any]:
+    """The plain filter fields of a memory (also used for payload-only backfill)."""
+    return {
+        FIELD_MEMORY_TYPE: memory.memory_type,
+        FIELD_SCOPE: memory.scope,
+        FIELD_SCOPE_PREFIXES: scope_prefixes(memory.scope),
+        FIELD_VALID_FROM: _iso(memory.valid_from or memory.created_at),
+        FIELD_VALID_TO: _iso(memory.valid_to),
+    }
 
 
 def _vector_size(collection_info: Any) -> int | None:
@@ -103,6 +141,12 @@ class QdrantStore:
                 points_count=getattr(collection_info, "points_count", "unknown"),
                 dimensions=actual,
             )
+            # Indexes added after the collection was created (RET-7 memory_type /
+            # scope_prefixes) must exist on old collections too. Idempotent.
+            try:
+                await self._create_indexes(client)
+            except Exception as e:  # noqa: BLE001 - an index is an optimisation, never a boot blocker
+                log.warning("qdrant_index_ensure_failed", error=str(e))
             return
 
         log.info("qdrant_creating_collection", name=self.collection_name, dimensions=expected)
@@ -160,6 +204,8 @@ class QdrantStore:
             (FIELD_PROJECT_ID, qmodels.PayloadSchemaType.KEYWORD),
             (FIELD_CREATED_AT, qmodels.PayloadSchemaType.DATETIME),
             (FIELD_EXPIRES_AT, qmodels.PayloadSchemaType.DATETIME),
+            (FIELD_MEMORY_TYPE, qmodels.PayloadSchemaType.KEYWORD),
+            (FIELD_SCOPE_PREFIXES, qmodels.PayloadSchemaType.KEYWORD),
         ]
 
         for field_name, field_type in index_fields:
@@ -174,6 +220,28 @@ class QdrantStore:
                 # Index might already exist
                 pass
 
+    async def ensure_indexes(self) -> None:
+        """Create any missing payload indexes on the active collection (idempotent)."""
+        client = await self._get_client()
+        await self._create_indexes(client)
+
+    def build_payload(self, memory: Memory) -> dict[str, Any]:
+        """Full Qdrant payload for a memory (content + metadata encrypted when enabled)."""
+        payload: dict[str, Any] = {
+            FIELD_USER_ID: memory.user_id,
+            FIELD_PROJECT_ID: memory.project_id,
+            FIELD_CONTENT: self._encryptor.encrypt(memory.content),
+            FIELD_CREATED_AT: memory.created_at.isoformat(),
+            FIELD_METADATA: self._encryptor.encrypt_dict(memory.metadata),
+            **filterable_payload(memory),
+        }
+        if memory.expires_at:
+            payload[FIELD_EXPIRES_AT] = memory.expires_at.isoformat()
+        # Add extracted facts and entity refs to payload for retrieval
+        payload["extracted_facts"] = memory.extracted_facts or []
+        payload["entities"] = [e.model_dump() for e in (memory.entities or [])]
+        return payload
+
     async def upsert(self, memory: Memory) -> None:
         """
         Insert or update a memory in the vector store.
@@ -185,21 +253,7 @@ class QdrantStore:
             raise ValueError("Memory must have embedding computed before upserting")
 
         client = await self._get_client()
-
-        payload: dict[str, Any] = {
-            FIELD_USER_ID: memory.user_id,
-            FIELD_PROJECT_ID: memory.project_id,
-            FIELD_CONTENT: self._encryptor.encrypt(memory.content),
-            FIELD_CREATED_AT: memory.created_at.isoformat(),
-            FIELD_METADATA: self._encryptor.encrypt_dict(memory.metadata),
-        }
-
-        if memory.expires_at:
-            payload[FIELD_EXPIRES_AT] = memory.expires_at.isoformat()
-
-        # Add extracted facts and entity refs to payload for retrieval
-        payload["extracted_facts"] = memory.extracted_facts
-        payload["entities"] = [e.model_dump() for e in memory.entities]
+        payload = self.build_payload(memory)
 
         point = qmodels.PointStruct(
             id=memory.id,
@@ -244,19 +298,7 @@ class QdrantStore:
                 log.warning("bulk_skip_no_embedding", memory_id=memory.id)
                 continue
 
-            payload: dict[str, Any] = {
-                FIELD_USER_ID: memory.user_id,
-                FIELD_PROJECT_ID: memory.project_id,
-                FIELD_CONTENT: self._encryptor.encrypt(memory.content),
-                FIELD_CREATED_AT: memory.created_at.isoformat(),
-                FIELD_METADATA: self._encryptor.encrypt_dict(memory.metadata),
-            }
-
-            if memory.expires_at:
-                payload[FIELD_EXPIRES_AT] = memory.expires_at.isoformat()
-
-            payload["extracted_facts"] = memory.extracted_facts or []
-            payload["entities"] = [e.model_dump() for e in (memory.entities or [])]
+            payload = self.build_payload(memory)
 
             points.append(
                 qmodels.PointStruct(
@@ -293,6 +335,84 @@ class QdrantStore:
             ],
         )
 
+    @property
+    def metadata_filterable(self) -> bool:
+        """True when metadata values are stored in plaintext (encryption off),
+        so ``metadata.<key>`` equality can be pushed into the Qdrant filter."""
+        return not self._encryptor.enabled
+
+    @staticmethod
+    def _match_values(value: Any) -> list[Any]:
+        """Equivalent typed forms of a string filter value.
+
+        Recall filters compare ``str(stored) == str(filter)``; Qdrant matches
+        typed values, so "5" must also try 5 and "true" must also try True.
+        """
+        if not isinstance(value, str):
+            return [value]
+        forms: list[Any] = [value]
+        low = value.strip().lower()
+        if low in ("true", "false"):
+            forms.append(low == "true")
+        else:
+            for cast in (int, float):
+                try:
+                    forms.append(cast(value))
+                    break
+                except ValueError:
+                    continue
+        return forms
+
+    def build_filter(
+        self,
+        user_id: str,
+        project_id: str | None = None,
+        *,
+        active_at: Any = None,
+        must_match: dict[str, Any] | None = None,
+        metadata_match: dict[str, Any] | None = None,
+    ) -> qmodels.Filter:
+        """Qdrant filter: user (+ project) scope, not expired at ``active_at``,
+        exact matches on plain fields, and (plaintext only) metadata equality."""
+        must: list[Any] = [qmodels.FieldCondition(key=FIELD_USER_ID, match=qmodels.MatchValue(value=user_id))]
+        if project_id is not None:
+            must.append(qmodels.FieldCondition(key=FIELD_PROJECT_ID, match=qmodels.MatchValue(value=project_id)))
+        for key, value in (must_match or {}).items():
+            if key not in PLAIN_FILTER_FIELDS:
+                raise ValueError(f"{key!r} is not a plain payload field")
+            if isinstance(value, list | tuple | set):
+                must.append(qmodels.FieldCondition(key=key, match=qmodels.MatchAny(any=[str(v) for v in value])))
+            else:
+                must.append(qmodels.FieldCondition(key=key, match=qmodels.MatchValue(value=value)))
+        if metadata_match and self.metadata_filterable:
+            for key, value in metadata_match.items():
+                if value is None or str(value) == "None":
+                    # Python's str(None) == "None" also matches a MISSING key;
+                    # Qdrant can't express that, so leave it to the caller.
+                    continue
+                forms = self._match_values(value)
+                field_key = f"{FIELD_METADATA}.{key}"
+                conds: list[Any] = [
+                    # MatchValue has no float form: exact numeric match is a closed range.
+                    qmodels.FieldCondition(key=field_key, range=qmodels.Range(gte=f, lte=f))
+                    if isinstance(f, float)
+                    else qmodels.FieldCondition(key=field_key, match=qmodels.MatchValue(value=f))
+                    for f in forms
+                ]
+                must.append(conds[0] if len(conds) == 1 else qmodels.Filter(should=conds))
+        if active_at is not None:
+            # RET-2: never return a memory whose expiry has passed.
+            must.append(
+                qmodels.Filter(
+                    should=[
+                        qmodels.IsEmptyCondition(is_empty=qmodels.PayloadField(key=FIELD_EXPIRES_AT)),
+                        qmodels.IsNullCondition(is_null=qmodels.PayloadField(key=FIELD_EXPIRES_AT)),
+                        qmodels.FieldCondition(key=FIELD_EXPIRES_AT, range=qmodels.DatetimeRange(gt=active_at)),
+                    ]
+                )
+            )
+        return qmodels.Filter(must=must)
+
     async def search(
         self,
         query_vector: list[float],
@@ -300,6 +420,11 @@ class QdrantStore:
         project_id: str | None = None,
         limit: int = 5,
         score_threshold: float = 0.70,
+        *,
+        offset: int = 0,
+        active_at: Any = None,
+        must_match: dict[str, Any] | None = None,
+        metadata_match: dict[str, Any] | None = None,
     ) -> list[tuple[str, float, dict[str, Any]]]:
         """
         Semantic search for memories.
@@ -310,37 +435,80 @@ class QdrantStore:
             project_id: Filter to this project. If None, search across
                 all projects owned by the user (cross-project recall).
             limit: Max results to return
-            score_threshold: Minimum similarity score
+            score_threshold: Minimum cosine similarity
+            offset: Skip this many best hits (paging for over-fetch loops)
+            active_at: Exclude memories whose ``expires_at`` <= this time
+            must_match: Exact match on plain payload fields (``PLAIN_FILTER_FIELDS``)
+            metadata_match: ``metadata.<key>`` equality; applied server-side only
+                when metadata is unencrypted — callers must still verify.
 
         Returns:
             List of (memory_id, score, payload) tuples
         """
         client = await self._get_client()
 
-        # Build filter: always scope to user_id; project_id only when provided
-        must_conditions: list[Any] = [
-            qmodels.FieldCondition(
-                key=FIELD_USER_ID,
-                match=qmodels.MatchValue(value=user_id),
-            ),
-        ]
-        if project_id is not None:
-            must_conditions.append(
-                qmodels.FieldCondition(
-                    key=FIELD_PROJECT_ID,
-                    match=qmodels.MatchValue(value=project_id),
-                )
-            )
-
         results = await client.query_points(
             collection_name=self.collection_name,
             query=query_vector,
-            query_filter=qmodels.Filter(must=must_conditions),
+            query_filter=self.build_filter(
+                user_id, project_id, active_at=active_at, must_match=must_match, metadata_match=metadata_match
+            ),
             limit=limit,
+            offset=offset or None,
             score_threshold=score_threshold,
         )
 
         return [(str(r.id), r.score, self._decrypt_payload(r.payload or {})) for r in results.points]
+
+    async def score_ids(self, query_vector: list[float], memory_ids: list[str], user_id: str | None = None) -> dict[str, float]:
+        """Cosine similarity of ``query_vector`` to specific points (RET-5).
+
+        One filtered query instead of fetching each vector. Points owned by
+        another user are never scored when ``user_id`` is given.
+        """
+        if not memory_ids:
+            return {}
+        client = await self._get_client()
+        must: list[Any] = [qmodels.HasIdCondition(has_id=list(memory_ids))]
+        if user_id is not None:
+            must.append(qmodels.FieldCondition(key=FIELD_USER_ID, match=qmodels.MatchValue(value=user_id)))
+        results = await client.query_points(
+            collection_name=self.collection_name,
+            query=query_vector,
+            query_filter=qmodels.Filter(must=must),
+            limit=len(memory_ids),
+            with_payload=False,
+        )
+        return {str(r.id): float(r.score) for r in results.points}
+
+    async def set_payload_fields(self, memory_id: str, fields: dict[str, Any]) -> None:
+        """Overwrite only the given payload keys of one point (backfills)."""
+        client = await self._get_client()
+        await client.set_payload(collection_name=self.collection_name, payload=fields, points=[memory_id])
+
+    async def get_raw_payloads(self, memory_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Stored payloads (not decrypted) for the given ids; missing ids omitted."""
+        if not memory_ids:
+            return {}
+        client = await self._get_client()
+        points = await client.retrieve(
+            collection_name=self.collection_name, ids=list(memory_ids), with_payload=True, with_vectors=False
+        )
+        return {str(p.id): dict(p.payload or {}) for p in points}
+
+    async def set_metadata(self, memory_id: str, metadata: dict[str, Any]) -> None:
+        """Replace a point's metadata payload (encrypted like on upsert)."""
+        await self.set_payload_fields(memory_id, {FIELD_METADATA: self._encryptor.encrypt_dict(metadata)})
+
+    async def existing_ids(self, memory_ids: list[str]) -> set[str]:
+        """Which of ``memory_ids`` have a point in the collection."""
+        if not memory_ids:
+            return set()
+        client = await self._get_client()
+        points = await client.retrieve(
+            collection_name=self.collection_name, ids=list(memory_ids), with_payload=False, with_vectors=False
+        )
+        return {str(p.id) for p in points}
 
     async def delete(self, memory_id: str, user_id: str | None = None) -> bool:
         """Delete a single memory by ID.

@@ -11,8 +11,10 @@ from datetime import timedelta
 
 import pytest
 
+from remembra.config import Settings
 from remembra.core.time import utcnow
 from remembra.models.memory import RecallRequest
+from remembra.retrieval.ranking import RelevanceRanker
 from remembra.services.memory import MemoryService
 
 
@@ -60,6 +62,8 @@ class _FakeDB:
 async def test_filter_only_recall_scans_past_first_page():
     svc = MemoryService.__new__(MemoryService)
     svc.db = _FakeDB()
+    svc.settings = Settings(openai_api_key="t")
+    svc.relevance_ranker = RelevanceRanker()
 
     req = RecallRequest(
         user_id="u1",

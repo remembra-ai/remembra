@@ -225,7 +225,6 @@ class RelevanceRanker:
 
         cfg = config or self.config
         boost = 0.0
-        query_lower = query.lower()
 
         # Check if query_entities are provided (direct matches)
         if query_entities:
@@ -234,9 +233,16 @@ class RelevanceRanker:
                 if entity.id in query_entity_ids:
                     boost += cfg.entity_boost_per_match * entity.confidence
 
-        # Also check entity names in query string
+        # Also check entity names in query string (whole-word, no junk names - RET-3)
+        from remembra.retrieval.graph import ENTITY_MENTION_STOPLIST, MIN_MENTION_LEN, mention_in_query
+
         for entity in memory_entities:
-            if entity.canonical_name.lower() in query_lower:
+            name = (entity.canonical_name or "").strip()
+            if len(name) < MIN_MENTION_LEN or name.casefold() in ENTITY_MENTION_STOPLIST:
+                continue
+            if query_entities and entity.id in {e.id for e in query_entities}:
+                continue  # already counted above
+            if mention_in_query(name, query):
                 boost += cfg.entity_boost_per_match * entity.confidence
 
         return min(boost, cfg.entity_max_boost)
@@ -265,6 +271,7 @@ class RelevanceRanker:
         query: str = "",
         query_entities: list[EntityRef] | None = None,
         retrieval_mode: str = "balanced",
+        feedback_weight: float = 0.0,
     ) -> list[RankedMemory]:
         """
         Rank memories using weighted combination of signals.
@@ -273,7 +280,12 @@ class RelevanceRanker:
             memories: List of memory dicts with keys:
                 - id: Memory ID
                 - content: Memory content
-                - relevance/semantic_score: Base similarity score
+                - semantic_score (or relevance): ABSOLUTE similarity in [0, 1];
+                  it is not rescaled against the other candidates, so a weak
+                  best match stays weak (RET-1)
+                - rerank_score: optional CrossEncoder probability; when present
+                  it is the relevance component instead of semantic_score
+                - feedback_score: optional net feedback in [-1, 1]
                 - created_at: ISO timestamp
                 - keyword_score: BM25 score (optional)
                 - entities: List of EntityRef (optional)
@@ -306,9 +318,9 @@ class RelevanceRanker:
 
         ranked: list[RankedMemory] = []
 
-        # Find max scores for normalization
-        max_semantic = max(m.get("relevance", m.get("semantic_score", 0)) for m in memories) or 1.0
-        max_keyword = max(m.get("keyword_score", 0) for m in memories) or 1.0
+        # Keyword (BM25) scores are unbounded, so they are scaled by the batch
+        # max. Semantic scores are cosine similarities and stay absolute.
+        max_keyword = max(m.get("keyword_score", 0) or 0 for m in memories) or 1.0
 
         for memory in memories:
             memory_id = str(memory.get("id", ""))
@@ -344,10 +356,12 @@ class RelevanceRanker:
                         )
 
             # Compute component scores
-            raw_semantic = memory.get("relevance", memory.get("semantic_score", 0))
-            semantic_score = raw_semantic / max_semantic if max_semantic > 0 else 0
+            raw_semantic = memory["semantic_score"] if "semantic_score" in memory else memory.get("relevance", 0)
+            semantic_score = min(1.0, max(0.0, float(raw_semantic or 0.0)))
+            rerank = memory.get("rerank_score")
+            relevance_component = min(1.0, max(0.0, float(rerank))) if rerank is not None else semantic_score
 
-            raw_keyword = memory.get("keyword_score", 0)
+            raw_keyword = memory.get("keyword_score", 0) or 0
             keyword_score = raw_keyword / max_keyword if max_keyword > 0 else 0
 
             recency_score = self._compute_recency_score(created_at, config)
@@ -358,11 +372,12 @@ class RelevanceRanker:
 
             # Compute weighted final score
             final_score = (
-                config.semantic_weight * semantic_score
+                config.semantic_weight * relevance_component
                 + config.recency_weight * recency_score
                 + config.entity_weight * entity_score
                 + config.keyword_weight * keyword_score
                 + config.access_weight * access_score
+                + feedback_weight * float(memory.get("feedback_score", 0.0) or 0.0)
             )
 
             ranked.append(

@@ -6,7 +6,9 @@ from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 from remembra.api.v1 import spaces
+from remembra.config import Settings
 from remembra.models.memory import RecallResponse
+from remembra.retrieval.ranking import RelevanceRanker
 from remembra.services.memory import MemoryService
 from remembra.spaces.manager import SpaceManager
 from tests.security_harness import secure_app
@@ -30,10 +32,25 @@ class _Qdrant:
     async def get_by_id(self, memory_id: str):
         return self.payloads.get(memory_id)
 
+    async def score_ids(self, query_vector, memory_ids, user_id=None):
+        """Cosine of the query to each stored vector (QdrantStore.score_ids contract, RET-5)."""
+        import math
+
+        out = {}
+        for mid in memory_ids:
+            vec = (self.payloads.get(mid) or {}).get("embedding")
+            if vec:
+                dot = sum(a * b for a, b in zip(query_vector, vec, strict=False))
+                norm = math.sqrt(sum(a * a for a in query_vector)) * math.sqrt(sum(b * b for b in vec))
+                out[mid] = dot / norm if norm else 0.0
+        return out
+
 
 def _memory_service(db, space_manager, payloads) -> MemoryService:
     """Real MemoryService.recall_across_spaces with vector store / embedder stubbed out."""
     service = MemoryService.__new__(MemoryService)
+    service.settings = Settings(openai_api_key="t")
+    service.relevance_ranker = RelevanceRanker()
     service.db = db
     service.space_manager = space_manager
     service.qdrant = _Qdrant(payloads)
