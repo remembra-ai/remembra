@@ -115,3 +115,5 @@ async def test_entity_graph_respects_limits(client: AsyncClient) -> None:
 
     node_ids = {n["id"] for n in payload["nodes"]}
     assert node_ids == {"e1", "e2"}
+    # Each node carries its project so the dashboard can place it.
+    assert {n["project_id"] for n in payload["nodes"]} == {project_id}

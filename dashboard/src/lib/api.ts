@@ -828,6 +828,8 @@ export interface EntityGraphNode {
   confidence: number;
   memory_count: number;
   community_id: number | null;
+  /** Present on servers that return it (the Constellation places entities by project). */
+  project_id?: string | null;
 }
 
 export interface EntityGraphEdge {

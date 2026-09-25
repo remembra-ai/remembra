@@ -36,7 +36,8 @@ export function AppLayout({
   const section = sectionOf(activeTab);
   const meta = TABS[activeTab];
   const subTabs = section.tabs.length > 1 ? section.tabs : [];
-  const usesMemoryProject = section.id === 'memory' || section.id === 'graph';
+  // The Constellation has its own project filter; Entities and Brain use the memory project.
+  const usesMemoryProject = section.id === 'memory' || (section.id === 'graph' && activeTab !== 'graph');
   const wide = activeTab === 'graph';
 
   const navProps = {

@@ -43,7 +43,7 @@ export const TABS: Record<TabType, TabMeta> = {
   analytics: { label: 'Analytics', title: 'Memory', subtitle: 'Recall traffic, storage growth and usage.' },
   decay: { label: 'Decay', title: 'Memory', subtitle: 'Recency, retention, and what is being forgotten.' },
   debugger: { label: 'Debugger', title: 'Memory', subtitle: 'Why a recall returned what it did.' },
-  graph: { label: 'Graph', title: 'Graph', subtitle: 'How memories connect through people, projects and ideas.' },
+  graph: { label: 'Constellation', title: 'Graph', subtitle: 'Agents, projects, handoffs and entities, live. Orange packets are handoffs and notes in flight.' },
   entities: { label: 'Entities', title: 'Graph', subtitle: 'The people, products and concepts memory has resolved.' },
   brain: { label: 'Brain', title: 'Graph', subtitle: 'Themes, central memories and surprising links.' },
   settings: { label: 'General', title: 'Settings', subtitle: 'Profile, preferences and workspace defaults.' },

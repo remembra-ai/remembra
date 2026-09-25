@@ -112,7 +112,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
     { id: 'nav-analytics', label: 'Analytics', description: 'Usage metrics and trends', icon: BarChart3, section: 'Memory', action: go('analytics'), keywords: ['usage', 'metrics', 'stats'] },
     { id: 'nav-decay', label: 'Decay report', description: 'Memory retention analysis', icon: TrendingDown, section: 'Memory', action: go('decay') },
     { id: 'nav-debugger', label: 'Query debugger', description: 'Inspect recall quality', icon: Bug, section: 'Memory', action: go('debugger') },
-    { id: 'nav-graph', label: 'Knowledge graph', description: 'Visual entity relationships', icon: Orbit, section: 'Graph', action: go('graph'), keywords: ['network', 'connections'], shortcut: 'g g' },
+    { id: 'nav-graph', label: 'Constellation', description: 'Live graph of agents, projects and entities', icon: Orbit, section: 'Graph', action: go('graph'), keywords: ['graph', 'network', 'knowledge', 'map'], shortcut: 'g g' },
     { id: 'nav-entities', label: 'Entities', description: 'People, concepts, and products', icon: Users, section: 'Graph', action: go('entities'), keywords: ['people', 'concepts'] },
     { id: 'nav-brain', label: 'Brain', description: 'Themes and surprising links', icon: Brain, section: 'Graph', action: go('brain'), keywords: ['insights', 'communities'] },
     // Settings

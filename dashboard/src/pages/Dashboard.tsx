@@ -24,8 +24,8 @@ const StoreMemory = lazy(() =>
 const EntityList = lazy(() =>
   import('../components/EntityList').then((module) => ({ default: module.EntityList })),
 );
-const EntityGraph = lazy(() =>
-  import('../components/KnowledgeGraph').then((module) => ({ default: module.KnowledgeGraph })),
+const Constellation = lazy(() =>
+  import('../graph/Constellation').then((module) => ({ default: module.Constellation })),
 );
 const BrainInsights = lazy(() =>
   import('../components/BrainInsights').then((module) => ({ default: module.BrainInsights })),
@@ -408,8 +408,8 @@ export function Dashboard({ activeTab, onLogout, showNewMemory: showNewMemoryPro
 
       case 'graph':
         return (
-          <Suspense fallback={<SectionLoading label="Loading knowledge graph..." />}>
-            <EntityGraph projectId={currentProjectId} />
+          <Suspense fallback={<SectionLoading label="Loading the constellation..." />}>
+            <Constellation />
           </Suspense>
         );
 
