@@ -1,3458 +1,604 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Remembra - AI Memory Control Plane</title>
-    <meta name="description" content="A governed memory control plane for AI agents. Share context across tools, resolve entities, inspect recall, and self-host in minutes.">
-
-    <!-- Open Graph -->
-    <meta property="og:title" content="Remembra - AI Memory Control Plane">
-    <meta property="og:description" content="Give every AI agent a shared, governed memory bank with temporal context, entity resolution, graph-aware recall, and operator visibility.">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://remembra.dev">
-    <meta property="og:image" content="https://remembra.dev/social-preview.png">
-    <meta property="og:image:width" content="1200">
-    <meta property="og:image:height" content="630">
-
-    <!-- Twitter Card -->
-    <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:site" content="@remembradev">
-    <meta name="twitter:creator" content="@remembradev">
-    <meta name="twitter:title" content="Remembra - AI Memory Control Plane">
-    <meta name="twitter:description" content="Shared, governed memory for AI agents. MCP native, self-hostable, and built for real operator visibility.">
-    <meta name="twitter:image" content="https://remembra.dev/social-preview.png">
-
-    <!-- Additional SEO -->
-    <meta name="robots" content="index, follow">
-    <meta name="author" content="DolphyTech">
-    <meta name="keywords" content="AI memory, LLM memory, MCP memory, agent memory, AI agents, RAG, vector database, entity resolution, AI chatbot, persistent memory, self-hosted, MCP">
-    <link rel="canonical" href="https://remembra.dev">
-
-    <!-- Schema.org Structured Data -->
-    <script type="application/ld+json">
-    {
-        "@context": "https://schema.org",
-        "@type": "SoftwareApplication",
-        "name": "Remembra",
-        "applicationCategory": "DeveloperApplication",
-        "operatingSystem": "Any",
-        "description": "AI memory control plane for agents. Persistent memory with entity resolution, temporal context, governance, and graph-aware recall.",
-        "url": "https://remembra.dev",
-        "offers": {
-            "@type": "Offer",
-            "price": "0",
-            "priceCurrency": "USD",
-            "description": "Free tier with 25,000 memories"
-        },
-        "author": {
-            "@type": "Organization",
-            "name": "DolphyTech",
-            "url": "https://dolphytech.com"
-        }
-    }
-    </script>
-
-    <!-- Favicons -->
-    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="shortcut icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <meta name="apple-mobile-web-app-title" content="Remembra" />
-    <link rel="manifest" href="/site.webmanifest" />
-
-    <!-- Inter Font -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-
-    <style>
-        /* Reset */
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        /* Variables - Minimal palette */
-        :root {
-            --black: #000000;
-            --black-light: #0a0a0a;
-            --gray-900: #111111;
-            --gray-800: #1a1a1a;
-            --gray-700: #262626;
-            --gray-600: #404040;
-            --gray-500: #525252;
-            --gray-400: #737373;
-            --gray-300: #a3a3a3;
-            --white: #ffffff;
-            --purple: #8b5cf6;
-            --purple-light: #a78bfa;
-            --purple-glow: rgba(139, 92, 246, 0.5);
-            --green: #22c55e;
-            --green-light: #4ade80;
-            --green-glow: rgba(34, 197, 94, 0.4);
-            --blue: #3b82f6;
-            --cyan: #06b6d4;
-            --cyan-glow: rgba(6, 182, 212, 0.5);
-            --red: #ef4444;
-            --red-light: #f87171;
-            --yellow: #eab308;
-        }
-
-        html { scroll-behavior: smooth; }
-
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--black);
-            color: var(--white);
-            line-height: 1.6;
-            -webkit-font-smoothing: antialiased;
-        }
-
-        a { color: inherit; text-decoration: none; }
-
-        .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
-
-        /* Header */
-        .header {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 100;
-            transition: all 0.3s ease;
-        }
-
-        .header-inner {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 24px;
-            height: 64px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-
-        .header.scrolled {
-            background: rgba(0, 0, 0, 0.9);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-weight: 600;
-            font-size: 18px;
-        }
-
-        .logo img { width: 28px; height: 28px; border-radius: 8px; }
-        .logo svg { width: 24px; height: 24px; }
-
-        .nav { display: flex; align-items: center; gap: 32px; }
-        .nav-links { display: flex; gap: 32px; list-style: none; }
-        .nav-links a {
-            font-size: 14px;
-            color: var(--gray-400);
-            transition: color 0.2s;
-        }
-        .nav-links a:hover { color: var(--white); }
-
-        /* Mobile Menu Toggle */
-        .mobile-menu-toggle {
-            display: none;
-            background: none;
-            border: none;
-            cursor: pointer;
-            padding: 8px;
-            z-index: 1001;
-        }
-        .mobile-menu-toggle svg {
-            width: 24px;
-            height: 24px;
-            stroke: var(--white);
-        }
-
-        /* Mobile Menu */
-        .mobile-menu {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0, 0, 0, 0.98);
-            z-index: 999;
-            padding: 80px 24px 24px;
-            flex-direction: column;
-            gap: 8px;
-            overflow-y: auto;
-        }
-        .mobile-menu.open { display: flex; }
-        .mobile-menu a {
-            display: block;
-            padding: 16px 0;
-            font-size: 18px;
-            color: var(--gray-300);
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-            transition: color 0.2s;
-        }
-        .mobile-menu a:hover { color: var(--white); }
-        .mobile-menu .mobile-actions {
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            margin-top: 24px;
-        }
-        .mobile-menu .mobile-actions .btn {
-            width: 100%;
-            justify-content: center;
-        }
-        body.menu-open { overflow: hidden; }
-
-        @media (max-width: 900px) {
-            .mobile-menu-toggle { display: block; }
-        }
-
-        .nav-actions { display: flex; align-items: center; gap: 12px; }
-
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            gap: 8px;
-            padding: 10px 20px;
-            font-size: 14px;
-            font-weight: 500;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .btn-ghost { background: transparent; color: var(--gray-400); }
-        .btn-ghost:hover { color: var(--white); }
-
-        .btn-primary { background: var(--white); color: var(--black); }
-        .btn-primary:hover { background: rgba(255,255,255,0.9); transform: translateY(-1px); }
-
-        .btn-outline {
-            background: transparent;
-            color: var(--white);
-            border: 1px solid rgba(255,255,255,0.2);
-        }
-        .btn-outline:hover {
-            border-color: rgba(255,255,255,0.4);
-            background: rgba(255,255,255,0.05);
-        }
-
-        .btn-purple { background: var(--purple); color: var(--white); }
-        .btn-purple:hover { background: var(--purple-light); }
-
-        /* Hero */
-        .hero {
-            position: relative;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 104px 24px 80px;
-            overflow: hidden;
-            background:
-                linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px),
-                radial-gradient(circle at 50% 0%, rgba(139,92,246,0.16), transparent 42%),
-                var(--black);
-            background-size: 56px 56px, 56px 56px, auto, auto;
-        }
-
-        .hero::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(180deg, rgba(0,0,0,0.12), var(--black) 88%);
-            pointer-events: none;
-        }
-
-        .hero-stage {
-            position: relative;
-            z-index: 1;
-            width: min(1200px, 100%);
-            display: grid;
-            grid-template-columns: minmax(0, 0.95fr) minmax(420px, 1.05fr);
-            gap: 42px;
-            align-items: center;
-            margin: 0 auto 40px;
-        }
-
-        .hero-copy-block {
-            text-align: left;
-        }
-
-        .hero-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 8px 16px;
-            background: rgba(139,92,246,0.1);
-            border: 1px solid rgba(139,92,246,0.2);
-            border-radius: 100px;
-            font-size: 13px;
-            color: var(--purple-light);
-            margin-bottom: 26px;
-        }
-
-        .hero-badge .dot {
-            width: 6px;
-            height: 6px;
-            background: var(--purple-light);
-            border-radius: 50%;
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-
-        .hero-title {
-            font-size: clamp(40px, 7vw, 72px);
-            font-weight: 700;
-            line-height: 1.05;
-            letter-spacing: 0;
-            max-width: 900px;
-            margin-bottom: 24px;
-        }
-
-        .hero-title .highlight {
-            background: linear-gradient(135deg, var(--purple-light) 0%, var(--cyan) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .hero-subtitle {
-            font-size: 18px;
-            color: var(--gray-400);
-            max-width: 760px;
-            margin-bottom: 28px;
-            line-height: 1.7;
-        }
-
-        .hero-kpis {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(150px, 1fr));
-            gap: 12px;
-            width: min(640px, 100%);
-            margin: 24px 0 0;
-        }
-
-        .hero-kpi {
-            background: rgba(255,255,255,0.035);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
-            padding: 14px 16px;
-            text-align: left;
-        }
-
-        .hero-kpi strong {
-            display: block;
-            font-size: 22px;
-            line-height: 1.1;
-            color: var(--white);
-            margin-bottom: 5px;
-        }
-
-        .hero-kpi span {
-            display: block;
-            font-size: 12px;
-            color: var(--gray-500);
-            line-height: 1.4;
-        }
-
-        .hero-actions { display: flex; gap: 16px; flex-wrap: wrap; justify-content: flex-start; }
-
-        .memory-console {
-            position: relative;
-            min-height: 560px;
-            border: 1px solid rgba(255,255,255,0.12);
-            border-radius: 28px;
-            background:
-                linear-gradient(180deg, rgba(255,255,255,0.075), rgba(255,255,255,0.025)),
-                rgba(6,8,13,0.92);
-            box-shadow: 0 30px 90px rgba(0,0,0,0.58);
-            overflow: hidden;
-            text-align: left;
-        }
-
-        .memory-console::before {
-            content: '';
-            position: absolute;
-            inset: 0;
-            background:
-                linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
-                linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
-            background-size: 36px 36px;
-            mask-image: linear-gradient(180deg, rgba(0,0,0,0.75), transparent 70%);
-            pointer-events: none;
-        }
-
-        .console-topbar {
-            position: relative;
-            z-index: 1;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 14px;
-            padding: 18px 20px;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
-            background: rgba(0,0,0,0.2);
-        }
-
-        .console-title {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: var(--white);
-            font-weight: 700;
-            font-size: 14px;
-        }
-
-        .console-title span {
-            width: 9px;
-            height: 9px;
-            border-radius: 999px;
-            background: var(--green-light);
-            box-shadow: 0 0 18px rgba(74,222,128,0.72);
-        }
-
-        .console-pills {
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-            gap: 8px;
-        }
-
-        .console-pill {
-            border: 1px solid rgba(255,255,255,0.12);
-            border-radius: 999px;
-            padding: 6px 9px;
-            color: var(--gray-300);
-            font-size: 11px;
-            font-family: 'JetBrains Mono', monospace;
-            background: rgba(255,255,255,0.04);
-        }
-
-        .console-body {
-            position: relative;
-            z-index: 1;
-            display: grid;
-            grid-template-columns: 1fr 0.9fr;
-            gap: 16px;
-            padding: 20px;
-        }
-
-        .console-column {
-            display: grid;
-            gap: 14px;
-            align-content: start;
-        }
-
-        .console-label {
-            color: var(--gray-500);
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-        }
-
-        .signal-card,
-        .memory-record,
-        .mini-graph,
-        .recall-card {
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 16px;
-            background: rgba(0,0,0,0.24);
-        }
-
-        .signal-card {
-            padding: 14px;
-        }
-
-        .signal-meta {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 12px;
-            margin-bottom: 10px;
-            color: var(--gray-500);
-            font-size: 12px;
-        }
-
-        .signal-source {
-            color: var(--cyan);
-            font-weight: 600;
-        }
-
-        .signal-text {
-            color: var(--gray-300);
-            font-size: 13px;
-            line-height: 1.55;
-        }
-
-        .pipeline {
-            display: grid;
-            gap: 9px;
-        }
-
-        .pipeline-row {
-            display: grid;
-            grid-template-columns: 18px 1fr auto;
-            gap: 10px;
-            align-items: center;
-            color: var(--gray-300);
-            font-size: 12px;
-        }
-
-        .pipeline-row span:first-child {
-            width: 18px;
-            height: 18px;
-            border-radius: 50%;
-            background: rgba(34,197,94,0.14);
-            border: 1px solid rgba(34,197,94,0.35);
-            box-shadow: inset 0 0 0 4px rgba(34,197,94,0.05);
-        }
-
-        .pipeline-row em {
-            color: var(--gray-500);
-            font-style: normal;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 11px;
-        }
-
-        .memory-record {
-            padding: 14px;
-        }
-
-        .memory-record strong {
-            display: block;
-            margin-bottom: 6px;
-            color: var(--white);
-            font-size: 13px;
-        }
-
-        .memory-record p {
-            color: var(--gray-400);
-            font-size: 12px;
-            line-height: 1.55;
-        }
-
-        .record-tags {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 6px;
-            margin-top: 10px;
-        }
-
-        .record-tags span {
-            border-radius: 999px;
-            padding: 4px 7px;
-            background: rgba(139,92,246,0.12);
-            color: var(--purple-light);
-            font-size: 10px;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .mini-graph {
-            position: relative;
-            min-height: 210px;
-            padding: 16px;
-            overflow: hidden;
-        }
-
-        .graph-node {
-            position: absolute;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-width: 68px;
-            height: 34px;
-            padding: 0 10px;
-            border-radius: 999px;
-            background: rgba(255,255,255,0.07);
-            border: 1px solid rgba(255,255,255,0.12);
-            color: var(--gray-300);
-            font-size: 11px;
-            font-weight: 600;
-        }
-
-        .graph-node.core {
-            left: 50%;
-            top: 50%;
-            transform: translate(-50%, -50%);
-            min-width: 86px;
-            height: 42px;
-            color: var(--white);
-            border-color: rgba(6,182,212,0.42);
-            background: rgba(6,182,212,0.14);
-            box-shadow: 0 0 34px rgba(6,182,212,0.18);
-        }
-
-        .graph-node.n1 { left: 14px; top: 22px; }
-        .graph-node.n2 { right: 16px; top: 26px; }
-        .graph-node.n3 { left: 24px; bottom: 28px; }
-        .graph-node.n4 { right: 22px; bottom: 30px; }
-
-        .graph-line {
-            position: absolute;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(6,182,212,0.52), transparent);
-            transform-origin: center;
-        }
-
-        .graph-line.l1 { width: 170px; left: 70px; top: 76px; transform: rotate(24deg); }
-        .graph-line.l2 { width: 150px; right: 70px; top: 78px; transform: rotate(-23deg); }
-        .graph-line.l3 { width: 155px; left: 72px; bottom: 76px; transform: rotate(-24deg); }
-        .graph-line.l4 { width: 148px; right: 76px; bottom: 76px; transform: rotate(22deg); }
-
-        .recall-card {
-            padding: 14px;
-            background: rgba(34,197,94,0.055);
-            border-color: rgba(34,197,94,0.18);
-        }
-
-        .recall-card strong {
-            display: block;
-            color: var(--green-light);
-            font-size: 12px;
-            margin-bottom: 7px;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-        }
-
-        .recall-card p {
-            color: var(--gray-300);
-            font-size: 12px;
-            line-height: 1.55;
-        }
-
-        /* Interactive Demo */
-        .timeline-indicator { text-align: center; margin-bottom: 24px; }
-        .timeline-badge {
-            display: inline-flex; align-items: center; gap: 10px; padding: 10px 20px;
-            background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 100px; font-size: 15px; color: var(--gray-400);
-        }
-        .timeline-badge svg { width: 18px; height: 18px; }
-        .timeline-badge .session-num { color: var(--white); font-weight: 600; }
-
-        .demo-container {
-            display: grid; grid-template-columns: 1fr 100px 1.3fr; max-width: 1400px; margin: 0 auto;
-            background: var(--gray-900); border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 24px; overflow: hidden; box-shadow: 0 25px 80px -20px rgba(0,0,0,0.6);
-        }
-
-        .panel { display: flex; flex-direction: column; }
-        .panel-header {
-            display: flex; align-items: center; justify-content: space-between;
-            padding: 18px 24px; border-bottom: 1px solid rgba(255,255,255,0.06);
-            background: rgba(255,255,255,0.02);
-        }
-        .panel-label { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
-        .panel-label.bad { color: var(--red-light); }
-        .panel-label.good { color: var(--green-light); }
-        .panel-label svg { width: 16px; height: 16px; }
-        .panel-dots { display: flex; gap: 8px; }
-        .panel-dots span { width: 12px; height: 12px; border-radius: 50%; }
-        .panel-dots .red { background: #ff5f57; }
-        .panel-dots .yellow { background: #febc2e; }
-        .panel-dots .green { background: #28c840; }
-        .panel-body { flex: 1; padding: 28px; min-height: 380px; }
-        .panel.without { border-right: 1px solid rgba(255,255,255,0.04); }
-        .panel.with { border-left: 1px solid rgba(255,255,255,0.04); background: rgba(34, 197, 94, 0.02); display: grid; grid-template-columns: 1fr 200px; grid-template-rows: auto 1fr; }
-        .panel.with .panel-header { grid-column: 1 / -1; }
-        .panel.with .panel-body { border-right: 1px solid rgba(255,255,255,0.06); }
-
-        .memory-sidebar { padding: 20px; background: rgba(0,0,0,0.2); display: flex; flex-direction: column; }
-        .memory-sidebar-header { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--purple-light); margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
-        .memory-sidebar-header svg { width: 16px; height: 16px; }
-        .memory-list { display: flex; flex-direction: column; gap: 12px; flex: 1; }
-        .memory-item { background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.15); border-radius: 10px; padding: 14px; opacity: 0; transform: translateX(20px); }
-        .memory-item.visible { animation: memSlideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        @keyframes memSlideIn { to { opacity: 1; transform: translateX(0); } }
-        .memory-item.active { border-color: var(--cyan); box-shadow: 0 0 20px var(--cyan-glow); background: rgba(6, 182, 212, 0.1); }
-        .memory-item-text { font-size: 13px; color: var(--gray-300); line-height: 1.4; margin-bottom: 10px; }
-        .memory-item-meta { display: flex; align-items: center; justify-content: space-between; }
-        .memory-item-tag { font-size: 10px; font-weight: 600; text-transform: uppercase; padding: 4px 8px; border-radius: 4px; background: rgba(139, 92, 246, 0.2); color: var(--purple-light); }
-        .memory-item-time { font-size: 10px; color: var(--gray-600); }
-
-        .chat-messages { display: flex; flex-direction: column; gap: 18px; }
-        .chat-message { display: flex; gap: 14px; opacity: 0; transform: translateY(15px); }
-        .chat-message.visible { animation: msgIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-        @keyframes msgIn { to { opacity: 1; transform: translateY(0); } }
-        .chat-avatar { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600; flex-shrink: 0; }
-        .chat-avatar.user { background: linear-gradient(135deg, var(--purple) 0%, var(--blue) 100%); }
-        .chat-avatar.ai { background: linear-gradient(135deg, var(--gray-600) 0%, var(--gray-700) 100%); }
-        .panel.with .chat-avatar.ai { background: linear-gradient(135deg, var(--green) 0%, var(--cyan) 100%); }
-        .chat-content { flex: 1; }
-        .chat-name { font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--gray-500); }
-        .chat-bubble { background: rgba(255,255,255,0.05); border-radius: 14px; border-top-left-radius: 4px; padding: 14px 18px; font-size: 15px; color: var(--gray-300); line-height: 1.6; }
-        .chat-bubble .keyword { color: var(--cyan); font-weight: 500; }
-        .chat-bubble.frustrated { background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.15); }
-        .chat-bubble.ai-good { background: rgba(34, 197, 94, 0.08); border: 1px solid rgba(34, 197, 94, 0.15); }
-        .status-badge { font-size: 12px; margin-top: 8px; opacity: 0; }
-        .status-badge.frustrated { color: var(--red-light); }
-        .status-badge.satisfied { color: var(--green-light); }
-        .status-badge.visible { animation: fadeInBadge 0.3s ease forwards; }
-        @keyframes fadeInBadge { to { opacity: 1; } }
-
-        .connection-zone { display: flex; flex-direction: column; align-items: center; justify-content: center; background: linear-gradient(180deg, rgba(139,92,246,0.05) 0%, rgba(6,182,212,0.05) 100%); position: relative; overflow: hidden; }
-        .flow-line { position: absolute; left: 50%; top: 0; bottom: 0; width: 3px; background: linear-gradient(180deg, transparent 0%, rgba(139,92,246,0.4) 20%, rgba(6,182,212,0.6) 50%, rgba(139,92,246,0.4) 80%, transparent 100%); transform: translateX(-50%); }
-        .brain-container { position: relative; z-index: 10; }
-        .brain-icon { width: 60px; height: 60px; background: var(--gray-900); border: 2px solid rgba(139,92,246,0.4); border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease; }
-        .brain-icon svg { width: 28px; height: 28px; color: var(--purple-light); transition: all 0.3s ease; }
-        .brain-icon.active { border-color: var(--cyan); box-shadow: 0 0 40px var(--cyan-glow); }
-        .brain-icon.active svg { color: var(--cyan); animation: brainPulse 0.5s ease; }
-        @keyframes brainPulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.2); } }
-        .pulse-ring { position: absolute; top: 50%; left: 50%; width: 60px; height: 60px; border: 2px solid var(--purple); border-radius: 50%; transform: translate(-50%, -50%); opacity: 0; pointer-events: none; }
-        .pulse-ring.active { animation: ringPulse 1.5s ease-out forwards; }
-        @keyframes ringPulse { 0% { transform: translate(-50%, -50%) scale(1); opacity: 0.8; } 100% { transform: translate(-50%, -50%) scale(2.5); opacity: 0; } }
-        .particle-container { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-        .particle { position: absolute; width: 8px; height: 8px; background: var(--cyan); border-radius: 50%; left: 50%; transform: translateX(-50%); box-shadow: 0 0 10px var(--cyan-glow), 0 0 20px var(--cyan-glow); opacity: 0; }
-        .particle.down { animation: particleDown 1.4s ease-out forwards; }
-        @keyframes particleDown { 0% { top: 8%; opacity: 0; transform: translateX(-50%) scale(0.5); } 15% { opacity: 1; transform: translateX(-50%) scale(1); } 85% { opacity: 1; } 100% { top: 92%; opacity: 0; transform: translateX(-50%) scale(0.5); } }
-        .data-stream { position: absolute; left: 50%; width: 4px; height: 30px; background: linear-gradient(180deg, var(--cyan), transparent); transform: translateX(-50%); opacity: 0; border-radius: 2px; }
-        .data-stream.active { animation: streamDown 0.7s ease-out forwards; }
-        @keyframes streamDown { 0% { top: 15%; opacity: 0; } 20% { opacity: 1; } 100% { top: 85%; opacity: 0; } }
-        .connection-label { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--gray-600); white-space: nowrap; opacity: 0; transition: all 0.3s ease; }
-        .connection-label.visible { opacity: 1; color: var(--cyan); }
-
-        .nav-dots { display: flex; justify-content: center; gap: 10px; margin-top: 20px; }
-        .nav-dot { width: 10px; height: 10px; border-radius: 50%; background: rgba(255,255,255,0.2); cursor: pointer; transition: all 0.3s ease; border: none; padding: 0; }
-        .nav-dot:hover { background: rgba(255,255,255,0.4); }
-        .nav-dot.active { background: var(--cyan); box-shadow: 0 0 10px var(--cyan-glow); }
-        .pause-hint { text-align: center; font-size: 11px; color: var(--gray-600); margin-top: 10px; margin-bottom: 20px; }
-
-        /* Code Block */
-        .code-block {
-            background: var(--gray-900);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 12px;
-            overflow: hidden;
-            text-align: left;
-            max-width: 700px;
-            width: 100%;
-        }
-
-        .code-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 12px 16px;
-            background: rgba(255,255,255,0.03);
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .code-dot { width: 12px; height: 12px; border-radius: 50%; }
-        .code-dot.red { background: #ff5f57; }
-        .code-dot.yellow { background: #febc2e; }
-        .code-dot.green { background: #28c840; }
-
-        .code-title { margin-left: 12px; font-size: 13px; color: var(--gray-500); }
-
-        .code-body {
-            padding: 20px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 13px;
-            line-height: 1.7;
-            overflow-x: auto;
-        }
-
-        .code-body .kw { color: #ff79c6; }
-        .code-body .str { color: #50fa7b; }
-        .code-body .cmt { color: #6272a4; }
-        .code-body .fn { color: #8be9fd; }
-
-        /* Section Styling */
-        section { padding: 120px 24px; }
-
-        .section-dark { background: var(--black-light); }
-        .section-darker { background: var(--gray-900); }
-
-        .section-header {
-            text-align: center;
-            max-width: 700px;
-            margin: 0 auto 64px;
-        }
-
-        .section-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 12px;
-            background: rgba(34,197,94,0.1);
-            border: 1px solid rgba(34,197,94,0.2);
-            border-radius: 100px;
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--green);
-            margin-bottom: 16px;
-        }
-
-        .section-title {
-            font-size: clamp(32px, 5vw, 48px);
-            font-weight: 700;
-            letter-spacing: 0;
-            margin-bottom: 16px;
-        }
-
-        .section-subtitle {
-            font-size: 18px;
-            color: var(--gray-400);
-            line-height: 1.7;
-        }
-
-        /* Control Plane */
-        .control-plane-section {
-            background:
-                linear-gradient(180deg, var(--black), var(--black-light) 42%, var(--gray-900));
-            overflow: hidden;
-        }
-
-        .control-plane {
-            max-width: 1200px;
-            margin: 0 auto;
-            display: grid;
-            grid-template-columns: 0.9fr 1.1fr;
-            gap: 28px;
-            align-items: stretch;
-        }
-
-        .control-copy {
-            background: rgba(255,255,255,0.035);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 24px;
-            padding: 34px;
-            text-align: left;
-        }
-
-        .control-copy h2 {
-            font-size: clamp(30px, 4vw, 48px);
-            line-height: 1.08;
-            letter-spacing: 0;
-            margin: 12px 0 18px;
-        }
-
-        .control-copy p {
-            color: var(--gray-400);
-            line-height: 1.7;
-            font-size: 16px;
-        }
-
-        .control-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 7px 12px;
-            border-radius: 999px;
-            border: 1px solid rgba(6,182,212,0.24);
-            background: rgba(6,182,212,0.08);
-            color: var(--cyan);
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
-        }
-
-        .control-points {
-            display: grid;
-            gap: 12px;
-            margin-top: 28px;
-        }
-
-        .control-point {
-            display: flex;
-            gap: 12px;
-            align-items: flex-start;
-            padding: 14px;
-            border-radius: 14px;
-            background: rgba(255,255,255,0.03);
-            border: 1px solid rgba(255,255,255,0.06);
-        }
-
-        .control-point svg {
-            width: 18px;
-            height: 18px;
-            color: var(--green-light);
-            flex-shrink: 0;
-            margin-top: 2px;
-        }
-
-        .control-point strong {
-            display: block;
-            color: var(--white);
-            font-size: 14px;
-            margin-bottom: 4px;
-        }
-
-        .control-point span {
-            color: var(--gray-500);
-            font-size: 13px;
-            line-height: 1.5;
-        }
-
-        .control-map {
-            background: var(--gray-900);
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 24px;
-            padding: 22px;
-            min-height: 520px;
-            display: grid;
-            grid-template-rows: auto 1fr;
-            gap: 18px;
-            box-shadow: 0 25px 80px -20px rgba(0,0,0,0.58);
-        }
-
-        .control-map-header {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            align-items: center;
-            padding-bottom: 16px;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
-        }
-
-        .control-map-title {
-            color: var(--white);
-            font-weight: 700;
-        }
-
-        .control-map-subtitle {
-            margin-top: 4px;
-            color: var(--gray-500);
-            font-size: 13px;
-        }
-
-        .control-status {
-            display: inline-flex;
-            align-items: center;
-            gap: 7px;
-            color: var(--green-light);
-            font-size: 12px;
-            border: 1px solid rgba(34,197,94,0.24);
-            background: rgba(34,197,94,0.08);
-            border-radius: 999px;
-            padding: 7px 10px;
-            white-space: nowrap;
-        }
-
-        .control-status span {
-            width: 7px;
-            height: 7px;
-            border-radius: 50%;
-            background: var(--green-light);
-            box-shadow: 0 0 12px rgba(74,222,128,0.7);
-        }
-
-        .memory-map {
-            display: grid;
-            grid-template-columns: 1fr 1.1fr 1fr;
-            gap: 16px;
-            align-items: center;
-        }
-
-        .map-column {
-            display: grid;
-            gap: 12px;
-        }
-
-        .map-label {
-            color: var(--gray-500);
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.14em;
-            text-transform: uppercase;
-            margin-bottom: 2px;
-        }
-
-        .map-node {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            min-height: 52px;
-            padding: 12px;
-            border-radius: 14px;
-            background: rgba(255,255,255,0.04);
-            border: 1px solid rgba(255,255,255,0.07);
-            color: var(--gray-300);
-            font-size: 13px;
-        }
-
-        .map-node svg {
-            width: 18px;
-            height: 18px;
-            color: var(--purple-light);
-            flex-shrink: 0;
-        }
-
-        .map-node.output svg { color: var(--cyan); }
-
-        .memory-core {
-            position: relative;
-            border-radius: 22px;
-            border: 1px solid rgba(139,92,246,0.28);
-            background:
-                linear-gradient(180deg, rgba(139,92,246,0.16), rgba(6,182,212,0.08)),
-                rgba(255,255,255,0.035);
-            padding: 22px;
-            min-height: 330px;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
-        }
-
-        .memory-core-top {
-            text-align: center;
-        }
-
-        .memory-core-icon {
-            width: 62px;
-            height: 62px;
-            border-radius: 18px;
-            border: 1px solid rgba(255,255,255,0.16);
-            background: rgba(0,0,0,0.22);
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 14px;
-        }
-
-        .memory-core-icon svg {
-            width: 30px;
-            height: 30px;
-            color: var(--cyan);
-        }
-
-        .memory-core h3 {
-            color: var(--white);
-            font-size: 20px;
-            margin-bottom: 8px;
-        }
-
-        .memory-core p {
-            color: var(--gray-400);
-            font-size: 13px;
-            line-height: 1.6;
-        }
-
-        .memory-ops {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
-            margin-top: 18px;
-        }
-
-        .memory-op {
-            padding: 10px;
-            border-radius: 12px;
-            background: rgba(0,0,0,0.18);
-            border: 1px solid rgba(255,255,255,0.07);
-            font-size: 12px;
-            color: var(--gray-300);
-        }
-
-        .memory-op strong {
-            display: block;
-            color: var(--white);
-            font-size: 13px;
-            margin-bottom: 4px;
-        }
-
-        /* Product Dock */
-        .product-dock-section {
-            padding-top: 70px;
-            padding-bottom: 70px;
-            background: var(--black);
-        }
-
-        .product-dock {
-            max-width: 1200px;
-            margin: 0 auto;
-            display: grid;
-            grid-template-columns: repeat(5, minmax(0, 1fr));
-            gap: 12px;
-        }
-
-        .dock-card {
-            min-height: 168px;
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 18px;
-            background:
-                linear-gradient(180deg, rgba(255,255,255,0.055), rgba(255,255,255,0.018)),
-                var(--gray-900);
-            padding: 18px;
-            text-align: left;
-            transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease;
-        }
-
-        .dock-card:hover {
-            transform: translateY(-3px);
-            border-color: rgba(6,182,212,0.28);
-            background:
-                linear-gradient(180deg, rgba(6,182,212,0.075), rgba(255,255,255,0.018)),
-                var(--gray-900);
-        }
-
-        .dock-icon {
-            width: 36px;
-            height: 36px;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            border-radius: 10px;
-            border: 1px solid rgba(255,255,255,0.1);
-            background: rgba(255,255,255,0.04);
-            color: var(--cyan);
-            margin-bottom: 14px;
-        }
-
-        .dock-icon svg {
-            width: 18px;
-            height: 18px;
-        }
-
-        .dock-card h3 {
-            font-size: 15px;
-            margin-bottom: 8px;
-            color: var(--white);
-        }
-
-        .dock-card p {
-            color: var(--gray-500);
-            font-size: 12px;
-            line-height: 1.55;
-        }
-
-        .dock-card span {
-            display: inline-flex;
-            margin-top: 14px;
-            color: var(--gray-400);
-            font-size: 11px;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        /* API System */
-        .api-system-section {
-            background:
-                linear-gradient(180deg, var(--black-light), var(--black));
-            overflow: hidden;
-        }
-
-        .api-system {
-            max-width: 1200px;
-            margin: 0 auto;
-            display: grid;
-            grid-template-columns: 0.95fr 1.05fr;
-            gap: 28px;
-            align-items: stretch;
-        }
-
-        .api-copy {
-            text-align: left;
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 24px;
-            background: rgba(255,255,255,0.032);
-            padding: 34px;
-        }
-
-        .api-copy h2 {
-            font-size: clamp(30px, 4vw, 48px);
-            line-height: 1.08;
-            letter-spacing: 0;
-            margin: 14px 0 18px;
-        }
-
-        .api-copy p {
-            color: var(--gray-400);
-            line-height: 1.7;
-            font-size: 16px;
-        }
-
-        .api-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 7px 12px;
-            border-radius: 999px;
-            border: 1px solid rgba(139,92,246,0.25);
-            background: rgba(139,92,246,0.1);
-            color: var(--purple-light);
-            font-size: 12px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
-        }
-
-        .api-terminal {
-            margin-top: 26px;
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 18px;
-            background: rgba(0,0,0,0.28);
-            overflow: hidden;
-        }
-
-        .api-terminal-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            padding: 12px 14px;
-            border-bottom: 1px solid rgba(255,255,255,0.06);
-            color: var(--gray-500);
-            font-size: 12px;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        .api-terminal-body {
-            padding: 18px;
-            color: var(--gray-300);
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 12px;
-            line-height: 1.8;
-            overflow-x: auto;
-        }
-
-        .api-terminal-body .endpoint { color: var(--cyan); }
-        .api-terminal-body .method { color: var(--green-light); }
-        .api-terminal-body .dim { color: var(--gray-600); }
-
-        .api-grid {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 14px;
-        }
-
-        .api-card {
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 18px;
-            background: var(--gray-900);
-            padding: 18px;
-            text-align: left;
-        }
-
-        .api-card h3 {
-            color: var(--white);
-            font-size: 15px;
-            margin-bottom: 8px;
-        }
-
-        .api-card p {
-            color: var(--gray-500);
-            font-size: 12px;
-            line-height: 1.58;
-        }
-
-        .api-chip {
-            display: inline-flex;
-            margin-bottom: 12px;
-            border-radius: 999px;
-            border: 1px solid rgba(6,182,212,0.22);
-            background: rgba(6,182,212,0.08);
-            color: var(--cyan);
-            padding: 5px 8px;
-            font-size: 10px;
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        /* Feature Cards */
-        .features-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-            gap: 24px;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .feature-card {
-            background: var(--gray-900);
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 16px;
-            padding: 32px;
-            transition: all 0.3s ease;
-        }
-
-        .feature-card:hover {
-            border-color: rgba(139,92,246,0.3);
-            transform: translateY(-4px);
-        }
-
-        .feature-icon {
-            width: 48px;
-            height: 48px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 20px;
-        }
-
-        .feature-icon svg {
-            width: 24px;
-            height: 24px;
-            color: var(--white);
-        }
-
-        .feature-title {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 12px;
-        }
-
-        .feature-desc {
-            font-size: 14px;
-            color: var(--gray-400);
-            margin-bottom: 16px;
-            line-height: 1.6;
-        }
-
-        .feature-list {
-            list-style: none;
-        }
-
-        .feature-list li {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            font-size: 13px;
-            color: var(--gray-400);
-            padding: 4px 0;
-        }
-
-        .feature-list li svg {
-            width: 16px;
-            height: 16px;
-            color: var(--purple-light);
-            flex-shrink: 0;
-        }
-
-        /* Enterprise Grid */
-        .enterprise-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 20px;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-
-        .enterprise-card {
-            background: var(--gray-900);
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 12px;
-            padding: 24px;
-            transition: all 0.3s ease;
-        }
-
-        .enterprise-card:hover {
-            border-color: rgba(255,255,255,0.1);
-        }
-
-        .enterprise-card .icon {
-            width: 40px;
-            height: 40px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 16px;
-        }
-
-        .enterprise-card .icon svg {
-            width: 20px;
-            height: 20px;
-            color: var(--white);
-        }
-
-        .enterprise-card h3 {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-
-        .enterprise-card p {
-            font-size: 13px;
-            color: var(--gray-400);
-            line-height: 1.5;
-        }
-
-        /* MCP Section */
-        .mcp-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 60px;
-            align-items: center;
-            max-width: 1100px;
-            margin: 0 auto;
-        }
-
-        .mcp-content h2 {
-            font-size: clamp(28px, 4vw, 40px);
-            font-weight: 700;
-            letter-spacing: 0;
-            margin-bottom: 20px;
-        }
-
-        .mcp-content p {
-            font-size: 17px;
-            color: var(--gray-400);
-            line-height: 1.7;
-            margin-bottom: 24px;
-        }
-
-        .mcp-command {
-            background: var(--gray-900);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 8px;
-            padding: 16px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 13px;
-            margin-bottom: 24px;
-            overflow-x: auto;
-        }
-
-        .mcp-list {
-            list-style: none;
-        }
-
-        .mcp-list li {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            padding: 8px 0;
-            font-size: 15px;
-            color: var(--gray-300);
-        }
-
-        .mcp-list li svg {
-            width: 20px;
-            height: 20px;
-            color: var(--purple-light);
-            flex-shrink: 0;
-        }
-
-        .integrations-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-            gap: 16px;
-            max-width: 900px;
-            margin: 0 auto;
-        }
-
-        .integration-card {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
-            padding: 24px 16px;
-            background: var(--gray-800);
-            border: 1px solid rgba(255,255,255,0.06);
-            border-radius: 12px;
-            text-decoration: none;
-            color: var(--gray-300);
-            font-size: 14px;
-            font-weight: 500;
-            transition: all 0.2s ease;
-        }
-
-        .integration-card:hover {
-            border-color: var(--purple);
-            background: rgba(139, 92, 246, 0.08);
-            color: var(--white);
-            transform: translateY(-2px);
-        }
-
-        .integration-card .int-icon {
-            font-size: 28px;
-            line-height: 1;
-        }
-
-        .integration-card .int-name {
-            text-align: center;
-            line-height: 1.3;
-        }
-
-        .mcp-demo {
-            background: var(--gray-900);
-            border: 1px solid rgba(255,255,255,0.1);
-            border-radius: 16px;
-            padding: 24px;
-        }
-
-        .mcp-demo-header {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-            margin-bottom: 20px;
-            padding-bottom: 16px;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .mcp-demo-header .dot { width: 10px; height: 10px; border-radius: 50%; }
-        .mcp-demo-header .red { background: #ff5f57; }
-        .mcp-demo-header .yellow { background: #febc2e; }
-        .mcp-demo-header .green { background: #28c840; }
-        .mcp-demo-header span { margin-left: 8px; font-size: 13px; color: var(--gray-500); }
-
-        .mcp-chat { font-size: 14px; }
-        .mcp-chat .msg { display: flex; gap: 12px; margin-bottom: 16px; }
-        .mcp-chat .msg.user .label { color: var(--purple-light); font-weight: 600; }
-        .mcp-chat .msg.ai .label { color: var(--green); font-weight: 600; }
-        .mcp-chat .msg .text { color: var(--gray-300); }
-        .mcp-chat .divider {
-            border-top: 1px solid rgba(255,255,255,0.05);
-            margin: 20px 0;
-            padding-top: 8px;
-        }
-        .mcp-chat .divider span { font-size: 12px; color: var(--gray-600); }
-
-        /* Comparison Table */
-        .comparison-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 14px;
-        }
-
-        .comparison-table th,
-        .comparison-table td {
-            padding: 16px;
-            text-align: center;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .comparison-table th:first-child,
-        .comparison-table td:first-child {
-            text-align: left;
-        }
-
-        .comparison-table thead th {
-            font-weight: 600;
-            color: var(--gray-400);
-            padding-bottom: 20px;
-        }
-
-        .comparison-table thead th:nth-child(2) {
-            color: var(--purple-light);
-        }
-
-        .comparison-table tbody tr:hover {
-            background: rgba(255,255,255,0.02);
-        }
-
-        .comparison-table tbody tr.highlight {
-            background: rgba(139,92,246,0.05);
-        }
-
-        .comparison-table td:first-child {
-            color: var(--gray-300);
-        }
-
-        .check { color: var(--green); }
-        .cross { color: var(--red); opacity: 0.6; }
-        .partial { color: var(--yellow); }
-        .text-green { color: var(--green); font-weight: 600; }
-        .text-red { color: var(--red); }
-        .text-yellow { color: var(--yellow); }
-
-        /* Steps */
-        .steps-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 32px;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-
-        .step {
-            position: relative;
-        }
-
-        .step-number {
-            position: absolute;
-            top: -16px;
-            left: -16px;
-            width: 48px;
-            height: 48px;
-            background: var(--purple);
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 20px;
-            font-weight: 700;
-        }
-
-        .step-content {
-            background: var(--gray-900);
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 16px;
-            padding: 40px 28px 28px;
-        }
-
-        .step-content h3 {
-            font-size: 20px;
-            font-weight: 600;
-            margin-bottom: 12px;
-        }
-
-        .step-content p {
-            font-size: 14px;
-            color: var(--gray-400);
-            margin-bottom: 16px;
-        }
-
-        .step-code {
-            background: rgba(0,0,0,0.5);
-            border-radius: 8px;
-            padding: 12px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 12px;
-            color: var(--green);
-            overflow-x: auto;
-        }
-
-        .step-methods {
-            list-style: none;
-        }
-
-        .step-methods li {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 0;
-            font-size: 13px;
-            color: var(--gray-300);
-        }
-
-        .step-methods .badge {
-            width: 28px;
-            height: 28px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 14px;
-        }
-
-        /* Use Cases */
-        .usecases-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 20px;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-
-        .usecase-card {
-            background: var(--gray-900);
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 12px;
-            padding: 24px;
-            transition: all 0.3s ease;
-        }
-
-        .usecase-card:hover {
-            border-color: rgba(255,255,255,0.1);
-        }
-
-        .usecase-card .icon {
-            width: 48px;
-            height: 48px;
-            background: rgba(255,255,255,0.05);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin-bottom: 16px;
-            font-size: 24px;
-        }
-
-        .usecase-card h3 {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-
-        .usecase-card p {
-            font-size: 13px;
-            color: var(--gray-400);
-            line-height: 1.5;
-        }
-
-        /* Pricing */
-        .pricing-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 24px;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        @media (max-width: 1100px) {
-            .pricing-grid { grid-template-columns: repeat(2, 1fr); }
-        }
-
-        .pricing-card {
-            background: var(--gray-900);
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 16px;
-            padding: 32px;
-            transition: all 0.3s ease;
-        }
-
-        .pricing-card.featured {
-            border-color: var(--purple);
-            position: relative;
-        }
-
-        .pricing-card.featured::before {
-            content: 'Most Popular';
-            position: absolute;
-            top: -12px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: var(--purple);
-            color: var(--white);
-            font-size: 12px;
-            font-weight: 600;
-            padding: 4px 12px;
-            border-radius: 100px;
-        }
-
-        .pricing-name {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-
-        .pricing-price {
-            font-size: 42px;
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-
-        .pricing-price span {
-            font-size: 16px;
-            font-weight: 400;
-            color: var(--gray-500);
-        }
-
-        .pricing-desc {
-            font-size: 14px;
-            color: var(--gray-400);
-            margin-bottom: 24px;
-        }
-
-        .pricing-features {
-            list-style: none;
-            margin-bottom: 32px;
-        }
-
-        .pricing-features li {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            padding: 8px 0;
-            font-size: 14px;
-            color: var(--gray-300);
-        }
-
-        .pricing-features li svg {
-            width: 16px;
-            height: 16px;
-            color: var(--purple-light);
-            flex-shrink: 0;
-        }
-
-        .pricing-card .btn { width: 100%; }
-
-        /* Blog/Changelog Preview */
-        .blog-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 24px;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-
-        .blog-card {
-            background: var(--gray-900);
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 12px;
-            overflow: hidden;
-            transition: all 0.3s ease;
-        }
-
-        .blog-card:hover {
-            border-color: rgba(255,255,255,0.1);
-            transform: translateY(-4px);
-        }
-
-        .blog-card-image {
-            height: 160px;
-            background: var(--gray-800);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .blog-card-image svg {
-            width: 48px;
-            height: 48px;
-            color: var(--gray-600);
-        }
-
-        .blog-card-content {
-            padding: 20px;
-        }
-
-        .blog-card-date {
-            font-size: 12px;
-            color: var(--gray-500);
-            margin-bottom: 8px;
-        }
-
-        .blog-card h3 {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 8px;
-            line-height: 1.4;
-        }
-
-        .blog-card p {
-            font-size: 13px;
-            color: var(--gray-400);
-            line-height: 1.5;
-        }
-
-        /* CTA */
-        .cta {
-            text-align: center;
-            padding: 120px 24px;
-            background: linear-gradient(to bottom, var(--gray-900), var(--black));
-        }
-
-        .cta h2 {
-            font-size: clamp(32px, 5vw, 48px);
-            font-weight: 700;
-            letter-spacing: 0;
-            margin-bottom: 16px;
-        }
-
-        .cta p {
-            font-size: 18px;
-            color: var(--gray-400);
-            margin-bottom: 32px;
-        }
-
-        .cta-actions {
-            display: flex;
-            justify-content: center;
-            gap: 16px;
-            flex-wrap: wrap;
-        }
-
-        /* Footer */
-        .footer {
-            padding: 80px 24px 40px;
-            border-top: 1px solid rgba(255,255,255,0.05);
-        }
-
-        .footer-grid {
-            display: grid;
-            grid-template-columns: 2fr repeat(4, 1fr);
-            gap: 48px;
-            max-width: 1200px;
-            margin: 0 auto 60px;
-        }
-
-        .footer-brand p {
-            font-size: 14px;
-            color: var(--gray-500);
-            line-height: 1.6;
-            margin-top: 16px;
-        }
-
-        .footer-column h4 {
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 20px;
-        }
-
-        .footer-column ul { list-style: none; }
-        .footer-column li { margin-bottom: 12px; }
-        .footer-column a {
-            font-size: 14px;
-            color: var(--gray-500);
-            transition: color 0.2s;
-        }
-        .footer-column a:hover { color: var(--white); }
-
-        .footer-bottom {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding-top: 32px;
-            border-top: 1px solid rgba(255,255,255,0.05);
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        .footer-bottom p {
-            font-size: 13px;
-            color: var(--gray-600);
-        }
-
-        .footer-legal {
-            display: flex;
-            gap: 24px;
-        }
-
-        .footer-legal a {
-            font-size: 13px;
-            color: var(--gray-600);
-            transition: color 0.2s;
-        }
-        .footer-legal a:hover { color: var(--white); }
-
-        /* Animations */
-        .reveal {
-            opacity: 0;
-            transform: translateY(30px);
-            transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1);
-        }
-
-        .reveal.visible {
-            opacity: 1;
-            transform: translateY(0);
-        }
-
-        /* Mobile */
-        @media (max-width: 1100px) {
-            .hero-stage {
-                grid-template-columns: 1fr;
-                gap: 28px;
-                text-align: center;
-            }
-            .hero-copy-block { text-align: center; }
-            .hero-subtitle,
-            .hero-kpis { margin-left: auto; margin-right: auto; }
-            .hero-actions { justify-content: center; }
-            .memory-console { width: min(720px, 100%); margin: 0 auto; }
-            .demo-container { grid-template-columns: 1fr; }
-            .connection-zone { height: 100px; flex-direction: row; }
-            .flow-line { width: 100%; height: 3px; left: 0; top: 50%; transform: translateY(-50%); background: linear-gradient(90deg, transparent, rgba(139,92,246,0.4), rgba(6,182,212,0.6), rgba(139,92,246,0.4), transparent); }
-            .panel.without, .panel.with { border: none; }
-            .panel.with { grid-template-columns: 1fr; }
-            .memory-sidebar { border-top: 1px solid rgba(255,255,255,0.06); flex-direction: row; flex-wrap: wrap; gap: 12px; }
-            .memory-sidebar-header { width: 100%; }
-            .memory-list { flex-direction: row; flex-wrap: wrap; }
-            .memory-item { flex: 1; min-width: 200px; }
-            .control-plane { grid-template-columns: 1fr; }
-            .memory-map { grid-template-columns: 1fr; }
-            .product-dock { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-            .api-system { grid-template-columns: 1fr; }
-        }
-
-        @media (max-width: 900px) {
-            .nav-links { display: none; }
-            .mcp-grid { grid-template-columns: 1fr; gap: 40px; }
-            .steps-grid { grid-template-columns: 1fr; }
-            .pricing-grid { grid-template-columns: 1fr; }
-            .footer-grid { grid-template-columns: 1fr 1fr; }
-            .footer-brand { grid-column: 1 / -1; }
-            .hero-kpis { grid-template-columns: repeat(2, 1fr); }
-            .console-body { grid-template-columns: 1fr; }
-            .memory-console { min-height: auto; }
-            .mini-graph { min-height: 190px; }
-        }
-
-        @media (max-width: 600px) {
-            .hero-actions { flex-direction: column; width: 100%; }
-            .hero-actions .btn { width: 100%; max-width: 300px; }
-            .hero-kpis { grid-template-columns: 1fr; }
-            .hero { padding-left: 16px; padding-right: 16px; }
-            .memory-console { border-radius: 20px; }
-            .console-topbar { align-items: flex-start; flex-direction: column; }
-            .console-pills { justify-content: flex-start; }
-            .graph-node { min-width: 58px; padding: 0 8px; font-size: 10px; }
-            .graph-line { opacity: 0.65; }
-            .product-dock { grid-template-columns: 1fr; }
-            .dock-card { min-height: 128px; }
-            .api-grid { grid-template-columns: 1fr; }
-            .api-copy { padding: 22px; border-radius: 18px; }
-            .control-copy, .control-map { padding: 20px; border-radius: 18px; }
-            .control-map-header { align-items: flex-start; flex-direction: column; }
-            .memory-ops { grid-template-columns: 1fr; }
-            .footer-grid { grid-template-columns: 1fr; }
-            .footer-bottom { flex-direction: column; gap: 16px; text-align: center; }
-            .cta-actions { flex-direction: column; }
-            .cta-actions .btn { width: 100%; max-width: 300px; }
-        }
-
-        /* Table responsive */
-        .table-wrapper {
-            overflow-x: auto;
-            -webkit-overflow-scrolling: touch;
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remembra: one cloud memory for all your AI agents</title>
+<meta name="description" content="One agent stops, the next one already knows. Remembra is one cloud memory for all your AI agents: when one stops, the next picks up from its handoff in any tool, on any machine.">
+
+<meta property="og:title" content="Remembra: one agent stops, the next one already knows">
+<meta property="og:description" content="One cloud memory for all your AI agents. Out of credits on one? Keep going on another, in any tool, on any machine.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://remembra.dev">
+<meta property="og:image" content="https://remembra.dev/social-preview.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@remembradev">
+<meta name="twitter:title" content="Remembra: one agent stops, the next one already knows">
+<meta name="twitter:description" content="One cloud memory for all your AI agents. Out of credits on one? Keep going on another.">
+<meta name="twitter:image" content="https://remembra.dev/social-preview.png">
+<meta name="robots" content="index, follow">
+<meta name="author" content="DolphyTech">
+<link rel="canonical" href="https://remembra.dev">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "Remembra",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Any",
+  "description": "One cloud memory for all your AI agents. When one agent stops, the next one picks up from its handoff in any tool, on any machine.",
+  "url": "https://remembra.dev",
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD", "description": "Free plan, no card required" },
+  "author": { "@type": "Organization", "name": "DolphyTech", "url": "https://dolphytech.com" }
+}
+</script>
+
+<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Remembra">
+<link rel="manifest" href="/site.webmanifest">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script>
+  /* Apply a saved theme before first paint. Storage may be unavailable; the page works without it. */
+  (function () {
+    try {
+      var t = localStorage.getItem("remembra-theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
+<link rel="stylesheet" href="/site.css">
+<style>
+:root { --t-hero: clamp(2.3rem, 1rem + 4.2vw, 4.6rem); }
+
+/* ------------------------------------------------------------------
+   Hero
+------------------------------------------------------------------- */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: clamp(32px, 5vw, 80px);
+  align-items: center;
+  min-height: calc(100svh - var(--nav-h));
+  padding-top: 8px;
+  padding-bottom: 48px;
+}
+.hero h1 {
+  font-family: var(--f-display);
+  font-weight: 800;
+  font-size: var(--t-hero);
+  line-height: .98;
+  letter-spacing: -.036em;
+  margin-top: 18px;
+}
+.hero h1 .l { display: block; }
+.hero h1 mark {
+  background: var(--signal); color: var(--on-signal);
+  padding: 0 .08em; margin: 0 -.02em;
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+.lede {
+  margin-top: 22px; max-width: 33em;
+  font-size: var(--t-18); line-height: 1.5; color: var(--ink-2);
+}
+.lede strong { color: var(--ink); font-weight: 600; }
+.hero .cmd { margin-top: 28px; }
+
+/* ------------------------------------------------------------------
+   Signature: the trail ("git log for agents")
+------------------------------------------------------------------- */
+.relay {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--r);
+  box-shadow: var(--shadow);
+  font-family: var(--f-mono);
+  font-size: .8125rem;
+  line-height: 1.5;
+  min-width: 0;
+}
+.relay-head {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--head); color: var(--head-ink);
+  padding: 10px 16px; font-size: var(--t-12);
+  border-radius: calc(var(--r) - 1px) calc(var(--r) - 1px) 0 0;
+}
+.relay-head .cmdname { white-space: nowrap; flex: none; font-weight: 700; }
+.relay-head .repo { opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.relay-head .tag {
+  margin-left: auto; flex: none; border: 1px solid rgba(236,237,232,.35); padding: 1px 7px; border-radius: 2px;
+  font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; opacity: .85;
+}
+.relay-body { padding: 16px 20px 8px 16px; }
+.track { position: relative; }
+.rail, .rail-fill {
+  position: absolute; left: 11px; width: 2px; top: 0; height: 0;
+  background: repeating-linear-gradient(180deg, var(--rule) 0 4px, transparent 4px 8px);
+}
+:root[data-theme="dark"] .rail { background: repeating-linear-gradient(180deg, #4A4E53 0 4px, transparent 4px 8px); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rail { background: repeating-linear-gradient(180deg, #4A4E53 0 4px, transparent 4px 8px); } }
+.rail-fill { background: var(--signal); transition: height .9s cubic-bezier(.6,0,.2,1); }
+.baton {
+  position: absolute; left: 12px; top: 0; width: 12px; height: 26px; margin-left: -6px;
+  background: var(--signal); border-radius: 6px;
+  box-shadow: 0 0 0 4px var(--signal-wash), 0 4px 14px rgba(255,91,20,.45);
+  transform: translateY(0);
+  transition: transform .9s cubic-bezier(.6,0,.2,1);
+  z-index: 2;
+  opacity: 0;
+}
+.relay.is-ready .baton { opacity: 1; }
+.no-tr, .no-tr * { transition: none !important; }
+
+.log { position: relative; }
+.e { display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 14px; padding: 4px 0; }
+.e > div { min-width: 0; }
+.node {
+  justify-self: center; margin-top: 6px; position: relative; z-index: 1;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: var(--panel); border: 2px solid var(--ink-3);
+}
+.e.from .node, .e.to .node { border-color: var(--ink); }
+.relay[data-stage="1"] .e.from .node { background: var(--ink); }
+.e.hand .node { border-radius: 1px; transform: rotate(45deg); border-color: var(--signal); width: 11px; height: 11px; margin-top: 9px; }
+.relay:not(.is-animating) .e.to .node,
+.relay[data-stage="5"] .e.to .node,
+.relay[data-stage="6"] .e.to .node { background: var(--signal); border-color: var(--signal); }
+.who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
+.agent {
+  font-family: var(--f-display); font-weight: 700; font-size: 1rem; letter-spacing: -.01em; color: var(--ink);
+  background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-align: left;
+  text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--ink-3); text-underline-offset: 4px; text-decoration-thickness: 1px;
+}
+.agent:hover { text-decoration-style: solid; text-decoration-color: var(--signal); text-decoration-thickness: 2px; }
+.where { color: var(--ink-3); font-size: var(--t-12); }
+.line { color: var(--ink-2); overflow-wrap: anywhere; }
+.line .k { color: var(--ink-3); }
+.past .agent { color: var(--ink-3); font-size: .9375rem; }
+.past .line { color: var(--ink-3); }
+
+.meter { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-top: 6px; max-width: 360px; }
+.meter[hidden] { display: none; }
+.meter .lab { color: var(--ink-3); font-size: var(--t-12); }
+.meter .bar { height: 6px; background: var(--paper-2); border: 1px solid var(--rule); position: relative; overflow: hidden; }
+.meter .fill { position: absolute; inset: 0 auto 0 0; width: var(--m, 0%); background: var(--ink); }
+.meter.low .fill { background: var(--fail); }
+.meter .val { font-variant-numeric: tabular-nums; min-width: 6ch; text-align: right; font-size: var(--t-12); color: var(--ink); }
+.meter.low .val { color: var(--fail); }
+
+.stop .line { color: var(--fail); font-weight: 500; }
+.stop .line::before { content: "\2715  "; }
+.stop.calm .line { color: var(--ink-2); }
+.stop.calm .line::before { content: "\25A0  "; color: var(--ink-3); }
+
+.handoff {
+  border: 1px solid var(--rule); border-left: 3px solid var(--signal);
+  background: var(--paper); padding: 8px 12px 9px; margin: 2px 0;
+}
+.handoff-h { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; font-size: var(--t-12); letter-spacing: .06em; text-transform: uppercase; color: var(--signal-ink); font-weight: 700; }
+.handoff-h .sig { font-weight: 400; color: var(--ink-3); text-transform: none; letter-spacing: 0; }
+.facts { margin-top: 4px; }
+.facts li { display: grid; grid-template-columns: 1.6ch minmax(0,1fr); gap: 8px; color: var(--ink); overflow-wrap: anywhere; }
+.facts li::before { font-weight: 700; }
+.facts .ok::before   { content: "\2713"; color: var(--ok); }
+.facts .warn::before { content: "!";      color: var(--signal-ink); }
+.facts .todo::before { content: "\2192"; color: var(--signal-ink); }
+.facts .todo { font-weight: 500; }
+
+.to .line { color: var(--ink); }
+.to .line .p { color: var(--signal-ink); margin-right: .6ch; }
+.to .line.ok .p { color: var(--ok); }
+.cursor { display: inline-block; width: .6em; height: 1.05em; background: var(--signal); vertical-align: -2px; margin-left: 2px; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+
+/* staged reveal, only while animating (the still frame shows everything) */
+.relay.is-animating [data-at] { opacity: 0; transform: translateY(4px); transition: opacity .35s ease, transform .35s ease; }
+.relay.is-animating [data-at].on { opacity: 1; transform: none; }
+.relay.is-animating .facts li:nth-child(2) { transition-delay: .12s; }
+.relay.is-animating .facts li:nth-child(3) { transition-delay: .24s; }
+.relay.is-animating .facts li:nth-child(4) { transition-delay: .36s; }
+
+.relay-foot {
+  display: grid; gap: 10px;
+  border-top: 1px solid var(--rule); padding: 12px 16px 14px;
+  font-family: var(--f-body); font-size: var(--t-14); color: var(--ink-2);
+}
+.relay-foot .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.relay-foot .hint { font-size: var(--t-12); color: var(--ink-3); font-family: var(--f-mono); }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg button {
+  font-family: var(--f-mono); font-size: var(--t-12);
+  background: transparent; border: 1px solid var(--rule); border-radius: 2px;
+  padding: 6px 10px; cursor: pointer; color: var(--ink-2); position: relative; overflow: hidden;
+}
+.seg button:hover { border-color: var(--ink); color: var(--ink); }
+.seg button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--paper); }
+.relay-foot .pause { margin-left: auto; font-family: var(--f-mono); font-size: var(--t-12); background: transparent; border: 0; padding: 6px 0; cursor: pointer; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+.seg button .prog { position: absolute; left: 0; bottom: 0; height: 2px; width: 0; background: var(--signal); }
+
+/* ------------------------------------------------------------------
+   Below the fold
+------------------------------------------------------------------- */
+.sec { padding: clamp(64px, 9vw, 120px) 0; border-top: 1px solid var(--rule); }
+.sec-grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: clamp(28px, 5vw, 80px); }
+.sec h2 {
+  font-family: var(--f-display); font-weight: 800; font-size: var(--t-44);
+  line-height: 1; letter-spacing: -.03em; margin-top: 16px; text-wrap: balance;
+}
+.sec .intro { margin-top: 18px; color: var(--ink-2); font-size: var(--t-18); max-width: 30em; }
+.sec code { white-space: nowrap; font-family: var(--f-mono); font-size: .9em; background: var(--paper-2); padding: 1px 5px; border-radius: 2px; }
+
+/* 1. How it works: three stations on one rail */
+.legs { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); border-top: 2px solid var(--ink); }
+.leg { position: relative; padding: 30px 28px 0 0; }
+.leg::before {
+  content: ""; position: absolute; top: -8px; left: 0; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--paper); border: 2px solid var(--ink);
+}
+.leg:last-child::before { background: var(--signal); border-color: var(--signal); box-shadow: 0 0 0 5px var(--signal-wash); }
+.leg .n { font-family: var(--f-mono); font-size: var(--t-12); color: var(--ink-3); letter-spacing: .06em; }
+.leg h3 { font-family: var(--f-display); font-weight: 700; font-size: var(--t-30); letter-spacing: -.02em; line-height: 1.05; margin-top: 8px; }
+.leg p { margin-top: 12px; color: var(--ink-2); max-width: 22em; }
+.also { margin-top: 40px; font-size: var(--t-14); color: var(--ink-2); max-width: 46em; }
+.also b { color: var(--ink); font-weight: 600; }
+
+/* 2. Agents: a lineup */
+.lineup { border-top: 1px solid var(--rule); }
+.lineup li {
+  display: grid; grid-template-columns: 3.2rem minmax(0, 1fr) auto; align-items: baseline; gap: 12px;
+  padding: 14px 0; border-bottom: 1px solid var(--rule);
+}
+.lineup .lane { font-family: var(--f-mono); font-size: var(--t-12); color: var(--ink-3); }
+.lineup .name { font-family: var(--f-display); font-weight: 700; font-size: var(--t-30); letter-spacing: -.02em; line-height: 1.1; }
+.lineup .note { font-family: var(--f-mono); font-size: var(--t-12); color: var(--ink-3); text-align: right; }
+.lineup li.any .name { color: var(--signal-ink); }
+.lineup li.any .lane::before { content: ""; display: inline-block; width: 8px; height: 18px; border-radius: 4px; background: var(--signal); vertical-align: -3px; }
+.places { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 8px; }
+.places li { font-family: var(--f-mono); font-size: var(--t-12); border: 1px solid var(--rule); padding: 5px 9px; border-radius: 2px; color: var(--ink-2); background: var(--panel); }
+.fine { margin-top: 22px; font-size: var(--t-14); color: var(--ink-3); max-width: 34em; }
+
+/* 3. Start: full-bleed orange band */
+.band { background: var(--signal); color: var(--on-signal); padding: clamp(64px, 9vw, 112px) 0; }
+.band .eyebrow { color: var(--on-signal); }
+.band .eyebrow::before { background: var(--on-signal); }
+.band h2 {
+  font-family: var(--f-display); font-weight: 800; font-size: var(--t-44);
+  line-height: 1; letter-spacing: -.03em; margin-top: 16px; text-wrap: balance;
+}
+.band-grid { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: clamp(32px, 5vw, 80px); align-items: start; }
+.band .cmd { margin-top: 28px; box-shadow: 6px 6px 0 var(--on-signal); background: #15171A; color: #ECEDE8; }
+.band .cmd code .ps { color: #FF6B2B; }
+.band .copy { border-left-color: rgba(236,237,232,.18); }
+.band .cmd-meta, .band .cmd-meta .free, .band .cmd-meta a { color: var(--on-signal); }
+.band .cmd-meta a { text-decoration-color: var(--on-signal); }
+.band .cmd-meta .sep { background: var(--on-signal); }
+.band :focus-visible { outline-color: var(--on-signal); }
+
+.prices { margin-top: 36px; border-top: 2px solid var(--on-signal); }
+.prices a { display: block; text-decoration: none; color: var(--on-signal); }
+.prices ul { display: grid; grid-template-columns: repeat(5, auto); gap: 0; }
+.prices li { padding: 14px 18px 14px 0; border-bottom: 1px solid rgba(21,23,26,.35); }
+.prices .pn { display: block; font-family: var(--f-mono); font-size: var(--t-12); letter-spacing: .06em; text-transform: uppercase; }
+.prices .pv { display: block; font-family: var(--f-display); font-weight: 800; font-size: var(--t-22); letter-spacing: -.02em; line-height: 1.15; margin-top: 2px; }
+.prices .pv small { font-family: var(--f-body); font-weight: 600; font-size: var(--t-14); letter-spacing: 0; }
+.prices .pd { display: block; font-size: var(--t-12); margin-top: 2px; }
+.prices li.founding .pv { background: var(--on-signal); color: var(--signal); display: inline-block; padding: 0 .2em; }
+.prices .more { display: inline-flex; gap: 8px; margin-top: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 2px; }
+.prices a:hover .more { text-decoration-thickness: 3px; }
+
+.trust { display: grid; gap: 0; border-top: 2px solid var(--on-signal); }
+.trust div { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 12px; padding: 14px 0; border-bottom: 1px solid rgba(21,23,26,.35); }
+.trust dt { font-family: var(--f-mono); font-size: var(--t-12); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding-top: 2px; }
+.trust dd { margin: 0; font-size: var(--t-16); }
+
+/* ------------------------------------------------------------------
+   Responsive
+------------------------------------------------------------------- */
+@media (max-height: 820px) and (min-width: 961px) {
+  :root { --t-hero: clamp(2.3rem, 1rem + 3.5vw, 4rem); }
+  .lede { margin-top: 16px; }
+  .hero .cmd { margin-top: 22px; }
+}
+@media (max-width: 1100px) {
+  .prices ul { grid-template-columns: repeat(3, auto); }
+}
+@media (max-width: 960px) {
+  .hero { grid-template-columns: minmax(0,1fr); min-height: 0; gap: 28px; padding-top: 6px; padding-bottom: 56px; align-items: start; }
+  .hero h1 { margin-top: 12px; }
+  .lede { font-size: var(--t-16); margin-top: 12px; }
+  .hero .cmd { margin-top: 18px; }
+  .cmd-meta { margin-top: 12px; font-size: .8125rem; gap: 4px 12px; }
+  .sec-grid, .band-grid { grid-template-columns: minmax(0,1fr); }
+  .legs { grid-template-columns: minmax(0,1fr); border-top: 0; border-left: 2px solid var(--ink); margin-left: 7px; }
+  .leg { padding: 0 0 32px 26px; }
+  .leg:last-child { padding-bottom: 0; }
+  .leg::before { top: 4px; left: -8px; }
+}
+@media (max-width: 520px) {
+  :root { --t-hero: 2.15rem; }
+  .hero { gap: 20px; }
+  .lede { line-height: 1.45; }
+  .lede .long { display: none; }
+  .relay { font-size: .75rem; }
+  .relay-body { padding: 10px 12px 6px 8px; }
+  .relay-head { padding: 8px 12px; }
+  .e { column-gap: 10px; padding: 3px 0; }
+  .e.past { display: none; }
+  .agent { font-size: .9375rem; }
+  .handoff { padding: 6px 10px 7px; }
+  .lineup li { grid-template-columns: 2.4rem minmax(0,1fr); }
+  .lineup .note { grid-column: 2; text-align: left; }
+  .prices ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .prices li.founding { grid-column: 1 / -1; }
+  .trust div { grid-template-columns: minmax(0,1fr); gap: 4px; }
+  .band .cmd { box-shadow: 4px 4px 0 var(--on-signal); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail-fill, .baton, .relay [data-at] { transition: none !important; }
+  .cursor { animation: none; }
+}
+</style>
 </head>
-<body>
-    <!-- Header -->
-    <header class="header" id="header">
-        <div class="header-inner">
-            <a href="/" class="logo">
-                <img src="/logo.jpg" alt="Remembra">
-                Remembra
-            </a>
+<body class="site">
+<a class="skip" href="#main">Skip to content</a>
 
-            <nav class="nav">
-                <ul class="nav-links">
-                    <li><a href="#features">Features</a></li>
-                    <li><a href="#pricing">Pricing</a></li>
-                    <li><a href="https://docs.remembra.dev">Docs</a></li>
-                    <li><a href="#changelog">Changelog</a></li>
-                    <li><a href="https://app.remembra.dev">Dashboard</a></li>
-                </ul>
-                <div class="nav-actions">
-                    <a href="https://github.com/remembra-ai/remembra" target="_blank" class="btn btn-outline" style="padding: 8px 14px; gap: 6px;">
-                        <svg style="width: 18px; height: 18px;" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                        Star
-                    </a>
-                    <a href="https://app.remembra.dev/login" class="btn btn-ghost">Login</a>
-                    <a href="https://app.remembra.dev/signup" class="btn btn-primary">Get Started</a>
-                </div>
-                <button class="mobile-menu-toggle" id="mobileMenuToggle" aria-label="Toggle menu">
-                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24" id="menuIcon">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
-                    </svg>
-                </button>
-            </nav>
-        </div>
-    </header>
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href="/" aria-label="Remembra home">
+      <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="6" cy="25" r="2.4" fill="currentColor" opacity=".3"/>
+        <circle cx="11.5" cy="20" r="2.4" fill="currentColor" opacity=".55"/>
+        <rect x="15" y="4" width="9" height="22" rx="4.5" transform="rotate(40 19.5 15)" fill="var(--signal)"/>
+      </svg>
+      <span class="brand-name">Remembra</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a class="nav-hide-md" href="#how">How it works</a>
+      <a class="nav-hide-sm" href="/pricing">Pricing</a>
+      <a class="nav-hide-md" href="https://docs.remembra.dev">Docs</a>
+      <a class="nav-hide-md" href="https://github.com/remembra-ai/remembra">GitHub</a>
+      <button class="theme-btn" type="button" data-theme-toggle aria-label="Switch color theme">
+        <svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke-linecap="round"/></svg>
+        <svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" stroke-linejoin="round"/></svg>
+      </button>
+      <a class="btn-nav" href="https://app.remembra.dev/signup">Start free</a>
+    </nav>
+  </div>
+</header>
 
-    <!-- Mobile Menu -->
-    <div class="mobile-menu" id="mobileMenu">
-        <a href="#features" class="mobile-nav-link">Features</a>
-        <a href="#pricing" class="mobile-nav-link">Pricing</a>
-        <a href="https://docs.remembra.dev" class="mobile-nav-link">Docs</a>
-        <a href="#changelog" class="mobile-nav-link">Changelog</a>
-        <a href="https://app.remembra.dev" class="mobile-nav-link">Dashboard</a>
-        <div class="mobile-actions">
-            <a href="https://github.com/remembra-ai/remembra" target="_blank" class="btn btn-outline">
-                <svg style="width: 18px; height: 18px;" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                Star on GitHub
-            </a>
-            <a href="https://app.remembra.dev/login" class="btn btn-outline">Login</a>
-            <a href="https://app.remembra.dev/signup" class="btn btn-primary">Get Started</a>
-        </div>
+<main id="main">
+  <!-- ============================ HERO ============================ -->
+  <section class="wrap hero" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <p class="eyebrow">Out of credits on one? Keep going on another.</p>
+      <h1 id="hero-title"><span class="l">One agent stops.</span> <span class="l">The next one <mark>already knows.</mark></span></h1>
+      <p class="lede"><strong>Remembra is one cloud memory for all your AI agents.</strong> When one stops, whether it hit a usage limit, ran out of credits, the lid closed or the day ended, the next one picks up from its handoff<span class="long"> without you re-explaining anything</span>. Any tool, any machine.</p>
+
+      <!-- requires PyPI release with remembra-relay -->
+      <div class="cmd" role="group" aria-label="Install command">
+        <code><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span><span>&amp;&amp; remembra-relay connect</span></code>
+        <button class="copy" type="button" data-copy="pipx install remembra &amp;&amp; remembra-relay connect" aria-label="Copy install command">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
+          <span class="copy-label">Copy</span>
+        </button>
+        <span class="sr-only" role="status" data-copy-status></span>
+      </div>
+      <p class="cmd-meta">
+        <span class="free">Free to start</span><span class="sep" aria-hidden="true"></span>
+        <span>Open source</span><span class="sep" aria-hidden="true"></span>
+        <a href="https://docs.remembra.dev/getting-started/docker/">or self-host it</a>
+      </p>
     </div>
 
-    <!-- Hero -->
-    <section class="hero">
-        <div class="hero-stage">
-            <div class="hero-copy-block">
-                <div class="hero-badge">
-                    <span class="dot"></span>
-                    Memory Control Plane • MCP Native • Self-Hosted
+    <!-- Signature: the trail. One agent stops, the baton passes, the next one picks up. -->
+    <figure class="relay" id="relay" data-stage="6" aria-labelledby="relay-cap">
+      <figcaption id="relay-cap" class="sr-only">Example trail: Claude Code on studio-laptop runs out of API credits and leaves a signed handoff with 3 commits on feat/pdf-export, 4 changed files, 41 tests passing and 1 failing, and one open item. OpenAI Codex on studio-laptop picks it up a minute later and finishes the fix.</figcaption>
+      <div class="relay-head" aria-hidden="true">
+        <span class="cmdname">trail</span>
+        <span class="repo" data-k="repo">invoices-api</span>
+        <span class="tag">example</span>
+      </div>
+      <div class="relay-body">
+        <div class="track" id="track">
+          <span class="rail" id="rail" aria-hidden="true"></span>
+          <span class="rail-fill" id="railFill" aria-hidden="true"></span>
+          <span class="baton" id="baton" aria-hidden="true"></span>
+          <ol class="log">
+            <li class="e past" id="nPast">
+              <span class="node" aria-hidden="true"></span>
+              <div>
+                <p class="who"><button class="agent" type="button" data-slot="past" data-k="pastAgent">Kimi CLI</button><span class="where" data-k="pastWhere">home-desktop · yesterday 21:14</span></p>
+                <p class="line" data-k="pastLine">handoff 91d0 · picked up by claude-code</p>
+              </div>
+            </li>
+            <li class="e from" id="nFrom" data-at="1">
+              <span class="node" aria-hidden="true"></span>
+              <div>
+                <p class="who"><button class="agent" type="button" data-slot="from" data-k="fromAgent">Claude Code</button><span class="where" data-k="fromWhere">studio-laptop · 14:02</span></p>
+                <p class="line"><span class="k">working on </span><span data-k="task">PDF export for invoices</span></p>
+                <div class="meter low" id="meter" aria-hidden="true">
+                  <span class="lab" data-k="meterLab">API credits</span>
+                  <span class="bar"><span class="fill" id="meterFill" style="--m:0%"></span></span>
+                  <span class="val" id="meterVal">$0.00</span>
                 </div>
-
-                <h1 class="hero-title">
-                    One memory bank<br><span class="highlight">for every AI agent.</span>
-                </h1>
-
-                <p class="hero-subtitle">
-                    Remembra gives Claude, Cursor, Codex, OpenAI agents, and automations a shared brain with provenance, temporal context, entity resolution, and a dashboard you can actually operate.
-                </p>
-
-                <div class="hero-actions">
-                    <a href="https://app.remembra.dev/signup" class="btn btn-primary">Start Building Free →</a>
-                    <a href="https://docs.remembra.dev" class="btn btn-outline">Read the Docs</a>
-                </div>
-
-                <div class="hero-kpis">
-                    <div class="hero-kpi">
-                        <strong>5 min</strong>
-                        <span>Docker self-host setup</span>
-                    </div>
-                    <div class="hero-kpi">
-                        <strong>MCP</strong>
-                        <span>Native tools for agent workflows</span>
-                    </div>
-                    <div class="hero-kpi">
-                        <strong>Graph</strong>
-                        <span>Entity and relationship recall</span>
-                    </div>
-                    <div class="hero-kpi">
-                        <strong>Audit</strong>
-                        <span>Inspect who wrote what and why</span>
-                    </div>
-                </div>
-            </div>
-
-            <div class="memory-console" aria-label="Remembra memory control plane preview">
-                <div class="console-topbar">
-                    <div class="console-title"><span></span>Remembra Live Memory</div>
-                    <div class="console-pills">
-                        <div class="console-pill">mcp_server</div>
-                        <div class="console-pill">entity_graph</div>
-                        <div class="console-pill">audit_log</div>
-                    </div>
-                </div>
-
-                <div class="console-body">
-                    <div class="console-column">
-                        <div class="console-label">Incoming context</div>
-                        <div class="signal-card">
-                            <div class="signal-meta">
-                                <span class="signal-source">Agent workspace</span>
-                                <span>project: customer-onboarding</span>
-                            </div>
-                            <div class="signal-text">
-                                The team chose self-hosted Remembra, connected MCP tools, and wants future agents to remember install notes, owners, and open tasks.
-                            </div>
-                        </div>
-                        <div class="pipeline">
-                            <div class="pipeline-row"><span></span><strong>Extract facts</strong><em>14ms</em></div>
-                            <div class="pipeline-row"><span></span><strong>Resolve entities</strong><em>31ms</em></div>
-                            <div class="pipeline-row"><span></span><strong>Attach provenance</strong><em>18ms</em></div>
-                            <div class="pipeline-row"><span></span><strong>Index for recall</strong><em>42ms</em></div>
-                        </div>
-                        <div class="recall-card">
-                            <strong>Recalled for next agent</strong>
-                            <p>Continue from the last verified step, use the saved deployment notes, and cite the source memory before making changes.</p>
-                        </div>
-                    </div>
-
-                    <div class="console-column">
-                        <div class="console-label">Memory graph</div>
-                        <div class="mini-graph">
-                            <div class="graph-line l1"></div>
-                            <div class="graph-line l2"></div>
-                            <div class="graph-line l3"></div>
-                            <div class="graph-line l4"></div>
-                            <div class="graph-node n1">Team</div>
-                            <div class="graph-node n2">Agent</div>
-                            <div class="graph-node core">Remembra</div>
-                            <div class="graph-node n3">Docker</div>
-                            <div class="graph-node n4">Docs</div>
-                        </div>
-                        <div class="memory-record">
-                            <strong>Memory record</strong>
-                            <p>Workspace prefers local-first setup, Docker deployment, and documented handoffs between Claude, Cursor, Codex, and automations.</p>
-                            <div class="record-tags">
-                                <span>handoff</span>
-                                <span>source</span>
-                                <span>team</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="timeline-indicator">
-            <div class="timeline-badge">
-                <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                <span class="session-num" id="sessionLabel">Session 2</span> — Context survives the handoff
-            </div>
-        </div>
-
-        <div class="demo-container" id="demoContainer">
-            <div class="panel without">
-                <div class="panel-header">
-                    <div class="panel-label bad">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                        Scattered Agents
-                    </div>
-                    <div class="panel-dots"><span class="red"></span><span class="yellow"></span><span class="green"></span></div>
-                </div>
-                <div class="panel-body">
-                    <div class="chat-messages" id="chatWithout"></div>
-                </div>
-            </div>
-
-            <div class="connection-zone">
-                <div class="flow-line"></div>
-                <div class="particle-container" id="particleContainer"></div>
-                <div class="brain-container">
-                    <div class="pulse-ring" id="pulseRing1"></div>
-                    <div class="pulse-ring" id="pulseRing2"></div>
-                    <div class="brain-icon" id="brainIcon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-                    </div>
-                </div>
-                <div class="connection-label" id="connectionLabel">Memory Flow</div>
-            </div>
-
-            <div class="panel with">
-                <div class="panel-header">
-                    <div class="panel-label good">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        Remembra Control Plane
-                    </div>
-                    <div class="panel-dots"><span class="red"></span><span class="yellow"></span><span class="green"></span></div>
-                </div>
-                <div class="panel-body">
-                    <div class="chat-messages" id="chatWith"></div>
-                </div>
-                <div class="memory-sidebar">
-                    <div class="memory-sidebar-header">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-                        Recalled Memories
-                    </div>
-                    <div class="memory-list" id="memoryList"></div>
-                </div>
-            </div>
-        </div>
-
-        <div class="nav-dots" id="navDots">
-            <button class="nav-dot active" data-index="0"></button>
-            <button class="nav-dot" data-index="1"></button>
-            <button class="nav-dot" data-index="2"></button>
-        </div>
-        <div class="pause-hint">Hover to pause</div>
-    </section>
-
-    <!-- Control Plane -->
-    <section class="control-plane-section">
-        <div class="container">
-            <div class="control-plane">
-                <div class="control-copy reveal">
-                    <div class="control-badge">Shared context layer</div>
-                    <h2>Not just memory. The operating layer between your tools and your agents.</h2>
-                    <p>
-                        The next generation of AI work is multi-agent, multi-tool, and always interrupted. Remembra turns all of that scattered context into a governed memory system: what happened, who said it, when it changed, which agent can see it, and why it was recalled.
-                    </p>
-                    <div class="control-points">
-                        <div class="control-point">
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                            <div>
-                                <strong>Media and project context that follows the work</strong>
-                                <span>Store meeting notes, code decisions, campaign context, launch plans, documents, and agent handoffs in one recallable layer.</span>
-                            </div>
-                        </div>
-                        <div class="control-point">
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                            <div>
-                                <strong>Temporal truth instead of stale snippets</strong>
-                                <span>Resolve conflicts, expire temporary facts, query relationships as of a date, and keep agents from repeating yesterday's assumptions.</span>
-                            </div>
-                        </div>
-                        <div class="control-point">
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                            <div>
-                                <strong>Operator visibility built for production</strong>
-                                <span>Use the dashboard to inspect recall quality, entity graphs, teams, API keys, billing, webhooks, audit trails, and debugger output.</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="control-map reveal">
-                    <div class="control-map-header">
-                        <div>
-                            <div class="control-map-title">Remembra Memory Graph</div>
-                            <div class="control-map-subtitle">Context enters once. Every approved agent recalls the right slice.</div>
-                        </div>
-                        <div class="control-status"><span></span> Live memory layer</div>
-                    </div>
-
-                    <div class="memory-map">
-                        <div class="map-column">
-                            <div class="map-label">Inputs</div>
-                            <div class="map-node"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h8M8 14h5m-9 5V5a2 2 0 012-2h12a2 2 0 012 2v14l-4-4H6l-4 4z"/></svg> Claude, Cursor, Codex</div>
-                            <div class="map-node"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14m-8 4h6a2 2 0 002-2V8a2 2 0 00-2-2H7a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg> Meetings and media notes</div>
-                            <div class="map-node"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7h18M3 12h18M3 17h18"/></svg> Docs, issues, CRM, Slack</div>
-                        </div>
-
-                        <div class="memory-core">
-                            <div class="memory-core-top">
-                                <div class="memory-core-icon">
-                                    <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.6" d="M11 4a3 3 0 00-3 3v1H7a3 3 0 000 6h1v1a3 3 0 006 0v-1h1a3 3 0 000-6h-1V7a3 3 0 00-3-3z"/></svg>
-                                </div>
-                                <h3>Extract. Resolve. Rank. Govern.</h3>
-                                <p>Hybrid semantic search, BM25, entity graph traversal, scopes, feedback, and temporal policies work together before context reaches the model.</p>
-                            </div>
-                            <div class="memory-ops">
-                                <div class="memory-op"><strong>Provenance</strong>Source, actor, project</div>
-                                <div class="memory-op"><strong>Temporal</strong>TTL, decay, as-of</div>
-                                <div class="memory-op"><strong>Graph</strong>People, orgs, links</div>
-                                <div class="memory-op"><strong>Guardrails</strong>Teams, keys, audit</div>
-                            </div>
-                        </div>
-
-                        <div class="map-column">
-                            <div class="map-label">Outputs</div>
-                            <div class="map-node output"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg> Better agent replies</div>
-                            <div class="map-node output"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 11V7a4 4 0 118 0v4m-9 0h10l1 10H9l1-10z"/></svg> Scoped team memory</div>
-                            <div class="map-node output"><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6h13M9 7h13M5 7h.01M5 17h.01"/></svg> Debuggable recall</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Product Dock -->
-    <section class="product-dock-section">
-        <div class="container">
-            <div class="section-header reveal">
-                <span class="section-badge">Product surfaces</span>
-                <h2 class="section-title">Everything points back to one operating layer.</h2>
-                <p class="section-subtitle">The landing page, dashboard, docs, changelog, and API should tell the same truth: Remembra is the control plane for agent memory.</p>
-            </div>
-
-            <div class="product-dock reveal">
-                <a class="dock-card" href="#features">
-                    <div class="dock-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7h16M4 12h16M4 17h10"/></svg>
-                    </div>
-                    <h3>Features</h3>
-                    <p>Memory extraction, temporal truth, graph recall, conflict review, and security controls.</p>
-                    <span>inspect_features()</span>
-                </a>
-
-                <a class="dock-card" href="https://docs.remembra.dev">
-                    <div class="dock-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13M5 4.5A2.5 2.5 0 012.5 7v11A2.5 2.5 0 015 20.5h14A2.5 2.5 0 0021.5 18V7A2.5 2.5 0 0019 4.5h-7z"/></svg>
-                    </div>
-                    <h3>Docs</h3>
-                    <p>Install guides, MCP setup, API reference, diagnostics, and integration paths.</p>
-                    <span>docs.remembra.dev</span>
-                </a>
-
-                <a class="dock-card" href="https://app.remembra.dev">
-                    <div class="dock-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5h16v14H4zM4 10h16M9 10v9"/></svg>
-                    </div>
-                    <h3>Dashboard</h3>
-                    <p>Operate memories, teams, keys, billing, graph views, timeline, and recall debugging.</p>
-                    <span>control_plane()</span>
-                </a>
-
-                <a class="dock-card" href="#changelog">
-                    <div class="dock-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h8M8 11h8M8 15h5M5 3h14a2 2 0 012 2v14l-4-2-4 2-4-2-4 2V5a2 2 0 012-2z"/></svg>
-                    </div>
-                    <h3>Changelog</h3>
-                    <p>Track what changed, what shipped, and what agents should remember about the project.</p>
-                    <span>ingest_changelog()</span>
-                </a>
-
-                <a class="dock-card" href="#api-system">
-                    <div class="dock-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M4 5h16v14H4z"/></svg>
-                    </div>
-                    <h3>API</h3>
-                    <p>Conversation ingest, recall debug, webhooks, inbox, meetings, and transfer endpoints.</p>
-                    <span>/api/v1/*</span>
-                </a>
-            </div>
-        </div>
-    </section>
-
-    <!-- Features -->
-    <section id="features" class="section-dark">
-        <div class="container">
-            <div class="section-header reveal">
-                <h2 class="section-title">A memory layer you can operate, not just call.</h2>
-                <p class="section-subtitle">Remembra is built for agent systems that need continuity, accountability, source-aware recall, and context that improves over time.</p>
-            </div>
-
-            <div class="features-grid">
-                <div class="feature-card reveal">
-                    <div class="feature-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                    </div>
-                    <h3 class="feature-title">Lossless Memory</h3>
-                    <p class="feature-desc">Most memory layers keep an LLM's paraphrase of what you said. Remembra keeps the receipts: the verbatim original is preserved, and every derived fact points back to it.</p>
-                    <ul class="feature-list">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Immutable verbatim source records</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> source_id receipts on every derived fact</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Facts verified against their source — drift gets flagged</li>
-                    </ul>
-                </div>
-
-                <div class="feature-card reveal">
-                    <div class="feature-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-                    </div>
-                    <h3 class="feature-title">Conversation Ingest</h3>
-                    <p class="feature-desc">Turn full conversations into durable facts, entities, and deduped memories with optional dry runs and streaming progress.</p>
-                    <ul class="feature-list">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Fact extraction + importance scoring</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Entity extraction and speaker attribution</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> SSE progress for larger sessions</li>
-                    </ul>
-                </div>
-
-                <div class="feature-card reveal">
-                    <div class="feature-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    </div>
-                    <h3 class="feature-title">Temporal Truth</h3>
-                    <p class="feature-desc">Memories that understand time: TTL, natural decay, as-of relationship queries, and stale-context cleanup.</p>
-                    <ul class="feature-list">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> TTL presets (session → permanent)</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Ebbinghaus-based decay</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> as_of historical queries</li>
-                    </ul>
-                </div>
-
-                <div class="feature-card reveal">
-                    <div class="feature-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                    </div>
-                    <h3 class="feature-title">Recall Pipeline</h3>
-                    <p class="feature-desc">Not just vectors. Combine semantic search, BM25, graph retrieval, reranking, and token-aware context shaping.</p>
-                    <ul class="feature-list">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Vector + BM25 fusion</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Graph-aware recall</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Token-aware context optimization</li>
-                    </ul>
-                </div>
-
-                <div class="feature-card reveal">
-                    <div class="feature-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-                    </div>
-                    <h3 class="feature-title">Security Controls</h3>
-                    <p class="feature-desc">Practical production controls for memory systems: encryption support, PII handling, scoped keys, rate limits, sanitization, and audit trails.</p>
-                    <ul class="feature-list">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> AES-256-GCM encryption of vector-store memory payloads</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> PII detection & redaction</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> API key auth + rate limiting</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Full audit logging</li>
-                    </ul>
-                </div>
-
-                <div class="feature-card reveal">
-                    <div class="feature-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
-                    </div>
-                    <h3 class="feature-title">Conflict Review</h3>
-                    <p class="feature-desc">Track, inspect, resolve, or dismiss conflicting memories so agents do not keep repeating old assumptions.</p>
-                    <ul class="feature-list">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Open, resolved, dismissed states</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Project-scoped conflict lists</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Review stats for operators</li>
-                    </ul>
-                </div>
-
-                <div class="feature-card reveal">
-                    <div class="feature-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-                    </div>
-                    <h3 class="feature-title">Dashboard Control Plane</h3>
-                    <p class="feature-desc">Visual memory browser with entity graphs, query debugging, teams, projects, keys, billing, and activity visibility.</p>
-                    <ul class="feature-list">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Memory browser</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Entity graph visualization</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Query debugger and analytics</li>
-                    </ul>
-                </div>
-
-                <div class="feature-card reveal">
-                    <div class="feature-icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
-                    </div>
-                    <h3 class="feature-title">Agent Handoffs</h3>
-                    <p class="feature-desc">Use MCP tools and the agent inbox pattern to pass targeted context between supported agents and workflows.</p>
-                    <ul class="feature-list">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> MCP server for supported tools</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> One-command installer</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Targeted agent inbox + acknowledgements</li>
-                    </ul>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- API System -->
-    <section id="api-system" class="api-system-section">
-        <div class="container">
-            <div class="api-system">
-                <div class="api-copy reveal">
-                    <span class="api-badge">API advantage</span>
-                    <h2>Memory APIs for the parts agents usually lose.</h2>
-                    <p>
-                        The next level for Remembra is not another generic vector endpoint. It is the operational API surface around memory: ingestion, conflicts, inbox handoffs, meetings, observability, plugins, and exports that help teams trust what agents remember.
-                    </p>
-
-                    <div class="api-terminal">
-                        <div class="api-terminal-header">
-                            <span class="code-dot red"></span>
-                            <span class="code-dot yellow"></span>
-                            <span class="code-dot green"></span>
-                            remembra-api
-                        </div>
-                        <div class="api-terminal-body">
-                            <span class="method">POST</span> <span class="endpoint">/api/v1/ingest/conversation/stream</span> <span class="dim"># extract facts with progress</span><br>
-                            <span class="method">POST</span> <span class="endpoint">/api/v1/debug/recall</span> <span class="dim"># explain why memory returned</span><br>
-                            <span class="method">GET</span> <span class="endpoint">/api/v1/conflicts/stats</span> <span class="dim"># review contradictory facts</span><br>
-                            <span class="method">POST</span> <span class="endpoint">/api/v1/inbox/send</span> <span class="dim"># target another agent</span><br>
-                            <span class="method">POST</span> <span class="endpoint">/api/v1/meetings/summarize</span> <span class="dim"># convert calls into action memory</span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="api-grid reveal">
-                    <div class="api-card">
-                        <span class="api-chip">ingest</span>
-                        <h3>Conversation memory, not chat logs</h3>
-                        <p>Extracts facts, entities, speaker context, deduped memories, and processing stats from whole conversations.</p>
-                    </div>
-                    <div class="api-card">
-                        <span class="api-chip">debug</span>
-                        <h3>Explainable recall</h3>
-                        <p>Shows semantic, keyword, graph, recency, entity, access, rerank, and final scores for operators.</p>
-                    </div>
-                    <div class="api-card">
-                        <span class="api-chip">conflicts</span>
-                        <h3>Contradiction queue</h3>
-                        <p>Gives teams a place to inspect and resolve memory conflicts instead of letting old facts quietly win.</p>
-                    </div>
-                    <div class="api-card">
-                        <span class="api-chip">inbox</span>
-                        <h3>Agent-to-agent pickup</h3>
-                        <p>Lets agents leave targeted tasks, context, status, and acknowledgements for the next tool in the chain.</p>
-                    </div>
-                    <div class="api-card">
-                        <span class="api-chip">meetings</span>
-                        <h3>Meeting continuity</h3>
-                        <p>Builds pre-meeting briefs and post-meeting summaries from calendar, transcript, and memory context.</p>
-                    </div>
-                    <div class="api-card">
-                        <span class="api-chip">webhooks</span>
-                        <h3>Evented memory systems</h3>
-                        <p>Dispatch memory lifecycle events to downstream tools with signing, retries, plugins, and audit visibility.</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Enterprise Features -->
-    <section>
-        <div class="container">
-            <div class="section-header reveal">
-                <span class="section-badge">Available in current builds</span>
-                <h2 class="section-title">Production controls without mystery.</h2>
-                <p class="section-subtitle">The page should match what the product actually exposes: webhooks, RBAC, import/export, plugins, teams, audit logs, and scoped keys.</p>
-            </div>
-
-            <div class="enterprise-grid">
-                <div class="enterprise-card reveal">
-                    <div class="icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-                    </div>
-                    <h3>Webhooks</h3>
-                    <p>Real-time event notifications with HMAC-SHA256 signing and automatic retry delivery.</p>
-                </div>
-
-                <div class="enterprise-card reveal">
-                    <div class="icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-                    </div>
-                    <h3>RBAC</h3>
-                    <p>Admin, Editor, Viewer roles with 12 granular permissions. Scoped API keys included.</p>
-                </div>
-
-                <div class="enterprise-card reveal">
-                    <div class="icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-                    </div>
-                    <h3>Import / Export</h3>
-                    <p>Migrate from ChatGPT, Claude, or other providers. Export to JSON, CSV, JSONL.</p>
-                </div>
-
-                <div class="enterprise-card reveal">
-                    <div class="icon">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
-                    </div>
-                    <h3>Plugins</h3>
-                    <p>Extend with auto-tagging, Slack notifications, or build your own custom plugins.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- MCP Section -->
-    <section class="section-darker">
-        <div class="container">
-            <div class="mcp-grid">
-                <div class="mcp-content reveal">
-                    <span class="hero-badge" style="margin-bottom: 16px;">MCP clients and agent tools</span>
-                    <h2>MCP-Native Memory</h2>
-                    <p>Install the MCP server once, then connect supported agents and IDEs to the same memory layer.</p>
-
-                    <div class="mcp-command">
-                        <span style="color: var(--gray-500)"># Add to Claude Code</span><br>
-                        claude mcp add remembra -e REMEMBRA_URL=<span style="color: var(--green)">http://localhost:8787</span> -- remembra-mcp
-                    </div>
-
-                    <ul class="mcp-list">
-                        <li>
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                            Claude Code, Cursor, VS Code, Windsurf, Zed, Codex, JetBrains &amp; more
-                        </li>
-                        <li>
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                            MCP tools for memory storage, recall, entity search, timeline, and relationships
-                        </li>
-                        <li>
-                            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                            Works through agent tool calls; no app code changes required
-                        </li>
-                    </ul>
-                </div>
-
-                <div class="mcp-demo reveal">
-                    <div class="mcp-demo-header">
-                        <span class="dot red"></span>
-                        <span class="dot yellow"></span>
-                        <span class="dot green"></span>
-                        <span>Claude Code</span>
-                    </div>
-                    <div class="mcp-chat">
-                        <div class="msg user">
-                            <span class="label">You:</span>
-                            <span class="text">Remember that I prefer TypeScript and use Tailwind</span>
-                        </div>
-                        <div class="msg ai">
-                            <span class="label">Claude:</span>
-                            <span class="text">✓ Stored to memory. I'll remember your preferences.</span>
-                        </div>
-                        <div class="divider"><span>Next session...</span></div>
-                        <div class="msg user">
-                            <span class="label">You:</span>
-                            <span class="text">Set up a new project for me</span>
-                        </div>
-                        <div class="msg ai">
-                            <span class="label">Claude:</span>
-                            <span class="text">I remember you prefer TypeScript + Tailwind. I'll set that up...</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Integrations Grid -->
-    <section>
-        <div class="container">
-            <div class="section-header reveal">
-                <span class="section-badge">Integrations</span>
-                <h2 class="section-title">Works With Your Favorite Tools</h2>
-                <p class="section-subtitle">Copy-paste setup guides for every major AI coding tool</p>
-            </div>
-
-            <div class="integrations-grid reveal">
-                <a href="https://docs.remembra.dev/integrations/claude-code/" class="integration-card">
-                    <span class="int-icon">&#x1F4BB;</span>
-                    <span class="int-name">Claude Code</span>
-                </a>
-                <a href="https://docs.remembra.dev/integrations/claude-desktop/" class="integration-card">
-                    <span class="int-icon">&#x1F5A5;</span>
-                    <span class="int-name">Claude Desktop</span>
-                </a>
-                <a href="https://docs.remembra.dev/integrations/cursor/" class="integration-card">
-                    <span class="int-icon">&#x1F4DD;</span>
-                    <span class="int-name">Cursor</span>
-                </a>
-                <a href="https://docs.remembra.dev/integrations/vscode/" class="integration-card">
-                    <span class="int-icon">&#x1F4D0;</span>
-                    <span class="int-name">VS Code + Copilot</span>
-                </a>
-                <a href="https://docs.remembra.dev/integrations/windsurf/" class="integration-card">
-                    <span class="int-icon">&#x1F30A;</span>
-                    <span class="int-name">Windsurf</span>
-                </a>
-                <a href="https://docs.remembra.dev/integrations/jetbrains/" class="integration-card">
-                    <span class="int-icon">&#x1F9E0;</span>
-                    <span class="int-name">JetBrains IDEs</span>
-                </a>
-                <a href="https://docs.remembra.dev/integrations/zed/" class="integration-card">
-                    <span class="int-icon">&#x26A1;</span>
-                    <span class="int-name">Zed</span>
-                </a>
-                <a href="https://docs.remembra.dev/integrations/codex/" class="integration-card">
-                    <span class="int-icon">&#x1F916;</span>
-                    <span class="int-name">OpenAI Codex</span>
-                </a>
-                <a href="https://docs.remembra.dev/integrations/any-mcp-client/" class="integration-card">
-                    <span class="int-icon">&#x1F50C;</span>
-                    <span class="int-name">Any MCP Client</span>
-                </a>
-            </div>
-        </div>
-    </section>
-
-    <!-- Product Truth -->
-    <section>
-        <div class="container">
-            <div class="section-header reveal">
-                <h2 class="section-title">What Remembra is strongest at today.</h2>
-                <p class="section-subtitle">No inflated benchmark claims here. These are the product surfaces backed by the current codebase and docs.</p>
-            </div>
-
-            <div class="table-wrapper reveal">
-                <table class="comparison-table">
-                    <thead>
-                        <tr>
-                            <th>Surface</th>
-                            <th>What it gives you</th>
-                            <th>Where to inspect it</th>
-                            <th>Status</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr class="highlight">
-                            <td>Temporal memory</td>
-                            <td>TTL, decay, as-of relationship queries, and history-aware recall.</td>
-                            <td>Temporal API, timeline, decay report</td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr>
-                            <td>Entity graph</td>
-                            <td>People, organizations, concepts, aliases, and relationships tied back to memories.</td>
-                            <td>Entity Atlas, Knowledge Graph</td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr class="highlight">
-                            <td>MCP server</td>
-                            <td>Agent tools for store, recall, update, entity search, timeline, and relationships.</td>
-                            <td>Docs, MCP tool reference</td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr>
-                            <td>Conversation ingest</td>
-                            <td>Extracts facts, entities, speaker context, dedupes, and streams progress for large sessions.</td>
-                            <td><code>/ingest/conversation</code>, <code>/stream</code></td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr class="highlight">
-                            <td>Recall debugging</td>
-                            <td>Explains semantic, keyword, graph, recency, entity, access, rerank, and final scores.</td>
-                            <td><code>/debug/recall</code>, dashboard debugger</td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr>
-                            <td>Conflict review</td>
-                            <td>Lists conflicting memories, reports stats, and lets operators resolve or dismiss them.</td>
-                            <td><code>/conflicts</code> APIs</td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr class="highlight">
-                            <td>Agent inbox</td>
-                            <td>Targeted agent-to-agent messages with read/done/blocked/rejected acknowledgements.</td>
-                            <td><code>/inbox</code> APIs, MCP inbox tools</td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr>
-                            <td>Universal installer</td>
-                            <td>Auto-detects supported AI tools and writes MCP configuration.</td>
-                            <td><code>remembra-install</code>, <code>remembra-doctor</code></td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr>
-                            <td>Local bridge</td>
-                            <td>Gives sandboxed agents a local endpoint that can proxy to Remembra Cloud.</td>
-                            <td><code>remembra-bridge</code></td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr>
-                            <td>Control plane dashboard</td>
-                            <td>Browse memories, inspect graph, debug recall, manage projects, teams, keys, and billing.</td>
-                            <td>Dashboard app</td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr>
-                            <td>Webhooks and plugins</td>
-                            <td>Lifecycle events, HMAC signing, retries, auto-tagging, recall logging, and Slack notifier plugin.</td>
-                            <td>Webhooks and plugins modules</td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr>
-                            <td>Cloud plans</td>
-                            <td>Free, Pro, Team, and Enterprise tiers with usage metering and upgrade flows.</td>
-                            <td>Billing and cloud plan APIs</td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr>
-                            <td>Import/export</td>
-                            <td>Move memory data through JSON, JSONL, CSV, and provider import paths.</td>
-                            <td>Transfer APIs</td>
-                            <td class="check">Live</td>
-                        </tr>
-                        <tr class="highlight">
-                            <td>Meetings and audio</td>
-                            <td>Builds meeting briefs, summarizes transcripts, and can convert audio segments into memory payloads.</td>
-                            <td><code>/meetings</code>, <code>/audio</code> APIs</td>
-                            <td class="check">Live</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </section>
-
-    <!-- Getting Started Steps -->
-    <section class="section-dark">
-        <div class="container">
-            <div class="section-header reveal">
-                <h2 class="section-title">Up and Running in 5 Minutes</h2>
-                <p class="section-subtitle">From zero to AI memory in three steps</p>
-            </div>
-
-            <div class="steps-grid">
-                <div class="step reveal">
-                    <div class="step-number">1</div>
-                    <div class="step-content">
-                        <h3>Deploy</h3>
-                        <p>One command to run Remembra with Docker:</p>
-                        <div class="step-code">
-                            docker run -d -p 8787:8787 remembra/remembra
-                        </div>
-                    </div>
-                </div>
-
-                <div class="step reveal">
-                    <div class="step-number">2</div>
-                    <div class="step-content">
-                        <h3>Connect All Agents</h3>
-                        <p>One command configures supported AI tools:</p>
-                        <div class="step-code">
-                            pip install remembra<br>
-                            remembra-install --all --url http://localhost:8787
-                        </div>
-                        <p style="margin-top: 12px; font-size: 14px; color: var(--gray-500);">
-                            Detects Claude, Codex, Cursor, Windsurf, Gemini, and more where supported.
-                        </p>
-                    </div>
-                </div>
-
-                <div class="step reveal">
-                    <div class="step-number">3</div>
-                    <div class="step-content">
-                        <h3>Use</h3>
-                        <p>Store and recall memories:</p>
-                        <div class="step-code">
-                            <span style="color: var(--gray-500)"># Store</span><br>
-                            memory.store(<span style="color: var(--green)">"User likes dark mode"</span>)<br><br>
-                            <span style="color: var(--gray-500)"># Recall</span><br>
-                            memory.recall(<span style="color: var(--green)">"preferences"</span>)
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div style="text-align: center; margin-top: 48px;" class="reveal">
-                <a href="https://docs.remembra.dev/getting-started/quickstart" class="btn btn-outline">
-                    Read the Full Guide →
-                </a>
-            </div>
-        </div>
-    </section>
-
-    <!-- Use Cases -->
-    <section>
-        <div class="container">
-            <div class="section-header reveal">
-                <h2 class="section-title">Use Cases</h2>
-                <p class="section-subtitle">Build AI that actually remembers</p>
-            </div>
-
-            <div class="usecases-grid">
-                <div class="usecase-card reveal">
-                    <div class="icon">💬</div>
-                    <h3>AI Assistants</h3>
-                    <p>Give your chatbots persistent memory across sessions. Remember user preferences, past conversations, and context.</p>
-                </div>
-                <div class="usecase-card reveal">
-                    <div class="icon">🏥</div>
-                    <h3>Healthcare AI</h3>
-                    <p>Clinical copilots can preserve patient context and care-team notes when deployed with the required privacy, compliance, and audit controls.</p>
-                </div>
-                <div class="usecase-card reveal">
-                    <div class="icon">📚</div>
-                    <h3>Education</h3>
-                    <p>Adaptive learning that remembers student progress, struggles, and breakthroughs. Personalized tutoring at scale.</p>
-                </div>
-                <div class="usecase-card reveal">
-                    <div class="icon">🛒</div>
-                    <h3>E-Commerce</h3>
-                    <p>Shopping assistants that remember preferences, past purchases, and browsing behavior for personalized recommendations.</p>
-                </div>
-                <div class="usecase-card reveal">
-                    <div class="icon">📊</div>
-                    <h3>Sales & CRM</h3>
-                    <p>AI that remembers every customer interaction, preference, and deal status. Never lose context again.</p>
-                </div>
-                <div class="usecase-card reveal">
-                    <div class="icon">💻</div>
-                    <h3>Developer Tools</h3>
-                    <p>Code assistants that remember your codebase, preferences, and past decisions. Context-aware suggestions.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- Pricing -->
-    <section id="pricing" class="section-dark">
-        <div class="container">
-            <div class="section-header reveal">
-                <h2 class="section-title">Simple, Transparent Pricing</h2>
-                <p class="section-subtitle">Start free. Scale when you're ready.</p>
-            </div>
-
-            <div class="pricing-grid">
-                <div class="pricing-card reveal">
-                    <div class="pricing-name">Free</div>
-                    <div class="pricing-price">$0<span>/month</span></div>
-                    <p class="pricing-desc">For side projects and experimentation</p>
-                    <ul class="pricing-features">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 25,000 memories</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 50K API calls/month</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 2 API keys</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 1 project</li>
-                    </ul>
-                    <a href="https://app.remembra.dev/signup" class="btn btn-outline">Get Started</a>
-                </div>
-
-                <div class="pricing-card featured reveal">
-                    <div class="pricing-name">Pro</div>
-                    <div class="pricing-price">$49<span>/month</span></div>
-                    <p class="pricing-desc">For production applications • 5 users</p>
-                    <p style="font-size: 12px; color: var(--purple-light); margin-top: -16px; margin-bottom: 16px;">Or $499/year (save $89)</p>
-                    <ul class="pricing-features">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 500K memories</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 5 users included</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 5 projects</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Webhooks + Email support</li>
-                    </ul>
-                    <a href="https://app.remembra.dev/signup" class="btn btn-primary">Get Started →</a>
-                </div>
-
-                <div class="pricing-card reveal" style="border-color: rgba(139,92,246,0.3);">
-                    <div class="pricing-name">Team</div>
-                    <div class="pricing-price">$199<span>/month</span></div>
-                    <p class="pricing-desc">For growing companies • 25 users</p>
-                    <p style="font-size: 12px; color: var(--purple-light); margin-top: -16px; margin-bottom: 16px;">Or $1,999/year (save $389)</p>
-                    <ul class="pricing-features">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 2M memories</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 25 users included</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Priority support</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> 99.9% SLA</li>
-                    </ul>
-                    <a href="https://app.remembra.dev/signup" class="btn btn-purple">Get Started →</a>
-                </div>
-
-                <div class="pricing-card reveal">
-                    <div class="pricing-name">Enterprise</div>
-                    <div class="pricing-price">Custom</div>
-                    <p class="pricing-desc">For large deployments</p>
-                    <ul class="pricing-features">
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Custom limits</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Dedicated infra</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Custom security requirements</li>
-                        <li><svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Custom SLA</li>
-                    </ul>
-                    <a href="/contact.html?type=enterprise" class="btn btn-outline">Contact Sales</a>
-                </div>
-            </div>
-
-            <!-- Self-hosted note -->
-            <p style="text-align: center; color: var(--gray-400); margin-top: 32px; font-size: 14px;">
-                🔧 Self-hosting? Remembra is <a href="https://github.com/remembra-ai/remembra" style="color: var(--purple-light);">open source (MIT)</a> — self-host without Remembra Cloud plan limits.
-            </p>
-        </div>
-    </section>
-
-    <!-- Changelog/Blog Preview -->
-    <section id="changelog">
-        <div class="container">
-            <div class="section-header reveal">
-                <h2 class="section-title">Changelog</h2>
-                <p class="section-subtitle">What's new in Remembra</p>
-            </div>
-
-            <div class="blog-grid">
-                <a href="/changelog/v0.13.2.html" class="blog-card reveal">
-                    <div class="blog-card-image">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-6l5-3v6l-5 3zM4 7l8-4 8 4-8 4-8-4zM4 7v10l8 4 8-4V7"/></svg>
-                    </div>
-                    <div class="blog-card-content">
-                        <div class="blog-card-date">Apr 25, 2026</div>
-                        <h3>Remembra v0.13.2 — Product Surfaces & Dashboard Control Plane</h3>
-                        <p>New landing narrative, dashboard operator overview, runtime billing config, safer examples, and hardened release hygiene.</p>
-                    </div>
-                </a>
-
-                <a href="/changelog/v0.13.1.html" class="blog-card reveal">
-                    <div class="blog-card-image">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7M4 17h16M4 7h16"/></svg>
-                    </div>
-                    <div class="blog-card-content">
-                        <div class="blog-card-date">Mar 30, 2026</div>
-                        <h3>Remembra v0.13.1 — Cold Archive & Adaptive Thresholds</h3>
-                        <p>Queryable cold storage for decayed memories, adaptive pruning thresholds, archive restore, and temporal cleanup improvements.</p>
-                    </div>
-                </a>
-
-                <a href="/changelog/v0.13.0.html" class="blog-card reveal">
-                    <div class="blog-card-image">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                    </div>
-                    <div class="blog-card-content">
-                        <div class="blog-card-date">Mar 27, 2026</div>
-                        <h3>Remembra v0.13.0 — Dashboard v2.0 & Team Collaboration</h3>
-                        <p>Two-Factor Authentication, Team Collaboration, Admin Dashboard, Activity Logs, Entity Browser, Timeline fixes, and npm package.</p>
-                    </div>
-                </a>
-
-                <a href="/changelog/v0.10.1.html" class="blog-card reveal">
-                    <div class="blog-card-image">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                    </div>
-                    <div class="blog-card-content">
-                        <div class="blog-card-date">Mar 15, 2026</div>
-                        <h3>Remembra v0.10.1 — Centralized Credentials</h3>
-                        <p>Centralized credentials, slim recall mode (90% smaller payloads), and bridge lifecycle management with health checks.</p>
-                    </div>
-                </a>
-
-                <a href="/changelog/v0.10.0.html" class="blog-card reveal">
-                    <div class="blog-card-image">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                    </div>
-                    <div class="blog-card-content">
-                        <div class="blog-card-date">Mar 15, 2026</div>
-                        <h3>Remembra v0.10.0 — Universal Agent Installer</h3>
-                        <p>One-command setup for all AI agents, remembra-doctor diagnostics, and local bridge for sandboxed agents.</p>
-                    </div>
-                </a>
-
-                <a href="/changelog/v0.9.0.html" class="blog-card reveal">
-                    <div class="blog-card-image">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                    </div>
-                    <div class="blog-card-content">
-                        <div class="blog-card-date">Mar 9, 2026</div>
-                        <h3>Remembra v0.9.0 — Temporal Knowledge Graph</h3>
-                        <p>Bi-temporal relationship model, 11 MCP tools (up from 5), point-in-time queries, cross-agent memory sharing, and interactive entity graph visualization.</p>
-                    </div>
-                </a>
-
-                <a href="/changelog/v0.7.2.html" class="blog-card reveal">
-                    <div class="blog-card-image">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                    </div>
-                    <div class="blog-card-content">
-                        <div class="blog-card-date">Mar 6, 2026</div>
-                        <h3>Remembra v0.7.2 Released</h3>
-                        <p>EntityGraph performance fix, rebuild-vectors admin endpoint, troubleshooting docs.</p>
-                    </div>
-                </a>
-
-                <a href="/changelog/v0.7.1.html" class="blog-card reveal">
-                    <div class="blog-card-image">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-                    </div>
-                    <div class="blog-card-content">
-                        <div class="blog-card-date">Mar 4, 2026</div>
-                        <h3>Remembra v0.7.1 Released</h3>
-                        <p>Dashboard improvements, auth fixes, and documentation updates.</p>
-                    </div>
-                </a>
-
-                <a href="/changelog/v0.7.0.html" class="blog-card reveal">
-                    <div class="blog-card-image">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-                    </div>
-                    <div class="blog-card-content">
-                        <div class="blog-card-date">Mar 2, 2026</div>
-                        <h3>Enterprise Features Now Free</h3>
-                        <p>Webhooks, RBAC, Import/Export, and Plugins - all available in the free tier.</p>
-                    </div>
-                </a>
-
-                <a href="/changelog/mcp-server" class="blog-card reveal">
-                    <div class="blog-card-image">
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                    </div>
-                    <div class="blog-card-content">
-                        <div class="blog-card-date">Feb 28, 2026</div>
-                        <h3>MCP Server for Claude Code</h3>
-                        <p>Give Claude persistent memory with one command. Works with Cursor too.</p>
-                    </div>
-                </a>
-            </div>
-
-            <div style="text-align: center; margin-top: 40px;" class="reveal">
-                <a href="/changelog" class="btn btn-ghost">View all updates →</a>
-            </div>
-        </div>
-    </section>
-
-    <!-- CTA -->
-    <section class="cta">
-        <h2 class="reveal">Ready to give your AI a memory?</h2>
-        <p class="reveal">Start building in minutes. No credit card required.</p>
-        <div class="cta-actions reveal">
-            <a href="https://app.remembra.dev/signup" class="btn btn-primary">Get Started Free</a>
-            <a href="https://docs.remembra.dev" class="btn btn-outline">Read the Docs</a>
-        </div>
-    </section>
-
-    <!-- Footer -->
-    <footer class="footer">
-        <div class="footer-grid">
-            <div class="footer-brand">
-                <a href="/" class="logo">
-                    <img src="/logo.jpg" alt="Remembra">
-                    Remembra
-                </a>
-                <p>Memory layer for AI applications.<br>Built by DolphyTech.</p>
-                <div style="display: flex; align-items: center; gap: 16px; margin-top: 16px;">
-                    <a href="https://github.com/remembra-ai/remembra" target="_blank" style="color: var(--gray-500); transition: color 0.2s;">
-                        <svg style="width: 20px; height: 20px;" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                    </a>
-                    <a href="https://twitter.com/remembradev" target="_blank" style="color: var(--gray-500); transition: color 0.2s;">
-                        <svg style="width: 20px; height: 20px;" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-                    </a>
-                    <a href="https://discord.gg/mPYQRKzXz5" target="_blank" style="color: var(--gray-500); transition: color 0.2s;">
-                        <svg style="width: 20px; height: 20px;" fill="currentColor" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189z"/></svg>
-                    </a>
-                </div>
-            </div>
-
-            <div class="footer-column">
-                <h4>Product</h4>
-                <ul>
-                    <li><a href="#features">Features</a></li>
-                    <li><a href="#pricing">Pricing</a></li>
-                    <li><a href="#changelog">Changelog</a></li>
-                    <li><a href="https://github.com/remembra-ai/remembra">Open Source</a></li>
+              </div>
+            </li>
+            <li class="e stop" id="nStop" data-at="2">
+              <span aria-hidden="true"></span>
+              <div><p class="line" data-k="stop">credit balance too low · session ended</p></div>
+            </li>
+            <li class="e hand" data-at="3">
+              <span class="node" aria-hidden="true"></span>
+              <div class="handoff">
+                <p class="handoff-h"><span data-k="kind">Handoff 3c9e</span> <span class="sig" data-k="sig">signed by claude-code · 14:02</span></p>
+                <ul class="facts" id="facts">
+                  <li class="ok">3 commits on feat/pdf-export · pushed</li>
+                  <li class="ok">4 files changed</li>
+                  <li class="warn">41 tests passed · 1 failing</li>
+                  <li class="todo">open: rounding in totals()</li>
                 </ul>
-            </div>
-
-            <div class="footer-column">
-                <h4>Resources</h4>
-                <ul>
-                    <li><a href="https://docs.remembra.dev">Documentation</a></li>
-                    <li><a href="https://docs.remembra.dev/api">API Reference</a></li>
-                    <li><a href="https://docs.remembra.dev/guides">Guides</a></li>
-                    <li><a href="/blog">Blog</a></li>
-                </ul>
-            </div>
-
-            <div class="footer-column">
-                <h4>Company</h4>
-                <ul>
-                    <li><a href="/about.html">About</a></li>
-                    <li><a href="/contact.html">Contact</a></li>
-                    <li><a href="https://twitter.com/remembradev">Twitter</a></li>
-                    <li><a href="https://github.com/remembra-ai">GitHub</a></li>
-                    <li><a href="https://discord.gg/mPYQRKzXz5">Discord</a></li>
-                </ul>
-            </div>
-
-            <div class="footer-column">
-                <h4>Legal</h4>
-                <ul>
-                    <li><a href="/privacy">Privacy</a></li>
-                    <li><a href="/terms">Terms</a></li>
-                    <li><a href="/security">Security</a></li>
-                </ul>
-            </div>
+              </div>
+            </li>
+            <li class="e to" id="nTo" data-at="5">
+              <span class="node" aria-hidden="true"></span>
+              <div>
+                <p class="who"><button class="agent" type="button" data-slot="to" data-k="toAgent">OpenAI Codex</button><span class="where" data-k="toWhere">studio-laptop · 14:03</span></p>
+                <div id="toLines">
+                  <p class="line" data-at="6"><span class="p">&rsaquo;</span>brief: claude-code, 1m ago, feat/pdf-export@a41f2c9</p>
+                  <p class="line" data-at="6"><span class="p">&rarr;</span>fixing rounding in totals()</p>
+                  <p class="line ok" data-at="6"><span class="p">&#10003;</span>42 passed · pushed<span class="cursor" aria-hidden="true"></span></p>
+                </div>
+              </div>
+            </li>
+          </ol>
         </div>
-
-        <div class="footer-bottom">
-            <p>&copy; 2026 DolphyTech. All rights reserved.</p>
-            <div class="footer-legal">
-                <a href="/privacy">Privacy</a>
-                <a href="/terms">Terms</a>
-            </div>
+      </div>
+      <div class="relay-foot">
+        <div class="row">
+          <span id="seg-label">What stops the first agent?</span>
+          <div class="seg" role="group" aria-labelledby="seg-label">
+            <button type="button" data-scn="credits" aria-pressed="true">Out of credits<span class="prog" aria-hidden="true"></span></button>
+            <button type="button" data-scn="usage" aria-pressed="false">Usage limit<span class="prog" aria-hidden="true"></span></button>
+            <button type="button" data-scn="lid" aria-pressed="false">Lid closed<span class="prog" aria-hidden="true"></span></button>
+            <button type="button" data-scn="day" aria-pressed="false">Next morning<span class="prog" aria-hidden="true"></span></button>
+          </div>
         </div>
-    </footer>
+        <p class="hint">Tap an agent's name to hand off to a different agent on another machine. A git log for your agents.</p>
+        <p class="sr-only" role="status" id="relay-status"></p>
+      </div>
+    </figure>
+  </section>
 
-    <script>
-        // Header scroll effect
-        const header = document.getElementById('header');
-        window.addEventListener('scroll', () => {
-            header.classList.toggle('scrolled', window.scrollY > 50);
-        });
+  <!-- ======================= 1. HOW IT WORKS ======================= -->
+  <section class="sec" id="how" aria-labelledby="how-title">
+    <div class="wrap sec-grid">
+      <div>
+        <p class="eyebrow">How it works</p>
+        <h2 id="how-title">Set it up once. Then just keep working.</h2>
+      </div>
+      <div>
+        <ol class="legs">
+          <li class="leg">
+            <span class="n">01</span>
+            <h3>Connect</h3>
+            <p>Start free for a key, or self-host. Run the install line on each machine. <code>connect</code> finds your agents and shows exactly what it will change; add <code>--apply</code> to wire them in.</p>
+          </li>
+          <li class="leg">
+            <span class="n">02</span>
+            <h3>Work normally</h3>
+            <p>Nothing new to learn. When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. Secrets are redacted first.</p>
+          </li>
+          <li class="leg">
+            <span class="n">03</span>
+            <h3>Switch anytime</h3>
+            <p>Open any agent on any machine. It starts with a short brief: who worked last, what is done, what is not, what is failing, and the next step.</p>
+          </li>
+        </ol>
+        <p class="also"><b>Also built in:</b> an inbox so agents can leave each other notes, and the trail, every handoff in order, like a git log for your agents.</p>
+      </div>
+    </div>
+  </section>
 
-        // Scroll reveal
-        const reveals = document.querySelectorAll('.reveal');
-        const revealOnScroll = () => {
-            reveals.forEach(el => {
-                const top = el.getBoundingClientRect().top;
-                if (top < window.innerHeight - 100) {
-                    el.classList.add('visible');
-                }
-            });
-        };
-        window.addEventListener('scroll', revealOnScroll);
-        revealOnScroll();
+  <!-- ========================= 2. AGENTS ========================== -->
+  <section class="sec" id="agents" aria-labelledby="agents-title">
+    <div class="wrap sec-grid">
+      <div>
+        <p class="eyebrow">Every agent</p>
+        <h2 id="agents-title">Whatever you run, wherever it runs.</h2>
+        <p class="intro">Your memory lives in the cloud, not on one laptop. Start at your desk, keep going on a server, finish from home, with whichever agent still has credits.</p>
+        <ul class="places" aria-label="Where your agents can run">
+          <li>laptop</li><li>desktop</li><li>cloud VM</li><li>server</li>
+        </ul>
+      </div>
+      <div>
+        <ol class="lineup">
+          <li><span class="lane">01</span><span class="name">Claude Code</span><span class="note">terminal</span></li>
+          <li><span class="lane">02</span><span class="name">OpenAI Codex</span><span class="note">terminal</span></li>
+          <li><span class="lane">03</span><span class="name">Cursor</span><span class="note">editor</span></li>
+          <li><span class="lane">04</span><span class="name">Gemini CLI</span><span class="note">terminal</span></li>
+          <li><span class="lane">05</span><span class="name">Qwen Code</span><span class="note">terminal</span></li>
+          <li><span class="lane">06</span><span class="name">Kimi CLI</span><span class="note">terminal</span></li>
+          <li class="any"><span class="lane" aria-hidden="true"></span><span class="name">Any MCP-capable agent</span><span class="note">bring your own</span></li>
+        </ol>
+        <p class="fine">Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi are in beta, and <code>connect</code> only previews them unless you opt in. Any MCP agent can also read the brief and write the handoff through Remembra's MCP tools.</p>
+      </div>
+    </div>
+  </section>
 
-        // ========== HERO DEMO ==========
-        const chatWithout = document.getElementById('chatWithout');
-        const chatWith = document.getElementById('chatWith');
-        const memoryList = document.getElementById('memoryList');
-        const sessionLabel = document.getElementById('sessionLabel');
-        const brainIcon = document.getElementById('brainIcon');
-        const pulseRing1 = document.getElementById('pulseRing1');
-        const pulseRing2 = document.getElementById('pulseRing2');
-        const particleContainer = document.getElementById('particleContainer');
-        const connectionLabel = document.getElementById('connectionLabel');
-        const demoContainer = document.getElementById('demoContainer');
+  <!-- ===================== 3. START (orange band) ===================== -->
+  <section class="band" id="start" aria-labelledby="start-title">
+    <div class="wrap band-grid">
+      <div>
+        <p class="eyebrow">Start</p>
+        <h2 id="start-title">Free to start. Covered on every project.</h2>
+        <!-- requires PyPI release with remembra-relay -->
+        <div class="cmd" role="group" aria-label="Install command">
+          <code><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span><span>&amp;&amp; remembra-relay connect</span></code>
+          <button class="copy" type="button" data-copy="pipx install remembra &amp;&amp; remembra-relay connect" aria-label="Copy install command">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
+            <span class="copy-label">Copy</span>
+          </button>
+          <span class="sr-only" role="status" data-copy-status></span>
+        </div>
+        <p class="cmd-meta">
+          <span class="free">Free to start</span><span class="sep" aria-hidden="true"></span>
+          <span>Open source</span><span class="sep" aria-hidden="true"></span>
+          <a href="https://docs.remembra.dev/getting-started/docker/">or self-host it</a>
+        </p>
 
-        const scenarios = [
-            {
-                session: 'Session 2',
-                without: [
-                    { role: 'user', name: 'You', text: "Let's continue working on my project" },
-                    { role: 'ai', name: 'AI', text: "I'd be happy to help! What project are you working on?", delay: 700 },
-                    { role: 'user', name: 'You', text: "...the one we discussed yesterday?", frustrated: true },
-                    { role: 'ai', name: 'AI', text: "I apologize, but I don't have any memory of our previous conversations.", delay: 700 },
-                ],
-                with: [
-                    { role: 'user', name: 'You', text: "Let's continue working on my project" },
-                    { role: 'ai', name: 'AI', text: "Ready to continue on <span class='keyword'>your e-commerce app</span>! Last time you were setting up <span class='keyword'>user authentication</span>.", good: true, delay: 800 },
-                    { role: 'user', name: 'You', text: "Perfect, let's do that", satisfied: true },
-                    { role: 'ai', name: 'AI', text: "Since you prefer <span class='keyword'>React</span>, I'll use the auth pattern we discussed.", good: true, delay: 600 },
-                ],
-                memories: [
-                    { text: 'Building e-commerce application', tag: 'PROJECT', time: '2 days ago' },
-                    { text: 'Prefers React + TypeScript', tag: 'TECH', time: '2 days ago' },
-                    { text: 'Working on user authentication', tag: 'CONTEXT', time: 'Yesterday' },
-                ]
-            },
-            {
-                session: 'Session 5',
-                without: [
-                    { role: 'user', name: 'You', text: "Can you review my API code?" },
-                    { role: 'ai', name: 'AI', text: "Sure! What language and framework are you using?", delay: 600 },
-                    { role: 'user', name: 'You', text: "I've told you this multiple times now...", frustrated: true },
-                    { role: 'ai', name: 'AI', text: "I apologize. I don't retain information between sessions.", delay: 700 },
-                ],
-                with: [
-                    { role: 'user', name: 'You', text: "Can you review my API code?" },
-                    { role: 'ai', name: 'AI', text: "Looking at your <span class='keyword'>Node.js</span> API. I see you're following the <span class='keyword'>REST patterns</span> we established.", good: true, delay: 800 },
-                    { role: 'user', name: 'You', text: "You actually remember everything 🙌", satisfied: true },
-                    { role: 'ai', name: 'AI', text: "Of course! Using <span class='keyword'>async/await</span> as you prefer. Here are my suggestions...", good: true, delay: 600 },
-                ],
-                memories: [
-                    { text: 'Backend: Node.js + Express', tag: 'TECH', time: '1 week ago' },
-                    { text: 'Prefers async/await patterns', tag: 'PREFERENCE', time: '5 days ago' },
-                    { text: 'REST API architecture', tag: 'CONTEXT', time: '3 days ago' },
-                ]
-            },
-            {
-                session: 'Session 10',
-                without: [
-                    { role: 'user', name: 'You', text: "Deploy to production" },
-                    { role: 'ai', name: 'AI', text: "I'd be happy to help! Where would you like to deploy?", delay: 600 },
-                    { role: 'user', name: 'You', text: "We've deployed together 5 times already!", frustrated: true },
-                    { role: 'ai', name: 'AI', text: "Each conversation starts fresh. Please share the deployment target.", delay: 700 },
-                ],
-                with: [
-                    { role: 'user', name: 'You', text: "Deploy to production" },
-                    { role: 'ai', name: 'AI', text: "Deploying to <span class='keyword'>your cloud server</span> with <span class='keyword'>Docker</span>. Using your standard config.", good: true, delay: 900 },
-                    { role: 'user', name: 'You', text: "This is what AI should be ✨", satisfied: true },
-                    { role: 'ai', name: 'AI', text: "Deployment complete! Sent notification to <span class='keyword'>your Slack</span> as usual.", good: true, delay: 600 },
-                ],
-                memories: [
-                    { text: 'Deploys via Docker containers', tag: 'INFRA', time: '2 weeks ago' },
-                    { text: 'Production server configured', tag: 'INFRA', time: '1 week ago' },
-                    { text: 'Notifications via Slack', tag: 'PREFERENCE', time: '5 days ago' },
-                ]
-            }
-        ];
+        <div class="prices">
+          <a href="/pricing" aria-label="See pricing: Free $0, Solo $12 a month, Founding 100 $9 a month billed yearly and locked for life, Pro $29 a month, Team $15 a seat a month">
+            <ul aria-hidden="true">
+              <li><span class="pn">Free</span><span class="pv">$0</span><span class="pd">no card</span></li>
+              <li><span class="pn">Solo</span><span class="pv">$12<small>/mo</small></span><span class="pd">for one developer</span></li>
+              <li class="founding"><span class="pn">Founding 100</span><span class="pv">$9<small>/mo</small></span><span class="pd">billed yearly, locked for life</span></li>
+              <li><span class="pn">Pro</span><span class="pv">$29<small>/mo</small></span><span class="pd">heavy use</span></li>
+              <li><span class="pn">Team</span><span class="pv">$15<small>/seat</small></span><span class="pd">3-seat minimum</span></li>
+            </ul>
+            <span class="more">See pricing <span aria-hidden="true">&rarr;</span></span>
+          </a>
+        </div>
+      </div>
 
-        let currentScenario = 0;
+      <dl class="trust" aria-label="How your memory is protected">
+        <div><dt>Redacted</dt><dd>Keys, tokens and other secrets are stripped out before anything is saved.</dd></div>
+        <div><dt>Isolated</dt><dd>Every account's memory is walled off, and project-scoped keys only see their own projects.</dd></div>
+        <div><dt>Signed</dt><dd>Each handoff carries the agent, machine and time that wrote it. An agent's key can't write as another agent.</dd></div>
+        <div><dt>Open</dt><dd>The core is MIT-licensed open source. Read it, run it, host it yourself.</dd></div>
+      </dl>
+    </div>
+  </section>
+</main>
 
-        function createMessage(msg) {
-            const div = document.createElement('div');
-            div.className = 'chat-message';
-            const bubbleClass = msg.frustrated ? 'frustrated' : (msg.good ? 'ai-good' : '');
-            const badgeClass = msg.frustrated ? 'frustrated' : (msg.satisfied ? 'satisfied' : '');
-            const badgeText = msg.frustrated ? '😤 Repeating context again...' : (msg.satisfied ? '✨ No repetition needed' : '');
-            div.innerHTML = '<div class="chat-avatar ' + msg.role + '">' + (msg.role === 'user' ? 'Y' : 'A') + '</div><div class="chat-content"><div class="chat-name">' + msg.name + '</div><div class="chat-bubble ' + bubbleClass + '">' + msg.text + '</div>' + (badgeText ? '<div class="status-badge ' + badgeClass + '">' + badgeText + '</div>' : '') + '</div>';
-            return div;
-        }
+<footer class="site-footer">
+  <div class="wrap foot">
+    <div class="foot-brand">
+      <span class="brand-name">Remembra</span>
+      <p>One cloud memory for all your AI agents. &copy; 2026 DolphyTech.</p>
+    </div>
+    <nav aria-label="Footer">
+      <ul class="foot-links">
+        <li><a href="/pricing">Pricing</a></li>
+        <li><a href="https://docs.remembra.dev">Docs</a></li>
+        <li><a href="https://github.com/remembra-ai/remembra">GitHub</a></li>
+        <li><a href="/security">Security</a></li>
+        <li><a href="/privacy">Privacy</a></li>
+        <li><a href="/terms">Terms</a></li>
+        <li><a href="/contact">Contact</a></li>
+      </ul>
+    </nav>
+  </div>
+</footer>
 
-        function createMemoryItem(mem) {
-            const div = document.createElement('div');
-            div.className = 'memory-item';
-            div.innerHTML = '<div class="memory-item-text">' + mem.text + '</div><div class="memory-item-meta"><span class="memory-item-tag">' + mem.tag + '</span><span class="memory-item-time">' + mem.time + '</span></div>';
-            return div;
-        }
-
-        function spawnParticle() {
-            const p = document.createElement('div');
-            p.className = 'particle';
-            particleContainer.appendChild(p);
-            setTimeout(function() { p.classList.add('down'); }, 10);
-            setTimeout(function() { p.remove(); }, 1400);
-        }
-
-        function spawnStream() {
-            const s = document.createElement('div');
-            s.className = 'data-stream';
-            s.style.top = '15%';
-            particleContainer.appendChild(s);
-            setTimeout(function() { s.classList.add('active'); }, 10);
-            setTimeout(function() { s.remove(); }, 700);
-        }
-
-        function triggerPulse(ring) {
-            ring.classList.remove('active');
-            void ring.offsetWidth;
-            ring.classList.add('active');
-        }
-
-        function runScenario(scenario) {
-            chatWithout.innerHTML = '';
-            chatWith.innerHTML = '';
-            memoryList.innerHTML = '';
-            brainIcon.classList.remove('active');
-            connectionLabel.classList.remove('visible');
-            sessionLabel.textContent = scenario.session;
-
-            var wDelay = 0;
-            scenario.without.forEach(function(msg, i) {
-                var el = createMessage(msg);
-                chatWithout.appendChild(el);
-                wDelay += msg.delay || 400;
-                setTimeout(function() {
-                    el.classList.add('visible');
-                    if (msg.frustrated) setTimeout(function() { var b = el.querySelector('.status-badge'); if(b) b.classList.add('visible'); }, 300);
-                }, wDelay);
-                wDelay += 500;
-            });
-
-            setTimeout(function() {
-                brainIcon.classList.add('active');
-                connectionLabel.classList.add('visible');
-                triggerPulse(pulseRing1);
-                setTimeout(function() { triggerPulse(pulseRing2); }, 250);
-                for (var i = 0; i < 8; i++) {
-                    (function(idx) {
-                        setTimeout(function() {
-                            spawnParticle();
-                            if (idx % 2 === 0) spawnStream();
-                        }, idx * 120);
-                    })(i);
-                }
-                setTimeout(function() {
-                    scenario.memories.forEach(function(mem, i) {
-                        var item = createMemoryItem(mem);
-                        memoryList.appendChild(item);
-                        setTimeout(function() {
-                            item.classList.add('visible');
-                            item.classList.add('active');
-                            spawnParticle();
-                            setTimeout(function() { item.classList.remove('active'); }, 500);
-                        }, i * 250);
-                    });
-                }, 300);
-                setTimeout(function() { brainIcon.classList.remove('active'); }, 1200);
-            }, 400);
-
-            var withDelay = 0;
-            scenario.with.forEach(function(msg, i) {
-                var el = createMessage(msg);
-                chatWith.appendChild(el);
-                withDelay += msg.delay || 400;
-                setTimeout(function() {
-                    el.classList.add('visible');
-                    if (msg.satisfied) setTimeout(function() { var b = el.querySelector('.status-badge'); if(b) b.classList.add('visible'); }, 300);
-                }, withDelay + 900);
-                withDelay += 500;
-            });
-        }
-
-        // Navigation dots
-        var navDots = document.querySelectorAll('.nav-dot');
-        function updateDots() {
-            navDots.forEach(function(dot, i) {
-                dot.classList.toggle('active', i === currentScenario);
-            });
-        }
-        navDots.forEach(function(dot) {
-            dot.addEventListener('click', function() {
-                var index = parseInt(dot.dataset.index);
-                currentScenario = index;
-                runScenario(scenarios[currentScenario]);
-                updateDots();
-                resetAutoPlay();
-            });
-        });
-
-        // Pause on hover
-        var isPaused = false;
-        var autoPlayInterval;
-        demoContainer.addEventListener('mouseenter', function() { isPaused = true; });
-        demoContainer.addEventListener('mouseleave', function() { isPaused = false; });
-
-        function autoPlay() {
-            if (!isPaused) {
-                currentScenario = (currentScenario + 1) % scenarios.length;
-                runScenario(scenarios[currentScenario]);
-                updateDots();
-            }
-        }
-        function resetAutoPlay() {
-            clearInterval(autoPlayInterval);
-            autoPlayInterval = setInterval(autoPlay, 15000);
-        }
-
-        setTimeout(function() {
-            runScenario(scenarios[0]);
-            updateDots();
-            autoPlayInterval = setInterval(autoPlay, 15000);
-        }, 500);
-
-        // Mobile Menu Toggle
-        var mobileMenuToggle = document.getElementById('mobileMenuToggle');
-        var mobileMenu = document.getElementById('mobileMenu');
-        var menuIcon = document.getElementById('menuIcon');
-
-        if (mobileMenuToggle && mobileMenu) {
-            mobileMenuToggle.addEventListener('click', function() {
-                var isOpen = mobileMenu.classList.toggle('open');
-                document.body.classList.toggle('menu-open', isOpen);
-                // Change icon between hamburger and X
-                if (isOpen) {
-                    menuIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>';
-                } else {
-                    menuIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>';
-                }
-            });
-
-            // Close menu when clicking nav links
-            var mobileNavLinks = mobileMenu.querySelectorAll('.mobile-nav-link');
-            mobileNavLinks.forEach(function(link) {
-                link.addEventListener('click', function() {
-                    mobileMenu.classList.remove('open');
-                    document.body.classList.remove('menu-open');
-                    menuIcon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>';
-                });
-            });
-        }
-    </script>
+<script src="/site.js" defer></script>
+<script src="/relay-demo.js" defer></script>
 </body>
 </html>
