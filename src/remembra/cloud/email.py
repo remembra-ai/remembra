@@ -522,6 +522,23 @@ class EmailService:
             support_email="support@remembra.dev",
         )
 
+    async def send_email_verification_email(self, to: str, verify_url: str) -> EmailResult:
+        """Send an email-address verification link (inline HTML; no template file)."""
+        import html as _html
+
+        safe_url = _html.escape(verify_url, quote=True)
+        message = EmailMessage(
+            to=to,
+            subject="Remembra: verify your email address",
+            html=(
+                "<p>Confirm this email address for your Remembra account.</p>"
+                f'<p><a href="{safe_url}">Verify email address</a></p>'
+                "<p>The link expires in 24 hours. If you did not request this, ignore this email.</p>"
+            ),
+            tags={"template": "email_verification"},
+        )
+        return await self.backend.send(message)
+
     async def send_team_invite_email(
         self,
         to: str,

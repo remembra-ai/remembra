@@ -61,6 +61,12 @@ class Permission(StrEnum):
     ADMIN_USERS = "admin:users"
 
 
+# Credential ids that are not real API keys (shared by every JWT / dev session).
+SYNTHETIC_KEY_IDS = frozenset({"jwt_auth", "dev_key"})
+
+ROLE_LEVEL: dict[Role, int] = {Role.VIEWER: 1, Role.EDITOR: 2, Role.ADMIN: 3}
+
+
 # Default permission sets per role
 ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
     Role.ADMIN: set(Permission),  # all permissions
@@ -150,6 +156,8 @@ class RoleManager:
         project_ids: list[str] | None = None,
     ) -> KeyRole:
         """Assign or update a role on an API key."""
+        if api_key_id in SYNTHETIC_KEY_IDS:
+            raise ValueError(f"'{api_key_id}' is not an API key and cannot carry a role")
         scopes_str = ",".join(scopes) if scopes else ""
         projects_str = ",".join(project_ids) if project_ids else ""
 

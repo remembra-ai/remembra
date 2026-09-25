@@ -17,9 +17,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser
-from remembra.auth.rbac import Permission, Role, RoleManager
+from remembra.auth.middleware import AuthenticatedUser, CurrentUser
+from remembra.auth.rbac import ROLE_LEVEL, SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
 from remembra.auth.scopes import RequireAdmin, RequireAuditExport
+from remembra.auth.superadmin import RequireSuperadmin, is_superadmin
 from remembra.auth.users import UserManager
 from remembra.cloud.metering import UsageMeter
 from remembra.cloud.plans import PlanTier, get_plan
@@ -86,46 +87,6 @@ RoleManagerDep = Annotated[RoleManager | None, Depends(get_role_manager)]
 DatabaseDep = Annotated[Database, Depends(get_database)]
 UsageMeterDep = Annotated[UsageMeter | None, Depends(get_usage_meter)]
 UserManagerDep = Annotated[UserManager, Depends(get_user_manager)]
-
-
-async def require_superadmin(
-    request: Request,
-    current_user: CurrentUser,
-) -> None:
-    """Dependency that checks if the current user is a superadmin (in owner_emails)."""
-    settings = get_settings()
-
-    # Get user's email from the database
-    db: Database = request.app.state.db
-    user_data = await db.get_user_by_id(current_user.user_id)
-
-    if not user_data:
-        log.warning("superadmin_check_user_not_found", user_id=current_user.user_id)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="User not found",
-        )
-
-    user_email = user_data.get("email", "").lower()
-    owner_emails = [e.lower() for e in settings.owner_emails] if settings.owner_emails else []
-
-    log.info(
-        "superadmin_check",
-        user_id=current_user.user_id,
-        email=user_email,
-        owner_emails=owner_emails,
-        is_admin=user_email in owner_emails,
-    )
-
-    if user_email not in owner_emails:
-        log.warning("superadmin_access_denied", user_id=current_user.user_id, email=user_email)
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Superadmin access required. Contact support@remembra.dev",
-        )
-
-
-RequireSuperadmin = Annotated[None, Depends(require_superadmin)]
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +175,57 @@ class AdminResetPasswordResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Tenant scoping helpers
+# ---------------------------------------------------------------------------
+
+
+async def _audit_scope(request: Request, current_user: AuthenticatedUser, requested_user_id: str | None) -> str | None:
+    """Tenant admins only ever see their own tenant's audit trail.
+
+    Platform superadmins may filter by any user id (or see all when omitted).
+    """
+    if await is_superadmin(request, current_user):
+        return requested_user_id
+    if requested_user_id and requested_user_id != current_user.user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Audit access is limited to your own account.",
+        )
+    return current_user.user_id
+
+
+async def _require_own_key(request: Request, current_user: AuthenticatedUser, api_key_id: str) -> None:
+    """404 unless ``api_key_id`` is a real key owned by the caller."""
+    if api_key_id in SYNTHETIC_KEY_IDS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Not an API key.")
+    key_manager = getattr(request.app.state, "api_key_manager", None)
+    key_info = await key_manager.get_key_info(api_key_id) if key_manager is not None else None
+    if key_info is None or key_info.user_id != current_user.user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Key {api_key_id} not found")
+
+
+def _enforce_no_escalation(
+    caller: KeyRole,
+    role: Role,
+    scopes: list[str] | None,
+    project_ids: list[str] | None,
+) -> None:
+    """A role assignment may never grant more than the caller holds."""
+    if ROLE_LEVEL[role] > ROLE_LEVEL[caller.role]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot grant a role above your own.")
+    if caller.scopes and (not scopes or not set(scopes) <= set(caller.scopes)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Scoped keys may only grant a subset of their own scopes.",
+        )
+    if caller.project_ids and (not project_ids or not set(project_ids) <= set(caller.project_ids)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Project-restricted keys may only grant a subset of their own projects.",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Audit endpoints
 # ---------------------------------------------------------------------------
 
@@ -235,7 +247,7 @@ async def list_audit_events(
 ) -> AuditListResponse:
     """List recent audit events. Requires admin:export permission."""
     events = await audit_logger.get_recent_events(
-        user_id=user_id,
+        user_id=await _audit_scope(request, current_user, user_id),
         action=_parse_audit_action(action),
         limit=limit,
     )
@@ -259,7 +271,7 @@ async def export_audit_json(
 ) -> Response:
     """Export audit events as JSON. Requires admin:export permission."""
     events = await audit_logger.get_recent_events(
-        user_id=user_id,
+        user_id=await _audit_scope(request, current_user, user_id),
         action=_parse_audit_action(action),
         limit=limit,
     )
@@ -291,7 +303,7 @@ async def export_audit_csv(
 ) -> Response:
     """Export audit events as CSV. Requires admin:export permission."""
     events = await audit_logger.get_recent_events(
-        user_id=user_id,
+        user_id=await _audit_scope(request, current_user, user_id),
         action=_parse_audit_action(action),
         limit=limit,
     )
@@ -351,7 +363,10 @@ async def assign_role(
     current_user: CurrentUser,
     _perm: RequireAdmin,
 ) -> dict[str, Any]:
-    """Assign or update a role on an API key. Requires admin role."""
+    """Assign or update a role on one of the caller's own API keys. Requires admin role.
+
+    The assignment can never exceed the caller's own role, scopes, or projects.
+    """
     if role_manager is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -365,6 +380,15 @@ async def assign_role(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid role: {body.role}. Valid roles: admin, editor, viewer",
         ) from None
+
+    if body.scopes:
+        valid_perms = {p.value for p in Permission}
+        unknown = [scope for scope in body.scopes if scope not in valid_perms]
+        if unknown:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown scopes: {unknown}")
+
+    await _require_own_key(request, current_user, body.api_key_id)
+    _enforce_no_escalation(_perm, role, body.scopes, body.project_ids)
 
     result = await role_manager.assign_role(
         api_key_id=body.api_key_id,
@@ -400,6 +424,10 @@ async def remove_role(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="RBAC is not enabled on this instance.",
         )
+
+    await _require_own_key(request, current_user, api_key_id)
+    # Removing a role reverts the key to an unrestricted editor.
+    _enforce_no_escalation(_perm, Role.EDITOR, None, None)
 
     deleted = await role_manager.remove_role(api_key_id)
     if not deleted:
@@ -482,6 +510,16 @@ async def trigger_consolidation(
             detail="Sleep-time compute is not enabled. Set REMEMBRA_SLEEP_TIME_ENABLED=true",
         )
 
+    # Tenant admins consolidate only their own data; platform-wide or other-tenant
+    # runs are reserved for superadmins.
+    if not await is_superadmin(request, current_user):
+        if user_id and user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only run consolidation for your own account.",
+            )
+        user_id = current_user.user_id
+
     try:
         report = await sleep_worker.run_consolidation(user_id=user_id)
 
@@ -501,9 +539,10 @@ async def trigger_consolidation(
         }
 
     except Exception as e:
+        log.error("consolidation_failed", error_type=type(e).__name__, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Consolidation failed: {str(e)}",
+            detail="Consolidation failed. See server logs.",
         ) from e
 
 
@@ -937,6 +976,12 @@ async def toggle_user_active(
         (active, datetime.now(UTC).isoformat(), user_id),
     )
     await db.conn.commit()
+
+    if not active:
+        # Deactivation must cut API access too, not just dashboard login.
+        from remembra.auth.users import revoke_user_access
+
+        await revoke_user_access(db, user_id)
 
     status_str = "activated" if active else "deactivated"
     return {

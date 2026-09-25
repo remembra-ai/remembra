@@ -6,26 +6,28 @@ Separated from main.py to avoid circular imports.
 from typing import Any
 
 from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from remembra.config import get_settings
 
 
 def get_key_func(request: Any) -> str:
     """
-    Get rate limit key - prefer API key over IP.
+    Rate-limit bucket for a request.
 
-    This allows per-user rate limiting when authenticated,
-    falling back to IP for unauthenticated requests.
+    Uses the *validated* account identity recorded by the auth dependency
+    (``request.state.rate_limit_identity``) when the route is authenticated.
+    Otherwise falls back to the real client IP, resolved through the trusted
+    proxy list. A raw ``X-API-Key`` header is never used: it is attacker
+    controlled, so keying on it let anyone mint fresh buckets per request and
+    brute-force login/TOTP without limit.
     """
-    # Try to get API key from header
-    api_key = request.headers.get("X-API-Key", "")
-    if api_key:
-        # Use first 8 chars of key as identifier (don't log full key)
-        return f"key:{api_key[:8]}"
+    identity = getattr(getattr(request, "state", None), "rate_limit_identity", None)
+    if identity:
+        return str(identity)
 
-    # Fall back to IP address
-    return get_remote_address(request)
+    from remembra.auth.middleware import get_client_ip
+
+    return f"ip:{get_client_ip(request)}"
 
 
 # Create the limiter instance

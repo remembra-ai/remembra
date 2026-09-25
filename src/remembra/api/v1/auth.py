@@ -8,10 +8,13 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from remembra.auth.middleware import authenticate_jwt
+from remembra.auth.superadmin import account_is_owner
 from remembra.auth.users import UserManager
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
 from remembra.core.time import utcnow
+from remembra.security import state as security_state
 
 # Email imports (optional - only if cloud module available)
 try:
@@ -230,43 +233,21 @@ async def get_current_user_from_jwt(
             detail="Authentication service unavailable",
         )
 
-    # Verify JWT token
-    try:
-        payload = user_manager.verify_jwt_token(credentials.credentials)
-    except Exception as e:
-        log.error("jwt_verification_error", error=str(e), error_type=type(e).__name__)
+    # Full validation: signature/expiry, logout blacklist, password-change
+    # invalidation, and account active status (fails closed).
+    session = await authenticate_jwt(request, credentials.credentials)
+    if session is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
-    if not payload:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # Check if token is blacklisted
-    try:
-        if await user_manager.is_token_blacklisted(credentials.credentials):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token has been invalidated",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        log.error("token_blacklist_check_failed", error=str(e), user_id=payload.get("sub"))
-        # Continue - don't fail auth if blacklist check fails
 
     # Get user from database
     try:
-        user = await user_manager.get_user_by_id(payload["sub"])
+        user = await user_manager.get_user_by_id(session.user_id)
     except Exception as e:
-        log.error("get_user_by_id_failed", error=str(e), user_id=payload.get("sub"))
+        log.error("get_user_by_id_failed", error=str(e), user_id=session.user_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to retrieve user data",
@@ -329,6 +310,16 @@ async def signup(
         name=body.name,
     )
 
+    if error == "Email already registered":
+        # Do not reveal whether an address has an account: answer exactly like a
+        # successful signup (same status, shape and roughly the same latency).
+        user_manager.hash_password(body.password)
+        log.info("signup_existing_email_suppressed")
+        return SignupResponse(
+            id=UserManager.generate_user_id(),
+            email=body.email.lower().strip(),
+            name=body.name,
+        )
     if error:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -357,10 +348,10 @@ async def signup(
                         plan="Free",
                     )
                 )
-                log.info("welcome_email_queued", email=user.email)
+                log.info("welcome_email_queued", user_id=user.id)
         except Exception as e:
             # Don't fail signup if email fails
-            log.warning("welcome_email_failed", email=user.email, error=str(e))
+            log.warning("welcome_email_failed", user_id=user.id, error_type=type(e).__name__)
 
     return SignupResponse(
         id=user.id,
@@ -390,6 +381,18 @@ async def login(
     If 2FA is enabled and no totp_code provided, returns requires_2fa=true.
     """
     user_manager = await get_user_manager(request)
+    db = user_manager.db
+
+    # Per-account lockout (independent of client IP) stops distributed
+    # password / TOTP guessing against a single account.
+    lock_key = security_state.account_key("login", body.email)
+    remaining = await security_state.lockout_remaining_seconds(db, lock_key)
+    if remaining:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many failed attempts. Try again later.",
+            headers={"Retry-After": str(remaining)},
+        )
 
     user, token, error = await user_manager.authenticate(
         email=body.email,
@@ -397,9 +400,11 @@ async def login(
     )
 
     if error:
+        await security_state.record_failure(db, lock_key)
+        # Same message for unknown email / wrong password / inactive account.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=error,
+            detail="Invalid email or password",
         )
     assert user is not None  # authenticate returns a user whenever error is falsy
 
@@ -412,17 +417,17 @@ async def login(
                 message="2FA code required",
             )
 
-        # Verify TOTP code
+        # Verify TOTP code (single-use; failures count toward lockout)
         if not await user_manager.verify_totp(user.id, body.totp_code):
+            await security_state.record_failure(db, lock_key)
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid 2FA code",
             )
 
-    # Check if user is admin (in owner_emails)
-    settings = get_settings()
-    owner_emails = [e.lower() for e in settings.owner_emails] if settings.owner_emails else []
-    is_admin = user.email.lower() in owner_emails
+    await security_state.clear_failures(db, lock_key)
+
+    is_admin = account_is_owner(await db.get_user_by_id(user.id))
 
     return LoginResponse(
         access_token=token,
@@ -486,7 +491,7 @@ async def forgot_password(
     # Send password reset email if token was generated
     if reset_token:
         # SECURITY: Never log reset tokens - they grant account access
-        log.info("password_reset_token_generated", email=body.email)
+        log.info("password_reset_token_generated")
 
         # Send the password reset email
         try:
@@ -502,12 +507,12 @@ async def forgot_password(
             )
 
             if result.success:
-                log.info("password_reset_email_sent", email=body.email)
+                log.info("password_reset_email_sent")
             else:
-                log.warning("password_reset_email_failed", email=body.email, error=result.error)
+                log.warning("password_reset_email_failed", error=result.error)
         except Exception as e:
             # Don't fail the request if email sending fails
-            log.error("password_reset_email_error", email=body.email, error=str(e))
+            log.error("password_reset_email_error", error_type=type(e).__name__)
 
     # Always return generic message for security (don't reveal if email exists)
     return ForgotPasswordResponse()
@@ -571,10 +576,8 @@ async def get_me(
                 detail="User not found",
             )
 
-        # Check if user is admin (in owner_emails)
-        settings = get_settings()
-        owner_emails = [e.lower() for e in settings.owner_emails] if settings.owner_emails else []
-        is_admin = user.email.lower() in owner_emails
+        # Superadmin only for verified owner accounts (never an unverified email claim)
+        is_admin = account_is_owner(await user_manager.db.get_user_by_id(user.id))
 
         return UserResponse(
             id=user.id,
@@ -591,8 +594,8 @@ async def get_me(
         log.error("get_me_failed", user_id=current_user.get("id"), error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve user profile: {str(e)}",
-        )
+            detail="Failed to retrieve user profile",
+        ) from e
 
 
 class UpdateProfileRequest(BaseModel):
@@ -952,6 +955,7 @@ class VerifyKeyResponse(BaseModel):
     response_model=VerifyKeyResponse,
     summary="Verify API key validity",
 )
+@limiter.limit("30/minute")
 async def verify_api_key(
     request: Request,
 ) -> VerifyKeyResponse:
@@ -1002,3 +1006,76 @@ async def verify_api_key(
         rate_limit_tier=key_info.get("rate_limit_tier", "standard"),
         message="API key is valid and active.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Email verification
+# ---------------------------------------------------------------------------
+
+
+class VerifyEmailConfirmRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=256)
+
+
+class VerifyEmailResponse(BaseModel):
+    message: str
+    email_verified: bool
+
+
+@router.post(
+    "/verify-email/request",
+    response_model=VerifyEmailResponse,
+    summary="Send an email-verification link to the account address",
+)
+@limiter.limit("3/minute")
+async def request_email_verification(
+    request: Request,
+    current_user: CurrentUser,
+) -> VerifyEmailResponse:
+    """Email a single-use verification link (valid 24h) to the account's address."""
+    user_manager = await get_user_manager(request)
+    user_row = await user_manager.db.get_user_by_id(current_user["id"])
+    if not user_row:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if user_row.get("email_verified"):
+        return VerifyEmailResponse(message="Email already verified", email_verified=True)
+    if not EMAIL_AVAILABLE:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Email delivery is not configured")
+
+    token = await security_state.create_email_verification(user_manager.db, user_row["id"], user_row["email"])
+    try:
+        email_service = EmailService.create(provider=EmailProvider.RESEND)
+        result = await email_service.send_email_verification_email(
+            to=user_row["email"],
+            verify_url=f"https://app.remembra.dev/verify-email?token={token}",
+        )
+    except Exception as e:
+        log.error("verification_email_error", error_type=type(e).__name__)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Email delivery is not configured") from e
+    if not result.success:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not send verification email")
+    return VerifyEmailResponse(message="Verification email sent", email_verified=False)
+
+
+@router.post(
+    "/verify-email/confirm",
+    response_model=VerifyEmailResponse,
+    summary="Confirm the account email with the emailed token",
+)
+@limiter.limit("10/minute")
+async def confirm_email_verification(
+    request: Request,
+    body: VerifyEmailConfirmRequest,
+    current_user: CurrentUser,
+) -> VerifyEmailResponse:
+    """Mark the signed-in account's email verified if the token matches."""
+    user_manager = await get_user_manager(request)
+    user_row = await user_manager.db.get_user_by_id(current_user["id"])
+    if not user_row:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    ok = await security_state.consume_email_verification(user_manager.db, user_row["id"], user_row["email"], body.token)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")
+    await user_manager.db.update_user_email_verified(user_row["id"], True)
+    log.info("email_verified", user_id=user_row["id"])
+    return VerifyEmailResponse(message="Email verified", email_verified=True)

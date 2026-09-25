@@ -24,6 +24,12 @@ KEY_PREFIX = "rem_"
 KEY_BYTES = 32  # 256 bits of entropy
 
 
+def evict_user_from_cache(user_id: str) -> None:
+    """Drop every cached validation entry belonging to ``user_id``."""
+    global _key_cache
+    _key_cache = {k: v for k, v in _key_cache.items() if v.get("user_id") != user_id}
+
+
 @dataclass
 class APIKey:
     """Represents a generated API key."""
@@ -134,7 +140,6 @@ class APIKeyManager:
             key_id=key_id,
             user_id=user_id,
             name=name,
-            key_preview=raw_key[:12] + "...",
         )
 
         return APIKey(
@@ -179,7 +184,7 @@ class APIKeyManager:
         global _key_cache
 
         if not raw_key.startswith(KEY_PREFIX):
-            log.debug("api_key_invalid_format", key_preview=raw_key[:8] if raw_key else "empty")
+            log.debug("api_key_invalid_format")
             return None
 
         cache_key = self.compute_lookup(raw_key)
@@ -219,7 +224,7 @@ class APIKeyManager:
                 log.info("api_key_lookup_backfilled", key_id=key_data["id"])
                 return key_data
 
-        log.warning("api_key_validation_failed", key_preview=raw_key[:12] + "...")
+        log.warning("api_key_validation_failed")
         return None
 
     async def list_keys(self, user_id: str) -> list[APIKeyInfo]:

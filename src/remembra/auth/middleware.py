@@ -1,7 +1,9 @@
 """FastAPI authentication middleware and dependencies."""
 
 import hmac
+import ipaddress
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Annotated, Any
 
 import structlog
@@ -48,24 +50,152 @@ def resolve_api_key(request: Request, api_key: str | None) -> str | None:
     return None
 
 
+@lru_cache(maxsize=16)
+def _trusted_networks(cidrs: tuple[str, ...]) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    networks = []
+    for cidr in cidrs:
+        try:
+            networks.append(ipaddress.ip_network(cidr.strip(), strict=False))
+        except ValueError:
+            log.warning("trusted_proxy_cidr_invalid", cidr=cidr)
+    return tuple(networks)
+
+
+def _parse_ip(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    try:
+        ip = ipaddress.ip_address(value.strip())
+    except ValueError:
+        return None
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return ip.ipv4_mapped
+    return ip
+
+
+def _is_trusted(ip: ipaddress.IPv4Address | ipaddress.IPv6Address | None, networks: tuple[Any, ...]) -> bool:
+    return ip is not None and any(ip.version == net.version and ip in net for net in networks)
+
+
 def get_client_ip(request: Request) -> str:
-    """Extract client IP from request, handling proxies."""
-    # Check X-Forwarded-For header (from proxies/load balancers)
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        # Take the first IP in the chain (original client)
-        return forwarded.split(",")[0].strip()
+    """Return the real client IP.
 
-    # Check X-Real-IP header (nginx)
-    real_ip = request.headers.get("X-Real-IP")
-    if real_ip:
-        return real_ip
+    ``X-Forwarded-For`` / ``X-Real-IP`` are honoured ONLY when the direct peer is a
+    configured trusted proxy (``REMEMBRA_TRUSTED_PROXIES``); otherwise any client
+    could spoof its address to evade rate limits or poison audit logs. The
+    forwarded chain is walked right-to-left and the first hop that is not itself
+    a trusted proxy is the client.
+    """
+    peer = request.client.host if request.client else None
+    networks = _trusted_networks(tuple(getattr(get_settings(), "trusted_proxies", None) or ()))
+    if peer and _is_trusted(_parse_ip(peer), networks):
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+            for hop in reversed(hops):
+                hop_ip = _parse_ip(hop)
+                if hop_ip is None:
+                    break  # malformed chain: stop trusting it
+                if not _is_trusted(hop_ip, networks):
+                    return str(hop_ip)
+            else:
+                if hops and _parse_ip(hops[0]) is not None:
+                    return str(_parse_ip(hops[0]))
+        real_ip = request.headers.get("X-Real-IP")
+        if real_ip and _parse_ip(real_ip) is not None:
+            return str(_parse_ip(real_ip))
+    return peer or "unknown"
 
-    # Fallback to direct client IP
-    if request.client:
-        return request.client.host
 
-    return "unknown"
+def _mark_rate_limit_identity(request: Request, user_id: str) -> None:
+    """Record the validated identity so rate limits key on the account, not on a header."""
+    try:
+        request.state.rate_limit_identity = f"user:{user_id}"
+    except Exception:  # pragma: no cover - non-Starlette request doubles in unit tests
+        pass
+
+
+def _user_from_key_info(key_info: dict[str, Any]) -> AuthenticatedUser:
+    return AuthenticatedUser(
+        user_id=key_info["user_id"],
+        api_key_id=key_info["id"],
+        rate_limit_tier=key_info.get("rate_limit_tier", "standard"),
+        name=key_info.get("name"),
+        role=key_info.get("role", "editor"),
+        scopes=key_info.get("scopes"),
+        project_ids=key_info.get("project_ids"),
+    )
+
+
+async def _account_is_active(request: Request, user_id: str) -> bool:
+    """False only when a user row exists and is deactivated (tenants without rows are allowed)."""
+    db = getattr(request.app.state, "db", None)
+    if db is None:
+        return True
+    try:
+        user_row = await db.get_user_by_id(user_id)
+    except Exception as e:
+        log.error("account_active_check_failed", user_id=user_id, error_type=type(e).__name__)
+        return False  # fail closed
+    if not user_row:
+        return True
+    return bool(user_row.get("is_active", True))
+
+
+async def authenticate_jwt(request: Request, token: str) -> AuthenticatedUser | None:
+    """Validate a dashboard JWT end-to-end.
+
+    Rejects tokens that are expired/invalid, blacklisted (logout), issued before
+    the user's last password change / session invalidation, or that belong to a
+    missing or deactivated account. Returns None when the token is not usable.
+    """
+    settings = get_settings()
+    db = getattr(request.app.state, "db", None)
+    if db is None or not settings.jwt_secret:
+        log.warning("jwt_auth_unavailable", db_ready=db is not None)
+        return None
+
+    from remembra.auth.users import UserManager
+    from remembra.security import state as security_state
+
+    user_manager = UserManager(db, settings.jwt_secret)
+    payload = user_manager.verify_jwt_token(token)
+    sub = payload.get("sub") if payload else None
+    if not payload or not sub:
+        return None
+    try:
+        if await user_manager.is_token_blacklisted(token):
+            log.info("jwt_rejected_blacklisted", user_id=sub)
+            return None
+        user_row = await db.get_user_by_id(sub)
+        if not user_row or not user_row.get("is_active", True):
+            log.info("jwt_rejected_inactive_or_missing", user_id=sub)
+            return None
+        valid_after = await security_state.get_tokens_valid_after_ms(db, sub)
+        if valid_after and security_state.token_issued_at_ms(payload) < valid_after:
+            log.info("jwt_rejected_invalidated_session", user_id=sub)
+            return None
+    except Exception as e:
+        # Fail closed: a JWT we cannot fully validate is not accepted.
+        log.error("jwt_validation_error", error_type=type(e).__name__)
+        return None
+
+    return AuthenticatedUser(
+        user_id=sub,
+        api_key_id="jwt_auth",
+        rate_limit_tier="standard",
+        name=payload.get("email"),
+    )
+
+
+async def authenticate_api_key(request: Request, api_key: str) -> AuthenticatedUser | None:
+    """Validate an API key and the owning account's active status."""
+    key_manager = await get_api_key_manager(request)
+    key_info = await key_manager.validate_key(api_key)
+    if not key_info:
+        return None
+    if not await _account_is_active(request, key_info["user_id"]):
+        log.info("api_key_rejected_inactive_account", user_id=key_info["user_id"], key_id=key_info["id"])
+        return None
+    return _user_from_key_info(key_info)
 
 
 async def get_api_key_manager(request: Request) -> APIKeyManager:
@@ -102,63 +232,28 @@ async def get_current_user(
             rate_limit_tier="standard",
         )
 
-    # Check for JWT Bearer token first
+    # Check for JWT Bearer token first (a rem_ key sent as Bearer is handled below)
     auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[7:]  # Remove "Bearer " prefix
-        try:
-            from remembra.auth.users import UserManager
-
-            db = getattr(request.app.state, "db", None)
-            if db is None:
-                log.warning("database_not_initialized_for_jwt_auth")
-                # Don't fail - fall through to API key check
-            elif not settings.jwt_secret:
-                log.warning("jwt_secret_not_configured")
-                # Don't fail - fall through to API key check
-            else:
-                user_manager = UserManager(db, settings.jwt_secret)
-                payload = user_manager.verify_jwt_token(token)
-                sub = payload.get("sub") if payload else None
-                if sub:
-                    log.debug("auth_jwt_success", user_id=sub)
-                    return AuthenticatedUser(
-                        user_id=sub,
-                        api_key_id="jwt_auth",
-                        rate_limit_tier="standard",
-                        name=payload.get("email") if payload else None,
-                    )
-        except Exception as e:
-            log.warning("jwt_verification_failed", error=str(e), error_type=type(e).__name__)
-            # Fall through to API key check
+    if auth_header and auth_header.startswith("Bearer ") and not auth_header[7:].strip().startswith("rem_"):
+        jwt_user = await authenticate_jwt(request, auth_header[7:].strip())
+        if jwt_user:
+            _mark_rate_limit_identity(request, jwt_user.user_id)
+            return jwt_user
 
     # Check API key (also accepts a rem_ key sent as a Bearer token)
     api_key = resolve_api_key(request, api_key)
     if api_key:
-        key_manager = await get_api_key_manager(request)
-        key_info = await key_manager.validate_key(api_key)
-
-        if key_info:
-            return AuthenticatedUser(
-                user_id=key_info["user_id"],
-                api_key_id=key_info["id"],
-                rate_limit_tier=key_info.get("rate_limit_tier", "standard"),
-                name=key_info.get("name"),
-                role=key_info.get("role", "editor"),  # RBAC FIX: Extract role from key
-                scopes=key_info.get("scopes"),
-                project_ids=key_info.get("project_ids"),
-            )
-        else:
-            log.warning(
-                "auth_invalid_api_key",
-                ip=get_client_ip(request),
-                key_preview=api_key[:12] + "..." if len(api_key) > 12 else api_key,
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid or revoked API key.",
-                headers={"WWW-Authenticate": "ApiKey"},
-            )
+        key_user = await authenticate_api_key(request, api_key)
+        if key_user:
+            _mark_rate_limit_identity(request, key_user.user_id)
+            return key_user
+        # Never log any part of a rejected credential.
+        log.warning("auth_invalid_api_key", ip=get_client_ip(request))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or revoked API key.",
+            headers={"WWW-Authenticate": "ApiKey"},
+        )
 
     # No valid auth provided
     log.warning("auth_missing_credentials", ip=get_client_ip(request))
@@ -195,19 +290,10 @@ async def get_optional_user(
         return None
 
     # A key was supplied — validate it and return the user if valid, else None.
-    key_manager = await get_api_key_manager(request)
-    key_info = await key_manager.validate_key(api_key)
-    if key_info:
-        return AuthenticatedUser(
-            user_id=key_info["user_id"],
-            api_key_id=key_info["id"],
-            rate_limit_tier=key_info.get("rate_limit_tier", "standard"),
-            name=key_info.get("name"),
-            role=key_info.get("role", "editor"),
-            scopes=key_info.get("scopes"),
-            project_ids=key_info.get("project_ids"),
-        )
-    return None
+    key_user = await authenticate_api_key(request, api_key)
+    if key_user:
+        _mark_rate_limit_identity(request, key_user.user_id)
+    return key_user
 
 
 async def get_user_from_jwt_or_api_key(
@@ -233,50 +319,20 @@ async def get_user_from_jwt_or_api_key(
             rate_limit_tier="standard",
         )
 
-    # Check for JWT Bearer token first
     auth_header = request.headers.get("Authorization")
-    if auth_header and auth_header.startswith("Bearer "):
-        token = auth_header[7:]  # Remove "Bearer " prefix
-        try:
-            # Create UserManager to verify JWT
-            from remembra.auth.users import UserManager
-
-            db = getattr(request.app.state, "db", None)
-            if db is None:
-                log.debug("database_not_initialized_for_jwt_auth_optional")
-                # Don't fail - fall through to API key check
-            elif not settings.jwt_secret:
-                log.debug("jwt_secret_not_configured_optional")
-                # Don't fail - fall through to API key check
-            else:
-                user_manager = UserManager(db, settings.jwt_secret)
-                payload = user_manager.verify_jwt_token(token)
-                sub = payload.get("sub") if payload else None
-                if sub:
-                    return AuthenticatedUser(
-                        user_id=sub,
-                        api_key_id="jwt_auth",
-                        rate_limit_tier="standard",
-                        name=payload.get("email") if payload else None,
-                    )
-        except Exception as e:
-            log.debug("jwt_verification_failed_optional", error=str(e), error_type=type(e).__name__)
+    if auth_header and auth_header.startswith("Bearer ") and not auth_header[7:].strip().startswith("rem_"):
+        jwt_user = await authenticate_jwt(request, auth_header[7:].strip())
+        if jwt_user:
+            _mark_rate_limit_identity(request, jwt_user.user_id)
+            return jwt_user
 
     # Fall back to API key (also accepts a rem_ key sent as a Bearer token)
     api_key = resolve_api_key(request, api_key)
     if api_key:
-        key_manager = await get_api_key_manager(request)
-        key_info = await key_manager.validate_key(api_key)
-        if key_info:
-            return AuthenticatedUser(
-                user_id=key_info["user_id"],
-                api_key_id=key_info["id"],
-                rate_limit_tier=key_info.get("rate_limit_tier", "standard"),
-                name=key_info.get("name"),
-                role=key_info.get("role", "editor"),
-                scopes=key_info.get("scopes"),
-                project_ids=key_info.get("project_ids"),
-            )
+        key_user = await authenticate_api_key(request, api_key)
+        if key_user:
+            _mark_rate_limit_identity(request, key_user.user_id)
+            return key_user
 
     return None
 
@@ -317,6 +373,16 @@ def resolve_project_access(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="This API key is restricted to multiple projects. Provide project_id explicitly.",
     )
+
+
+def resolve_project_or_default(user: AuthenticatedUser, project_id: str | None) -> str:
+    """Resolve the project for a write/scoped operation.
+
+    Omitted ``project_id`` pins a single-project key to its one project (and
+    defaults unrestricted callers to ``"default"``); an explicit value is
+    checked against the key's allowed projects.
+    """
+    return resolve_project_access(user, project_id) or "default"
 
 
 async def require_master_key(

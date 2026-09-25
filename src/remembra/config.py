@@ -270,6 +270,21 @@ class Settings(BaseSettings):
     # Rate Limiting
     rate_limit_enabled: bool = Field(True, description="Enable rate limiting")
     rate_limit_storage: str = Field("memory", description="Rate limit storage backend: 'memory' or 'redis://...'")
+    trusted_proxies: list[str] = Field(
+        default_factory=lambda: ["127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"],
+        description=(
+            "CIDRs of reverse proxies whose X-Forwarded-For / X-Real-IP headers are trusted. "
+            "Forwarding headers from any other peer are ignored. Set to [] when the API is exposed directly."
+        ),
+    )
+    superadmin_user_ids: list[str] = Field(
+        default_factory=list,
+        description="User IDs with platform superadmin access (in addition to verified owner_emails).",
+    )
+    secret_redaction_enabled: bool = Field(
+        True,
+        description="Redact credentials (API keys, tokens, private keys) from memory content on write and on read.",
+    )
 
     # Input Sanitization
     sanitization_enabled: bool = Field(True, description="Enable input sanitization and trust scoring")
