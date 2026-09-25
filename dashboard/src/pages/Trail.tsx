@@ -7,9 +7,9 @@ import clsx from 'clsx';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { useRelayData } from '../hooks/relayData';
 import { useNow, useResource } from '../hooks/useResource';
-import { relay, type TrailItem } from '../lib/relay';
+import { mergeTrailPages, relay, type TrailItem } from '../lib/relay';
 import { INSTALL_COMMAND, agentMeta } from '../lib/agents';
-import { navigate, useRoute } from '../lib/nav';
+import { hrefFor, navigate, useRoute } from '../lib/nav';
 import { dayLabel, relativeTime } from '../lib/time';
 import { AgentAvatar, CopyCommand, ErrorNotice, StaleNotice, TrailSkeleton } from '../components/relay/ui';
 import { TrailNode } from '../components/relay/Handoff';
@@ -18,8 +18,10 @@ const PAGE = 30;
 
 interface Older {
   key: string;
+  /** Everything on screen when the last older page loaded, plus that page. */
   items: TrailItem[];
-  done: boolean;
+  /** Entries older than the oldest one loaded (from the last page's total). */
+  remaining: number;
 }
 
 function FilterChip({
@@ -70,7 +72,7 @@ export function Trail() {
   const key = `trail:${project ?? '*'}:${agent ?? '*'}`;
 
   const head = useResource(key, () => relay.trail({ projectId: project, agentId: agent, limit: PAGE }), { pollMs: 30000 });
-  const [older, setOlder] = useState<Older>({ key, items: [], done: false });
+  const [older, setOlder] = useState<Older>({ key, items: [], remaining: 0 });
   const [loadingMore, setLoadingMore] = useState(false);
   const [moreError, setMoreError] = useState<unknown>(null);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(openParam ? [openParam] : []));
@@ -91,17 +93,13 @@ export function Trail() {
     node.scrollIntoView({ block: 'start' });
   }, [openParam, headCount]);
 
-  const olderItems = older.key === key ? older.items : [];
-  const seen = new Set<string>();
-  const items: TrailItem[] = [];
-  for (const item of [...(head.data?.items ?? []), ...olderItems]) {
-    if (!seen.has(item.id)) {
-      seen.add(item.id);
-      items.push(item);
-    }
-  }
+  // The head polls; older pages are paged by cursor from the oldest entry on
+  // screen, so new arrivals at the top never open a gap or repeat entries.
+  const hasOlder = older.key === key && older.items.length > 0;
+  const items = mergeTrailPages(head.data?.items ?? [], hasOlder ? older.items : []);
   const total = head.data?.total ?? 0;
-  const canLoadMore = !!head.data && items.length < total && !(older.key === key && older.done);
+  const remaining = hasOlder ? older.remaining : Math.max(0, total - (head.data?.items.length ?? 0));
+  const canLoadMore = !!head.data && items.length > 0 && remaining > 0;
   const latestHandoffId = items.find((item) => item.memory_type === 'handoff')?.id;
 
   const setFilter = (next: { project?: string | null; agent?: string | null }) => {
@@ -112,17 +110,21 @@ export function Trail() {
   };
 
   const loadMore = () => {
+    const shown = items;
+    const oldest = shown[shown.length - 1];
+    if (!oldest) return;
     setLoadingMore(true);
     setMoreError(null);
-    const offset = (head.data?.items.length ?? 0) + olderItems.length;
     relay
-      .trail({ projectId: project, agentId: agent, limit: PAGE, offset })
-      .then((page) => {
-        setOlder((prev) => ({
-          key,
-          items: [...(prev.key === key ? prev.items : []), ...page.items],
-          done: page.items.length < PAGE,
-        }));
+      .trail({ projectId: project, agentId: agent, limit: PAGE, before: oldest })
+      .then(async (page) => {
+        if (page.before !== undefined) return { page, remaining: Math.max(0, page.total - page.items.length) };
+        // A server without cursor paging ignored `before`: fall back to an offset.
+        const legacy = await relay.trail({ projectId: project, agentId: agent, limit: PAGE, offset: shown.length });
+        return { page: legacy, remaining: legacy.items.length < PAGE ? 0 : Math.max(0, legacy.total - shown.length - legacy.items.length) };
+      })
+      .then(({ page, remaining: left }) => {
+        setOlder({ key, items: [...shown, ...page.items], remaining: page.items.length === 0 ? 0 : left });
       })
       .catch((err: unknown) => setMoreError(err))
       .finally(() => setLoadingMore(false));
@@ -235,6 +237,13 @@ export function Trail() {
                   left open, what is failing and what comes next. Each one lands here, newest first.
                 </p>
                 <CopyCommand className="mx-auto mt-4 max-w-md text-left" command={INSTALL_COMMAND} label="Install command" />
+                <p className="mx-auto mt-2 max-w-md text-xs text-ink-3">
+                  The relay also needs an API key.{' '}
+                  <a href={hrefFor('home')} className="font-semibold text-ink underline decoration-signal decoration-2 underline-offset-4">
+                    Follow the setup checklist on Home
+                  </a>
+                  .
+                </p>
               </>
             )}
           </div>
@@ -275,7 +284,7 @@ export function Trail() {
             >
               {loadingMore && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
               Older entries
-              <span className="font-mono text-xs text-ink-3">{(total - items.length).toLocaleString()} more</span>
+              <span className="font-mono text-xs text-ink-3">{remaining.toLocaleString()} more</span>
             </button>
           </div>
         )}

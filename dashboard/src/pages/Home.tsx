@@ -6,7 +6,7 @@ import { useEffect, useId, useState } from 'react';
 import { ArrowRight, Inbox as InboxIcon, PenLine } from 'lucide-react';
 import { useRelayData } from '../hooks/relayData';
 import { useNow, useResource } from '../hooks/useResource';
-import { relay, type TrailItem } from '../lib/relay';
+import { inboxCounts, relay, type TrailItem } from '../lib/relay';
 import { agentMeta } from '../lib/agents';
 import { hrefFor } from '../lib/nav';
 import { parseServerTime, relativeTime, greeting } from '../lib/time';
@@ -123,7 +123,7 @@ export function Home({ userName }: { userName?: string }) {
   const agents = summary.data?.agents ?? [];
   const connectedCount = agents.length;
   const showConnectSide = hasHandoffs && connectedCount < 2 && !hideConnect;
-  const forYou = inbox.data?.agents.find((a) => a.agent_id === 'dashboard')?.unread ?? 0;
+  const { forYou, pendingForAgents, agentsWaiting } = inboxCounts(inbox.data);
 
   let statusLine: string;
   if (!loaded && trail.error != null) statusLine = "Your agents' trail can't be loaded right now.";
@@ -224,8 +224,8 @@ export function Home({ userName }: { userName?: string }) {
               title={
                 inbox.data ? (
                   <span className="flex items-baseline gap-2">
-                    <span className="tabular text-3xl font-extrabold">{inbox.data.unread_total}</span>{' '}
-                    <span className="text-base font-bold text-ink-2">unread</span>
+                    <span className="tabular text-3xl font-extrabold">{forYou}</span>{' '}
+                    <span className="text-base font-bold text-ink-2">for you</span>
                   </span>
                 ) : (
                   'Messages'
@@ -239,13 +239,18 @@ export function Home({ userName }: { userName?: string }) {
               {inbox.data && (
                 <>
                   <p className="text-sm text-ink-2">
-                    {inbox.data.unread_total === 0
-                      ? 'Nothing waiting. Leave an agent a note and it leads its next session brief.'
-                      : `Waiting to be picked up across ${plural(
-                          inbox.data.agents.filter((a) => a.unread > 0).length,
-                          'agent',
-                        )}.`}
-                    {forYou > 0 && <span className="font-semibold text-signal-ink"> {forYou} for you.</span>}
+                    {forYou > 0 && (
+                      <span className="font-semibold text-signal-ink">
+                        {plural(forYou, 'message')} from your agents to read.{' '}
+                      </span>
+                    )}
+                    {pendingForAgents > 0
+                      ? `${plural(pendingForAgents, 'note')} waiting for ${plural(agentsWaiting, 'agent')} to pick up in ${
+                          agentsWaiting === 1 ? 'its' : 'their'
+                        } next session brief.`
+                      : forYou === 0
+                        ? 'Nothing waiting. Leave an agent a note and it leads its next session brief.'
+                        : ''}
                   </p>
                   {unread.data && unread.data.items.length > 0 && (
                     <ul className="mt-3 divide-y divide-rule border-y border-rule">

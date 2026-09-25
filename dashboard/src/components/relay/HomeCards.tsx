@@ -7,7 +7,8 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, Check, Copy, X } from 'lucide-react';
 import type { UsageResponse } from '../../lib/api';
 import type { ActivitySummary, AgentActivity, TrailItem } from '../../lib/relay';
-import { CONNECTABLE_AGENTS, INSTALL_COMMAND, agentMeta, canonicalAgentId } from '../../lib/agents';
+import { api } from '../../lib/api';
+import { CONNECTABLE_AGENTS, PIPX_INSTALL, agentMeta, canonicalAgentId, saveKeyCommand } from '../../lib/agents';
 import { hrefFor } from '../../lib/nav';
 import { relativeTime } from '../../lib/time';
 import { useCopy } from '../../hooks/useCopy';
@@ -20,8 +21,9 @@ function agentConnectCommand(agentId: string): string {
 }
 
 /**
- * Setup checklist: the one-line install, then one row per agent that ticks
- * itself off when that agent's first handoff arrives.
+ * Setup checklist: a key, the install, connect, then one row per agent that
+ * ticks itself off when that agent's first handoff arrives. Without a key the
+ * hooks run but cannot reach the server, so the key comes first.
  */
 export function ConnectChecklist({
   agents,
@@ -38,6 +40,8 @@ export function ConnectChecklist({
   for (const agent of agents) seen.set(canonicalAgentId(agent.agent_id), agent);
   const connected = CONNECTABLE_AGENTS.filter((id) => seen.has(id)).length;
   const others = agents.filter((a) => !CONNECTABLE_AGENTS.includes(canonicalAgentId(a.agent_id)) && a.agent_id !== 'dashboard');
+  const unverifiedNames = CONNECTABLE_AGENTS.filter((id) => !agentMeta(id).verified).map((id) => agentMeta(id).name);
+  const verifiedNames = CONNECTABLE_AGENTS.filter((id) => agentMeta(id).verified).map((id) => agentMeta(id).name);
 
   return (
     <Card labelledBy={titleId}>
@@ -62,15 +66,42 @@ export function ConnectChecklist({
         <ol className="space-y-4">
           <li>
             <p className="text-sm text-ink-2">
-              <span className="font-semibold text-ink">1. Install, then connect.</span> <code className="font-mono text-[13px]">connect</code>{' '}
-              is a dry run that shows every change; nothing is written until you add <code className="font-mono text-[13px]">--apply</code>.
+              <span className="font-semibold text-ink">1. Create an API key.</span> The relay signs in to this server with it; without one
+              nothing reaches your trail.{' '}
+              <a href={hrefFor('keys')} className="font-semibold text-ink underline decoration-signal decoration-2 underline-offset-4">
+                Open API keys
+              </a>
             </p>
-            <CopyCommand className="mt-2" command={INSTALL_COMMAND} label="Install command" toastText="Install command copied" />
-            <CopyCommand className="mt-2" command="remembra-relay connect --apply" label="Apply command" toastText="Apply command copied" />
           </li>
           <li>
             <p className="text-sm text-ink-2">
-              <span className="font-semibold text-ink">2. Start a session and end it.</span> Each agent ticks off here when its first handoff
+              <span className="font-semibold text-ink">2. Install, then save the key.</span> Replace{' '}
+              <code className="font-mono text-[13px]">&lt;your-key&gt;</code>. This stores it in{' '}
+              <code className="font-mono text-[13px]">~/.remembra/credentials</code>, where the relay reads it, and adds the Remembra MCP
+              server to the agents it finds. Skip it if your agents already have <code className="font-mono text-[13px]">REMEMBRA_API_KEY</code>.
+            </p>
+            <CopyCommand className="mt-2" command={PIPX_INSTALL} label="Install command" toastText="Install command copied" />
+            <CopyCommand
+              className="mt-2"
+              command={saveKeyCommand(api.getApiBaseUrl())}
+              label="Save-key command"
+              toastText="Command copied: replace <your-key> before running it"
+            />
+          </li>
+          <li>
+            <p className="text-sm text-ink-2">
+              <span className="font-semibold text-ink">3. Connect.</span> <code className="font-mono text-[13px]">remembra-relay connect</code>{' '}
+              is a dry run that shows every change; nothing is written until you add <code className="font-mono text-[13px]">--apply</code>.
+            </p>
+            <CopyCommand className="mt-2" command="remembra-relay connect --apply" label="Apply command" toastText="Apply command copied" />
+            <p className="mt-1.5 text-xs text-ink-3">
+              This writes hooks for {verifiedNames.join(', ')} only, the verified adapter today. For {unverifiedNames.join(', ')}, copy that
+              agent’s command below: it adds <code className="font-mono">--include-unverified</code>.
+            </p>
+          </li>
+          <li>
+            <p className="text-sm text-ink-2">
+              <span className="font-semibold text-ink">4. Start a session and end it.</span> Each agent ticks off here when its first handoff
               arrives.
             </p>
             <div className="mt-2 flex gap-1" aria-hidden="true">
@@ -135,8 +166,9 @@ export function ConnectChecklist({
         </ol>
         <p className="mt-3 text-xs text-ink-3">
           Any MCP agent works too: the Remembra MCP server tells it to call <code className="font-mono">session_brief</code> at start and{' '}
-          <code className="font-mono">close_session</code> before it stops. Need your server URL or MCP config? Open Connection in the sidebar
-          (under More on a phone).
+          <code className="font-mono">close_session</code> before it stops. Your server URL is{' '}
+          <code className="font-mono [overflow-wrap:anywhere]">{api.getApiBaseUrl()}</code>; Connection in the sidebar (under More on a
+          phone) has the rest of the MCP config.
         </p>
       </div>
     </Card>

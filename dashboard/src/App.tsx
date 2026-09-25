@@ -10,6 +10,7 @@ import { Trail } from './pages/Trail';
 import { Agents } from './pages/Agents';
 import { Inbox } from './pages/Inbox';
 import { useRelayData } from './hooks/relayData';
+import { inboxCounts } from './lib/relay';
 import { useShortcuts } from './hooks/useShortcuts';
 import { navigate, useRoute, type TabType } from './lib/nav';
 import { Login } from './pages/Login';
@@ -406,7 +407,7 @@ function AuthenticatedShell({
       onSearch={onSearch}
       onShowShortcuts={onShowShortcuts}
       isAdmin={isAdmin}
-      inboxUnread={inbox.data?.unread_total ?? 0}
+      inboxUnread={inboxCounts(inbox.data).forYou}
     >
       {tab === 'home' && <Home userName={userName} />}
       {tab === 'trail' && <Trail />}

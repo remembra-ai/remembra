@@ -4,10 +4,17 @@
 import { useId, useState, type FormEvent } from 'react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
-import { Check, CheckCheck, Loader2, PenLine, Send, X } from 'lucide-react';
+import { Check, CheckCheck, Loader2, PenLine, Send, Undo2, X } from 'lucide-react';
 import { useRelayData } from '../hooks/relayData';
 import { useNow, useResource } from '../hooks/useResource';
-import { DASHBOARD_SENDER, relay, type InboxMessage, type InboxStatusFilter } from '../lib/relay';
+import {
+  DASHBOARD_SENDER,
+  WITHDRAWN_NOTE,
+  isWithdrawn,
+  relay,
+  type InboxMessage,
+  type InboxStatusFilter,
+} from '../lib/relay';
 import { CONNECTABLE_AGENTS, agentMeta } from '../lib/agents';
 import { navigate, useRoute } from '../lib/nav';
 import { absoluteTime, relativeTime } from '../lib/time';
@@ -19,6 +26,8 @@ const STATUS_TABS: { id: InboxStatusFilter; label: string }[] = [
   { id: 'all', label: 'All' },
 ];
 
+type AckAction = 'read' | 'done' | 'withdraw';
+
 const AGENT_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$/;
 
 function subjectFrom(text: string): string {
@@ -26,8 +35,10 @@ function subjectFrom(text: string): string {
   return first.length > 120 ? `${first.slice(0, 117)}…` : first;
 }
 
-function StatusPill({ status }: { status: string }) {
-  if (status === 'unread') return <Pill tone="open">unread</Pill>;
+function StatusPill({ message }: { message: InboxMessage }) {
+  const { status } = message;
+  if (isWithdrawn(message)) return <Pill>withdrawn</Pill>;
+  if (status === 'unread') return <Pill tone="open">{message.to_agent === DASHBOARD_SENDER ? 'unread' : 'waiting'}</Pill>;
   if (status === 'done') return <Pill tone="ok">done</Pill>;
   if (status === 'blocked' || status === 'rejected') return <Pill tone="fail">{status}</Pill>;
   return <Pill>{status}</Pill>;
@@ -43,15 +54,22 @@ function MessageRow({
   message: InboxMessage;
   highlighted: boolean;
   pending: boolean;
-  onAck: (message: InboxMessage, result?: 'done') => void;
+  onAck: (message: InboxMessage, action: AckAction) => void;
   now: Date;
 }) {
   const [open, setOpen] = useState(highlighted);
+  const [confirmWithdraw, setConfirmWithdraw] = useState(false);
+  const confirmId = useId();
   const bodyId = useId();
   const long = message.body.length > 90 || message.body.includes('\n');
   const from = agentMeta(message.from_agent);
   const to = agentMeta(message.to_agent);
   const openStatus = message.status === 'unread' || message.status === 'read';
+  // Only messages to the user are the user's to read. A note to an agent stays
+  // in that agent's session brief until the agent itself acks it.
+  const forYou = message.to_agent === DASHBOARD_SENDER;
+  const waitingForAgent = !forYou && message.status === 'unread';
+  const withdrawn = isWithdrawn(message);
   return (
     <li className={clsx('px-4 py-3 sm:px-5', highlighted && 'bg-signal-wash')}>
       <div className="flex items-start gap-3">
@@ -65,7 +83,7 @@ function MessageRow({
             <span className={clsx('text-[15px] leading-snug text-ink [overflow-wrap:anywhere]', message.status === 'unread' ? 'font-bold' : 'font-semibold')}>
               {message.subject}
             </span>
-            <StatusPill status={message.status} />
+            <StatusPill message={message} />
           </p>
           <p className="mt-0.5 font-mono text-[11px] text-ink-3">
             {from.name} → {to.name} ·{' '}
@@ -92,18 +110,58 @@ function MessageRow({
               {open ? 'show less' : 'show all'}
             </button>
           )}
-          {message.ack_note && (
+          {message.ack_note && !withdrawn && (
             <p className="mt-1.5 border-l-2 border-rule pl-2 text-sm text-ink-2">
               <span className="font-mono text-[11px] text-ink-3">note from {to.name}:</span> {message.ack_note}
             </p>
           )}
-          {openStatus && (
+          {withdrawn && <p className="mt-1.5 font-mono text-[11px] text-ink-3">You withdrew this before {to.name} picked it up.</p>}
+          {waitingForAgent && !confirmWithdraw && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+              <p className="font-mono text-[11px] text-ink-3">In {to.name}’s session brief until {to.name} acknowledges it.</p>
+              <button
+                type="button"
+                disabled={pending}
+                onClick={() => setConfirmWithdraw(true)}
+                className="rr-btn-ghost inline-flex items-center gap-1.5 px-2.5 py-1 text-xs disabled:opacity-50"
+              >
+                <Undo2 className="h-3.5 w-3.5" aria-hidden="true" /> Withdraw
+              </button>
+            </div>
+          )}
+          {waitingForAgent && confirmWithdraw && (
+            <div role="group" aria-labelledby={confirmId} className="mt-2 border-l-[3px] border-fail bg-paper px-3 py-2">
+              <p id={confirmId} className="text-sm text-ink">
+                Withdraw this note? {to.name} will no longer see it in its session brief.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => onAck(message, 'withdraw')}
+                  className="rr-btn-primary inline-flex items-center gap-1.5 px-2.5 py-1 text-xs disabled:opacity-50"
+                >
+                  {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />}
+                  Withdraw delivery
+                </button>
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => setConfirmWithdraw(false)}
+                  className="rr-btn-ghost inline-flex items-center px-2.5 py-1 text-xs disabled:opacity-50"
+                >
+                  Keep it
+                </button>
+              </div>
+            </div>
+          )}
+          {openStatus && !waitingForAgent && (
             <div className="mt-2 flex flex-wrap gap-2">
               {message.status === 'unread' && (
                 <button
                   type="button"
                   disabled={pending}
-                  onClick={() => onAck(message)}
+                  onClick={() => onAck(message, 'read')}
                   className="rr-btn-ghost inline-flex items-center gap-1.5 px-2.5 py-1 text-xs disabled:opacity-50"
                 >
                   <Check className="h-3.5 w-3.5" aria-hidden="true" /> Mark read
@@ -113,6 +171,7 @@ function MessageRow({
                 type="button"
                 disabled={pending}
                 onClick={() => onAck(message, 'done')}
+                title={forYou ? undefined : `${to.name} has read it; this closes it on ${to.name}’s behalf`}
                 className="rr-btn-ghost inline-flex items-center gap-1.5 px-2.5 py-1 text-xs disabled:opacity-50"
               >
                 {pending ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <CheckCheck className="h-3.5 w-3.5" aria-hidden="true" />}
@@ -301,12 +360,21 @@ export function Inbox() {
       agent: next.agent !== undefined ? next.agent : agent,
     });
 
-  const ack = (message: InboxMessage, result?: 'done') => {
+  const ack = (message: InboxMessage, action: AckAction) => {
     setPending((prev) => new Set(prev).add(message.inbox_id));
-    relay
-      .ack(message.inbox_id, result)
+    const request =
+      action === 'withdraw'
+        ? relay.ack(message.inbox_id, 'done', WITHDRAWN_NOTE)
+        : relay.ack(message.inbox_id, action === 'done' ? 'done' : undefined);
+    request
       .then(() => {
-        toast.success(result === 'done' ? 'Marked done' : 'Marked read');
+        toast.success(
+          action === 'withdraw'
+            ? `Withdrawn. ${agentMeta(message.to_agent).name} won’t see it.`
+            : action === 'done'
+              ? 'Marked done'
+              : 'Marked read',
+        );
         list.refresh();
         refreshAll();
       })

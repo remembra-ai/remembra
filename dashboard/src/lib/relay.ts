@@ -52,7 +52,33 @@ export interface TrailResponse {
   project_id: string | null;
   agent_id?: string | null;
   items: TrailItem[];
+  /** Every match; with a cursor, the matches older than it. */
   total: number;
+  /** The cursor the server paged by (absent on servers without cursor paging). */
+  before?: { created_at: string; id: string | null } | null;
+}
+
+/**
+ * Merge the live head page with older pages already on screen. Older pages
+ * keep the entries that were in the head when they were loaded, so new
+ * arrivals never push anything out of view. A re-closed session supersedes
+ * its earlier handoff, so only the newest handoff per (agent, session) stays.
+ */
+export function mergeTrailPages(head: TrailItem[], older: TrailItem[]): TrailItem[] {
+  const seen = new Set<string>();
+  const sessions = new Set<string>();
+  const items: TrailItem[] = [];
+  for (const item of [...head, ...older]) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    if (item.memory_type === 'handoff' && item.session_id) {
+      const session = `${item.agent_id ?? ''}\u0000${item.session_id}`;
+      if (sessions.has(session)) continue;
+      sessions.add(session);
+    }
+    items.push(item);
+  }
+  return items;
 }
 
 export interface ActivityBucket {
@@ -128,6 +154,43 @@ export type AckResult = 'done' | 'blocked' | 'rejected';
 /** The sender id messages composed in the dashboard carry. */
 export const DASHBOARD_SENDER = 'dashboard';
 
+/** The ack note that marks a message the user withdrew before its agent picked it up. */
+export const WITHDRAWN_NOTE = 'Withdrawn from the dashboard before delivery.';
+
+/** True for a message the user withdrew (acked as done with WITHDRAWN_NOTE). */
+export function isWithdrawn(message: Pick<InboxMessage, 'status' | 'ack_note'>): boolean {
+  return message.status === 'done' && message.ack_note === WITHDRAWN_NOTE;
+}
+
+export interface InboxCounts {
+  /** Unread messages addressed to the user (sent to the dashboard). */
+  forYou: number;
+  /** Unread notes waiting in agents' session briefs (not for the user). */
+  pendingForAgents: number;
+  /** How many agents (not the user) have at least one unread note waiting. */
+  agentsWaiting: number;
+}
+
+/**
+ * Splits the inbox summary into what the user has to read (the badge) and
+ * what is still waiting for agents to pick up. An agent's unread note is not
+ * the user's unread mail: acking it would drop it from that agent's brief.
+ */
+export function inboxCounts(summary: InboxSummary | null | undefined): InboxCounts {
+  let forYou = 0;
+  let pendingForAgents = 0;
+  let agentsWaiting = 0;
+  for (const agent of summary?.agents ?? []) {
+    if (agent.agent_id === DASHBOARD_SENDER) {
+      forYou += agent.unread;
+    } else if (agent.unread > 0) {
+      pendingForAgents += agent.unread;
+      agentsWaiting += 1;
+    }
+  }
+  return { forYou, pendingForAgents, agentsWaiting };
+}
+
 function query(params: Record<string, string | number | null | undefined>): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
@@ -143,13 +206,24 @@ export function localTzOffsetMinutes(): number {
 }
 
 export const relay = {
-  trail(params: { projectId?: string | null; agentId?: string | null; limit?: number; offset?: number } = {}) {
+  trail(
+    params: {
+      projectId?: string | null;
+      agentId?: string | null;
+      limit?: number;
+      offset?: number;
+      /** Cursor: the oldest entry already shown; only older entries come back. */
+      before?: Pick<TrailItem, 'created_at' | 'id'> | null;
+    } = {},
+  ) {
     return api.request<TrailResponse>(
       `/trail${query({
         project_id: params.projectId,
         agent_id: params.agentId,
         limit: params.limit ?? 30,
         offset: params.offset ?? 0,
+        before: params.before?.created_at,
+        before_id: params.before?.id,
       })}`,
     );
   },

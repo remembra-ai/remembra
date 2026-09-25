@@ -116,7 +116,7 @@ export function Sidebar({
                   <>
                     <Badge count={badge} className="hidden lg:inline-flex" />
                     <span aria-hidden="true" className="absolute right-2 top-2 h-2 w-2 rounded-full bg-signal lg:hidden" />
-                    <span className="sr-only">, {badge} unread</span>
+                    <span className="sr-only">, {badge} unread for you</span>
                   </>
                 )}
               </a>
@@ -254,7 +254,7 @@ export function MobileNav({
                     {badge > 0 && <Badge count={badge} className="absolute -right-3 -top-1.5" />}
                   </span>
                   {section.label}
-                  {badge > 0 && <span className="sr-only">, {badge} unread</span>}
+                  {badge > 0 && <span className="sr-only">, {badge} unread for you</span>}
                 </a>
               </li>
             );

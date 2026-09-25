@@ -1,34 +1,50 @@
 // Agents: one card per agent identity seen on the trail, with its last
-// activity, sessions this week and a 14-day sparkline. The pulse means it
-// was active in the last hour.
+// activity, sessions this week and a 14-day sparkline. The pulse means the
+// agent is mid-session: its newest entry is a recent checkpoint that no
+// handoff has closed yet. A handoff means the session ended.
 
 import { ArrowRight, PenLine } from 'lucide-react';
 import { useRelayData } from '../hooks/relayData';
 import { useNow } from '../hooks/useResource';
 import type { AgentActivity, TrailItem } from '../lib/relay';
-import { agentMeta } from '../lib/agents';
+import { agentMeta, agentState, type AgentState } from '../lib/agents';
 import { hrefFor } from '../lib/nav';
 import { absoluteTime, minutesSince, relativeTime } from '../lib/time';
 import { AgentAvatar, ErrorNotice, Pill, PulseDot, Skeleton, Sparkline, StaleNotice } from '../components/relay/ui';
 import { BranchLabel } from '../components/relay/Handoff';
 import { ConnectChecklist } from '../components/relay/HomeCards';
 
+function stateTitle(state: AgentState, now: Date): string {
+  if (state.kind === 'working') return `Saved a checkpoint ${relativeTime(state.at, now)} and has not handed off yet`;
+  if (state.kind === 'handed-off') return 'Its last session ended with this handoff';
+  if (state.kind === 'recent') return 'Left an entry in the last hour';
+  return 'No entries in the last hour';
+}
+
+function stateLabel(state: AgentState, now: Date): string {
+  if (state.kind === 'working') return 'working';
+  if (state.kind === 'handed-off') return `handed off ${relativeTime(state.at, now)}`;
+  if (state.kind === 'recent') return 'active in the last hour';
+  return 'idle';
+}
+
 function AgentCard({
   agent,
   latest,
+  newest,
   unread,
   days,
   now,
 }: {
   agent: AgentActivity;
   latest?: TrailItem;
+  newest?: TrailItem;
   unread: number;
   days: number;
   now: Date;
 }) {
   const meta = agentMeta(agent.agent_id);
-  const minutes = minutesSince(agent.last_active, now);
-  const active = minutes !== null && minutes <= 60;
+  const state = agentState(agent.last_active, newest, now);
   const titleId = `agent-${agent.agent_id.replace(/[^A-Za-z0-9_-]/g, '_')}`;
   const total14 = agent.daily.reduce((sum, n) => sum + n, 0);
   return (
@@ -41,9 +57,9 @@ function AgentCard({
           </h2>
           <p className="truncate font-mono text-[11px] text-ink-3">{agent.agent_id}</p>
         </div>
-        <span className="mt-1 inline-flex shrink-0 items-center gap-1.5 font-mono text-[11px] text-ink-2">
-          <PulseDot active={active} />
-          {active ? 'active now' : 'idle'}
+        <span className="mt-1 inline-flex shrink-0 items-center gap-1.5 font-mono text-[11px] text-ink-2" title={stateTitle(state, now)}>
+          <PulseDot active={state.kind === 'working'} />
+          {stateLabel(state, now)}
         </span>
       </div>
 
@@ -117,7 +133,7 @@ function AgentCard({
           className="rr-btn-ghost ml-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 text-sm"
         >
           <PenLine className="h-3.5 w-3.5" aria-hidden="true" /> Message
-          {unread > 0 && <span className="font-mono text-[11px] text-signal-ink">{unread} unread</span>}
+          {unread > 0 && <span className="font-mono text-[11px] text-signal-ink">{unread} waiting</span>}
         </a>
       </div>
     </article>
@@ -129,10 +145,11 @@ export function Agents() {
   const now = useNow(30000);
   const agents = summary.data?.agents ?? [];
   const latestByAgent = new Map<string, TrailItem>();
+  const newestByAgent = new Map<string, TrailItem>();
   for (const item of trail.data?.items ?? []) {
-    if (item.agent_id && item.memory_type === 'handoff' && !latestByAgent.has(item.agent_id)) {
-      latestByAgent.set(item.agent_id, item);
-    }
+    if (!item.agent_id) continue;
+    if (!newestByAgent.has(item.agent_id)) newestByAgent.set(item.agent_id, item);
+    if (item.memory_type === 'handoff' && !latestByAgent.has(item.agent_id)) latestByAgent.set(item.agent_id, item);
   }
   const unreadByAgent = new Map((inbox.data?.agents ?? []).map((a) => [a.agent_id, a.unread]));
   const activeNow = agents.filter((a) => {
@@ -181,7 +198,7 @@ export function Agents() {
             <p className="font-display mt-2 text-2xl font-bold leading-tight text-ink">Agents appear here after their first handoff.</p>
             <p className="mt-2 text-sm text-ink-2">
               Each card shows when the agent was last active, its sessions this week and two weeks of activity. An orange pulse means it
-              is working right now.
+              saved a checkpoint in the last hour and has not handed off yet.
             </p>
           </div>
           <ConnectChecklist agents={agents} now={now} />
@@ -195,6 +212,7 @@ export function Agents() {
               key={agent.agent_id}
               agent={agent}
               latest={latestByAgent.get(agent.agent_id)}
+              newest={newestByAgent.get(agent.agent_id)}
               unread={unreadByAgent.get(agent.agent_id) ?? 0}
               days={summary.data?.days ?? agent.daily.length}
               now={now}
