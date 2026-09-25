@@ -172,6 +172,8 @@ class Settings(BaseSettings):
     # -----------------------------------------------------------------------
     enable_temporal_decay: bool = True
     default_ttl_days: int | None = None
+    # memory_type="checkpoint" stores get this TTL unless the caller sets ttl/expires_at (AGT-5).
+    checkpoint_default_ttl: str = "7d"
     max_memories_per_recall: int = 10
     recall_score_threshold: float = 0.70
 

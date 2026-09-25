@@ -28,7 +28,7 @@ def test_package_version_matches_pyproject() -> None:
 
 
 def test_sdk_user_agent_version_matches() -> None:
-    assert sdk_memory.USER_AGENT_VERSION == _pyproject_version()
+    assert _pyproject_version() == sdk_memory.USER_AGENT_VERSION
     client = sdk_memory.Memory(base_url="http://x")
     try:
         assert client._headers["User-Agent"] == f"remembra-python/{_pyproject_version()}"

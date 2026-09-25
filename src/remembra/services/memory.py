@@ -473,6 +473,7 @@ class MemoryService:
                 entities=[],
                 expires_at=expires_at,
                 source_id=derived_source_id,
+                duplicate_of=response_id or None,
             )
 
         log.info(

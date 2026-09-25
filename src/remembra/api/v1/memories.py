@@ -49,6 +49,7 @@ from remembra.models.memory import (
 from remembra.security.audit import AuditLogger
 from remembra.security.pii_detector import PIIDetector
 from remembra.security.sanitizer import ContentSanitizer
+from remembra.services.agent_session import MemoryTypePolicyError, apply_memory_type_policy
 from remembra.services.memory import MemoryService
 from remembra.storage.embeddings import EmbeddingProviderError
 from remembra.webhooks.events import (
@@ -279,6 +280,12 @@ async def store_memory(
     # Override user_id with authenticated user (security: prevent user spoofing)
     body.user_id = current_user.user_id
     body.project_id = resolve_project_access(current_user, body.project_id) or "default"
+
+    # Agent memory-type hygiene: checkpoint TTL, atomic handoff, status via upsert (AGT-5)
+    try:
+        apply_memory_type_policy(body, settings.checkpoint_default_ttl)
+    except MemoryTypePolicyError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
     # Idempotency check — return cached result on duplicate key
     idem_key = request.headers.get("Idempotency-Key")

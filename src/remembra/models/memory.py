@@ -6,7 +6,11 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-MEMORY_TYPES = Literal["observation", "fact", "inference", "task", "source"]
+# Agent-hygiene types (AGT-5): "checkpoint" = short-lived progress note (default
+# TTL applied on store), "handoff" = a session snapshot stored as ONE unit (never
+# fact-split), "status" = current value for a key, upserted via the session
+# status endpoint (the prior value for the same key is superseded).
+MEMORY_TYPES = Literal["observation", "fact", "inference", "task", "source", "checkpoint", "handoff", "status"]
 
 
 def _new_id() -> str:
@@ -207,6 +211,13 @@ class StoreResponse(BaseModel):
         description=(
             "Set to 'pending' when async enrichment is enabled: the verbatim "
             "source is stored and searchable now; derived facts land shortly."
+        ),
+    )
+    duplicate_of: str | None = Field(
+        default=None,
+        description=(
+            "Set when nothing new was stored because every extracted fact "
+            "duplicated an existing memory; `id` is then that existing memory."
         ),
     )
 
