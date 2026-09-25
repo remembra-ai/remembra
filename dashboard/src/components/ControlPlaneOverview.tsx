@@ -110,7 +110,7 @@ export function ControlPlaneOverview({
       initial={{ opacity: 0, y: 18 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
-      className="mb-7 overflow-hidden rounded-[28px] border border-[hsl(var(--border))/0.72] bg-[linear-gradient(135deg,hsl(var(--card))/0.92,hsl(var(--background))/0.76)] shadow-[0_28px_70px_hsl(0_0%_0%/0.18),inset_0_1px_0_hsl(0_0%_100%/0.06)]"
+      className="mb-7 overflow-hidden rounded-[4px] border border-[hsl(var(--border))/0.72] bg-[linear-gradient(135deg,hsl(var(--card))/0.92,hsl(var(--background))/0.76)] shadow-[0_28px_70px_hsl(0_0%_0%/0.18),inset_0_1px_0_hsl(0_0%_100%/0.06)]"
     >
       <div className="grid gap-0 lg:grid-cols-[0.9fr_1.1fr]">
         <div className="border-b border-[hsl(var(--border))/0.72] p-5 md:p-7 lg:border-b-0 lg:border-r">
@@ -156,7 +156,7 @@ export function ControlPlaneOverview({
             </button>
             <button
               onClick={onOpenDebugger}
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-300/25 bg-amber-300/10 px-4 text-sm font-medium text-amber-200 transition hover:bg-amber-300/15"
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-300/25 bg-amber-300/10 px-4 text-sm font-medium text-amber-300 transition hover:bg-amber-300/15"
             >
               <Activity className="h-4 w-4" />
               Debug
@@ -177,7 +177,7 @@ export function ControlPlaneOverview({
               value={formatCount(entityCount)}
               detail="People, organizations, projects, and concepts joined into a graph."
               icon={Users}
-              accent="border-emerald-300/25 bg-emerald-300/10 text-emerald-200"
+              accent="border-emerald-300/25 bg-emerald-300/10 text-emerald-300"
               loading={loading}
             />
             <MetricCard
@@ -185,7 +185,7 @@ export function ControlPlaneOverview({
               value={formatCount(apiCalls)}
               detail="Store and recall activity moving through this workspace."
               icon={Workflow}
-              accent="border-cyan-300/25 bg-cyan-300/10 text-cyan-200"
+              accent="border-cyan-300/25 bg-cyan-300/10 text-cyan-300"
               loading={loading}
             />
             <MetricCard
@@ -209,7 +209,7 @@ export function ControlPlaneOverview({
             </div>
             <button
               onClick={onOpenGraph}
-              className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-xs font-medium text-cyan-200 transition hover:bg-cyan-300/15"
+              className="inline-flex items-center gap-2 rounded-xl border border-cyan-300/25 bg-cyan-300/10 px-3 py-2 text-xs font-medium text-cyan-300 transition hover:bg-cyan-300/15"
             >
               Graph
               <ArrowRight className="h-3.5 w-3.5" />

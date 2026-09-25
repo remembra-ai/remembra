@@ -20,7 +20,12 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8787',
+        // Local API for `npm run dev`; override with REMEMBRA_API_PROXY=http://host:port
+        target: process.env.REMEMBRA_API_PROXY || 'http://localhost:8787',
+        changeOrigin: true,
+      },
+      '/health': {
+        target: process.env.REMEMBRA_API_PROXY || 'http://localhost:8787',
         changeOrigin: true,
       },
     },

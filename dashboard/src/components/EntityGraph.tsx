@@ -606,7 +606,7 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
   return (
     <div
       ref={containerRef}
-      className="dashboard-surface relative isolate w-full overflow-hidden rounded-[30px]"
+      className="dashboard-surface relative isolate w-full overflow-hidden rounded-[4px]"
       style={{ height: 'clamp(680px, calc(100vh - 11rem), 860px)' }}
     >
       {/* Depth background with radial glow - circuit board aesthetic */}
@@ -843,14 +843,14 @@ export function EntityGraph({ projectId }: EntityGraphProps) {
         width={dimensions.width}
         height={dimensions.height}
         backgroundColor="transparent"
-        nodeCanvasObject={paintNode}
+        nodeCanvasObject={(node, ctx, scale) => paintNode(node as GraphNode, ctx, scale)}
         nodePointerAreaPaint={(node, color, ctx) => {
           ctx.fillStyle = color;
           ctx.beginPath();
-          ctx.arc(node.x, node.y, (node as GraphNode).size || 6, 0, 2 * Math.PI);
+          ctx.arc(node.x ?? 0, node.y ?? 0, (node as GraphNode).size || 6, 0, 2 * Math.PI);
           ctx.fill();
         }}
-        linkCanvasObject={paintLink}
+        linkCanvasObject={(link, ctx, scale) => paintLink(link as GraphLink, ctx, scale)}
         linkDirectionalParticles={(link) => highlightLinks.has(`${graphNodeId((link as GraphLink).source)}-${graphNodeId((link as GraphLink).target)}`) ? 4 : 1}
         linkDirectionalParticleWidth={(link) => highlightLinks.has(`${graphNodeId((link as GraphLink).source)}-${graphNodeId((link as GraphLink).target)}`) ? 2.4 : 1.2}
         linkDirectionalParticleSpeed={(link) => highlightLinks.has(`${graphNodeId((link as GraphLink).source)}-${graphNodeId((link as GraphLink).target)}`) ? 0.013 : 0.0045}

@@ -177,7 +177,7 @@ interface StatCardProps {
 
 function StatCard({ icon, label, value, color }: StatCardProps) {
   const colorClasses = {
-    blue: 'bg-blue-50 dark:bg-blue-900/20 text-[#8B5CF6] dark:text-[#A78BFA]',
+    blue: 'bg-blue-50 dark:bg-blue-900/20 text-signal-ink dark:text-signal-ink',
     green: 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400',
     yellow: 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-600 dark:text-yellow-400',
     red: 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400',

@@ -1,82 +1,290 @@
 @import "tailwindcss";
 
-/* Enable class-based dark mode for Tailwind v4 */
+/* Class-based dark mode (html.dark, set before first paint in index.html). */
 @variant dark (&:is(.dark *));
 
-/* Remembra Brand Colors - Unified with Landing Page */
-/* Primary Purple: #8B5CF6 (258° 90% 66%) */
-/* Dark BG: #0F0F0F, Cards: #1F1F1F */
+/* ==========================================================================
+   Remembra "Baton trail" tokens
+   Stone-paper neutrals, graphite ink, and signal orange reserved for the
+   baton: the thing that moves, the thing you act on.
+   ========================================================================== */
 
 :root {
-  /* Default to light theme - dark mode overrides below */
-  --background: 0 0% 100%;
-  --foreground: 0 0% 6%;
-  --card: 0 0% 98%;
-  --card-foreground: 0 0% 6%;
-  --popover: 0 0% 100%;
-  --popover-foreground: 0 0% 6%;
-  --primary: 258 85% 58%;
+  --paper: #ecede8;
+  --paper-2: #e2e4de;
+  --panel: #fafaf7;
+  --ink: #15171a;
+  --ink-2: #464b51;
+  --ink-3: #62686e;
+  --rule: #c9ccc5;
+  --rule-strong: #15171a;
+  --signal: #ff5b14;
+  --signal-ink: #b33900;
+  --signal-wash: rgb(255 91 20 / 0.12);
+  --on-signal: #15171a;
+  --accent: #c2410c; /* orange fill that carries white text (5.2:1) */
+  --accent-hover: #a93a0a;
+  --ok: #22703f;
+  --ok-wash: rgb(34 112 63 / 0.1);
+  --fail: #b0281c;
+  --fail-wash: rgb(176 40 28 / 0.09);
+  --head: #15171a;
+  --head-ink: #ecede8;
+  --shadow: 0 1px 0 rgb(21 23 26 / 0.05), 0 24px 48px -28px rgb(21 23 26 / 0.35);
+
+  /* Legacy HSL tokens (existing pages use hsl(var(--x))) mapped onto the palette. */
+  --background: 72 12% 92%;
+  --foreground: 216 11% 9%;
+  --card: 60 23% 97%;
+  --card-foreground: 216 11% 9%;
+  --popover: 60 23% 97%;
+  --popover-foreground: 216 11% 9%;
+  --primary: 17 88% 40%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 258 30% 92%;
-  --secondary-foreground: 0 0% 6%;
-  --muted: 0 0% 96%;
-  --muted-foreground: 0 0% 45%;
-  --accent: 258 30% 92%;
-  --accent-foreground: 0 0% 6%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 90%;
-  --input: 0 0% 90%;
-  --ring: 258 85% 58%;
-  --radius: 0.5rem;
-  --shell-glow: 199 92% 56%;
-  --shell-accent: 258 85% 58%;
-  --shell-panel: 0 0% 100%;
-  --shell-panel-border: 0 0% 86%;
+  --secondary: 80 10% 88%;
+  --secondary-foreground: 216 11% 9%;
+  --muted: 80 10% 88%;
+  --muted-foreground: 210 6% 41%;
+  --accent-hsl: 18 100% 95%;
+  --accent-foreground: 216 11% 9%;
+  --destructive: 5 73% 40%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 86 6% 79%;
+  --input: 86 6% 79%;
+  --ring: 18 100% 54%;
+  --radius: 0.25rem;
+  --shell-glow: 18 100% 54%;
+  --shell-accent: 17 88% 40%;
+  --shell-panel: 60 23% 97%;
+  --shell-panel-border: 86 6% 79%;
+
+  --f-display: "Bricolage Grotesque", "Avenir Next Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Status hues: the 300/400 shades that older pages use for text were tuned
+     for dark panels; on stone paper they take the darker, readable shade. */
+  --tone-emerald-300: #047857;
+  --tone-emerald-400: #059669;
+  --tone-green-300: #15803d;
+  --tone-green-400: #16a34a;
+  --tone-red-300: #b91c1c;
+  --tone-red-400: #dc2626;
+  --tone-amber-300: #b45309;
+  --tone-amber-400: #b45309;
+  --tone-yellow-300: #a16207;
+  --tone-yellow-400: #a16207;
+  --tone-blue-300: #1d4ed8;
+  --tone-blue-400: #2563eb;
+  --tone-cyan-300: #0e7490;
+  --tone-cyan-400: #0e7490;
+  --tone-sky-300: #0369a1;
+  --tone-sky-400: #0284c7;
+
+  color-scheme: light;
 }
 
 .dark {
-  --background: 0 0% 6%;
-  --foreground: 0 0% 98%;
-  --card: 0 0% 12%;
-  --card-foreground: 0 0% 98%;
-  --popover: 0 0% 10%;
-  --popover-foreground: 0 0% 98%;
-  --primary: 258 90% 66%;
+  --paper: #131416;
+  --paper-2: #1a1c1f;
+  --panel: #1b1d20;
+  --ink: #ecede7;
+  --ink-2: #b4b7b1;
+  --ink-3: #8e928c;
+  --rule: #2e3135;
+  --rule-strong: #5a5f64;
+  --signal: #ff6b2b;
+  --signal-ink: #ff9160;
+  --signal-wash: rgb(255 107 43 / 0.15);
+  --on-signal: #15171a;
+  --accent: #c2410c;
+  --accent-hover: #d9530f;
+  --ok: #72c794;
+  --ok-wash: rgb(114 199 148 / 0.12);
+  --fail: #f28d83;
+  --fail-wash: rgb(242 141 131 / 0.12);
+  --head: #0d0e0f;
+  --head-ink: #ecede7;
+  --shadow: 0 1px 0 rgb(0 0 0 / 0.4), 0 24px 48px -28px rgb(0 0 0 / 0.8);
+
+  --background: 220 7% 8%;
+  --foreground: 70 14% 92%;
+  --card: 216 8% 12%;
+  --card-foreground: 70 14% 92%;
+  --popover: 216 8% 12%;
+  --popover-foreground: 70 14% 92%;
+  --primary: 20 88% 47%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 258 90% 76%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 0 0% 15%;
-  --muted-foreground: 0 0% 65%;
-  --accent: 258 40% 20%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 62.8% 30.6%;
-  --destructive-foreground: 0 0% 98%;
-  --border: 0 0% 20%;
-  --input: 0 0% 15%;
-  --ring: 258 90% 66%;
-  --shell-glow: 190 93% 62%;
-  --shell-accent: 258 90% 66%;
-  --shell-panel: 0 0% 9%;
-  --shell-panel-border: 0 0% 18%;
+  --secondary: 220 8% 15%;
+  --secondary-foreground: 70 14% 92%;
+  --muted: 220 8% 15%;
+  --muted-foreground: 90 3% 56%;
+  --accent-hsl: 18 60% 16%;
+  --accent-foreground: 70 14% 92%;
+  --destructive: 5 81% 73%;
+  --destructive-foreground: 216 11% 9%;
+  --border: 214 7% 19%;
+  --input: 214 7% 19%;
+  --ring: 18 100% 58%;
+  --shell-glow: 18 100% 58%;
+  --shell-accent: 20 88% 47%;
+  --shell-panel: 216 8% 12%;
+  --shell-panel-border: 214 7% 19%;
+
+  --tone-emerald-300: #6ee7b7;
+  --tone-emerald-400: #34d399;
+  --tone-green-300: #86efac;
+  --tone-green-400: #4ade80;
+  --tone-red-300: #fca5a5;
+  --tone-red-400: #f87171;
+  --tone-amber-300: #fcd34d;
+  --tone-amber-400: #fbbf24;
+  --tone-yellow-300: #fde047;
+  --tone-yellow-400: #facc15;
+  --tone-blue-300: #93c5fd;
+  --tone-blue-400: #60a5fa;
+  --tone-cyan-300: #67e8f9;
+  --tone-cyan-400: #22d3ee;
+  --tone-sky-300: #7dd3fc;
+  --tone-sky-400: #38bdf8;
+
+  color-scheme: dark;
 }
 
+/* Tailwind colors: new token utilities, plus the stock gray / purple scales
+   remapped so existing pages pick up stone neutrals and the signal accent. */
+@theme inline {
+  --color-paper: var(--paper);
+  --color-paper-2: var(--paper-2);
+  --color-panel: var(--panel);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-rule: var(--rule);
+  --color-rule-strong: var(--rule-strong);
+  --color-signal: var(--signal);
+  --color-signal-ink: var(--signal-ink);
+  --color-signal-wash: var(--signal-wash);
+  --color-on-signal: var(--on-signal);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-ok: var(--ok);
+  --color-ok-wash: var(--ok-wash);
+  --color-fail: var(--fail);
+  --color-fail-wash: var(--fail-wash);
+  --color-head: var(--head);
+  --color-head-ink: var(--head-ink);
+
+  --color-emerald-300: var(--tone-emerald-300);
+  --color-emerald-400: var(--tone-emerald-400);
+  --color-green-300: var(--tone-green-300);
+  --color-green-400: var(--tone-green-400);
+  --color-red-300: var(--tone-red-300);
+  --color-red-400: var(--tone-red-400);
+  --color-amber-300: var(--tone-amber-300);
+  --color-amber-400: var(--tone-amber-400);
+  --color-yellow-300: var(--tone-yellow-300);
+  --color-yellow-400: var(--tone-yellow-400);
+  --color-blue-300: var(--tone-blue-300);
+  --color-blue-400: var(--tone-blue-400);
+  --color-cyan-300: var(--tone-cyan-300);
+  --color-cyan-400: var(--tone-cyan-400);
+  --color-sky-300: var(--tone-sky-300);
+  --color-sky-400: var(--tone-sky-400);
+
+  --font-display: var(--f-display);
+  --font-sans: var(--f-body);
+  --font-mono: var(--f-mono);
+}
+
+@theme {
+  /* One small radius family: stone-paper cards, not pills. */
+  --radius-sm: 2px;
+  --radius-md: 3px;
+  --radius-lg: 3px;
+  --radius-xl: 4px;
+  --radius-2xl: 5px;
+  --radius-3xl: 6px;
+
+  --color-gray-50: #f7f7f4;
+  --color-gray-100: #ecede8;
+  --color-gray-200: #e2e4de;
+  --color-gray-300: #c9ccc5;
+  --color-gray-400: #8e938d;
+  --color-gray-500: #62686e;
+  --color-gray-600: #4f555b;
+  --color-gray-700: #2e3135;
+  --color-gray-800: #232529;
+  --color-gray-900: #1b1d20;
+  --color-gray-950: #131416;
+
+  --color-purple-50: #fff4ed;
+  --color-purple-100: #ffe6d5;
+  --color-purple-200: #ffc9a8;
+  --color-purple-300: #ffa172;
+  --color-purple-400: #ff7b3d;
+  --color-purple-500: #ff5b14;
+  --color-purple-600: #c2410c;
+  --color-purple-700: #a93a0a;
+  --color-purple-800: #7c2d0b;
+  --color-purple-900: #4a1d0a;
+  --color-purple-950: #2b1106;
+
+  --color-violet-200: #ffc9a8;
+  --color-violet-300: #ffa172;
+  --color-violet-400: #ff7b3d;
+  --color-violet-500: #ff5b14;
+  --color-indigo-400: #ff7b3d;
+  --color-indigo-500: #ff5b14;
+}
+
+/* ==========================================================================
+   Base
+   ========================================================================== */
+
 * {
-  border-color: hsl(var(--border));
+  border-color: var(--rule);
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
-  background-color: hsl(var(--background));
-  color: hsl(var(--foreground));
-  font-family: 'Avenir Next', 'IBM Plex Sans', 'Segoe UI', sans-serif;
-  background-image:
-    radial-gradient(circle at 0% 0%, hsl(var(--shell-glow) / 0.14), transparent 28%),
-    radial-gradient(circle at 100% 0%, hsl(var(--shell-accent) / 0.10), transparent 24%),
-    linear-gradient(180deg, hsl(var(--background)), hsl(var(--background)));
+  margin: 0;
+  background-color: var(--paper);
+  color: var(--ink);
+  font-family: var(--f-body);
+  line-height: 1.5;
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* Hide scrollbar for nav tabs */
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+.font-display {
+  font-family: var(--f-display);
+  letter-spacing: -0.02em;
+}
+
+.sr-only-focusable:not(:focus) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Hide scrollbar for horizontal chip rows */
 .scrollbar-hide {
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -85,199 +293,265 @@ body {
   display: none;
 }
 
+/* ==========================================================================
+   Shell
+   ========================================================================== */
+
 .dashboard-shell {
   position: relative;
   isolation: isolate;
+  background: var(--paper);
 }
 
-.dashboard-shell::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    linear-gradient(hsl(var(--foreground) / 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, hsl(var(--foreground) / 0.03) 1px, transparent 1px);
-  background-size: 72px 72px;
-  mask-image: linear-gradient(180deg, rgba(255, 255, 255, 0.55), transparent 85%);
-  opacity: 0.35;
-  z-index: -2;
-}
-
-.dashboard-shell::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background:
-    radial-gradient(circle at 20% 0%, hsl(var(--shell-glow) / 0.14), transparent 24%),
-    radial-gradient(circle at 82% 18%, hsl(var(--shell-accent) / 0.12), transparent 22%);
-  z-index: -1;
-}
-
-.dashboard-surface {
-  background:
-    linear-gradient(180deg, hsl(var(--shell-panel) / 0.92), hsl(var(--card) / 0.88));
-  border: 1px solid hsl(var(--shell-panel-border) / 0.72);
-  box-shadow:
-    0 24px 60px hsl(0 0% 0% / 0.16),
-    inset 0 1px 0 hsl(0 0% 100% / 0.06);
-  backdrop-filter: blur(18px);
+/* The panel every card sits on. Flat paper, a hairline rule, a soft shadow. */
+.dashboard-surface,
+.rr-card {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  box-shadow: var(--shadow);
 }
 
 .premium-chip {
-  border: 1px solid hsl(var(--border) / 0.82);
-  background: hsl(var(--card) / 0.7);
-  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.04);
+  border: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+.rr-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--f-mono);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.rr-eyebrow::before {
+  content: "";
+  width: 18px;
+  height: 2px;
+  background: var(--signal);
+  flex: none;
+}
+
+/* The dashed trail rail */
+.rr-rail {
+  background: repeating-linear-gradient(180deg, var(--rule) 0 4px, transparent 4px 8px);
+}
+.dark .rr-rail {
+  background: repeating-linear-gradient(180deg, #45494e 0 4px, transparent 4px 8px);
+}
+.rr-rail-h {
+  background: repeating-linear-gradient(90deg, var(--rule) 0 5px, transparent 5px 10px);
+}
+.dark .rr-rail-h {
+  background: repeating-linear-gradient(90deg, #45494e 0 5px, transparent 5px 10px);
+}
+.rr-underline-trail {
+  background: repeating-linear-gradient(90deg, var(--signal) 0 0.26em, transparent 0.26em 0.38em);
+}
+
+/* The baton: a rounded signal-orange capsule */
+.rr-baton {
+  background: var(--signal);
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px var(--signal-wash), 0 4px 14px rgb(255 91 20 / 0.4);
+}
+
+/* Terminal command block with an offset signal shadow */
+.rr-cmd {
+  background: var(--head);
+  color: var(--head-ink);
+  box-shadow: 4px 4px 0 var(--signal);
 }
 
 .page-enter {
-  animation: page-enter 280ms cubic-bezier(0.22, 1, 0.36, 1);
-  transform-origin: top center;
+  animation: page-enter 220ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @keyframes page-enter {
   from {
     opacity: 0;
-    transform: translateY(18px) scale(0.985);
+    transform: translateY(6px);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
+    transform: none;
   }
 }
 
-/* ─── Live Sync Pulse ─────────────────────────────────────────── */
+/* Pulse dot: agent active in the last hour */
+@keyframes rr-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgb(255 91 20 / 0.55);
+  }
+  70% {
+    box-shadow: 0 0 0 7px rgb(255 91 20 / 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgb(255 91 20 / 0);
+  }
+}
+.rr-pulse {
+  animation: rr-pulse 2s ease-out infinite;
+}
+
+/* Legacy live-sync pulse (memory list) */
 @keyframes sync-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgb(52 211 153 / 0.55);
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(34 112 63 / 0.5);
   }
   50% {
-    box-shadow: 0 0 0 5px rgb(52 211 153 / 0);
+    box-shadow: 0 0 0 5px rgb(34 112 63 / 0);
   }
 }
-
 .sync-pulse {
   animation: sync-pulse 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
-/* ─── Premium Form Inputs ─────────────────────────────────────── */
-.input-premium {
-  background: hsl(var(--card) / 0.7);
-  border: 1px solid hsl(var(--border) / 0.72);
-  color: hsl(var(--foreground));
-  transition: border-color 200ms ease, box-shadow 200ms ease, background 200ms ease;
+/* Skeleton shimmer */
+@keyframes rr-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.rr-skeleton {
+  background: linear-gradient(90deg, var(--paper-2) 25%, var(--paper) 50%, var(--paper-2) 75%);
+  background-size: 200% 100%;
+  animation: rr-shimmer 1.6s linear infinite;
+  border-radius: 2px;
 }
 
-.input-premium::placeholder {
-  color: hsl(var(--muted-foreground));
-}
+/* ==========================================================================
+   Forms and buttons (shared by new and existing pages)
+   ========================================================================== */
 
-.input-premium:focus {
+.input-premium,
+.rr-input {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  border-radius: 3px;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+.input-premium::placeholder,
+.rr-input::placeholder {
+  color: var(--ink-3);
+}
+.input-premium:focus,
+.rr-input:focus {
   outline: none;
-  border-color: hsl(var(--primary) / 0.6);
-  box-shadow:
-    0 0 0 3px hsl(var(--primary) / 0.12),
-    0 0 20px hsl(var(--primary) / 0.06);
-  background: hsl(var(--card) / 0.9);
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-wash);
 }
 
-.input-premium:hover:not(:focus) {
-  border-color: hsl(var(--border));
-  background: hsl(var(--card) / 0.8);
+.btn-primary,
+.rr-btn-primary {
+  background: var(--signal);
+  color: var(--on-signal);
+  font-weight: 600;
+  border: 1px solid var(--signal);
+  border-radius: 3px;
+  transition: filter 150ms ease, transform 120ms ease;
 }
-
-/* ─── Button Premium Press ─────────────────────────────────────── */
-.btn-primary {
-  background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--shell-glow)));
-  color: white;
-  font-weight: 500;
-  box-shadow: 0 12px 28px hsl(var(--primary) / 0.22);
-  transition: transform 120ms ease, box-shadow 200ms ease, filter 200ms ease;
+.btn-primary:hover,
+.rr-btn-primary:hover {
+  filter: brightness(1.06);
 }
-
-.btn-primary:hover {
-  filter: brightness(1.08);
-  box-shadow: 0 16px 36px hsl(var(--primary) / 0.30);
-  transform: translateY(-1px);
+.btn-primary:active,
+.rr-btn-primary:active {
+  transform: translateY(1px);
 }
-
-.btn-primary:active {
-  transform: translateY(0) scale(0.98);
-  box-shadow: 0 6px 16px hsl(var(--primary) / 0.18);
-}
-
-.btn-primary:disabled {
+.btn-primary:disabled,
+.rr-btn-primary:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   filter: none;
   transform: none;
 }
 
-.btn-ghost {
-  background: hsl(var(--muted) / 0.5);
-  border: 1px solid hsl(var(--border) / 0.72);
-  color: hsl(var(--muted-foreground));
-  transition: all 150ms ease;
+.btn-ghost,
+.rr-btn-ghost {
+  background: transparent;
+  border: 1px solid var(--rule);
+  color: var(--ink-2);
+  border-radius: 3px;
+  transition: border-color 150ms ease, color 150ms ease, background 150ms ease;
+}
+.btn-ghost:hover,
+.rr-btn-ghost:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.btn-ghost:active,
+.rr-btn-ghost:active {
+  transform: translateY(1px);
 }
 
-.btn-ghost:hover {
-  background: hsl(var(--muted) / 0.85);
-  color: hsl(var(--foreground));
-  border-color: hsl(var(--border));
-}
+/* ==========================================================================
+   Modal + command palette
+   ========================================================================== */
 
-.btn-ghost:active {
-  transform: scale(0.98);
-}
-
-/* ─── Modal Backdrop ──────────────────────────────────────────── */
 .modal-backdrop {
-  background: hsl(0 0% 0% / 0.6);
-  backdrop-filter: blur(8px) saturate(1.2);
+  background: rgb(13 14 15 / 0.55);
+  backdrop-filter: blur(3px);
 }
 
 .modal-surface {
-  background:
-    linear-gradient(180deg, hsl(var(--shell-panel) / 0.96), hsl(var(--card) / 0.94));
-  border: 1px solid hsl(var(--shell-panel-border) / 0.72);
-  box-shadow:
-    0 32px 80px hsl(0 0% 0% / 0.35),
-    0 0 0 1px hsl(0 0% 100% / 0.04),
-    inset 0 1px 0 hsl(0 0% 100% / 0.06);
+  background: var(--panel);
+  border: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow);
 }
 
-/* ─── Command Palette ─────────────────────────────────────────── */
 .cmdk-input {
   background: transparent;
   border: none;
   outline: none;
-  color: hsl(var(--foreground));
+  color: var(--ink);
   font-size: 16px;
   width: 100%;
 }
-
 .cmdk-input::placeholder {
-  color: hsl(var(--muted-foreground));
+  color: var(--ink-3);
 }
 
 .cmdk-item {
-  padding: 10px 14px;
-  border-radius: 10px;
+  padding: 9px 12px;
+  border-radius: 3px;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 10px;
-  color: hsl(var(--muted-foreground));
+  color: var(--ink-2);
   transition: background 100ms ease, color 100ms ease;
 }
-
 .cmdk-item:hover,
 .cmdk-item[data-selected="true"] {
-  background: hsl(var(--primary) / 0.12);
-  color: hsl(var(--foreground));
+  background: var(--signal-wash);
+  color: var(--ink);
+}
+.cmdk-item[data-selected="true"] {
+  box-shadow: inset 2px 0 0 var(--signal);
 }
 
-.cmdk-item[data-selected="true"] {
-  box-shadow: inset 0 0 0 1px hsl(var(--primary) / 0.2);
+/* ==========================================================================
+   Reduced motion: no travel, no shimmer, no pulse.
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .rr-skeleton {
+    animation: none;
+  }
 }

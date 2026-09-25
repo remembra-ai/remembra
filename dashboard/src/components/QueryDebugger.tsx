@@ -59,7 +59,7 @@ export function QueryDebugger({ projectId }: QueryDebuggerProps) {
             placeholder="Enter a query to debug recall pipeline..."
             className="w-full pl-10 pr-4 py-2.5 rounded-lg border border-gray-300 dark:border-gray-600
                        bg-white dark:bg-gray-800 text-gray-900 dark:text-white
-                       focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+                       focus:ring-2 focus:ring-signal focus:border-transparent"
           />
         </div>
         <button
@@ -67,7 +67,7 @@ export function QueryDebugger({ projectId }: QueryDebuggerProps) {
           disabled={loading || !query.trim()}
           className={clsx(
             'px-5 py-2.5 rounded-lg font-medium text-white',
-            'bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:opacity-50 disabled:cursor-not-allowed',
+            'bg-accent hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed',
             'flex items-center gap-2'
           )}
         >
@@ -87,7 +87,7 @@ export function QueryDebugger({ projectId }: QueryDebuggerProps) {
           {/* Pipeline Summary */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800">
-              <div className="text-xs text-[#8B5CF6] dark:text-[#A78BFA] font-medium">Latency</div>
+              <div className="text-xs text-signal-ink dark:text-signal-ink font-medium">Latency</div>
               <div className="text-lg font-bold text-blue-800 dark:text-blue-300">{result.latency_ms.toFixed(0)}ms</div>
             </div>
             <div className="p-3 rounded-lg bg-purple-50 dark:bg-purple-900/20 border border-purple-100 dark:border-purple-800">
@@ -112,7 +112,7 @@ export function QueryDebugger({ projectId }: QueryDebuggerProps) {
                 className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium
                            bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300"
               >
-                <span className="w-4 h-4 flex items-center justify-center rounded-full bg-[#8B5CF6] text-white text-[10px]">{i + 1}</span>
+                <span className="w-4 h-4 flex items-center justify-center rounded-full bg-accent text-white text-[10px]">{i + 1}</span>
                 {stage.replace(/_/g, ' ')}
               </span>
             ))}
@@ -177,7 +177,7 @@ function ResultCard({
         onClick={onToggle}
         className="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50"
       >
-        <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900 text-[#7C3AED] dark:text-blue-300 text-xs font-bold">
+        <span className="flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900 text-signal-ink dark:text-blue-300 text-xs font-bold">
           {rank}
         </span>
         <div className="flex-1 min-w-0">

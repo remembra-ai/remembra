@@ -89,7 +89,7 @@ export function Projects() {
     setProjectIdTouched(false);
   };
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
     const token = localStorage.getItem('remembra_jwt_token');
     if (token) {
       return { 'Authorization': `Bearer ${token}` };
@@ -404,7 +404,7 @@ export function Projects() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 animate-spin text-[#8B5CF6]" />
+        <Loader2 className="w-8 h-8 animate-spin text-signal-ink" />
       </div>
     );
   }
@@ -421,7 +421,7 @@ export function Projects() {
         </div>
         <button
           onClick={() => setShowCreateSpace(true)}
-          className="inline-flex items-center gap-2 px-4 py-2 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white rounded-lg font-medium transition-colors"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors"
         >
           <Plus className="w-4 h-4" />
           New Project
@@ -442,7 +442,7 @@ export function Projects() {
           placeholder="Search projects..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6]"
+          className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal"
         />
       </div>
 
@@ -458,7 +458,7 @@ export function Projects() {
           </p>
           <button
             onClick={() => setShowCreateSpace(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-[#8B5CF6] hover:bg-[#7C3AED] text-white rounded-lg font-medium transition-colors"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-accent hover:bg-accent-hover text-white rounded-lg font-medium transition-colors"
           >
             <FolderPlus className="w-4 h-4" />
             Create First Project
@@ -473,14 +473,14 @@ export function Projects() {
               className={clsx(
                 'p-4 rounded-xl border cursor-pointer transition-all',
                 selectedSpace?.id === space.id
-                  ? 'border-[#8B5CF6] bg-[#8B5CF6]/5 ring-2 ring-[#8B5CF6]/20'
-                  : 'border-gray-200 dark:border-gray-700 hover:border-[#8B5CF6]/50 bg-white dark:bg-gray-800'
+                  ? 'border-signal bg-signal/5 ring-2 ring-signal/20'
+                  : 'border-gray-200 dark:border-gray-700 hover:border-signal/50 bg-white dark:bg-gray-800'
               )}
             >
               <div className="flex items-start justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <div className="p-2 rounded-lg bg-[#8B5CF6]/10">
-                    <FolderOpen className="w-5 h-5 text-[#8B5CF6]" />
+                  <div className="p-2 rounded-lg bg-signal/10">
+                    <FolderOpen className="w-5 h-5 text-signal-ink" />
                   </div>
                   <div>
                     <h3 className="font-semibold text-gray-900 dark:text-white">
@@ -568,8 +568,8 @@ export function Projects() {
                     className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-[#8B5CF6]/20 flex items-center justify-center">
-                        <Users className="w-4 h-4 text-[#8B5CF6]" />
+                      <div className="w-8 h-8 rounded-full bg-signal/20 flex items-center justify-center">
+                        <Users className="w-4 h-4 text-signal-ink" />
                       </div>
                       <div>
                         <p className="text-sm font-medium text-gray-900 dark:text-white">
@@ -633,7 +633,7 @@ export function Projects() {
                   }}
                   placeholder="e.g., Product Research"
                   required
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6]"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal"
                 />
               </div>
 
@@ -650,7 +650,7 @@ export function Projects() {
                   }}
                   placeholder="e.g., product-research"
                   required
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6]"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal"
                 />
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   This becomes the isolated `project_id` used by memories, recall, analytics, and API clients.
@@ -666,7 +666,7 @@ export function Projects() {
                   onChange={(e) => setNewSpaceDescription(e.target.value)}
                   placeholder="What is this project for?"
                   rows={3}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6]"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal"
                 />
               </div>
 
@@ -681,7 +681,7 @@ export function Projects() {
                 <button
                   type="submit"
                   disabled={formLoading || !newSpaceName.trim() || !newSpaceProjectId.trim()}
-                  className="flex-1 px-4 py-2 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {formLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -744,7 +744,7 @@ export function Projects() {
                     onFocus={() => setShowMemberDropdown(true)}
                     placeholder={teamMembersLoading ? "Loading team members..." : "Search team members or enter user ID"}
                     required
-                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6]"
+                    className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal"
                   />
                   {teamMembersLoading && (
                     <div className="absolute right-3 top-1/2 -translate-y-1/2">
@@ -777,8 +777,8 @@ export function Projects() {
                           }}
                           className="w-full px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center gap-3 transition-colors"
                         >
-                          <div className="w-8 h-8 rounded-full bg-[#8B5CF6]/20 flex items-center justify-center flex-shrink-0">
-                            <Users className="w-4 h-4 text-[#8B5CF6]" />
+                          <div className="w-8 h-8 rounded-full bg-signal/20 flex items-center justify-center flex-shrink-0">
+                            <Users className="w-4 h-4 text-signal-ink" />
                           </div>
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
@@ -831,7 +831,7 @@ export function Projects() {
                 <select
                   value={grantPermission}
                   onChange={(e) => setGrantPermission(e.target.value as 'read' | 'write' | 'admin')}
-                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#8B5CF6]"
+                  className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-signal"
                 >
                   <option value="read">Read — Can recall memories</option>
                   <option value="write">Write — Can store and recall</option>
@@ -854,7 +854,7 @@ export function Projects() {
                 <button
                   type="submit"
                   disabled={formLoading || !grantAgentId.trim()}
-                  className="flex-1 px-4 py-2 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
                   {formLoading ? (
                     <Loader2 className="w-4 h-4 animate-spin" />

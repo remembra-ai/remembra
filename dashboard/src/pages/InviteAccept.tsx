@@ -27,7 +27,7 @@ export function InviteAccept({
     fetchInviteDetails();
   }, [token]);
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
     const jwtToken = localStorage.getItem('remembra_jwt_token');
     if (jwtToken) {
       return { 'Authorization': `Bearer ${jwtToken}` };
@@ -94,7 +94,7 @@ export function InviteAccept({
   if (loading) {
     return (
       <div className="min-h-screen bg-[hsl(var(--background))] flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-[#8B5CF6]" />
+        <Loader2 className="w-8 h-8 animate-spin text-signal-ink" />
       </div>
     );
   }
@@ -122,8 +122,8 @@ export function InviteAccept({
       <div className="max-w-md w-full bg-[hsl(var(--card))] rounded-2xl p-8 border border-[hsl(var(--border))]">
         {/* Header */}
         <div className="text-center mb-8">
-          <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-[#8B5CF6]/20 flex items-center justify-center">
-            <Users className="w-8 h-8 text-[#8B5CF6]" />
+          <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-signal/20 flex items-center justify-center">
+            <Users className="w-8 h-8 text-signal-ink" />
           </div>
           <h1 className="text-2xl font-bold text-[hsl(var(--foreground))] mb-2">
             You're Invited!
@@ -147,7 +147,7 @@ export function InviteAccept({
               disabled={accepting}
               className={clsx(
                 'w-full py-3 rounded-lg font-semibold text-white',
-                'bg-[#8B5CF6] hover:bg-[#7C3AED]',
+                'bg-accent hover:bg-accent-hover',
                 'transition-colors',
                 'disabled:opacity-50 disabled:cursor-not-allowed',
                 'flex items-center justify-center gap-2'
@@ -178,7 +178,7 @@ export function InviteAccept({
                 }}
                 className={clsx(
                   'w-full py-3 rounded-lg font-semibold text-white',
-                  'bg-[#8B5CF6] hover:bg-[#7C3AED]',
+                  'bg-accent hover:bg-accent-hover',
                   'transition-colors'
                 )}
               >

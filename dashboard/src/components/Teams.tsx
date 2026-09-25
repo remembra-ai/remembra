@@ -95,7 +95,7 @@ export function Teams() {
   const [spaceActionLoading, setSpaceActionLoading] = useState(false);
   const [selectedSpaceId, setSelectedSpaceId] = useState('');
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
     const token = localStorage.getItem('remembra_jwt_token');
     if (token) {
       return { 'Authorization': `Bearer ${token}` };
@@ -492,7 +492,7 @@ export function Teams() {
   if (loading && teams.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#8B5CF6]"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-signal"></div>
       </div>
     );
   }
@@ -512,7 +512,7 @@ export function Teams() {
           onClick={() => setShowCreateTeam(true)}
           className={clsx(
             'inline-flex items-center gap-2 px-4 py-2.5 rounded-lg',
-            'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white',
+            'bg-accent hover:bg-accent-hover text-white',
             'font-medium text-sm transition-colors',
             'shadow-lg shadow-purple-500/20'
           )}
@@ -540,7 +540,7 @@ export function Teams() {
           </p>
           <button
             onClick={() => setShowCreateTeam(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-medium text-sm"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium text-sm"
           >
             <Plus className="w-4 h-4" />
             Create Your First Team
@@ -561,8 +561,8 @@ export function Teams() {
                   'w-full p-4 rounded-xl text-left transition-all',
                   'border',
                   selectedTeam?.id === team.id
-                    ? 'bg-[#8B5CF6]/10 border-[#8B5CF6]/50'
-                    : 'bg-[hsl(var(--card))] border-[hsl(var(--border))] hover:border-[#8B5CF6]/30'
+                    ? 'bg-signal/10 border-signal/50'
+                    : 'bg-[hsl(var(--card))] border-[hsl(var(--border))] hover:border-signal/30'
                 )}
               >
                 <div className="flex items-center justify-between mb-2">
@@ -603,7 +603,7 @@ export function Teams() {
                   {canManageTeam && (
                     <button
                       onClick={() => setShowInviteMember(true)}
-                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-medium text-sm"
+                      className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium text-sm"
                     >
                       <UserPlus className="w-4 h-4" />
                       Invite
@@ -666,7 +666,7 @@ export function Teams() {
                         className="flex items-center justify-between p-3 rounded-lg bg-[hsl(var(--muted))]"
                       >
                         <div className="flex items-center gap-3">
-                          <div className="w-10 h-10 rounded-full bg-[#8B5CF6]/20 flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-full bg-signal/20 flex items-center justify-center">
                             <RoleIcon className={clsx('w-5 h-5', roleColors[member.role])} />
                           </div>
                           <div>
@@ -718,7 +718,7 @@ export function Teams() {
               {/* Linked Projects */}
               <div className="p-6 rounded-xl bg-[hsl(var(--card))] border border-[hsl(var(--border))]">
                 <div className="flex items-center gap-2 mb-4">
-                  <FolderOpen className="w-5 h-5 text-[#8B5CF6]" />
+                  <FolderOpen className="w-5 h-5 text-signal-ink" />
                   <h3 className="text-lg font-semibold text-[hsl(var(--foreground))]">
                     Linked Projects ({linkedProjects.length})
                   </h3>
@@ -741,7 +741,7 @@ export function Teams() {
                     <button
                       onClick={linkProject}
                       disabled={spaceActionLoading || !selectedSpaceId}
-                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#8B5CF6] px-4 py-2 text-sm font-medium text-white hover:bg-[#7C3AED] disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Link2 className="w-4 h-4" />
                       Link Project
@@ -848,7 +848,7 @@ export function Teams() {
                   type="text"
                   value={newTeamName}
                   onChange={(e) => setNewTeamName(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[#8B5CF6]"
+                  className="w-full px-3 py-2 rounded-lg bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-signal"
                   placeholder="My Team"
                   required
                 />
@@ -861,7 +861,7 @@ export function Teams() {
                 <textarea
                   value={newTeamDescription}
                   onChange={(e) => setNewTeamDescription(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] resize-none"
+                  className="w-full px-3 py-2 rounded-lg bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-signal resize-none"
                   rows={3}
                   placeholder="What's this team for?"
                 />
@@ -882,7 +882,7 @@ export function Teams() {
                   type="submit"
                   disabled={formLoading || !newTeamName.trim()}
                   className={clsx(
-                    'px-4 py-2 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-medium',
+                    'px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium',
                     'disabled:opacity-50 disabled:cursor-not-allowed'
                   )}
                 >
@@ -942,7 +942,7 @@ export function Teams() {
                       setShowInviteMember(false);
                       setLastInvite(null);
                     }}
-                    className="px-4 py-2 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-medium"
+                    className="px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium"
                   >
                     Done
                   </button>
@@ -964,7 +964,7 @@ export function Teams() {
                     type="email"
                     value={inviteEmail}
                     onChange={(e) => setInviteEmail(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[#8B5CF6]"
+                    className="w-full px-3 py-2 rounded-lg bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-signal"
                     placeholder="colleague@company.com"
                     required
                   />
@@ -977,7 +977,7 @@ export function Teams() {
                   <select
                     value={inviteRole}
                     onChange={(e) => setInviteRole(e.target.value)}
-                    className="w-full px-3 py-2 rounded-lg bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-[#8B5CF6]"
+                    className="w-full px-3 py-2 rounded-lg bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-signal"
                   >
                     <option value="viewer">Viewer — Read-only access</option>
                     <option value="member">Member — Can create and edit</option>
@@ -1007,7 +1007,7 @@ export function Teams() {
                     type="submit"
                     disabled={formLoading || !inviteEmail.trim() || selectedTeam.used_seats >= selectedTeam.max_seats}
                     className={clsx(
-                      'px-4 py-2 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] text-white font-medium',
+                      'px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium',
                       'disabled:opacity-50 disabled:cursor-not-allowed'
                     )}
                   >

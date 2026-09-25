@@ -56,7 +56,7 @@ export function Settings({ onLogout }: SettingsProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 animate-spin text-[#8B5CF6]" />
+        <Loader2 className="w-8 h-8 animate-spin text-signal-ink" />
       </div>
     );
   }
@@ -101,7 +101,7 @@ export function Settings({ onLogout }: SettingsProps) {
         <div className="grid gap-4 md:grid-cols-2">
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
             <div className="flex items-center gap-2 mb-3">
-              <Globe className="w-4 h-4 text-[#8B5CF6]" />
+              <Globe className="w-4 h-4 text-signal-ink" />
               <h2 className="text-sm font-semibold text-gray-900 dark:text-white">API URL</h2>
             </div>
             <code className="block text-sm text-gray-700 dark:text-gray-300 break-all">{apiUrl}</code>
@@ -109,7 +109,7 @@ export function Settings({ onLogout }: SettingsProps) {
 
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
             <div className="flex items-center gap-2 mb-3">
-              <Database className="w-4 h-4 text-[#8B5CF6]" />
+              <Database className="w-4 h-4 text-signal-ink" />
               <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Current Project</h2>
             </div>
             <code className="block text-sm text-gray-700 dark:text-gray-300">{projectId}</code>
@@ -117,7 +117,7 @@ export function Settings({ onLogout }: SettingsProps) {
 
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
             <div className="flex items-center gap-2 mb-3">
-              <User className="w-4 h-4 text-[#8B5CF6]" />
+              <User className="w-4 h-4 text-signal-ink" />
               <h2 className="text-sm font-semibold text-gray-900 dark:text-white">User ID</h2>
             </div>
             <code className="block text-sm text-gray-700 dark:text-gray-300 break-all">{userId}</code>
@@ -125,7 +125,7 @@ export function Settings({ onLogout }: SettingsProps) {
 
           <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-5">
             <div className="flex items-center gap-2 mb-3">
-              <Shield className="w-4 h-4 text-[#8B5CF6]" />
+              <Shield className="w-4 h-4 text-signal-ink" />
               <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Auth Mode</h2>
             </div>
             <span className="inline-flex items-center rounded-full bg-purple-100 px-3 py-1 text-sm font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
@@ -166,7 +166,7 @@ export function Settings({ onLogout }: SettingsProps) {
             className={clsx(
               'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
               activeTab === 'profile'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
+                ? 'border-signal text-signal-ink dark:text-signal-ink'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
             )}
           >
@@ -178,7 +178,7 @@ export function Settings({ onLogout }: SettingsProps) {
             className={clsx(
               'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
               activeTab === 'password'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
+                ? 'border-signal text-signal-ink dark:text-signal-ink'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
             )}
           >
@@ -190,7 +190,7 @@ export function Settings({ onLogout }: SettingsProps) {
             className={clsx(
               'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
               activeTab === 'security'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
+                ? 'border-signal text-signal-ink dark:text-signal-ink'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
             )}
           >
@@ -202,7 +202,7 @@ export function Settings({ onLogout }: SettingsProps) {
             className={clsx(
               'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
               activeTab === 'workspace'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
+                ? 'border-signal text-signal-ink dark:text-signal-ink'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
             )}
           >
@@ -214,7 +214,7 @@ export function Settings({ onLogout }: SettingsProps) {
             className={clsx(
               'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
               activeTab === 'retrieval'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
+                ? 'border-signal text-signal-ink dark:text-signal-ink'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
             )}
           >
@@ -226,7 +226,7 @@ export function Settings({ onLogout }: SettingsProps) {
             className={clsx(
               'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
               activeTab === 'diagnostics'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
+                ? 'border-signal text-signal-ink dark:text-signal-ink'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
             )}
           >
@@ -238,7 +238,7 @@ export function Settings({ onLogout }: SettingsProps) {
             className={clsx(
               'py-4 px-1 border-b-2 font-medium text-sm flex items-center gap-2 transition-colors',
               activeTab === 'account'
-                ? 'border-[#8B5CF6] text-[#8B5CF6] dark:text-[#A78BFA]'
+                ? 'border-signal text-signal-ink dark:text-signal-ink'
                 : 'border-transparent text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
             )}
           >
@@ -334,7 +334,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserResponse; onUpdate: () 
             onChange={(e) => setName(e.target.value)}
             placeholder="Your name"
             maxLength={100}
-            className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+            className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
           />
         </div>
 
@@ -369,7 +369,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserResponse; onUpdate: () 
             disabled={loading || name === (user.name || '')}
             className={clsx(
               'px-4 py-2 rounded-lg font-medium transition-colors',
-              'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white',
+              'bg-accent hover:bg-accent-hover text-white',
               (loading || name === (user.name || '')) && 'opacity-50 cursor-not-allowed'
             )}
           >
@@ -445,7 +445,7 @@ function PasswordSettings() {
             value={currentPassword}
             onChange={(e) => setCurrentPassword(e.target.value)}
             placeholder="Enter current password"
-            className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+            className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
           />
         </div>
 
@@ -460,7 +460,7 @@ function PasswordSettings() {
             value={newPassword}
             onChange={(e) => setNewPassword(e.target.value)}
             placeholder="Enter new password"
-            className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+            className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
           />
         </div>
 
@@ -475,7 +475,7 @@ function PasswordSettings() {
             value={confirmPassword}
             onChange={(e) => setConfirmPassword(e.target.value)}
             placeholder="Confirm new password"
-            className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+            className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
           />
         </div>
 
@@ -518,7 +518,7 @@ function PasswordSettings() {
             disabled={loading || !isValid}
             className={clsx(
               'px-4 py-2 rounded-lg font-medium transition-colors',
-              'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white',
+              'bg-accent hover:bg-accent-hover text-white',
               (loading || !isValid) && 'opacity-50 cursor-not-allowed'
             )}
           >
@@ -832,7 +832,7 @@ function SecuritySettings() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-6 h-6 animate-spin text-[#8B5CF6]" />
+        <Loader2 className="w-6 h-6 animate-spin text-signal-ink" />
       </div>
     );
   }
@@ -904,7 +904,7 @@ function SecuritySettings() {
                 'px-4 py-2 rounded-lg font-medium text-sm transition-colors',
                 totpEnabled
                   ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-900/50'
-                  : 'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white',
+                  : 'bg-accent hover:bg-accent-hover text-white',
                 actionLoading && 'opacity-50 cursor-not-allowed'
               )}
             >
@@ -958,7 +958,7 @@ function SecuritySettings() {
                 onChange={(e) => setVerifyCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 placeholder="000000"
                 maxLength={6}
-                className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white text-center text-2xl font-mono tracking-widest placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+                className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white text-center text-2xl font-mono tracking-widest placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
               />
               
               <div className="flex gap-3">
@@ -979,7 +979,7 @@ function SecuritySettings() {
                   disabled={actionLoading || verifyCode.length !== 6}
                   className={clsx(
                     'flex-1 px-4 py-2 rounded-lg font-medium transition-colors',
-                    'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white',
+                    'bg-accent hover:bg-accent-hover text-white',
                     (actionLoading || verifyCode.length !== 6) && 'opacity-50 cursor-not-allowed'
                   )}
                 >
@@ -1086,7 +1086,7 @@ function ActivityLog() {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
     const token = localStorage.getItem('remembra_jwt_token');
     if (token) {
       return { 'Authorization': `Bearer ${token}` };
@@ -1198,7 +1198,7 @@ function ActivityLog() {
     return (
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
         <div className="flex items-center justify-center py-8">
-          <Loader2 className="w-6 h-6 animate-spin text-[#8B5CF6]" />
+          <Loader2 className="w-6 h-6 animate-spin text-signal-ink" />
         </div>
       </div>
     );
@@ -1289,7 +1289,7 @@ function ActivityLog() {
           {events.length > 5 && (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="w-full mt-4 py-2 text-sm text-[#8B5CF6] hover:text-[#7C3AED] font-medium"
+              className="w-full mt-4 py-2 text-sm text-signal-ink hover:text-signal-ink font-medium"
             >
               {expanded ? 'Show less' : `Show ${events.length - 5} more events`}
             </button>
@@ -1319,7 +1319,7 @@ function WorkspaceSettings() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
     const token = localStorage.getItem('remembra_jwt_token');
     if (token) {
       return { 'Authorization': `Bearer ${token}` };
@@ -1383,7 +1383,7 @@ function WorkspaceSettings() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 animate-spin text-[#8B5CF6]" />
+        <Loader2 className="w-8 h-8 animate-spin text-signal-ink" />
       </div>
     );
   }
@@ -1427,7 +1427,7 @@ function WorkspaceSettings() {
             <select
               value={defaultProject}
               onChange={(e) => setDefaultProject(e.target.value)}
-              className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+              className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
             >
               <option value="default">Default (no project)</option>
               {projects.map((project) => (
@@ -1443,7 +1443,7 @@ function WorkspaceSettings() {
             disabled={saving}
             className={clsx(
               'px-4 py-2 rounded-lg font-medium transition-colors',
-              'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white',
+              'bg-accent hover:bg-accent-hover text-white',
               saving && 'opacity-50 cursor-not-allowed'
             )}
           >
@@ -1489,7 +1489,7 @@ function RetrievalSettings() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
     const token = localStorage.getItem('remembra_jwt_token');
     if (token) {
       return { 'Authorization': `Bearer ${token}` };
@@ -1555,7 +1555,7 @@ function RetrievalSettings() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 animate-spin text-[#8B5CF6]" />
+        <Loader2 className="w-8 h-8 animate-spin text-signal-ink" />
       </div>
     );
   }
@@ -1760,7 +1760,7 @@ function DiagnosticsSettings() {
   const [error, setError] = useState<string | null>(null);
   const [calibrating, setCalibrating] = useState(false);
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
     const token = localStorage.getItem('remembra_jwt_token');
     if (token) {
       return { 'Authorization': `Bearer ${token}` };
@@ -1826,7 +1826,7 @@ function DiagnosticsSettings() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 animate-spin text-[#8B5CF6]" />
+        <Loader2 className="w-8 h-8 animate-spin text-signal-ink" />
       </div>
     );
   }

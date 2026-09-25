@@ -10,6 +10,7 @@ import { type Memory, api } from '../lib/api';
 import { RefreshCw, Plus } from 'lucide-react';
 import clsx from 'clsx';
 import { pageTransition } from '../lib/motion';
+import type { TabType } from '../lib/nav';
 
 const MemoryDetail = lazy(() =>
   import('./MemoryDetail').then((module) => ({ default: module.MemoryDetail })),
@@ -57,7 +58,7 @@ const Admin = lazy(() =>
   import('./Admin').then((module) => ({ default: module.Admin })),
 );
 
-export type TabType = 'memories' | 'entities' | 'graph' | 'brain' | 'decay' | 'debugger' | 'analytics' | 'timeline' | 'projects' | 'keys' | 'billing' | 'settings' | 'teams' | 'admin';
+export type { TabType } from '../lib/nav';
 
 interface DashboardProps {
   activeTab: TabType;
@@ -269,7 +270,7 @@ export function Dashboard({ activeTab, onLogout, showNewMemory: showNewMemoryPro
                   onClick={() => setShowNewMemory(true)}
                   className={clsx(
                     'inline-flex items-center gap-2 px-4 py-2.5 rounded-lg',
-                    'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white',
+                    'bg-accent hover:bg-accent-hover text-white',
                     'font-medium text-sm transition-colors',
                     'shadow-lg shadow-purple-500/20'
                   )}
@@ -337,9 +338,9 @@ export function Dashboard({ activeTab, onLogout, showNewMemory: showNewMemoryPro
             {isSearching && results?.context && (
               <div className={clsx(
                 'mb-6 p-4 rounded-xl',
-                'bg-[#8B5CF6]/10 border border-[#8B5CF6]/20'
+                'bg-signal/10 border border-signal/20'
               )}>
-                <h3 className="text-sm font-medium text-[#A78BFA] mb-2">
+                <h3 className="text-sm font-medium text-signal-ink mb-2">
                   Context Summary
                 </h3>
                 <p className="text-sm text-[hsl(var(--foreground))]">

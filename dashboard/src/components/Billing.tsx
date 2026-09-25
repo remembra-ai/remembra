@@ -73,7 +73,7 @@ function UsageBar({
         <div 
           className={clsx(
             'h-full rounded-full transition-all duration-300',
-            isCritical ? 'bg-red-500' : isWarning ? 'bg-amber-500' : 'bg-[#8B5CF6]'
+            isCritical ? 'bg-red-500' : isWarning ? 'bg-amber-500' : 'bg-accent'
           )}
           style={{ width: `${percentage}%` }}
         />
@@ -111,13 +111,13 @@ function PricingCard({
     <div className={clsx(
       'relative p-6 rounded-xl border-2 transition-all',
       isPopular 
-        ? 'border-[#8B5CF6] bg-blue-50/50 dark:bg-blue-900/10' 
+        ? 'border-signal bg-blue-50/50 dark:bg-blue-900/10' 
         : 'border-gray-200 dark:border-gray-700',
       isCurrentPlan && 'ring-2 ring-green-500 ring-offset-2 dark:ring-offset-gray-900'
     )}>
       {isPopular && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-          <span className="bg-[#8B5CF6] text-white text-xs font-semibold px-3 py-1 rounded-full">
+          <span className="bg-accent text-white text-xs font-semibold px-3 py-1 rounded-full">
             Most Popular
           </span>
         </div>
@@ -158,7 +158,7 @@ function PricingCard({
           className={clsx(
             'w-full py-3 px-4 rounded-lg font-semibold transition-all flex items-center justify-center gap-2',
             isPopular
-              ? 'bg-[#8B5CF6] hover:bg-[#7C3AED] text-white'
+              ? 'bg-accent hover:bg-accent-hover text-white'
               : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white',
             loading && 'opacity-50 cursor-not-allowed'
           )}
@@ -199,9 +199,9 @@ function TeamBillingView({ context }: { context: BillingContextResponse }) {
   return (
     <div className="space-y-8">
       {/* Team Plan Banner */}
-      <div className="p-6 rounded-xl border-2 border-[#8B5CF6] bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20">
+      <div className="p-6 rounded-xl border-2 border-signal bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20">
         <div className="flex items-center gap-4">
-          <div className="p-3 rounded-full bg-gradient-to-r from-[#8B5CF6] to-purple-500">
+          <div className="p-3 rounded-full bg-gradient-to-r from-signal to-purple-500">
             <Users className="w-6 h-6 text-white" />
           </div>
           <div>
@@ -218,7 +218,7 @@ function TeamBillingView({ context }: { context: BillingContextResponse }) {
       {/* Role & Access Info */}
       <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <div className="flex items-center gap-2 mb-4">
-          <Shield className="w-5 h-5 text-[#8B5CF6]" />
+          <Shield className="w-5 h-5 text-signal-ink" />
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Your Access</h3>
         </div>
         
@@ -234,7 +234,7 @@ function TeamBillingView({ context }: { context: BillingContextResponse }) {
           
           <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
             <span className="text-sm text-gray-600 dark:text-gray-400">Team Plan</span>
-            <span className="text-sm font-semibold text-[#8B5CF6]">
+            <span className="text-sm font-semibold text-signal-ink">
               {planDisplayName}
             </span>
           </div>
@@ -244,12 +244,12 @@ function TeamBillingView({ context }: { context: BillingContextResponse }) {
       {/* Team Plan Features */}
       <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <div className="flex items-center gap-2 mb-4">
-          <Zap className="w-5 h-5 text-[#8B5CF6]" />
+          <Zap className="w-5 h-5 text-signal-ink" />
           <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Team Features</h3>
         </div>
         
         <div className="grid grid-cols-2 gap-4">
-          {context.limits.max_memories && (
+          {!!context.limits.max_memories && (
             <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
               <div className="text-xs text-gray-500 dark:text-gray-400">Memories</div>
               <div className="text-lg font-bold text-gray-900 dark:text-white">
@@ -257,7 +257,7 @@ function TeamBillingView({ context }: { context: BillingContextResponse }) {
               </div>
             </div>
           )}
-          {context.limits.max_users && (
+          {!!context.limits.max_users && (
             <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
               <div className="text-xs text-gray-500 dark:text-gray-400">Team Members</div>
               <div className="text-lg font-bold text-gray-900 dark:text-white">
@@ -265,7 +265,7 @@ function TeamBillingView({ context }: { context: BillingContextResponse }) {
               </div>
             </div>
           )}
-          {context.limits.max_projects && (
+          {!!context.limits.max_projects && (
             <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
               <div className="text-xs text-gray-500 dark:text-gray-400">Projects</div>
               <div className="text-lg font-bold text-gray-900 dark:text-white">
@@ -273,7 +273,7 @@ function TeamBillingView({ context }: { context: BillingContextResponse }) {
               </div>
             </div>
           )}
-          {context.limits.max_api_keys && (
+          {!!context.limits.max_api_keys && (
             <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
               <div className="text-xs text-gray-500 dark:text-gray-400">API Keys</div>
               <div className="text-lg font-bold text-gray-900 dark:text-white">
@@ -284,12 +284,12 @@ function TeamBillingView({ context }: { context: BillingContextResponse }) {
         </div>
         
         <div className="mt-4 flex flex-wrap gap-2">
-          {context.limits.has_webhooks && (
+          {!!context.limits.has_webhooks && (
             <span className="px-2 py-1 text-xs rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
               ✓ Webhooks
             </span>
           )}
-          {context.limits.has_sso && (
+          {!!context.limits.has_sso && (
             <span className="px-2 py-1 text-xs rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
               ✓ SSO
             </span>
@@ -442,7 +442,7 @@ export function Billing() {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 animate-spin text-[#8B5CF6]" />
+        <Loader2 className="w-8 h-8 animate-spin text-signal-ink" />
       </div>
     );
   }
@@ -475,13 +475,13 @@ export function Billing() {
       <div className={clsx(
         'p-6 rounded-xl border-2',
         hasPaidPlan
-          ? 'border-[#8B5CF6] bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20'
+          ? 'border-signal bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20'
           : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800'
       )}>
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             {hasPaidPlan ? (
-              <div className="p-3 rounded-full bg-gradient-to-r from-[#8B5CF6] to-purple-500">
+              <div className="p-3 rounded-full bg-gradient-to-r from-signal to-purple-500">
                 <Crown className="w-6 h-6 text-white" />
               </div>
             ) : (
@@ -538,7 +538,7 @@ export function Billing() {
       {planInfo && (
         <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-2 mb-6">
-            <TrendingUp className="w-5 h-5 text-[#8B5CF6]" />
+            <TrendingUp className="w-5 h-5 text-signal-ink" />
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Usage This Month</h3>
             {usage?.period && (
               <span className="text-sm text-gray-500 dark:text-gray-400">({usage.period})</span>
@@ -661,7 +661,7 @@ export function Billing() {
               <th className="px-4 py-4 text-center text-sm font-semibold text-gray-900 dark:text-white">
                 Free
               </th>
-              <th className="px-4 py-4 text-center text-sm font-semibold text-[#8B5CF6] dark:text-[#A78BFA]">
+              <th className="px-4 py-4 text-center text-sm font-semibold text-signal-ink dark:text-signal-ink">
                 Pro $49
               </th>
               <th className="px-4 py-4 text-center text-sm font-semibold text-purple-600 dark:text-purple-400">
@@ -697,7 +697,7 @@ export function Billing() {
                       <span className="text-gray-400">—</span>
                     )
                   ) : (
-                    <span className="font-medium text-[#7C3AED] dark:text-[#A78BFA]">{feature.pro}</span>
+                    <span className="font-medium text-signal-ink dark:text-signal-ink">{feature.pro}</span>
                   )}
                 </td>
                 <td className="px-4 py-3 text-center text-sm bg-purple-50/50 dark:bg-purple-900/10">

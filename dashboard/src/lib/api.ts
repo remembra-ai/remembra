@@ -14,6 +14,20 @@ export function getApiBaseUrl(): string {
   return API_ROOT;
 }
 
+/**
+ * An API failure with its HTTP status (0 = the server could not be reached).
+ * It is still an Error, so existing `err.message` handling keeps working.
+ */
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 export interface Memory {
   id: string;
   content: string;
@@ -320,17 +334,23 @@ class ApiClient {
   ): Promise<T> {
     const authHeaders = this.getAuthHeaders();
     if (Object.keys(authHeaders).length === 0) {
-      throw new Error('Not authenticated');
+      throw new ApiError('Not authenticated', 401);
     }
 
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...authHeaders,
-        ...options.headers,
-      },
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${API_BASE}${endpoint}`, {
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          ...authHeaders,
+          ...options.headers,
+        },
+      });
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') throw err;
+      throw new ApiError('Could not reach the Remembra server', 0);
+    }
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
@@ -344,21 +364,27 @@ class ApiClient {
       } else if (error.message) {
         message = error.message;
       }
-      throw new Error(message);
+      throw new ApiError(message, response.status);
     }
 
     const contentType = response.headers.get('content-type') || '';
     if (!contentType.includes('application/json')) {
       const preview = await response.text().catch(() => '');
       const shortPreview = preview.slice(0, 120).replace(/\s+/g, ' ').trim();
-      throw new Error(
+      throw new ApiError(
         `Unexpected API response (expected JSON, got ${contentType || 'unknown'}). ` +
         `This usually means the dashboard is pointing at the wrong API URL (VITE_API_URL). ` +
-        `Preview: ${shortPreview || '(empty)'}`
+        `Preview: ${shortPreview || '(empty)'}`,
+        response.status,
       );
     }
 
     return response.json();
+  }
+
+  /** Authenticated JSON request against /api/v1 (throws ApiError). */
+  request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    return this.fetchApi<T>(endpoint, options);
   }
 
   async listMemories(params: ListMemoriesParams = {}): Promise<Memory[]> {

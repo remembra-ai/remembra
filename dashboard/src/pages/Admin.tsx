@@ -74,7 +74,7 @@ export function Admin() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
-  const getAuthHeaders = () => {
+  const getAuthHeaders = (): Record<string, string> => {
     const token = localStorage.getItem('remembra_jwt_token');
     return {
       'Authorization': `Bearer ${token}`,

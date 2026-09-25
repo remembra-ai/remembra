@@ -101,9 +101,9 @@ export function ApiKeyManager() {
           onClick={() => setShowCreateModal(true)}
           className={clsx(
             'px-4 py-2 rounded-xl text-sm font-semibold',
-            'bg-[linear-gradient(135deg,#8B5CF6,#6366f1)] text-white',
-            'flex items-center gap-2 shadow-[0_4px_14px_rgba(139,92,246,0.3)]',
-            'hover:shadow-[0_6px_20px_rgba(139,92,246,0.4)] transition-all'
+            'bg-accent text-white',
+            'flex items-center gap-2 shadow-[0_4px_14px_rgba(255,91,20,0.3)]',
+            'hover:shadow-[0_6px_20px_rgba(255,91,20,0.4)] transition-all'
           )}
         >
           <Plus className="w-4 h-4" />

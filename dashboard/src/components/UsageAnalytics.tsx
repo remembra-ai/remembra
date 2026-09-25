@@ -62,7 +62,7 @@ export function UsageAnalytics({ projectId }: UsageAnalyticsProps) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-6 h-6 animate-spin text-[#8B5CF6]" />
+        <Loader2 className="w-6 h-6 animate-spin text-signal-ink" />
       </div>
     );
   }
@@ -88,7 +88,7 @@ export function UsageAnalytics({ projectId }: UsageAnalyticsProps) {
   const healthPct = (count: number) => healthTotal > 0 ? Math.round((count / healthTotal) * 100) : 0;
 
   const entityTypeColors: Record<string, string> = {
-    person: 'bg-[#8B5CF6]',
+    person: 'bg-accent',
     company: 'bg-purple-500',
     organization: 'bg-purple-500',
     location: 'bg-green-500',
@@ -206,7 +206,7 @@ export function UsageAnalytics({ projectId }: UsageAnalyticsProps) {
                   <span className="text-xs text-gray-500 dark:text-gray-400 w-20">{labels[bucket] || bucket}</span>
                   <div className="flex-1 h-3 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
                     <div
-                      className="h-full bg-[#8B5CF6] rounded-full transition-all"
+                      className="h-full bg-accent rounded-full transition-all"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -223,7 +223,7 @@ export function UsageAnalytics({ projectId }: UsageAnalyticsProps) {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="text-center">
-              <div className="text-2xl font-bold text-[#8B5CF6] dark:text-[#A78BFA]">{analytics.stores_today}</div>
+              <div className="text-2xl font-bold text-signal-ink dark:text-signal-ink">{analytics.stores_today}</div>
               <div className="text-xs text-gray-500 dark:text-gray-400">Stores</div>
             </div>
             <div className="text-center">

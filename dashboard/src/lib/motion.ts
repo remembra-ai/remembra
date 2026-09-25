@@ -131,11 +131,11 @@ export const slideInRight: Variants = {
 export const cardHover = {
   rest: {
     y: 0,
-    boxShadow: '0 0 0 rgba(139, 92, 246, 0)',
+    boxShadow: '0 0 0 rgba(255, 91, 20, 0)',
   },
   hover: {
     y: -2,
-    boxShadow: '0 8px 30px rgba(139, 92, 246, 0.12)',
+    boxShadow: '0 8px 30px rgba(255, 91, 20, 0.12)',
     transition: spring.snappy,
   },
   tap: {
@@ -149,8 +149,8 @@ export const cardHover = {
 export const pulseGlow: Variants = {
   animate: {
     boxShadow: [
-      '0 0 0 0 rgba(139, 92, 246, 0.4)',
-      '0 0 0 8px rgba(139, 92, 246, 0)',
+      '0 0 0 0 rgba(255, 91, 20, 0.4)',
+      '0 0 0 8px rgba(255, 91, 20, 0)',
     ],
     transition: {
       duration: 2,

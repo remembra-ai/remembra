@@ -2,7 +2,16 @@ import { useState, useEffect, useCallback } from 'react';
 import { AppLayout } from './components/AppLayout';
 import { ApiKeyForm } from './components/ApiKeyForm';
 import { CommandPalette } from './components/CommandPalette';
-import { Dashboard, type TabType } from './pages/Dashboard';
+import { ShortcutsDialog } from './components/ShortcutsDialog';
+import { RelayDataProvider } from './components/relay/RelayDataProvider';
+import { Dashboard } from './pages/Dashboard';
+import { Home } from './pages/Home';
+import { Trail } from './pages/Trail';
+import { Agents } from './pages/Agents';
+import { Inbox } from './pages/Inbox';
+import { useRelayData } from './hooks/relayData';
+import { useShortcuts } from './hooks/useShortcuts';
+import { navigate, useRoute, type TabType } from './lib/nav';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { ForgotPassword } from './pages/ForgotPassword';
@@ -14,10 +23,20 @@ type AuthMode = 'login' | 'signup' | 'forgot-password' | 'reset-password' | 'api
 
 function App() {
   const [darkMode, setDarkMode] = useState(() => {
-    const saved = localStorage.getItem('darkMode');
-    if (saved !== null) return saved === 'true';
-    // Default to dark mode to match Remembra brand
-    return true;
+    try {
+      const saved = localStorage.getItem('darkMode');
+      if (saved === 'true' || saved === 'false') return saved === 'true';
+    } catch {
+      // Storage unavailable: follow the system theme.
+    }
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+  });
+  const [themeChosen, setThemeChosen] = useState(() => {
+    try {
+      return localStorage.getItem('darkMode') !== null;
+    } catch {
+      return false;
+    }
   });
   
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -46,20 +65,27 @@ function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [activeTab, setActiveTab] = useState<TabType>(() => {
-    const saved = localStorage.getItem('activeTab');
-    return (saved as TabType) || 'memories';
-  });
-
-  // Save active tab
-  useEffect(() => {
-    localStorage.setItem('activeTab', activeTab);
-  }, [activeTab]);
+  const { tab: activeTab } = useRoute();
+  const setActiveTab = useCallback((tab: TabType) => navigate(tab), []);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', darkMode);
-    localStorage.setItem('darkMode', String(darkMode));
-  }, [darkMode]);
+    if (!themeChosen) return;
+    try {
+      localStorage.setItem('darkMode', String(darkMode));
+    } catch {
+      // Storage unavailable: the choice lasts for this visit.
+    }
+  }, [darkMode, themeChosen]);
+
+  // Follow the system theme until the user picks one.
+  useEffect(() => {
+    if (themeChosen || !window.matchMedia) return undefined;
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = (e: MediaQueryListEvent) => setDarkMode(e.matches);
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, [themeChosen]);
 
   // Verify JWT token on mount
   useEffect(() => {
@@ -84,7 +110,6 @@ function App() {
           setAuthMode('login');
         } else {
           const user = await response.json();
-          console.log('[Auth] /auth/me response:', { email: user.email, is_admin: user.is_admin });
           setCurrentUser({ id: user.id, email: user.email, name: user.name, is_admin: user.is_admin });
           localStorage.setItem('remembra_user', JSON.stringify(user));
           // Set user ID in API client for API calls
@@ -101,6 +126,7 @@ function App() {
   }, []);
 
   const handleToggleDarkMode = () => {
+    setThemeChosen(true);
     setDarkMode(!darkMode);
   };
 
@@ -130,9 +156,9 @@ function App() {
         if (response.ok) {
           localStorage.removeItem('pending_invite_token');
           setInviteToken(null);
-          setActiveTab('teams');
-          // Clear URL
+          // Clear the invite path, then open Teams
           window.history.replaceState({}, '', '/');
+          setActiveTab('teams');
           return;
         }
       } catch {
@@ -193,17 +219,20 @@ function App() {
     setAuthMode('login');
   };
 
-  // Command palette state
+  // Command palette + shortcuts state
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [showNewMemoryModal, setShowNewMemoryModal] = useState(false);
 
   const handleSearch = useCallback(() => {
     setCommandPaletteOpen(true);
   }, []);
 
-  const handleNewMemory = useCallback(() => {
-    setShowNewMemoryModal(true);
-  }, []);
+  useShortcuts({
+    enabled: isAuthenticated && !inviteToken && !commandPaletteOpen && !shortcutsOpen,
+    onPalette: handleSearch,
+    onHelp: () => setShortcutsOpen(true),
+  });
 
   // Not authenticated - show auth screens
   if (!isAuthenticated) {
@@ -241,8 +270,8 @@ function App() {
             token={inviteToken}
             isAuthenticated={false}
             onAccepted={() => {
-              setActiveTab('teams');
               window.history.replaceState({}, '', '/');
+              setActiveTab('teams');
             }}
             onSwitchToLogin={() => {
               localStorage.setItem('pending_invite_token', inviteToken);
@@ -289,8 +318,8 @@ function App() {
           isAuthenticated={true}
           onAccepted={() => {
             setInviteToken(null);
-            setActiveTab('teams');
             window.history.replaceState({}, '', '/');
+            setActiveTab('teams');
           }}
           onSwitchToLogin={() => {}}
           onSwitchToSignup={() => {}}
@@ -299,41 +328,100 @@ function App() {
     );
   }
 
-  // Authenticated - show dashboard with new layout
+  // Authenticated - mission control and the rest of the dashboard
   return (
     <div className={darkMode ? 'dark' : ''}>
-      <AppLayout
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        darkMode={darkMode}
-        onToggleDarkMode={handleToggleDarkMode}
-        isAuthenticated={isAuthenticated}
-        onLogout={handleLogout}
-        userName={currentUser?.name || currentUser?.email}
-        onNewMemory={handleNewMemory}
-        onSearch={handleSearch}
-        isAdmin={currentUser?.is_admin}
-      >
-        <Dashboard
+      <RelayDataProvider userKey={currentUser?.id ?? 'api-key'}>
+        <AuthenticatedShell
           activeTab={activeTab}
+          darkMode={darkMode}
+          onToggleDarkMode={handleToggleDarkMode}
           onLogout={handleLogout}
+          userName={currentUser?.name || currentUser?.email}
+          isAdmin={currentUser?.is_admin === true}
+          onSearch={handleSearch}
+          onShowShortcuts={() => setShortcutsOpen(true)}
           showNewMemory={showNewMemoryModal}
           onCloseNewMemory={() => setShowNewMemoryModal(false)}
           onTabChange={setActiveTab}
         />
-      </AppLayout>
+      </RelayDataProvider>
 
-      {/* Command Palette (⌘K) */}
       <CommandPalette
         isOpen={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
         onNavigate={(tab) => setActiveTab(tab)}
+        isAdmin={currentUser?.is_admin === true}
+        onShowShortcuts={() => {
+          setCommandPaletteOpen(false);
+          setShortcutsOpen(true);
+        }}
         onNewMemory={() => {
           setCommandPaletteOpen(false);
+          setActiveTab('memories');
           setShowNewMemoryModal(true);
         }}
       />
+      <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
     </div>
+  );
+}
+
+const RELAY_TABS: TabType[] = ['home', 'trail', 'agents', 'inbox'];
+
+function AuthenticatedShell({
+  activeTab,
+  darkMode,
+  onToggleDarkMode,
+  onLogout,
+  userName,
+  isAdmin,
+  onSearch,
+  onShowShortcuts,
+  showNewMemory,
+  onCloseNewMemory,
+  onTabChange,
+}: {
+  activeTab: TabType;
+  darkMode: boolean;
+  onToggleDarkMode: () => void;
+  onLogout: () => void;
+  userName?: string;
+  isAdmin: boolean;
+  onSearch: () => void;
+  onShowShortcuts: () => void;
+  showNewMemory: boolean;
+  onCloseNewMemory: () => void;
+  onTabChange: (tab: TabType) => void;
+}) {
+  const { inbox } = useRelayData();
+  const tab: TabType = activeTab === 'admin' && !isAdmin ? 'home' : activeTab;
+  return (
+    <AppLayout
+      activeTab={tab}
+      darkMode={darkMode}
+      onToggleDarkMode={onToggleDarkMode}
+      onLogout={onLogout}
+      userName={userName}
+      onSearch={onSearch}
+      onShowShortcuts={onShowShortcuts}
+      isAdmin={isAdmin}
+      inboxUnread={inbox.data?.unread_total ?? 0}
+    >
+      {tab === 'home' && <Home userName={userName} />}
+      {tab === 'trail' && <Trail />}
+      {tab === 'agents' && <Agents />}
+      {tab === 'inbox' && <Inbox />}
+      {!RELAY_TABS.includes(tab) && (
+        <Dashboard
+          activeTab={tab}
+          onLogout={onLogout}
+          showNewMemory={showNewMemory}
+          onCloseNewMemory={onCloseNewMemory}
+          onTabChange={onTabChange}
+        />
+      )}
+    </AppLayout>
   );
 }
 

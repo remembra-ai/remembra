@@ -44,7 +44,7 @@ export function ApiKeyForm({ onAuthenticated }: ApiKeyFormProps) {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 px-4">
       <div className="max-w-md w-full">
         <div className="text-center mb-8">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-[#8B5CF6] to-[#A78BFA] flex items-center justify-center mx-auto mb-4">
+          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-signal to-signal flex items-center justify-center mx-auto mb-4">
             <Key className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
@@ -67,7 +67,7 @@ export function ApiKeyForm({ onAuthenticated }: ApiKeyFormProps) {
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
                 placeholder="rem_..."
-                className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent"
+                className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
               />
             </div>
 
@@ -82,7 +82,7 @@ export function ApiKeyForm({ onAuthenticated }: ApiKeyFormProps) {
                   value={userId}
                   onChange={(e) => setUserId(e.target.value)}
                   placeholder="default_user"
-                  className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent text-sm"
+                  className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent text-sm"
                 />
               </div>
               <div>
@@ -95,7 +95,7 @@ export function ApiKeyForm({ onAuthenticated }: ApiKeyFormProps) {
                   value={projectId}
                   onChange={(e) => setProjectId(e.target.value)}
                   placeholder="default"
-                  className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#8B5CF6] focus:border-transparent text-sm"
+                  className="w-full px-4 py-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent text-sm"
                 />
               </div>
             </div>
@@ -107,7 +107,7 @@ export function ApiKeyForm({ onAuthenticated }: ApiKeyFormProps) {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3 px-4 rounded-lg bg-[#8B5CF6] hover:bg-[#7C3AED] disabled:bg-[#A78BFA] text-white font-medium transition-colors flex items-center justify-center gap-2"
+              className="w-full py-3 px-4 rounded-lg bg-accent hover:bg-accent-hover disabled:bg-accent/50 text-white font-medium transition-colors flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>

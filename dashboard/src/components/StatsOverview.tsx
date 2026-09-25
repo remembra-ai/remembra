@@ -37,10 +37,10 @@ interface StatCardProps {
 function StatCard({ label, value, subtext, icon: Icon, trend, color = 'purple', delay = 0 }: StatCardProps) {
   const colorStyles = {
     purple: {
-      accent: '#8B5CF6',
-      iconBg: 'rgba(139, 92, 246, 0.12)',
-      iconBorder: 'rgba(139, 92, 246, 0.22)',
-      glow: 'rgba(139, 92, 246, 0.16)',
+      accent: '#FF5B14',
+      iconBg: 'rgba(255, 91, 20, 0.12)',
+      iconBorder: 'rgba(255, 91, 20, 0.22)',
+      glow: 'rgba(255, 91, 20, 0.16)',
     },
     blue: {
       accent: '#60A5FA',
@@ -70,7 +70,7 @@ function StatCard({ label, value, subtext, icon: Icon, trend, color = 'purple', 
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4, delay, ease: "easeOut" }}
       className={clsx(
-        'group dashboard-surface relative overflow-hidden rounded-[24px] p-6',
+        'group dashboard-surface relative overflow-hidden rounded-[4px] p-6',
         'hover:-translate-y-0.5',
         'transition-all duration-300'
       )}
@@ -153,7 +153,7 @@ export function StatsOverview({
         {[...Array(4)].map((_, i) => (
           <div 
             key={i}
-            className="dashboard-surface h-36 animate-pulse rounded-[24px] p-6"
+            className="dashboard-surface h-36 animate-pulse rounded-[4px] p-6"
           >
             <div className="mb-4 h-4 w-24 rounded bg-[hsl(var(--muted))]" />
             <div className="mb-3 h-8 w-28 rounded bg-[hsl(var(--muted))]" />
