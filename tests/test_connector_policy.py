@@ -13,6 +13,7 @@ from remembra.connector.policy import (
     normalize_agent_label,
     normalize_projects,
     normalize_public_url,
+    parse_requested_scope,
     parse_scope,
     redirect_uri_allowed,
     redirect_uri_matches,
@@ -29,6 +30,17 @@ def test_parse_scope_defaults_orders_and_rejects_unknown():
     assert parse_scope("memory:store memory:recall memory:recall offline_access") == ["memory:recall", "memory:store"]
     with pytest.raises(ScopeError):
         parse_scope("memory:recall memory:delete")
+
+
+def test_parse_requested_scope_keeps_supported_subset():
+    assert parse_requested_scope(None) == (["session:brief", "memory:recall", "memory:store"], [])
+    assert parse_requested_scope("offline_access") == (["session:brief", "memory:recall", "memory:store"], [])
+    assert parse_requested_scope("claudeai memory:store session:brief") == (
+        ["session:brief", "memory:store"],
+        ["claudeai"],
+    )
+    with pytest.raises(ScopeError):
+        parse_requested_scope("claudeai memory:delete")
 
 
 @pytest.mark.parametrize(

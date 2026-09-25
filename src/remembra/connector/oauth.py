@@ -34,6 +34,7 @@ from remembra.auth.users import UserManager
 from remembra.config import Settings, get_settings
 from remembra.connector import pages
 from remembra.connector.policy import (
+    IGNORED_SCOPES,
     SCOPE_DESCRIPTIONS,
     SUPPORTED_SCOPES,
     ScopeError,
@@ -42,6 +43,7 @@ from remembra.connector.policy import (
     is_loopback_redirect,
     normalize_agent_label,
     normalize_projects,
+    parse_requested_scope,
     parse_scope,
     redirect_host,
     redirect_origin,
@@ -243,11 +245,15 @@ async def register_client(request: Request, store: StoreDep) -> JSONResponse:
     response_types = body.get("response_types", ["code"])
     if response_types != ["code"]:
         return _oauth_error("invalid_client_metadata", 'response_types must be ["code"].')
-    if body.get("scope") is not None:
-        try:
-            parse_scope(str(body["scope"]))
-        except ScopeError as e:
-            return _oauth_error("invalid_client_metadata", str(e))
+    # The registration scope is advisory: every client may request every
+    # supported scope at /oauth/authorize, and the response states that set.
+    # Unknown values (e.g. Claude's "claudeai") are ignored, not refused
+    # (RFC 7591 2: the server may replace requested metadata).
+    requested_scope = body.get("scope")
+    if isinstance(requested_scope, str):
+        ignored = sorted(set(requested_scope.split()) - set(SUPPORTED_SCOPES) - IGNORED_SCOPES)
+        if ignored:
+            log.info("oauth_register_scope_ignored", scopes=[v[:64] for v in ignored[:10]])
 
     client, secret = await store.register_client(
         client_name=_client_name(body.get("client_name")),
@@ -310,9 +316,12 @@ async def authorize(request: Request, store: StoreDep) -> Response:
     if q.get("code_challenge_method") != "S256":
         return fail("invalid_request", "code_challenge_method must be S256.")
     try:
-        scopes = parse_scope(q.get("scope"))
+        scopes, dropped = parse_requested_scope(q.get("scope"))
     except ScopeError as e:
         return fail("invalid_scope", str(e))
+    if dropped:
+        # Granted scopes are listed on the consent page and in the token response.
+        log.info("oauth_authorize_scope_dropped", client_id=client["client_id"], scopes=[v[:64] for v in dropped[:10]])
     if not resource_matches(q.get("resource"), resource_url(settings)):
         return fail("invalid_target", "resource does not name this server's MCP endpoint.")
 

@@ -67,6 +67,26 @@ def parse_scope(raw: str | None) -> list[str]:
     return [s for s in SUPPORTED_SCOPES if s in requested]
 
 
+def parse_requested_scope(raw: str | None) -> tuple[list[str], list[str]]:
+    """Lenient parse for authorization and registration requests.
+
+    RFC 6749 3.3 and RFC 7591 2 let the server grant less than was asked:
+    unknown scopes are dropped (clients send vendor values, e.g. Claude's
+    ``claudeai``) and the supported ones kept. Returns (granted, dropped).
+    Missing/empty means every supported scope. Raises ScopeError only when
+    scopes were requested and none of them is supported, so nothing
+    meaningful could be granted.
+    """
+    requested = {s for s in (raw or "").split() if s and s not in IGNORED_SCOPES}
+    if not requested:
+        return list(SUPPORTED_SCOPES), []
+    granted = [s for s in SUPPORTED_SCOPES if s in requested]
+    dropped = sorted(requested - set(SUPPORTED_SCOPES))
+    if not granted:
+        raise ScopeError(f"unsupported scope: {' '.join(dropped)}")
+    return granted, dropped
+
+
 def format_scope(scopes: Iterable[str]) -> str:
     return " ".join(scopes)
 

@@ -888,7 +888,6 @@ async def test_oversized_mcp_body_rejected(h):
         ({"redirect_uris": [CLAUDE_REDIRECT_URI], "token_endpoint_auth_method": "private_key_jwt"}, "invalid_client_metadata"),
         ({"redirect_uris": [CLAUDE_REDIRECT_URI], "grant_types": ["client_credentials"]}, "invalid_client_metadata"),
         ({"redirect_uris": [CLAUDE_REDIRECT_URI], "response_types": ["token"]}, "invalid_client_metadata"),
-        ({"redirect_uris": [CLAUDE_REDIRECT_URI], "scope": "memory:delete"}, "invalid_client_metadata"),
     ],
 )
 async def test_registration_validates_client_metadata(h, body, error):
@@ -942,3 +941,47 @@ async def test_inbox_expiry_and_validation(h):
         owner_user_id=(await h.db.get_user_by_email("alice@example.com"))["id"], agent_id="codex", status="unread", limit=5
     )
     assert rows[0]["expires_at"] and rows[0]["metadata"]["project_id"] == "alpha"
+
+
+# ---------------------------------------------------------------------------
+# Scopes a client sends that Remembra doesn't know
+# ---------------------------------------------------------------------------
+
+
+async def test_registration_ignores_unknown_scopes(h):
+    """claude.ai has been seen registering with scope "claudeai"; that must not
+    block the connection (RFC 7591 2: the server may replace metadata)."""
+    for scope in ("claudeai", "memory:delete session:brief", "offline_access"):
+        resp = await h.register(scope=scope)
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["scope"] == "session:brief memory:recall memory:store"
+
+
+async def test_authorize_keeps_the_supported_subset_of_scopes(h):
+    await _alice(h)
+    client_id = (await h.register(scope="claudeai")).json()["client_id"]
+    verifier, challenge = pkce()
+    page = await h.authorize(client_id, challenge, scope="claudeai session:brief offline_access")
+    assert page.status_code == 200, page.text
+    rid = h.request_id(page)
+    await h.login(rid, "alice@example.com")
+    code = h.redirect_params(await h.consent(rid, ["alpha"]))["code"]
+    tok = await h.token(
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": CLAUDE_REDIRECT_URI,
+            "client_id": client_id,
+            "code_verifier": verifier,
+        }
+    )
+    assert tok.status_code == 200, tok.text
+    # The token response states the scope actually granted (RFC 6749 3.3).
+    assert tok.json()["scope"] == "session:brief"
+    access = tok.json()["access_token"]
+    assert (await h.tool(access, "session_brief"))["status"] == "ok"
+    denied = await h.mcp_post(
+        access,
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "recall_memories", "arguments": {"query": "x"}}},
+    )
+    assert denied.status_code == 403
