@@ -1,11 +1,10 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Remembra: one cloud memory for all your AI agents</title>
-<meta name="description" content="One agent stops, the next one already knows. Remembra is one cloud memory for all your AI agents: when one stops, the next picks up from its handoff in any tool, on any machine.">
-
+<meta name="description" content="One agent stops. The next one already knows. Remembra is one cloud memory for all your AI agents: when one stops, the next picks up from its handoff, in any tool, on any machine.">
 <meta property="og:title" content="Remembra: one agent stops, the next one already knows">
 <meta property="og:description" content="One cloud memory for all your AI agents. Out of credits on one? Keep going on another, in any tool, on any machine.">
 <meta property="og:type" content="website">
@@ -13,6 +12,7 @@
 <meta property="og:image" content="https://remembra.dev/social-preview.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Remembra: a pixel brain hands an orange baton along a dashed trail into the e of the wordmark.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:site" content="@remembradev">
 <meta name="twitter:title" content="Remembra: one agent stops, the next one already knows">
@@ -34,475 +34,199 @@
   "author": { "@type": "Organization", "name": "DolphyTech", "url": "https://dolphytech.com" }
 }
 </script>
-
-<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96">
+<!-- @head -->
+<script>
+  /* Dark for every visitor unless they chose light. Storage may be unavailable; the page works without it. */
+  (function () { var t = "dark"; try { if (localStorage.getItem("remembra-theme") === "light") t = "light"; } catch (e) {} document.documentElement.setAttribute("data-theme", t); })();
+</script>
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="shortcut icon" href="/favicon.ico">
 <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
-<meta name="apple-mobile-web-app-title" content="Remembra">
 <link rel="manifest" href="/site.webmanifest">
-
+<meta name="theme-color" content="#131416">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<script>
-  /* Apply a saved theme before first paint. Storage may be unavailable; the page works without it. */
-  (function () {
-    try {
-      var t = localStorage.getItem("remembra-theme");
-      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
-    } catch (e) {}
-  })();
-</script>
-<link rel="stylesheet" href="/site.css">
-<style>
-:root { --t-hero: clamp(2.3rem, 1rem + 4.2vw, 4.6rem); }
-
-/* ------------------------------------------------------------------
-   Hero
-------------------------------------------------------------------- */
-.hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: clamp(32px, 5vw, 80px);
-  align-items: center;
-  min-height: calc(100svh - var(--nav-h));
-  padding-top: 8px;
-  padding-bottom: 48px;
-}
-.hero h1 {
-  font-family: var(--f-display);
-  font-weight: 800;
-  font-size: var(--t-hero);
-  line-height: .98;
-  letter-spacing: -.036em;
-  margin-top: 18px;
-}
-.hero h1 .l { display: block; }
-.hero h1 mark {
-  background: var(--signal); color: var(--on-signal);
-  padding: 0 .08em; margin: 0 -.02em;
-  -webkit-box-decoration-break: clone; box-decoration-break: clone;
-}
-.lede {
-  margin-top: 22px; max-width: 33em;
-  font-size: var(--t-18); line-height: 1.5; color: var(--ink-2);
-}
-.lede strong { color: var(--ink); font-weight: 600; }
-.hero .cmd { margin-top: 28px; }
-
-/* ------------------------------------------------------------------
-   Signature: the trail ("git log for agents")
-------------------------------------------------------------------- */
-.relay {
-  position: relative;
-  background: var(--panel);
-  border: 1px solid var(--rule-strong);
-  border-radius: var(--r);
-  box-shadow: var(--shadow);
-  font-family: var(--f-mono);
-  font-size: .8125rem;
-  line-height: 1.5;
-  min-width: 0;
-}
-.relay-head {
-  display: flex; align-items: center; gap: 12px;
-  background: var(--head); color: var(--head-ink);
-  padding: 10px 16px; font-size: var(--t-12);
-  border-radius: calc(var(--r) - 1px) calc(var(--r) - 1px) 0 0;
-}
-.relay-head .cmdname { white-space: nowrap; flex: none; font-weight: 700; }
-.relay-head .repo { opacity: .7; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.relay-head .tag {
-  margin-left: auto; flex: none; border: 1px solid rgba(236,237,232,.35); padding: 1px 7px; border-radius: 2px;
-  font-size: .6875rem; letter-spacing: .08em; text-transform: uppercase; opacity: .85;
-}
-.relay-body { padding: 16px 20px 8px 16px; }
-.track { position: relative; }
-.rail, .rail-fill {
-  position: absolute; left: 11px; width: 2px; top: 0; height: 0;
-  background: repeating-linear-gradient(180deg, var(--rule) 0 4px, transparent 4px 8px);
-}
-:root[data-theme="dark"] .rail { background: repeating-linear-gradient(180deg, #4A4E53 0 4px, transparent 4px 8px); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .rail { background: repeating-linear-gradient(180deg, #4A4E53 0 4px, transparent 4px 8px); } }
-.rail-fill { background: var(--signal); transition: height .9s cubic-bezier(.6,0,.2,1); }
-.baton {
-  position: absolute; left: 12px; top: 0; width: 12px; height: 26px; margin-left: -6px;
-  background: var(--signal); border-radius: 6px;
-  box-shadow: 0 0 0 4px var(--signal-wash), 0 4px 14px rgba(255,91,20,.45);
-  transform: translateY(0);
-  transition: transform .9s cubic-bezier(.6,0,.2,1);
-  z-index: 2;
-  opacity: 0;
-}
-.relay.is-ready .baton { opacity: 1; }
-.no-tr, .no-tr * { transition: none !important; }
-
-.log { position: relative; }
-.e { display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 14px; padding: 4px 0; }
-.e > div { min-width: 0; }
-.node {
-  justify-self: center; margin-top: 6px; position: relative; z-index: 1;
-  width: 12px; height: 12px; border-radius: 50%;
-  background: var(--panel); border: 2px solid var(--ink-3);
-}
-.e.from .node, .e.to .node { border-color: var(--ink); }
-.relay[data-stage="1"] .e.from .node { background: var(--ink); }
-.e.hand .node { border-radius: 1px; transform: rotate(45deg); border-color: var(--signal); width: 11px; height: 11px; margin-top: 9px; }
-.relay:not(.is-animating) .e.to .node,
-.relay[data-stage="5"] .e.to .node,
-.relay[data-stage="6"] .e.to .node { background: var(--signal); border-color: var(--signal); }
-.who { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; }
-.agent {
-  font-family: var(--f-display); font-weight: 700; font-size: 1rem; letter-spacing: -.01em; color: var(--ink);
-  background: none; border: 0; padding: 0; margin: 0; cursor: pointer; text-align: left;
-  text-decoration: underline; text-decoration-style: dotted; text-decoration-color: var(--ink-3); text-underline-offset: 4px; text-decoration-thickness: 1px;
-}
-.agent:hover { text-decoration-style: solid; text-decoration-color: var(--signal); text-decoration-thickness: 2px; }
-.where { color: var(--ink-3); font-size: var(--t-12); }
-.line { color: var(--ink-2); overflow-wrap: anywhere; }
-.line .k { color: var(--ink-3); }
-.past .agent { color: var(--ink-3); font-size: .9375rem; }
-.past .line { color: var(--ink-3); }
-
-.meter { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; margin-top: 6px; max-width: 360px; }
-.meter[hidden] { display: none; }
-.meter .lab { color: var(--ink-3); font-size: var(--t-12); }
-.meter .bar { height: 6px; background: var(--paper-2); border: 1px solid var(--rule); position: relative; overflow: hidden; }
-.meter .fill { position: absolute; inset: 0 auto 0 0; width: var(--m, 0%); background: var(--ink); }
-.meter.low .fill { background: var(--fail); }
-.meter .val { font-variant-numeric: tabular-nums; min-width: 6ch; text-align: right; font-size: var(--t-12); color: var(--ink); }
-.meter.low .val { color: var(--fail); }
-
-.stop .line { color: var(--fail); font-weight: 500; }
-.stop .line::before { content: "\2715  "; }
-.stop.calm .line { color: var(--ink-2); }
-.stop.calm .line::before { content: "\25A0  "; color: var(--ink-3); }
-
-.handoff {
-  border: 1px solid var(--rule); border-left: 3px solid var(--signal);
-  background: var(--paper); padding: 8px 12px 9px; margin: 2px 0;
-}
-.handoff-h { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; font-size: var(--t-12); letter-spacing: .06em; text-transform: uppercase; color: var(--signal-ink); font-weight: 700; }
-.handoff-h .sig { font-weight: 400; color: var(--ink-3); text-transform: none; letter-spacing: 0; }
-.handoff .src { margin-top: 2px; font-size: var(--t-12); color: var(--ink-3); }
-.facts { margin-top: 4px; }
-.facts li { display: grid; grid-template-columns: 1.6ch minmax(0,1fr); gap: 8px; color: var(--ink); overflow-wrap: anywhere; }
-.facts li::before { font-weight: 700; }
-.facts .ok::before   { content: "\2713"; color: var(--ok); }
-.facts .warn::before { content: "!";      color: var(--signal-ink); }
-.facts .todo::before { content: "\2192"; color: var(--signal-ink); }
-.facts .todo { font-weight: 500; }
-.facts .note::before { content: "\2022"; color: var(--ink-3); }
-
-.to .line { color: var(--ink); }
-.to .line .p { color: var(--signal-ink); margin-right: .6ch; }
-.to .line.ok .p { color: var(--ok); }
-.cursor { display: inline-block; width: .6em; height: 1.05em; background: var(--signal); vertical-align: -2px; margin-left: 2px; animation: blink 1s steps(1) infinite; }
-@keyframes blink { 50% { opacity: 0; } }
-
-/* staged reveal, only while animating (the still frame shows everything) */
-.relay.is-animating [data-at] { opacity: 0; transform: translateY(4px); transition: opacity .35s ease, transform .35s ease; }
-.relay.is-animating [data-at].on { opacity: 1; transform: none; }
-.relay.is-animating .facts li:nth-child(2) { transition-delay: .12s; }
-.relay.is-animating .facts li:nth-child(3) { transition-delay: .24s; }
-.relay.is-animating .facts li:nth-child(4) { transition-delay: .36s; }
-
-.relay-foot {
-  display: grid; gap: 10px;
-  border-top: 1px solid var(--rule); padding: 12px 16px 14px;
-  font-family: var(--f-body); font-size: var(--t-14); color: var(--ink-2);
-}
-.relay-foot .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
-.relay-foot .hint { font-size: var(--t-12); color: var(--ink-3); font-family: var(--f-mono); }
-.seg { display: flex; flex-wrap: wrap; gap: 6px; }
-.seg button {
-  font-family: var(--f-mono); font-size: var(--t-12);
-  background: transparent; border: 1px solid var(--rule); border-radius: 2px;
-  padding: 6px 10px; cursor: pointer; color: var(--ink-2); position: relative; overflow: hidden;
-}
-.seg button:hover { border-color: var(--ink); color: var(--ink); }
-.seg button[aria-pressed="true"] { border-color: var(--ink); background: var(--ink); color: var(--paper); }
-.relay-foot .pause { margin-left: auto; font-family: var(--f-mono); font-size: var(--t-12); background: transparent; border: 0; padding: 6px 0; cursor: pointer; color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
-.seg button .prog { position: absolute; left: 0; bottom: 0; height: 2px; width: 0; background: var(--signal); }
-
-/* ------------------------------------------------------------------
-   Below the fold
-------------------------------------------------------------------- */
-.sec { padding: clamp(64px, 9vw, 120px) 0; border-top: 1px solid var(--rule); }
-.sec-grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: clamp(28px, 5vw, 80px); }
-.sec h2 {
-  font-family: var(--f-display); font-weight: 800; font-size: var(--t-44);
-  line-height: 1; letter-spacing: -.03em; margin-top: 16px; text-wrap: balance;
-}
-.sec .intro { margin-top: 18px; color: var(--ink-2); font-size: var(--t-18); max-width: 30em; }
-.sec code { white-space: nowrap; font-family: var(--f-mono); font-size: .9em; background: var(--paper-2); padding: 1px 5px; border-radius: 2px; }
-
-/* 1. How it works: three stations on one rail */
-.legs { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); border-top: 2px solid var(--ink); }
-.leg { position: relative; padding: 30px 28px 0 0; }
-.leg::before {
-  content: ""; position: absolute; top: -8px; left: 0; width: 14px; height: 14px; border-radius: 50%;
-  background: var(--paper); border: 2px solid var(--ink);
-}
-.leg:last-child::before { background: var(--signal); border-color: var(--signal); box-shadow: 0 0 0 5px var(--signal-wash); }
-.leg .n { font-family: var(--f-mono); font-size: var(--t-12); color: var(--ink-3); letter-spacing: .06em; }
-.leg h3 { font-family: var(--f-display); font-weight: 700; font-size: var(--t-30); letter-spacing: -.02em; line-height: 1.05; margin-top: 8px; }
-.leg p { margin-top: 12px; color: var(--ink-2); max-width: 22em; }
-.also { margin-top: 40px; font-size: var(--t-14); color: var(--ink-2); max-width: 46em; }
-.also b { color: var(--ink); font-weight: 600; }
-
-/* 2. Agents: a lineup */
-.lineup { border-top: 1px solid var(--rule); }
-.lineup li {
-  display: grid; grid-template-columns: 3.2rem minmax(0, 1fr) auto; align-items: baseline; gap: 12px;
-  padding: 14px 0; border-bottom: 1px solid var(--rule);
-}
-.lineup .lane { font-family: var(--f-mono); font-size: var(--t-12); color: var(--ink-3); }
-.lineup .name { font-family: var(--f-display); font-weight: 700; font-size: var(--t-30); letter-spacing: -.02em; line-height: 1.1; }
-.lineup .note { font-family: var(--f-mono); font-size: var(--t-12); color: var(--ink-3); text-align: right; }
-.lineup li.any .name { color: var(--signal-ink); }
-.lineup li.any .lane::before { content: ""; display: inline-block; width: 8px; height: 18px; border-radius: 4px; background: var(--signal); vertical-align: -3px; }
-.places { margin-top: 26px; display: flex; flex-wrap: wrap; gap: 8px; }
-.places li { font-family: var(--f-mono); font-size: var(--t-12); border: 1px solid var(--rule); padding: 5px 9px; border-radius: 2px; color: var(--ink-2); background: var(--panel); }
-.fine { margin-top: 22px; font-size: var(--t-14); color: var(--ink-3); max-width: 34em; }
-
-/* 3. Start: full-bleed orange band */
-.band { background: var(--signal); color: var(--on-signal); padding: clamp(64px, 9vw, 112px) 0; }
-.band .eyebrow { color: var(--on-signal); }
-.band .eyebrow::before { background: var(--on-signal); }
-.band h2 {
-  font-family: var(--f-display); font-weight: 800; font-size: var(--t-44);
-  line-height: 1; letter-spacing: -.03em; margin-top: 16px; text-wrap: balance;
-}
-.band-grid { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr); gap: clamp(32px, 5vw, 80px); align-items: start; }
-.band .cmd { margin-top: 28px; box-shadow: 6px 6px 0 var(--on-signal); background: #15171A; color: #ECEDE8; }
-.band .cmd code .ps { color: #FF6B2B; }
-.band .copy { border-left-color: rgba(236,237,232,.18); }
-.band .cmd-meta, .band .cmd-meta .free, .band .cmd-meta a { color: var(--on-signal); }
-.band .cmd-meta a { text-decoration-color: var(--on-signal); }
-.band .cmd-meta .sep { background: var(--on-signal); }
-.band :focus-visible { outline-color: var(--on-signal); }
-.band .cmd :focus-visible { outline-color: #FF6B2B; }  /* the band's command stays graphite in both themes */
-
-.prices { margin-top: 36px; border-top: 2px solid var(--on-signal); }
-.prices a { display: block; text-decoration: none; color: var(--on-signal); }
-.prices ul { display: grid; grid-template-columns: repeat(5, auto); gap: 0; }
-.prices li { padding: 14px 18px 14px 0; border-bottom: 1px solid rgba(21,23,26,.35); }
-.prices .pn { display: block; font-family: var(--f-mono); font-size: var(--t-12); letter-spacing: .06em; text-transform: uppercase; }
-.prices .pv { display: block; font-family: var(--f-display); font-weight: 800; font-size: var(--t-22); letter-spacing: -.02em; line-height: 1.15; margin-top: 2px; }
-.prices .pv small { font-family: var(--f-body); font-weight: 600; font-size: var(--t-14); letter-spacing: 0; }
-.prices .pd { display: block; font-size: var(--t-12); margin-top: 2px; }
-.prices li.founding .pv { background: var(--on-signal); color: var(--signal); display: inline-block; padding: 0 .2em; }
-.prices .more { display: inline-flex; gap: 8px; margin-top: 14px; font-weight: 600; text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 2px; }
-.prices a:hover .more { text-decoration-thickness: 3px; }
-
-.trust { display: grid; gap: 0; border-top: 2px solid var(--on-signal); }
-.trust div { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); gap: 12px; padding: 14px 0; border-bottom: 1px solid rgba(21,23,26,.35); }
-.trust dt { font-family: var(--f-mono); font-size: var(--t-12); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; padding-top: 2px; }
-.trust dd { margin: 0; font-size: var(--t-16); }
-
-/* ------------------------------------------------------------------
-   Responsive
-------------------------------------------------------------------- */
-@media (max-height: 820px) and (min-width: 961px) {
-  :root { --t-hero: clamp(2.3rem, 1rem + 3.5vw, 4rem); }
-  .lede { margin-top: 16px; }
-  .hero .cmd { margin-top: 22px; }
-}
-@media (max-width: 1100px) {
-  .prices ul { grid-template-columns: repeat(3, auto); }
-}
-@media (max-width: 960px) {
-  .hero { grid-template-columns: minmax(0,1fr); min-height: 0; gap: 28px; padding-top: 6px; padding-bottom: 56px; align-items: start; }
-  .hero h1 { margin-top: 12px; }
-  .lede { font-size: var(--t-16); margin-top: 12px; }
-  .hero .cmd { margin-top: 18px; }
-  .cmd-meta { margin-top: 12px; font-size: .8125rem; gap: 4px 12px; }
-  .sec-grid, .band-grid { grid-template-columns: minmax(0,1fr); }
-  .legs { grid-template-columns: minmax(0,1fr); border-top: 0; border-left: 2px solid var(--ink); margin-left: 7px; }
-  .leg { padding: 0 0 32px 26px; }
-  .leg:last-child { padding-bottom: 0; }
-  .leg::before { top: 4px; left: -8px; }
-}
-@media (max-width: 520px) {
-  :root { --t-hero: 2.15rem; }
-  .hero { gap: 20px; }
-  .lede { line-height: 1.45; }
-  .lede .long { display: none; }
-  .relay { font-size: .75rem; }
-  .relay-body { padding: 10px 12px 6px 8px; }
-  .relay-head { padding: 8px 12px; }
-  .e { column-gap: 10px; padding: 3px 0; }
-  .e.past { display: none; }
-  .agent { font-size: .9375rem; }
-  .handoff { padding: 6px 10px 7px; }
-  .lineup li { grid-template-columns: 2.4rem minmax(0,1fr); }
-  .lineup .note { grid-column: 2; text-align: left; }
-  .prices ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .prices li.founding { grid-column: 1 / -1; }
-  .trust div { grid-template-columns: minmax(0,1fr); gap: 4px; }
-  .band .cmd { box-shadow: 4px 4px 0 var(--on-signal); }
-}
-@media (prefers-reduced-motion: reduce) {
-  .rail-fill, .baton, .relay [data-at] { transition: none !important; }
-  .cursor { animation: none; }
-}
-</style>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site.css">
+<!-- /@head -->
+<link rel="stylesheet" href="home.css">
 </head>
-<body class="site">
+<body class="site" data-page="home">
+<!-- @header -->
 <a class="skip" href="#main">Skip to content</a>
-
 <header class="site-header">
   <div class="wrap bar">
-    <a class="brand" href="/" aria-label="Remembra home">
-      <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true">
-        <circle cx="6" cy="25" r="2.4" fill="currentColor" opacity=".3"/>
-        <circle cx="11.5" cy="20" r="2.4" fill="currentColor" opacity=".55"/>
-        <rect x="15" y="4" width="9" height="22" rx="4.5" transform="rotate(40 19.5 15)" fill="var(--signal)"/>
-      </svg>
-      <span class="brand-name">Remembra</span>
-    </a>
+    <a class="brand" href="/" aria-label="Remembra home"><svg class="lockup" viewBox="-136.21 18.6 532.21 99.3" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M-122.83 82.72 L-122.05 84.90 L-121.01 86.86 L-119.61 88.72 L-118.24 90.11 L-116.22 91.68 L-114.36 92.77 L-112.30 93.67 L-110.03 94.35 L-107.55 94.80 L-103.80 95.18 L-92.13 96.01 L-78.74 96.57 L-65.97 96.78 L-65.46 100.56 L-64.75 109.98 L-64.40 112.48 L-64.08 113.80 L-63.68 114.48 L-63.14 115.02 L-62.49 115.43 L-61.76 115.71 L-60.98 115.87 L-60.16 115.90 L-59.08 115.77 L-58.32 115.54 L-57.39 115.05 L-56.82 114.56 L-56.25 113.75 L-55.99 112.98 L-55.50 110.08 L-54.76 102.31 L-54.09 98.76 L-52.69 99.14 L-51.18 99.39 L-49.59 99.51 L-47.36 99.48 L-45.65 99.32 L-43.37 98.92 L-41.67 98.50 L-40.03 97.96 L-38.45 97.33 L-36.96 96.58 L-35.59 95.75 L-34.36 94.81 L-33.29 93.79 L-32.68 93.05 L-31.90 91.86 L-31.29 90.61 L-30.73 88.85 L-30.42 86.58 L-30.47 84.77 L-30.83 82.80 L-45.28 87.21 L-49.11 88.54 L-51.78 89.61 L-54.04 90.71 L-55.89 91.82 L-57.31 92.96 L-58.76 94.59 L-59.22 94.93 L-59.74 95.17 L-60.29 95.30 L-61.14 95.29 L-61.69 95.15 L-62.44 94.74 L-62.86 94.36 L-63.33 93.64 L-63.51 93.11 L-63.59 92.54 L-63.50 91.70 L-63.17 90.91 L-61.73 89.16 L-60.76 88.25 L-59.71 87.42 L-58.06 86.31 L-56.76 85.57 L-53.37 83.98 L-48.77 82.25 L-43.53 80.57 L-32.88 77.35 L-31.39 76.02 L-30.26 74.69 L-29.43 73.46 L-28.69 72.12 L-28.03 70.66 L-27.34 68.76 L-26.66 66.43 L-26.20 64.38 L-25.85 62.26 L-25.62 60.09 L-25.50 57.89 L-25.50 55.67 L-25.78 52.02 L-26.11 49.88 L-26.56 47.81 L-27.61 44.58 L-28.40 42.81 L-29.33 41.18 L-30.27 39.92 L-31.49 38.56 L-32.73 37.43 L-34.30 36.31 L-35.86 35.48 L-37.21 34.99 L-38.35 37.39 L-38.95 38.87 L-39.62 40.87 L-40.13 42.92 L-40.48 45.01 L-40.64 46.62 L-40.72 48.80 L-40.63 51.34 L-40.70 51.91 L-40.89 52.45 L-41.18 52.94 L-41.77 53.55 L-42.25 53.85 L-42.79 54.05 L-43.35 54.14 L-44.20 54.07 L-44.74 53.88 L-45.23 53.60 L-45.66 53.22 L-46.14 52.52 L-46.34 51.98 L-46.43 51.42 L-46.50 47.52 L-46.24 44.30 L-45.68 41.14 L-45.01 38.62 L-43.93 35.66 L-42.62 32.89 L-44.22 30.55 L-45.98 28.45 L-47.90 26.57 L-49.45 25.32 L-51.68 23.86 L-54.09 22.66 L-56.68 21.73 L-58.75 21.21 L-61.67 20.76 L-64.68 20.60 L-67.30 20.71 L-70.31 21.16 L-72.51 21.79 L-74.99 22.87 L-77.20 24.28 L-79.14 25.99 L-79.51 26.40 L-79.31 27.29 L-79.36 29.01 L-79.60 31.93 L-79.89 34.11 L-80.58 37.60 L-81.53 40.98 L-83 44.85 L-84.67 48.22 L-85.03 48.66 L-85.47 49.03 L-85.97 49.30 L-86.79 49.51 L-87.36 49.51 L-88.19 49.31 L-88.69 49.04 L-89.13 48.68 L-89.50 48.25 L-89.77 47.74 L-89.94 47.20 L-89.98 46.35 L-89.78 45.52 L-88.58 43.09 L-87.65 40.87 L-86.53 37.42 L-85.96 35.03 L-85.53 32.56 L-85.31 30.67 L-85.13 28.08 L-86.10 27.43 L-87.19 26.84 L-88.35 26.34 L-89.56 25.94 L-92.15 25.41 L-94.92 25.25 L-97.82 25.44 L-101.28 26.04 L-105.20 27.07 L-109.04 28.41 L-111.83 29.62 L-113.64 30.52 L-117.12 32.51 L-119.58 34.18 L-121.13 35.37 L-124 37.92 L-126.53 40.68 L-127.66 42.13 L-128.67 43.63 L-130.92 47.57 L-131.73 49.23 L-132.43 50.94 L-133.01 52.68 L-133.48 54.44 L-133.83 56.21 L-134.07 57.99 L-134.19 59.77 L-134.21 61.54 L-134.12 63.29 L-133.77 65.85 L-133.41 67.50 L-132.94 69.10 L-132.36 70.65 L-131.68 72.12 L-130.90 73.51 L-130.01 74.82 L-129.02 76.03 L-127.80 77.25 L-124.48 76.95 L-119.98 76.79 L-115.53 76.82 L-102.51 77.20 L-98.28 77.15 L-95.15 76.97 L-91.01 76.48 L-87.94 75.89 L-85.92 75.38 L-80.42 73.75 L-76.33 72.80 L-73.06 72.30 L-69.72 72.10 L-52.11 72.10 L-51.54 72.15 L-51 72.32 L-50.50 72.59 L-49.87 73.16 L-49.55 73.63 L-49.33 74.16 L-49.22 74.72 L-49.22 75.28 L-49.33 75.84 L-49.55 76.37 L-50.06 77.05 L-50.74 77.56 L-51.54 77.85 L-52.11 77.90 L-69.63 77.91 L-72.44 78.08 L-74.89 78.44 L-77.42 78.98 L-80.47 79.80 L-84.36 80.97 L-86.67 81.56 L-90.07 82.22 L-93.56 82.66 L-96.97 82.91 L-101.43 83.02 L-105.87 82.95 L-116.74 82.61 L-120.98 82.61Z"/><path fill="var(--signal)" d="M-52.11 78.30 L-51.90 78.29 L-51.68 78.27 L-51.47 78.24 L-51.26 78.19 L-51.05 78.12 L-50.85 78.05 L-50.65 77.96 L-50.46 77.86 L-50.28 77.74 L-50.10 77.62 L-49.94 77.48 L-49.78 77.33 L-49.63 77.18 L-49.49 77.01 L-49.37 76.83 L-49.25 76.65 L-49.15 76.46 L-49.06 76.26 L-48.99 76.06 L-48.92 75.85 L-48.87 75.64 L-48.84 75.43 L-48.82 75.22 L-48.81 75 L-48.82 74.78 L-48.84 74.57 L-48.87 74.36 L-48.92 74.15 L-48.99 73.94 L-49.06 73.74 L-49.15 73.54 L-49.25 73.35 L-49.37 73.17 L-49.49 72.99 L-49.63 72.82 L-49.78 72.67 L-49.94 72.52 L-50.10 72.38 L-50.28 72.26 L-50.46 72.14 L-50.65 72.04 L-50.85 71.95 L-51.05 71.88 L-51.26 71.81 L-51.47 71.76 L-51.68 71.73 L-51.90 71.71 L-52.11 71.70 L-71.91 71.70 L-72.13 71.71 L-72.34 71.73 L-72.55 71.76 L-72.77 71.81 L-72.97 71.88 L-73.17 71.95 L-73.37 72.04 L-73.56 72.14 L-73.74 72.26 L-73.92 72.38 L-74.09 72.52 L-74.24 72.67 L-74.39 72.82 L-74.53 72.99 L-74.65 73.17 L-74.77 73.35 L-74.87 73.54 L-74.96 73.74 L-75.04 73.94 L-75.10 74.15 L-75.15 74.36 L-75.18 74.57 L-75.20 74.78 L-75.21 75 L-75.20 75.22 L-75.18 75.43 L-75.15 75.64 L-75.10 75.85 L-75.04 76.06 L-74.96 76.26 L-74.87 76.46 L-74.77 76.65 L-74.65 76.83 L-74.53 77.01 L-74.39 77.18 L-74.24 77.33 L-74.09 77.48 L-73.92 77.62 L-73.74 77.74 L-73.56 77.86 L-73.37 77.96 L-73.17 78.05 L-72.97 78.12 L-72.77 78.19 L-72.55 78.24 L-72.34 78.27 L-72.13 78.29 L-71.91 78.30Z"/><g fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 94.5 V33.5 H19.5 A15.5 15.5 0 0 1 19.5 64.5 H5.5 M18.5 64.5 L33.5 94.5"/><path d="M83.5 75 A17 19.5 0 0 0 49.5 75 A17 19.5 0 0 0 76.01 91.17"/><path d="M49.5 75 H83.5"/><path d="M100.0 94.5 V55.5 M100.0 71 A11.5 15.5 0 0 1 123.0 71 V94.5 M123.0 71 A11.5 15.5 0 0 1 146.0 71 V94.5"/><path d="M196.5 75 A17 19.5 0 0 0 162.5 75 A17 19.5 0 0 0 189.01 91.17"/><path d="M213.0 94.5 V55.5 M213.0 71 A11.5 15.5 0 0 1 236.0 71 V94.5 M236.0 71 A11.5 15.5 0 0 1 259.0 71 V94.5"/><path d="M275.5 27.5 V94.5 M275.5 75 A17 19.5 0 0 1 309.5 75 A17 19.5 0 0 1 275.5 75"/><path d="M326.0 94.5 V55.5 M326.0 73 A15 17.5 0 0 1 341.0 55.5"/><path d="M388.5 75 A17 19.5 0 0 0 354.5 75 A17 19.5 0 0 0 388.5 75 M388.5 55.5 V94.5"/></g><g fill="none" stroke="var(--signal)" stroke-width="11" stroke-linecap="round"><path d="M162.5 75 H196.5"/></g></svg></a>
     <nav class="nav-links" aria-label="Primary">
-      <a class="nav-hide-md" href="#how">How it works</a>
-      <a class="nav-hide-sm" href="/pricing">Pricing</a>
-      <a class="nav-hide-md" href="https://docs.remembra.dev">Docs</a>
-      <a class="nav-hide-md" href="https://github.com/remembra-ai/remembra">GitHub</a>
-      <button class="theme-btn" type="button" data-theme-toggle aria-label="Switch color theme">
-        <svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke-linecap="round"/></svg>
-        <svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" stroke-linejoin="round"/></svg>
-      </button>
+      <a class="nav-link" href="/#how">How it works</a>
+      <a class="nav-link" href="/pricing">Pricing</a>
+      <a class="nav-link nav-hide-lg" href="https://docs.remembra.dev">Docs</a>
+      <a class="nav-link nav-hide-lg" href="https://github.com/remembra-ai/remembra">GitHub</a>
+      <button class="icon-btn theme-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke-linecap="round"/></svg><svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" stroke-linejoin="round"/></svg></button>
+      <button class="icon-btn menu-btn" type="button" data-menu-toggle aria-expanded="false" aria-controls="site-menu" aria-label="Open menu"><svg class="bars" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="square"/></svg><svg class="x" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke-linecap="square"/></svg></button>
       <a class="btn-nav" href="https://app.remembra.dev/signup">Start free</a>
     </nav>
   </div>
+  <nav class="menu-panel" id="site-menu" aria-label="Menu">
+    <a href="/#how">How it works</a>
+    <a href="/pricing">Pricing</a>
+    <a href="https://docs.remembra.dev">Docs</a>
+    <a href="https://github.com/remembra-ai/remembra">GitHub</a>
+    <a href="/security">Security</a>
+    <a href="/contact">Contact</a>
+  </nav>
 </header>
+<!-- /@header -->
 
 <main id="main">
   <!-- ============================ HERO ============================ -->
-  <section class="wrap hero" aria-labelledby="hero-title">
-    <div class="hero-copy">
-      <p class="eyebrow">Out of credits on one? Keep going on another.</p>
-      <h1 id="hero-title"><span class="l">One agent stops.</span> <span class="l">The next one <mark>already knows.</mark></span></h1>
-      <p class="lede"><strong>Remembra is one cloud memory for all your AI agents.</strong> When one stops, whether it hit a usage limit, ran out of credits or the day ended, the next one picks up from its handoff<span class="long"> without you re-explaining anything</span>. Any tool, any machine.</p>
+  <section class="hero" id="hero" aria-labelledby="hero-title">
+    <canvas class="hero-sky" id="heroSky" aria-hidden="true"></canvas>
+    <div class="wrap hero-grid">
+      <div class="hero-copy">
+        <p class="eyebrow">Out of credits on one? Keep going on another.</p>
+        <h1 id="hero-title"><span class="l">One agent stops.</span> <span class="l">The next one <mark>already knows.</mark></span></h1>
+        <p class="lede"><strong>Remembra is one cloud memory for all your AI agents.</strong> When one stops, whether it ran out of credits, hit a usage limit, or you closed the lid for the day, the next one picks up from the trail it left. <em>Any tool, any machine.</em></p>
 
-      <!-- requires PyPI release with remembra-relay and the published relay setup guide -->
-      <div class="cmd steps" role="group" aria-label="Install commands">
-        <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
-        <button class="copy" type="button" data-copy="pipx install remembra&#10;remembra-install --all --api-key &lt;your-key&gt;&#10;remembra-relay connect" aria-label="Copy install commands">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
-          <span class="copy-label">Copy</span>
-        </button>
-        <span class="sr-only" role="status" data-copy-status></span>
-      </div>
-      <p class="cmd-meta">
-        <a class="free" href="https://app.remembra.dev/signup">Get a free key</a><span class="sep" aria-hidden="true"></span>
-        <a href="https://docs.remembra.dev/guides/relay/">Setup guide</a><span class="sep" aria-hidden="true"></span>
-        <span>Open source</span><span class="sep" aria-hidden="true"></span>
-        <a href="https://docs.remembra.dev/getting-started/docker/">or self-host it</a>
-      </p>
-    </div>
-
-    <!-- Signature: the trail. One agent stops, the baton passes, the next one picks up. -->
-    <figure class="relay" id="relay" data-stage="6" aria-labelledby="relay-cap">
-      <figcaption id="relay-cap" class="sr-only">Example trail for invoices-api: Claude Code on studio-laptop stops (credit balance too low · session ended) and leaves a handoff from its session hook: 3 commits on feat/pdf-export · pushed; 4 files changed; 41 tests passed · 1 failing; open: rounding in totals(). OpenAI Codex on studio-laptop reads the brief through MCP at 14:03 and carries on: fixing rounding in totals().</figcaption>
-      <div class="relay-head" aria-hidden="true">
-        <span class="cmdname">trail</span>
-        <span class="repo" data-k="repo">invoices-api</span>
-        <span class="tag">example</span>
-      </div>
-      <div class="relay-body">
-        <div class="track" id="track">
-          <span class="rail" id="rail" aria-hidden="true"></span>
-          <span class="rail-fill" id="railFill" aria-hidden="true"></span>
-          <span class="baton" id="baton" aria-hidden="true"></span>
-          <ol class="log">
-            <li class="e past" id="nPast">
-              <span class="node" aria-hidden="true"></span>
-              <div>
-                <p class="who"><button class="agent" type="button" data-slot="past" data-k="pastAgent">Kimi CLI</button><span class="where" data-k="pastWhere">home-desktop · yesterday 21:14</span></p>
-                <p class="line" data-k="pastLine">handoff 91d0 · picked up by claude-code</p>
-              </div>
-            </li>
-            <li class="e from" id="nFrom" data-at="1">
-              <span class="node" aria-hidden="true"></span>
-              <div>
-                <p class="who"><button class="agent" type="button" data-slot="from" data-k="fromAgent">Claude Code</button><span class="where" data-k="fromWhere">studio-laptop · 14:02</span></p>
-                <p class="line"><span class="k">working on </span><span data-k="task">PDF export for invoices</span></p>
-                <div class="meter low" id="meter" aria-hidden="true">
-                  <span class="lab" data-k="meterLab">API credits</span>
-                  <span class="bar"><span class="fill" id="meterFill" style="--m:0%"></span></span>
-                  <span class="val" id="meterVal">$0.00</span>
-                </div>
-              </div>
-            </li>
-            <li class="e stop" id="nStop" data-at="2">
-              <span aria-hidden="true"></span>
-              <div><p class="line" data-k="stop">credit balance too low · session ended</p></div>
-            </li>
-            <li class="e hand" data-at="3">
-              <span class="node" aria-hidden="true"></span>
-              <div class="handoff">
-                <p class="handoff-h"><span data-k="kind">Handoff 3c9e</span> <span class="sig" data-k="sig">from claude-code · session hook · 14:02</span></p>
-                <p class="src" data-k="src">facts from git and the session transcript</p>
-                <ul class="facts" id="facts">
-                  <li class="ok">3 commits on feat/pdf-export · pushed</li>
-                  <li class="ok">4 files changed</li>
-                  <li class="warn">41 tests passed · 1 failing</li>
-                  <li class="todo">open: rounding in totals()</li>
-                </ul>
-              </div>
-            </li>
-            <li class="e to" id="nTo" data-at="5">
-              <span class="node" aria-hidden="true"></span>
-              <div>
-                <p class="who"><button class="agent" type="button" data-slot="to" data-k="toAgent">OpenAI Codex</button><span class="where" data-k="toWhere">studio-laptop · 14:03</span></p>
-                <div id="toLines">
-                  <p class="line" data-at="6"><span class="p">&rsaquo;</span>session_brief (MCP): claude-code, 1m ago, feat/pdf-export@a41f2c9</p>
-                  <p class="line" data-at="6"><span class="p">&rarr;</span>fixing rounding in totals()</p>
-                  <p class="line ok" data-at="6"><span class="p">&#10003;</span>42 passed · pushed<span class="cursor" aria-hidden="true"></span></p>
-                </div>
-              </div>
-            </li>
-          </ol>
+        <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
+        <div class="cmd" role="group" aria-label="Install commands">
+          <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
+          <button class="copy" type="button" data-copy="pipx install remembra&#10;remembra-install --all --api-key &lt;your-key&gt;&#10;remembra-relay connect" aria-label="Copy install commands">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
+            <span class="copy-label">Copy</span>
+          </button>
+          <span class="sr-only" role="status" data-copy-status></span>
         </div>
+        <p class="cmd-meta">
+          <a href="https://app.remembra.dev/signup"><b>Free to start</b></a><span class="sep" aria-hidden="true"></span>
+          <a href="https://github.com/remembra-ai/remembra">Open source</a><span class="sep" aria-hidden="true"></span>
+          <a href="https://docs.remembra.dev/getting-started/docker/">or self-host it</a>
+        </p>
       </div>
-      <div class="relay-foot">
-        <div class="row">
-          <span id="seg-label">What stops the first agent?</span>
-          <div class="seg" role="group" aria-labelledby="seg-label">
-            <button type="button" data-scn="credits" aria-pressed="true">Out of credits<span class="prog" aria-hidden="true"></span></button>
-            <button type="button" data-scn="usage" aria-pressed="false">Usage limit<span class="prog" aria-hidden="true"></span></button>
-            <button type="button" data-scn="lid" aria-pressed="false">Lid closed<span class="prog" aria-hidden="true"></span></button>
-            <button type="button" data-scn="day" aria-pressed="false">Next morning<span class="prog" aria-hidden="true"></span></button>
+
+      <!-- The trail. One agent stops, the baton passes, the next one picks up. -->
+      <figure class="relay" id="relay" data-stage="6" aria-labelledby="relay-cap">
+        <figcaption id="relay-cap" class="sr-only">Example trail for invoices-api: Claude Code on studio-laptop stops (credit balance too low · session ended) and leaves a handoff from its session hook: 3 commits on feat/pdf-export · pushed; 4 files changed; 41 tests passed · 1 failing; open: rounding in totals(). OpenAI Codex on studio-laptop reads the brief through MCP at 14:03 and carries on: fixing rounding in totals().</figcaption>
+        <div class="relay-head" aria-hidden="true">
+          <span class="cmdname">remembra-relay trail</span>
+          <span class="repo" data-k="repo">invoices-api</span>
+          <span class="tag">example</span>
+        </div>
+        <div class="relay-body">
+          <div class="track" id="track">
+            <span class="rail" id="rail" aria-hidden="true"></span>
+            <span class="rail-fill" id="railFill" aria-hidden="true"></span>
+            <span class="baton" id="baton" aria-hidden="true"></span>
+            <ol class="log">
+              <li class="e past" id="nPast">
+                <span class="node" aria-hidden="true"></span>
+                <div>
+                  <p class="who"><button class="agent" type="button" data-slot="past" data-k="pastAgent">Kimi CLI</button><span class="where" data-k="pastWhere">home-desktop · yesterday 21:14</span></p>
+                  <p class="line" data-k="pastLine">handoff 91d0 · picked up by claude-code</p>
+                </div>
+              </li>
+              <li class="e from" id="nFrom" data-at="1">
+                <span class="node" aria-hidden="true"></span>
+                <div>
+                  <p class="who"><button class="agent" type="button" data-slot="from" data-k="fromAgent">Claude Code</button><span class="where" data-k="fromWhere">studio-laptop · 14:02</span></p>
+                  <p class="line"><span class="k">working on </span><span data-k="task">PDF export for invoices</span></p>
+                  <div class="meter low" id="meter" aria-hidden="true">
+                    <span class="lab" data-k="meterLab">API credits</span>
+                    <span class="bar"><span class="fill" id="meterFill" style="--m:0%"></span></span>
+                    <span class="val" id="meterVal">$0.00</span>
+                  </div>
+                </div>
+              </li>
+              <li class="e stop" id="nStop" data-at="2">
+                <span aria-hidden="true"></span>
+                <div><p class="line" data-k="stop">credit balance too low · session ended</p></div>
+              </li>
+              <li class="e hand" data-at="3">
+                <span class="node" aria-hidden="true"></span>
+                <div class="handoff">
+                  <p class="handoff-h"><span data-k="kind">Handoff 3c9e</span> <span class="sig" data-k="sig">from claude-code · session hook · 14:02</span></p>
+                  <p class="src" data-k="src">facts from git and the session transcript</p>
+                  <ul class="facts" id="facts">
+                    <li class="ok">3 commits on feat/pdf-export · pushed</li>
+                    <li class="ok">4 files changed</li>
+                    <li class="warn">41 tests passed · 1 failing</li>
+                    <li class="todo">open: rounding in totals()</li>
+                  </ul>
+                </div>
+              </li>
+              <li class="e to" id="nTo" data-at="5">
+                <span class="node" aria-hidden="true"></span>
+                <div>
+                  <p class="who"><button class="agent" type="button" data-slot="to" data-k="toAgent">OpenAI Codex</button><span class="where" data-k="toWhere">studio-laptop · 14:03</span></p>
+                  <div id="toLines">
+                    <p class="line" data-at="6"><span class="p">&rsaquo;</span>session_brief (MCP): claude-code, 1m ago, feat/pdf-export@a41f2c9</p>
+                    <p class="line" data-at="6"><span class="p">&rarr;</span>fixing rounding in totals()</p>
+                    <p class="line ok" data-at="6"><span class="p">&#10003;</span>42 passed · pushed<span class="cursor" aria-hidden="true"></span></p>
+                  </div>
+                </div>
+              </li>
+            </ol>
           </div>
         </div>
-        <p class="hint">Tap an agent's name to hand off to a different agent on another machine. A git log for your agents.</p>
-        <p class="sr-only" role="status" id="relay-status"></p>
+        <div class="relay-foot">
+          <div class="row">
+            <span id="seg-label">What stops the first agent?</span>
+            <div class="seg" role="group" aria-labelledby="seg-label">
+              <button type="button" data-scn="credits" aria-pressed="true">Out of credits<span class="prog" aria-hidden="true"></span></button>
+              <button type="button" data-scn="usage" aria-pressed="false">Usage limit<span class="prog" aria-hidden="true"></span></button>
+              <button type="button" data-scn="lid" aria-pressed="false">Lid closed<span class="prog" aria-hidden="true"></span></button>
+              <button type="button" data-scn="day" aria-pressed="false">Next morning · cloud VM<span class="prog" aria-hidden="true"></span></button>
+            </div>
+          </div>
+          <p class="hint">Tap an agent's name to hand off to a different agent on another machine. A git log for your agents.</p>
+          <p class="sr-only" role="status" id="relay-status"></p>
+        </div>
+      </figure>
+    </div>
+
+    <!-- The brand, condensing out of the cloud. The baton runs this trail on every handoff above. -->
+    <div class="hero-band" id="heroBand">
+      <div class="canvas-room" id="heroMark">
+        <div class="fallback" aria-hidden="true"><!-- @lockup --><svg class="lockup" viewBox="-136.21 18.6 532.21 99.3" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M-122.83 82.72 L-122.05 84.90 L-121.01 86.86 L-119.61 88.72 L-118.24 90.11 L-116.22 91.68 L-114.36 92.77 L-112.30 93.67 L-110.03 94.35 L-107.55 94.80 L-103.80 95.18 L-92.13 96.01 L-78.74 96.57 L-65.97 96.78 L-65.46 100.56 L-64.75 109.98 L-64.40 112.48 L-64.08 113.80 L-63.68 114.48 L-63.14 115.02 L-62.49 115.43 L-61.76 115.71 L-60.98 115.87 L-60.16 115.90 L-59.08 115.77 L-58.32 115.54 L-57.39 115.05 L-56.82 114.56 L-56.25 113.75 L-55.99 112.98 L-55.50 110.08 L-54.76 102.31 L-54.09 98.76 L-52.69 99.14 L-51.18 99.39 L-49.59 99.51 L-47.36 99.48 L-45.65 99.32 L-43.37 98.92 L-41.67 98.50 L-40.03 97.96 L-38.45 97.33 L-36.96 96.58 L-35.59 95.75 L-34.36 94.81 L-33.29 93.79 L-32.68 93.05 L-31.90 91.86 L-31.29 90.61 L-30.73 88.85 L-30.42 86.58 L-30.47 84.77 L-30.83 82.80 L-45.28 87.21 L-49.11 88.54 L-51.78 89.61 L-54.04 90.71 L-55.89 91.82 L-57.31 92.96 L-58.76 94.59 L-59.22 94.93 L-59.74 95.17 L-60.29 95.30 L-61.14 95.29 L-61.69 95.15 L-62.44 94.74 L-62.86 94.36 L-63.33 93.64 L-63.51 93.11 L-63.59 92.54 L-63.50 91.70 L-63.17 90.91 L-61.73 89.16 L-60.76 88.25 L-59.71 87.42 L-58.06 86.31 L-56.76 85.57 L-53.37 83.98 L-48.77 82.25 L-43.53 80.57 L-32.88 77.35 L-31.39 76.02 L-30.26 74.69 L-29.43 73.46 L-28.69 72.12 L-28.03 70.66 L-27.34 68.76 L-26.66 66.43 L-26.20 64.38 L-25.85 62.26 L-25.62 60.09 L-25.50 57.89 L-25.50 55.67 L-25.78 52.02 L-26.11 49.88 L-26.56 47.81 L-27.61 44.58 L-28.40 42.81 L-29.33 41.18 L-30.27 39.92 L-31.49 38.56 L-32.73 37.43 L-34.30 36.31 L-35.86 35.48 L-37.21 34.99 L-38.35 37.39 L-38.95 38.87 L-39.62 40.87 L-40.13 42.92 L-40.48 45.01 L-40.64 46.62 L-40.72 48.80 L-40.63 51.34 L-40.70 51.91 L-40.89 52.45 L-41.18 52.94 L-41.77 53.55 L-42.25 53.85 L-42.79 54.05 L-43.35 54.14 L-44.20 54.07 L-44.74 53.88 L-45.23 53.60 L-45.66 53.22 L-46.14 52.52 L-46.34 51.98 L-46.43 51.42 L-46.50 47.52 L-46.24 44.30 L-45.68 41.14 L-45.01 38.62 L-43.93 35.66 L-42.62 32.89 L-44.22 30.55 L-45.98 28.45 L-47.90 26.57 L-49.45 25.32 L-51.68 23.86 L-54.09 22.66 L-56.68 21.73 L-58.75 21.21 L-61.67 20.76 L-64.68 20.60 L-67.30 20.71 L-70.31 21.16 L-72.51 21.79 L-74.99 22.87 L-77.20 24.28 L-79.14 25.99 L-79.51 26.40 L-79.31 27.29 L-79.36 29.01 L-79.60 31.93 L-79.89 34.11 L-80.58 37.60 L-81.53 40.98 L-83 44.85 L-84.67 48.22 L-85.03 48.66 L-85.47 49.03 L-85.97 49.30 L-86.79 49.51 L-87.36 49.51 L-88.19 49.31 L-88.69 49.04 L-89.13 48.68 L-89.50 48.25 L-89.77 47.74 L-89.94 47.20 L-89.98 46.35 L-89.78 45.52 L-88.58 43.09 L-87.65 40.87 L-86.53 37.42 L-85.96 35.03 L-85.53 32.56 L-85.31 30.67 L-85.13 28.08 L-86.10 27.43 L-87.19 26.84 L-88.35 26.34 L-89.56 25.94 L-92.15 25.41 L-94.92 25.25 L-97.82 25.44 L-101.28 26.04 L-105.20 27.07 L-109.04 28.41 L-111.83 29.62 L-113.64 30.52 L-117.12 32.51 L-119.58 34.18 L-121.13 35.37 L-124 37.92 L-126.53 40.68 L-127.66 42.13 L-128.67 43.63 L-130.92 47.57 L-131.73 49.23 L-132.43 50.94 L-133.01 52.68 L-133.48 54.44 L-133.83 56.21 L-134.07 57.99 L-134.19 59.77 L-134.21 61.54 L-134.12 63.29 L-133.77 65.85 L-133.41 67.50 L-132.94 69.10 L-132.36 70.65 L-131.68 72.12 L-130.90 73.51 L-130.01 74.82 L-129.02 76.03 L-127.80 77.25 L-124.48 76.95 L-119.98 76.79 L-115.53 76.82 L-102.51 77.20 L-98.28 77.15 L-95.15 76.97 L-91.01 76.48 L-87.94 75.89 L-85.92 75.38 L-80.42 73.75 L-76.33 72.80 L-73.06 72.30 L-69.72 72.10 L-52.11 72.10 L-51.54 72.15 L-51 72.32 L-50.50 72.59 L-49.87 73.16 L-49.55 73.63 L-49.33 74.16 L-49.22 74.72 L-49.22 75.28 L-49.33 75.84 L-49.55 76.37 L-50.06 77.05 L-50.74 77.56 L-51.54 77.85 L-52.11 77.90 L-69.63 77.91 L-72.44 78.08 L-74.89 78.44 L-77.42 78.98 L-80.47 79.80 L-84.36 80.97 L-86.67 81.56 L-90.07 82.22 L-93.56 82.66 L-96.97 82.91 L-101.43 83.02 L-105.87 82.95 L-116.74 82.61 L-120.98 82.61Z"/><path fill="var(--signal)" d="M-52.11 78.30 L-51.90 78.29 L-51.68 78.27 L-51.47 78.24 L-51.26 78.19 L-51.05 78.12 L-50.85 78.05 L-50.65 77.96 L-50.46 77.86 L-50.28 77.74 L-50.10 77.62 L-49.94 77.48 L-49.78 77.33 L-49.63 77.18 L-49.49 77.01 L-49.37 76.83 L-49.25 76.65 L-49.15 76.46 L-49.06 76.26 L-48.99 76.06 L-48.92 75.85 L-48.87 75.64 L-48.84 75.43 L-48.82 75.22 L-48.81 75 L-48.82 74.78 L-48.84 74.57 L-48.87 74.36 L-48.92 74.15 L-48.99 73.94 L-49.06 73.74 L-49.15 73.54 L-49.25 73.35 L-49.37 73.17 L-49.49 72.99 L-49.63 72.82 L-49.78 72.67 L-49.94 72.52 L-50.10 72.38 L-50.28 72.26 L-50.46 72.14 L-50.65 72.04 L-50.85 71.95 L-51.05 71.88 L-51.26 71.81 L-51.47 71.76 L-51.68 71.73 L-51.90 71.71 L-52.11 71.70 L-71.91 71.70 L-72.13 71.71 L-72.34 71.73 L-72.55 71.76 L-72.77 71.81 L-72.97 71.88 L-73.17 71.95 L-73.37 72.04 L-73.56 72.14 L-73.74 72.26 L-73.92 72.38 L-74.09 72.52 L-74.24 72.67 L-74.39 72.82 L-74.53 72.99 L-74.65 73.17 L-74.77 73.35 L-74.87 73.54 L-74.96 73.74 L-75.04 73.94 L-75.10 74.15 L-75.15 74.36 L-75.18 74.57 L-75.20 74.78 L-75.21 75 L-75.20 75.22 L-75.18 75.43 L-75.15 75.64 L-75.10 75.85 L-75.04 76.06 L-74.96 76.26 L-74.87 76.46 L-74.77 76.65 L-74.65 76.83 L-74.53 77.01 L-74.39 77.18 L-74.24 77.33 L-74.09 77.48 L-73.92 77.62 L-73.74 77.74 L-73.56 77.86 L-73.37 77.96 L-73.17 78.05 L-72.97 78.12 L-72.77 78.19 L-72.55 78.24 L-72.34 78.27 L-72.13 78.29 L-71.91 78.30Z"/><g fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 94.5 V33.5 H19.5 A15.5 15.5 0 0 1 19.5 64.5 H5.5 M18.5 64.5 L33.5 94.5"/><path d="M83.5 75 A17 19.5 0 0 0 49.5 75 A17 19.5 0 0 0 76.01 91.17"/><path d="M49.5 75 H83.5"/><path d="M100.0 94.5 V55.5 M100.0 71 A11.5 15.5 0 0 1 123.0 71 V94.5 M123.0 71 A11.5 15.5 0 0 1 146.0 71 V94.5"/><path d="M196.5 75 A17 19.5 0 0 0 162.5 75 A17 19.5 0 0 0 189.01 91.17"/><path d="M213.0 94.5 V55.5 M213.0 71 A11.5 15.5 0 0 1 236.0 71 V94.5 M236.0 71 A11.5 15.5 0 0 1 259.0 71 V94.5"/><path d="M275.5 27.5 V94.5 M275.5 75 A17 19.5 0 0 1 309.5 75 A17 19.5 0 0 1 275.5 75"/><path d="M326.0 94.5 V55.5 M326.0 73 A15 17.5 0 0 1 341.0 55.5"/><path d="M388.5 75 A17 19.5 0 0 0 354.5 75 A17 19.5 0 0 0 388.5 75 M388.5 55.5 V94.5"/></g><g fill="none" stroke="var(--signal)" stroke-width="11" stroke-linecap="round"><path d="M162.5 75 H196.5"/></g></svg><!-- /@lockup --></div>
       </div>
-    </figure>
+      <div class="win hero-win" id="heroWin" aria-hidden="true">
+        <div class="tb"><i></i><span id="hwTitle">handoff.saved</span><span class="id" id="hwId">#3c9e</span></div>
+        <div class="bd">
+          <div class="row"><span class="k">from</span><span class="v" id="hwFrom">claude-code@studio-laptop</span></div>
+          <div class="row"><span class="k">to</span><span class="v" id="hwTo">codex@studio-laptop</span></div>
+          <div class="row"><span class="k">via</span><span class="v" id="hwVia">session hook</span></div>
+          <div class="row"><span class="k">facts</span><span class="v" id="hwFacts">4 · from git</span></div>
+          <div class="row"><span class="k">status</span><span class="hot" id="hwStatus">picked up</span></div>
+          <div class="pixbar" id="hwBar"></div>
+        </div>
+      </div>
+      <p class="hero-status" aria-hidden="true"><i></i><span id="heroStatus">claude-code stopped · handoff 3c9e (facts from git) → codex already knows</span></p>
+    </div>
   </section>
 
-  <!-- ======================= 1. HOW IT WORKS ======================= -->
+  <!-- ======================= HOW IT WORKS ======================= -->
   <section class="sec" id="how" aria-labelledby="how-title">
     <div class="wrap sec-grid">
       <div>
-        <p class="eyebrow">How it works</p>
+        <p class="eyebrow"><span class="n">01</span> How it works</p>
         <h2 id="how-title">Set it up once. Then just keep working.</h2>
       </div>
       <div>
         <ol class="legs">
           <li class="leg">
-            <span class="n">01</span>
+            <span class="n">CONNECT</span>
             <h3>Connect</h3>
             <p>Start free for a key, or self-host. Run the three install lines on each machine: <code>remembra-install</code> saves your key and adds Remembra to your agents, then <code>connect</code> shows exactly what it will change; add <code>--apply</code> to wire it in.</p>
           </li>
           <li class="leg">
-            <span class="n">02</span>
+            <span class="n">WORK NORMALLY</span>
             <h3>Work normally</h3>
             <p>Nothing new to learn. When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. Secrets are redacted first.</p>
           </li>
           <li class="leg">
-            <span class="n">03</span>
+            <span class="n">SWITCH ANYTIME</span>
             <h3>Switch anytime</h3>
             <p>Open any agent on any machine. It starts with a short brief: who worked last, what is done, what is not, what is failing, and the next step.</p>
           </li>
@@ -512,40 +236,168 @@
     </div>
   </section>
 
-  <!-- ========================= 2. AGENTS ========================== -->
+  <!-- ======================= CONSTELLATION ======================= -->
   <section class="sec" id="agents" aria-labelledby="agents-title">
     <div class="wrap sec-grid">
       <div>
-        <p class="eyebrow">Every agent</p>
+        <p class="eyebrow"><span class="n">02</span> Every agent, every machine</p>
         <h2 id="agents-title">Whatever you run, wherever it runs.</h2>
         <p class="intro">Your memory lives in the cloud, not on one laptop. Start at your desk, keep going on a server, finish from home, with whichever agent still has credits.</p>
         <ul class="places" aria-label="Where your agents can run">
           <li>laptop</li><li>desktop</li><li>cloud VM</li><li>server</li>
         </ul>
+        <p class="fine" style="margin-top:22px">Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet, so <code>connect</code> only previews them unless you opt in. Until then, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent.</p>
       </div>
       <div>
-        <ol class="lineup">
-          <li><span class="lane">01</span><span class="name">Claude Code</span><span class="note">terminal</span></li>
-          <li><span class="lane">02</span><span class="name">OpenAI Codex</span><span class="note">terminal</span></li>
-          <li><span class="lane">03</span><span class="name">Cursor</span><span class="note">editor</span></li>
-          <li><span class="lane">04</span><span class="name">Gemini CLI</span><span class="note">terminal</span></li>
-          <li><span class="lane">05</span><span class="name">Qwen Code</span><span class="note">terminal</span></li>
-          <li><span class="lane">06</span><span class="name">Kimi CLI</span><span class="note">terminal</span></li>
-          <li class="any"><span class="lane" aria-hidden="true"></span><span class="name">Any MCP-capable agent</span><span class="note">bring your own</span></li>
-        </ol>
-        <p class="fine">Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet, so <code>connect</code> only previews them unless you opt in. Until then, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent.</p>
+        <div class="const" id="constellation">
+          <canvas id="constSky" aria-hidden="true"></canvas>
+          <div class="core" aria-hidden="true"><!-- @pixbrain --><svg class="pixbrain" viewBox="2 3 28 27" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d="M17 4h6v1h-6zM10 5h4v1h-4zM17 5h8v1h-8zM8 6h6v1h-6zM17 6h9v1h-9zM6 7h8v1h-8zM16 7h10v1h-10zM5 8h8v1h-8zM16 8h9v1h-9zM28 8h1v1h-1zM4 9h9v1h-9zM15 9h10v1h-10zM27 9h2v1h-2zM3 10h10v1h-10zM15 10h9v1h-9zM27 10h3v1h-3zM3 11h21v1h-21zM27 11h3v1h-3zM3 12h22v1h-22zM26 12h4v1h-4zM3 13h27v1h-27zM3 14h27v1h-27zM2 15h28v1h-28zM3 16h27v1h-27zM3 17h13v1h-13zM24 17h5v1h-5zM24 18h4v1h-4zM17 19h7v1h-7zM6 20h16v1h-16zM6 21h15v1h-15zM25 21h4v1h-4zM7 22h13v1h-13zM23 22h6v1h-6zM15 23h6v1h-6zM22 23h5v1h-5zM20 24h3v1h-3zM20 25h3v1h-3zM20 26h3v1h-3zM20 27h3v1h-3zM21 28h1v1h-1z"/><path fill="var(--signal)" d="M17 17h7v1h-7zM17 18h7v1h-7z"/></svg><!-- /@pixbrain --><span>one cloud memory</span></div>
+          <button type="button" class="cnode n1" data-agent="Claude Code" data-host="studio-laptop" aria-label="Hand the work to Claude Code"><svg class="pix" viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d=""/></svg><span class="nm">Claude Code</span><span class="host">studio-laptop</span><span class="st"></span></button>
+          <button type="button" class="cnode n2" data-agent="OpenAI Codex" data-host="studio-laptop" aria-label="Hand the work to OpenAI Codex"><svg class="pix" viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d=""/></svg><span class="nm">OpenAI Codex</span><span class="host">studio-laptop</span><span class="st"></span></button>
+          <button type="button" class="cnode n3" data-agent="Cursor" data-host="office-pc" aria-label="Hand the work to Cursor"><svg class="pix" viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d=""/></svg><span class="nm">Cursor</span><span class="host">office-pc</span><span class="st"></span></button>
+          <button type="button" class="cnode n4" data-agent="Gemini CLI" data-host="office-pc" aria-label="Hand the work to Gemini CLI"><svg class="pix" viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d=""/></svg><span class="nm">Gemini CLI</span><span class="host">office-pc</span><span class="st"></span></button>
+          <button type="button" class="cnode n5" data-agent="Qwen Code" data-host="cloud VM" aria-label="Hand the work to Qwen Code"><svg class="pix" viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d=""/></svg><span class="nm">Qwen Code</span><span class="host">cloud VM</span><span class="st"></span></button>
+          <button type="button" class="cnode n6" data-agent="Kimi CLI" data-host="home-desktop" aria-label="Hand the work to Kimi CLI"><svg class="pix" viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d=""/></svg><span class="nm">Kimi CLI</span><span class="host">home-desktop</span><span class="st"></span></button>
+          <div class="cnode n7 any" data-agent="any MCP agent" data-host="build-server"><svg class="pix" viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="currentColor" d=""/></svg><span class="nm">any MCP agent</span><span class="host">build-server</span><span class="st"></span></div>
+        </div>
+        <div class="const-foot">
+          <span class="strip" aria-live="off"><i></i><span id="constStatus">claude-code stopped · handoff 3c9e (facts from git) → codex already knows</span></span>
+          <span>Tap an agent to hand the work to it.</span>
+        </div>
       </div>
     </div>
   </section>
 
-  <!-- ===================== 3. START (orange band) ===================== -->
+  <!-- ========================= CREW MODE ========================= -->
+  <!-- @crew-section -->
+  <!-- Crew mode is off: CREW_LIVE in scripts/site_partials.py; the section is scripts/site-crew-section.html -->
+<!-- /@crew-section -->
+
+  <!-- ========================= DASHBOARD ========================= -->
+  <section class="sec" id="dashboard" aria-labelledby="dash-title">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow"><span class="n">03</span> The dashboard</p>
+        <h2 id="dash-title">Mission control for every agent you run.</h2>
+        <p class="intro">See where each agent left off, what is failing, and the one command that continues the work. The trail keeps every handoff in order, newest first.</p>
+      </div>
+
+      <figure class="app" aria-labelledby="app-cap">
+        <div class="app-bar">
+          <span class="mark" aria-hidden="true"><!-- @mark --><svg class="mark" viewBox="5.8 7.79 84.36 74.2" aria-hidden="true"><path fill="currentColor" fill-rule="evenodd" d="M15.42 55.85 L16.01 57.50 L16.80 58.98 L17.86 60.39 L18.90 61.45 L20.43 62.64 L21.84 63.46 L23.40 64.14 L25.13 64.66 L27 65 L29.84 65.28 L38.68 65.91 L48.83 66.34 L58.50 66.50 L58.89 69.37 L59.42 76.50 L59.69 78.39 L59.93 79.40 L60.24 79.91 L60.65 80.32 L61.14 80.63 L61.69 80.84 L62.28 80.96 L62.90 80.99 L63.72 80.89 L64.30 80.71 L65 80.34 L65.44 79.97 L65.87 79.36 L66.06 78.77 L66.43 76.58 L67 70.69 L67.50 68 L68.56 68.29 L69.70 68.48 L70.91 68.57 L72.60 68.55 L73.89 68.42 L75.62 68.12 L76.91 67.80 L78.16 67.40 L79.35 66.91 L80.48 66.35 L81.51 65.72 L82.45 65.01 L83.26 64.23 L83.72 63.67 L84.31 62.78 L84.77 61.82 L85.20 60.49 L85.43 58.78 L85.39 57.40 L85.12 55.91 L74.18 59.25 L71.27 60.26 L69.25 61.07 L67.54 61.90 L66.14 62.75 L65.06 63.61 L63.96 64.84 L63.62 65.10 L63.22 65.28 L62.80 65.38 L62.16 65.37 L61.74 65.27 L61.17 64.96 L60.86 64.66 L60.50 64.12 L60.36 63.72 L60.30 63.29 L60.37 62.65 L60.62 62.05 L61.71 60.73 L62.45 60.04 L63.24 59.41 L64.49 58.57 L65.48 58.01 L68.05 56.80 L71.53 55.50 L75.50 54.22 L83.57 51.78 L84.70 50.77 L85.55 49.76 L86.18 48.83 L86.74 47.82 L87.24 46.71 L87.77 45.27 L88.28 43.51 L88.63 41.96 L88.90 40.35 L89.07 38.71 L89.16 37.03 L89.16 35.36 L88.95 32.59 L88.70 30.97 L88.35 29.40 L87.56 26.96 L86.96 25.61 L86.26 24.38 L85.55 23.42 L84.62 22.40 L83.68 21.54 L82.49 20.69 L81.31 20.06 L80.29 19.69 L79.43 21.51 L78.97 22.63 L78.46 24.15 L78.08 25.70 L77.81 27.28 L77.69 28.50 L77.63 30.15 L77.70 32.08 L77.64 32.51 L77.50 32.91 L77.28 33.29 L76.83 33.75 L76.47 33.98 L76.06 34.13 L75.64 34.20 L74.99 34.14 L74.59 34 L74.21 33.78 L73.89 33.50 L73.52 32.97 L73.37 32.56 L73.30 32.14 L73.25 29.18 L73.45 26.74 L73.87 24.35 L74.38 22.44 L75.20 20.20 L76.19 18.10 L74.98 16.32 L73.65 14.73 L72.19 13.31 L71.01 12.36 L69.33 11.26 L67.50 10.35 L65.54 9.64 L63.97 9.25 L61.76 8.91 L59.48 8.79 L57.49 8.87 L55.21 9.22 L53.55 9.69 L51.66 10.51 L49.99 11.57 L48.53 12.87 L48.24 13.18 L48.40 13.85 L48.36 15.16 L48.18 17.37 L47.95 19.02 L47.43 21.67 L46.71 24.23 L45.60 27.16 L44.34 29.71 L44.06 30.05 L43.73 30.32 L43.35 30.53 L42.73 30.69 L42.30 30.69 L41.67 30.54 L41.29 30.34 L40.95 30.06 L40.68 29.73 L40.47 29.35 L40.34 28.94 L40.31 28.30 L40.46 27.67 L41.37 25.83 L42.08 24.15 L42.93 21.53 L43.36 19.72 L43.68 17.85 L43.85 16.41 L43.98 14.45 L43.25 13.96 L42.42 13.51 L41.55 13.14 L40.63 12.83 L38.67 12.43 L36.57 12.31 L34.37 12.45 L31.75 12.91 L28.78 13.69 L25.87 14.71 L23.76 15.62 L22.38 16.30 L19.75 17.81 L17.89 19.08 L16.71 19.98 L14.54 21.91 L12.62 24 L11.77 25.10 L11 26.23 L9.29 29.22 L8.68 30.48 L8.15 31.77 L7.71 33.09 L7.36 34.42 L7.09 35.77 L6.91 37.12 L6.82 38.46 L6.80 39.80 L6.88 41.12 L7.14 43.06 L7.41 44.32 L7.77 45.53 L8.21 46.70 L8.72 47.82 L9.31 48.87 L9.99 49.86 L10.73 50.78 L11.66 51.70 L14.18 51.48 L17.59 51.36 L20.96 51.38 L30.82 51.67 L34.02 51.63 L36.40 51.49 L39.53 51.12 L41.86 50.68 L43.39 50.29 L47.56 49.06 L50.65 48.33 L53.13 47.96 L55.66 47.80 L69 47.80 L69.43 47.84 L69.84 47.97 L70.22 48.17 L70.70 48.60 L70.94 48.96 L71.11 49.36 L71.19 49.78 L71.19 50.22 L71.11 50.64 L70.94 51.04 L70.56 51.56 L70.04 51.94 L69.43 52.16 L69 52.20 L55.73 52.20 L53.60 52.33 L51.74 52.61 L49.83 53.02 L47.51 53.64 L44.57 54.52 L42.82 54.97 L40.24 55.47 L37.60 55.80 L35.02 55.99 L31.64 56.07 L28.27 56.02 L20.04 55.76 L16.83 55.77Z"/><path fill="var(--signal)" d="M69 52.50 L69.16 52.49 L69.33 52.48 L69.49 52.45 L69.65 52.41 L69.80 52.37 L69.96 52.31 L70.11 52.24 L70.25 52.17 L70.39 52.08 L70.52 51.98 L70.65 51.88 L70.77 51.77 L70.88 51.65 L70.98 51.52 L71.08 51.39 L71.17 51.25 L71.24 51.11 L71.31 50.96 L71.37 50.80 L71.41 50.65 L71.45 50.49 L71.48 50.33 L71.49 50.16 L71.50 50 L71.49 49.84 L71.48 49.67 L71.45 49.51 L71.41 49.35 L71.37 49.20 L71.31 49.04 L71.24 48.89 L71.17 48.75 L71.08 48.61 L70.98 48.48 L70.88 48.35 L70.77 48.23 L70.65 48.12 L70.52 48.02 L70.39 47.92 L70.25 47.83 L70.11 47.76 L69.96 47.69 L69.80 47.63 L69.65 47.59 L69.49 47.55 L69.33 47.52 L69.16 47.51 L69 47.50 L54 47.50 L53.84 47.51 L53.67 47.52 L53.51 47.55 L53.35 47.59 L53.20 47.63 L53.04 47.69 L52.89 47.76 L52.75 47.83 L52.61 47.92 L52.48 48.02 L52.35 48.12 L52.23 48.23 L52.12 48.35 L52.02 48.48 L51.92 48.61 L51.83 48.75 L51.76 48.89 L51.69 49.04 L51.63 49.20 L51.59 49.35 L51.55 49.51 L51.52 49.67 L51.51 49.84 L51.50 50 L51.51 50.16 L51.52 50.33 L51.55 50.49 L51.59 50.65 L51.63 50.80 L51.69 50.96 L51.76 51.11 L51.83 51.25 L51.92 51.39 L52.02 51.52 L52.12 51.65 L52.23 51.77 L52.35 51.88 L52.48 51.98 L52.61 52.08 L52.75 52.17 L52.89 52.24 L53.04 52.31 L53.20 52.37 L53.35 52.41 L53.51 52.45 L53.67 52.48 L53.84 52.49 L54 52.50Z"/></svg><!-- /@mark --></span>
+          <span class="proj">invoices-api</span>
+          <div class="app-tabs" role="tablist" aria-label="Dashboard views">
+            <button type="button" role="tab" id="tab-home" aria-selected="true" aria-controls="view-home">Mission control</button>
+            <button type="button" role="tab" id="tab-trail" aria-selected="false" aria-controls="view-trail" tabindex="-1">Trail</button>
+          </div>
+          <span class="kbd" aria-hidden="true">&#8984;K</span>
+        </div>
+        <div class="app-body">
+          <div class="app-side" aria-hidden="true">
+            <span class="on" data-side="home"><i></i>Home</span>
+            <span data-side="trail"><i></i>Trail</span>
+            <span><i></i>Agents</span>
+            <span><i></i>Inbox<em>2</em></span>
+            <span><i></i>Memory</span>
+            <span><i></i>Graph</span>
+            <span><i></i>Settings</span>
+          </div>
+
+          <div class="app-main" role="tabpanel" id="view-home" aria-labelledby="tab-home">
+            <p class="rr-eyebrow">Mission control · Thu, Sep 25</p>
+            <h3>Good evening<b>.</b></h3>
+            <p class="status">Since you last looked (2h ago): 3 handoffs from 2 agents, 1 with failing checks.</p>
+            <div class="app-cols">
+              <article class="lh" aria-label="Last handoff">
+                <div class="lh-h"><b>last handoff</b><span>--project invoices-api</span><time>4m ago</time></div>
+                <div class="lh-b">
+                  <p class="lh-prev"><b>Kimi CLI</b> handed off yesterday · main@91d0c2e</p>
+                  <div class="lh-cur">
+                    <p><span class="nm">Claude Code</span><span class="ver">verified agent</span></p>
+                    <p class="pills"><span>feat/pdf-export@a41f2c9</span><span class="fail">1 failing</span><span class="open">1 open</span></p>
+                    <p class="hl">PDF export for invoices: 3 commits pushed, rounding in totals() still open.</p>
+                  </div>
+                  <dl class="lh-sec">
+                    <div><dt>Done</dt><dd>3 commits on feat/pdf-export, pushed · 4 files changed</dd></div>
+                    <div><dt>Failing</dt><dd>test_invoice_totals_rounding</dd></div>
+                    <div><dt>Next</dt><dd>fix rounding in totals() (suggested by claude-code, unverified)</dd></div>
+                  </dl>
+                  <div class="lh-cont">
+                    <p class="k">Continue with</p>
+                    <code>git switch feat/pdf-export &amp;&amp; remembra-relay brief --project invoices-api</code>
+                  </div>
+                </div>
+              </article>
+              <div class="side-cards">
+                <div class="card">
+                  <p class="rr-eyebrow">Last 7 days</p>
+                  <p class="t">This week</p>
+                  <p>14 handoffs across 4 agents, 3 projects.</p>
+                  <div class="spark" aria-hidden="true"><i style="--h:30%"></i><i style="--h:55%"></i><i style="--h:20%"></i><i style="--h:70%"></i><i style="--h:45%"></i><i style="--h:85%"></i><i style="--h:60%"></i></div>
+                </div>
+                <div class="card">
+                  <p class="rr-eyebrow">Plan · this month</p>
+                  <p class="t">Solo plan</p>
+                  <p>Smart credits: 640 of 2,200 used. Handoffs never use credits.</p>
+                  <div class="pbar" aria-hidden="true"><i style="--w:29%"></i></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="app-main" role="tabpanel" id="view-trail" aria-labelledby="tab-trail" hidden>
+            <p class="rr-eyebrow">Trail · invoices-api</p>
+            <h3>git log for your agents<b>.</b></h3>
+            <p class="status">Every handoff and checkpoint, newest first.</p>
+            <ol class="trail-list">
+              <li class="cur"><span class="dot" aria-hidden="true"></span><span class="a">claude-code<span class="when">today 14:02</span></span><span class="what"><b>handoff 3c9e</b> · feat/pdf-export@a41f2c9 · 3 commits pushed · <span class="f">1 failing</span> · next: rounding in totals()</span></li>
+              <li><span class="dot" aria-hidden="true"></span><span class="a">claude-code<span class="when">today 12:40</span></span><span class="what"><b>checkpoint 7a02</b> · PDF layout done, fonts embedded</span></li>
+              <li><span class="dot" aria-hidden="true"></span><span class="a">kimi<span class="when">yesterday 21:14</span></span><span class="what"><b>handoff 91d0</b> · main@91d0c2e · invoice numbering merged · picked up by claude-code</span></li>
+              <li><span class="dot" aria-hidden="true"></span><span class="a">codex<span class="when">yesterday 17:55</span></span><span class="what"><b>handoff 5e3b</b> · feat/numbering@0c7d4e1 · 12 passed · next: numbering migration</span></li>
+            </ol>
+          </div>
+        </div>
+      </figure>
+      <p class="app-cap" id="app-cap">Product UI: the dashboard's Mission control and Trail, recreated here with example data.</p>
+    </div>
+  </section>
+
+  <!-- ===================== PICK UP FROM ANYWHERE ===================== -->
+  <!-- beta: the connector is built and tested locally; not yet verified inside the live Claude and ChatGPT apps -->
+  <!-- requires docs.remembra.dev deployed with integrations/claude-and-chatgpt-apps.md -->
+  <section class="sec" id="anywhere" aria-labelledby="anywhere-title">
+    <div class="wrap anywhere">
+      <div>
+        <p class="eyebrow"><span class="n">04</span> Pick up from anywhere <span class="tag signal">Beta</span></p>
+        <h2 id="anywhere-title">Check on your agents from your phone.</h2>
+        <p class="intro">Add the Remembra connector to the Claude apps or to ChatGPT. Ask where the work stands, read the trail, search your memory, or leave an agent an instruction. <b>It sees it first thing in its next session.</b></p>
+        <ul class="apps-list">
+          <li><b>Claude</b><span>claude.ai, Claude Desktop and the Claude phone apps, as a custom connector.</span></li>
+          <li><b>ChatGPT</b><span>On the web, in developer mode (Plus, Pro, Business, Enterprise and Education).</span></li>
+          <li><b>Read-mostly</b><span>Nothing over the connector edits or deletes memories. It can add a note and message an agent's inbox.</span></li>
+        </ul>
+        <p class="fine" style="margin-top:18px">Beta: the connector is built and tested against Remembra's own server, and we are still verifying it inside the live Claude and ChatGPT apps. <a class="link" href="https://docs.remembra.dev/integrations/claude-and-chatgpt-apps/">Connector setup</a></p>
+      </div>
+      <div class="phone" role="img" aria-label="Example chat in the Claude app with the Remembra connector: asking where the invoices work was left, then telling claude-code to fix the rounding first thing tomorrow.">
+        <div class="ph-top" aria-hidden="true"><b>Claude</b><span>Remembra connector · on</span></div>
+        <div class="chat" aria-hidden="true">
+          <p class="msg me">Where did we leave the invoices work?</p>
+          <div class="msg"><span class="tool">session_brief</span><br>Claude Code handed off 1h ago on <b>feat/pdf-export</b>. Done: 3 commits pushed. Failing: 1 rounding test. Suggested next step: fix rounding in totals().</div>
+          <p class="msg me">Tell claude-code to fix the rounding first thing tomorrow.</p>
+          <div class="msg"><span class="tool">send_to_inbox</span><br>Left in claude-code's inbox. It will be at the top of its next brief.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== START (orange band) ===================== -->
   <section class="band" id="start" aria-labelledby="start-title">
     <div class="wrap band-grid">
       <div>
         <p class="eyebrow">Start</p>
-        <h2 id="start-title">Free to start. Covered on every project.</h2>
-        <!-- requires PyPI release with remembra-relay and the published relay setup guide -->
-        <div class="cmd steps" role="group" aria-label="Install commands">
+        <h2 id="start-title">Free to start. Every handoff stays free.</h2>
+        <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
+        <div class="cmd" role="group" aria-label="Install commands">
           <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
           <button class="copy" type="button" data-copy="pipx install remembra&#10;remembra-install --all --api-key &lt;your-key&gt;&#10;remembra-relay connect" aria-label="Copy install commands">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
@@ -554,23 +406,23 @@
           <span class="sr-only" role="status" data-copy-status></span>
         </div>
         <p class="cmd-meta">
-          <a class="free" href="https://app.remembra.dev/signup">Get a free key</a><span class="sep" aria-hidden="true"></span>
+          <a href="https://app.remembra.dev/signup"><b>Get a free key</b></a><span class="sep" aria-hidden="true"></span>
           <a href="https://docs.remembra.dev/guides/relay/">Setup guide</a><span class="sep" aria-hidden="true"></span>
-          <span>Open source</span><span class="sep" aria-hidden="true"></span>
           <a href="https://docs.remembra.dev/getting-started/docker/">or self-host it</a>
         </p>
 
         <!-- requires billing: Solo, Pro, Team and Founding 100 live in Paddle and the dashboard -->
         <div class="prices">
-          <a href="/pricing" aria-label="See pricing: Free $0, Solo $12 a month, Founding 100 $9 a month billed yearly and locked for life, Pro $29 a month, Team $15 a seat a month">
+          <a href="/pricing" aria-label="See pricing: Free $0, Solo $12 a month, Founding 100 $9 a month billed yearly and locked for life, Pro $29 a month, Team $15 a seat a month. Handoffs, pickups, inbox, trail and search are always free.">
             <ul aria-hidden="true">
               <li><span class="pn">Free</span><span class="pv">$0</span><span class="pd">no card</span></li>
-              <li><span class="pn">Solo</span><span class="pv">$12<small>/mo</small></span><span class="pd">for one developer</span></li>
-              <li class="founding"><span class="pn">Founding 100</span><span class="pv">$9<small>/mo</small></span><span class="pd">billed yearly, locked for life</span></li>
+              <li><span class="pn">Solo</span><span class="pv">$12<small>/mo</small></span><span class="pd">one developer</span></li>
+              <li class="founding"><span class="pn">Founding 100</span><span class="pv">$9<small>/mo</small></span><span class="pd">$108 yearly, locked for life</span></li>
               <li><span class="pn">Pro</span><span class="pv">$29<small>/mo</small></span><span class="pd">heavy use</span></li>
               <li><span class="pn">Team</span><span class="pv">$15<small>/seat</small></span><span class="pd">3-seat minimum</span></li>
             </ul>
-            <span class="more">See pricing <span aria-hidden="true">&rarr;</span></span>
+            <p class="free-line" aria-hidden="true">Handoffs, pickups, inbox, trail and search are always free.</p>
+            <span class="more" aria-hidden="true">See pricing <span>&rarr;</span></span>
           </a>
         </div>
       </div>
@@ -578,34 +430,66 @@
       <dl class="trust" aria-label="How your memory is protected">
         <div><dt>Redacted</dt><dd>Keys, tokens and other secrets are stripped out before anything is saved.</dd></div>
         <div><dt>Isolated</dt><dd>Every account's memory is walled off, and project-scoped keys only see their own projects.</dd></div>
-        <div><dt>Traceable</dt><dd>Each handoff records the agent, session and time that wrote it, and whether its facts came from git or from the agent. Give each agent its own scoped key and it can't write as another.</dd></div>
-        <div><dt>Open</dt><dd>The core is MIT-licensed open source. Read it, run it, host it yourself.</dd></div>
+        <div><dt>Attributed</dt><dd>Every handoff names the agent, session and time that wrote it, and whether its facts came from git or from the agent. Give an agent its own scoped key and it is key-verified; it can't write as another.</dd></div>
+        <div><dt>Open</dt><dd>The core is MIT-licensed open source. Read it, run it, <a href="https://docs.remembra.dev/getting-started/docker/">host it yourself</a>.</dd></div>
       </dl>
     </div>
   </section>
 </main>
 
+<!-- @footer -->
 <footer class="site-footer">
-  <div class="wrap foot">
+  <div class="terrain" aria-hidden="true"></div>
+  <div class="ground"><div class="wrap foot">
     <div class="foot-brand">
-      <span class="brand-name">Remembra</span>
-      <p>One cloud memory for all your AI agents. &copy; 2026 DolphyTech.</p>
+      <a class="brand" href="/" aria-label="Remembra home"><svg class="lockup" viewBox="-136.21 18.6 532.21 99.3" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M-122.83 82.72 L-122.05 84.90 L-121.01 86.86 L-119.61 88.72 L-118.24 90.11 L-116.22 91.68 L-114.36 92.77 L-112.30 93.67 L-110.03 94.35 L-107.55 94.80 L-103.80 95.18 L-92.13 96.01 L-78.74 96.57 L-65.97 96.78 L-65.46 100.56 L-64.75 109.98 L-64.40 112.48 L-64.08 113.80 L-63.68 114.48 L-63.14 115.02 L-62.49 115.43 L-61.76 115.71 L-60.98 115.87 L-60.16 115.90 L-59.08 115.77 L-58.32 115.54 L-57.39 115.05 L-56.82 114.56 L-56.25 113.75 L-55.99 112.98 L-55.50 110.08 L-54.76 102.31 L-54.09 98.76 L-52.69 99.14 L-51.18 99.39 L-49.59 99.51 L-47.36 99.48 L-45.65 99.32 L-43.37 98.92 L-41.67 98.50 L-40.03 97.96 L-38.45 97.33 L-36.96 96.58 L-35.59 95.75 L-34.36 94.81 L-33.29 93.79 L-32.68 93.05 L-31.90 91.86 L-31.29 90.61 L-30.73 88.85 L-30.42 86.58 L-30.47 84.77 L-30.83 82.80 L-45.28 87.21 L-49.11 88.54 L-51.78 89.61 L-54.04 90.71 L-55.89 91.82 L-57.31 92.96 L-58.76 94.59 L-59.22 94.93 L-59.74 95.17 L-60.29 95.30 L-61.14 95.29 L-61.69 95.15 L-62.44 94.74 L-62.86 94.36 L-63.33 93.64 L-63.51 93.11 L-63.59 92.54 L-63.50 91.70 L-63.17 90.91 L-61.73 89.16 L-60.76 88.25 L-59.71 87.42 L-58.06 86.31 L-56.76 85.57 L-53.37 83.98 L-48.77 82.25 L-43.53 80.57 L-32.88 77.35 L-31.39 76.02 L-30.26 74.69 L-29.43 73.46 L-28.69 72.12 L-28.03 70.66 L-27.34 68.76 L-26.66 66.43 L-26.20 64.38 L-25.85 62.26 L-25.62 60.09 L-25.50 57.89 L-25.50 55.67 L-25.78 52.02 L-26.11 49.88 L-26.56 47.81 L-27.61 44.58 L-28.40 42.81 L-29.33 41.18 L-30.27 39.92 L-31.49 38.56 L-32.73 37.43 L-34.30 36.31 L-35.86 35.48 L-37.21 34.99 L-38.35 37.39 L-38.95 38.87 L-39.62 40.87 L-40.13 42.92 L-40.48 45.01 L-40.64 46.62 L-40.72 48.80 L-40.63 51.34 L-40.70 51.91 L-40.89 52.45 L-41.18 52.94 L-41.77 53.55 L-42.25 53.85 L-42.79 54.05 L-43.35 54.14 L-44.20 54.07 L-44.74 53.88 L-45.23 53.60 L-45.66 53.22 L-46.14 52.52 L-46.34 51.98 L-46.43 51.42 L-46.50 47.52 L-46.24 44.30 L-45.68 41.14 L-45.01 38.62 L-43.93 35.66 L-42.62 32.89 L-44.22 30.55 L-45.98 28.45 L-47.90 26.57 L-49.45 25.32 L-51.68 23.86 L-54.09 22.66 L-56.68 21.73 L-58.75 21.21 L-61.67 20.76 L-64.68 20.60 L-67.30 20.71 L-70.31 21.16 L-72.51 21.79 L-74.99 22.87 L-77.20 24.28 L-79.14 25.99 L-79.51 26.40 L-79.31 27.29 L-79.36 29.01 L-79.60 31.93 L-79.89 34.11 L-80.58 37.60 L-81.53 40.98 L-83 44.85 L-84.67 48.22 L-85.03 48.66 L-85.47 49.03 L-85.97 49.30 L-86.79 49.51 L-87.36 49.51 L-88.19 49.31 L-88.69 49.04 L-89.13 48.68 L-89.50 48.25 L-89.77 47.74 L-89.94 47.20 L-89.98 46.35 L-89.78 45.52 L-88.58 43.09 L-87.65 40.87 L-86.53 37.42 L-85.96 35.03 L-85.53 32.56 L-85.31 30.67 L-85.13 28.08 L-86.10 27.43 L-87.19 26.84 L-88.35 26.34 L-89.56 25.94 L-92.15 25.41 L-94.92 25.25 L-97.82 25.44 L-101.28 26.04 L-105.20 27.07 L-109.04 28.41 L-111.83 29.62 L-113.64 30.52 L-117.12 32.51 L-119.58 34.18 L-121.13 35.37 L-124 37.92 L-126.53 40.68 L-127.66 42.13 L-128.67 43.63 L-130.92 47.57 L-131.73 49.23 L-132.43 50.94 L-133.01 52.68 L-133.48 54.44 L-133.83 56.21 L-134.07 57.99 L-134.19 59.77 L-134.21 61.54 L-134.12 63.29 L-133.77 65.85 L-133.41 67.50 L-132.94 69.10 L-132.36 70.65 L-131.68 72.12 L-130.90 73.51 L-130.01 74.82 L-129.02 76.03 L-127.80 77.25 L-124.48 76.95 L-119.98 76.79 L-115.53 76.82 L-102.51 77.20 L-98.28 77.15 L-95.15 76.97 L-91.01 76.48 L-87.94 75.89 L-85.92 75.38 L-80.42 73.75 L-76.33 72.80 L-73.06 72.30 L-69.72 72.10 L-52.11 72.10 L-51.54 72.15 L-51 72.32 L-50.50 72.59 L-49.87 73.16 L-49.55 73.63 L-49.33 74.16 L-49.22 74.72 L-49.22 75.28 L-49.33 75.84 L-49.55 76.37 L-50.06 77.05 L-50.74 77.56 L-51.54 77.85 L-52.11 77.90 L-69.63 77.91 L-72.44 78.08 L-74.89 78.44 L-77.42 78.98 L-80.47 79.80 L-84.36 80.97 L-86.67 81.56 L-90.07 82.22 L-93.56 82.66 L-96.97 82.91 L-101.43 83.02 L-105.87 82.95 L-116.74 82.61 L-120.98 82.61Z"/><path fill="var(--signal)" d="M-52.11 78.30 L-51.90 78.29 L-51.68 78.27 L-51.47 78.24 L-51.26 78.19 L-51.05 78.12 L-50.85 78.05 L-50.65 77.96 L-50.46 77.86 L-50.28 77.74 L-50.10 77.62 L-49.94 77.48 L-49.78 77.33 L-49.63 77.18 L-49.49 77.01 L-49.37 76.83 L-49.25 76.65 L-49.15 76.46 L-49.06 76.26 L-48.99 76.06 L-48.92 75.85 L-48.87 75.64 L-48.84 75.43 L-48.82 75.22 L-48.81 75 L-48.82 74.78 L-48.84 74.57 L-48.87 74.36 L-48.92 74.15 L-48.99 73.94 L-49.06 73.74 L-49.15 73.54 L-49.25 73.35 L-49.37 73.17 L-49.49 72.99 L-49.63 72.82 L-49.78 72.67 L-49.94 72.52 L-50.10 72.38 L-50.28 72.26 L-50.46 72.14 L-50.65 72.04 L-50.85 71.95 L-51.05 71.88 L-51.26 71.81 L-51.47 71.76 L-51.68 71.73 L-51.90 71.71 L-52.11 71.70 L-71.91 71.70 L-72.13 71.71 L-72.34 71.73 L-72.55 71.76 L-72.77 71.81 L-72.97 71.88 L-73.17 71.95 L-73.37 72.04 L-73.56 72.14 L-73.74 72.26 L-73.92 72.38 L-74.09 72.52 L-74.24 72.67 L-74.39 72.82 L-74.53 72.99 L-74.65 73.17 L-74.77 73.35 L-74.87 73.54 L-74.96 73.74 L-75.04 73.94 L-75.10 74.15 L-75.15 74.36 L-75.18 74.57 L-75.20 74.78 L-75.21 75 L-75.20 75.22 L-75.18 75.43 L-75.15 75.64 L-75.10 75.85 L-75.04 76.06 L-74.96 76.26 L-74.87 76.46 L-74.77 76.65 L-74.65 76.83 L-74.53 77.01 L-74.39 77.18 L-74.24 77.33 L-74.09 77.48 L-73.92 77.62 L-73.74 77.74 L-73.56 77.86 L-73.37 77.96 L-73.17 78.05 L-72.97 78.12 L-72.77 78.19 L-72.55 78.24 L-72.34 78.27 L-72.13 78.29 L-71.91 78.30Z"/><g fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 94.5 V33.5 H19.5 A15.5 15.5 0 0 1 19.5 64.5 H5.5 M18.5 64.5 L33.5 94.5"/><path d="M83.5 75 A17 19.5 0 0 0 49.5 75 A17 19.5 0 0 0 76.01 91.17"/><path d="M49.5 75 H83.5"/><path d="M100.0 94.5 V55.5 M100.0 71 A11.5 15.5 0 0 1 123.0 71 V94.5 M123.0 71 A11.5 15.5 0 0 1 146.0 71 V94.5"/><path d="M196.5 75 A17 19.5 0 0 0 162.5 75 A17 19.5 0 0 0 189.01 91.17"/><path d="M213.0 94.5 V55.5 M213.0 71 A11.5 15.5 0 0 1 236.0 71 V94.5 M236.0 71 A11.5 15.5 0 0 1 259.0 71 V94.5"/><path d="M275.5 27.5 V94.5 M275.5 75 A17 19.5 0 0 1 309.5 75 A17 19.5 0 0 1 275.5 75"/><path d="M326.0 94.5 V55.5 M326.0 73 A15 17.5 0 0 1 341.0 55.5"/><path d="M388.5 75 A17 19.5 0 0 0 354.5 75 A17 19.5 0 0 0 388.5 75 M388.5 55.5 V94.5"/></g><g fill="none" stroke="var(--signal)" stroke-width="11" stroke-linecap="round"><path d="M162.5 75 H196.5"/></g></svg></a>
+      <p>One cloud memory for all your AI agents. The core is open source under the MIT license.</p>
+      <p>&copy; 2026 DolphyTech</p>
     </div>
     <nav aria-label="Footer">
       <ul class="foot-links">
-        <li><a href="/pricing">Pricing</a></li>
         <li><a href="https://docs.remembra.dev">Docs</a></li>
         <li><a href="https://github.com/remembra-ai/remembra">GitHub</a></li>
+        <li><a href="/pricing">Pricing</a></li>
         <li><a href="/security">Security</a></li>
         <li><a href="/privacy">Privacy</a></li>
         <li><a href="/terms">Terms</a></li>
         <li><a href="/contact">Contact</a></li>
       </ul>
     </nav>
-  </div>
+  </div></div>
 </footer>
+<!-- /@footer -->
 
-<script src="/site.js" defer></script>
-<script src="/relay-demo.js" defer></script>
+<script src="site.js" defer></script>
+<script src="relay-demo.js" defer></script>
+<script src="hero.js" defer></script>
+<script src="constellation.js" defer></script>
+<script>
+  /* Dashboard replica: two views, as real tabs (arrow keys move between them). */
+  (function () {
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.app-tabs [role="tab"]'));
+    var side = document.querySelectorAll(".app-side [data-side]");
+    function select(tab, focus) {
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.setAttribute("aria-selected", String(on));
+        t.tabIndex = on ? 0 : -1;
+        document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
+      });
+      side.forEach(function (s) { s.classList.toggle("on", "tab-" + s.getAttribute("data-side") === tab.id); });
+      if (focus) tab.focus();
+    }
+    tabs.forEach(function (t, i) {
+      t.addEventListener("click", function () { select(t, false); });
+      t.addEventListener("keydown", function (e) {
+        if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
+          e.preventDefault();
+          select(tabs[(i + (e.key === "ArrowRight" ? 1 : tabs.length - 1)) % tabs.length], true);
+        }
+      });
+    });
+  })();
+</script>
 </body>
 </html>

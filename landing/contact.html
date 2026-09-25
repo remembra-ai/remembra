@@ -1,340 +1,175 @@
-<!DOCTYPE html>
-<html lang="en" class="scroll-smooth" data-theme="dark">
+<!doctype html>
+<html lang="en" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contact - Remembra | Get in Touch</title>
-    <meta name="description" content="Get in touch with the Remembra team. Questions, feedback, enterprise inquiries, or partnership opportunities.">
-    
-    <!-- Open Graph -->
-    <meta property="og:title" content="Contact Remembra">
-    <meta property="og:description" content="Questions? Feedback? Enterprise needs? We're here to help.">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://remembra.dev/contact">
-    
-    <!-- Favicons -->
-    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="shortcut icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    <meta name="apple-mobile-web-app-title" content="Remembra" />
-    
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#FF9160',
-                        'primary-dark': '#FF7F45',
-                        secondary: '#FF9160',
-                        dark: '#131416',
-                        'dark-lighter': '#1A1C1F',
-                        'dark-card': '#1B1D20',
-                    }
-                }
-            }
-        }
-    </script>
-    
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
-    <link rel="stylesheet" href="/site.css">
-    
-    <style>
-        body { font-family: 'Inter', sans-serif; }
-        .gradient-text {
-            background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 50%, #C4B5FD 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        /* Brand refresh: filled buttons use signal orange with graphite text (AA contrast). */
-        .bg-primary { background-color: #FF6B2B !important; color: #15171A !important; }
-        .hover\:bg-primary-dark:hover { background-color: #FF7F45 !important; }
-        .gradient-text {
-            background: linear-gradient(135deg, #FF6B2B 0%, #FF9160 60%, #FFB38F 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Contact · Remembra</title>
+<meta name="description" content="Questions about Remembra, enterprise needs, support or partnerships: write to us and we reply within a day or two.">
+<meta property="og:title" content="Contact · Remembra">
+<meta property="og:description" content="Questions, enterprise, support or partnerships. We reply within a day or two.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://remembra.dev/contact">
+<meta property="og:image" content="https://remembra.dev/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://remembra.dev/contact">
+<!-- @head -->
+<script>
+  /* Dark for every visitor unless they chose light. Storage may be unavailable; the page works without it. */
+  (function () { var t = "dark"; try { if (localStorage.getItem("remembra-theme") === "light") t = "light"; } catch (e) {} document.documentElement.setAttribute("data-theme", t); })();
+</script>
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="theme-color" content="#131416">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site.css">
+<!-- /@head -->
+<style>
+.contact-grid { display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: clamp(28px, 5vw, 72px); align-items: start; padding-bottom: clamp(56px, 8vw, 104px); }
+.form { display: grid; gap: 18px; }
+.form .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.form .req { color: var(--signal-ink); }
+.form .note { font-size: var(--t-14); color: var(--ink-3); }
+.form .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.sent { display: none; }
+.sent.show { display: block; margin-bottom: 18px; }
+.direct { border-top: 2px solid var(--ink); }
+.direct li { display: grid; gap: 2px; padding: 16px 0; border-bottom: 1px solid var(--rule); }
+.direct .k { font-family: var(--f-mono); font-size: var(--t-12); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); }
+.direct a { color: var(--ink); font-weight: 600; text-decoration-color: var(--signal); text-underline-offset: 4px; text-decoration-thickness: 2px; }
+.direct span { color: var(--ink-2); font-size: var(--t-14); }
+.office { margin-top: 26px; font-size: var(--t-14); color: var(--ink-2); line-height: 1.6; }
+.office b { color: var(--ink); }
+@media (max-width: 860px) { .contact-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 520px) { .form .pair { grid-template-columns: minmax(0, 1fr); } }
+</style>
 </head>
-<body class="legacy bg-dark text-white antialiased">
-    <a class="skip" href="#main">Skip to content</a>
-    <header class="site-header">
-      <div class="wrap bar">
-        <a class="brand" href="/" aria-label="Remembra home">
-          <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true">
-            <circle cx="6" cy="25" r="2.4" fill="currentColor" opacity=".3"/>
-            <circle cx="11.5" cy="20" r="2.4" fill="currentColor" opacity=".55"/>
-            <rect x="15" y="4" width="9" height="22" rx="4.5" transform="rotate(40 19.5 15)" fill="var(--signal)"/>
-          </svg>
-          <span class="brand-name">Remembra</span>
-        </a>
-        <nav class="nav-links" aria-label="Primary">
-          <a class="nav-hide-md" href="/#how">How it works</a>
-          <a class="nav-hide-sm" href="/pricing">Pricing</a>
-          <a class="nav-hide-md" href="https://docs.remembra.dev">Docs</a>
-          <a class="nav-hide-md" href="https://github.com/remembra-ai/remembra">GitHub</a>
-          <a class="btn-nav" href="https://app.remembra.dev/signup">Start free</a>
-        </nav>
+<body class="site" data-page="contact">
+<!-- @header -->
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href="/" aria-label="Remembra home"><svg class="lockup" viewBox="-136.21 18.6 532.21 99.3" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M-122.83 82.72 L-122.05 84.90 L-121.01 86.86 L-119.61 88.72 L-118.24 90.11 L-116.22 91.68 L-114.36 92.77 L-112.30 93.67 L-110.03 94.35 L-107.55 94.80 L-103.80 95.18 L-92.13 96.01 L-78.74 96.57 L-65.97 96.78 L-65.46 100.56 L-64.75 109.98 L-64.40 112.48 L-64.08 113.80 L-63.68 114.48 L-63.14 115.02 L-62.49 115.43 L-61.76 115.71 L-60.98 115.87 L-60.16 115.90 L-59.08 115.77 L-58.32 115.54 L-57.39 115.05 L-56.82 114.56 L-56.25 113.75 L-55.99 112.98 L-55.50 110.08 L-54.76 102.31 L-54.09 98.76 L-52.69 99.14 L-51.18 99.39 L-49.59 99.51 L-47.36 99.48 L-45.65 99.32 L-43.37 98.92 L-41.67 98.50 L-40.03 97.96 L-38.45 97.33 L-36.96 96.58 L-35.59 95.75 L-34.36 94.81 L-33.29 93.79 L-32.68 93.05 L-31.90 91.86 L-31.29 90.61 L-30.73 88.85 L-30.42 86.58 L-30.47 84.77 L-30.83 82.80 L-45.28 87.21 L-49.11 88.54 L-51.78 89.61 L-54.04 90.71 L-55.89 91.82 L-57.31 92.96 L-58.76 94.59 L-59.22 94.93 L-59.74 95.17 L-60.29 95.30 L-61.14 95.29 L-61.69 95.15 L-62.44 94.74 L-62.86 94.36 L-63.33 93.64 L-63.51 93.11 L-63.59 92.54 L-63.50 91.70 L-63.17 90.91 L-61.73 89.16 L-60.76 88.25 L-59.71 87.42 L-58.06 86.31 L-56.76 85.57 L-53.37 83.98 L-48.77 82.25 L-43.53 80.57 L-32.88 77.35 L-31.39 76.02 L-30.26 74.69 L-29.43 73.46 L-28.69 72.12 L-28.03 70.66 L-27.34 68.76 L-26.66 66.43 L-26.20 64.38 L-25.85 62.26 L-25.62 60.09 L-25.50 57.89 L-25.50 55.67 L-25.78 52.02 L-26.11 49.88 L-26.56 47.81 L-27.61 44.58 L-28.40 42.81 L-29.33 41.18 L-30.27 39.92 L-31.49 38.56 L-32.73 37.43 L-34.30 36.31 L-35.86 35.48 L-37.21 34.99 L-38.35 37.39 L-38.95 38.87 L-39.62 40.87 L-40.13 42.92 L-40.48 45.01 L-40.64 46.62 L-40.72 48.80 L-40.63 51.34 L-40.70 51.91 L-40.89 52.45 L-41.18 52.94 L-41.77 53.55 L-42.25 53.85 L-42.79 54.05 L-43.35 54.14 L-44.20 54.07 L-44.74 53.88 L-45.23 53.60 L-45.66 53.22 L-46.14 52.52 L-46.34 51.98 L-46.43 51.42 L-46.50 47.52 L-46.24 44.30 L-45.68 41.14 L-45.01 38.62 L-43.93 35.66 L-42.62 32.89 L-44.22 30.55 L-45.98 28.45 L-47.90 26.57 L-49.45 25.32 L-51.68 23.86 L-54.09 22.66 L-56.68 21.73 L-58.75 21.21 L-61.67 20.76 L-64.68 20.60 L-67.30 20.71 L-70.31 21.16 L-72.51 21.79 L-74.99 22.87 L-77.20 24.28 L-79.14 25.99 L-79.51 26.40 L-79.31 27.29 L-79.36 29.01 L-79.60 31.93 L-79.89 34.11 L-80.58 37.60 L-81.53 40.98 L-83 44.85 L-84.67 48.22 L-85.03 48.66 L-85.47 49.03 L-85.97 49.30 L-86.79 49.51 L-87.36 49.51 L-88.19 49.31 L-88.69 49.04 L-89.13 48.68 L-89.50 48.25 L-89.77 47.74 L-89.94 47.20 L-89.98 46.35 L-89.78 45.52 L-88.58 43.09 L-87.65 40.87 L-86.53 37.42 L-85.96 35.03 L-85.53 32.56 L-85.31 30.67 L-85.13 28.08 L-86.10 27.43 L-87.19 26.84 L-88.35 26.34 L-89.56 25.94 L-92.15 25.41 L-94.92 25.25 L-97.82 25.44 L-101.28 26.04 L-105.20 27.07 L-109.04 28.41 L-111.83 29.62 L-113.64 30.52 L-117.12 32.51 L-119.58 34.18 L-121.13 35.37 L-124 37.92 L-126.53 40.68 L-127.66 42.13 L-128.67 43.63 L-130.92 47.57 L-131.73 49.23 L-132.43 50.94 L-133.01 52.68 L-133.48 54.44 L-133.83 56.21 L-134.07 57.99 L-134.19 59.77 L-134.21 61.54 L-134.12 63.29 L-133.77 65.85 L-133.41 67.50 L-132.94 69.10 L-132.36 70.65 L-131.68 72.12 L-130.90 73.51 L-130.01 74.82 L-129.02 76.03 L-127.80 77.25 L-124.48 76.95 L-119.98 76.79 L-115.53 76.82 L-102.51 77.20 L-98.28 77.15 L-95.15 76.97 L-91.01 76.48 L-87.94 75.89 L-85.92 75.38 L-80.42 73.75 L-76.33 72.80 L-73.06 72.30 L-69.72 72.10 L-52.11 72.10 L-51.54 72.15 L-51 72.32 L-50.50 72.59 L-49.87 73.16 L-49.55 73.63 L-49.33 74.16 L-49.22 74.72 L-49.22 75.28 L-49.33 75.84 L-49.55 76.37 L-50.06 77.05 L-50.74 77.56 L-51.54 77.85 L-52.11 77.90 L-69.63 77.91 L-72.44 78.08 L-74.89 78.44 L-77.42 78.98 L-80.47 79.80 L-84.36 80.97 L-86.67 81.56 L-90.07 82.22 L-93.56 82.66 L-96.97 82.91 L-101.43 83.02 L-105.87 82.95 L-116.74 82.61 L-120.98 82.61Z"/><path fill="var(--signal)" d="M-52.11 78.30 L-51.90 78.29 L-51.68 78.27 L-51.47 78.24 L-51.26 78.19 L-51.05 78.12 L-50.85 78.05 L-50.65 77.96 L-50.46 77.86 L-50.28 77.74 L-50.10 77.62 L-49.94 77.48 L-49.78 77.33 L-49.63 77.18 L-49.49 77.01 L-49.37 76.83 L-49.25 76.65 L-49.15 76.46 L-49.06 76.26 L-48.99 76.06 L-48.92 75.85 L-48.87 75.64 L-48.84 75.43 L-48.82 75.22 L-48.81 75 L-48.82 74.78 L-48.84 74.57 L-48.87 74.36 L-48.92 74.15 L-48.99 73.94 L-49.06 73.74 L-49.15 73.54 L-49.25 73.35 L-49.37 73.17 L-49.49 72.99 L-49.63 72.82 L-49.78 72.67 L-49.94 72.52 L-50.10 72.38 L-50.28 72.26 L-50.46 72.14 L-50.65 72.04 L-50.85 71.95 L-51.05 71.88 L-51.26 71.81 L-51.47 71.76 L-51.68 71.73 L-51.90 71.71 L-52.11 71.70 L-71.91 71.70 L-72.13 71.71 L-72.34 71.73 L-72.55 71.76 L-72.77 71.81 L-72.97 71.88 L-73.17 71.95 L-73.37 72.04 L-73.56 72.14 L-73.74 72.26 L-73.92 72.38 L-74.09 72.52 L-74.24 72.67 L-74.39 72.82 L-74.53 72.99 L-74.65 73.17 L-74.77 73.35 L-74.87 73.54 L-74.96 73.74 L-75.04 73.94 L-75.10 74.15 L-75.15 74.36 L-75.18 74.57 L-75.20 74.78 L-75.21 75 L-75.20 75.22 L-75.18 75.43 L-75.15 75.64 L-75.10 75.85 L-75.04 76.06 L-74.96 76.26 L-74.87 76.46 L-74.77 76.65 L-74.65 76.83 L-74.53 77.01 L-74.39 77.18 L-74.24 77.33 L-74.09 77.48 L-73.92 77.62 L-73.74 77.74 L-73.56 77.86 L-73.37 77.96 L-73.17 78.05 L-72.97 78.12 L-72.77 78.19 L-72.55 78.24 L-72.34 78.27 L-72.13 78.29 L-71.91 78.30Z"/><g fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 94.5 V33.5 H19.5 A15.5 15.5 0 0 1 19.5 64.5 H5.5 M18.5 64.5 L33.5 94.5"/><path d="M83.5 75 A17 19.5 0 0 0 49.5 75 A17 19.5 0 0 0 76.01 91.17"/><path d="M49.5 75 H83.5"/><path d="M100.0 94.5 V55.5 M100.0 71 A11.5 15.5 0 0 1 123.0 71 V94.5 M123.0 71 A11.5 15.5 0 0 1 146.0 71 V94.5"/><path d="M196.5 75 A17 19.5 0 0 0 162.5 75 A17 19.5 0 0 0 189.01 91.17"/><path d="M213.0 94.5 V55.5 M213.0 71 A11.5 15.5 0 0 1 236.0 71 V94.5 M236.0 71 A11.5 15.5 0 0 1 259.0 71 V94.5"/><path d="M275.5 27.5 V94.5 M275.5 75 A17 19.5 0 0 1 309.5 75 A17 19.5 0 0 1 275.5 75"/><path d="M326.0 94.5 V55.5 M326.0 73 A15 17.5 0 0 1 341.0 55.5"/><path d="M388.5 75 A17 19.5 0 0 0 354.5 75 A17 19.5 0 0 0 388.5 75 M388.5 55.5 V94.5"/></g><g fill="none" stroke="var(--signal)" stroke-width="11" stroke-linecap="round"><path d="M162.5 75 H196.5"/></g></svg></a>
+    <nav class="nav-links" aria-label="Primary">
+      <a class="nav-link" href="/#how">How it works</a>
+      <a class="nav-link" href="/pricing">Pricing</a>
+      <a class="nav-link nav-hide-lg" href="https://docs.remembra.dev">Docs</a>
+      <a class="nav-link nav-hide-lg" href="https://github.com/remembra-ai/remembra">GitHub</a>
+      <button class="icon-btn theme-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke-linecap="round"/></svg><svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" stroke-linejoin="round"/></svg></button>
+      <button class="icon-btn menu-btn" type="button" data-menu-toggle aria-expanded="false" aria-controls="site-menu" aria-label="Open menu"><svg class="bars" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="square"/></svg><svg class="x" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke-linecap="square"/></svg></button>
+      <a class="btn-nav" href="https://app.remembra.dev/signup">Start free</a>
+    </nav>
+  </div>
+  <nav class="menu-panel" id="site-menu" aria-label="Menu">
+    <a href="/#how">How it works</a>
+    <a href="/pricing">Pricing</a>
+    <a href="https://docs.remembra.dev">Docs</a>
+    <a href="https://github.com/remembra-ai/remembra">GitHub</a>
+    <a href="/security">Security</a>
+    <a href="/contact" aria-current="page">Contact</a>
+  </nav>
+</header>
+<!-- /@header -->
+
+<main id="main">
+  <section class="wrap page-head" aria-labelledby="contact-title">
+    <p class="eyebrow">Contact</p>
+    <h1 id="contact-title">Leave us a note. <mark>We'll pick it up.</mark></h1>
+    <p class="lede">Questions about Remembra, enterprise needs, support or a partnership. We usually reply within 24 to 48 hours.</p>
+  </section>
+
+  <div class="wrap contact-grid">
+    <div>
+      <div class="win sent" id="sent" role="status">
+        <div class="tb"><i></i><span>message.sent</span></div>
+        <div class="bd" style="font-size:.875rem">Thanks. Your message is in our inbox, and we'll get back to you soon.</div>
       </div>
-    </header>
-    <div id="main">
-
-    <!-- Hero Section -->
-    <section class="pt-32 pb-12 px-6">
-        <div class="max-w-4xl mx-auto text-center">
-            <h1 class="text-5xl md:text-6xl font-bold mb-6 leading-tight">
-                Let's <span class="gradient-text">Connect</span>
-            </h1>
-            <p class="text-xl text-gray-400">
-                Questions about Remembra? Want to discuss enterprise needs? We'd love to hear from you.
-            </p>
+      <form class="form" action="https://formsubmit.co/contact@remembra.dev" method="POST">
+        <input class="hp" type="text" name="_honey" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <input type="hidden" name="_captcha" value="false">
+        <input type="hidden" name="_subject" value="New contact form message - Remembra">
+        <input type="hidden" name="_next" value="https://remembra.dev/contact?success=true">
+        <div class="pair">
+          <div class="field"><label for="f-first">First name <span class="req" aria-hidden="true">*</span></label><input id="f-first" type="text" name="first_name" required autocomplete="given-name"></div>
+          <div class="field"><label for="f-last">Last name <span class="req" aria-hidden="true">*</span></label><input id="f-last" type="text" name="last_name" required autocomplete="family-name"></div>
         </div>
-    </section>
-
-    <!-- Main Content -->
-    <section class="py-12 px-6">
-        <div class="max-w-6xl mx-auto">
-            <div class="grid lg:grid-cols-2 gap-12">
-                
-                <!-- Contact Form -->
-                <div class="bg-dark-card border border-white/10 rounded-2xl p-8">
-                    <h2 class="text-2xl font-bold mb-6">Send us a message</h2>
-                    
-                    <form action="https://formsubmit.co/contact@remembra.dev" method="POST" class="space-y-6">
-                        <!-- Honeypot -->
-                        <input type="text" name="_honey" style="display:none">
-                        <!-- Disable captcha -->
-                        <input type="hidden" name="_captcha" value="false">
-                        <!-- Subject -->
-                        <input type="hidden" name="_subject" value="📧 New Contact Form Submission - Remembra">
-                        <!-- Success page -->
-                        <input type="hidden" name="_next" value="https://remembra.dev/contact.html?success=true">
-                        
-                        <div class="grid md:grid-cols-2 gap-6">
-                            <div>
-                                <label class="block text-sm font-medium mb-2">First Name *</label>
-                                <input type="text" name="first_name" required 
-                                    class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition"
-                                    placeholder="John">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium mb-2">Last Name *</label>
-                                <input type="text" name="last_name" required 
-                                    class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition"
-                                    placeholder="Doe">
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Email *</label>
-                            <input type="email" name="email" required 
-                                class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition"
-                                placeholder="john@company.com">
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Company</label>
-                            <input type="text" name="company" 
-                                class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition"
-                                placeholder="Acme Inc.">
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium mb-2">What can we help with? *</label>
-                            <select name="inquiry_type" required
-                                class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition">
-                                <option value="" disabled selected>Select an option</option>
-                                <option value="general">General Inquiry</option>
-                                <option value="technical">Technical Support</option>
-                                <option value="enterprise">Enterprise / Custom Deployment</option>
-                                <option value="partnership">Partnership Opportunity</option>
-                                <option value="feedback">Product Feedback</option>
-                                <option value="other">Other</option>
-                            </select>
-                        </div>
-                        
-                        <div>
-                            <label class="block text-sm font-medium mb-2">Message *</label>
-                            <textarea name="message" required rows="5"
-                                class="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl focus:border-primary focus:outline-none transition resize-none"
-                                placeholder="Tell us more about your needs..."></textarea>
-                        </div>
-                        
-                        <button type="submit" 
-                            class="w-full py-4 bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl transition flex items-center justify-center gap-2">
-                            <span>Send Message</span>
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
-                            </svg>
-                        </button>
-                    </form>
-                    
-                    <p class="text-center text-xs text-gray-500 mt-4">
-                        We typically respond within 24-48 hours.
-                    </p>
-                </div>
-                
-                <!-- Contact Info & Quick Links -->
-                <div class="space-y-8">
-                    <!-- Direct Contact -->
-                    <div class="bg-dark-card border border-white/10 rounded-2xl p-8">
-                        <h2 class="text-2xl font-bold mb-6">Direct Contact</h2>
-                        
-                        <div class="space-y-6">
-                            <div class="flex items-start gap-4">
-                                <div class="w-12 h-12 bg-primary/20 rounded-xl flex items-center justify-center text-xl flex-shrink-0">📧</div>
-                                <div>
-                                    <h3 class="font-semibold mb-1">General Inquiries</h3>
-                                    <a href="mailto:contact@remembra.dev" class="text-primary hover:underline">contact@remembra.dev</a>
-                                    <p class="text-gray-400 text-sm mt-1">Questions, feedback, or just saying hi</p>
-                                </div>
-                            </div>
-                            
-                            <div class="flex items-start gap-4">
-                                <div class="w-12 h-12 bg-green-500/20 rounded-xl flex items-center justify-center text-xl flex-shrink-0">🏢</div>
-                                <div>
-                                    <h3 class="font-semibold mb-1">Enterprise Sales</h3>
-                                    <a href="mailto:sales@remembra.dev" class="text-primary hover:underline">sales@remembra.dev</a>
-                                    <p class="text-gray-400 text-sm mt-1">Custom deployments, SLAs, and dedicated support</p>
-                                </div>
-                            </div>
-                            
-                            <div class="flex items-start gap-4">
-                                <div class="w-12 h-12 bg-blue-500/20 rounded-xl flex items-center justify-center text-xl flex-shrink-0">🤝</div>
-                                <div>
-                                    <h3 class="font-semibold mb-1">Support</h3>
-                                    <a href="mailto:support@remembra.dev" class="text-primary hover:underline">support@remembra.dev</a>
-                                    <p class="text-gray-400 text-sm mt-1">Technical support and help</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Community -->
-                    <div class="bg-dark-card border border-white/10 rounded-2xl p-8">
-                        <h2 class="text-2xl font-bold mb-6">Community & Support</h2>
-                        
-                        <div class="space-y-4">
-                            <a href="https://github.com/remembra-ai/remembra/issues" target="_blank" 
-                                class="flex items-center gap-4 p-4 bg-white/5 rounded-xl hover:bg-white/10 transition group">
-                                <div class="w-10 h-10 bg-gray-700 rounded-lg flex items-center justify-center">
-                                    <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-                                </div>
-                                <div class="flex-1">
-                                    <h3 class="font-semibold group-hover:text-primary transition">GitHub Issues</h3>
-                                    <p class="text-gray-400 text-sm">Bug reports and feature requests</p>
-                                </div>
-                                <svg class="w-5 h-5 text-gray-400 group-hover:text-primary transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                                </svg>
-                            </a>
-                            
-                            <a href="https://discord.gg/mPYQRKzXz5" target="_blank" 
-                                class="flex items-center gap-4 p-4 bg-white/5 rounded-xl hover:bg-white/10 transition group">
-                                <div class="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center">
-                                    <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189z"/></svg>
-                                </div>
-                                <div class="flex-1">
-                                    <h3 class="font-semibold group-hover:text-primary transition">Discord Community</h3>
-                                    <p class="text-gray-400 text-sm">Chat with the community and get help</p>
-                                </div>
-                                <svg class="w-5 h-5 text-gray-400 group-hover:text-primary transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                                </svg>
-                            </a>
-                            
-                            <a href="https://twitter.com/remembradev" target="_blank" 
-                                class="flex items-center gap-4 p-4 bg-white/5 rounded-xl hover:bg-white/10 transition group">
-                                <div class="w-10 h-10 bg-black rounded-lg flex items-center justify-center">
-                                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-                                </div>
-                                <div class="flex-1">
-                                    <h3 class="font-semibold group-hover:text-primary transition">Twitter / X</h3>
-                                    <p class="text-gray-400 text-sm">Follow for updates and announcements</p>
-                                </div>
-                                <svg class="w-5 h-5 text-gray-400 group-hover:text-primary transition" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
-                                </svg>
-                            </a>
-                        </div>
-                    </div>
-                    
-                    <!-- Office Location -->
-                    <div class="bg-dark-card border border-white/10 rounded-2xl p-8">
-                        <h2 class="text-2xl font-bold mb-6">Office</h2>
-                        <div class="flex items-start gap-4">
-                            <div class="w-12 h-12 bg-orange-500/20 rounded-xl flex items-center justify-center text-xl flex-shrink-0">📍</div>
-                            <div>
-                                <h3 class="font-semibold mb-1">DolphyTech</h3>
-                                <p class="text-gray-400">515 Centerpoint Drive, Suite #212</p>
-                                <p class="text-gray-400">Middletown, CT 06457</p>
-                                <p class="text-gray-400 mt-2">
-                                    <a href="tel:+12038870943" class="hover:text-white transition">(203) 887-0943</a>
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+        <div class="field"><label for="f-email">Email <span class="req" aria-hidden="true">*</span></label><input id="f-email" type="email" name="email" required autocomplete="email"></div>
+        <div class="field"><label for="f-company">Company</label><input id="f-company" type="text" name="company" autocomplete="organization"></div>
+        <div class="field">
+          <label for="f-type">What can we help with? <span class="req" aria-hidden="true">*</span></label>
+          <select id="f-type" name="inquiry_type" required>
+            <option value="" disabled selected>Select an option</option>
+            <option value="general">General question</option>
+            <option value="technical">Technical support</option>
+            <option value="enterprise">Enterprise or custom deployment</option>
+            <option value="partnership">Partnership</option>
+            <option value="feedback">Product feedback</option>
+            <option value="other">Other</option>
+          </select>
         </div>
-    </section>
-
-    <!-- Handle URL parameters and Success Message -->
-    <script>
-        const urlParams = new URLSearchParams(window.location.search);
-        
-        // Auto-select inquiry type based on URL param
-        if (urlParams.get('type') === 'enterprise') {
-            const selectEl = document.querySelector('select[name="inquiry_type"]');
-            if (selectEl) {
-                selectEl.value = 'enterprise';
-            }
-            // Update page title for enterprise visitors
-            document.title = 'Enterprise Sales - Remembra';
-        }
-        
-        // Show success message
-        if (urlParams.get('success') === 'true') {
-            const successDiv = document.createElement('div');
-            successDiv.className = 'fixed top-24 left-1/2 -translate-x-1/2 z-50 bg-green-500 text-white px-6 py-4 rounded-xl shadow-lg flex items-center gap-3';
-            successDiv.innerHTML = `
-                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-                </svg>
-                <span class="font-medium">Message sent! We'll get back to you soon.</span>
-            `;
-            document.body.appendChild(successDiv);
-            setTimeout(() => successDiv.remove(), 5000);
-            history.replaceState(null, '', '/contact.html');
-        }
-    </script>
+        <div class="field"><label for="f-msg">Message <span class="req" aria-hidden="true">*</span></label><textarea id="f-msg" name="message" required rows="6"></textarea></div>
+        <div><button class="btn signal" type="submit">Send message <span aria-hidden="true">&rarr;</span></button></div>
+        <p class="note">Fields marked * are required.</p>
+      </form>
     </div>
-    <footer class="site-footer">
-      <div class="wrap foot">
-        <div class="foot-brand">
-          <span class="brand-name">Remembra</span>
-          <p>One cloud memory for all your AI agents. &copy; 2026 DolphyTech.</p>
-        </div>
-        <nav aria-label="Footer">
-          <ul class="foot-links">
-            <li><a href="/pricing">Pricing</a></li>
-            <li><a href="https://docs.remembra.dev">Docs</a></li>
-            <li><a href="https://github.com/remembra-ai/remembra">GitHub</a></li>
-            <li><a href="/security">Security</a></li>
-            <li><a href="/privacy">Privacy</a></li>
-            <li><a href="/terms">Terms</a></li>
-            <li><a href="/contact">Contact</a></li>
-          </ul>
-        </nav>
-      </div>
-    </footer>
+
+    <aside aria-label="Other ways to reach us">
+      <ul class="direct">
+        <li><span class="k">General</span><a href="mailto:contact@remembra.dev">contact@remembra.dev</a><span>Questions, feedback, or just saying hi.</span></li>
+        <li><span class="k">Enterprise</span><a href="mailto:sales@remembra.dev">sales@remembra.dev</a><span>Custom deployments, SLAs and dedicated support.</span></li>
+        <li><span class="k">Support</span><a href="mailto:support@remembra.dev">support@remembra.dev</a><span>Technical help with your setup.</span></li>
+        <li><span class="k">Security</span><a href="mailto:security@dolphytech.com">security@dolphytech.com</a><span>Report a vulnerability privately.</span></li>
+        <li><span class="k">Community</span><a href="https://github.com/remembra-ai/remembra/issues">GitHub issues</a><span>Bug reports and feature requests. Also on <a href="https://discord.gg/mPYQRKzXz5">Discord</a> and <a href="https://twitter.com/remembradev">X</a>.</span></li>
+      </ul>
+      <p class="office"><b>DolphyTech</b><br>515 Centerpoint Drive, Suite #212<br>Middletown, CT 06457<br>(203) 887-0943</p>
+    </aside>
+  </div>
+</main>
+
+<!-- @footer -->
+<footer class="site-footer">
+  <div class="terrain" aria-hidden="true"></div>
+  <div class="ground"><div class="wrap foot">
+    <div class="foot-brand">
+      <a class="brand" href="/" aria-label="Remembra home"><svg class="lockup" viewBox="-136.21 18.6 532.21 99.3" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M-122.83 82.72 L-122.05 84.90 L-121.01 86.86 L-119.61 88.72 L-118.24 90.11 L-116.22 91.68 L-114.36 92.77 L-112.30 93.67 L-110.03 94.35 L-107.55 94.80 L-103.80 95.18 L-92.13 96.01 L-78.74 96.57 L-65.97 96.78 L-65.46 100.56 L-64.75 109.98 L-64.40 112.48 L-64.08 113.80 L-63.68 114.48 L-63.14 115.02 L-62.49 115.43 L-61.76 115.71 L-60.98 115.87 L-60.16 115.90 L-59.08 115.77 L-58.32 115.54 L-57.39 115.05 L-56.82 114.56 L-56.25 113.75 L-55.99 112.98 L-55.50 110.08 L-54.76 102.31 L-54.09 98.76 L-52.69 99.14 L-51.18 99.39 L-49.59 99.51 L-47.36 99.48 L-45.65 99.32 L-43.37 98.92 L-41.67 98.50 L-40.03 97.96 L-38.45 97.33 L-36.96 96.58 L-35.59 95.75 L-34.36 94.81 L-33.29 93.79 L-32.68 93.05 L-31.90 91.86 L-31.29 90.61 L-30.73 88.85 L-30.42 86.58 L-30.47 84.77 L-30.83 82.80 L-45.28 87.21 L-49.11 88.54 L-51.78 89.61 L-54.04 90.71 L-55.89 91.82 L-57.31 92.96 L-58.76 94.59 L-59.22 94.93 L-59.74 95.17 L-60.29 95.30 L-61.14 95.29 L-61.69 95.15 L-62.44 94.74 L-62.86 94.36 L-63.33 93.64 L-63.51 93.11 L-63.59 92.54 L-63.50 91.70 L-63.17 90.91 L-61.73 89.16 L-60.76 88.25 L-59.71 87.42 L-58.06 86.31 L-56.76 85.57 L-53.37 83.98 L-48.77 82.25 L-43.53 80.57 L-32.88 77.35 L-31.39 76.02 L-30.26 74.69 L-29.43 73.46 L-28.69 72.12 L-28.03 70.66 L-27.34 68.76 L-26.66 66.43 L-26.20 64.38 L-25.85 62.26 L-25.62 60.09 L-25.50 57.89 L-25.50 55.67 L-25.78 52.02 L-26.11 49.88 L-26.56 47.81 L-27.61 44.58 L-28.40 42.81 L-29.33 41.18 L-30.27 39.92 L-31.49 38.56 L-32.73 37.43 L-34.30 36.31 L-35.86 35.48 L-37.21 34.99 L-38.35 37.39 L-38.95 38.87 L-39.62 40.87 L-40.13 42.92 L-40.48 45.01 L-40.64 46.62 L-40.72 48.80 L-40.63 51.34 L-40.70 51.91 L-40.89 52.45 L-41.18 52.94 L-41.77 53.55 L-42.25 53.85 L-42.79 54.05 L-43.35 54.14 L-44.20 54.07 L-44.74 53.88 L-45.23 53.60 L-45.66 53.22 L-46.14 52.52 L-46.34 51.98 L-46.43 51.42 L-46.50 47.52 L-46.24 44.30 L-45.68 41.14 L-45.01 38.62 L-43.93 35.66 L-42.62 32.89 L-44.22 30.55 L-45.98 28.45 L-47.90 26.57 L-49.45 25.32 L-51.68 23.86 L-54.09 22.66 L-56.68 21.73 L-58.75 21.21 L-61.67 20.76 L-64.68 20.60 L-67.30 20.71 L-70.31 21.16 L-72.51 21.79 L-74.99 22.87 L-77.20 24.28 L-79.14 25.99 L-79.51 26.40 L-79.31 27.29 L-79.36 29.01 L-79.60 31.93 L-79.89 34.11 L-80.58 37.60 L-81.53 40.98 L-83 44.85 L-84.67 48.22 L-85.03 48.66 L-85.47 49.03 L-85.97 49.30 L-86.79 49.51 L-87.36 49.51 L-88.19 49.31 L-88.69 49.04 L-89.13 48.68 L-89.50 48.25 L-89.77 47.74 L-89.94 47.20 L-89.98 46.35 L-89.78 45.52 L-88.58 43.09 L-87.65 40.87 L-86.53 37.42 L-85.96 35.03 L-85.53 32.56 L-85.31 30.67 L-85.13 28.08 L-86.10 27.43 L-87.19 26.84 L-88.35 26.34 L-89.56 25.94 L-92.15 25.41 L-94.92 25.25 L-97.82 25.44 L-101.28 26.04 L-105.20 27.07 L-109.04 28.41 L-111.83 29.62 L-113.64 30.52 L-117.12 32.51 L-119.58 34.18 L-121.13 35.37 L-124 37.92 L-126.53 40.68 L-127.66 42.13 L-128.67 43.63 L-130.92 47.57 L-131.73 49.23 L-132.43 50.94 L-133.01 52.68 L-133.48 54.44 L-133.83 56.21 L-134.07 57.99 L-134.19 59.77 L-134.21 61.54 L-134.12 63.29 L-133.77 65.85 L-133.41 67.50 L-132.94 69.10 L-132.36 70.65 L-131.68 72.12 L-130.90 73.51 L-130.01 74.82 L-129.02 76.03 L-127.80 77.25 L-124.48 76.95 L-119.98 76.79 L-115.53 76.82 L-102.51 77.20 L-98.28 77.15 L-95.15 76.97 L-91.01 76.48 L-87.94 75.89 L-85.92 75.38 L-80.42 73.75 L-76.33 72.80 L-73.06 72.30 L-69.72 72.10 L-52.11 72.10 L-51.54 72.15 L-51 72.32 L-50.50 72.59 L-49.87 73.16 L-49.55 73.63 L-49.33 74.16 L-49.22 74.72 L-49.22 75.28 L-49.33 75.84 L-49.55 76.37 L-50.06 77.05 L-50.74 77.56 L-51.54 77.85 L-52.11 77.90 L-69.63 77.91 L-72.44 78.08 L-74.89 78.44 L-77.42 78.98 L-80.47 79.80 L-84.36 80.97 L-86.67 81.56 L-90.07 82.22 L-93.56 82.66 L-96.97 82.91 L-101.43 83.02 L-105.87 82.95 L-116.74 82.61 L-120.98 82.61Z"/><path fill="var(--signal)" d="M-52.11 78.30 L-51.90 78.29 L-51.68 78.27 L-51.47 78.24 L-51.26 78.19 L-51.05 78.12 L-50.85 78.05 L-50.65 77.96 L-50.46 77.86 L-50.28 77.74 L-50.10 77.62 L-49.94 77.48 L-49.78 77.33 L-49.63 77.18 L-49.49 77.01 L-49.37 76.83 L-49.25 76.65 L-49.15 76.46 L-49.06 76.26 L-48.99 76.06 L-48.92 75.85 L-48.87 75.64 L-48.84 75.43 L-48.82 75.22 L-48.81 75 L-48.82 74.78 L-48.84 74.57 L-48.87 74.36 L-48.92 74.15 L-48.99 73.94 L-49.06 73.74 L-49.15 73.54 L-49.25 73.35 L-49.37 73.17 L-49.49 72.99 L-49.63 72.82 L-49.78 72.67 L-49.94 72.52 L-50.10 72.38 L-50.28 72.26 L-50.46 72.14 L-50.65 72.04 L-50.85 71.95 L-51.05 71.88 L-51.26 71.81 L-51.47 71.76 L-51.68 71.73 L-51.90 71.71 L-52.11 71.70 L-71.91 71.70 L-72.13 71.71 L-72.34 71.73 L-72.55 71.76 L-72.77 71.81 L-72.97 71.88 L-73.17 71.95 L-73.37 72.04 L-73.56 72.14 L-73.74 72.26 L-73.92 72.38 L-74.09 72.52 L-74.24 72.67 L-74.39 72.82 L-74.53 72.99 L-74.65 73.17 L-74.77 73.35 L-74.87 73.54 L-74.96 73.74 L-75.04 73.94 L-75.10 74.15 L-75.15 74.36 L-75.18 74.57 L-75.20 74.78 L-75.21 75 L-75.20 75.22 L-75.18 75.43 L-75.15 75.64 L-75.10 75.85 L-75.04 76.06 L-74.96 76.26 L-74.87 76.46 L-74.77 76.65 L-74.65 76.83 L-74.53 77.01 L-74.39 77.18 L-74.24 77.33 L-74.09 77.48 L-73.92 77.62 L-73.74 77.74 L-73.56 77.86 L-73.37 77.96 L-73.17 78.05 L-72.97 78.12 L-72.77 78.19 L-72.55 78.24 L-72.34 78.27 L-72.13 78.29 L-71.91 78.30Z"/><g fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 94.5 V33.5 H19.5 A15.5 15.5 0 0 1 19.5 64.5 H5.5 M18.5 64.5 L33.5 94.5"/><path d="M83.5 75 A17 19.5 0 0 0 49.5 75 A17 19.5 0 0 0 76.01 91.17"/><path d="M49.5 75 H83.5"/><path d="M100.0 94.5 V55.5 M100.0 71 A11.5 15.5 0 0 1 123.0 71 V94.5 M123.0 71 A11.5 15.5 0 0 1 146.0 71 V94.5"/><path d="M196.5 75 A17 19.5 0 0 0 162.5 75 A17 19.5 0 0 0 189.01 91.17"/><path d="M213.0 94.5 V55.5 M213.0 71 A11.5 15.5 0 0 1 236.0 71 V94.5 M236.0 71 A11.5 15.5 0 0 1 259.0 71 V94.5"/><path d="M275.5 27.5 V94.5 M275.5 75 A17 19.5 0 0 1 309.5 75 A17 19.5 0 0 1 275.5 75"/><path d="M326.0 94.5 V55.5 M326.0 73 A15 17.5 0 0 1 341.0 55.5"/><path d="M388.5 75 A17 19.5 0 0 0 354.5 75 A17 19.5 0 0 0 388.5 75 M388.5 55.5 V94.5"/></g><g fill="none" stroke="var(--signal)" stroke-width="11" stroke-linecap="round"><path d="M162.5 75 H196.5"/></g></svg></a>
+      <p>One cloud memory for all your AI agents. The core is open source under the MIT license.</p>
+      <p>&copy; 2026 DolphyTech</p>
+    </div>
+    <nav aria-label="Footer">
+      <ul class="foot-links">
+        <li><a href="https://docs.remembra.dev">Docs</a></li>
+        <li><a href="https://github.com/remembra-ai/remembra">GitHub</a></li>
+        <li><a href="/pricing">Pricing</a></li>
+        <li><a href="/security">Security</a></li>
+        <li><a href="/privacy">Privacy</a></li>
+        <li><a href="/terms">Terms</a></li>
+        <li><a href="/contact" aria-current="page">Contact</a></li>
+      </ul>
+    </nav>
+  </div></div>
+</footer>
+<!-- /@footer -->
+
+<script src="site.js" defer></script>
+<script>
+  /* ?type=enterprise preselects the topic; ?success=true confirms a sent message. */
+  (function () {
+    var q = new URLSearchParams(window.location.search);
+    if (q.get("type") === "enterprise") {
+      var sel = document.getElementById("f-type");
+      if (sel) sel.value = "enterprise";
+    }
+    if (q.get("success") === "true") {
+      var box = document.getElementById("sent");
+      if (box) box.classList.add("show");
+      history.replaceState(null, "", window.location.pathname);
+    }
+  })();
+</script>
 </body>
 </html>

@@ -1,367 +1,168 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" data-theme="dark">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Security - Remembra</title>
-    <meta name="description" content="Remembra security practices, data protection, and compliance information.">
-    
-    <!-- Open Graph -->
-    <meta property="og:title" content="Security - Remembra">
-    <meta property="og:description" content="Learn about Remembra's security practices and data protection.">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://remembra.dev/security">
-    
-    <!-- Favicons -->
-    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="shortcut icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-    
-    <!-- Inter Font -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
-    <link rel="stylesheet" href="/site.css">
-    
-    <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-        
-        :root {
-            --black: #000000;
-            --gray-900: #111111;
-            --gray-800: #1a1a1a;
-            --gray-600: #404040;
-            --gray-500: #525252;
-            --gray-400: #737373;
-            --gray-300: #a3a3a3;
-            --white: #ffffff;
-            --purple: #FF6B2B;
-            --purple-light: #FF9160;
-            --green: #22c55e;
-        }
-        
-        html { scroll-behavior: smooth; }
-        
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: var(--black);
-            color: var(--white);
-            line-height: 1.6;
-            -webkit-font-smoothing: antialiased;
-        }
-        
-        a { color: var(--purple-light); text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        
-        .container { max-width: 800px; margin: 0 auto; padding: 0 24px; }
-        
-        /* Header */
-        .header {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            z-index: 100;
-            background: rgba(0, 0, 0, 0.9);
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid rgba(255,255,255,0.05);
-        }
-        
-        .header-inner {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 0 24px;
-            height: 64px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        
-        .logo {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-weight: 600;
-            font-size: 18px;
-            color: var(--white);
-        }
-        
-        .logo img { width: 28px; height: 28px; border-radius: 8px; }
-        
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            padding: 10px 20px;
-            font-size: 14px;
-            font-weight: 500;
-            border-radius: 8px;
-            border: none;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            background: var(--white);
-            color: var(--black);
-        }
-        
-        .btn:hover { background: rgba(255,255,255,0.9); }
-        
-        /* Content */
-        .content {
-            padding: 120px 24px 80px;
-        }
-        
-        .page-title {
-            font-size: 48px;
-            font-weight: 700;
-            margin-bottom: 16px;
-            letter-spacing: -0.02em;
-        }
-        
-        .page-subtitle {
-            font-size: 18px;
-            color: var(--gray-400);
-            margin-bottom: 48px;
-        }
-        
-        .section {
-            margin-bottom: 48px;
-        }
-        
-        .section h2 {
-            font-size: 24px;
-            font-weight: 600;
-            margin-bottom: 16px;
-            color: var(--white);
-        }
-        
-        .section p {
-            color: var(--gray-300);
-            margin-bottom: 16px;
-            line-height: 1.8;
-        }
-        
-        .section ul {
-            list-style: none;
-            margin-bottom: 16px;
-        }
-        
-        .section ul li {
-            display: flex;
-            align-items: flex-start;
-            gap: 12px;
-            padding: 8px 0;
-            color: var(--gray-300);
-        }
-        
-        .section ul li svg {
-            width: 20px;
-            height: 20px;
-            color: var(--green);
-            flex-shrink: 0;
-            margin-top: 2px;
-        }
-        
-        .badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 6px 12px;
-            background: rgba(34,197,94,0.1);
-            border: 1px solid rgba(34,197,94,0.2);
-            border-radius: 100px;
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--green);
-            margin-bottom: 24px;
-        }
-        
-        .card {
-            background: var(--gray-900);
-            border: 1px solid rgba(255,255,255,0.05);
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 16px;
-        }
-        
-        .card h3 {
-            font-size: 18px;
-            font-weight: 600;
-            margin-bottom: 12px;
-        }
-        
-        .card p {
-            color: var(--gray-400);
-            font-size: 14px;
-        }
-        
-        /* Footer */
-        .footer {
-            padding: 40px 24px;
-            border-top: 1px solid rgba(255,255,255,0.05);
-            text-align: center;
-        }
-        
-        .footer p {
-            font-size: 13px;
-            color: var(--gray-600);
-        }
-        
-        .footer-links {
-            display: flex;
-            justify-content: center;
-            gap: 24px;
-            margin-bottom: 16px;
-        }
-        
-        .footer-links a {
-            font-size: 14px;
-            color: var(--gray-500);
-        }
-    </style>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Security · Remembra</title>
+<meta name="description" content="How Remembra protects your memory: secrets redacted before anything is saved, accounts walled off, every handoff attributed to the agent that wrote it, and an open-source core you can audit and host yourself.">
+<meta property="og:title" content="Security · Remembra">
+<meta property="og:description" content="Redacted, isolated, attributed and open: how Remembra protects your agents' memory.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://remembra.dev/security">
+<meta property="og:image" content="https://remembra.dev/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="canonical" href="https://remembra.dev/security">
+<!-- @head -->
+<script>
+  /* Dark for every visitor unless they chose light. Storage may be unavailable; the page works without it. */
+  (function () { var t = "dark"; try { if (localStorage.getItem("remembra-theme") === "light") t = "light"; } catch (e) {} document.documentElement.setAttribute("data-theme", t); })();
+</script>
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
+<meta name="theme-color" content="#131416">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="site.css">
+<!-- /@head -->
+<style>
+.four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 2px solid var(--ink); margin-top: clamp(28px, 4vw, 40px); }
+.four li { padding: 20px 22px 0 0; }
+.four li + li { padding-left: 22px; border-left: 1px dashed var(--rule); }
+.four .k { font-family: var(--f-mono); font-size: var(--t-12); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--signal-ink); }
+.four p { margin-top: 8px; color: var(--ink-2); font-size: var(--t-14); }
+@media (max-width: 960px) { .four { grid-template-columns: repeat(2, minmax(0, 1fr)); } .four li:nth-child(3) { padding-left: 0; border-left: 0; } }
+@media (max-width: 560px) { .four { grid-template-columns: minmax(0, 1fr); } .four li, .four li + li { padding-left: 0; border-left: 0; padding-right: 0; } }
+</style>
 </head>
-<body class="legacy">
-    <a class="skip" href="#main">Skip to content</a>
-    <header class="site-header">
-      <div class="wrap bar">
-        <a class="brand" href="/" aria-label="Remembra home">
-          <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true">
-            <circle cx="6" cy="25" r="2.4" fill="currentColor" opacity=".3"/>
-            <circle cx="11.5" cy="20" r="2.4" fill="currentColor" opacity=".55"/>
-            <rect x="15" y="4" width="9" height="22" rx="4.5" transform="rotate(40 19.5 15)" fill="var(--signal)"/>
-          </svg>
-          <span class="brand-name">Remembra</span>
-        </a>
-        <nav class="nav-links" aria-label="Primary">
-          <a class="nav-hide-md" href="/#how">How it works</a>
-          <a class="nav-hide-sm" href="/pricing">Pricing</a>
-          <a class="nav-hide-md" href="https://docs.remembra.dev">Docs</a>
-          <a class="nav-hide-md" href="https://github.com/remembra-ai/remembra">GitHub</a>
-          <a class="btn-nav" href="https://app.remembra.dev/signup">Start free</a>
-        </nav>
-      </div>
-    </header>
-    <div id="main">
+<body class="site" data-page="security">
+<!-- @header -->
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href="/" aria-label="Remembra home"><svg class="lockup" viewBox="-136.21 18.6 532.21 99.3" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M-122.83 82.72 L-122.05 84.90 L-121.01 86.86 L-119.61 88.72 L-118.24 90.11 L-116.22 91.68 L-114.36 92.77 L-112.30 93.67 L-110.03 94.35 L-107.55 94.80 L-103.80 95.18 L-92.13 96.01 L-78.74 96.57 L-65.97 96.78 L-65.46 100.56 L-64.75 109.98 L-64.40 112.48 L-64.08 113.80 L-63.68 114.48 L-63.14 115.02 L-62.49 115.43 L-61.76 115.71 L-60.98 115.87 L-60.16 115.90 L-59.08 115.77 L-58.32 115.54 L-57.39 115.05 L-56.82 114.56 L-56.25 113.75 L-55.99 112.98 L-55.50 110.08 L-54.76 102.31 L-54.09 98.76 L-52.69 99.14 L-51.18 99.39 L-49.59 99.51 L-47.36 99.48 L-45.65 99.32 L-43.37 98.92 L-41.67 98.50 L-40.03 97.96 L-38.45 97.33 L-36.96 96.58 L-35.59 95.75 L-34.36 94.81 L-33.29 93.79 L-32.68 93.05 L-31.90 91.86 L-31.29 90.61 L-30.73 88.85 L-30.42 86.58 L-30.47 84.77 L-30.83 82.80 L-45.28 87.21 L-49.11 88.54 L-51.78 89.61 L-54.04 90.71 L-55.89 91.82 L-57.31 92.96 L-58.76 94.59 L-59.22 94.93 L-59.74 95.17 L-60.29 95.30 L-61.14 95.29 L-61.69 95.15 L-62.44 94.74 L-62.86 94.36 L-63.33 93.64 L-63.51 93.11 L-63.59 92.54 L-63.50 91.70 L-63.17 90.91 L-61.73 89.16 L-60.76 88.25 L-59.71 87.42 L-58.06 86.31 L-56.76 85.57 L-53.37 83.98 L-48.77 82.25 L-43.53 80.57 L-32.88 77.35 L-31.39 76.02 L-30.26 74.69 L-29.43 73.46 L-28.69 72.12 L-28.03 70.66 L-27.34 68.76 L-26.66 66.43 L-26.20 64.38 L-25.85 62.26 L-25.62 60.09 L-25.50 57.89 L-25.50 55.67 L-25.78 52.02 L-26.11 49.88 L-26.56 47.81 L-27.61 44.58 L-28.40 42.81 L-29.33 41.18 L-30.27 39.92 L-31.49 38.56 L-32.73 37.43 L-34.30 36.31 L-35.86 35.48 L-37.21 34.99 L-38.35 37.39 L-38.95 38.87 L-39.62 40.87 L-40.13 42.92 L-40.48 45.01 L-40.64 46.62 L-40.72 48.80 L-40.63 51.34 L-40.70 51.91 L-40.89 52.45 L-41.18 52.94 L-41.77 53.55 L-42.25 53.85 L-42.79 54.05 L-43.35 54.14 L-44.20 54.07 L-44.74 53.88 L-45.23 53.60 L-45.66 53.22 L-46.14 52.52 L-46.34 51.98 L-46.43 51.42 L-46.50 47.52 L-46.24 44.30 L-45.68 41.14 L-45.01 38.62 L-43.93 35.66 L-42.62 32.89 L-44.22 30.55 L-45.98 28.45 L-47.90 26.57 L-49.45 25.32 L-51.68 23.86 L-54.09 22.66 L-56.68 21.73 L-58.75 21.21 L-61.67 20.76 L-64.68 20.60 L-67.30 20.71 L-70.31 21.16 L-72.51 21.79 L-74.99 22.87 L-77.20 24.28 L-79.14 25.99 L-79.51 26.40 L-79.31 27.29 L-79.36 29.01 L-79.60 31.93 L-79.89 34.11 L-80.58 37.60 L-81.53 40.98 L-83 44.85 L-84.67 48.22 L-85.03 48.66 L-85.47 49.03 L-85.97 49.30 L-86.79 49.51 L-87.36 49.51 L-88.19 49.31 L-88.69 49.04 L-89.13 48.68 L-89.50 48.25 L-89.77 47.74 L-89.94 47.20 L-89.98 46.35 L-89.78 45.52 L-88.58 43.09 L-87.65 40.87 L-86.53 37.42 L-85.96 35.03 L-85.53 32.56 L-85.31 30.67 L-85.13 28.08 L-86.10 27.43 L-87.19 26.84 L-88.35 26.34 L-89.56 25.94 L-92.15 25.41 L-94.92 25.25 L-97.82 25.44 L-101.28 26.04 L-105.20 27.07 L-109.04 28.41 L-111.83 29.62 L-113.64 30.52 L-117.12 32.51 L-119.58 34.18 L-121.13 35.37 L-124 37.92 L-126.53 40.68 L-127.66 42.13 L-128.67 43.63 L-130.92 47.57 L-131.73 49.23 L-132.43 50.94 L-133.01 52.68 L-133.48 54.44 L-133.83 56.21 L-134.07 57.99 L-134.19 59.77 L-134.21 61.54 L-134.12 63.29 L-133.77 65.85 L-133.41 67.50 L-132.94 69.10 L-132.36 70.65 L-131.68 72.12 L-130.90 73.51 L-130.01 74.82 L-129.02 76.03 L-127.80 77.25 L-124.48 76.95 L-119.98 76.79 L-115.53 76.82 L-102.51 77.20 L-98.28 77.15 L-95.15 76.97 L-91.01 76.48 L-87.94 75.89 L-85.92 75.38 L-80.42 73.75 L-76.33 72.80 L-73.06 72.30 L-69.72 72.10 L-52.11 72.10 L-51.54 72.15 L-51 72.32 L-50.50 72.59 L-49.87 73.16 L-49.55 73.63 L-49.33 74.16 L-49.22 74.72 L-49.22 75.28 L-49.33 75.84 L-49.55 76.37 L-50.06 77.05 L-50.74 77.56 L-51.54 77.85 L-52.11 77.90 L-69.63 77.91 L-72.44 78.08 L-74.89 78.44 L-77.42 78.98 L-80.47 79.80 L-84.36 80.97 L-86.67 81.56 L-90.07 82.22 L-93.56 82.66 L-96.97 82.91 L-101.43 83.02 L-105.87 82.95 L-116.74 82.61 L-120.98 82.61Z"/><path fill="var(--signal)" d="M-52.11 78.30 L-51.90 78.29 L-51.68 78.27 L-51.47 78.24 L-51.26 78.19 L-51.05 78.12 L-50.85 78.05 L-50.65 77.96 L-50.46 77.86 L-50.28 77.74 L-50.10 77.62 L-49.94 77.48 L-49.78 77.33 L-49.63 77.18 L-49.49 77.01 L-49.37 76.83 L-49.25 76.65 L-49.15 76.46 L-49.06 76.26 L-48.99 76.06 L-48.92 75.85 L-48.87 75.64 L-48.84 75.43 L-48.82 75.22 L-48.81 75 L-48.82 74.78 L-48.84 74.57 L-48.87 74.36 L-48.92 74.15 L-48.99 73.94 L-49.06 73.74 L-49.15 73.54 L-49.25 73.35 L-49.37 73.17 L-49.49 72.99 L-49.63 72.82 L-49.78 72.67 L-49.94 72.52 L-50.10 72.38 L-50.28 72.26 L-50.46 72.14 L-50.65 72.04 L-50.85 71.95 L-51.05 71.88 L-51.26 71.81 L-51.47 71.76 L-51.68 71.73 L-51.90 71.71 L-52.11 71.70 L-71.91 71.70 L-72.13 71.71 L-72.34 71.73 L-72.55 71.76 L-72.77 71.81 L-72.97 71.88 L-73.17 71.95 L-73.37 72.04 L-73.56 72.14 L-73.74 72.26 L-73.92 72.38 L-74.09 72.52 L-74.24 72.67 L-74.39 72.82 L-74.53 72.99 L-74.65 73.17 L-74.77 73.35 L-74.87 73.54 L-74.96 73.74 L-75.04 73.94 L-75.10 74.15 L-75.15 74.36 L-75.18 74.57 L-75.20 74.78 L-75.21 75 L-75.20 75.22 L-75.18 75.43 L-75.15 75.64 L-75.10 75.85 L-75.04 76.06 L-74.96 76.26 L-74.87 76.46 L-74.77 76.65 L-74.65 76.83 L-74.53 77.01 L-74.39 77.18 L-74.24 77.33 L-74.09 77.48 L-73.92 77.62 L-73.74 77.74 L-73.56 77.86 L-73.37 77.96 L-73.17 78.05 L-72.97 78.12 L-72.77 78.19 L-72.55 78.24 L-72.34 78.27 L-72.13 78.29 L-71.91 78.30Z"/><g fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 94.5 V33.5 H19.5 A15.5 15.5 0 0 1 19.5 64.5 H5.5 M18.5 64.5 L33.5 94.5"/><path d="M83.5 75 A17 19.5 0 0 0 49.5 75 A17 19.5 0 0 0 76.01 91.17"/><path d="M49.5 75 H83.5"/><path d="M100.0 94.5 V55.5 M100.0 71 A11.5 15.5 0 0 1 123.0 71 V94.5 M123.0 71 A11.5 15.5 0 0 1 146.0 71 V94.5"/><path d="M196.5 75 A17 19.5 0 0 0 162.5 75 A17 19.5 0 0 0 189.01 91.17"/><path d="M213.0 94.5 V55.5 M213.0 71 A11.5 15.5 0 0 1 236.0 71 V94.5 M236.0 71 A11.5 15.5 0 0 1 259.0 71 V94.5"/><path d="M275.5 27.5 V94.5 M275.5 75 A17 19.5 0 0 1 309.5 75 A17 19.5 0 0 1 275.5 75"/><path d="M326.0 94.5 V55.5 M326.0 73 A15 17.5 0 0 1 341.0 55.5"/><path d="M388.5 75 A17 19.5 0 0 0 354.5 75 A17 19.5 0 0 0 388.5 75 M388.5 55.5 V94.5"/></g><g fill="none" stroke="var(--signal)" stroke-width="11" stroke-linecap="round"><path d="M162.5 75 H196.5"/></g></svg></a>
+    <nav class="nav-links" aria-label="Primary">
+      <a class="nav-link" href="/#how">How it works</a>
+      <a class="nav-link" href="/pricing">Pricing</a>
+      <a class="nav-link nav-hide-lg" href="https://docs.remembra.dev">Docs</a>
+      <a class="nav-link nav-hide-lg" href="https://github.com/remembra-ai/remembra">GitHub</a>
+      <button class="icon-btn theme-btn" type="button" data-theme-toggle aria-label="Switch to light theme"><svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke-linecap="round"/></svg><svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" stroke-linejoin="round"/></svg></button>
+      <button class="icon-btn menu-btn" type="button" data-menu-toggle aria-expanded="false" aria-controls="site-menu" aria-label="Open menu"><svg class="bars" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="square"/></svg><svg class="x" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke-linecap="square"/></svg></button>
+      <a class="btn-nav" href="https://app.remembra.dev/signup">Start free</a>
+    </nav>
+  </div>
+  <nav class="menu-panel" id="site-menu" aria-label="Menu">
+    <a href="/#how">How it works</a>
+    <a href="/pricing">Pricing</a>
+    <a href="https://docs.remembra.dev">Docs</a>
+    <a href="https://github.com/remembra-ai/remembra">GitHub</a>
+    <a href="/security" aria-current="page">Security</a>
+    <a href="/contact">Contact</a>
+  </nav>
+</header>
+<!-- /@header -->
 
-    <main class="content">
-        <div class="container">
-            <span class="badge">Security first</span>
-            <h1 class="page-title">Security</h1>
-            <p class="page-subtitle">How we protect your data and maintain trust.</p>
+<main id="main">
+  <section class="wrap page-head" aria-labelledby="doc-title">
+    <p class="eyebrow">Security</p>
+    <h1 id="doc-title">Your agents' memory, <mark>kept on a short leash.</mark></h1>
+    <p class="lede">A memory that every agent reads has to be careful about what goes in, who can read it back, and who wrote it. This is how Remembra handles each.</p>
+    <ol class="four">
+      <li><p class="k">Redacted</p><p>Keys, tokens and other secrets are stripped out before anything is saved.</p></li>
+      <li><p class="k">Isolated</p><p>Every account's memory is walled off, and project-scoped keys only see their own projects.</p></li>
+      <li><p class="k">Attributed</p><p>Every handoff names the agent, session and time that wrote it, and whether its facts came from git or from the agent.</p></li>
+      <li><p class="k">Open</p><p>The core is MIT-licensed open source. Read it, run it, host it yourself.</p></li>
+    </ol>
+  </section>
 
-            <div class="section">
-                <h2>Our Security Philosophy</h2>
-                <p>Remembra is built with security as a first-class citizen. We believe that AI memory systems must be trustworthy, and that starts with robust security practices.</p>
-            </div>
+  <div class="wrap doc-grid">
+    <aside aria-label="On this page">
+      <p class="k">On this page</p>
+      <nav class="toc">
+        <a href="#handoffs">Handoffs and briefs</a>
+        <a href="#data">Data protection</a>
+        <a href="#access">Access control</a>
+        <a href="#hosting">Hosting</a>
+        <a href="#privacy">Compliance and privacy</a>
+        <a href="#disclosure">Responsible disclosure</a>
+      </nav>
+    </aside>
+    <article class="prose">
+      <h2 id="handoffs">Handoffs and briefs</h2>
+      <p>The relay passes work between agents, so it is built on the assumption that what one agent wrote may be wrong, or may try to steer the next one.</p>
+      <ul>
+        <li><strong>Redacted before storage.</strong> Every string in a handoff passes secret redaction and the server's PII policy, value by value. A blocked value is replaced with <code>[REDACTED:pii]</code>; a close is never rejected for it.</li>
+        <li><strong>The raw transcript stays on your machine.</strong> Close-out reads git and, for Claude Code, the local session transcript, and sends only the facts it pulled out.</li>
+        <li><strong>Briefs are data, not instructions.</strong> Everything another agent or tool recorded is wrapped in one untrusted-data block with a fixed preamble. Text inside it cannot close the block.</li>
+        <li><strong>Low-trust text is withheld.</strong> When recorded text matches prompt-injection patterns, the brief shows counts, a <code>LOW TRUST</code> marker and the handoff id to review, not the text.</li>
+        <li><strong>Attributed.</strong> A handoff closed with a key scoped to one agent is shown as <em>key-verified</em>, and that key cannot write as another agent. Otherwise it is shown as <em>self-declared</em>. An agent's own summary is marked unverified, or contradicted when the facts disagree.</li>
+      </ul>
 
-            <div class="section">
-                <h2>Data Protection</h2>
-                <ul>
-                    <li>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>Encryption at Rest:</strong> Memory content and metadata in the vector store are encrypted with AES-256-GCM, and 2FA secrets are encrypted. The metadata database is not yet field-encrypted; we are extending encryption to all stored memory data.</span>
-                    </li>
-                    <li>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>Encryption in Transit:</strong> All API communications use TLS 1.3.</span>
-                    </li>
-                    <li>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>User Scoping:</strong> Memories are strictly scoped to user IDs, preventing cross-user data leakage.</span>
-                    </li>
-                    <li>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>PII Detection:</strong> Built-in detection and optional redaction of sensitive data.</span>
-                    </li>
-                </ul>
-            </div>
+      <h2 id="data">Data protection</h2>
+      <ul>
+        <li><strong>Encryption at rest:</strong> memory content and metadata in the vector store are encrypted with AES-256-GCM, and 2FA secrets are encrypted. The metadata database is not yet field-encrypted; we are extending encryption to all stored memory data.</li>
+        <li><strong>Encryption in transit:</strong> all API traffic uses HTTPS.</li>
+        <li><strong>User scoping:</strong> memories are strictly scoped to their account, preventing cross-account leakage.</li>
+        <li><strong>PII detection:</strong> built-in detection and optional redaction of sensitive data.</li>
+      </ul>
 
-            <div class="section">
-                <h2>Authentication & Access Control</h2>
-                <ul>
-                    <li>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>API Key Authentication:</strong> Secure, scoped API keys with granular permissions.</span>
-                    </li>
-                    <li>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>RBAC:</strong> Role-based access control with Admin, Editor, and Viewer roles.</span>
-                    </li>
-                    <li>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>Rate Limiting:</strong> Protection against abuse with configurable rate limits.</span>
-                    </li>
-                    <li>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>Audit Logging:</strong> Full audit trail of all API operations.</span>
-                    </li>
-                </ul>
-            </div>
+      <h2 id="access">Access control</h2>
+      <ul>
+        <li><strong>Scoped API keys:</strong> keys can be limited to one agent, to certain projects, and to certain permissions.</li>
+        <li><strong>Project-restricted keys</strong> can only resolve into, close, brief and see links for their own projects, and never move a repository's binding.</li>
+        <li><strong>Roles:</strong> admin, editor and viewer roles for keys, and owner, admin, member and viewer roles for teams.</li>
+        <li><strong>Rate limiting</strong> against abuse, per plan and per minute.</li>
+        <li><strong>Audit logging</strong> of API operations.</li>
+      </ul>
 
-            <div class="section">
-                <h2>Infrastructure</h2>
-                <div class="card">
-                    <h3>Self-Hosted Option</h3>
-                    <p>Deploy Remembra on your own infrastructure with full control over your data. No data ever leaves your network.</p>
-                </div>
-                <div class="card">
-                    <h3>Cloud Hosting</h3>
-                    <p>Our managed cloud service is designed for secure operations, with audit logging, hardened defaults, and deployment controls that support customer compliance reviews.</p>
-                </div>
-            </div>
+      <h2 id="hosting">Hosting</h2>
+      <h3>Self-hosted</h3>
+      <p>Run Remembra on your own infrastructure with full control over your data. The hosted service is optional; a self-hosted server keeps your memory on your network.</p>
+      <h3>Remembra Cloud</h3>
+      <p>Our managed service is designed for secure operations, with audit logging, hardened defaults and deployment controls that support customer compliance reviews.</p>
 
-            <div class="section">
-                <h2>Compliance & Privacy</h2>
-                <ul>
-                    <li>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>GDPR Ready:</strong> Full support for data export and deletion (right to be forgotten).</span>
-                    </li>
-                    <li>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>Data Portability:</strong> Export all your memories in JSON, CSV, or JSONL format.</span>
-                    </li>
-                    <li>
-                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                        <span><strong>No Training on Your Data:</strong> Your memories are never used to train AI models.</span>
-                    </li>
-                </ul>
-            </div>
+      <h2 id="privacy">Compliance and privacy</h2>
+      <ul>
+        <li><strong>Export and deletion:</strong> export your memories, or delete them, whenever you want.</li>
+        <li><strong>No training on your data:</strong> your memories are never used to train AI models.</li>
+      </ul>
+      <p>The <a href="/privacy">privacy policy</a> covers what we collect and why.</p>
 
-            <div class="section">
-                <h2>Responsible Disclosure</h2>
-                <p>We take security vulnerabilities seriously. If you discover a security issue, please report it responsibly:</p>
-                <p>Email: <a href="mailto:security@dolphytech.com">security@dolphytech.com</a></p>
-                <p>We aim to respond within 48 hours and will work with you to understand and address the issue.</p>
-            </div>
+      <h2 id="disclosure">Responsible disclosure</h2>
+      <p>If you find a security issue, please report it privately to <a href="mailto:security@dolphytech.com">security@dolphytech.com</a>. We aim to respond within 48 hours and will work with you to understand and fix it.</p>
+      <p>For security questions or our security documentation, <a href="/contact">contact us</a>.</p>
+    </article>
+  </div>
+</main>
 
-            <div class="section">
-                <h2>Questions?</h2>
-                <p>For security-related questions or to request our security documentation, please <a href="/contact">contact us</a>.</p>
-            </div>
-        </div>
-    </main>
-
+<!-- @footer -->
+<footer class="site-footer">
+  <div class="terrain" aria-hidden="true"></div>
+  <div class="ground"><div class="wrap foot">
+    <div class="foot-brand">
+      <a class="brand" href="/" aria-label="Remembra home"><svg class="lockup" viewBox="-136.21 18.6 532.21 99.3" aria-hidden="true" focusable="false"><path fill="currentColor" fill-rule="evenodd" d="M-122.83 82.72 L-122.05 84.90 L-121.01 86.86 L-119.61 88.72 L-118.24 90.11 L-116.22 91.68 L-114.36 92.77 L-112.30 93.67 L-110.03 94.35 L-107.55 94.80 L-103.80 95.18 L-92.13 96.01 L-78.74 96.57 L-65.97 96.78 L-65.46 100.56 L-64.75 109.98 L-64.40 112.48 L-64.08 113.80 L-63.68 114.48 L-63.14 115.02 L-62.49 115.43 L-61.76 115.71 L-60.98 115.87 L-60.16 115.90 L-59.08 115.77 L-58.32 115.54 L-57.39 115.05 L-56.82 114.56 L-56.25 113.75 L-55.99 112.98 L-55.50 110.08 L-54.76 102.31 L-54.09 98.76 L-52.69 99.14 L-51.18 99.39 L-49.59 99.51 L-47.36 99.48 L-45.65 99.32 L-43.37 98.92 L-41.67 98.50 L-40.03 97.96 L-38.45 97.33 L-36.96 96.58 L-35.59 95.75 L-34.36 94.81 L-33.29 93.79 L-32.68 93.05 L-31.90 91.86 L-31.29 90.61 L-30.73 88.85 L-30.42 86.58 L-30.47 84.77 L-30.83 82.80 L-45.28 87.21 L-49.11 88.54 L-51.78 89.61 L-54.04 90.71 L-55.89 91.82 L-57.31 92.96 L-58.76 94.59 L-59.22 94.93 L-59.74 95.17 L-60.29 95.30 L-61.14 95.29 L-61.69 95.15 L-62.44 94.74 L-62.86 94.36 L-63.33 93.64 L-63.51 93.11 L-63.59 92.54 L-63.50 91.70 L-63.17 90.91 L-61.73 89.16 L-60.76 88.25 L-59.71 87.42 L-58.06 86.31 L-56.76 85.57 L-53.37 83.98 L-48.77 82.25 L-43.53 80.57 L-32.88 77.35 L-31.39 76.02 L-30.26 74.69 L-29.43 73.46 L-28.69 72.12 L-28.03 70.66 L-27.34 68.76 L-26.66 66.43 L-26.20 64.38 L-25.85 62.26 L-25.62 60.09 L-25.50 57.89 L-25.50 55.67 L-25.78 52.02 L-26.11 49.88 L-26.56 47.81 L-27.61 44.58 L-28.40 42.81 L-29.33 41.18 L-30.27 39.92 L-31.49 38.56 L-32.73 37.43 L-34.30 36.31 L-35.86 35.48 L-37.21 34.99 L-38.35 37.39 L-38.95 38.87 L-39.62 40.87 L-40.13 42.92 L-40.48 45.01 L-40.64 46.62 L-40.72 48.80 L-40.63 51.34 L-40.70 51.91 L-40.89 52.45 L-41.18 52.94 L-41.77 53.55 L-42.25 53.85 L-42.79 54.05 L-43.35 54.14 L-44.20 54.07 L-44.74 53.88 L-45.23 53.60 L-45.66 53.22 L-46.14 52.52 L-46.34 51.98 L-46.43 51.42 L-46.50 47.52 L-46.24 44.30 L-45.68 41.14 L-45.01 38.62 L-43.93 35.66 L-42.62 32.89 L-44.22 30.55 L-45.98 28.45 L-47.90 26.57 L-49.45 25.32 L-51.68 23.86 L-54.09 22.66 L-56.68 21.73 L-58.75 21.21 L-61.67 20.76 L-64.68 20.60 L-67.30 20.71 L-70.31 21.16 L-72.51 21.79 L-74.99 22.87 L-77.20 24.28 L-79.14 25.99 L-79.51 26.40 L-79.31 27.29 L-79.36 29.01 L-79.60 31.93 L-79.89 34.11 L-80.58 37.60 L-81.53 40.98 L-83 44.85 L-84.67 48.22 L-85.03 48.66 L-85.47 49.03 L-85.97 49.30 L-86.79 49.51 L-87.36 49.51 L-88.19 49.31 L-88.69 49.04 L-89.13 48.68 L-89.50 48.25 L-89.77 47.74 L-89.94 47.20 L-89.98 46.35 L-89.78 45.52 L-88.58 43.09 L-87.65 40.87 L-86.53 37.42 L-85.96 35.03 L-85.53 32.56 L-85.31 30.67 L-85.13 28.08 L-86.10 27.43 L-87.19 26.84 L-88.35 26.34 L-89.56 25.94 L-92.15 25.41 L-94.92 25.25 L-97.82 25.44 L-101.28 26.04 L-105.20 27.07 L-109.04 28.41 L-111.83 29.62 L-113.64 30.52 L-117.12 32.51 L-119.58 34.18 L-121.13 35.37 L-124 37.92 L-126.53 40.68 L-127.66 42.13 L-128.67 43.63 L-130.92 47.57 L-131.73 49.23 L-132.43 50.94 L-133.01 52.68 L-133.48 54.44 L-133.83 56.21 L-134.07 57.99 L-134.19 59.77 L-134.21 61.54 L-134.12 63.29 L-133.77 65.85 L-133.41 67.50 L-132.94 69.10 L-132.36 70.65 L-131.68 72.12 L-130.90 73.51 L-130.01 74.82 L-129.02 76.03 L-127.80 77.25 L-124.48 76.95 L-119.98 76.79 L-115.53 76.82 L-102.51 77.20 L-98.28 77.15 L-95.15 76.97 L-91.01 76.48 L-87.94 75.89 L-85.92 75.38 L-80.42 73.75 L-76.33 72.80 L-73.06 72.30 L-69.72 72.10 L-52.11 72.10 L-51.54 72.15 L-51 72.32 L-50.50 72.59 L-49.87 73.16 L-49.55 73.63 L-49.33 74.16 L-49.22 74.72 L-49.22 75.28 L-49.33 75.84 L-49.55 76.37 L-50.06 77.05 L-50.74 77.56 L-51.54 77.85 L-52.11 77.90 L-69.63 77.91 L-72.44 78.08 L-74.89 78.44 L-77.42 78.98 L-80.47 79.80 L-84.36 80.97 L-86.67 81.56 L-90.07 82.22 L-93.56 82.66 L-96.97 82.91 L-101.43 83.02 L-105.87 82.95 L-116.74 82.61 L-120.98 82.61Z"/><path fill="var(--signal)" d="M-52.11 78.30 L-51.90 78.29 L-51.68 78.27 L-51.47 78.24 L-51.26 78.19 L-51.05 78.12 L-50.85 78.05 L-50.65 77.96 L-50.46 77.86 L-50.28 77.74 L-50.10 77.62 L-49.94 77.48 L-49.78 77.33 L-49.63 77.18 L-49.49 77.01 L-49.37 76.83 L-49.25 76.65 L-49.15 76.46 L-49.06 76.26 L-48.99 76.06 L-48.92 75.85 L-48.87 75.64 L-48.84 75.43 L-48.82 75.22 L-48.81 75 L-48.82 74.78 L-48.84 74.57 L-48.87 74.36 L-48.92 74.15 L-48.99 73.94 L-49.06 73.74 L-49.15 73.54 L-49.25 73.35 L-49.37 73.17 L-49.49 72.99 L-49.63 72.82 L-49.78 72.67 L-49.94 72.52 L-50.10 72.38 L-50.28 72.26 L-50.46 72.14 L-50.65 72.04 L-50.85 71.95 L-51.05 71.88 L-51.26 71.81 L-51.47 71.76 L-51.68 71.73 L-51.90 71.71 L-52.11 71.70 L-71.91 71.70 L-72.13 71.71 L-72.34 71.73 L-72.55 71.76 L-72.77 71.81 L-72.97 71.88 L-73.17 71.95 L-73.37 72.04 L-73.56 72.14 L-73.74 72.26 L-73.92 72.38 L-74.09 72.52 L-74.24 72.67 L-74.39 72.82 L-74.53 72.99 L-74.65 73.17 L-74.77 73.35 L-74.87 73.54 L-74.96 73.74 L-75.04 73.94 L-75.10 74.15 L-75.15 74.36 L-75.18 74.57 L-75.20 74.78 L-75.21 75 L-75.20 75.22 L-75.18 75.43 L-75.15 75.64 L-75.10 75.85 L-75.04 76.06 L-74.96 76.26 L-74.87 76.46 L-74.77 76.65 L-74.65 76.83 L-74.53 77.01 L-74.39 77.18 L-74.24 77.33 L-74.09 77.48 L-73.92 77.62 L-73.74 77.74 L-73.56 77.86 L-73.37 77.96 L-73.17 78.05 L-72.97 78.12 L-72.77 78.19 L-72.55 78.24 L-72.34 78.27 L-72.13 78.29 L-71.91 78.30Z"/><g fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 94.5 V33.5 H19.5 A15.5 15.5 0 0 1 19.5 64.5 H5.5 M18.5 64.5 L33.5 94.5"/><path d="M83.5 75 A17 19.5 0 0 0 49.5 75 A17 19.5 0 0 0 76.01 91.17"/><path d="M49.5 75 H83.5"/><path d="M100.0 94.5 V55.5 M100.0 71 A11.5 15.5 0 0 1 123.0 71 V94.5 M123.0 71 A11.5 15.5 0 0 1 146.0 71 V94.5"/><path d="M196.5 75 A17 19.5 0 0 0 162.5 75 A17 19.5 0 0 0 189.01 91.17"/><path d="M213.0 94.5 V55.5 M213.0 71 A11.5 15.5 0 0 1 236.0 71 V94.5 M236.0 71 A11.5 15.5 0 0 1 259.0 71 V94.5"/><path d="M275.5 27.5 V94.5 M275.5 75 A17 19.5 0 0 1 309.5 75 A17 19.5 0 0 1 275.5 75"/><path d="M326.0 94.5 V55.5 M326.0 73 A15 17.5 0 0 1 341.0 55.5"/><path d="M388.5 75 A17 19.5 0 0 0 354.5 75 A17 19.5 0 0 0 388.5 75 M388.5 55.5 V94.5"/></g><g fill="none" stroke="var(--signal)" stroke-width="11" stroke-linecap="round"><path d="M162.5 75 H196.5"/></g></svg></a>
+      <p>One cloud memory for all your AI agents. The core is open source under the MIT license.</p>
+      <p>&copy; 2026 DolphyTech</p>
     </div>
-    <footer class="site-footer">
-      <div class="wrap foot">
-        <div class="foot-brand">
-          <span class="brand-name">Remembra</span>
-          <p>One cloud memory for all your AI agents. &copy; 2026 DolphyTech.</p>
-        </div>
-        <nav aria-label="Footer">
-          <ul class="foot-links">
-            <li><a href="/pricing">Pricing</a></li>
-            <li><a href="https://docs.remembra.dev">Docs</a></li>
-            <li><a href="https://github.com/remembra-ai/remembra">GitHub</a></li>
-            <li><a href="/security">Security</a></li>
-            <li><a href="/privacy">Privacy</a></li>
-            <li><a href="/terms">Terms</a></li>
-            <li><a href="/contact">Contact</a></li>
-          </ul>
-        </nav>
-      </div>
-    </footer>
+    <nav aria-label="Footer">
+      <ul class="foot-links">
+        <li><a href="https://docs.remembra.dev">Docs</a></li>
+        <li><a href="https://github.com/remembra-ai/remembra">GitHub</a></li>
+        <li><a href="/pricing">Pricing</a></li>
+        <li><a href="/security" aria-current="page">Security</a></li>
+        <li><a href="/privacy">Privacy</a></li>
+        <li><a href="/terms">Terms</a></li>
+        <li><a href="/contact">Contact</a></li>
+      </ul>
+    </nav>
+  </div></div>
+</footer>
+<!-- /@footer -->
+
+<script src="site.js" defer></script>
 </body>
 </html>

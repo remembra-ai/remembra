@@ -9,6 +9,27 @@
    picking up. Tapping an agent's name hands the work off to a
    different agent on a different machine, continuing the same trail.
 ------------------------------------------------------------------- */
+/* ------------------------------------------------------------------
+   The shared trail bus. The trail demo is the one source of truth for
+   which handoff is happening; the hero canvas and the constellation
+   subscribe to it, so the same handoff lights up everywhere at once.
+
+     RemembraTrail.on(fn)       fn(event) now (last event) and on every stage
+     RemembraTrail.watch(el)    keep the story moving while el is on screen
+     RemembraTrail.handOff(n)   hand the work to agent n (a tap anywhere)
+------------------------------------------------------------------- */
+var RemembraTrail = window.RemembraTrail = window.RemembraTrail || (function () {
+  var subs = [];
+  var bus = {
+    last: null,
+    on: function (fn) { subs.push(fn); if (bus.last) fn(bus.last); },
+    emit: function (ev) { bus.last = ev; subs.slice().forEach(function (fn) { try { fn(ev); } catch (e) { /* one view failing must not stop the others */ } }); },
+    watch: function () {},
+    handOff: function () {}
+  };
+  return bus;
+})();
+
 (function () {
   "use strict";
 
@@ -167,6 +188,7 @@
   var paused = reduce;
   var HOLD = 6200;
   var taps = 0;
+  var seq = 0;              /* one number per story played, so views can tell stories apart */
 
   function el(tag, cls, text) {
     var n = document.createElement(tag);
@@ -252,13 +274,42 @@
     baton.style.transform = "translateY(" + (holder - 13) + "px)";
   }
 
-  function setStage(n) {
+  /* What the other views need to draw this handoff, worded once here so
+     the hero window, its status strip and the constellation say the same
+     thing. None of them claims a signature: a handoff records who wrote it and
+     where its facts came from. Only Claude Code's session hook reads its
+     facts from git; an MCP handoff or checkpoint is declared by the agent,
+     so the views mark it self-declared, as the brief does. */
+  function agentId(a) { return AGENT_ID[a] || a.toLowerCase().replace(/\s+/g, "-"); }
+  function summaryOf(s) {
+    var from = agentId(s.from.agent), to = agentId(s.to.agent);
+    if (s.kind === "Checkpoint") return from + " went offline · checkpoint " + s.id + " (self-declared) → " + to + " picks up from it";
+    var src = hooked(s.from.agent) ? "facts from git" : "self-declared";
+    return from + " stopped · handoff " + s.id + " (" + src + ") → " + to + " already knows";
+  }
+  function publish(n, still) {
+    var declared = S.kind === "Checkpoint" || !hooked(S.from.agent);
+    RemembraTrail.emit({
+      stage: n, still: !!still, scenario: current, seq: seq,
+      repo: S.repo, branch: S.branch, kind: S.kind, id: S.id, stop: S.stop,
+      facts: S.facts.length, via: hooked(S.from.agent) ? "session hook" : "MCP",
+      declared: declared,
+      title: S.kind === "Checkpoint" ? "checkpoint.saved" : "handoff.saved",
+      source: declared ? "self-declared" : "from git",
+      line: summaryOf(S),
+      from: { agent: S.from.agent, id: agentId(S.from.agent), host: S.from.host },
+      to: { agent: S.to.agent, id: agentId(S.to.agent), host: S.to.host }
+    });
+  }
+
+  function setStage(n, still) {
     stage = n;
     relay.setAttribute("data-stage", String(n));
     relay.querySelectorAll("[data-at]").forEach(function (x) {
       x.classList.toggle("on", Number(x.getAttribute("data-at")) <= n);
     });
     place();
+    publish(n, still);
   }
 
   function paintMeter(v, s) {
@@ -299,7 +350,7 @@
     relay.classList.add("no-tr");
     render(s);
     if (s.meter) paintMeter(s.meter.to, s);
-    setStage(6);
+    setStage(6, true);
     void relay.offsetWidth;
     relay.classList.remove("no-tr");
   }
@@ -319,6 +370,7 @@
   }
 
   function play(s) {
+    seq += 1;
     if (reduce) { showStill(s); return; }
     clearTimers();
     relay.classList.add("no-tr");
@@ -440,8 +492,38 @@
     syncPause();
   }
 
+  /* Hold the trail at the height of its tallest story. The stories differ
+     (four facts or two, a meter or none, one brief line or two), and a
+     figure that changed height with each one would move the headline
+     beside it and everything below it every few seconds. Each story is
+     rendered into the real markup and measured in one synchronous pass,
+     so none of them is ever painted; the current frame is put back after.
+     Measured again only when the width changes, or once fonts load. */
+  var reservedW = -1;
+  function reserve(force) {
+    var w = relay.offsetWidth || 0;
+    if (!force && w === reservedW) return;
+    reservedW = w;
+    relay.classList.add("no-tr");
+    track.style.minHeight = "";
+    var tallest = 0;
+    ORDER.map(function (k) { return SCN[k]; }).concat([S]).forEach(function (s) {
+      render(s);
+      tallest = Math.max(tallest, track.offsetHeight || 0);
+    });
+    render(S);
+    relay.querySelectorAll("[data-at]").forEach(function (x) {
+      x.classList.toggle("on", Number(x.getAttribute("data-at")) <= stage);
+    });
+    track.style.minHeight = tallest ? tallest + "px" : "";
+    place();
+    void relay.offsetWidth;
+    relay.classList.remove("no-tr");
+  }
+
   /* Initial state: the complete, finished story as a still frame. */
   showStill(S);
+  reserve(true);
   relay.classList.add("is-ready");
 
   function relayout() {
@@ -449,18 +531,34 @@
     place();
     void relay.offsetWidth;
     relay.classList.remove("no-tr");
+    reserve(false);
   }
   if (window.ResizeObserver) new ResizeObserver(relayout).observe(track);
   else window.addEventListener("resize", relayout);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(relayout);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { reserve(true); relayout(); });
+
+  /* The story keeps moving while any view of it is on screen: the trail
+     itself, the hero canvas or the constellation further down. */
+  var onScreen = new Map();
+  function watch(el, threshold) {
+    if (!el || !window.IntersectionObserver) return;
+    onScreen.set(el, false);
+    new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { onScreen.set(en.target, en.isIntersecting); });
+      var any = false;
+      onScreen.forEach(function (v) { any = any || v; });
+      visible = any;
+      if (visible && waiting) next();
+    }, { threshold: threshold == null ? 0.25 : threshold }).observe(el);
+  }
+  RemembraTrail.watch = function (el) { watch(el, 0.25); };
+  RemembraTrail.handOff = function (agent) {
+    if (AGENTS.indexOf(agent) === -1) return;
+    handOff(agent);
+  };
 
   if (!reduce) {
-    if (window.IntersectionObserver) {
-      new IntersectionObserver(function (entries) {
-        visible = entries[0].isIntersecting;
-        if (visible && waiting) next();
-      }, { threshold: 0.35 }).observe(relay);
-    }
+    watch(relay, 0.35);
     document.addEventListener("visibilitychange", function () { if (!document.hidden && waiting) next(); });
     /* Hold the still frame long enough to read, then show a different cause happening live. */
     startHold();

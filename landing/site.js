@@ -1,32 +1,55 @@
-/* Remembra site: theme toggle and copy-to-clipboard. No dependencies. */
+/* Remembra site: theme toggle, mobile menu, sticky header rule and
+   copy-to-clipboard. No dependencies. Dark is the default; the page's
+   inline head script has already applied a saved choice before paint. */
 (function () {
   "use strict";
   var root = document.documentElement;
   var KEY = "remembra-theme";
 
   /* ---------------- Theme toggle ---------------- */
-  var mq = window.matchMedia ? window.matchMedia("(prefers-color-scheme: dark)") : null;
-  function effectiveTheme() {
-    var t = root.getAttribute("data-theme");
-    if (t === "light" || t === "dark") return t;
-    return mq && mq.matches ? "dark" : "light";
-  }
+  function current() { return root.getAttribute("data-theme") === "light" ? "light" : "dark"; }
   function labelToggles() {
-    var next = effectiveTheme() === "dark" ? "light" : "dark";
+    var next = current() === "dark" ? "light" : "dark";
     document.querySelectorAll("[data-theme-toggle]").forEach(function (b) {
       b.setAttribute("aria-label", "Switch to " + next + " theme");
+      b.setAttribute("title", "Switch to " + next + " theme");
     });
   }
   document.querySelectorAll("[data-theme-toggle]").forEach(function (b) {
     b.addEventListener("click", function () {
-      var next = effectiveTheme() === "dark" ? "light" : "dark";
+      var next = current() === "dark" ? "light" : "dark";
       root.setAttribute("data-theme", next);
-      try { localStorage.setItem(KEY, next); } catch (e) { /* storage unavailable: theme still applies for this visit */ }
+      try { localStorage.setItem(KEY, next); } catch (e) { /* storage unavailable: the theme still applies for this visit */ }
       labelToggles();
+      window.dispatchEvent(new CustomEvent("remembra:theme", { detail: { theme: next } }));
     });
   });
-  if (mq && mq.addEventListener) mq.addEventListener("change", labelToggles);
   labelToggles();
+
+  /* ---------------- Mobile menu ---------------- */
+  var menuBtn = document.querySelector("[data-menu-toggle]");
+  var menu = document.getElementById("site-menu");
+  if (menuBtn && menu) {
+    var setOpen = function (open) {
+      menuBtn.setAttribute("aria-expanded", String(open));
+      menuBtn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+      menu.classList.toggle("is-open", open);
+    };
+    menuBtn.addEventListener("click", function () { setOpen(menuBtn.getAttribute("aria-expanded") !== "true"); });
+    menu.addEventListener("click", function (e) { if (e.target.closest("a")) setOpen(false); });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && menuBtn.getAttribute("aria-expanded") === "true") { setOpen(false); menuBtn.focus(); }
+    });
+    window.addEventListener("resize", function () { if (window.innerWidth > 860) setOpen(false); });
+  }
+
+  /* ---------------- Header rule once the page scrolls ---------------- */
+  var header = document.querySelector(".site-header");
+  if (header) {
+    var onScroll = function () { header.classList.toggle("is-stuck", window.scrollY > 4); };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+  }
 
   /* ---------------- Copy command ---------------- */
   document.querySelectorAll("[data-copy]").forEach(function (btn) {
