@@ -181,7 +181,11 @@
     if (result.success && result.memories) {
       renderMemories(result.memories);
     } else {
-      listEl.innerHTML = `<p class="remembra-error">${result.error || 'No results found'}</p>`;
+      // Never interpret server/error text as HTML on the host page.
+      const errorEl = document.createElement('p');
+      errorEl.className = 'remembra-error';
+      errorEl.textContent = result.error || 'No results found';
+      listEl.replaceChildren(errorEl);
     }
   }
   
@@ -193,19 +197,30 @@
       return;
     }
     
-    listEl.innerHTML = memories.map((mem, i) => `
-      <div class="remembra-memory-item" data-index="${i}">
-        <div class="remembra-memory-content">${escapeHtml(truncate(mem.content || mem.text, 150))}</div>
-        <div class="remembra-memory-actions">
-          <button class="remembra-insert-btn" data-content="${escapeAttr(mem.content || mem.text)}">
-            Insert
-          </button>
-          <button class="remembra-copy-btn" data-content="${escapeAttr(mem.content || mem.text)}">
-            Copy
-          </button>
-        </div>
-      </div>
-    `).join('');
+    // Build nodes with textContent/dataset only: memory text is untrusted and
+    // this script runs inside third-party pages.
+    listEl.replaceChildren(...memories.map((mem, i) => {
+      const text = mem.content || mem.text || '';
+      const item = document.createElement('div');
+      item.className = 'remembra-memory-item';
+      item.dataset.index = String(i);
+
+      const content = document.createElement('div');
+      content.className = 'remembra-memory-content';
+      content.textContent = truncate(text, 150);
+
+      const actions = document.createElement('div');
+      actions.className = 'remembra-memory-actions';
+      for (const [cls, label] of [['remembra-insert-btn', 'Insert'], ['remembra-copy-btn', 'Copy']]) {
+        const btn = document.createElement('button');
+        btn.className = cls;
+        btn.dataset.content = text;
+        btn.textContent = label;
+        actions.appendChild(btn);
+      }
+      item.append(content, actions);
+      return item;
+    }));
     
     // Add click handlers
     listEl.querySelectorAll('.remembra-insert-btn').forEach(btn => {
@@ -321,15 +336,6 @@
   
   // ===== UTILITIES =====
   
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
-  
-  function escapeAttr(text) {
-    return text.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
   
   function truncate(text, maxLength) {
     if (!text) return '';
