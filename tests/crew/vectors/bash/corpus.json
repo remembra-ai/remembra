@@ -1,0 +1,3602 @@
+{
+ "description": "Bash parser corpus (§8.2, §13.1). Each expect lists only the keys that differ from `defaults`. Paths are relative to the starting cwd (POSIX-normalised, no trailing slash) unless absolute or '~/'. Rules: docs/crew/bash-parser.md.",
+ "defaults": {
+  "read_only": false,
+  "writes": [],
+  "tree_writer": false,
+  "tree_scope": [],
+  "tamper": [],
+  "git_tree_op": null,
+  "opaque": false
+ },
+ "required_tags": [
+  "heredoc",
+  "noclobber",
+  "variable",
+  "glob",
+  "subshell",
+  "pushd",
+  "find_exec",
+  "checkout_ref_dir",
+  "restore_source",
+  "tree_writer",
+  "pm_script",
+  "combined_flags",
+  "raw_scan",
+  "not_tamper",
+  "devnull",
+  "git_C",
+  "cd",
+  "ln"
+ ],
+ "entries": [
+  {
+   "id": "b001",
+   "cmd": "ls",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b002",
+   "cmd": "ls -la src",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b003",
+   "cmd": "cat package.json",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b004",
+   "cmd": "head -n 20 src/app/pos/cart.ts",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b005",
+   "cmd": "tail -n 50 server.log",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b006",
+   "cmd": "grep -rn \"TODO\" src",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b007",
+   "cmd": "rg \"split tender\" src/app",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b008",
+   "cmd": "rg -l money src",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b009",
+   "cmd": "find . -name \"*.ts\" -type f",
+   "tags": [
+    "glob_as_pattern"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b010",
+   "cmd": "find src -maxdepth 2 -type d",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b011",
+   "cmd": "wc -l src/app/pos/*.ts",
+   "tags": [
+    "glob_as_pattern"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b012",
+   "cmd": "git status",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b013",
+   "cmd": "git status --porcelain -z",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b014",
+   "cmd": "git log --oneline -5",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b015",
+   "cmd": "git diff",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b016",
+   "cmd": "git diff --stat HEAD~1",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b017",
+   "cmd": "git show HEAD",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b018",
+   "cmd": "git branch",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b019",
+   "cmd": "git branch -a",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b020",
+   "cmd": "git rev-parse HEAD",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b021",
+   "cmd": "git blame src/app/pos/cart.ts",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b022",
+   "cmd": "git fetch origin",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b023",
+   "cmd": "git stash list",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b024",
+   "cmd": "git stash show -p",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b025",
+   "cmd": "git config --get core.hooksPath",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b026",
+   "cmd": "git config core.hooksPath",
+   "tags": [
+    "config_get"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b027",
+   "cmd": "git remote -v",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b028",
+   "cmd": "git ls-files",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b029",
+   "cmd": "git tag -l",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b030",
+   "cmd": "git clean -n",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b031",
+   "cmd": "git log --grep=no-verify",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b032",
+   "cmd": "npm test",
+   "tags": [
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b033",
+   "cmd": "npm run test",
+   "tags": [
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b034",
+   "cmd": "npm test -- pos",
+   "tags": [
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b035",
+   "cmd": "pnpm test",
+   "tags": [
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b036",
+   "cmd": "yarn test",
+   "tags": [
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b037",
+   "cmd": "pytest -q",
+   "tags": [
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b038",
+   "cmd": "python -m pytest tests/crew",
+   "tags": [
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b039",
+   "cmd": "npx jest src/app/pos",
+   "tags": [
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b040",
+   "cmd": "npx vitest run",
+   "tags": [
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b041",
+   "cmd": "go test ./...",
+   "tags": [
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b042",
+   "cmd": "cargo test",
+   "tags": [
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b043",
+   "cmd": "npx tsc --noEmit",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b044",
+   "cmd": "mypy src",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b045",
+   "cmd": "npx eslint src",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b046",
+   "cmd": "ruff check src",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b047",
+   "cmd": "black --check .",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b048",
+   "cmd": "npx prettier --check .",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b049",
+   "cmd": "biome check .",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b050",
+   "cmd": "git diff | grep pos",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b051",
+   "cmd": "cat a.txt | wc -l",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b052",
+   "cmd": "echo hello",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b053",
+   "cmd": "pwd",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b054",
+   "cmd": "which node",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b055",
+   "cmd": "env",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b056",
+   "cmd": "date",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b057",
+   "cmd": "ps aux | grep node",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b058",
+   "cmd": "jq . package.json",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b059",
+   "cmd": "du -sh node_modules",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b060",
+   "cmd": "sed -n '1,20p' src/app/pos/cart.ts",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b061",
+   "cmd": "sort names.txt | uniq",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b062",
+   "cmd": "diff a.txt b.txt",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b063",
+   "cmd": "FOO=1 npm test",
+   "tags": [
+    "env_prefix",
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b064",
+   "cmd": "time npm test",
+   "tags": [
+    "wrapper",
+    "test_runner"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b065",
+   "cmd": "ls 2>/dev/null",
+   "tags": [
+    "devnull"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b066",
+   "cmd": "grep foo src -r 2>/dev/null",
+   "tags": [
+    "devnull"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b067",
+   "cmd": "git log > /dev/null",
+   "tags": [
+    "devnull"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b068",
+   "cmd": "grep -rn -- \"--no-verify\" docs",
+   "tags": [
+    "tamper_text_in_read"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b069",
+   "cmd": "rg \"core.hooksPath\" src",
+   "tags": [
+    "tamper_text_in_read"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b070",
+   "cmd": "cat .remembra/zones.yml",
+   "tags": [
+    "crew_policy_read"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b071",
+   "cmd": "echo hi > notes.txt",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "notes.txt"
+    ]
+   }
+  },
+  {
+   "id": "b072",
+   "cmd": "echo hi >> log.txt",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "log.txt"
+    ]
+   }
+  },
+  {
+   "id": "b073",
+   "cmd": "printf 'x' >| out.txt",
+   "tags": [
+    "redirect",
+    "noclobber"
+   ],
+   "expect": {
+    "writes": [
+     "out.txt"
+    ]
+   }
+  },
+  {
+   "id": "b074",
+   "cmd": "cat a.txt > b.txt",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "b.txt"
+    ]
+   }
+  },
+  {
+   "id": "b075",
+   "cmd": "npm test > test.log 2>&1",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "test.log"
+    ]
+   }
+  },
+  {
+   "id": "b076",
+   "cmd": "npm test &> all.log",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "all.log"
+    ]
+   }
+  },
+  {
+   "id": "b077",
+   "cmd": "npm test &>> all.log",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "all.log"
+    ]
+   }
+  },
+  {
+   "id": "b078",
+   "cmd": "npm test 1> out.log",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "out.log"
+    ]
+   }
+  },
+  {
+   "id": "b079",
+   "cmd": "npm test 2> err.log",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "err.log"
+    ]
+   }
+  },
+  {
+   "id": "b080",
+   "cmd": "ls > /dev/null 2>&1",
+   "tags": [
+    "devnull"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b081",
+   "cmd": "echo x > ./src/app/pos/cart.ts",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/cart.ts"
+    ]
+   }
+  },
+  {
+   "id": "b082",
+   "cmd": "echo x > /tmp/scratch.txt",
+   "tags": [
+    "redirect",
+    "absolute"
+   ],
+   "expect": {
+    "writes": [
+     "/tmp/scratch.txt"
+    ]
+   }
+  },
+  {
+   "id": "b083",
+   "cmd": "echo '{}' > ~/.remembra/crew/snapshot/x.json",
+   "tags": [
+    "redirect",
+    "home"
+   ],
+   "expect": {
+    "writes": [
+     "~/.remembra/crew/snapshot/x.json"
+    ]
+   }
+  },
+  {
+   "id": "b084",
+   "cmd": "cat > src/app/pos/new.ts <<EOF\nexport const x = 1;\nrm -rf /\ngit commit --no-verify -m evil\nHUSKY=0\nEOF",
+   "tags": [
+    "heredoc"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/new.ts"
+    ]
+   }
+  },
+  {
+   "id": "b085",
+   "cmd": "cat <<'EOF' > README.md\nexport const x = 1;\nrm -rf /\ngit commit --no-verify -m evil\nHUSKY=0\nEOF",
+   "tags": [
+    "heredoc"
+   ],
+   "expect": {
+    "writes": [
+     "README.md"
+    ]
+   }
+  },
+  {
+   "id": "b086",
+   "cmd": "cat >> notes.md << 'END'\nline\nEND",
+   "tags": [
+    "heredoc"
+   ],
+   "expect": {
+    "writes": [
+     "notes.md"
+    ]
+   }
+  },
+  {
+   "id": "b087",
+   "cmd": "tee out.txt < in.txt",
+   "tags": [
+    "tee"
+   ],
+   "expect": {
+    "writes": [
+     "out.txt"
+    ]
+   }
+  },
+  {
+   "id": "b088",
+   "cmd": "git diff | tee patch.diff",
+   "tags": [
+    "tee",
+    "pipe"
+   ],
+   "expect": {
+    "writes": [
+     "patch.diff"
+    ]
+   }
+  },
+  {
+   "id": "b089",
+   "cmd": "echo x | tee -a a.log b.log",
+   "tags": [
+    "tee",
+    "pipe"
+   ],
+   "expect": {
+    "writes": [
+     "a.log",
+     "b.log"
+    ]
+   }
+  },
+  {
+   "id": "b090",
+   "cmd": "echo x > \"quoted name.txt\"",
+   "tags": [
+    "redirect",
+    "quoted"
+   ],
+   "expect": {
+    "writes": [
+     "quoted name.txt"
+    ]
+   }
+  },
+  {
+   "id": "b091",
+   "cmd": "echo x>tight.txt",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "tight.txt"
+    ]
+   }
+  },
+  {
+   "id": "b092",
+   "cmd": "sed 's/a/b/' src/x.ts > src/x2.ts",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "src/x2.ts"
+    ]
+   }
+  },
+  {
+   "id": "b093",
+   "cmd": "jq '.version=\"2\"' package.json > package.tmp.json",
+   "tags": [
+    "redirect"
+   ],
+   "expect": {
+    "writes": [
+     "package.tmp.json"
+    ]
+   }
+  },
+  {
+   "id": "b094",
+   "cmd": "echo x > \"$OUT\"",
+   "tags": [
+    "variable"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b095",
+   "cmd": "echo x > $OUT",
+   "tags": [
+    "variable"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b096",
+   "cmd": "echo x > ${DIR}/a.txt",
+   "tags": [
+    "variable"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b097",
+   "cmd": "echo x > src/*.ts",
+   "tags": [
+    "glob"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b098",
+   "cmd": "echo x > $(date).log",
+   "tags": [
+    "subshell"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b099",
+   "cmd": "echo x > `whoami`.txt",
+   "tags": [
+    "subshell"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b100",
+   "cmd": "sed -i 's/a/b/' src/app/pos/cart.ts",
+   "tags": [
+    "sed_i"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/cart.ts"
+    ]
+   }
+  },
+  {
+   "id": "b101",
+   "cmd": "sed -i '' 's/a/b/' src/x.ts",
+   "tags": [
+    "sed_i"
+   ],
+   "expect": {
+    "writes": [
+     "src/x.ts"
+    ]
+   }
+  },
+  {
+   "id": "b102",
+   "cmd": "sed -i.bak -e 's/a/b/' -e 's/c/d/' src/y.ts",
+   "tags": [
+    "sed_i"
+   ],
+   "expect": {
+    "writes": [
+     "src/y.ts"
+    ]
+   }
+  },
+  {
+   "id": "b103",
+   "cmd": "sed --in-place 's/x/y/' a.txt b.txt",
+   "tags": [
+    "sed_i"
+   ],
+   "expect": {
+    "writes": [
+     "a.txt",
+     "b.txt"
+    ]
+   }
+  },
+  {
+   "id": "b104",
+   "cmd": "sed -E -i 's/(a)/\\1b/' src/z.ts",
+   "tags": [
+    "sed_i"
+   ],
+   "expect": {
+    "writes": [
+     "src/z.ts"
+    ]
+   }
+  },
+  {
+   "id": "b105",
+   "cmd": "perl -pi -e 's/foo/bar/' src/app/pos/cart.ts",
+   "tags": [
+    "perl_i"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/cart.ts"
+    ]
+   }
+  },
+  {
+   "id": "b106",
+   "cmd": "perl -i -pe 's/a/b/' lib/x.pl",
+   "tags": [
+    "perl_i"
+   ],
+   "expect": {
+    "writes": [
+     "lib/x.pl"
+    ]
+   }
+  },
+  {
+   "id": "b107",
+   "cmd": "truncate -s 0 log.txt",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "log.txt"
+    ]
+   }
+  },
+  {
+   "id": "b108",
+   "cmd": "dd if=/dev/zero of=disk.img bs=1m count=1",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "disk.img"
+    ]
+   }
+  },
+  {
+   "id": "b109",
+   "cmd": "cp src/a.ts src/b.ts",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "src/b.ts"
+    ]
+   }
+  },
+  {
+   "id": "b110",
+   "cmd": "cp -r src/app/pos/ backup/",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "backup"
+    ]
+   }
+  },
+  {
+   "id": "b111",
+   "cmd": "cp a b c dir/",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "dir"
+    ]
+   }
+  },
+  {
+   "id": "b112",
+   "cmd": "cp -t dest/ a b",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "dest"
+    ]
+   }
+  },
+  {
+   "id": "b113",
+   "cmd": "mv old.ts new.ts",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "new.ts",
+     "old.ts"
+    ]
+   }
+  },
+  {
+   "id": "b114",
+   "cmd": "mv src/app/pos/a.ts src/app/reports/",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "src/app/pos/a.ts",
+     "src/app/reports"
+    ]
+   }
+  },
+  {
+   "id": "b115",
+   "cmd": "rm src/app/pos/legacy.ts",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "src/app/pos/legacy.ts"
+    ]
+   }
+  },
+  {
+   "id": "b116",
+   "cmd": "rm -rf build/",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "build"
+    ]
+   }
+  },
+  {
+   "id": "b117",
+   "cmd": "rm -f a.txt b.txt",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "a.txt",
+     "b.txt"
+    ]
+   }
+  },
+  {
+   "id": "b118",
+   "cmd": "rmdir empty_dir",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "empty_dir"
+    ]
+   }
+  },
+  {
+   "id": "b119",
+   "cmd": "unlink tmp.txt",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "tmp.txt"
+    ]
+   }
+  },
+  {
+   "id": "b120",
+   "cmd": "touch src/app/pos/index.ts",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "src/app/pos/index.ts"
+    ]
+   }
+  },
+  {
+   "id": "b121",
+   "cmd": "touch \"src/app/pos/new file.ts\"",
+   "tags": [
+    "quoted"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/new file.ts"
+    ]
+   }
+  },
+  {
+   "id": "b122",
+   "cmd": "mkdir -p src/app/pos/components",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "src/app/pos/components"
+    ]
+   }
+  },
+  {
+   "id": "b123",
+   "cmd": "mkdir a b",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "a",
+     "b"
+    ]
+   }
+  },
+  {
+   "id": "b124",
+   "cmd": "ln src/app/pos/cart.ts cart-link.ts",
+   "tags": [
+    "ln"
+   ],
+   "expect": {
+    "writes": [
+     "cart-link.ts",
+     "src/app/pos/cart.ts"
+    ]
+   }
+  },
+  {
+   "id": "b125",
+   "cmd": "ln -s ../shared/money.ts src/app/pos/money.ts",
+   "tags": [
+    "ln"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/money.ts",
+     "src/app/shared/money.ts"
+    ]
+   }
+  },
+  {
+   "id": "b126",
+   "cmd": "ln -sf /opt/tool bin/tool",
+   "tags": [
+    "ln"
+   ],
+   "expect": {
+    "writes": [
+     "/opt/tool",
+     "bin/tool"
+    ]
+   }
+  },
+  {
+   "id": "b127",
+   "cmd": "install -m 644 build/app.js dist/app.js",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "dist/app.js"
+    ]
+   }
+  },
+  {
+   "id": "b128",
+   "cmd": "install -d dist/assets",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "dist/assets"
+    ]
+   }
+  },
+  {
+   "id": "b129",
+   "cmd": "rsync -a src/ backup/src/",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "backup/src"
+    ]
+   }
+  },
+  {
+   "id": "b130",
+   "cmd": "chmod +x scripts/run.sh",
+   "tags": [
+    "chmod"
+   ],
+   "expect": {
+    "writes": [
+     "scripts/run.sh"
+    ]
+   }
+  },
+  {
+   "id": "b131",
+   "cmd": "chmod -R a-w src/app/pos",
+   "tags": [
+    "chmod"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos"
+    ]
+   }
+  },
+  {
+   "id": "b132",
+   "cmd": "chown mani file.txt",
+   "tags": [
+    "chmod"
+   ],
+   "expect": {
+    "writes": [
+     "file.txt"
+    ]
+   }
+  },
+  {
+   "id": "b133",
+   "cmd": "patch src/app/pos/cart.ts < fix.diff",
+   "tags": [
+    "patch"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/cart.ts"
+    ]
+   }
+  },
+  {
+   "id": "b134",
+   "cmd": "patch -p1 < fix.diff",
+   "tags": [
+    "patch"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b135",
+   "cmd": "git apply fix.diff",
+   "tags": [
+    "patch"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b136",
+   "cmd": "git checkout -- src/app/pos/cart.ts",
+   "tags": [
+    "git_checkout_path"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/cart.ts"
+    ]
+   }
+  },
+  {
+   "id": "b137",
+   "cmd": "git checkout main -- src/app/pos",
+   "tags": [
+    "git_checkout_path",
+    "checkout_ref_dir"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos"
+    ]
+   }
+  },
+  {
+   "id": "b138",
+   "cmd": "git checkout HEAD~1 -- src/app/pos/cart.ts src/app/pos/split.ts",
+   "tags": [
+    "git_checkout_path"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/cart.ts",
+     "src/app/pos/split.ts"
+    ]
+   }
+  },
+  {
+   "id": "b139",
+   "cmd": "git checkout .",
+   "tags": [
+    "git_checkout_path"
+   ],
+   "expect": {
+    "writes": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b140",
+   "cmd": "git checkout -- .",
+   "tags": [
+    "git_checkout_path"
+   ],
+   "expect": {
+    "writes": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b141",
+   "cmd": "git checkout src/app/pos/cart.ts",
+   "tags": [
+    "git_checkout_path"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/cart.ts"
+    ]
+   }
+  },
+  {
+   "id": "b142",
+   "cmd": "git restore src/app/pos/cart.ts",
+   "tags": [
+    "git_restore"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/cart.ts"
+    ]
+   }
+  },
+  {
+   "id": "b143",
+   "cmd": "git restore --source HEAD~2 -- src/app/reports",
+   "tags": [
+    "git_restore",
+    "restore_source"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/reports"
+    ]
+   }
+  },
+  {
+   "id": "b144",
+   "cmd": "git restore --source=main src/x.ts",
+   "tags": [
+    "git_restore",
+    "restore_source"
+   ],
+   "expect": {
+    "writes": [
+     "src/x.ts"
+    ]
+   }
+  },
+  {
+   "id": "b145",
+   "cmd": "git restore --staged src/x.ts",
+   "tags": [
+    "git_restore"
+   ],
+   "expect": {
+    "writes": [
+     "src/x.ts"
+    ]
+   }
+  },
+  {
+   "id": "b146",
+   "cmd": "git rm src/old.ts",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "src/old.ts"
+    ]
+   }
+  },
+  {
+   "id": "b147",
+   "cmd": "git rm -r --cached dist",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "dist"
+    ]
+   }
+  },
+  {
+   "id": "b148",
+   "cmd": "git mv src/a.ts src/b.ts",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "src/a.ts",
+     "src/b.ts"
+    ]
+   }
+  },
+  {
+   "id": "b149",
+   "cmd": "prisma migrate dev --name add_tender",
+   "tags": [
+    "migration"
+   ],
+   "expect": {
+    "writes": [
+     "prisma/migrations"
+    ]
+   }
+  },
+  {
+   "id": "b150",
+   "cmd": "npx prisma migrate dev",
+   "tags": [
+    "migration",
+    "runner"
+   ],
+   "expect": {
+    "writes": [
+     "prisma/migrations"
+    ]
+   }
+  },
+  {
+   "id": "b151",
+   "cmd": "curl -o out.json https://example.com/x",
+   "tags": [
+    "download"
+   ],
+   "expect": {
+    "writes": [
+     "out.json"
+    ]
+   }
+  },
+  {
+   "id": "b152",
+   "cmd": "curl -sSL https://example.com/x.sh -o tools/x.sh",
+   "tags": [
+    "download"
+   ],
+   "expect": {
+    "writes": [
+     "tools/x.sh"
+    ]
+   }
+  },
+  {
+   "id": "b153",
+   "cmd": "wget -O data.csv https://example.com/d.csv",
+   "tags": [
+    "download"
+   ],
+   "expect": {
+    "writes": [
+     "data.csv"
+    ]
+   }
+  },
+  {
+   "id": "b154",
+   "cmd": "sort -o sorted.txt names.txt",
+   "tags": [],
+   "expect": {
+    "writes": [
+     "sorted.txt"
+    ]
+   }
+  },
+  {
+   "id": "b155",
+   "cmd": "sudo rm /etc/hosts.bak",
+   "tags": [
+    "wrapper",
+    "absolute"
+   ],
+   "expect": {
+    "writes": [
+     "/etc/hosts.bak"
+    ]
+   }
+  },
+  {
+   "id": "b156",
+   "cmd": "nohup touch started.flag",
+   "tags": [
+    "wrapper"
+   ],
+   "expect": {
+    "writes": [
+     "started.flag"
+    ]
+   }
+  },
+  {
+   "id": "b157",
+   "cmd": "CI=1 touch ci.flag",
+   "tags": [
+    "env_prefix"
+   ],
+   "expect": {
+    "writes": [
+     "ci.flag"
+    ]
+   }
+  },
+  {
+   "id": "b158",
+   "cmd": "cd src/app && touch pos/x.ts",
+   "tags": [
+    "cd"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/x.ts"
+    ]
+   }
+  },
+  {
+   "id": "b159",
+   "cmd": "cd src && cd app && rm pos/y.ts",
+   "tags": [
+    "cd"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/y.ts"
+    ]
+   }
+  },
+  {
+   "id": "b160",
+   "cmd": "cd .. && echo x > a.txt",
+   "tags": [
+    "cd"
+   ],
+   "expect": {
+    "writes": [
+     "../a.txt"
+    ]
+   }
+  },
+  {
+   "id": "b161",
+   "cmd": "cd /abs/repo && rm x",
+   "tags": [
+    "cd",
+    "absolute"
+   ],
+   "expect": {
+    "writes": [
+     "/abs/repo/x"
+    ]
+   }
+  },
+  {
+   "id": "b162",
+   "cmd": "cd src; rm a.ts",
+   "tags": [
+    "cd"
+   ],
+   "expect": {
+    "writes": [
+     "src/a.ts"
+    ]
+   }
+  },
+  {
+   "id": "b163",
+   "cmd": "cd src || exit 1; rm b.ts",
+   "tags": [
+    "cd"
+   ],
+   "expect": {
+    "writes": [
+     "src/b.ts"
+    ]
+   }
+  },
+  {
+   "id": "b164",
+   "cmd": "cd src && ls && rm c.ts",
+   "tags": [
+    "cd"
+   ],
+   "expect": {
+    "writes": [
+     "src/c.ts"
+    ]
+   }
+  },
+  {
+   "id": "b165",
+   "cmd": "cd ~/code && touch a",
+   "tags": [
+    "cd",
+    "home"
+   ],
+   "expect": {
+    "writes": [
+     "~/code/a"
+    ]
+   }
+  },
+  {
+   "id": "b166",
+   "cmd": "cd && rm x",
+   "tags": [
+    "cd",
+    "home"
+   ],
+   "expect": {
+    "writes": [
+     "~/x"
+    ]
+   }
+  },
+  {
+   "id": "b167",
+   "cmd": "pushd src/app/pos && touch z.ts && popd && touch root.ts",
+   "tags": [
+    "pushd"
+   ],
+   "expect": {
+    "writes": [
+     "root.ts",
+     "src/app/pos/z.ts"
+    ]
+   }
+  },
+  {
+   "id": "b168",
+   "cmd": "pushd src; touch a.ts; popd",
+   "tags": [
+    "pushd"
+   ],
+   "expect": {
+    "writes": [
+     "src/a.ts"
+    ]
+   }
+  },
+  {
+   "id": "b169",
+   "cmd": "git -C ../yaadbooks-a checkout -- src/app/pos/split.ts",
+   "tags": [
+    "git_C"
+   ],
+   "expect": {
+    "writes": [
+     "../yaadbooks-a/src/app/pos/split.ts"
+    ]
+   }
+  },
+  {
+   "id": "b170",
+   "cmd": "git -C sub restore x.ts",
+   "tags": [
+    "git_C",
+    "git_restore"
+   ],
+   "expect": {
+    "writes": [
+     "sub/x.ts"
+    ]
+   }
+  },
+  {
+   "id": "b171",
+   "cmd": "cd \"$DIR\" && rm x",
+   "tags": [
+    "variable",
+    "cd"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b172",
+   "cmd": "cd - && rm x",
+   "tags": [
+    "cd"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b173",
+   "cmd": "(cd src && rm a.ts)",
+   "tags": [
+    "subshell"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b174",
+   "cmd": "{ echo a; echo b; } > out.txt",
+   "tags": [
+    "group"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b175",
+   "cmd": "prettier --write .",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b176",
+   "cmd": "npx prettier --write .",
+   "tags": [
+    "tree_writer",
+    "runner"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b177",
+   "cmd": "npx prettier --write src/app/pos",
+   "tags": [
+    "tree_writer",
+    "runner"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "src/app/pos"
+    ]
+   }
+  },
+  {
+   "id": "b178",
+   "cmd": "npx prettier --write src/app/pos/cart.ts",
+   "tags": [
+    "formatter_file"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/cart.ts"
+    ]
+   }
+  },
+  {
+   "id": "b179",
+   "cmd": "prettier -w src",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "src"
+    ]
+   }
+  },
+  {
+   "id": "b180",
+   "cmd": "prettier --write \"src/**/*.ts\"",
+   "tags": [
+    "tree_writer",
+    "glob"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b181",
+   "cmd": "npx eslint --fix",
+   "tags": [
+    "tree_writer",
+    "runner"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b182",
+   "cmd": "eslint --fix src/",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "src"
+    ]
+   }
+  },
+  {
+   "id": "b183",
+   "cmd": "npx eslint . --fix",
+   "tags": [
+    "tree_writer",
+    "runner"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b184",
+   "cmd": "eslint --fix src/app/pos/cart.ts",
+   "tags": [
+    "formatter_file"
+   ],
+   "expect": {
+    "writes": [
+     "src/app/pos/cart.ts"
+    ]
+   }
+  },
+  {
+   "id": "b185",
+   "cmd": "biome check --write .",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b186",
+   "cmd": "biome format --write src",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "src"
+    ]
+   }
+  },
+  {
+   "id": "b187",
+   "cmd": "npx @biomejs/biome check --apply .",
+   "tags": [
+    "tree_writer",
+    "runner"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b188",
+   "cmd": "ruff format",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b189",
+   "cmd": "ruff format src",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "src"
+    ]
+   }
+  },
+  {
+   "id": "b190",
+   "cmd": "ruff format src/app.py",
+   "tags": [
+    "formatter_file"
+   ],
+   "expect": {
+    "writes": [
+     "src/app.py"
+    ]
+   }
+  },
+  {
+   "id": "b191",
+   "cmd": "ruff check --fix .",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b192",
+   "cmd": "black .",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b193",
+   "cmd": "black src tests",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "src",
+     "tests"
+    ]
+   }
+  },
+  {
+   "id": "b194",
+   "cmd": "gofmt -w .",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b195",
+   "cmd": "go fmt ./...",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b196",
+   "cmd": "cargo fmt",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b197",
+   "cmd": "npm run lint",
+   "tags": [
+    "tree_writer",
+    "pm_script"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b198",
+   "cmd": "npm run lint -- --fix",
+   "tags": [
+    "tree_writer",
+    "pm_script"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b199",
+   "cmd": "npm run format",
+   "tags": [
+    "tree_writer",
+    "pm_script"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b200",
+   "cmd": "pnpm lint",
+   "tags": [
+    "tree_writer",
+    "pm_script"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b201",
+   "cmd": "pnpm run fix",
+   "tags": [
+    "tree_writer",
+    "pm_script"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b202",
+   "cmd": "yarn lint",
+   "tags": [
+    "tree_writer",
+    "pm_script"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b203",
+   "cmd": "yarn format:check",
+   "tags": [
+    "tree_writer",
+    "pm_script"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b204",
+   "cmd": "bun run codegen",
+   "tags": [
+    "tree_writer",
+    "pm_script"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b205",
+   "cmd": "npm run gen:types",
+   "tags": [
+    "tree_writer",
+    "pm_script"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b206",
+   "cmd": "npm run build",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b207",
+   "cmd": "prisma generate",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b208",
+   "cmd": "npx prisma generate",
+   "tags": [
+    "tree_writer",
+    "runner"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b209",
+   "cmd": "supabase gen types typescript --local > src/types/database.ts",
+   "tags": [
+    "tree_writer",
+    "redirect"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ],
+    "writes": [
+     "src/types/database.ts"
+    ]
+   }
+  },
+  {
+   "id": "b210",
+   "cmd": "openapi-generator-cli generate -i api.yaml -g typescript -o src/api",
+   "tags": [
+    "tree_writer"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "src/api"
+    ]
+   }
+  },
+  {
+   "id": "b211",
+   "cmd": "npx graphql-codegen",
+   "tags": [
+    "tree_writer",
+    "runner"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b212",
+   "cmd": "git checkout main",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "checkout_branch"
+   }
+  },
+  {
+   "id": "b213",
+   "cmd": "git checkout feat/crew",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "checkout_branch"
+   }
+  },
+  {
+   "id": "b214",
+   "cmd": "git checkout -b feat/x",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "switch"
+   }
+  },
+  {
+   "id": "b215",
+   "cmd": "git switch main",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "switch"
+   }
+  },
+  {
+   "id": "b216",
+   "cmd": "git switch -c fix",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "switch"
+   }
+  },
+  {
+   "id": "b217",
+   "cmd": "git reset --hard",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "reset_hard"
+   }
+  },
+  {
+   "id": "b218",
+   "cmd": "git reset --hard origin/main",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "reset_hard"
+   }
+  },
+  {
+   "id": "b219",
+   "cmd": "git stash",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "stash"
+   }
+  },
+  {
+   "id": "b220",
+   "cmd": "git stash push -m wip",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "stash"
+   }
+  },
+  {
+   "id": "b221",
+   "cmd": "git stash pop",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "stash"
+   }
+  },
+  {
+   "id": "b222",
+   "cmd": "git clean -fd",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "clean"
+   }
+  },
+  {
+   "id": "b223",
+   "cmd": "git clean -xfd",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "clean"
+   }
+  },
+  {
+   "id": "b224",
+   "cmd": "git rebase main",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "rebase"
+   }
+  },
+  {
+   "id": "b225",
+   "cmd": "git rebase --continue",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "rebase"
+   }
+  },
+  {
+   "id": "b226",
+   "cmd": "git merge feature",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "merge"
+   }
+  },
+  {
+   "id": "b227",
+   "cmd": "git merge --abort",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "merge"
+   }
+  },
+  {
+   "id": "b228",
+   "cmd": "git pull",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "pull"
+   }
+  },
+  {
+   "id": "b229",
+   "cmd": "git pull --rebase origin main",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "pull"
+   }
+  },
+  {
+   "id": "b230",
+   "cmd": "git cherry-pick abc1234",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "cherry_pick"
+   }
+  },
+  {
+   "id": "b231",
+   "cmd": "git -C ../yaadbooks-b stash",
+   "tags": [
+    "git_tree_op",
+    "git_C"
+   ],
+   "expect": {
+    "git_tree_op": "stash"
+   }
+  },
+  {
+   "id": "b232",
+   "cmd": "git reset HEAD~1",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b233",
+   "cmd": "git reset --soft HEAD~1",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b234",
+   "cmd": "git commit --no-verify -m x",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b235",
+   "cmd": "git commit -n -m x",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b236",
+   "cmd": "git commit -nm \"msg\"",
+   "tags": [
+    "tamper",
+    "combined_flags"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b237",
+   "cmd": "git commit -anm msg",
+   "tags": [
+    "tamper",
+    "combined_flags"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b238",
+   "cmd": "git commit -am \"fix -n flag\"",
+   "tags": [
+    "not_tamper"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b239",
+   "cmd": "git commit -m \"-n\"",
+   "tags": [
+    "not_tamper"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b240",
+   "cmd": "git commit -mn",
+   "tags": [
+    "not_tamper",
+    "combined_flags"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b241",
+   "cmd": "git push --no-verify",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b242",
+   "cmd": "git push origin main --no-verify",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b243",
+   "cmd": "git push -n",
+   "tags": [
+    "not_tamper"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b244",
+   "cmd": "git merge --no-verify feature",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "git_tree_op": "merge"
+   }
+  },
+  {
+   "id": "b245",
+   "cmd": "git rebase --no-verify main",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "git_tree_op": "rebase"
+   }
+  },
+  {
+   "id": "b246",
+   "cmd": "git am --no-verify < p.patch",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b247",
+   "cmd": "git -C ../yaadbooks-a commit --no-verify -m x",
+   "tags": [
+    "tamper",
+    "git_C"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b248",
+   "cmd": "git -c core.hooksPath=/dev/null commit -m x",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b249",
+   "cmd": "git -c core.hookspath=x commit -m y",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b250",
+   "cmd": "git config core.hooksPath /dev/null",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ]
+   }
+  },
+  {
+   "id": "b251",
+   "cmd": "git config --local core.hooksPath .githooks",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ]
+   }
+  },
+  {
+   "id": "b252",
+   "cmd": "git config --unset core.hooksPath",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ]
+   }
+  },
+  {
+   "id": "b253",
+   "cmd": "git config --global core.hooksPath ~/hooks",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ]
+   }
+  },
+  {
+   "id": "b254",
+   "cmd": "HUSKY=0 git commit -m x",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "husky_off"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b255",
+   "cmd": "export HUSKY=0",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "husky_off"
+    ]
+   }
+  },
+  {
+   "id": "b256",
+   "cmd": "env HUSKY=0 git push",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "husky_off"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b257",
+   "cmd": "HUSKY_SKIP_HOOKS=1 git commit -m x",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "husky_off"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b258",
+   "cmd": "HUSKY=1 git commit -m x",
+   "tags": [
+    "not_tamper"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b259",
+   "cmd": "LEFTHOOK=0 git commit -m x",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "lefthook_off"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b260",
+   "cmd": "LEFTHOOK_EXCLUDE=crew git push",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "lefthook_off"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b261",
+   "cmd": "REMEMBRA_CREW=off claude",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "env_crew_var"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b262",
+   "cmd": "export REMEMBRA_CREW=0",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "env_crew_var"
+    ]
+   }
+  },
+  {
+   "id": "b263",
+   "cmd": "REMEMBRA_CREW_SESSION=cs_x git commit -m y",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "env_crew_var"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b264",
+   "cmd": "unset REMEMBRA_CREW",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "env_crew_var"
+    ]
+   }
+  },
+  {
+   "id": "b265",
+   "cmd": "REMEMBRA_BYPASS=1 git push",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "env_crew_var"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b266",
+   "cmd": "REMEMBRA_BYPASS=RCB-7K3QW-9ZX2M git push",
+   "tags": [
+    "not_tamper",
+    "bypass_code_form"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b267",
+   "cmd": "export REMEMBRA_BYPASS=RCB-7K3QW-9ZX2M",
+   "tags": [
+    "tamper",
+    "bypass_code_form"
+   ],
+   "expect": {
+    "tamper": [
+     "env_crew_var"
+    ]
+   }
+  },
+  {
+   "id": "b268",
+   "cmd": "pkill -f remembra-crewd",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ]
+   }
+  },
+  {
+   "id": "b269",
+   "cmd": "killall remembra-crewd",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ]
+   }
+  },
+  {
+   "id": "b270",
+   "cmd": "kill -9 $(pgrep -f crewd)",
+   "tags": [
+    "tamper",
+    "subshell"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b271",
+   "cmd": "kill $(cat ~/.remembra/crew/run/crewd.pid)",
+   "tags": [
+    "tamper",
+    "subshell"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b272",
+   "cmd": "launchctl bootout gui/501/dev.remembra.crewd",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ]
+   }
+  },
+  {
+   "id": "b273",
+   "cmd": "launchctl unload ~/Library/LaunchAgents/dev.remembra.crewd.plist",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ]
+   }
+  },
+  {
+   "id": "b274",
+   "cmd": "systemctl --user stop remembra-crewd.service",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ]
+   }
+  },
+  {
+   "id": "b275",
+   "cmd": "systemctl --user disable --now remembra-crewd",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ]
+   }
+  },
+  {
+   "id": "b276",
+   "cmd": "kill 12345",
+   "tags": [
+    "not_tamper"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b277",
+   "cmd": "rm -rf ~/.remembra",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crew_files_removed"
+    ],
+    "writes": [
+     "~/.remembra"
+    ]
+   }
+  },
+  {
+   "id": "b278",
+   "cmd": "rm .git/hooks/pre-commit",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crew_files_removed"
+    ],
+    "writes": [
+     ".git/hooks/pre-commit"
+    ]
+   }
+  },
+  {
+   "id": "b279",
+   "cmd": "rm -f .remembra/zones.yml",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crew_files_removed"
+    ],
+    "writes": [
+     ".remembra/zones.yml"
+    ]
+   }
+  },
+  {
+   "id": "b280",
+   "cmd": "mv .remembra/zones.yml /tmp/z",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crew_files_removed"
+    ],
+    "writes": [
+     ".remembra/zones.yml",
+     "/tmp/z"
+    ]
+   }
+  },
+  {
+   "id": "b281",
+   "cmd": "chmod -x .git/hooks/pre-push",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crew_files_removed"
+    ],
+    "writes": [
+     ".git/hooks/pre-push"
+    ]
+   }
+  },
+  {
+   "id": "b282",
+   "cmd": "truncate -s 0 ~/.remembra/crew/bin/crew-gate.py",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "crew_files_removed"
+    ],
+    "writes": [
+     "~/.remembra/crew/bin/crew-gate.py"
+    ]
+   }
+  },
+  {
+   "id": "b283",
+   "cmd": "echo \"\" > .git/hooks/pre-commit",
+   "tags": [
+    "crew_policy_write"
+   ],
+   "expect": {
+    "writes": [
+     ".git/hooks/pre-commit"
+    ]
+   }
+  },
+  {
+   "id": "b284",
+   "cmd": "bash -c \"git commit --no-verify -m x\"",
+   "tags": [
+    "tamper",
+    "shell_c",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b285",
+   "cmd": "eval \"git commit --no-verify\"",
+   "tags": [
+    "tamper",
+    "eval",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b286",
+   "cmd": "sh -c 'HUSKY=0 git push'",
+   "tags": [
+    "tamper",
+    "shell_c",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "husky_off"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b287",
+   "cmd": "python -c \"import os; os.system('git push --no-verify')\"",
+   "tags": [
+    "tamper",
+    "python_c",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b288",
+   "cmd": "python3 -c \"import shutil; shutil.rmtree('.remembra')\"",
+   "tags": [
+    "tamper",
+    "python_c",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "crew_files_removed"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b289",
+   "cmd": "bash <<'EOF'\ngit commit --no-verify -m x\nEOF",
+   "tags": [
+    "tamper",
+    "heredoc",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b290",
+   "cmd": "zsh -c 'git config core.hooksPath /tmp'",
+   "tags": [
+    "tamper",
+    "shell_c",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b291",
+   "cmd": "echo \"HUSKY=0\" > notes.md",
+   "tags": [
+    "not_tamper"
+   ],
+   "expect": {
+    "writes": [
+     "notes.md"
+    ]
+   }
+  },
+  {
+   "id": "b292",
+   "cmd": "eval \"$CMD\"",
+   "tags": [
+    "eval",
+    "variable"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b293",
+   "cmd": "bash -c \"$X\"",
+   "tags": [
+    "shell_c",
+    "variable"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b294",
+   "cmd": "sh -c 'echo x > y'",
+   "tags": [
+    "shell_c"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b295",
+   "cmd": "python -c \"open('src/app/pos/x.ts','w').write('')\"",
+   "tags": [
+    "python_c"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b296",
+   "cmd": "node -e \"require('fs').writeFileSync('a','b')\"",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b297",
+   "cmd": "./scripts/fix.sh",
+   "tags": [
+    "script"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b298",
+   "cmd": "bash scripts/deploy.sh",
+   "tags": [
+    "script"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b299",
+   "cmd": "make build",
+   "tags": [
+    "make"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b300",
+   "cmd": "make",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b301",
+   "cmd": "find . -name '*.orig' -exec rm {} \\;",
+   "tags": [
+    "find_exec"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b302",
+   "cmd": "find . -name '*.tmp' -delete",
+   "tags": [
+    "find_exec"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b303",
+   "cmd": "ls | xargs rm",
+   "tags": [
+    "xargs"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b304",
+   "cmd": "rm src/*.ts",
+   "tags": [
+    "glob"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b305",
+   "cmd": "rm $TMPFILE",
+   "tags": [
+    "variable"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b306",
+   "cmd": "touch src/{a,b}.ts",
+   "tags": [
+    "glob"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b307",
+   "cmd": "npm install",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b308",
+   "cmd": "npm ci",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b309",
+   "cmd": "pnpm add zod",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b310",
+   "cmd": "node scripts/gen.js",
+   "tags": [
+    "script"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b311",
+   "cmd": "docker compose up -d",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b312",
+   "cmd": "curl https://api.example.com/health",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b313",
+   "cmd": "git commit -m \"wip\"",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b314",
+   "cmd": "git push origin main",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b315",
+   "cmd": "git add -A",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b316",
+   "cmd": "awk '{print $1}' file.txt",
+   "tags": [],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b317",
+   "cmd": "echo a && python manage.py migrate",
+   "tags": [
+    "script"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b318",
+   "cmd": "echo x > a.txt && rm $F",
+   "tags": [
+    "variable",
+    "mixed"
+   ],
+   "expect": {
+    "writes": [
+     "a.txt"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b319",
+   "cmd": "git stash && npm test",
+   "tags": [
+    "git_tree_op",
+    "mixed"
+   ],
+   "expect": {
+    "git_tree_op": "stash"
+   }
+  },
+  {
+   "id": "b320",
+   "cmd": "npm test && git push --no-verify",
+   "tags": [
+    "tamper",
+    "mixed"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b321",
+   "cmd": "prettier --write . && git commit -m fmt",
+   "tags": [
+    "tree_writer",
+    "mixed"
+   ],
+   "expect": {
+    "tree_writer": true,
+    "tree_scope": [
+     "."
+    ],
+    "opaque": true
+   }
+  }
+ ]
+}

@@ -1,0 +1,845 @@
+{
+ "name": "adopt_then_release",
+ "description": "Offered session adopts across checkouts (moment), baton passes (moment), then releases; offers cleared.",
+ "snapshot": {
+  "crew": {
+   "id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "name": "YaadBooks",
+   "mode": "multi",
+   "enforcement": "enforce",
+   "settings_version": 1,
+   "last_seq": 10
+  },
+  "server_time": "2026-09-25T20:00:10.000Z",
+  "as_of_seq": 10,
+  "etag": "\"10\"",
+  "sessions": [
+   {
+    "id": "cs_a",
+    "callsign": "cc-1",
+    "agent_id": "claude-code",
+    "member_key": "claude-code:mbp:2c784ed4",
+    "agent_verified": true,
+    "adapter": "claude-code",
+    "adapter_enforcement": "enforced",
+    "client_kind": "hook",
+    "model": null,
+    "host_id": "hst_mbp",
+    "state": "active",
+    "quiet_reason": null,
+    "state_reason": null,
+    "stuck": false,
+    "branch": "feat/cc-1",
+    "head_commit": null,
+    "worktree_id": "wt-cc-1",
+    "githook_state": "ok",
+    "current_task_id": "tsk_14",
+    "limit": null,
+    "joined_at": "2026-09-25T20:00:00.000Z",
+    "last_activity_at": "2026-09-25T20:00:00.000Z",
+    "ended_at": null,
+    "end_reason": null
+   },
+   {
+    "id": "cs_b",
+    "callsign": "codex-1",
+    "agent_id": "codex",
+    "member_key": "codex:mbp:40166117",
+    "agent_verified": true,
+    "adapter": "codex",
+    "adapter_enforcement": "advisory",
+    "client_kind": "hook",
+    "model": null,
+    "host_id": "hst_mbp",
+    "state": "active",
+    "quiet_reason": null,
+    "state_reason": null,
+    "stuck": false,
+    "branch": "feat/codex-1",
+    "head_commit": null,
+    "worktree_id": "wt-codex-1",
+    "githook_state": "ok",
+    "current_task_id": null,
+    "limit": null,
+    "joined_at": "2026-09-25T20:00:00.000Z",
+    "last_activity_at": "2026-09-25T20:00:00.000Z",
+    "ended_at": null,
+    "end_reason": null
+   }
+  ],
+  "claims": [
+   {
+    "id": "clm_pos",
+    "zone_id": "zn_pos",
+    "path_glob": null,
+    "resource": null,
+    "mode": "exclusive",
+    "holder_kind": "session",
+    "holder_session_id": "cs_a",
+    "holder_agent_id": "claude-code",
+    "holder_user_id": "u_mani",
+    "task_id": "tsk_14",
+    "state": "active",
+    "source": "task",
+    "epoch": 1,
+    "unconfirmed": false,
+    "fenced": false,
+    "lease_expires_at": "2026-09-25T20:10:00.000Z",
+    "reserve_reason": null,
+    "reserved_for": null,
+    "offered_to": null,
+    "queue_pos": null,
+    "baton_ref": null,
+    "granted_at": "2026-09-25T20:00:00.000Z",
+    "version": 1
+   },
+   {
+    "id": "clm_old",
+    "zone_id": "zn_reports",
+    "path_glob": null,
+    "resource": null,
+    "mode": "exclusive",
+    "holder_kind": "session",
+    "holder_session_id": "cs_b",
+    "holder_agent_id": "claude-code",
+    "holder_user_id": "u_mani",
+    "task_id": null,
+    "state": "released",
+    "source": "first_write",
+    "epoch": 1,
+    "unconfirmed": false,
+    "fenced": false,
+    "lease_expires_at": null,
+    "reserve_reason": null,
+    "reserved_for": null,
+    "offered_to": null,
+    "queue_pos": null,
+    "baton_ref": null,
+    "granted_at": null,
+    "version": 1
+   }
+  ],
+  "zones": [
+   {
+    "id": "zn_pos",
+    "slug": "pos",
+    "title": "POS section",
+    "parent_id": null,
+    "is_leaf": true,
+    "builtin": false,
+    "include_globs": [
+     "src/app/pos/**"
+    ],
+    "exclude_globs": [],
+    "services": [],
+    "command_patterns": [],
+    "mcp_tools": [],
+    "mode": "exclusive",
+    "auto_claim": true,
+    "protected": false,
+    "reserve_for": null,
+    "fail_closed": false,
+    "frozen_by": null,
+    "frozen_note": null,
+    "frozen_until": null,
+    "source": "repo",
+    "version": 1
+   },
+   {
+    "id": "zn_reports",
+    "slug": "reports",
+    "title": "REPORTS section",
+    "parent_id": null,
+    "is_leaf": true,
+    "builtin": false,
+    "include_globs": [
+     "src/app/reports/**"
+    ],
+    "exclude_globs": [],
+    "services": [],
+    "command_patterns": [],
+    "mcp_tools": [],
+    "mode": "exclusive",
+    "auto_claim": true,
+    "protected": false,
+    "reserve_for": null,
+    "fail_closed": false,
+    "frozen_by": null,
+    "frozen_note": null,
+    "frozen_until": null,
+    "source": "repo",
+    "version": 1
+   }
+  ],
+  "commons": [
+   {
+    "glob": "package.json",
+    "kind": "plain"
+   },
+   {
+    "glob": "package-lock.json",
+    "kind": "serialize"
+   }
+  ],
+  "ignore": [
+   "docs/**"
+  ],
+  "tasks": [
+   {
+    "id": "tsk_14",
+    "number": 14,
+    "title": "Task 14",
+    "status": "in_progress",
+    "status_before_stall": null,
+    "phase": null,
+    "priority": 2,
+    "zone_ids": [
+     "zn_pos"
+    ],
+    "owner_session_id": "cs_a",
+    "owner_agent_id": "claude-code",
+    "reviewer": null,
+    "depends_on": [],
+    "acceptance": [],
+    "acceptance_locked": true,
+    "started_head": null,
+    "current_report_id": null,
+    "blocked_reason": null,
+    "version": 1
+   },
+   {
+    "id": "tsk_9",
+    "number": 9,
+    "title": "Task 9",
+    "status": "ready",
+    "status_before_stall": null,
+    "phase": null,
+    "priority": 2,
+    "zone_ids": [],
+    "owner_session_id": null,
+    "owner_agent_id": null,
+    "reviewer": null,
+    "depends_on": [],
+    "acceptance": [],
+    "acceptance_locked": false,
+    "started_head": null,
+    "current_report_id": null,
+    "blocked_reason": null,
+    "version": 1
+   }
+  ],
+  "collisions": [
+   {
+    "id": "col_1",
+    "kind": "same_file",
+    "severity": "medium",
+    "subject": "src/app/pos/cart.ts",
+    "zone_id": "zn_pos",
+    "session_a": "cs_a",
+    "session_b": "cs_b",
+    "claim_id": null,
+    "attribution": "certain",
+    "state": "open",
+    "escalated": false,
+    "resolution": null
+   },
+   {
+    "id": "col_2",
+    "kind": "same_file",
+    "severity": "medium",
+    "subject": "src/app/pos/cart.ts",
+    "zone_id": "zn_pos",
+    "session_a": "cs_a",
+    "session_b": "cs_b",
+    "claim_id": null,
+    "attribution": "certain",
+    "state": "resolved",
+    "escalated": false,
+    "resolution": null
+   }
+  ],
+  "decisions": [
+   {
+    "id": "dec_1",
+    "number": 1,
+    "title": "Decision 1",
+    "decision": "GCT rounding half-up per line",
+    "state": "in_force",
+    "source": "direct",
+    "decided_by_kind": "human",
+    "decided_by": "u_mani",
+    "confirmed_by": "u_mani",
+    "task_id": null,
+    "zone_id": null,
+    "supersedes_id": null
+   },
+   {
+    "id": "dec_2",
+    "number": 2,
+    "title": "Decision 2",
+    "decision": "GCT rounding half-up per line",
+    "state": "proposed",
+    "source": "direct",
+    "decided_by_kind": "agent",
+    "decided_by": "cs_a",
+    "confirmed_by": null,
+    "task_id": null,
+    "zone_id": null,
+    "supersedes_id": null
+   },
+   {
+    "id": "dec_3",
+    "number": 3,
+    "title": "Decision 3",
+    "decision": "GCT rounding half-up per line",
+    "state": "rejected",
+    "source": "direct",
+    "decided_by_kind": "agent",
+    "decided_by": "cs_a",
+    "confirmed_by": null,
+    "task_id": null,
+    "zone_id": null,
+    "supersedes_id": null
+   }
+  ],
+  "offers": [],
+  "footprints": [],
+  "inbox_counts": {
+   "project": 2,
+   "crew": 1
+  },
+  "pending_zone_changes": [
+   "zch_1"
+  ]
+ },
+ "frames": [
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 11,
+    "id": "evt_00000011",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:11.000Z",
+    "type": "session.quota_blocked",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": true,
+    "summary": "session.quota_blocked #11",
+    "payload": {
+     "error": "billing_error",
+     "source": "reported",
+     "baton_ref": "refs/remembra/baton/T-14/7",
+     "claims_reserved": [
+      "clm_pos"
+     ]
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 12,
+    "id": "evt_00000012",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:12.000Z",
+    "type": "baton.ref_created",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_a",
+     "callsign": "cc-1",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_a"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "baton.ref_created #12",
+    "payload": {
+     "ref": "refs/remembra/baton/T-14/7",
+     "task_id": "tsk_14",
+     "dirty_files": 3,
+     "unpushed": 2
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 13,
+    "id": "evt_00000013",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:13.000Z",
+    "type": "claim.reserved",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "system",
+     "id": "server",
+     "callsign": null,
+     "agent_id": null,
+     "user_id": null,
+     "verified": true
+    },
+    "refs": {},
+    "severity": "info",
+    "moment": false,
+    "summary": "claim.reserved #13",
+    "payload": {
+     "claim": {
+      "id": "clm_pos",
+      "zone_id": "zn_pos",
+      "path_glob": null,
+      "resource": null,
+      "mode": "exclusive",
+      "holder_kind": "session",
+      "holder_session_id": "cs_a",
+      "holder_agent_id": "claude-code",
+      "holder_user_id": "u_mani",
+      "task_id": "tsk_14",
+      "state": "reserved",
+      "source": "task",
+      "epoch": 1,
+      "unconfirmed": false,
+      "fenced": false,
+      "lease_expires_at": null,
+      "reserve_reason": "quota",
+      "reserved_for": null,
+      "offered_to": null,
+      "queue_pos": null,
+      "baton_ref": "refs/remembra/baton/T-14/7",
+      "granted_at": "2026-09-25T20:00:00.000Z",
+      "version": 2
+     },
+     "reason": "quota"
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 14,
+    "id": "evt_00000014",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:14.000Z",
+    "type": "task.stalled",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "system",
+     "id": "server",
+     "callsign": null,
+     "agent_id": null,
+     "user_id": null,
+     "verified": true
+    },
+    "refs": {},
+    "severity": "info",
+    "moment": false,
+    "summary": "task.stalled #14",
+    "payload": {
+     "task": {
+      "id": "tsk_14",
+      "number": 14,
+      "title": "Task 14",
+      "status": "stalled",
+      "status_before_stall": "in_progress",
+      "phase": null,
+      "priority": 2,
+      "zone_ids": [
+       "zn_pos"
+      ],
+      "owner_session_id": "cs_a",
+      "owner_agent_id": null,
+      "reviewer": null,
+      "depends_on": [],
+      "acceptance": [],
+      "acceptance_locked": true,
+      "started_head": null,
+      "current_report_id": null,
+      "blocked_reason": null,
+      "version": 2
+     },
+     "reason": "quota"
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 15,
+    "id": "evt_00000015",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:15.000Z",
+    "type": "session.joined",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_c",
+     "callsign": "cc-2",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_c"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "session.joined #15",
+    "payload": {
+     "session": {
+      "id": "cs_c",
+      "callsign": "cc-2",
+      "agent_id": "claude-code",
+      "member_key": "claude-code:mbp:7051a76a",
+      "agent_verified": true,
+      "adapter": "claude-code",
+      "adapter_enforcement": "enforced",
+      "client_kind": "hook",
+      "model": null,
+      "host_id": "hst_mbp",
+      "state": "active",
+      "quiet_reason": null,
+      "state_reason": null,
+      "stuck": false,
+      "branch": "feat/cc-2",
+      "head_commit": null,
+      "worktree_id": "wt-cc-2",
+      "githook_state": "ok",
+      "current_task_id": null,
+      "limit": null,
+      "joined_at": "2026-09-25T20:00:00.000Z",
+      "last_activity_at": "2026-09-25T20:00:00.000Z",
+      "ended_at": null,
+      "end_reason": null
+     },
+     "resume_of": null,
+     "observe_only": false
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 16,
+    "id": "evt_00000016",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:16.000Z",
+    "type": "claim.offered_in_brief",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_c",
+     "callsign": "cc-2",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_c"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "claim.offered_in_brief #16",
+    "payload": {
+     "offer": {
+      "id": "off_1",
+      "claim_id": "clm_pos",
+      "task_id": "tsk_14",
+      "to_session": "cs_c",
+      "via": "brief"
+     }
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 17,
+    "id": "evt_00000017",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:17.000Z",
+    "type": "claim.adopted",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_c",
+     "callsign": "cc-2",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_c"
+    },
+    "severity": "info",
+    "moment": true,
+    "summary": "claim.adopted #17",
+    "payload": {
+     "claim": {
+      "id": "clm_pos",
+      "zone_id": "zn_pos",
+      "path_glob": null,
+      "resource": null,
+      "mode": "exclusive",
+      "holder_kind": "session",
+      "holder_session_id": "cs_c",
+      "holder_agent_id": "claude-code",
+      "holder_user_id": "u_mani",
+      "task_id": "tsk_14",
+      "state": "active",
+      "source": "adopt",
+      "epoch": 2,
+      "unconfirmed": false,
+      "fenced": false,
+      "lease_expires_at": "2026-09-25T20:10:00.000Z",
+      "reserve_reason": null,
+      "reserved_for": null,
+      "offered_to": null,
+      "queue_pos": null,
+      "baton_ref": "refs/remembra/baton/T-14/7",
+      "granted_at": "2026-09-25T20:00:00.000Z",
+      "version": 3
+     },
+     "cross_checkout": true,
+     "from_session": "cs_a"
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 18,
+    "id": "evt_00000018",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:18.000Z",
+    "type": "baton.passed",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_c",
+     "callsign": "cc-2",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_c"
+    },
+    "severity": "info",
+    "moment": true,
+    "summary": "baton.passed #18",
+    "payload": {
+     "baton_id": "bat_1",
+     "task_id": "tsk_14",
+     "from_session": "cs_a",
+     "to_session": "cs_c",
+     "kind": "adopt",
+     "handoff_id": "mem_42",
+     "zones": [
+      "zn_pos"
+     ],
+     "baton_ref": "refs/remembra/baton/T-14/7",
+     "restored": true
+    }
+   }
+  },
+  {
+   "type": "crew.event",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "data": {
+    "seq": 19,
+    "id": "evt_00000019",
+    "crew_id": "crw_0a1b2c3d4e5f6a7b",
+    "project_id": "yaadbooks",
+    "ts": "2026-09-25T20:00:19.000Z",
+    "type": "claim.released",
+    "v": 1,
+    "origin": "server",
+    "actor": {
+     "kind": "session",
+     "id": "cs_c",
+     "callsign": "cc-2",
+     "agent_id": "claude-code",
+     "user_id": "u_mani",
+     "verified": true
+    },
+    "refs": {
+     "session_id": "cs_c"
+    },
+    "severity": "info",
+    "moment": false,
+    "summary": "claim.released #19",
+    "payload": {
+     "claim": {
+      "id": "clm_pos",
+      "zone_id": "zn_pos",
+      "path_glob": null,
+      "resource": null,
+      "mode": "exclusive",
+      "holder_kind": "session",
+      "holder_session_id": "cs_c",
+      "holder_agent_id": "claude-code",
+      "holder_user_id": "u_mani",
+      "task_id": "tsk_14",
+      "state": "released",
+      "source": "adopt",
+      "epoch": 2,
+      "unconfirmed": false,
+      "fenced": false,
+      "lease_expires_at": "2026-09-25T20:10:00.000Z",
+      "reserve_reason": null,
+      "reserved_for": null,
+      "offered_to": null,
+      "queue_pos": null,
+      "baton_ref": "refs/remembra/baton/T-14/7",
+      "granted_at": "2026-09-25T20:00:00.000Z",
+      "version": 4
+     },
+     "baton": false
+    }
+   }
+  }
+ ],
+ "expect": [
+  {
+   "path": [
+    "offers",
+    "off_1"
+   ],
+   "absent": true
+  },
+  {
+   "path": [
+    "offers"
+   ],
+   "length": 0
+  },
+  {
+   "path": [
+    "claims",
+    "clm_pos"
+   ],
+   "absent": true
+  },
+  {
+   "path": [
+    "batons"
+   ],
+   "length": 1
+  },
+  {
+   "path": [
+    "batons",
+    0,
+    "seq"
+   ],
+   "equals": 18
+  },
+  {
+   "path": [
+    "batons",
+    0,
+    "to_session"
+   ],
+   "equals": "cs_c"
+  },
+  {
+   "path": [
+    "batons",
+    0,
+    "restored"
+   ],
+   "equals": true
+  },
+  {
+   "path": [
+    "batons",
+    0,
+    "kind"
+   ],
+   "equals": "adopt"
+  },
+  {
+   "path": [
+    "moments"
+   ],
+   "length": 3
+  },
+  {
+   "path": [
+    "moments",
+    0,
+    "seq"
+   ],
+   "equals": 11
+  },
+  {
+   "path": [
+    "moments",
+    1,
+    "type"
+   ],
+   "equals": "claim.adopted"
+  },
+  {
+   "path": [
+    "moments",
+    2,
+    "type"
+   ],
+   "equals": "baton.passed"
+  },
+  {
+   "path": [
+    "last_seq"
+   ],
+   "equals": 19
+  },
+  {
+   "path": [
+    "crew",
+    "last_seq"
+   ],
+   "equals": 19
+  }
+ ]
+}
