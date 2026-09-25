@@ -1,759 +1,541 @@
-import { useEffect, useState } from 'react';
-import { api } from '../lib/api';
-import type { PlanInfoResponse, UsageResponse, DailyUsageResponse, BillingContextResponse } from '../lib/api';
-import { 
-  CreditCard, 
-  Zap, 
-  Database, 
-  Key, 
-  Clock, 
-  Check, 
-  ExternalLink,
-  Loader2,
-  TrendingUp,
-  AlertCircle,
-  Crown,
-  Users,
-  Mail,
-  Shield
-} from 'lucide-react';
-import clsx from 'clsx';
+// Billing: this period's smart credits (GET /cloud/usage/summary), what does
+// and does not use them, and the self-serve plans (GET /billing/plans) with
+// Paddle checkout. Team is sold per seat with a server-enforced minimum.
 
-interface PlanFeature {
-  name: string;
-  free: string | boolean;
-  pro: string | boolean;
-  team: string | boolean;
-  enterprise: string | boolean;
+import { useId, useState } from 'react';
+import clsx from 'clsx';
+import { Check, CreditCard, ExternalLink, Loader2, Mail, Minus, Plus } from 'lucide-react';
+import {
+  api,
+  ApiError,
+  type BillingContextResponse,
+  type BillingCycle,
+  type PlanCatalogEntry,
+  type PlansResponse,
+  type UsageSummaryResponse,
+} from '../lib/api';
+import { clampSeats, creditsView, formatUsd, planLine, resetLabel } from '../lib/credits';
+import { useResource } from '../hooks/useResource';
+import { Card, CardHeader, ErrorNotice, Pill, Skeleton } from './relay/ui';
+import { DegradedNotice, PixelMeter } from './credits/Credits';
+
+interface PaddleGlobal {
+  Initialized?: boolean;
+  Initialize: (opts: { token: string }) => void;
+  Checkout: { open: (opts: Record<string, unknown>) => void };
 }
 
-const PLAN_FEATURES: PlanFeature[] = [
-  { name: 'Memories', free: '25,000', pro: '500,000', team: '2,000,000', enterprise: 'Unlimited' },
-  { name: 'API Calls/month', free: '50,000', pro: '1,000,000', team: '5,000,000', enterprise: '50M+' },
-  { name: 'API Keys', free: '2', pro: '10', team: '50', enterprise: '100' },
-  { name: 'Projects', free: '1', pro: '5', team: '100', enterprise: '1,000' },
-  { name: 'Team Members', free: '1', pro: '5', team: '25', enterprise: '1,000' },
-  { name: 'Webhooks', free: false, pro: true, team: true, enterprise: true },
-  { name: 'Observability', free: false, pro: true, team: true, enterprise: true },
-  { name: 'SSO/SAML', free: false, pro: false, team: false, enterprise: true },
-  { name: 'Priority Support', free: false, pro: false, team: true, enterprise: true },
-  { name: 'SLA', free: false, pro: false, team: false, enterprise: true },
-];
+function paddle(): PaddleGlobal | null {
+  const p = (window as unknown as { Paddle?: PaddleGlobal }).Paddle;
+  return p && typeof p.Checkout?.open === 'function' ? p : null;
+}
 
-function UsageBar({ 
-  label, 
-  current, 
-  limit, 
-  icon: Icon 
-}: { 
-  label: string; 
-  current: number; 
-  limit: number; 
-  icon: React.ElementType;
-}) {
-  const percentage = limit > 0 ? Math.min((current / limit) * 100, 100) : 0;
-  const isWarning = percentage >= 80;
-  const isCritical = percentage >= 95;
+function userEmail(): string | undefined {
+  try {
+    const raw = localStorage.getItem('remembra_user');
+    return raw ? (JSON.parse(raw)?.email as string | undefined) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
+/**
+ * Open Paddle checkout. Single-quantity plans can use a client price; per-seat
+ * Team and Founding 100 always go through a server transaction, where the seat
+ * minimum and the redemption cap are enforced.
+ */
+async function startCheckout(plan: string, cycle: BillingCycle, seats: number | undefined, perSeat: boolean): Promise<void> {
+  const config = await api.getBillingClientConfig().catch(() => null);
+  const P = paddle();
+  if (P && config?.client_token && !P.Initialized) {
+    P.Initialize({ token: config.client_token });
+    P.Initialized = true;
+  }
+  const priceKey = cycle === 'yearly' ? `${plan}_annual` : plan;
+  const clientPrice = !perSeat && plan !== 'founding' ? config?.prices?.[priceKey] : undefined;
+  if (P && config?.provider === 'paddle' && clientPrice) {
+    const email = userEmail();
+    P.Checkout.open({
+      items: [{ priceId: clientPrice, quantity: 1 }],
+      ...(email ? { customer: { email } } : {}),
+      customData: { remembra_user_id: api.getUserId(), plan },
+      settings: { successUrl: config.success_url || 'https://remembra.dev/dashboard?checkout=success' },
+    });
+    return;
+  }
+  const response = await api.createCheckout(plan, cycle, perSeat ? seats : undefined);
+  if (response.transaction_id && P) {
+    P.Checkout.open({ transactionId: response.transaction_id });
+  } else if (response.checkout_url) {
+    window.location.href = response.checkout_url;
+  } else {
+    throw new Error('Checkout could not start: Paddle did not load in this browser. Disable blockers for paddle.com and try again.');
+  }
+}
+
+function Legend() {
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Icon className={clsx(
-            'w-4 h-4',
-            isCritical ? 'text-red-500' : isWarning ? 'text-amber-500' : 'text-gray-500 dark:text-gray-400'
-          )} />
-          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
-        </div>
-        <span className="text-sm text-gray-500 dark:text-gray-400">
-          {current.toLocaleString()} / {limit.toLocaleString()}
-        </span>
-      </div>
-      <div className="h-2 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
-        <div 
-          className={clsx(
-            'h-full rounded-full transition-all duration-300',
-            isCritical ? 'bg-red-500' : isWarning ? 'bg-amber-500' : 'bg-accent'
-          )}
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
-      {isCritical && (
-        <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1">
-          <AlertCircle className="w-3 h-3" />
-          Approaching limit! Consider upgrading.
-        </p>
-      )}
+    <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[11px] text-ink-3">
+      <li className="flex items-center gap-1.5">
+        <span aria-hidden="true" className="h-2.5 w-2.5 bg-ink" /> spent
+      </li>
+      <li className="flex items-center gap-1.5">
+        <span aria-hidden="true" className="h-2.5 w-2.5 bg-signal" /> held for enrichment in progress
+      </li>
+      <li className="flex items-center gap-1.5">
+        <span aria-hidden="true" className="rr-cell-open h-2.5 w-2.5" /> left
+      </li>
+    </ul>
+  );
+}
+
+function Stat({ label, value, note }: { label: string; value: string; note?: string }) {
+  return (
+    <div className="min-w-0 border-t border-rule pt-2">
+      <dt className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">{label}</dt>
+      <dd className="mt-0.5">
+        <span className="tabular font-display text-xl font-bold text-ink">{value}</span>
+        {note && <span className="mt-0.5 block text-xs text-ink-3">{note}</span>}
+      </dd>
     </div>
   );
 }
 
-function PricingCard({ 
-  name, 
-  price, 
-  description, 
-  features, 
-  isCurrentPlan, 
-  onUpgrade,
-  isPopular,
-  loading
-}: {
-  name: string;
-  price: string;
-  description: string;
-  features: string[];
-  isCurrentPlan: boolean;
-  onUpgrade?: () => void;
-  isPopular?: boolean;
-  loading?: boolean;
-}) {
+function PeriodCard({ summary, onPortal, portalBusy }: { summary: UsageSummaryResponse; onPortal: () => void; portalBusy: boolean }) {
+  const titleId = useId();
+  const view = creditsView(summary);
+  const paid = summary.plan !== 'free';
   return (
-    <div className={clsx(
-      'relative p-6 rounded-xl border-2 transition-all',
-      isPopular 
-        ? 'border-signal bg-blue-50/50 dark:bg-blue-900/10' 
-        : 'border-gray-200 dark:border-gray-700',
-      isCurrentPlan && 'ring-2 ring-green-500 ring-offset-2 dark:ring-offset-gray-900'
-    )}>
-      {isPopular && (
-        <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-          <span className="bg-accent text-white text-xs font-semibold px-3 py-1 rounded-full">
-            Most Popular
+    <Card labelledBy={titleId}>
+      <CardHeader
+        id={titleId}
+        eyebrow={`This period · ${summary.credits.bank === 'yearly' ? 'yearly bank' : 'monthly'}`}
+        title={planLine(summary)}
+        action={
+          paid && (
+            <button type="button" onClick={onPortal} disabled={portalBusy} className="rr-btn-ghost inline-flex items-center gap-1.5 px-3 py-2 text-sm">
+              {portalBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <CreditCard className="h-4 w-4" aria-hidden="true" />}
+              Manage subscription
+            </button>
+          )
+        }
+      />
+      <div className="px-4 pb-5 pt-3 sm:px-5">
+        <p className="flex flex-wrap items-baseline gap-x-2">
+          <span className={clsx('font-display tabular text-5xl font-extrabold tracking-tight', view.degraded ? 'text-fail' : 'text-ink')}>
+            {view.remaining.toLocaleString()}
           </span>
-        </div>
-      )}
-      
-      {isCurrentPlan && (
-        <div className="absolute -top-3 right-4">
-          <span className="bg-green-500 text-white text-xs font-semibold px-3 py-1 rounded-full flex items-center gap-1">
-            <Check className="w-3 h-3" /> Current Plan
+          <span className="text-ink-2">
+            of {view.limit.toLocaleString()} smart credits left · {resetLabel(summary)}
           </span>
-        </div>
-      )}
-
-      <div className="text-center mb-6">
-        <h3 className="text-xl font-bold text-gray-900 dark:text-white">{name}</h3>
-        <div className="mt-2">
-          <span className="text-4xl font-bold text-gray-900 dark:text-white">{price}</span>
-          {price !== 'Custom' && price !== 'Free' && (
-            <span className="text-gray-500 dark:text-gray-400">/month</span>
-          )}
-        </div>
-        <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">{description}</p>
+        </p>
+        <PixelMeter summary={summary} cells={64} className="mt-3" />
+        <Legend />
+        {summary.credits.unverified_cap_applied && (
+          <p className="mt-3 text-sm text-signal-ink">
+            Free credits are held at a starter amount until you verify your email. Verify it from the link we sent to unlock the full
+            monthly allowance.
+          </p>
+        )}
+        {view.degraded && (
+          <div className="mt-4">
+            <DegradedNotice summary={summary} />
+          </div>
+        )}
+        <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+          <Stat
+            label="Relay events"
+            value={summary.relay_events.this_month.toLocaleString()}
+            note={
+              summary.relay_events.over_soft_cap
+                ? `Past the ${summary.relay_events.soft_cap.toLocaleString()} fair-use mark this month. Still free.`
+                : 'Always free, never uses credits'
+            }
+          />
+          <Stat label="Recalls" value={summary.recalls.this_month.toLocaleString()} note={`of ${summary.recalls.limit.toLocaleString()} this month, free`} />
+          <Stat label="Memories" value={summary.memories.stored.toLocaleString()} note={`of ${summary.memories.cap.toLocaleString()} stored`} />
+          <Stat
+            label="Stores"
+            value={summary.stores.this_month.toLocaleString()}
+            note={summary.stores.degraded_this_month > 0 ? `${summary.stores.degraded_this_month.toLocaleString()} saved without enrichment` : 'this month, all enriched'}
+          />
+        </dl>
+        <p className="mt-4 font-mono text-[11px] text-ink-3">
+          AI spend this period ${summary.credits.llm_usd_used.toFixed(2)} of a ${summary.credits.ceiling_usd.toFixed(2)} ceiling.
+        </p>
       </div>
+    </Card>
+  );
+}
 
-      <ul className="space-y-3 mb-6">
-        {features.map((feature, i) => (
-          <li key={i} className="flex items-start gap-2">
-            <Check className="w-5 h-5 text-green-500 shrink-0 mt-0.5" />
-            <span className="text-sm text-gray-700 dark:text-gray-300">{feature}</span>
+function HowCreditsWork() {
+  const titleId = useId();
+  return (
+    <Card labelledBy={titleId}>
+      <CardHeader id={titleId} eyebrow="Smart credits" title="What uses them, what never does" />
+      <div className="grid gap-5 px-4 pb-5 pt-3 sm:px-5 md:grid-cols-2">
+        <div>
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">Never uses credits</p>
+          <p className="mt-1 text-sm text-ink-2">
+            <span className="font-semibold text-ink">Relay is always free.</span> Handoffs, checkpoints, status updates, inbox notes, pickup
+            briefs, trail reads and recalls cost nothing on every plan.
+          </p>
+        </div>
+        <div>
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">Uses credits</p>
+          <p className="mt-1 text-sm text-ink-2">
+            Storing a memory with AI enrichment (fact extraction, entity linking): one credit per 8,000 characters, or the actual AI cost if
+            that is higher. One credit is $0.0025 of AI spend.
+          </p>
+        </div>
+        <div>
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">When they run out</p>
+          <p className="mt-1 text-sm text-ink-2">
+            Nothing is rejected. New memories are saved in degraded mode: stored and searchable, without enrichment, until credits come back.
+          </p>
+        </div>
+        <div>
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">Monthly or yearly</p>
+          <p className="mt-1 text-sm text-ink-2">
+            Monthly plans get the allowance each month. Yearly plans bank the whole year up front, so a busy month can draw on later ones.
+          </p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function SeatStepper({ seats, min, onChange, planName }: { seats: number; min: number; onChange: (n: number) => void; planName: string }) {
+  const inputId = useId();
+  return (
+    <div className="flex items-center gap-2">
+      <label htmlFor={inputId} className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
+        Seats
+      </label>
+      <div className="inline-flex items-stretch border border-rule">
+        <button
+          type="button"
+          onClick={() => onChange(clampSeats(seats - 1, min))}
+          disabled={seats <= min}
+          aria-label={`One fewer ${planName} seat`}
+          className="px-2 text-ink-2 hover:bg-paper-2 disabled:opacity-40"
+        >
+          <Minus className="h-3.5 w-3.5" />
+        </button>
+        <input
+          id={inputId}
+          type="number"
+          inputMode="numeric"
+          min={min}
+          max={1000}
+          value={seats}
+          onChange={(e) => onChange(clampSeats(Number(e.target.value), min))}
+          className="tabular w-14 border-x border-rule bg-panel py-1 text-center font-mono text-sm text-ink [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+        />
+        <button
+          type="button"
+          onClick={() => onChange(clampSeats(seats + 1, min))}
+          aria-label={`One more ${planName} seat`}
+          className="px-2 text-ink-2 hover:bg-paper-2"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <span className="text-xs text-ink-3">minimum {min}</span>
+    </div>
+  );
+}
+
+function priceFor(plan: PlanCatalogEntry, cycle: BillingCycle): number | null {
+  return cycle === 'yearly' ? plan.price_yearly : plan.price_monthly;
+}
+
+function PlanRow({
+  plan,
+  cycle,
+  current,
+  busy,
+  onBuy,
+}: {
+  plan: PlanCatalogEntry;
+  cycle: BillingCycle;
+  current: boolean;
+  busy: boolean;
+  onBuy: (plan: PlanCatalogEntry, seats: number | undefined) => void;
+}) {
+  const [seats, setSeats] = useState(Math.max(plan.min_seats, 1));
+  const price = priceFor(plan, cycle);
+  const available = cycle === 'yearly' ? plan.available_yearly : plan.available_monthly;
+  const per = cycle === 'yearly' ? 'yr' : 'mo';
+  const total = price !== null && plan.per_seat ? price * seats : price;
+  return (
+    <li className={clsx('grid gap-4 py-5 md:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_auto] md:items-start', current && 'relative')}>
+      {current && <span aria-hidden="true" className="absolute inset-y-4 -left-4 w-[3px] bg-signal sm:-left-5" />}
+      <div className="min-w-0">
+        <p className="flex items-center gap-2">
+          <span className="font-display text-xl font-bold text-ink">{plan.name}</span>
+          {current && <Pill tone="signal">current</Pill>}
+        </p>
+        <p className="mt-1">
+          <span className="font-display tabular text-2xl font-extrabold text-ink">{price !== null ? formatUsd(price) : 'n/a'}</span>
+          <span className="text-sm text-ink-3">
+            {' '}
+            /{plan.per_seat ? 'seat/' : ''}
+            {per}
+          </span>
+        </p>
+        {plan.per_seat && total !== null && (
+          <p className="mt-0.5 font-mono text-[11px] text-ink-3">
+            {seats} seats = {formatUsd(total)}/{per}
+          </p>
+        )}
+      </div>
+      <ul className="min-w-0 space-y-1 text-sm text-ink-2">
+        {plan.features.map((feature) => (
+          <li key={feature} className="flex gap-2">
+            <Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden="true" />
+            {feature}
           </li>
         ))}
       </ul>
-
-      {onUpgrade && !isCurrentPlan && (
-        <button
-          onClick={onUpgrade}
-          disabled={loading}
-          className={clsx(
-            'w-full py-3 px-4 rounded-lg font-semibold transition-all flex items-center justify-center gap-2',
-            isPopular
-              ? 'bg-accent hover:bg-accent-hover text-white'
-              : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-900 dark:text-white',
-            loading && 'opacity-50 cursor-not-allowed'
-          )}
-        >
-          {loading ? (
-            <Loader2 className="w-5 h-5 animate-spin" />
-          ) : (
-            <>
-              <Zap className="w-5 h-5" />
-              Upgrade to {name}
-            </>
-          )}
-        </button>
-      )}
-
-      {name === 'Enterprise' && (
-        <a
-          href="mailto:sales@dolphytech.com?subject=Remembra Enterprise Inquiry"
-          className="w-full py-3 px-4 rounded-lg font-semibold transition-all flex items-center justify-center gap-2 bg-gray-900 dark:bg-white hover:bg-gray-800 dark:hover:bg-gray-100 text-white dark:text-gray-900"
-        >
-          Contact Sales
-          <ExternalLink className="w-4 h-4" />
-        </a>
-      )}
-    </div>
+      <div className="flex flex-col items-start gap-2 md:items-end">
+        {plan.per_seat && !current && <SeatStepper seats={seats} min={plan.min_seats} onChange={setSeats} planName={plan.name} />}
+        {!current && (
+          <button
+            type="button"
+            onClick={() => onBuy(plan, plan.per_seat ? seats : undefined)}
+            disabled={busy || !available || price === null}
+            className="rr-btn-primary inline-flex items-center gap-1.5 px-3.5 py-2 text-sm"
+          >
+            {busy && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+            {plan.per_seat ? `Start Team with ${seats} seats` : `Choose ${plan.name}`}
+          </button>
+        )}
+        {!current && !available && (
+          <p className="max-w-[26ch] text-xs text-ink-3 md:text-right">Checkout for {cycle} billing is not set up on this server yet.</p>
+        )}
+      </div>
+    </li>
   );
 }
 
-// Team Billing View - shown to team members who are NOT owners
-// Following industry standards: members see team context, not individual billing
-function TeamBillingView({ context }: { context: BillingContextResponse }) {
-  const planDisplayName = (context.team_plan || 'pro').charAt(0).toUpperCase() + 
-    (context.team_plan || 'pro').slice(1);
-  
-  const roleDisplayName = (context.role || 'member').charAt(0).toUpperCase() + 
-    (context.role || 'member').slice(1);
+function PlansSection({
+  plans,
+  currentPlan,
+  onError,
+}: {
+  plans: PlansResponse;
+  currentPlan: string;
+  onError: (message: string | null) => void;
+}) {
+  const titleId = useId();
+  const [cycle, setCycle] = useState<BillingCycle>('monthly');
+  const [busy, setBusy] = useState<string | null>(null);
 
+  const buy = async (planId: string, perSeat: boolean, seats: number | undefined, forceCycle?: BillingCycle) => {
+    setBusy(planId);
+    onError(null);
+    try {
+      await startCheckout(planId, forceCycle ?? cycle, seats, perSeat);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Checkout could not start.');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const founding = plans.founding;
   return (
-    <div className="space-y-8">
-      {/* Team Plan Banner */}
-      <div className="p-6 rounded-xl border-2 border-signal bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20">
-        <div className="flex items-center gap-4">
-          <div className="p-3 rounded-full bg-gradient-to-r from-signal to-purple-500">
-            <Users className="w-6 h-6 text-white" />
+    <Card labelledBy={titleId}>
+      <CardHeader
+        id={titleId}
+        eyebrow="Plans"
+        title="Change plan"
+        action={
+          <div role="radiogroup" aria-label="Billing cycle" className="inline-flex border border-rule">
+            {(['monthly', 'yearly'] as const).map((value) => (
+              <button
+                key={value}
+                type="button"
+                role="radio"
+                aria-checked={cycle === value}
+                onClick={() => setCycle(value)}
+                className={clsx('px-3 py-1.5 font-mono text-xs', cycle === value ? 'bg-ink text-paper' : 'text-ink-2 hover:text-ink')}
+              >
+                {value}
+              </button>
+            ))}
           </div>
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 dark:text-white">
-              {planDisplayName} Plan
-            </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              via <span className="font-semibold">{context.team_name}</span>
+        }
+      />
+      <div className="px-4 pb-2 sm:px-5">
+        {plans.provider !== 'paddle' && (
+          <p className="mt-3 border-l-[3px] border-rule-strong px-3 py-2 text-sm text-ink-2">
+            Self-serve checkout is not configured on this server. Prices are shown for reference.
+          </p>
+        )}
+        {founding.available && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border border-dashed border-signal px-4 py-3">
+            <p className="text-sm text-ink-2">
+              <span className="font-semibold text-ink">Founding 100:</span> Solo for {formatUsd(founding.price_yearly)}/yr, price locked for
+              life, billed yearly.
+              {founding.remaining !== null && <span className="font-mono text-xs text-ink-3"> {founding.remaining} left</span>}
             </p>
+            <button
+              type="button"
+              disabled={busy !== null}
+              onClick={() => buy('founding', false, undefined, 'yearly')}
+              className="rr-btn-ghost inline-flex items-center gap-1.5 px-3 py-1.5 text-sm"
+            >
+              {busy === 'founding' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+              Claim a founding seat
+            </button>
           </div>
-        </div>
+        )}
+        <ul className="divide-y divide-rule">
+          {plans.plans.map((plan) => (
+            <PlanRow
+              key={plan.id}
+              plan={plan}
+              cycle={cycle}
+              current={plan.id === currentPlan}
+              busy={busy === plan.id}
+              onBuy={(p, seats) => buy(p.id, p.per_seat, seats)}
+            />
+          ))}
+          <li className="grid gap-3 py-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+            <div>
+              <p className="font-display text-xl font-bold text-ink">Enterprise</p>
+              <p className="mt-1 text-sm text-ink-2">SSO, custom limits, a contract and an SLA.</p>
+            </div>
+            <a
+              href="mailto:sales@dolphytech.com?subject=Remembra%20Enterprise"
+              className="rr-btn-ghost inline-flex items-center gap-1.5 justify-self-start px-3.5 py-2 text-sm md:justify-self-end"
+            >
+              <Mail className="h-4 w-4" aria-hidden="true" /> Talk to us
+            </a>
+          </li>
+        </ul>
       </div>
+    </Card>
+  );
+}
 
-      {/* Role & Access Info */}
-      <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-        <div className="flex items-center gap-2 mb-4">
-          <Shield className="w-5 h-5 text-signal-ink" />
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Your Access</h3>
-        </div>
-        
-        <div className="space-y-4">
-          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
-            <span className="text-sm text-gray-600 dark:text-gray-400">Your Role</span>
-            <span className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-              {context.role === 'owner' && <Crown className="w-4 h-4 text-yellow-500" />}
-              {context.role === 'admin' && <Shield className="w-4 h-4 text-purple-500" />}
-              {roleDisplayName}
-            </span>
-          </div>
-          
-          <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
-            <span className="text-sm text-gray-600 dark:text-gray-400">Team Plan</span>
-            <span className="text-sm font-semibold text-signal-ink">
-              {planDisplayName}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Team Plan Features */}
-      <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-        <div className="flex items-center gap-2 mb-4">
-          <Zap className="w-5 h-5 text-signal-ink" />
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Team Features</h3>
-        </div>
-        
-        <div className="grid grid-cols-2 gap-4">
-          {!!context.limits.max_memories && (
-            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Memories</div>
-              <div className="text-lg font-bold text-gray-900 dark:text-white">
-                {Number(context.limits.max_memories).toLocaleString()}
+/** Team members who do not own billing see the team's plan and who to ask. */
+function TeamBillingView({ context, summary }: { context: BillingContextResponse; summary: UsageSummaryResponse | undefined }) {
+  const titleId = useId();
+  const plan = context.team_plan || 'team';
+  return (
+    <div className="space-y-5">
+      <Card labelledBy={titleId}>
+        <CardHeader id={titleId} eyebrow={`Via ${context.team_name ?? 'your team'}`} title={`${plan[0].toUpperCase()}${plan.slice(1)} plan`} />
+        <div className="px-4 pb-5 pt-3 sm:px-5">
+          <p className="text-sm text-ink-2">
+            You are a <span className="font-semibold text-ink">{context.role ?? 'member'}</span> of {context.team_name ?? 'this team'}. Credits
+            and limits are pooled across the team's seats.
+          </p>
+          {summary && (
+            <>
+              <PixelMeter summary={summary} cells={48} className="mt-4" />
+              <p className="mt-1.5 font-mono text-[11px] text-ink-3">
+                {summary.credits.remaining.toLocaleString()} of {summary.credits.limit.toLocaleString()} credits left · {resetLabel(summary)}
+              </p>
+              <div className="mt-3">
+                <DegradedNotice summary={summary} compact />
               </div>
-            </div>
+            </>
           )}
-          {!!context.limits.max_users && (
-            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Team Members</div>
-              <div className="text-lg font-bold text-gray-900 dark:text-white">
-                {Number(context.limits.max_users).toLocaleString()}
-              </div>
-            </div>
-          )}
-          {!!context.limits.max_projects && (
-            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
-              <div className="text-xs text-gray-500 dark:text-gray-400">Projects</div>
-              <div className="text-lg font-bold text-gray-900 dark:text-white">
-                {Number(context.limits.max_projects).toLocaleString()}
-              </div>
-            </div>
-          )}
-          {!!context.limits.max_api_keys && (
-            <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900">
-              <div className="text-xs text-gray-500 dark:text-gray-400">API Keys</div>
-              <div className="text-lg font-bold text-gray-900 dark:text-white">
-                {Number(context.limits.max_api_keys).toLocaleString()}
-              </div>
-            </div>
-          )}
-        </div>
-        
-        <div className="mt-4 flex flex-wrap gap-2">
-          {!!context.limits.has_webhooks && (
-            <span className="px-2 py-1 text-xs rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-              ✓ Webhooks
-            </span>
-          )}
-          {!!context.limits.has_sso && (
-            <span className="px-2 py-1 text-xs rounded-full bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">
-              ✓ SSO
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* Billing Contact Info */}
-      <div className="p-6 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20">
-        <div className="flex items-start gap-3">
-          <Mail className="w-5 h-5 text-amber-600 dark:text-amber-400 mt-0.5" />
-          <div>
-            <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200">
-              Billing is managed by your team admin
-            </h3>
-            <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+          <p className="mt-4 flex items-start gap-2 text-sm text-ink-2">
+            <Mail className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" aria-hidden="true" />
+            <span>
+              Billing is managed by the team owner
               {context.owner_email ? (
                 <>
-                  Contact <a href={`mailto:${context.owner_email}`} className="underline font-medium">
+                  {' '}
+                  (
+                  <a className="font-semibold text-ink underline decoration-signal decoration-2 underline-offset-4" href={`mailto:${context.owner_email}`}>
                     {context.owner_email}
-                  </a> for billing questions or plan changes.
+                  </a>
+                  )
                 </>
-              ) : (
-                'Contact your team owner for billing questions or plan changes.'
-              )}
-            </p>
-          </div>
+              ) : null}
+              . Ask them for more seats or a plan change.
+            </span>
+          </p>
         </div>
-      </div>
+      </Card>
+      <HowCreditsWork />
     </div>
   );
 }
 
 export function Billing() {
-  const [billingContext, setBillingContext] = useState<BillingContextResponse | null>(null);
-  const [planInfo, setPlanInfo] = useState<PlanInfoResponse | null>(null);
-  const [usage, setUsage] = useState<UsageResponse | null>(null);
-  const [, setDailyUsage] = useState<DailyUsageResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
-  const [portalLoading, setPortalLoading] = useState(false);
+  const context = useResource('billing-context', () => api.getBillingContext());
+  const summary = useResource('billing-usage-summary', () => api.getUsageSummary(), { pollMs: 60000 });
+  const plans = useResource('billing-plans', () => api.getPlans());
   const [error, setError] = useState<string | null>(null);
+  const [portalBusy, setPortalBusy] = useState(false);
 
-  useEffect(() => {
-    loadBillingData();
-  }, []);
-
-  const loadBillingData = async () => {
-    setLoading(true);
+  const openPortal = async () => {
+    setPortalBusy(true);
     setError(null);
-    try {
-      // First, get billing context to determine what view to show
-      const contextData = await api.getBillingContext().catch(() => null);
-      setBillingContext(contextData);
-      
-      // Only load detailed billing data if user can manage billing
-      // or if we're in personal context
-      if (!contextData || contextData.context === 'personal' || contextData.can_manage_billing) {
-        const [planData, usageData, dailyData] = await Promise.all([
-          api.getPlanInfo().catch(() => null),
-          api.getUsage().catch(() => null),
-          api.getDailyUsage(7).catch(() => null),
-        ]);
-        setPlanInfo(planData);
-        setUsage(usageData);
-        setDailyUsage(dailyData);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load billing data');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUpgrade = async (plan: string) => {
-    setCheckoutLoading(true);
-    setError(null);
-    try {
-      // Try client-side Paddle checkout first (simpler, recommended by Paddle)
-      // @ts-expect-error Paddle is loaded via script tag
-      if (typeof window.Paddle !== 'undefined') {
-        const configResponse = await api.getBillingClientConfig();
-
-        if (configResponse.provider === 'paddle' && configResponse.prices[plan]) {
-          // @ts-expect-error Paddle global
-          if (configResponse.client_token && !window.Paddle.Initialized) {
-            // @ts-expect-error Paddle global
-            window.Paddle.Initialize({ token: configResponse.client_token });
-            // @ts-expect-error Paddle global
-            window.Paddle.Initialized = true;
-          }
-
-          const userJson = localStorage.getItem('remembra_user');
-          const userEmail = userJson ? JSON.parse(userJson)?.email : undefined;
-          const userId = api.getUserId();
-
-          // @ts-expect-error Paddle global
-          window.Paddle.Checkout.open({
-            items: [{ priceId: configResponse.prices[plan], quantity: 1 }],
-            ...(userEmail ? { customer: { email: userEmail } } : {}),
-            customData: { remembra_user_id: userId, plan },
-            settings: {
-              successUrl: configResponse.success_url || 'https://remembra.dev/dashboard?checkout=success',
-            },
-          });
-          setCheckoutLoading(false);
-          return;
-        }
-      }
-
-      // Fallback: server-side transaction approach
-      const response = await api.createCheckout(plan);
-
-      if (response.provider === 'paddle' && response.transaction_id) {
-        // @ts-expect-error Paddle is loaded via script tag
-        if (typeof window.Paddle !== 'undefined') {
-          // @ts-expect-error Paddle global
-          window.Paddle.Checkout.open({
-            transactionId: response.transaction_id,
-          });
-        } else if (response.checkout_url) {
-          window.location.href = response.checkout_url;
-        } else {
-          throw new Error('Paddle checkout not available');
-        }
-      } else if (response.checkout_url) {
-        window.location.href = response.checkout_url;
-      } else {
-        throw new Error('No checkout URL returned');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create checkout session');
-    } finally {
-      setCheckoutLoading(false);
-    }
-  };
-
-  const handleManageSubscription = async () => {
-    setPortalLoading(true);
     try {
       const { portal_url } = await api.createPortalSession();
       window.location.href = portal_url;
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to open billing portal');
+      setError(err instanceof Error ? err.message : 'The billing portal could not open.');
     } finally {
-      setPortalLoading(false);
+      setPortalBusy(false);
     }
   };
 
-  if (loading) {
+  if (context.loading || (summary.loading && !summary.error)) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-8 h-8 animate-spin text-signal-ink" />
+      <div className="space-y-5" role="status" aria-label="Loading billing">
+        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-40 w-full" />
       </div>
     );
   }
 
-  // Industry-standard behavior: Team members who are NOT owners see team context
-  // They cannot manage billing - only see their team plan and contact info
-  if (billingContext?.context === 'team' && !billingContext.can_manage_billing) {
-    return <TeamBillingView context={billingContext} />;
+  if (context.data?.context === 'team' && !context.data.can_manage_billing) {
+    return <TeamBillingView context={context.data} summary={summary.data} />;
   }
 
-  // For personal accounts OR team owners: show full billing management
-  const currentPlan = billingContext?.context === 'team' 
-    ? (billingContext.team_plan || 'pro')
-    : (planInfo?.plan || 'free');
-  const isPro = currentPlan === 'pro';
-  const isTeam = currentPlan === 'team';
-  const isEnterprise = currentPlan === 'enterprise';
-  const hasPaidPlan = isPro || isTeam || isEnterprise;
+  const metered = !(summary.error instanceof ApiError && [404, 503].includes(summary.error.status));
+  const currentPlan = summary.data?.plan ?? context.data?.team_plan ?? context.data?.plan ?? 'free';
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-5">
       {error && (
-        <div className="p-4 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 flex items-center gap-2">
-          <AlertCircle className="w-5 h-5" />
+        <p role="alert" className="border-l-[3px] border-fail bg-fail-wash px-4 py-3 text-sm text-ink">
           {error}
+        </p>
+      )}
+      {summary.data && <PeriodCard summary={summary.data} onPortal={openPortal} portalBusy={portalBusy} />}
+      {!summary.data && summary.error != null && metered && (
+        <div className="rr-card rounded-[3px]">
+          <ErrorNotice error={summary.error} what="your usage" onRetry={summary.refresh} />
         </div>
       )}
-
-      {/* Current Plan Banner */}
-      <div className={clsx(
-        'p-6 rounded-xl border-2',
-        hasPaidPlan
-          ? 'border-signal bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20'
-          : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800'
-      )}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            {hasPaidPlan ? (
-              <div className="p-3 rounded-full bg-gradient-to-r from-signal to-purple-500">
-                <Crown className="w-6 h-6 text-white" />
-              </div>
-            ) : (
-              <div className="p-3 rounded-full bg-gray-200 dark:bg-gray-700">
-                <CreditCard className="w-6 h-6 text-gray-600 dark:text-gray-400" />
-              </div>
-            )}
-            <div>
-              <h2 className="text-xl font-bold text-gray-900 dark:text-white capitalize">
-                {currentPlan} Plan
-              </h2>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                {isPro 
-                  ? 'Thank you for being a Pro subscriber!' 
-                  : isTeam
-                    ? 'Thank you for being a Team subscriber!'
-                    : isEnterprise 
-                      ? 'Enterprise features enabled'
-                      : 'Upgrade to unlock more features'}
-              </p>
-            </div>
-          </div>
-          
-          {hasPaidPlan && !isEnterprise && (
-            <button
-              onClick={handleManageSubscription}
-              disabled={portalLoading}
-              className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
-            >
-              {portalLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <>
-                  <CreditCard className="w-4 h-4" />
-                  Manage Subscription
-                </>
-              )}
-            </button>
-          )}
-          
-          {isEnterprise && (
-            <a
-              href="mailto:sales@dolphytech.com?subject=Remembra Enterprise Support"
-              className="px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-2"
-            >
-              <Mail className="w-4 h-4" />
-              Contact Sales
-            </a>
-          )}
-        </div>
-      </div>
-
-      {/* Usage Meters */}
-      {planInfo && (
-        <div className="p-6 rounded-xl border border-gray-200 dark:border-gray-700">
-          <div className="flex items-center gap-2 mb-6">
-            <TrendingUp className="w-5 h-5 text-signal-ink" />
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Usage This Month</h3>
-            {usage?.period && (
-              <span className="text-sm text-gray-500 dark:text-gray-400">({usage.period})</span>
-            )}
-          </div>
-
-          <div className="grid gap-6 md:grid-cols-2">
-            <UsageBar
-              label="Memories Stored"
-              current={planInfo.usage.memories_stored || 0}
-              limit={(planInfo.limits.max_memories as number) || 10000}
-              icon={Database}
-            />
-            <UsageBar
-              label="API Calls (Stores)"
-              current={planInfo.usage.stores_this_month || 0}
-              limit={(planInfo.limits.max_stores_per_month as number) || 10000}
-              icon={Zap}
-            />
-            <UsageBar
-              label="API Calls (Recalls)"
-              current={planInfo.usage.recalls_this_month || 0}
-              limit={(planInfo.limits.max_recalls_per_month as number) || 50000}
-              icon={Clock}
-            />
-            <UsageBar
-              label="Active API Keys"
-              current={planInfo.usage.api_keys_active || 0}
-              limit={(planInfo.limits.max_api_keys as number) || 3}
-              icon={Key}
-            />
-          </div>
+      {!metered && (
+        <p className="rr-card rounded-[3px] px-5 py-4 text-sm text-ink-2">
+          This server does not meter usage (self-hosted), so there are no credits to track. Everything is unlimited here.
+        </p>
+      )}
+      <HowCreditsWork />
+      {plans.data && <PlansSection plans={plans.data} currentPlan={currentPlan} onError={setError} />}
+      {!plans.data && plans.error != null && (
+        <div className="rr-card rounded-[3px]">
+          <ErrorNotice error={plans.error} what="the plans" onRetry={plans.refresh} />
         </div>
       )}
-
-      {/* Pricing Cards */}
-      {!isEnterprise && (
-        <div>
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">
-            {hasPaidPlan ? 'Your Plan' : 'Choose Your Plan'}
-          </h3>
-          
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
-            <PricingCard
-              name="Free"
-              price="Free"
-              description="For indie devs and testing"
-              features={[
-                '25,000 memories',
-                '50K API calls/month',
-                '2 API keys',
-                '1 project',
-                'Hybrid search',
-                'Entity resolution',
-              ]}
-              isCurrentPlan={currentPlan === 'free'}
-            />
-            
-            <PricingCard
-              name="Pro"
-              price="$49"
-              description="For startups & side projects"
-              features={[
-                '500,000 memories',
-                '1M API calls/month',
-                '10 API keys',
-                '5 projects',
-                '5 team members',
-                'Webhooks & observability',
-              ]}
-              isCurrentPlan={isPro}
-              isPopular={true}
-              onUpgrade={() => handleUpgrade('pro')}
-              loading={checkoutLoading}
-            />
-            
-            <PricingCard
-              name="Team"
-              price="$199"
-              description="For growing companies"
-              features={[
-                '2,000,000 memories',
-                '5M API calls/month',
-                '50 API keys',
-                '100 projects',
-                '25 team members',
-                'Priority support',
-              ]}
-              isCurrentPlan={isTeam}
-              onUpgrade={() => handleUpgrade('team')}
-              loading={checkoutLoading}
-            />
-            
-            <PricingCard
-              name="Enterprise"
-              price="Custom"
-              description="For large-scale deployments"
-              features={[
-                'Unlimited memories',
-                '50M+ API calls/month',
-                '100 API keys',
-                'SSO/SAML',
-                '1,000 team members',
-                'Dedicated SLA',
-              ]}
-              isCurrentPlan={isEnterprise}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Feature Comparison Table */}
-      <div className="overflow-hidden rounded-xl border border-gray-200 dark:border-gray-700">
-        <table className="w-full">
-          <thead className="bg-gray-50 dark:bg-gray-800">
-            <tr>
-              <th className="px-4 py-4 text-left text-sm font-semibold text-gray-900 dark:text-white">
-                Feature
-              </th>
-              <th className="px-4 py-4 text-center text-sm font-semibold text-gray-900 dark:text-white">
-                Free
-              </th>
-              <th className="px-4 py-4 text-center text-sm font-semibold text-signal-ink dark:text-signal-ink">
-                Pro $49
-              </th>
-              <th className="px-4 py-4 text-center text-sm font-semibold text-purple-600 dark:text-purple-400">
-                Team $199
-              </th>
-              <th className="px-4 py-4 text-center text-sm font-semibold text-gray-900 dark:text-white">
-                Enterprise
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-            {PLAN_FEATURES.map((feature, i) => (
-              <tr key={i} className={i % 2 === 0 ? 'bg-white dark:bg-gray-900' : 'bg-gray-50 dark:bg-gray-800/50'}>
-                <td className="px-4 py-3 text-sm text-gray-700 dark:text-gray-300">
-                  {feature.name}
-                </td>
-                <td className="px-4 py-3 text-center text-sm">
-                  {typeof feature.free === 'boolean' ? (
-                    feature.free ? (
-                      <Check className="w-5 h-5 text-green-500 mx-auto" />
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )
-                  ) : (
-                    <span className="text-gray-700 dark:text-gray-300">{feature.free}</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-center text-sm bg-blue-50/50 dark:bg-blue-900/10">
-                  {typeof feature.pro === 'boolean' ? (
-                    feature.pro ? (
-                      <Check className="w-5 h-5 text-green-500 mx-auto" />
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )
-                  ) : (
-                    <span className="font-medium text-signal-ink dark:text-signal-ink">{feature.pro}</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-center text-sm bg-purple-50/50 dark:bg-purple-900/10">
-                  {typeof feature.team === 'boolean' ? (
-                    feature.team ? (
-                      <Check className="w-5 h-5 text-green-500 mx-auto" />
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )
-                  ) : (
-                    <span className="font-medium text-purple-700 dark:text-purple-400">{feature.team}</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-center text-sm">
-                  {typeof feature.enterprise === 'boolean' ? (
-                    feature.enterprise ? (
-                      <Check className="w-5 h-5 text-green-500 mx-auto" />
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )
-                  ) : (
-                    <span className="text-gray-700 dark:text-gray-300">{feature.enterprise}</span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {/* FAQ or Help */}
-      <div className="p-6 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-          Frequently Asked Questions
-        </h3>
-        <div className="space-y-4">
-          <div>
-            <h4 className="font-medium text-gray-900 dark:text-white">What happens when I hit my limits?</h4>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              You'll receive a warning at 80% usage. API calls beyond your limit will return a 429 error until the next billing cycle or you upgrade.
-            </p>
-          </div>
-          <div>
-            <h4 className="font-medium text-gray-900 dark:text-white">Can I downgrade my plan?</h4>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              Yes, you can downgrade at any time through the billing portal. Changes take effect at the end of your current billing period.
-            </p>
-          </div>
-          <div>
-            <h4 className="font-medium text-gray-900 dark:text-white">Is there a free trial?</h4>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-              The Free tier is unlimited in time! You can use it forever for personal projects. Upgrade when you need more capacity.
-            </p>
-          </div>
-        </div>
-      </div>
+      <p className="flex items-center gap-1.5 text-xs text-ink-3">
+        Prices in USD, before tax. Payments by Paddle.
+        <a href="https://remembra.dev/pricing.html" className="inline-flex items-center gap-1 underline underline-offset-4" target="_blank" rel="noreferrer">
+          Full pricing <ExternalLink className="h-3 w-3" aria-hidden="true" />
+        </a>
+      </p>
     </div>
   );
 }

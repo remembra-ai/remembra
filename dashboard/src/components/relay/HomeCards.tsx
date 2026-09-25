@@ -1,11 +1,10 @@
-// Home page cards: connect checklist, weekly recap, plan meter, and the
-// first-handoff celebration.
+// Home page cards: connect checklist, weekly recap and the first-handoff
+// celebration. The plan meter lives in ../credits/Credits.
 
 import { useId } from 'react';
 import clsx from 'clsx';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, Check, Copy, X } from 'lucide-react';
-import type { UsageResponse } from '../../lib/api';
 import type { ActivitySummary, AgentActivity, TrailItem } from '../../lib/relay';
 import { api } from '../../lib/api';
 import { CONNECTABLE_AGENTS, PIPX_INSTALL, agentMeta, canonicalAgentId, saveKeyCommand } from '../../lib/agents';
@@ -236,66 +235,6 @@ export function WeeklyRecap({ summary, now }: { summary: ActivitySummary; now: D
             </ul>
           </>
         )}
-      </div>
-    </Card>
-  );
-}
-
-function Meter({ label, used, limit }: { label: string; used: number; limit: number }) {
-  const unlimited = !limit || limit <= 0;
-  const pct = unlimited ? 0 : Math.min(100, (used / limit) * 100);
-  const low = !unlimited && pct >= 90;
-  return (
-    <div>
-      <div className="flex items-baseline justify-between gap-2 text-sm">
-        <span className="text-ink-2">{label}</span>
-        <span className={clsx('tabular font-mono text-xs', low ? 'text-fail' : 'text-ink')}>
-          {used.toLocaleString()}
-          {!unlimited && <span className="text-ink-3"> / {limit.toLocaleString()}</span>}
-        </span>
-      </div>
-      {!unlimited && (
-        <div
-          className="mt-1 h-1.5 overflow-hidden border border-rule bg-paper-2"
-          role="meter"
-          aria-label={`${label} used`}
-          aria-valuemin={0}
-          aria-valuemax={limit}
-          aria-valuenow={Math.min(used, limit)}
-          aria-valuetext={`${used.toLocaleString()} of ${limit.toLocaleString()} (${Math.round(pct)}%)`}
-        >
-          <div className={clsx('h-full', low ? 'bg-fail' : 'bg-ink')} style={{ width: `${pct}%` }} />
-        </div>
-      )}
-      {!unlimited && (
-        <p className="mt-0.5 font-mono text-[11px] text-ink-3">{Math.max(0, limit - used).toLocaleString()} left this month</p>
-      )}
-    </div>
-  );
-}
-
-/** Plan and this month's usage. Only rendered when the server meters usage. */
-export function PlanMeter({ usage }: { usage: UsageResponse }) {
-  const titleId = useId();
-  const plan = usage.plan ? usage.plan[0].toUpperCase() + usage.plan.slice(1) : 'Free';
-  return (
-    <Card labelledBy={titleId}>
-      <CardHeader
-        id={titleId}
-        eyebrow={`Plan · ${usage.period}`}
-        title={`${plan} plan`}
-        action={
-          <a
-            href={hrefFor('billing')}
-            className="inline-flex items-center gap-1 text-sm font-semibold text-ink underline decoration-signal decoration-2 underline-offset-4"
-          >
-            Billing <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-          </a>
-        }
-      />
-      <div className="space-y-3 px-4 pb-4 pt-3 sm:px-5">
-        <Meter label="Stores (handoffs, memories)" used={usage.stores} limit={Number(usage.limits?.max_stores_per_month ?? 0)} />
-        <Meter label="Recalls (briefs, searches)" used={usage.recalls} limit={Number(usage.limits?.max_recalls_per_month ?? 0)} />
       </div>
     </Card>
   );

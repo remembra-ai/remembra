@@ -8,7 +8,7 @@ export function RelayDataProvider({ userKey, children }: { userKey: string; chil
   const trail = useResource(`trail:${userKey}`, () => relay.trail({ limit: TRAIL_HEAD_LIMIT }), { pollMs: RELAY_POLL_MS });
   const summary = useResource(`summary:${userKey}`, () => relay.summary(14), { pollMs: RELAY_POLL_MS });
   const inbox = useResource(`inbox:${userKey}`, () => relay.inboxSummary(), { pollMs: RELAY_POLL_MS });
-  const usage = useResource(`usage:${userKey}`, () => api.getUsage(), { pollMs: 5 * 60000 });
+  const usage = useResource(`usage:${userKey}`, () => api.getUsageSummary(), { pollMs: 2 * 60000 });
 
   const { refresh: refreshTrail } = trail;
   const { refresh: refreshSummary } = summary;

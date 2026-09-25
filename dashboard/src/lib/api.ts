@@ -632,12 +632,31 @@ class ApiClient {
     return this.fetchApi<BillingClientConfigResponse>('/billing/client-config');
   }
 
-  async createCheckout(plan: string): Promise<CheckoutResponse> {
-    // Paddle overlay checkout.
+  async createCheckout(plan: string, billingCycle: BillingCycle = 'monthly', seats?: number): Promise<CheckoutResponse> {
+    // Server-created Paddle transaction (the only path for per-seat Team and Founding 100).
     return this.fetchApi<CheckoutResponse>('/billing/checkout', {
       method: 'POST',
-      body: JSON.stringify({ plan, billing_cycle: 'monthly' }),
+      body: JSON.stringify({ plan, billing_cycle: billingCycle, ...(seats !== undefined ? { seats } : {}) }),
     });
+  }
+
+  /** Plan, smart credits (monthly or yearly bank), relay, recalls and memories. */
+  async getUsageSummary(): Promise<UsageSummaryResponse> {
+    return this.fetchApi<UsageSummaryResponse>('/cloud/usage/summary');
+  }
+
+  /** Self-serve plan catalog (public). */
+  async getPlans(): Promise<PlansResponse> {
+    return this.fetchApi<PlansResponse>('/billing/plans');
+  }
+
+  /** Apps connected through the remote (Claude / ChatGPT) connector. Dashboard sign-in only. */
+  async listConnections(): Promise<ConnectorConnectionsResponse> {
+    return this.fetchApi<ConnectorConnectionsResponse>('/connector/connections');
+  }
+
+  async revokeConnection(connectionId: string): Promise<{ connection_id: string; revoked: boolean }> {
+    return this.fetchApi(`/connector/connections/${encodeURIComponent(connectionId)}`, { method: 'DELETE' });
   }
 
   async createPortalSession(): Promise<PortalResponse> {
@@ -924,6 +943,73 @@ export interface CheckoutResponse {
 
 export interface PortalResponse {
   portal_url: string;
+}
+
+export type BillingCycle = 'monthly' | 'yearly';
+
+export interface UsageSummaryResponse {
+  plan: string;
+  plan_name: string;
+  interval: 'month' | 'year';
+  seats: number;
+  founding: boolean;
+  email_verified: boolean;
+  period: { key: string; type: 'month' | 'year'; start: string; end: string };
+  credits: {
+    limit: number;
+    used: number;
+    /** Held for enrichment still running; refunded when it settles. */
+    reserved: number;
+    remaining: number;
+    bank: 'monthly' | 'yearly';
+    llm_usd_used: number;
+    ceiling_usd: number;
+    unverified_cap_applied: boolean;
+  };
+  enrichment: { status: 'full' | 'degraded'; reason: 'credits_exhausted' | 'free_breaker_open' | string | null };
+  relay_events: { this_month: number; soft_cap: number; over_soft_cap: boolean; burst_per_min: number; free: boolean };
+  recalls: { this_month: number; limit: number; burst_per_min: number };
+  memories: { stored: number; cap: number };
+  stores: { this_month: number; degraded_this_month: number };
+}
+
+export interface PlanCatalogEntry {
+  id: string;
+  name: string;
+  /** USD cents; per seat when per_seat. */
+  price_monthly: number;
+  price_yearly: number | null;
+  per_seat: boolean;
+  min_seats: number;
+  available_monthly: boolean;
+  available_yearly: boolean;
+  features: string[];
+  limits: Record<string, number>;
+}
+
+export interface PlansResponse {
+  plans: PlanCatalogEntry[];
+  founding: { plan: string; price_yearly: number; max_redemptions: number; remaining: number | null; available: boolean };
+  provider: string;
+}
+
+export interface ConnectorConnection {
+  connection_id: string;
+  client_id: string;
+  client_name: string;
+  scopes: string[];
+  /** Empty = every project. */
+  project_ids: string[];
+  agent_id: string;
+  created_at: string | null;
+  last_used_at: string | null;
+}
+
+export interface ConnectorConnectionsResponse {
+  count: number;
+  connections: ConnectorConnection[];
+  /** scope -> what it allows, in plain words */
+  scopes: Record<string, string>;
 }
 
 export interface DailyUsageItem {
