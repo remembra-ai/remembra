@@ -167,7 +167,7 @@ def test_session_brief_and_status_tools(mcp_env):
     codex = mcp_env["make_client"](project="alpha", agent_id="codex")
     codex.send_to_inbox(to_agent="claude-code", subject="please review", body="details " * 60)
 
-    brief = _j(server.session_brief())
+    brief = _j(server.session_brief(verbose=True))
     assert brief["status"] == "ok"
     assert brief["agent_id"] == "claude-code"
     assert brief["project_id"] == "alpha"
@@ -179,7 +179,7 @@ def test_session_brief_and_status_tools(mcp_env):
 
 def test_session_brief_project_alias_resolves(mcp_env):
     server.store_memory("fact in alpha")
-    brief = _j(server.session_brief(project_id="ALPHA-OLD"))
+    brief = _j(server.session_brief(project_id="ALPHA-OLD", verbose=True))
     assert brief["project_id"] == "alpha"
     assert len(brief["recent"]) == 1
 

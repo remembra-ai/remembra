@@ -30,6 +30,7 @@ import contextvars
 import json
 import os
 import re
+import socket
 import sys
 import uuid
 from typing import Any
@@ -184,12 +185,14 @@ mcp = FastMCP(
     name="remembra",
     instructions=(
         "Remembra is persistent memory shared by all of the user's AI agents. "
-        "At session start call session_brief (latest handoff, your unread inbox, current "
-        "status, recent work by time). Use recall_memories before answering questions about "
-        "past decisions, people or projects. Store decisions and outcomes with store_memory; "
-        "set changing state with store_status (replaces the old value); use "
-        "memory_type='checkpoint' for progress notes (auto-expire) and memory_type='handoff' "
-        "for an end-of-session snapshot."
+        "1) At session start call session_brief (pass git_remote or root_path of your working "
+        "directory if you know it): it shows what the last agent did, did not finish, what is "
+        "failing and the next step, plus your unread inbox. "
+        "2) Before you finish, call close_session with what you know (branch, commits, files "
+        "changed, tests run and whether they passed, errors, open todos, next step) so the next "
+        "agent can pick up. Report facts; a summary is optional and is checked against them. "
+        "Use recall_memories before answering questions about past decisions, people or projects; "
+        "store decisions with store_memory and changing state with store_status."
     ),
 )
 # Report the Remembra package version in the MCP initialize handshake instead of
@@ -632,30 +635,204 @@ def _config_warnings(agent_id: str | None, project: str | None, server_version: 
         openWorldHint=False,
     )
 )
-def session_brief(project_id: str | None = None, agent_id: str | None = None, recent_n: int = 10) -> str:
+def session_brief(
+    project_id: str | None = None,
+    agent_id: str | None = None,
+    recent_n: int = 10,
+    git_remote: str | None = None,
+    root_path: str | None = None,
+    root_commit: str | None = None,
+    verbose: bool = False,
+) -> str:
     """Call this FIRST at session start. One call returns what to pick up:
 
-    - the latest handoff snapshot for the project (what the last agent left),
+    - "Last session": which agent, when, on which branch/commit, what was done,
+      what was NOT done, what is failing, and the next step,
     - this agent's unread inbox (count + previews; read full bodies with get_inbox),
-    - current status values (set with store_status),
+    - current status values, linked projects' latest handoffs,
     - the most recent memories by TIME (not by semantic similarity).
 
     Args:
         project_id: Project to brief on (default: configured REMEMBRA_PROJECT).
         agent_id: Inbox owner (default: REMEMBRA_AGENT_ID).
         recent_n: Number of recent memories (0-50, default 10).
+        git_remote: Your repo's remote URL; resolves the project wherever the
+            checkout lives (use instead of project_id).
+        root_path: Your working directory (fallback when there is no remote).
+        root_commit: Output of `git rev-list --max-parents=0 HEAD`.
+        verbose: Return the full JSON (handoff, inbox, status_items, recent, ...)
+            instead of the compact text brief.
 
     Returns:
-        JSON with handoff, inbox, status_items, recent, known_agents, warnings.
+        JSON with "brief" (compact text, ~1500 tokens max), project_id,
+        agent_id, handoff_id, inbox_unread and warnings — or the full brief
+        when verbose=True.
     """
     try:
         client = _get_client()
+        locator = {"git_remote": git_remote, "root_path": root_path, "root_commit": root_commit}
+        has_locator = any(v for v in locator.values()) and not project_id
+        if has_locator and root_path:
+            locator["host"] = _hostname()
         brief = client.session_brief(
             project_id=project_id,
             agent_id=agent_id or _default_agent_id() or None,
             recent_n=max(0, min(recent_n, 50)),
+            locator=locator if has_locator else None,
         )
-        return _dump({"status": "ok", **brief})
+        if verbose:
+            return _dump({"status": "ok", **brief})
+        handoff = brief.get("handoff") or {}
+        inbox = brief.get("inbox") or {}
+        return _dump(
+            {
+                "status": "ok",
+                "project_id": brief.get("project_id"),
+                "agent_id": brief.get("agent_id"),
+                "brief": brief.get("rendered"),
+                "handoff_id": handoff.get("id"),
+                "inbox_unread": inbox.get("unread_count", 0),
+                "warnings": brief.get("warnings") or [],
+            }
+        )
+    except Exception as e:
+        return _error(e)
+
+
+def _hostname() -> str:
+    return socket.gethostname()
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Close Session",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+)
+def close_session(
+    summary: str | None = None,
+    next_step: str | None = None,
+    todos_open: list[str] | None = None,
+    errors: list[str] | None = None,
+    facts: dict[str, Any] | None = None,
+    end_reason: str | None = None,
+    project_id: str | None = None,
+    git_remote: str | None = None,
+    root_path: str | None = None,
+    session_id: str | None = None,
+) -> str:
+    """Call this LAST, before you finish: leave a handoff for the next agent.
+
+    The server builds ONE structured handoff (Done / Not done / Failing / Next
+    step) from the facts you give. Calling it again in the same session
+    updates that handoff instead of adding another.
+
+    Args:
+        summary: Optional short narrative. It is checked against the facts
+            (commit ids, file names, "tests pass", "pushed") and shown as
+            unverified or contradicted — facts are what the next agent trusts.
+        next_step: The concrete next action for whoever picks up.
+        todos_open: Work you did not finish.
+        errors: Errors you hit that are not resolved.
+        facts: Anything else you know, using these keys: branch, head_commit,
+            commits [{sha, subject}], files_changed [path], uncommitted_files,
+            diff_stat, commands [{cmd, exit_code}], tests [{cmd, passed, summary}],
+            unpushed_commits, upstream, notes.
+        end_reason: Why the session ends (e.g. "done", "blocked", "context full").
+        project_id: Project (default: configured REMEMBRA_PROJECT).
+        git_remote: Resolve the project from your repo's remote instead.
+        root_path: Resolve the project from your working directory instead.
+        session_id: Defaults to this MCP session's id.
+
+    Returns:
+        JSON with handoff_id, headline, the rendered handoff and grounding verdict.
+    """
+    try:
+        client = _get_client()
+        merged: dict[str, Any] = dict(facts or {})
+        if next_step:
+            merged["next_step"] = next_step
+        if todos_open:
+            merged["todos_open"] = list(merged.get("todos_open") or []) + list(todos_open)
+        if errors:
+            merged["errors"] = list(merged.get("errors") or []) + list(errors)
+        locator = None
+        if (git_remote or root_path) and not project_id:
+            locator = {"git_remote": git_remote, "root_path": root_path}
+            if root_path:
+                locator["host"] = _hostname()
+        result = client.close_session(
+            facts=merged,
+            summary=summary,
+            end_reason=end_reason,
+            session_id=session_id,
+            agent_id=_default_agent_id() or None,
+            project_id=project_id,
+            locator=locator,
+        )
+        return _dump(
+            {
+                "status": "ok",
+                "handoff_id": result.get("handoff_id"),
+                "project_id": result.get("project_id"),
+                "changed": result.get("changed"),
+                "headline": result.get("headline"),
+                "grounding": result.get("grounding"),
+                "rendered": result.get("rendered"),
+            }
+        )
+    except Exception as e:
+        return _error(e)
+
+
+@mcp.tool(
+    annotations=ToolAnnotations(
+        title="Resolve Project",
+        readOnlyHint=False,
+        destructiveHint=False,
+        idempotentHint=True,
+        openWorldHint=False,
+    )
+)
+def resolve_project(
+    git_remote: str | None = None,
+    root_path: str | None = None,
+    root_commit: str | None = None,
+    repo_name: str | None = None,
+    hint_project: str | None = None,
+    bind: bool = False,
+) -> str:
+    """Map where you are working to a stable project id.
+
+    The same repository on any machine, drive or worktree resolves to the same
+    project (the remote URL is normalized across https/ssh forms).
+
+    Args:
+        git_remote: Output of `git remote get-url origin`.
+        root_path: Working directory (used when there is no remote).
+        root_commit: Output of `git rev-list --max-parents=0 HEAD`.
+        repo_name: Repository name, used to name a new project.
+        hint_project: Project id to use when this location is new.
+        bind: Re-bind an already-known location to hint_project.
+
+    Returns:
+        JSON with project_id, created, fingerprint.
+    """
+    try:
+        client = _get_client()
+        result = client.resolve_project(
+            git_remote=git_remote,
+            root_path=root_path,
+            root_commit=root_commit,
+            repo_name=repo_name,
+            host=_hostname() if root_path else None,
+            hint_project=hint_project,
+            bind=bind,
+        )
+        return _dump({"status": "ok", **result})
     except Exception as e:
         return _error(e)
 
