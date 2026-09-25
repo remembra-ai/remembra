@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, get_client_ip
+from remembra.auth.middleware import CurrentUser, ensure_project_access, get_client_ip, require_memory_store
 from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
 from remembra.ingestion.changelog import ChangelogParser, ChangelogRelease
@@ -24,7 +24,7 @@ from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.conversation_ingest import ConversationIngestService
 from remembra.services.memory import MemoryService
 
-router = APIRouter(prefix="/ingest", tags=["ingestion"])
+router = APIRouter(prefix="/ingest", tags=["ingestion"], dependencies=[require_memory_store()])
 
 
 def get_memory_service(request: Request) -> MemoryService:
@@ -158,6 +158,8 @@ async def ingest_changelog(
 
     Rate limit: 10 requests/minute.
     """
+    ensure_project_access(current_user, body.project_id)
+
     if not body.content and not body.file_path:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -314,6 +316,8 @@ async def ingest_conversation(
 
     Rate limit: 20 requests/minute.
     """
+    ensure_project_access(current_user, body.project_id)
+
     # Override user_id with authenticated user (security: prevent spoofing)
     body.user_id = current_user.user_id
 
@@ -428,6 +432,9 @@ async def ingest_conversation_stream(
 
     Rate limit: 20 requests/minute.
     """
+    # Authorize before opening the SSE stream or running any ingestion work.
+    ensure_project_access(current_user, body.project_id)
+
     # Override user_id with authenticated user
     body.user_id = current_user.user_id
 

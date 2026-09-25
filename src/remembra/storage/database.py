@@ -1349,7 +1349,7 @@ class Database:
         """
         cursor = await self.conn.execute(
             """
-            SELECT id, content, created_at, updated_at, expires_at, 
+            SELECT id, content, user_id, project_id, created_at, updated_at, expires_at,
                    access_count, last_accessed
             FROM memories WHERE id = ?
             """,

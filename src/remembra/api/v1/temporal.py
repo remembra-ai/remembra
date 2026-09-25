@@ -7,7 +7,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser
+from remembra.auth.middleware import (
+    CurrentUser,
+    ensure_project_access,
+    has_permission,
+    require_memory_recall,
+    require_memory_store,
+)
 from remembra.core.limiter import limiter
 from remembra.core.time import utcnow
 from remembra.services.memory import MemoryService
@@ -93,6 +99,7 @@ class CleanupResponse(BaseModel):
     "/decay/report",
     response_model=DecayReportResponse,
     summary="Get decay report for memories",
+    dependencies=[require_memory_recall()],
 )
 @limiter.limit("10/minute")
 async def get_decay_report(
@@ -113,6 +120,7 @@ async def get_decay_report(
 
     Use this to understand memory health and identify stale data.
     """
+    ensure_project_access(current_user, project_id)
     db = memory_service.db
     config = DecayConfig()
 
@@ -194,6 +202,14 @@ async def run_cleanup(
     ⚠️ WARNING: Setting dry_run=false will permanently delete memories!
     """
 
+    # Read-only previews remain available to viewers; deletion requires its own scope.
+    permission = "memory:recall" if dry_run else "memory:delete"
+    if not has_permission(current_user, permission):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Permission denied: {permission} required",
+        )
+    ensure_project_access(current_user, project_id)
     start_time = utcnow()
 
     # Create cleanup job
@@ -230,6 +246,7 @@ async def run_cleanup(
     "/memory/{memory_id}/decay",
     response_model=MemoryDecayInfo,
     summary="Get decay info for specific memory",
+    dependencies=[require_memory_recall()],
 )
 @limiter.limit("60/minute")
 async def get_memory_decay(
@@ -252,12 +269,13 @@ async def get_memory_decay(
 
     memory = await db.get_memory_with_decay(memory_id)
 
-    if not memory:
+    if not memory or memory.get("user_id") != current_user.user_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Memory {memory_id} not found",
         )
 
+    ensure_project_access(current_user, memory["project_id"])
     decay_info = calculate_memory_decay_info(memory, DecayConfig())
 
     return MemoryDecayInfo(
@@ -335,6 +353,7 @@ class AdaptiveThresholdResponse(BaseModel):
     "/archive",
     response_model=ArchiveListResponse,
     summary="List archived memories",
+    dependencies=[require_memory_recall()],
 )
 @limiter.limit("30/minute")
 async def list_archived_memories(
@@ -354,6 +373,7 @@ async def list_archived_memories(
     """
     db = memory_service.db
 
+    ensure_project_access(current_user, project_id)
     archived = await db.get_archived_memories(
         user_id=current_user.user_id,
         project_id=project_id,
@@ -388,6 +408,7 @@ async def list_archived_memories(
     "/archive/stats",
     response_model=ArchiveStatsResponse,
     summary="Get archive statistics",
+    dependencies=[require_memory_recall()],
 )
 @limiter.limit("30/minute")
 async def get_archive_stats(
@@ -403,6 +424,7 @@ async def get_archive_stats(
     """
     db = memory_service.db
 
+    ensure_project_access(current_user, project_id)
     stats = await db.get_archive_stats(
         user_id=current_user.user_id,
         project_id=project_id,
@@ -423,6 +445,7 @@ async def get_archive_stats(
     "/archive/{memory_id}",
     response_model=ArchivedMemory,
     summary="Get archived memory",
+    dependencies=[require_memory_recall()],
 )
 @limiter.limit("60/minute")
 async def get_archived_memory(
@@ -449,6 +472,7 @@ async def get_archived_memory(
             detail="Access denied",
         )
 
+    ensure_project_access(current_user, memory["project_id"])
     return ArchivedMemory(
         id=memory["id"],
         content=memory["content"],
@@ -464,6 +488,7 @@ async def get_archived_memory(
 @router.post(
     "/archive/{memory_id}/restore",
     summary="Restore memory from archive",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("10/minute")
 async def restore_memory(
@@ -493,6 +518,8 @@ async def restore_memory(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
         )
+
+    ensure_project_access(current_user, memory["project_id"])
 
     # Restore the memory
     success = await db.restore_memory(memory_id)
@@ -548,6 +575,7 @@ async def restore_memory(
     "/archive/search",
     response_model=ArchiveListResponse,
     summary="Search archived memories",
+    dependencies=[require_memory_recall()],
 )
 @limiter.limit("20/minute")
 async def search_archive(
@@ -566,6 +594,7 @@ async def search_archive(
     """
     db = memory_service.db
 
+    ensure_project_access(current_user, project_id)
     results = await db.search_archived_memories(
         user_id=current_user.user_id,
         query=q,
@@ -604,6 +633,7 @@ async def search_archive(
     "/adaptive/threshold",
     response_model=AdaptiveThresholdResponse,
     summary="Get current adaptive threshold",
+    dependencies=[require_memory_recall()],
 )
 @limiter.limit("60/minute")
 async def get_adaptive_threshold(
@@ -621,6 +651,7 @@ async def get_adaptive_threshold(
     - Memory density
     - Warm-up calibration phase
     """
+    ensure_project_access(current_user, project_id)
     db = memory_service.db
     manager = create_adaptive_manager(db)
 
@@ -645,6 +676,7 @@ async def get_adaptive_threshold(
 @router.post(
     "/adaptive/mode",
     summary="Set session mode",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("10/minute")
 async def set_session_mode(
@@ -662,6 +694,7 @@ async def set_session_mode(
     - **operational**: Higher threshold, prune more (focused work)
     - **balanced**: Auto-adjust based on behavior (default)
     """
+    ensure_project_access(current_user, project_id)
     valid_modes = ["exploratory", "operational", "balanced"]
     if mode not in valid_modes:
         raise HTTPException(
@@ -694,6 +727,7 @@ async def set_session_mode(
 @router.post(
     "/adaptive/reset",
     summary="Reset adaptive session",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("5/minute")
 async def reset_adaptive_session(
@@ -708,6 +742,7 @@ async def reset_adaptive_session(
     This clears all calibration data and starts fresh with
     a new warm-up period.
     """
+    ensure_project_access(current_user, project_id)
     db = memory_service.db
     manager = create_adaptive_manager(db)
 

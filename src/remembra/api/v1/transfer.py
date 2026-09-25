@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser
+from remembra.auth.middleware import CurrentUser, ensure_project_access, require_memory_recall, require_memory_store
 from remembra.core.limiter import limiter
 from remembra.io.export import export_csv, export_json, export_jsonl
 from remembra.io.importers import SUPPORTED_FORMATS, ImportedMemory
@@ -72,6 +72,7 @@ class ImportResponse(BaseModel):
     "/export",
     summary="Export memories",
     response_class=StreamingResponse,
+    dependencies=[require_memory_recall()],
 )
 @limiter.limit("5/minute")
 async def export_memories(
@@ -87,6 +88,8 @@ async def export_memories(
 
     Streaming download for large datasets.
     """
+    ensure_project_access(current_user, project_id)
+
     # Fetch all memories for the user
     memories = await _fetch_all_memories(
         memory_service,
@@ -124,6 +127,7 @@ async def export_memories(
     "/import",
     response_model=ImportResponse,
     summary="Import memories",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("5/minute")
 async def import_memories(
@@ -136,6 +140,7 @@ async def import_memories(
 
     Supported formats: json, jsonl, csv, chatgpt, claude, plaintext.
     """
+    ensure_project_access(current_user, body.project_id)
     parsed = _parse_import(body.format, body.data, body.split_mode)
 
     if not parsed:
@@ -158,6 +163,7 @@ async def import_memories(
     "/import/file",
     response_model=ImportResponse,
     summary="Import memories from file",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("3/minute")
 async def import_from_file(
@@ -173,6 +179,8 @@ async def import_from_file(
     split_mode: str = Query("paragraph"),
 ) -> ImportResponse:
     """Import memories from an uploaded file."""
+    ensure_project_access(current_user, project_id)
+
     # Read file content (limit to 50MB)
     max_size = 50 * 1024 * 1024
     content = await file.read(max_size + 1)
