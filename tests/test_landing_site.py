@@ -134,17 +134,45 @@ def test_new_pages_load_external_assets_only_from_google_fonts(page: str) -> Non
     assert external_assets == []
 
 
-def test_install_line_is_flagged_until_relay_ships_on_pypi() -> None:
-    html = (LANDING / "index.html").read_text()
-    installs = html.count("pipx install remembra</span>")
-    assert installs == 2
-    assert html.count("<!-- requires PyPI release with remembra-relay -->") == installs
-
-
 def test_signup_links_point_at_the_dashboard_signup_route() -> None:
     for page in ("index.html", "pricing.html"):
         hrefs = [url for tag, _a, url in _parse(LANDING / page).refs if tag == "a"]
         assert "https://app.remembra.dev/signup" in hrefs, page
+
+
+# ---------------------------------------------------------------------------
+# Deploy gates: what the pages depend on that does not exist yet
+# ---------------------------------------------------------------------------
+
+RELAY_GATE = "<!-- requires PyPI release with remembra-relay and the published relay setup guide -->"
+RELAY_GUIDE = "https://docs.remembra.dev/guides/relay/"
+KEY_STEP = "remembra-install --all --api-key <your-key>"
+
+
+def _install_blocks(page_html: str) -> list[tuple[str, str, str]]:
+    """(comment line before, the command block, the meta line after) for every install block."""
+    out = []
+    block = re.compile(
+        r'(?P<gate>[^\n]*)\n\s*<div class="cmd steps"(?P<body>.*?)</div>\s*<p class="cmd-meta">(?P<meta>.*?)</p>', re.S
+    )
+    for m in block.finditer(page_html):
+        out.append((m.group("gate").strip(), m.group("body"), m.group("meta")))
+    return out
+
+
+def test_every_install_block_has_the_key_step_the_setup_guide_and_the_release_gate() -> None:
+    page_html = (LANDING / "index.html").read_text()
+    blocks = _install_blocks(page_html)
+    assert len(blocks) == 2  # the hero and the Start band
+    assert len(re.findall(r'class="cmd[ "]', page_html)) == len(blocks)
+    for gate, body, meta in blocks:
+        assert gate == RELAY_GATE
+        copied = html.unescape(re.search(r'data-copy="([^"]*)"', body).group(1)).split("\n")
+        assert copied == ["pipx install remembra", KEY_STEP, "remembra-relay connect"]
+        shown = _text(re.search(r"<code>.*?</code>", body, re.S).group(0))
+        assert shown == f"$ pipx install remembra $ {KEY_STEP} $ remembra-relay connect"
+        assert f'href="{RELAY_GUIDE}"' in meta
+        assert 'href="https://app.remembra.dev/signup"' in meta
 
 
 # ---------------------------------------------------------------------------

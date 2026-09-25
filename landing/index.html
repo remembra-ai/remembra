@@ -385,17 +385,18 @@
       <h1 id="hero-title"><span class="l">One agent stops.</span> <span class="l">The next one <mark>already knows.</mark></span></h1>
       <p class="lede"><strong>Remembra is one cloud memory for all your AI agents.</strong> When one stops, whether it hit a usage limit, ran out of credits or the day ended, the next one picks up from its handoff<span class="long"> without you re-explaining anything</span>. Any tool, any machine.</p>
 
-      <!-- requires PyPI release with remembra-relay -->
-      <div class="cmd" role="group" aria-label="Install command">
-        <code><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span><span>&amp;&amp; remembra-relay connect</span></code>
-        <button class="copy" type="button" data-copy="pipx install remembra &amp;&amp; remembra-relay connect" aria-label="Copy install command">
+      <!-- requires PyPI release with remembra-relay and the published relay setup guide -->
+      <div class="cmd steps" role="group" aria-label="Install commands">
+        <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
+        <button class="copy" type="button" data-copy="pipx install remembra&#10;remembra-install --all --api-key &lt;your-key&gt;&#10;remembra-relay connect" aria-label="Copy install commands">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
           <span class="copy-label">Copy</span>
         </button>
         <span class="sr-only" role="status" data-copy-status></span>
       </div>
       <p class="cmd-meta">
-        <span class="free">Free to start</span><span class="sep" aria-hidden="true"></span>
+        <a class="free" href="https://app.remembra.dev/signup">Get a free key</a><span class="sep" aria-hidden="true"></span>
+        <a href="https://docs.remembra.dev/guides/relay/">Setup guide</a><span class="sep" aria-hidden="true"></span>
         <span>Open source</span><span class="sep" aria-hidden="true"></span>
         <a href="https://docs.remembra.dev/getting-started/docker/">or self-host it</a>
       </p>
@@ -493,7 +494,7 @@
           <li class="leg">
             <span class="n">01</span>
             <h3>Connect</h3>
-            <p>Start free for a key, or self-host. Run the install line on each machine. <code>connect</code> finds your agents and shows exactly what it will change; add <code>--apply</code> to wire them in.</p>
+            <p>Start free for a key, or self-host. Run the three install lines on each machine: <code>remembra-install</code> saves your key and adds Remembra to your agents, then <code>connect</code> shows exactly what it will change; add <code>--apply</code> to wire it in.</p>
           </li>
           <li class="leg">
             <span class="n">02</span>
@@ -543,17 +544,18 @@
       <div>
         <p class="eyebrow">Start</p>
         <h2 id="start-title">Free to start. Covered on every project.</h2>
-        <!-- requires PyPI release with remembra-relay -->
-        <div class="cmd" role="group" aria-label="Install command">
-          <code><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span><span>&amp;&amp; remembra-relay connect</span></code>
-          <button class="copy" type="button" data-copy="pipx install remembra &amp;&amp; remembra-relay connect" aria-label="Copy install command">
+        <!-- requires PyPI release with remembra-relay and the published relay setup guide -->
+        <div class="cmd steps" role="group" aria-label="Install commands">
+          <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
+          <button class="copy" type="button" data-copy="pipx install remembra&#10;remembra-install --all --api-key &lt;your-key&gt;&#10;remembra-relay connect" aria-label="Copy install commands">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
             <span class="copy-label">Copy</span>
           </button>
           <span class="sr-only" role="status" data-copy-status></span>
         </div>
         <p class="cmd-meta">
-          <span class="free">Free to start</span><span class="sep" aria-hidden="true"></span>
+          <a class="free" href="https://app.remembra.dev/signup">Get a free key</a><span class="sep" aria-hidden="true"></span>
+          <a href="https://docs.remembra.dev/guides/relay/">Setup guide</a><span class="sep" aria-hidden="true"></span>
           <span>Open source</span><span class="sep" aria-hidden="true"></span>
           <a href="https://docs.remembra.dev/getting-started/docker/">or self-host it</a>
         </p>
