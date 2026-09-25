@@ -28,6 +28,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
+from remembra import __version__
 from remembra.client.memory import Memory, MemoryError
 from remembra.security.error_sanitizer import sanitize_error_message
 
@@ -71,20 +72,56 @@ def _is_remote_transport() -> bool:
     return REMEMBRA_MCP_TRANSPORT.lower() in _REMOTE_TRANSPORTS
 
 
+def _current_http_request() -> Any | None:
+    """Return the HTTP request that carried the MCP message being handled now.
+
+    The MCP SDK attaches the originating Starlette request to every message
+    (``ServerMessageMetadata.request_context``) and exposes it on the
+    per-message request context. This is the only reliable source of the
+    caller's credentials on streamable-http: the session's server task is
+    spawned by the FIRST request, so contextvars set by the HTTP middleware
+    are inherited from that first request and would otherwise be reused for
+    every later message in the session (SEC-19).
+    """
+    try:
+        ctx = mcp._mcp_server.request_context
+    except LookupError:
+        return None
+    return getattr(ctx, "request", None)
+
+
+def _caller_credentials() -> tuple[str | None, str | None]:
+    """Resolve (api_key, project) for the message currently being handled.
+
+    Prefers the per-message HTTP request; when one is attached, its headers
+    are authoritative and the middleware contextvars are ignored entirely so
+    a stale key from an earlier request can never be reused. Falls back to the
+    middleware contextvars only when no per-message request exists.
+    """
+    request = _current_http_request()
+    if request is not None and hasattr(request, "headers"):
+        headers = {str(k).lower(): str(v) for k, v in request.headers.items()}
+        query_params = getattr(request, "query_params", None)
+        project = query_params.get("project") if query_params is not None else None
+        return _extract_api_key(headers), project
+    return _request_api_key.get(), _request_project.get()
+
+
 def _get_client() -> Memory:
     """Return the Memory client scoped to the current caller.
 
-    Remote transports require a per-request API key (no shared env-key fallback).
+    Remote transports require a per-request API key (no shared env-key fallback),
+    re-bound from the HTTP request of every MCP message (SEC-19).
     """
     if _is_remote_transport():
-        key = _request_api_key.get()
+        key, requested_project = _caller_credentials()
         if not key:
             raise MemoryError(
                 "Authentication required. Connect with your Remembra API key in the "
                 "X-API-Key header (or Authorization: Bearer rem_...).",
                 status_code=401,
             )
-        project = _request_project.get() or REMEMBRA_PROJECT
+        project = requested_project or REMEMBRA_PROJECT
         cache_key = f"{key}::{project}"
         client = _clients_by_key.get(cache_key)
         if client is None:
@@ -123,6 +160,9 @@ mcp = FastMCP(
         "people, projects, or decisions. Memories persist across sessions."
     ),
 )
+# Report the Remembra package version in the MCP initialize handshake instead of
+# the MCP SDK's version, so clients can see which server build they talk to.
+mcp._mcp_server.version = __version__
 
 
 # ---------------------------------------------------------------------------

@@ -40,11 +40,14 @@ from __future__ import annotations
 
 import builtins
 from datetime import datetime
-from importlib.metadata import PackageNotFoundError, version
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
+# The package's own __version__ is authoritative. Installed dist metadata can be
+# stale (an editable/pipx install made before a version bump), which is how the
+# MCP server ended up reporting 0.13.2 against a 0.16.0 API (AGT-12).
+from remembra import __version__ as USER_AGENT_VERSION
 from remembra.client.shadow_ttl import ShadowTTLCache, parse_ttl_string
 from remembra.client.temporal_parser import TemporalParser
 from remembra.client.types import (
@@ -59,11 +62,6 @@ from remembra.client.types import (
     RecallResult,
     StoreResult,
 )
-
-try:
-    USER_AGENT_VERSION = version("remembra")
-except PackageNotFoundError:
-    USER_AGENT_VERSION = "0.13.2"
 
 if TYPE_CHECKING:
     pass
