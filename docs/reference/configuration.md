@@ -150,6 +150,53 @@ Smart auto-forgetting detects 35+ temporal patterns and sets appropriate TTLs:
 
 No configuration needed—just store memories naturally.
 
+## Cloud metering and billing (Remembra Cloud)
+
+Only used when `REMEMBRA_CLOUD_ENABLED=true`. See
+[Cloud Plans & Smart Credits](plans-and-credits.md) for what the plans include.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REMEMBRA_CLOUD_ENABLED` | `false` | Plan limits, smart-credit metering and billing |
+| `REMEMBRA_PADDLE_PRICE_SOLO_MONTHLY` | - | Paddle price ID (`pri_...`) for Solo $12/mo |
+| `REMEMBRA_PADDLE_PRICE_SOLO_ANNUAL` | - | Paddle price ID for Solo $120/yr |
+| `REMEMBRA_PADDLE_PRICE_PRO_MONTHLY` | - | Paddle price ID for Pro $29/mo |
+| `REMEMBRA_PADDLE_PRICE_PRO_ANNUAL` | - | Paddle price ID for Pro $290/yr |
+| `REMEMBRA_PADDLE_PRICE_TEAM_SEAT_MONTHLY` | - | Paddle price ID for Team $15/seat/mo (quantity-based; set `quantity.minimum = 3` on the Paddle price) |
+| `REMEMBRA_PADDLE_PRICE_TEAM_SEAT_ANNUAL` | - | Paddle price ID for Team $150/seat/yr |
+| `REMEMBRA_PADDLE_PRICE_FOUNDING_ANNUAL` | - | Paddle price ID for Founding 100 Solo $108/yr |
+| `REMEMBRA_MEMORY_CAP_NOTICE_EFFECTIVE_AT` | - | When reduced memory caps start to apply (notice date + 30 days). Unset keeps the previous caps |
+| `REMEMBRA_FREE_BREAKER_ENABLED` | `true` | Pause all free-tier AI enrichment once the month's free AI budget is spent |
+| `REMEMBRA_FREE_BREAKER_MIN_USD` | `50` | Free-tier AI budget floor per month |
+| `REMEMBRA_FREE_BREAKER_REVENUE_PCT` | `0.20` | Budget as a share of last month's net paid revenue, when known |
+| `REMEMBRA_CREDIT_RESERVATION_STALE_MINUTES` | `15` | Credit holds older than this whose work is no longer running are released (charged at the chunk minimum) |
+| `REMEMBRA_UNVERIFIED_CREDIT_CAP_EFFECTIVE_AT` | - | Free accounts created at or after this time get 25 credits until the email is verified. Unset = off. Enable it only once the dashboard verify-email page is live |
+| `REMEMBRA_ANNUAL_CREDIT_UPFRONT_MONTHS` | `12` | Annual plans: months of credits available in the first month, one more each month after (`12` = whole bank up front) |
+| `REMEMBRA_TYPESAFE_USD_PER_REQUEST` | `0.0005` | Dollar cost metered per TypeSafe (Jev) request. Set it to your TypeSafe contract price |
+| `REMEMBRA_ENRICHMENT_GLOBAL_CONCURRENCY` | `16` | Enrichment jobs running at once across all tenants |
+| `REMEMBRA_ENRICHMENT_DEFAULT_CONCURRENCY` | `4` | Per-tenant enrichment concurrency when no plan applies |
+| `REMEMBRA_ENRICHMENT_MAX_PENDING_PER_TENANT` | `200` | Queued enrichment jobs per tenant before entity linking is skipped |
+
+A missing Paddle price ID makes checkout for that plan unavailable (HTTP 503
+with a clear message); nothing falls back to a guessed price. Webhooks map
+plans from the price ID only: an event whose price is not configured here is
+ignored and logged (`paddle_event_unknown_price`), never read from
+`custom_data`. Team and Founding 100 are sold only through
+`POST /api/v1/billing/checkout` (the client config lists single-quantity
+plans only).
+
+## Signup protection
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REMEMBRA_TURNSTILE_SECRET` | - | Cloudflare Turnstile secret. When set, `POST /api/v1/auth/signup` and `POST /api/v1/cloud/signup` require a Turnstile token (`turnstile_token` field or `CF-Turnstile-Response` header), verified server-side |
+| `REMEMBRA_SIGNUP_IP_RATE_LIMIT` | `3/hour` | Signups per client network (/24 for IPv4, /56 for IPv6) |
+| `REMEMBRA_SIGNUP_DOMAIN_RATE_LIMIT` | `20/day` | Signups per email domain |
+| `REMEMBRA_SIGNUP_ATTEMPT_IP_RATE_LIMIT` | `30/hour` | Signup attempts per client network before Turnstile runs (only with Turnstile on). The two limits above are charged only after Turnstile passes |
+| `REMEMBRA_TRUST_CLOUDFLARE_PROXIES` | `true` | Behind Cloudflare, take the client IP from `CF-Connecting-IP` when the forwarded chain reaches a Cloudflare edge range (only when the direct peer is a trusted proxy) |
+| `REMEMBRA_SIGNUP_DOMAIN_LIMIT_EXEMPT` | major mailbox providers | JSON list of domains exempt from the per-domain limit |
+| `REMEMBRA_RATE_LIMIT_STORAGE` | `memory` | Rate-limit backend for all limits: `memory` (per process) or `redis://host:6379/0` (shared; needs the `redis` package from the `cloud` extra) |
+
 ## Example .env File
 
 ```bash

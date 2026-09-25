@@ -141,6 +141,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.tasks = TaskRegistry(max_concurrency=settings.background_task_concurrency)
     set_task_registry(app.state.tasks)
 
+    # Bounded per-tenant enrichment queue (extraction / entity resolution).
+    from remembra.core.enrichment_queue import EnrichmentQueue, set_enrichment_queue
+
+    app.state.enrichment_queue = EnrichmentQueue(
+        global_concurrency=settings.enrichment_global_concurrency,
+        default_concurrency=settings.enrichment_default_concurrency,
+        max_pending_per_tenant=settings.enrichment_max_pending_per_tenant,
+    )
+    set_enrichment_queue(app.state.enrichment_queue)
+
+    if settings.rate_limit_enabled:
+        # Fail fast on a bad REMEMBRA_RATE_LIMIT_STORAGE (e.g. redis:// without
+        # the redis package) instead of on the first signup or recall.
+        from remembra.cloud.ratelimit import get_cloud_rate_limiter
+
+        get_cloud_rate_limiter()
+
     # SQLite metadata database (first: it holds the active vector collection)
     app.state.db = Database(settings.database_url)
     await app.state.db.connect()
@@ -256,8 +273,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Cloud services (billing, metering, limits)
     if settings.cloud_enabled:
+        from remembra.cloud.metering import now_utc as metering_now
+        from remembra.core import ai_spend
+
+        process_started_at = metering_now()
         app.state.usage_meter = UsageMeter(app.state.db)
         await app.state.usage_meter.init_schema()
+        # Enrichment work of the previous process died with it: release the
+        # holds opened before this process started (charged at the chunk
+        # minimum; a late settle adds the rest, capped at the hold). Holds of
+        # this process are never expired while their work is alive.
+        await app.state.usage_meter.expire_stale_reservations(created_before=process_started_at)
+        # Paid AI outside a metered write (Jev on recalls): skipped for the
+        # free group, recorded in the monthly AI-spend totals for the rest.
+        ai_spend.set_attribution_policy(app.state.usage_meter)
         log.info(
             "cloud_enabled",
             paddle_configured=bool(settings.paddle_api_key),
@@ -349,6 +378,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.sleep_worker = SleepTimeWorker(
             settings=settings,
             memory_service=app.state.memory_service,
+            usage_meter=app.state.usage_meter,
         )
         log.info(
             "sleep_time_worker_enabled",
@@ -454,8 +484,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     unregister_state_listener(app.state.alert_listener)
     await app.state.pending_worker.stop()
+    # Let queued / running enrichment finish while the registry still accepts
+    # their credit settles, then stop the registry, then wait for every settle
+    # (including ones released by cancelled work) before the database closes.
+    from remembra.core import ai_spend
+    from remembra.extraction import background
+
+    await background.drain(timeout=10.0)
     await app.state.tasks.shutdown(timeout=10.0)
+    await ai_spend.drain_settles(timeout=10.0)
+    ai_spend.set_attribution_policy(None)
     set_task_registry(None)
+    set_enrichment_queue(None)
     if app.state.plugin_manager:
         await app.state.plugin_manager.shutdown()
     # Close persistent HTTP clients

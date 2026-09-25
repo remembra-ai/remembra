@@ -21,6 +21,7 @@ from enum import StrEnum
 import structlog
 from openai import AsyncOpenAI
 
+from remembra.core.ai_spend import metered_chat
 from remembra.core.llm_guard import classify_llm_exception, make_llm_client, mark_llm_fallback
 from remembra.extraction.prompting import wrap_untrusted
 
@@ -203,7 +204,8 @@ class MemoryConsolidator:
                 ensure_ascii=False,
                 indent=2,
             )
-            response = await self._get_client().chat.completions.create(
+            response = await metered_chat(
+                self._get_client(),
                 model=self.model,
                 messages=[
                     {"role": "system", "content": CONSOLIDATION_SYSTEM_PROMPT},

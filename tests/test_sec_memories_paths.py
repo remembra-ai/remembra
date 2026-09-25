@@ -39,6 +39,21 @@ async def _meter_at(h, *, stores=0, recalls=0):
     return meter
 
 
+async def _fill_memories(db, user_id, n):
+    """Put the account at ``n`` stored memories (the only store quota that rejects)."""
+    now = datetime.now(UTC).isoformat()
+    await db.conn.executemany(
+        "INSERT INTO memories (id, user_id, project_id, content, created_at, updated_at) VALUES (?, ?, 'default', 'x', ?, ?)",
+        [(f"fill-{i}", user_id, now, now) for i in range(n)],
+    )
+    await db.conn.commit()
+
+
+async def _clear_memories(db, user_id):
+    await db.conn.execute("DELETE FROM memories WHERE user_id = ? AND id LIKE 'fill-%'", (user_id,))
+    await db.conn.commit()
+
+
 def _store_recorder(h):
     calls = []
 
@@ -58,14 +73,15 @@ async def test_batch_store_respects_plan_limit_meters_and_applies_policy(tmp_pat
         key, _ = await h.api_key("tenant-a", "editor")
         hdr = {"X-API-Key": key}
         meter = await _meter_at(h, stores=24_999)
+        # Free keeps its previous 25K memory cap until the reduction notice takes effect.
+        await _fill_memories(h.db, "tenant-a", 24_999)
 
         items = {"items": [{"content": "fact one here"}, {"content": "fact two here"}]}
         r = await h.client.post("/api/v1/memories/batch", json=items, headers=hdr)
-        assert r.status_code == 429
+        assert r.status_code == 429 and "Memory limit reached" in r.text
         assert calls == []
 
-        await h.db.conn.execute("UPDATE cloud_usage_daily SET stores = 0")
-        await h.db.conn.commit()
+        await _clear_memories(h.db, "tenant-a")
         items = {"items": [{"content": "fact one here"}, {"content": "SSN 123-45-6789"}, {"content": INJECTION}]}
         r = await h.client.post("/api/v1/memories/batch", json=items, headers=hdr)
         assert r.status_code == 201, r.text
@@ -73,7 +89,7 @@ async def test_batch_store_respects_plan_limit_meters_and_applies_policy(tmp_pat
         assert body["succeeded"] == 2 and "PII_DETECTED" in body["results"][1]["error"]
         trusts = [kw["trust_score"] for _, kw in calls]
         assert trusts[0] == 1.0 and trusts[1] < 0.5  # trust now persisted for batch items
-        assert (await meter.get_usage_snapshot("tenant-a")).stores_this_month == 2
+        assert (await meter.get_usage_snapshot("tenant-a")).stores_this_month == 24_999 + 2
 
 
 async def test_bulk_import_respects_plan_limit_and_pii(tmp_path):
@@ -82,13 +98,13 @@ async def test_bulk_import_respects_plan_limit_and_pii(tmp_path):
         h.app.state.memory_service.bulk_import = AsyncMock(return_value={"stored": 1, "errors": []})
         key, _ = await h.api_key("tenant-a", "editor")
         hdr = {"X-API-Key": key}
-        meter = await _meter_at(h, stores=25_000)
+        meter = await _meter_at(h)
+        await _fill_memories(h.db, "tenant-a", 24_999)
         items = {"items": [{"content": "row one"}, {"content": "SSN 123-45-6789"}]}
         assert (await h.client.post("/api/v1/memories/bulk", json=items, headers=hdr)).status_code == 429
         h.app.state.memory_service.bulk_import.assert_not_awaited()
 
-        await h.db.conn.execute("UPDATE cloud_usage_daily SET stores = 0")
-        await h.db.conn.commit()
+        await _clear_memories(h.db, "tenant-a")
         r = await h.client.post("/api/v1/memories/bulk", json=items, headers=hdr)
         assert r.status_code == 201, r.text
         sent = h.app.state.memory_service.bulk_import.await_args.kwargs["items"]

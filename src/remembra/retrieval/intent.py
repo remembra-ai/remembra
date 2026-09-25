@@ -179,6 +179,26 @@ class IntentRouter:
         jev_mode = getattr(self.jev, "mode", "off") if self.jev is not None else "off"
         if self._jev_client() is None or jev_mode == "off":
             return decision
+        if jev_mode != "shadow" and ruled is not None:
+            return ruled  # enforce: rules win, no Jev call
+        from remembra.core import ai_spend
+
+        # Jev is a paid call outside any metered write: the cloud policy skips it
+        # for the free group (recalls never use credits) and records it for others.
+        if not await ai_spend.allow_unattributed_ai(user_id):
+            return decision
+        with ai_spend.attribute_to(user_id):
+            return await self._resolve_with_jev(jev_mode, ruled, decision, query, user_id, project_id)
+
+    async def _resolve_with_jev(
+        self,
+        jev_mode: str,
+        ruled: ModeDecision | None,
+        decision: ModeDecision,
+        query: str,
+        user_id: str,
+        project_id: str | None,
+    ) -> ModeDecision:
         if jev_mode == "shadow":
             if self._spawn is not None:
                 self._spawn(self._shadow(query, decision, user_id, project_id), "jev_query_intent_shadow")

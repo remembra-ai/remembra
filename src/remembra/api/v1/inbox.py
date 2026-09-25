@@ -13,10 +13,11 @@ import logging
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 
 from remembra.auth.middleware import AuthenticatedUser, get_current_user, require_memory_recall, require_memory_store
+from remembra.cloud.limits import record_relay_usage, relay_guard
 from remembra.core.limiter import limiter
 from remembra.inbox.manager import TERMINAL_STATUSES, InboxManager
 
@@ -131,8 +132,14 @@ async def send_to_inbox(
     payload: Annotated[SendInboxRequest, Body(...)],
     current_user: CurrentUserDep,
     inbox: Annotated[InboxManager, Depends(get_inbox_manager)],
+    response: Response,
 ) -> SendInboxResponse:
-    """Write an inbox row addressed to `payload.to_agent`."""
+    """Write an inbox row addressed to `payload.to_agent`.
+
+    An inbox message is a relay event: free on every plan (never uses smart
+    credits), subject only to the plan's relay burst limit.
+    """
+    await relay_guard(request, response, current_user.user_id)
     try:
         row = await inbox.send(
             owner_user_id=current_user.user_id,
@@ -153,6 +160,7 @@ async def send_to_inbox(
             detail="Failed to send inbox message. Please try again later.",
         ) from e
 
+    await record_relay_usage(request, current_user.user_id)
     return SendInboxResponse(
         inbox_id=row["inbox_id"],
         status=row["status"],

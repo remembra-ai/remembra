@@ -1,46 +1,142 @@
 """
-Plan definitions and limit enforcement for Remembra Cloud.
+Plan catalog and limit checks for Remembra Cloud (the ONE plan module).
 
-Plans:
-  - free:       25K memories, 1 project, community support
-  - pro:        $49/mo ($499/yr) — 500K memories, 5 users, email support
-  - team:       $199/mo ($1,999/yr) — 2M memories, 25 users, priority support
-  - enterprise: Custom pricing — unlimited everything, SLA, SSO
+Owner-approved prices (2026-09):
+
+  - free:        $0            relay free, 500 smart credits/mo (new accounts: 25 until
+                               email verified, once that hold is enabled), 300 unenriched stores/day
+  - solo:        $12/mo  or $120/yr   2,200 credits/mo, 50K memories
+  - founding:    Solo at $108/yr, price locked for life, annual only, first 100
+  - pro:         $29/mo  or $290/yr   5,000 credits/mo, 125K memories
+  - team:        $15/seat/mo or $150/seat/yr, 3-seat minimum, limits pooled per seat
+  - enterprise:  custom contract ($399/mo floor)
+
+Grandfathered (existing subscribers only, never sold):
+
+  - legacy_pro_49:    the old $49 Pro  — 12,000 credits ($30 AI ceiling), 250K memories
+  - legacy_team_199:  the old $199 Team — 60,000 credits ($150 AI ceiling), 600K memories
+
+Smart credits are the only metered unit. One credit is $0.0025 of AI spend;
+an enriched store costs ``max(ceil(chars / 8000), actual LLM $ / 0.0025)``.
+Relay events (handoff / checkpoint / status / inbox), pickup briefs, trail
+reads and recalls never consume credits. When credits run out, stores degrade
+to atomic (no extraction, no entity resolution) instead of being rejected.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from dataclasses import dataclass, replace
+from datetime import datetime
 from enum import StrEnum
 from typing import Any
+
+# One smart credit buys this much AI spend (USD).
+CREDIT_USD = 0.0025
+# Content is metered per chunk of this many characters.
+CREDIT_CHUNK_CHARS = 8000
+# Credits reserved per chunk before enrichment runs ($0.04) — the worst case
+# a single chunk may spend; the difference is refunded when the work settles.
+RESERVE_CREDITS_PER_CHUNK = 16
+# Annual plans get the whole year's credits up front.
+MONTHS_PER_YEAR = 12
+
+OUT_OF_CREDITS_HINT = "You're out of smart credits; stores still save without enrichment. Solo gives 2,200/mo for $12."
 
 
 class PlanTier(StrEnum):
     FREE = "free"
+    SOLO = "solo"
     PRO = "pro"
     TEAM = "team"
     ENTERPRISE = "enterprise"
+    # Grandfathered subscribers of the pre-2026-09 catalog. Not purchasable.
+    LEGACY_PRO = "legacy_pro_49"
+    LEGACY_TEAM = "legacy_team_199"
+
+
+class BillingInterval(StrEnum):
+    MONTH = "month"
+    YEAR = "year"
+
+    @classmethod
+    def parse(cls, value: str | None) -> BillingInterval:
+        """Accept the spellings clients use: monthly/month, yearly/annual/year."""
+        normalized = (value or "month").strip().lower()
+        if normalized in ("year", "yearly", "annual", "annually"):
+            return cls.YEAR
+        if normalized in ("month", "monthly"):
+            return cls.MONTH
+        raise ValueError(f"Unknown billing interval: {value!r}")
+
+
+# Tiers a customer can buy through self-serve checkout.
+SELF_SERVE_TIERS: tuple[PlanTier, ...] = (PlanTier.SOLO, PlanTier.PRO, PlanTier.TEAM)
+LEGACY_TIERS: frozenset[PlanTier] = frozenset({PlanTier.LEGACY_PRO, PlanTier.LEGACY_TEAM})
+# Founding 100: Solo, annual only, price locked for life.
+FOUNDING_MAX_REDEMPTIONS = 100
+FOUNDING_ANNUAL_PRICE_CENTS = 10_800
 
 
 @dataclass(frozen=True)
 class PlanLimits:
-    """Enforced resource limits for a plan tier."""
+    """Enforced limits for one plan tier.
+
+    For ``per_seat`` plans (Team) every pooled field holds the PER-SEAT value;
+    :meth:`scaled` multiplies them by the billed seat count.
+    """
+
+    tier: PlanTier
+    display_name: str
 
     # Storage
     max_memories: int
     max_storage_mb: int
 
-    # Rate limits (per month)
+    # Metered usage (per month; annual plans bank 12x credits up front)
+    max_smart_credits_per_month: int
     max_recalls_per_month: int
-    max_stores_per_month: int
+    max_relay_events_per_month: int  # soft cap: surfaced, never rejected
+
+    # Input limits
+    max_content_chars: int
+    max_batch_items: int
+    max_batch_recall_queries: int
+
+    # Burst limits (per minute, per account)
+    recall_burst_per_min: int
+    relay_burst_per_min: int
 
     # Access
     max_api_keys: int
-    max_users: int
+    max_users: int  # seats
     max_projects: int
 
+    # Background enrichment jobs allowed to run at once for this account
+    enrichment_concurrency: int
+
+    retention_days: int | None = None  # None = unlimited
+
+    # Email verification gate (Free): credits available before the address is verified
+    unverified_credit_cap: int | None = None
+
+    # Writes stored WITHOUT enrichment (atomic, degraded, relay) per UTC day.
+    # Each still embeds; None = unlimited (paid plans are bounded by rate limits
+    # and their memory cap).
+    max_unenriched_writes_per_day: int | None = None
+
+    # Memory cap before the 30-day notice of a cap reduction takes effect
+    # (None = the cap did not shrink for this tier).
+    pre_notice_max_memories: int | None = None
+
+    per_seat: bool = False
+    min_seats: int = 1
+
+    # List prices in USD cents (None = not sold / custom)
+    price_monthly_cents: int | None = None
+    price_annual_cents: int | None = None
+
     # Features
-    retention_days: int | None  # None = unlimited
     has_hybrid_search: bool = True
     has_entity_resolution: bool = True
     has_temporal_decay: bool = True
@@ -51,90 +147,265 @@ class PlanLimits:
     has_observability: bool = False
     has_priority_support: bool = False
 
-    # Stripe
-    stripe_price_id: str | None = None  # Monthly price
-    stripe_annual_price_id: str | None = None  # Annual price (discounted)
+    @property
+    def is_legacy(self) -> bool:
+        return self.tier in LEGACY_TIERS
+
+    @property
+    def llm_ceiling_usd_month(self) -> float:
+        """Hard monthly AI-spend ceiling implied by the credit allowance."""
+        return round(self.max_smart_credits_per_month * CREDIT_USD, 4)
+
+    def credit_allowance(self, interval: BillingInterval, months_released: int = MONTHS_PER_YEAR) -> int:
+        """Credits available in the billing period: a month, or the released part of the yearly bank.
+
+        ``months_released`` (annual only) is how many months of the yearly bank
+        are available so far (12 = the whole bank).
+        """
+        if interval == BillingInterval.YEAR:
+            return self.max_smart_credits_per_month * max(1, min(MONTHS_PER_YEAR, months_released))
+        return self.max_smart_credits_per_month
+
+    def memory_cap(self, now: datetime, notice_effective_at: datetime | None) -> int:
+        """The memory cap in force at ``now``.
+
+        A reduced cap only applies once the written-notice date has passed; until
+        the owner sets that date (``memory_cap_notice_effective_at``) the previous
+        cap stays in force.
+        """
+        if self.pre_notice_max_memories is None:
+            return self.max_memories
+        if notice_effective_at is None or _naive(now) < _naive(notice_effective_at):
+            return self.pre_notice_max_memories
+        return self.max_memories
+
+    def scaled(self, seats: int | None) -> PlanLimits:
+        """Pooled limits for ``seats`` billed seats (identity for non-seat plans).
+
+        Exactly the seats that were paid for: a quantity below the plan minimum
+        is not rounded up. Unknown seats (None, e.g. a promo trial) get the minimum.
+        """
+        if not self.per_seat:
+            return self
+        seats = self.min_seats if not seats else max(1, int(seats))
+        return replace(
+            self,
+            max_memories=self.max_memories * seats,
+            max_storage_mb=self.max_storage_mb * seats,
+            max_smart_credits_per_month=self.max_smart_credits_per_month * seats,
+            max_recalls_per_month=self.max_recalls_per_month * seats,
+            max_relay_events_per_month=self.max_relay_events_per_month * seats,
+            max_api_keys=self.max_api_keys * seats,
+            max_users=seats,
+            per_seat=False,
+            min_seats=seats,
+        )
+
+
+def _naive(value: datetime) -> datetime:
+    return value.replace(tzinfo=None) if value.tzinfo else value
 
 
 # ---------------------------------------------------------------------------
-# Plan definitions (matching PRODUCT-SPEC.md research)
+# The catalog
 # ---------------------------------------------------------------------------
+
+_UNLIMITED_PROJECTS = 1_000
 
 PLANS: dict[PlanTier, PlanLimits] = {
-    # Free: Indie devs, students (tightened limits to encourage Pro upgrades)
     PlanTier.FREE: PlanLimits(
-        max_memories=25_000,  # 25K memories (tightened from 50K)
+        tier=PlanTier.FREE,
+        display_name="Relay Free",
+        max_memories=10_000,
+        pre_notice_max_memories=25_000,  # previous Free cap, until notice
         max_storage_mb=250,
-        max_recalls_per_month=50_000,  # 50K/mo (tightened from 100K)
-        max_stores_per_month=25_000,  # 25K/mo (tightened from 50K)
-        max_api_keys=2,  # 2 keys (tightened from 3)
+        max_smart_credits_per_month=500,  # $1.25 AI ceiling
+        unverified_credit_cap=25,
+        max_unenriched_writes_per_day=300,
+        max_recalls_per_month=10_000,
+        max_relay_events_per_month=5_000,
+        max_content_chars=8_000,
+        max_batch_items=10,
+        max_batch_recall_queries=5,
+        recall_burst_per_min=20,
+        relay_burst_per_min=30,
+        max_api_keys=3,
         max_users=1,
-        max_projects=1,  # 1 project
-        retention_days=None,  # unlimited
-        has_webhooks=False,
-        has_sso=False,
-        has_observability=False,
-        has_priority_support=False,
-        stripe_price_id=None,
+        max_projects=3,
+        enrichment_concurrency=2,
+        price_monthly_cents=0,
+        price_annual_cents=0,
     ),
-    # Pro $49/mo ($499/yr): Startups, side projects
-    PlanTier.PRO: PlanLimits(
-        max_memories=500_000,  # 500K memories (research spec)
-        max_storage_mb=5_000,
-        max_recalls_per_month=1_000_000,
-        max_stores_per_month=500_000,
+    PlanTier.SOLO: PlanLimits(
+        tier=PlanTier.SOLO,
+        display_name="Solo",
+        max_memories=50_000,
+        max_storage_mb=2_500,
+        max_smart_credits_per_month=2_200,  # $5.50 AI ceiling
+        max_recalls_per_month=50_000,
+        max_relay_events_per_month=25_000,
+        max_content_chars=50_000,
+        max_batch_items=100,
+        max_batch_recall_queries=20,
+        recall_burst_per_min=60,
+        relay_burst_per_min=60,
         max_api_keys=10,
-        max_users=5,
-        max_projects=5,  # 5 projects (research spec)
-        retention_days=365,
+        max_users=1,
+        max_projects=_UNLIMITED_PROJECTS,
+        enrichment_concurrency=4,
+        price_monthly_cents=1_200,
+        price_annual_cents=12_000,
         has_webhooks=True,
-        has_sso=False,
-        has_observability=True,
-        has_priority_support=False,
-        stripe_price_id="price_1T6ZDAQ3CqXwAZA7jUWCVVF0",  # $49/mo
-        stripe_annual_price_id="price_1T92ntQ3CqXwAZA7i8odzMW3",  # $499/yr (15% off)
     ),
-    # Team $199/mo ($1,999/yr): Growing companies
-    PlanTier.TEAM: PlanLimits(
-        max_memories=2_000_000,  # 2M memories (research spec)
-        max_storage_mb=20_000,
-        max_recalls_per_month=5_000_000,
-        max_stores_per_month=2_000_000,
-        max_api_keys=50,
-        max_users=25,
-        max_projects=100,  # unlimited-ish
-        retention_days=None,  # unlimited
+    PlanTier.PRO: PlanLimits(
+        tier=PlanTier.PRO,
+        display_name="Pro",
+        max_memories=125_000,
+        max_storage_mb=6_250,
+        max_smart_credits_per_month=5_000,  # $12.50 AI ceiling
+        max_recalls_per_month=250_000,
+        max_relay_events_per_month=100_000,
+        max_content_chars=50_000,
+        max_batch_items=100,
+        max_batch_recall_queries=20,
+        recall_burst_per_min=120,
+        relay_burst_per_min=120,
+        max_api_keys=25,
+        max_users=1,
+        max_projects=_UNLIMITED_PROJECTS,
+        enrichment_concurrency=8,
+        price_monthly_cents=2_900,
+        price_annual_cents=29_000,
         has_webhooks=True,
-        has_sso=False,
         has_observability=True,
         has_priority_support=True,
-        stripe_price_id="price_1T92njQ3CqXwAZA79F2iVamm",  # $199/mo
-        stripe_annual_price_id="price_1T92nxQ3CqXwAZA7qFVL4piW",  # $1,999/yr (16% off)
     ),
-    # Enterprise: Large orgs, custom pricing
+    PlanTier.TEAM: PlanLimits(
+        tier=PlanTier.TEAM,
+        display_name="Team",
+        # Per seat; pooled across the team via scaled(seats).
+        max_memories=50_000,
+        max_storage_mb=2_500,
+        max_smart_credits_per_month=2_200,
+        max_recalls_per_month=50_000,
+        max_relay_events_per_month=25_000,
+        max_content_chars=50_000,
+        max_batch_items=100,
+        max_batch_recall_queries=20,
+        recall_burst_per_min=120,
+        relay_burst_per_min=120,
+        max_api_keys=10,
+        max_users=1,
+        max_projects=_UNLIMITED_PROJECTS,
+        enrichment_concurrency=8,
+        per_seat=True,
+        min_seats=3,
+        price_monthly_cents=1_500,  # per seat
+        price_annual_cents=15_000,  # per seat
+        has_webhooks=True,
+        has_observability=True,
+        has_priority_support=True,
+    ),
     PlanTier.ENTERPRISE: PlanLimits(
+        tier=PlanTier.ENTERPRISE,
+        display_name="Enterprise",
         max_memories=10_000_000,
         max_storage_mb=100_000,
-        max_recalls_per_month=50_000_000,
-        max_stores_per_month=10_000_000,
+        # Default contract ceiling ($150/mo); every contract carries an explicit one.
+        max_smart_credits_per_month=60_000,
+        max_recalls_per_month=5_000_000,
+        max_relay_events_per_month=1_000_000,
+        max_content_chars=50_000,
+        max_batch_items=100,
+        max_batch_recall_queries=20,
+        recall_burst_per_min=600,
+        relay_burst_per_min=600,
         max_api_keys=100,
-        max_users=1000,
-        max_projects=1000,
-        retention_days=None,  # unlimited
+        max_users=1_000,
+        max_projects=10_000,
+        enrichment_concurrency=8,
+        price_monthly_cents=None,  # custom, $399/mo floor
         has_webhooks=True,
         has_sso=True,
         has_observability=True,
         has_priority_support=True,
-        stripe_price_id=None,  # Custom pricing, contact sales
+    ),
+    PlanTier.LEGACY_PRO: PlanLimits(
+        tier=PlanTier.LEGACY_PRO,
+        display_name="Pro (legacy $49)",
+        max_memories=250_000,
+        pre_notice_max_memories=500_000,
+        max_storage_mb=5_000,
+        max_smart_credits_per_month=12_000,  # $30 AI ceiling
+        max_recalls_per_month=1_000_000,
+        max_relay_events_per_month=100_000,
+        max_content_chars=50_000,
+        max_batch_items=100,
+        max_batch_recall_queries=20,
+        recall_burst_per_min=120,
+        relay_burst_per_min=120,
+        max_api_keys=10,
+        max_users=5,
+        max_projects=_UNLIMITED_PROJECTS,
+        enrichment_concurrency=8,
+        price_monthly_cents=4_900,
+        has_webhooks=True,
+        has_observability=True,
+    ),
+    PlanTier.LEGACY_TEAM: PlanLimits(
+        tier=PlanTier.LEGACY_TEAM,
+        display_name="Team (legacy $199)",
+        max_memories=600_000,
+        pre_notice_max_memories=2_000_000,
+        max_storage_mb=20_000,
+        max_smart_credits_per_month=60_000,  # $150 AI ceiling
+        max_recalls_per_month=5_000_000,
+        max_relay_events_per_month=500_000,
+        max_content_chars=50_000,
+        max_batch_items=100,
+        max_batch_recall_queries=20,
+        recall_burst_per_min=240,
+        relay_burst_per_min=240,
+        max_api_keys=50,
+        max_users=25,
+        max_projects=_UNLIMITED_PROJECTS,
+        enrichment_concurrency=8,
+        price_monthly_cents=19_900,
+        has_webhooks=True,
+        has_observability=True,
+        has_priority_support=True,
     ),
 }
 
 
 def get_plan(tier: PlanTier | str) -> PlanLimits:
-    """Get plan limits for a given tier."""
-    if isinstance(tier, str):
+    """Get the catalog limits for a tier (per-seat values for Team)."""
+    if isinstance(tier, str) and not isinstance(tier, PlanTier):
         tier = PlanTier(tier.lower())
-    return PLANS[tier]
+    return PLANS[PlanTier(tier)]
+
+
+def chunk_credits(content: str) -> int:
+    """Minimum credits for one item: one per started 8,000-character chunk."""
+    return max(1, math.ceil(len(content or "") / CREDIT_CHUNK_CHARS))
+
+
+def estimate_chunks(contents: list[str]) -> int:
+    """Chunk count for a write: the sum over items of ceil(len / 8000)."""
+    return sum(chunk_credits(c) for c in contents)
+
+
+def credits_for_usd(usd: float) -> int:
+    """Credits that ``usd`` of AI spend consumes (rounded up to whole credits)."""
+    if usd <= 0:
+        return 0
+    # Guard float noise: 0.0075 / 0.0025 must be 3, not 4.
+    return math.ceil(round(usd / CREDIT_USD, 6))
+
+
+def charge_for(min_credits: int, actual_usd: float) -> int:
+    """Credits charged for a settled enrichment: max(chunk minimum, actual spend)."""
+    return max(int(min_credits), credits_for_usd(actual_usd))
 
 
 @dataclass
@@ -148,33 +419,33 @@ class UsageSnapshot:
     stores_this_month: int = 0
     api_keys_active: int = 0
     storage_mb: float = 0.0
+    # Effective limits (seat-scaled, notice-aware); defaults to the catalog.
+    limits: PlanLimits | None = None
+    max_memories: int | None = None
+
+    def _limits(self) -> PlanLimits:
+        return self.limits or get_plan(self.plan)
+
+    def memory_cap(self) -> int:
+        return self.max_memories if self.max_memories is not None else self._limits().max_memories
 
     def check_limit(self, action: str) -> LimitCheckResult:
-        """Check if a specific action is within plan limits.
+        """Check whether ``action`` ("store", "recall", "create_key") is within the plan.
 
-        Args:
-            action: "store", "recall", "create_key", "create_project"
-
-        Returns:
-            LimitCheckResult with allowed status and details.
+        Stores are only ever rejected at the memory cap; running out of smart
+        credits degrades enrichment instead (see ``remembra.cloud.limits``).
         """
-        limits = get_plan(self.plan)
+        limits = self._limits()
 
         if action == "store":
-            if self.memories_stored >= limits.max_memories:
+            cap = self.memory_cap()
+            if self.memories_stored >= cap:
                 return LimitCheckResult(
                     allowed=False,
-                    reason=f"Memory limit reached ({limits.max_memories:,} memories)",
-                    limit=limits.max_memories,
+                    reason=f"Memory limit reached ({cap:,} memories)",
+                    limit=cap,
                     current=self.memories_stored,
-                    upgrade_hint="Upgrade to Pro for 500K memories (20x more!)" if self.plan == PlanTier.FREE else None,
-                )
-            if self.stores_this_month >= limits.max_stores_per_month:
-                return LimitCheckResult(
-                    allowed=False,
-                    reason=f"Monthly store limit reached ({limits.max_stores_per_month:,}/mo)",
-                    limit=limits.max_stores_per_month,
-                    current=self.stores_this_month,
+                    upgrade_hint=("Upgrade to Solo for 50,000 memories ($12/mo)." if self.plan == PlanTier.FREE else None),
                 )
             return LimitCheckResult(allowed=True)
 

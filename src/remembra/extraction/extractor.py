@@ -13,6 +13,7 @@ from typing import Any
 import structlog
 from openai import AsyncOpenAI
 
+from remembra.core.ai_spend import metered_chat
 from remembra.core.llm_guard import classify_llm_exception, make_llm_client, mark_llm_fallback
 from remembra.extraction.prompting import reference_date_line, wrap_untrusted
 
@@ -235,7 +236,8 @@ class FactExtractor:
     async def _extract_chunk(self, chunk: str, reference_date: datetime | None) -> tuple[list[str], str | None, bool]:
         """Returns (facts, error, truncated). error is set when the model path failed."""
         try:
-            response = await self._get_client().chat.completions.create(
+            response = await metered_chat(
+                self._get_client(),
                 model=self.config.model,
                 messages=[
                     {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},

@@ -20,6 +20,9 @@ def _scrub_secrets(value: str) -> str:
 # status endpoint (the prior value for the same key is superseded).
 MEMORY_TYPES = Literal["observation", "fact", "inference", "task", "source", "checkpoint", "handoff", "status"]
 
+# Agent relay memory types: stored atomically, never enriched, never metered as smart credits.
+RELAY_MEMORY_TYPES: frozenset[str] = frozenset({"handoff", "checkpoint", "status"})
+
 
 def _new_id() -> str:
     return str(uuid4())

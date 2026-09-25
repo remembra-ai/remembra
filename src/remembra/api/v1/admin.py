@@ -714,7 +714,7 @@ async def get_user_details(
         plan_tier = await usage_meter.get_tenant_plan(user_id)
 
     # Get usage snapshot
-    usage = {}
+    usage: dict[str, Any] = {}
     if usage_meter:
         snapshot = await usage_meter.get_usage_snapshot(user_id)
         usage = {
@@ -724,16 +724,24 @@ async def get_user_details(
             "api_keys_active": snapshot.api_keys_active,
         }
 
-    # Get plan limits
+    # Get plan limits (effective: seat-scaled, notice-aware) and per-tenant AI spend
     limits_obj = get_plan(plan_tier)
     limits = {
         "max_memories": limits_obj.max_memories,
         "max_recalls_per_month": limits_obj.max_recalls_per_month,
-        "max_stores_per_month": limits_obj.max_stores_per_month,
+        "smart_credits_per_month": limits_obj.max_smart_credits_per_month,
         "max_api_keys": limits_obj.max_api_keys,
         "has_webhooks": limits_obj.has_webhooks,
         "has_priority_support": limits_obj.has_priority_support,
     }
+    if usage_meter:
+        account = await usage_meter.get_account(user_id)
+        balance = await usage_meter.get_credit_balance(account)
+        limits["max_memories"] = account.memory_cap
+        limits["smart_credits"] = account.credit_limit
+        usage["smart_credits_used"] = balance.used
+        usage["smart_credits_reserved"] = balance.reserved
+        usage["llm_usd_this_period"] = round(balance.llm_usd, 4)
 
     return UserDetailResponse(
         id=user_data["id"],

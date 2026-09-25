@@ -22,11 +22,14 @@ def _signed(event: dict, secret: str = SECRET, ts: int | None = None) -> tuple[b
     return body, {"paddle-signature": f"ts={ts};h1={h1}", "content-type": "application/json"}
 
 
-def _event(event_type: str, user_id: str, plan: str = "pro") -> dict:
-    return {
-        "event_type": event_type,
-        "data": {"id": "sub_1", "status": "active", "custom_data": {"remembra_user_id": user_id, "plan": plan}},
-    }
+TEAM_SEAT_PRICE = "pri_team_seat_sec"
+
+
+def _event(event_type: str, user_id: str, plan: str = "pro", price: str | None = None, quantity: int = 1) -> dict:
+    data: dict = {"id": "sub_1", "status": "active", "custom_data": {"remembra_user_id": user_id, "plan": plan}}
+    if price:
+        data["items"] = [{"price": {"id": price}, "quantity": quantity}]
+    return {"event_type": event_type, "data": data}
 
 
 async def _app(tmp_path, secret: str | None):
@@ -34,6 +37,7 @@ async def _app(tmp_path, secret: str | None):
     # These fields use env aliases, so set them on the instance.
     settings.paddle_api_key = "pdl_test_api_key"
     settings.paddle_webhook_secret = secret
+    settings.paddle_price_team_seat_monthly = TEAM_SEAT_PRICE
     ctx = secure_app(tmp_path, [billing.router, cloud.router], settings=settings)
     h = await ctx.__aenter__()
     h.app.state.usage_meter = UsageMeter(h.db)
@@ -72,7 +76,7 @@ async def test_verified_webhook_is_applied_to_the_plan(tmp_path):
     ctx, h = await _app(tmp_path, secret=SECRET)
     try:
         uid = await h.create_user("buyer@example.com")
-        body, headers = _signed(_event("subscription.activated", uid, "team"))
+        body, headers = _signed(_event("subscription.activated", uid, "team", price=TEAM_SEAT_PRICE, quantity=3))
         r = await h.client.post("/api/v1/billing/webhook/paddle", content=body, headers=headers)
         assert r.status_code == 200, r.text
         assert r.json()["applied"] == "applied"
@@ -82,7 +86,7 @@ async def test_verified_webhook_is_applied_to_the_plan(tmp_path):
         assert (await h.client.post("/api/v1/billing/webhook/paddle", content=body, headers=headers)).status_code == 200
         assert await h.app.state.usage_meter.get_tenant_plan(uid) == PlanTier.FREE
 
-        body, headers = _signed(_event("subscription.activated", "user_does_not_exist"))
+        body, headers = _signed(_event("subscription.activated", "user_does_not_exist", price=TEAM_SEAT_PRICE, quantity=3))
         r = await h.client.post("/api/v1/billing/webhook/paddle", content=body, headers=headers)
         assert r.status_code == 200 and r.json()["applied"] == "unmatched"
     finally:

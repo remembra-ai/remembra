@@ -7,7 +7,7 @@ from datetime import datetime
 from typing import Annotated, Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from remembra.auth.middleware import (
     CurrentUser,
@@ -17,11 +17,11 @@ from remembra.auth.middleware import (
 )
 from remembra.cloud.limits import (
     EnforceRecallLimit,
-    EnforceStoreLimit,
     enforce_recall_quota,
-    enforce_store_quota,
+    gate_write,
     record_delete_usage,
     record_recall_usage,
+    record_relay_usage,
     record_store_usage,
 )
 from remembra.config import Settings, get_settings
@@ -29,6 +29,7 @@ from remembra.core.http_errors import embedding_http_exception
 from remembra.core.limiter import limiter
 from remembra.core.time import utcnow
 from remembra.models.memory import (
+    RELAY_MEMORY_TYPES,
     BatchRecallRequest,
     BatchRecallResponse,
     BatchStoreRequest,
@@ -303,7 +304,7 @@ async def store_memory(
     pii_detector: PIIDetectorDep,
     current_user: CurrentUser,
     settings: SettingsDep,
-    _limit: EnforceStoreLimit = None,
+    response: Response,
 ) -> StoreResponse:
     """
     Accept raw text, extract facts and entities, embed, and persist.
@@ -386,14 +387,35 @@ async def store_memory(
                 detail="Idempotency-Key was already used with a different request body.",
             )
 
+    # Plan gate BEFORE any LLM work: input limits, memory cap, and a smart-credit
+    # reservation. Out of credits degrades to an atomic store (never a 429).
+    relay = body.memory_type in RELAY_MEMORY_TYPES
     try:
-        result = await memory_service.store(
-            body,
-            source="user_input",
-            trust_score=sanitization.trust_score if sanitization else 1.0,
-            checksum=sanitization.checksum if sanitization else None,
-            skip_extraction=body.skip_extraction,
+        grant = await gate_write(
+            request,
+            response,
+            current_user.user_id,
+            [body.content],
+            atomic=[body.skip_extraction or relay],
+            project_ids=[body.project_id],
+            relay=relay,
         )
+    except HTTPException:
+        await _release_idempotency(memory_service, current_user.user_id, idem_key)
+        raise
+
+    try:
+        with grant.activate():
+            result = await memory_service.store(
+                body,
+                source="user_input",
+                trust_score=sanitization.trust_score if sanitization else 1.0,
+                checksum=sanitization.checksum if sanitization else None,
+                skip_extraction=body.skip_extraction or not grant.enrich,
+            )
+        if grant.degraded:
+            result.enrichment = "degraded"
+            await grant.record_degraded(1)
 
         # Audit log (don't log content, only memory_id)
         await audit_logger.log_memory_store(
@@ -404,8 +426,12 @@ async def store_memory(
             success=True,
         )
 
-        # Record usage for metering (no-op if cloud disabled)
-        await record_store_usage(request, current_user.user_id)
+        # Record usage for metering (no-op if cloud disabled). Relay events
+        # (handoff / checkpoint) are counted separately and never use credits.
+        if relay:
+            await record_relay_usage(request, current_user.user_id)
+        else:
+            await record_store_usage(request, current_user.user_id)
 
         # Only announce memories that were actually created (ING-24): a
         # duplicate store created nothing.
@@ -524,6 +550,7 @@ async def batch_store(
     pii_detector: PIIDetectorDep,
     current_user: CurrentUser,
     settings: SettingsDep,
+    response: Response,
 ) -> BatchStoreResponse:
     """
     Store up to 100 memories in a single request.
@@ -566,8 +593,25 @@ async def batch_store(
     items = body.items
     semaphore = asyncio.Semaphore(settings.batch_store_concurrency)
 
-    # Plan limits apply to the whole batch, not just single stores (SEC-11).
-    await enforce_store_quota(request, current_user.user_id, len(items))
+    # Plan limits apply to the whole batch (SEC-11): batch size, per-item size,
+    # memory cap, and ONE chunk-aware credit reservation for every item that
+    # will be enriched — taken before any LLM call. If it does not fit, the
+    # whole batch is stored atomically instead (degraded), never rejected.
+    atomic_flags = [body.skip_extraction or item.skip_extraction or item.memory_type in RELAY_MEMORY_TYPES for item in items]
+    batch_projects: set[str] = set()
+    for item in items:
+        try:
+            batch_projects.add(resolve_project_access(current_user, item.project_id) or "default")
+        except HTTPException:
+            pass  # reported per item below
+    grant = await gate_write(
+        request,
+        response,
+        current_user.user_id,
+        [item.content for item in items],
+        atomic=atomic_flags,
+        project_ids=batch_projects,
+    )
 
     async def store_item(i: int, item: StoreRequest) -> BatchStoreResult:
         # Enforce authenticated user
@@ -597,8 +641,10 @@ async def batch_store(
                     source="user_input",
                     trust_score=prepared.trust_score,
                     checksum=prepared.checksum,
-                    skip_extraction=body.skip_extraction or item.skip_extraction,
+                    skip_extraction=atomic_flags[i] or not grant.enrich,
                 )
+                if grant.degraded and not atomic_flags[i]:
+                    resp.enrichment = "degraded"
                 return BatchStoreResult(index=i, success=True, response=resp)
             except ValueError as e:
                 return BatchStoreResult(index=i, success=False, error=str(e))
@@ -610,10 +656,16 @@ async def batch_store(
                 _internal_log.error("batch_store_item_failed", index=i, error=str(e), error_type=type(e).__name__)
                 return BatchStoreResult(index=i, success=False, error="Failed to store item")
 
-    results = list(await asyncio.gather(*(store_item(i, item) for i, item in enumerate(items))))
+    with grant.activate():
+        # gather() copies the context into each item task, so every LLM call
+        # of this batch is billed to the one reservation.
+        results = list(await asyncio.gather(*(store_item(i, item) for i, item in enumerate(items))))
     succeeded = sum(1 for r in results if r.success)
+    relay_ok = sum(1 for r, item in zip(results, items, strict=True) if r.success and item.memory_type in RELAY_MEMORY_TYPES)
 
-    await record_store_usage(request, current_user.user_id, succeeded)
+    await record_store_usage(request, current_user.user_id, succeeded - relay_ok)
+    await record_relay_usage(request, current_user.user_id, relay_ok)
+    await grant.record_degraded(sum(1 for r, a in zip(results, atomic_flags, strict=True) if r.success and not a))
 
     await audit_logger.log_memory_store(
         user_id=current_user.user_id,
@@ -648,6 +700,7 @@ async def bulk_import(
     memory_service: MemoryServiceDep,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
+    response: Response,
 ) -> dict[str, Any]:
     """
     Fast bulk import optimized for pre-structured data.
@@ -704,7 +757,19 @@ async def bulk_import(
     project_id = resolve_project_access(current_user, body.items[0].project_id if body.items else None) or "default"
 
     # Plan limits + PII/injection policy apply to the fast path too (SEC-11/SEC-13).
-    await enforce_store_quota(request, current_user.user_id, len(body.items))
+    # Bulk import never calls an LLM (no extraction, consolidation or entity
+    # pass), so every item is atomic: batch size, per-item size, project and
+    # memory cap are enforced before any embedding; no smart credits are used.
+    await gate_write(
+        request,
+        response,
+        current_user.user_id,
+        [item.content for item in body.items],
+        atomic=[True] * len(body.items),
+        project_ids=[project_id],
+        # Rows arriving with their own embeddings cost nothing to embed.
+        count_unenriched=body.embeddings is None,
+    )
     items = []
     embeddings: list[list[float]] | None = [] if body.embeddings is not None else None
     policy_errors: list[dict[str, Any]] = []
@@ -773,6 +838,7 @@ async def batch_recall(
     body: BatchRecallRequest,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
+    response: Response,
 ) -> BatchRecallResponse:
     """
     Execute up to 20 recall queries in a single request.
@@ -804,7 +870,7 @@ async def batch_recall(
     results: list[RecallResponse] = []
 
     # Every query counts against the plan's recall limit (SEC-11).
-    await enforce_recall_quota(request, current_user.user_id, len(body.queries))
+    await enforce_recall_quota(request, current_user.user_id, len(body.queries), response)
 
     for query in body.queries:
         # Enforce authenticated user
@@ -1057,6 +1123,7 @@ async def update_memory(
     sanitizer: SanitizerDep,
     current_user: CurrentUser,
     settings: SettingsDep,
+    response: Response,
 ) -> UpdateResponse:
     """
     Re-extract facts from updated content and merge entity graph.
@@ -1121,13 +1188,18 @@ async def update_memory(
         sanitization = sanitizer.analyze(body.content, source="user_input")
         sanitized_content = sanitization.content
 
+    # Re-extraction is an enriched write: same credit gate as a store (adds no rows).
+    grant = await gate_write(request, response, current_user.user_id, [sanitized_content], memories_added=0)
+
     try:
-        result = await memory_service.update(
-            memory_id=memory_id,
-            user_id=current_user.user_id,
-            new_content=sanitized_content,
-            new_metadata=_client_metadata(current_user, body.metadata),
-        )
+        with grant.activate():
+            result = await memory_service.update(
+                memory_id=memory_id,
+                user_id=current_user.user_id,
+                new_content=sanitized_content,
+                new_metadata=_client_metadata(current_user, body.metadata),
+                enrich=grant.enrich,
+            )
         from remembra.security.audit import AuditAction
 
         await audit_logger.log(

@@ -21,6 +21,7 @@ from typing import Any
 import structlog
 
 from remembra.config import Settings
+from remembra.core import ai_spend
 from remembra.core.time import utcnow
 from remembra.extraction.consolidator import (
     ConsolidationAction,
@@ -51,9 +52,13 @@ class SleepTimeWorker:
         self,
         settings: Settings,
         memory_service: Any,  # Avoid circular import
+        usage_meter: Any | None = None,
     ) -> None:
         self.settings = settings
         self.memory_service = memory_service
+        # Cloud: sleep-time AI spend is billed to the account's smart credits and
+        # the LLM pass is skipped for accounts with none left.
+        self.usage_meter = usage_meter
         self.db = memory_service.db
         self.qdrant = memory_service.qdrant
         self.embeddings = memory_service.embeddings
@@ -174,9 +179,13 @@ class SleepTimeWorker:
         if not memories:
             return report
 
-        # Pass 1: Deduplication
-        duplicates = await self._dedup_pass(user_id, memories)
-        report.duplicates_merged = duplicates
+        # Pass 1: Deduplication (the only LLM pass: metered like a write)
+        job, allow_llm = await self._credit_job(user_id)
+        if allow_llm:
+            with ai_spend.activate(job):
+                report.duplicates_merged = await self._dedup_pass(user_id, memories)
+        else:
+            log.info("sleep_time_llm_pass_skipped_no_credits", user_id=user_id)
 
         # Pass 2: Entity resolution
         entities = await self._entity_resolution_pass(user_id)
@@ -199,6 +208,33 @@ class SleepTimeWorker:
 
         report.completed_at = utcnow()
         return report
+
+    async def _credit_job(self, user_id: str) -> tuple[ai_spend.SpendJob | None, bool]:
+        """(spend job billing this user's sleep-time LLM calls, whether the LLM pass may run).
+
+        Sleep-time work counts against the same smart-credit ceiling as stores:
+        it is skipped when the account has no credits left or when the free-tier
+        breaker is open for a free account. Actual spend is charged afterwards.
+        """
+        meter = self.usage_meter
+        if meter is None:
+            return None, True
+        account = await meter.get_account(user_id)
+        balance = await meter.get_credit_balance(account)
+        if balance.remaining <= 0 or (account.free_group and await meter.free_breaker_open()):
+            return None, False
+
+        async def settle(usd: float, _enriched: bool) -> int:
+            charged: int = await meter.record_unreserved_spend(account, usd)
+            return charged
+
+        from remembra.cloud.plans import CREDIT_USD
+
+        # The credits left are a hard budget for this pass (checked before every LLM call).
+        return (
+            ai_spend.SpendJob(user_id=user_id, settle=settle, label="sleep_time", budget_usd=balance.remaining * CREDIT_USD),
+            True,
+        )
 
     async def _brain_pass(self, user_id: str) -> int:
         """Recompute the brain layer for each project the user has entities in.

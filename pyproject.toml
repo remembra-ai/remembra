@@ -116,6 +116,8 @@ encryption = [
 # Cloud / SaaS dependencies (billing, metering)
 cloud = [
     "resend>=0.7.0",
+    # Shared rate-limit storage (REMEMBRA_RATE_LIMIT_STORAGE=redis://...).
+    "redis>=5.0.0",
 ]
 
 # Advanced retrieval (optional reranking)

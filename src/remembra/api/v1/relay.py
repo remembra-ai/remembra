@@ -31,13 +31,13 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from remembra.api.v1.agent_session import screen_text
 from remembra.auth.middleware import AuthenticatedUser, CurrentUser, has_permission, resolve_project_access
 from remembra.client.project import normalize_project_id
-from remembra.cloud.limits import EnforceStoreLimit, record_store_usage
+from remembra.cloud.limits import record_relay_usage, relay_guard
 from remembra.core.limiter import limiter
 from remembra.relay.identity import ProjectLocator
 from remembra.services.relay import BindingNotAllowed, ProjectAccessDenied, RelayService
@@ -441,12 +441,17 @@ async def close_session(
     request: Request,
     body: CloseRequest,
     current_user: CurrentUser,
-    _limit: EnforceStoreLimit = None,
+    response: Response,
 ) -> dict[str, Any]:
     """Build the handoff (Done / Not done / Failing / Next) from the session's
     facts. Idempotent per (agent_id, session_id): closing again updates the same
-    handoff (the previous version is superseded, never duplicated)."""
+    handoff (the previous version is superseded, never duplicated).
+
+    A close is a relay event: it never uses smart credits (the handoff is stored
+    without LLM enrichment); it counts toward the plan's relay burst limit and
+    soft monthly cap."""
     _require(current_user, "memory:store")
+    await relay_guard(request, response, current_user.user_id)
     agent, verified = effective_agent(request, current_user, body.agent_id)
     if not agent:
         raise HTTPException(
@@ -484,7 +489,7 @@ async def close_session(
         scrub=pii_scrubber(request),
     )
     if result["changed"]:
-        await record_store_usage(request, current_user.user_id)
+        await record_relay_usage(request, current_user.user_id)
     return {
         "project_id": project,
         "agent_id": agent,

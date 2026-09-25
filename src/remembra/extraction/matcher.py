@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import structlog
 from openai import AsyncOpenAI
 
+from remembra.core.ai_spend import metered_chat
 from remembra.extraction.entities import ExtractedEntity
 from remembra.extraction.prompting import wrap_untrusted
 
@@ -239,7 +240,8 @@ class EntityMatcher:
                 candidates=len(existing_json),
             )
 
-            response = await client.chat.completions.create(
+            response = await metered_chat(
+                client,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": ENTITY_MATCHING_PROMPT},

@@ -56,6 +56,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `._:@/+-`), so ids such as "Claude Desktop" no longer break requests; `GET /session/brief` accepts
   any agent id again.
 
+**New plans and cost protection for Remembra Cloud.**
+
+### Added
+- **New plan catalog:** Free $0, Solo $12/mo or $120/yr, Pro $29/mo or $290/yr,
+  Team $15/seat/mo or $150/seat/yr (3-seat minimum), Enterprise custom. Founding 100:
+  Solo at $108/yr, annual only, first 100 accounts. Existing $49 Pro and $199 Team
+  subscribers move to grandfathered `legacy_pro_49` / `legacy_team_199` tiers with
+  $30 / $150 monthly AI ceilings; reduced memory caps wait for
+  `REMEMBRA_MEMORY_CAP_NOTICE_EFFECTIVE_AT`.
+- **Smart credits.** AI enrichment (extraction, consolidation, entity resolution) is
+  metered in credits: `max(ceil(chars / 8000), actual LLM $ / 0.0025)` per store. A
+  chunk-aware reservation (16 credits per 8K chunk) is taken before any LLM call on
+  every write path, then settled from real OpenAI `usage` after the background work
+  finishes and the rest refunded. Annual plans get the whole year's credits up front
+  (configurable: `REMEMBRA_ANNUAL_CREDIT_UPFRONT_MONTHS`).
+- **Degrade, never reject.** Out of credits (or with the global free-tier breaker
+  open), writes are stored atomically without enrichment. Responses carry
+  `X-Remembra-Enrichment: full|degraded|atomic` and `X-Remembra-Credits-Remaining`.
+  A store is rejected (429) only at the memory cap or, on Free, past the daily
+  unenriched-write cap.
+- **Relay is free:** handoffs, checkpoints, status values, inbox messages, pickup
+  briefs, trail reads and recalls never use credits (relay has a per-plan burst limit
+  and a reported soft cap; recalls have monthly and burst limits).
+- **Global free-tier circuit breaker:** once a month's free AI spend reaches
+  max($50, 20% of last month's net paid revenue), all free enrichment degrades until
+  month end.
+- **Bounded enrichment queue** with per-tenant concurrency (Free 2, Solo 4, Pro/Team 8)
+  and a global cap.
+- **Signup hardening:** 3 signups/hour per /24, 20/day per email domain, optional
+  Cloudflare Turnstile (`REMEMBRA_TURNSTILE_SECRET`), and (once enabled) new Free
+  accounts hold 25 credits until the email is verified. Rate-limit storage can be Redis
+  (`REMEMBRA_RATE_LIMIT_STORAGE=redis://...`; `redis` added to the `cloud` extra).
+- `GET /api/v1/cloud/usage/summary` for the dashboard billing panel.
+
+### Fixed
+- Entity resolution (a ~3K-token LLM call) no longer runs for atomic stores:
+  handoff, checkpoint, status, `skip_extraction` and degraded writes.
+- **The credit reservation is a hard AI budget.** Every OpenAI, Anthropic and
+  TypeSafe call is checked against the write's reservation before it is made; once
+  it is used up the rest of the write stores verbatim facts and queued entity
+  linking is skipped. Settlement never charges more than was reserved (excess spend
+  is logged as platform loss), so `credits_used` cannot pass the plan ceiling.
+  Sleep-time work is budgeted by the credits left.
+- Stale-reservation expiry never releases a hold whose work is still running in
+  this process; startup releases only holds opened before the process started, and
+  expired-but-unsettled free holds keep counting toward the free breaker.
+- A credit settle released after the task registry shut down is no longer lost:
+  shutdown drains enrichment, then the registry, then every pending settle.
+- **Paddle webhooks map the plan from the price ID only.** Unknown prices are
+  ignored and logged instead of trusting browser-set `custom_data` (which could
+  grant Enterprise, legacy tiers or Founding). Team grants exactly the seats paid
+  for (a quantity below 3 is flagged, not rounded up). The Founding 100 cap is
+  enforced atomically in the webhook (past the cap: plain Solo annual, flagged for
+  refund). Client-side checkout lists only single-quantity plans; Team and
+  Founding go through server checkout. Approved refunds and chargebacks
+  (`adjustment.*`) end the plan and are subtracted from revenue.
+- **Team members are billed to the owner's pooled account** (ledger, limits,
+  memory cap), up to the seats paid for; new teams get the owner's paid seats.
+- **Unverified-email credit hold is opt-in** (`REMEMBRA_UNVERIFIED_CREDIT_CAP_EFFECTIVE_AT`)
+  and grandfathers accounts created before it; master-key `/cloud/signup` tenants
+  (no user record) are exempt.
+- TypeSafe (Jev) spend is metered: billed to the write on stores, skipped for Free
+  recalls, recorded in paid AI spend for paid recalls.
+- Free accounts: at most 300 stores without enrichment per UTC day (atomic, relay,
+  degraded), and their embedding cost feeds the free breaker.
+- Signup limits are charged only after Turnstile passes (a looser attempt cap runs
+  first), so token-less requests cannot lock out a network or a company domain.
+- Behind Cloudflare the client IP comes from `CF-Connecting-IP` when the forwarded
+  chain reaches a Cloudflare edge range (`REMEMBRA_TRUST_CLOUDFLARE_PROXIES`).
+
 ## [0.16.0] - 2026-07-16
 
 **Lossless memory + production reliability.** The theme of this release: what you

@@ -129,6 +129,7 @@ nav:
     - Multi-User App: examples/multi-user.md
   - Reference:
     - Configuration: reference/configuration.md
+    - Cloud Plans & Smart Credits: reference/plans-and-credits.md
     - API Reference: reference/api.md
     - Benchmarks: benchmarks.md
     - Changelog: reference/changelog.md

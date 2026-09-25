@@ -76,6 +76,39 @@ def _is_trusted(ip: ipaddress.IPv4Address | ipaddress.IPv6Address | None, networ
     return ip is not None and any(ip.version == net.version and ip in net for net in networks)
 
 
+# Cloudflare's published edge ranges (https://www.cloudflare.com/ips-v4 and /ips-v6).
+CLOUDFLARE_RANGES: tuple[str, ...] = (
+    "173.245.48.0/20",
+    "103.21.244.0/22",
+    "103.22.200.0/22",
+    "103.31.4.0/22",
+    "141.101.64.0/18",
+    "108.162.192.0/18",
+    "190.93.240.0/20",
+    "188.114.96.0/20",
+    "197.234.240.0/22",
+    "198.41.128.0/17",
+    "162.158.0.0/15",
+    "104.16.0.0/13",
+    "104.24.0.0/14",
+    "172.64.0.0/13",
+    "131.0.72.0/22",
+    "2400:cb00::/32",
+    "2606:4700::/32",
+    "2803:f800::/32",
+    "2405:b500::/32",
+    "2405:8100::/32",
+    "2a06:98c0::/29",
+    "2c0f:f248::/32",
+)
+
+
+def _cf_connecting_ip(request: Request) -> str | None:
+    value = request.headers.get("CF-Connecting-IP")
+    ip = _parse_ip(value) if value else None
+    return str(ip) if ip is not None else None
+
+
 def get_client_ip(request: Request) -> str:
     """Return the real client IP.
 
@@ -84,10 +117,24 @@ def get_client_ip(request: Request) -> str:
     could spoof its address to evade rate limits or poison audit logs. The
     forwarded chain is walked right-to-left and the first hop that is not itself
     a trusted proxy is the client.
+
+    Behind Cloudflare (``trust_cloudflare_proxies``, on by default) the hop that
+    reached our proxy is a Cloudflare edge address shared by many users; when
+    the chain arrives at a Cloudflare range, the client is Cloudflare's
+    ``CF-Connecting-IP``. Cloudflare ranges are only consulted inside a chain
+    that already starts at a trusted peer, so a direct client cannot use them.
     """
     peer = request.client.host if request.client else None
-    networks = _trusted_networks(tuple(getattr(get_settings(), "trusted_proxies", None) or ()))
-    if peer and _is_trusted(_parse_ip(peer), networks):
+    settings = get_settings()
+    networks = _trusted_networks(tuple(getattr(settings, "trusted_proxies", None) or ()))
+    cloudflare = _trusted_networks(CLOUDFLARE_RANGES) if getattr(settings, "trust_cloudflare_proxies", False) else ()
+    peer_ip = _parse_ip(peer) if peer else None
+    if peer and _is_trusted(peer_ip, cloudflare):
+        # Cloudflare connects to us directly.
+        cf_client = _cf_connecting_ip(request)
+        if cf_client:
+            return cf_client
+    if peer and (_is_trusted(peer_ip, networks) or _is_trusted(peer_ip, cloudflare)):
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
             hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
@@ -95,8 +142,14 @@ def get_client_ip(request: Request) -> str:
                 hop_ip = _parse_ip(hop)
                 if hop_ip is None:
                     break  # malformed chain: stop trusting it
-                if not _is_trusted(hop_ip, networks):
-                    return str(hop_ip)
+                if _is_trusted(hop_ip, networks):
+                    continue
+                if _is_trusted(hop_ip, cloudflare):
+                    cf_client = _cf_connecting_ip(request)
+                    if cf_client:
+                        return cf_client
+                    continue
+                return str(hop_ip)
             else:
                 if hops and _parse_ip(hops[0]) is not None:
                     return str(_parse_ip(hops[0]))
