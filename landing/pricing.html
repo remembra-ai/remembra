@@ -1,406 +1,403 @@
-<!DOCTYPE html>
-<html lang="en" class="scroll-smooth">
+<!doctype html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pricing - Remembra | AI Memory That Works</title>
-    <meta name="description" content="Simple pricing for Remembra. Start free, upgrade when you need more.">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remembra pricing</title>
+<meta name="description" content="Handoffs, pickups, inbox, trail and search are always free. Credits are only for AI enrichment of new notes. Free $0, Solo $12/mo, Pro $29/mo, Team $15/seat. Founding 100: $9/mo billed yearly, locked for life.">
+<meta property="og:title" content="Remembra pricing">
+<meta property="og:description" content="Handoffs are always free. Credits are only for AI enrichment of new notes. Start free, no card.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://remembra.dev/pricing">
+<meta property="og:image" content="https://remembra.dev/social-preview.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:site" content="@remembradev">
+<meta name="twitter:image" content="https://remembra.dev/social-preview.png">
+<link rel="canonical" href="https://remembra.dev/pricing">
 
-    <!-- Favicons -->
-    <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <link rel="shortcut icon" href="/favicon.ico" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+<link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="shortcut icon" href="/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Remembra">
+<link rel="manifest" href="/site.webmanifest">
 
-    <!-- Paddle Checkout -->
-    <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem("remembra-theme");
+      if (t === "light" || t === "dark") document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {}
+  })();
+</script>
+<link rel="stylesheet" href="/site.css">
+<style>
+.page-head { padding-top: clamp(36px, 6vw, 80px); padding-bottom: clamp(28px, 4vw, 48px); }
+.page-head h1 {
+  font-family: var(--f-display); font-weight: 800;
+  font-size: clamp(2.2rem, 1rem + 3.6vw, 4rem); line-height: 1; letter-spacing: -.035em;
+  margin-top: 16px; max-width: 16em; text-wrap: balance;
+}
+.page-head h1 mark { background: var(--signal); color: var(--on-signal); padding: 0 .08em; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.page-head .lede { margin-top: 20px; max-width: 38em; font-size: var(--t-18); color: var(--ink-2); }
+.page-head .lede strong { color: var(--ink); font-weight: 600; }
 
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#8B5CF6',
-                        'primary-dark': '#7C3AED',
-                        secondary: '#A78BFA',
-                        dark: '#0F0F0F',
-                        'dark-lighter': '#1A1A1A',
-                        'dark-card': '#1F1F1F',
-                    }
-                }
-            }
-        }
-    </script>
+/* Billing toggle */
+.billing { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; margin-top: 28px; }
+.billing[hidden] { display: none; }
+.toggle { display: inline-flex; border: 1px solid var(--ink); border-radius: var(--r); padding: 3px; background: var(--panel); }
+.toggle button {
+  font-family: var(--f-mono); font-size: var(--t-14); border: 0; background: transparent; color: var(--ink-2);
+  padding: 8px 14px; border-radius: 2px; cursor: pointer;
+}
+.toggle button[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
+.billing .save { font-size: var(--t-14); color: var(--ink-2); }
+.billing .save b { color: var(--signal-ink); font-weight: 700; }
 
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+/* Founding 100 */
+.founding {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 32px; align-items: center;
+  background: var(--signal); color: var(--on-signal);
+  border-radius: var(--r); padding: 22px 26px; margin-bottom: 20px;
+}
+.founding .k { font-family: var(--f-mono); font-size: var(--t-12); letter-spacing: .08em; text-transform: uppercase; font-weight: 700; }
+.founding h2 { font-family: var(--f-display); font-weight: 800; font-size: var(--t-30); letter-spacing: -.02em; line-height: 1.05; margin-top: 6px; }
+.founding p { margin-top: 6px; max-width: 44em; }
+.founding .btn { border-color: var(--on-signal); color: var(--on-signal); white-space: nowrap; }
+.founding .btn:hover { background: var(--on-signal); color: var(--signal); }
+.founding :focus-visible { outline-color: var(--on-signal); }
 
-    <style>
-        body { font-family: 'Inter', sans-serif; }
-        .gradient-text {
-            background: linear-gradient(135deg, #8B5CF6 0%, #A78BFA 50%, #C4B5FD 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-        .glow { box-shadow: 0 0 60px rgba(139, 92, 246, 0.3); }
-    </style>
+/* Plans */
+.plans { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--rule-strong); border-radius: var(--r); background: var(--panel); }
+.plan { padding: 26px 24px 28px; display: flex; flex-direction: column; min-width: 0; }
+.plan + .plan { border-left: 1px solid var(--rule); }
+.plan .name { font-family: var(--f-mono); font-size: var(--t-12); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2); font-weight: 700; }
+.plan .for { font-size: var(--t-14); color: var(--ink-3); margin-top: 4px; min-height: 2.8em; }
+.price { margin-top: 14px; font-family: var(--f-display); font-weight: 800; font-size: 2.6rem; letter-spacing: -.03em; line-height: 1; }
+.price small { font-family: var(--f-body); font-weight: 500; font-size: var(--t-16); letter-spacing: 0; color: var(--ink-2); }
+.price-note { margin-top: 8px; font-size: var(--t-14); color: var(--ink-2); min-height: 2.9em; }
+.credits { margin-top: 16px; padding: 10px 12px; border-left: 3px solid var(--signal); background: var(--paper); font-size: var(--t-14); }
+.credits b { font-family: var(--f-mono); font-weight: 700; }
+.plan ul { margin-top: 16px; display: grid; gap: 8px; font-size: var(--t-14); color: var(--ink-2); }
+.plan li { display: grid; grid-template-columns: 1.2em minmax(0, 1fr); gap: 6px; }
+.plan li::before { content: "\2713"; color: var(--ok); font-weight: 700; }
+.plan li.free-note::before { content: "\2192"; color: var(--signal-ink); }
+.plan li.free-note { color: var(--ink); font-weight: 500; }
+.plan .cta { margin-top: auto; padding-top: 24px; }
+.plan .btn { width: 100%; justify-content: center; }
+.plan.solo { background: var(--paper); box-shadow: inset 0 3px 0 var(--ink); }
+
+/* billing variants */
+[data-billing="yearly"] .m-only { display: none !important; }
+[data-billing="monthly"] .y-only { display: none !important; }
+
+.after { margin-top: 16px; font-size: var(--t-14); color: var(--ink-3); }
+.enterprise { margin-top: 20px; display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: baseline; justify-content: space-between; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); padding: 18px 0; }
+.enterprise p { color: var(--ink-2); max-width: 46em; }
+.enterprise b { color: var(--ink); font-family: var(--f-display); font-size: var(--t-22); letter-spacing: -.01em; margin-right: 8px; }
+.enterprise a { font-weight: 600; text-decoration-color: var(--signal); text-underline-offset: 4px; text-decoration-thickness: 2px; }
+
+/* Explainers */
+.sec { padding: clamp(56px, 8vw, 104px) 0; border-top: 1px solid var(--rule); margin-top: clamp(56px, 8vw, 96px); }
+.sec + .sec { margin-top: 0; }
+.sec-grid { display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 8fr); gap: clamp(28px, 5vw, 80px); }
+.sec h2 { font-family: var(--f-display); font-weight: 800; font-size: var(--t-44); line-height: 1; letter-spacing: -.03em; margin-top: 16px; text-wrap: balance; }
+.split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 2px solid var(--ink); }
+.split > div { padding: 22px 24px 0 0; }
+.split h3 { font-family: var(--f-display); font-weight: 700; font-size: var(--t-22); letter-spacing: -.01em; }
+.split ul { margin-top: 12px; display: grid; gap: 8px; }
+.split li { display: grid; grid-template-columns: 1.2em minmax(0,1fr); gap: 6px; color: var(--ink-2); }
+.split .always li::before { content: "\2713"; color: var(--ok); font-weight: 700; }
+.split .uses li::before { content: "\25CF"; color: var(--signal-ink); font-size: .8em; padding-top: .2em; }
+.plain { margin-top: 28px; display: grid; gap: 14px; max-width: 44em; color: var(--ink-2); }
+.plain b { color: var(--ink); }
+
+.reasons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; border-top: 2px solid var(--ink); }
+.reasons li { padding: 22px 24px 0 0; }
+.reasons .n { font-family: var(--f-mono); font-size: var(--t-12); color: var(--ink-3); }
+.reasons h3 { font-family: var(--f-display); font-weight: 700; font-size: var(--t-22); letter-spacing: -.01em; line-height: 1.1; margin-top: 6px; }
+.reasons p { margin-top: 10px; color: var(--ink-2); }
+
+.faq { display: grid; gap: 0; border-top: 1px solid var(--rule); }
+.faq div { padding: 18px 0; border-bottom: 1px solid var(--rule); }
+.faq dt { font-weight: 600; }
+.faq dd { margin: 6px 0 0; color: var(--ink-2); max-width: 46em; }
+
+@media (max-width: 1100px) {
+  .plans { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plan:nth-child(3) { border-left: 0; }
+  .plan:nth-child(n+3) { border-top: 1px solid var(--rule); }
+}
+@media (max-width: 960px) {
+  .sec-grid { grid-template-columns: minmax(0, 1fr); }
+  .reasons { grid-template-columns: minmax(0, 1fr); }
+  .reasons li { padding-right: 0; }
+}
+@media (max-width: 640px) {
+  .page-head .lede { font-size: var(--t-16); }
+  .founding { grid-template-columns: minmax(0, 1fr); padding: 20px; }
+  .plans { grid-template-columns: minmax(0, 1fr); }
+  .plan + .plan { border-left: 0; border-top: 1px solid var(--rule); }
+  .plan .for, .price-note { min-height: 0; }
+  .split { grid-template-columns: minmax(0, 1fr); }
+  .split > div { padding-right: 0; }
+}
+</style>
 </head>
-<body class="bg-dark text-white antialiased">
-    <!-- Navigation -->
-    <nav class="fixed top-0 left-0 right-0 z-50 bg-dark/80 backdrop-blur-xl border-b border-white/5">
-        <div class="max-w-7xl mx-auto px-6 py-4">
-            <div class="flex items-center justify-between">
-                <a href="/" class="flex items-center gap-3">
-                    <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
-                    <span class="text-xl font-bold">Remembra</span>
-                </a>
-                <div class="flex items-center gap-4">
-                    <a href="/about.html" class="hidden md:block text-gray-300 hover:text-white transition">About</a>
-                    <a href="https://docs.remembra.dev" class="text-gray-300 hover:text-white transition">Docs</a>
-                    <a href="/signup.html" class="px-5 py-2.5 bg-primary hover:bg-primary-dark text-white font-medium rounded-lg transition">
-                        Sign Up →
-                    </a>
-                </div>
-            </div>
-        </div>
+<body class="site">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap bar">
+    <a class="brand" href="/" aria-label="Remembra home">
+      <svg width="28" height="28" viewBox="0 0 32 32" aria-hidden="true">
+        <circle cx="6" cy="25" r="2.4" fill="currentColor" opacity=".3"/>
+        <circle cx="11.5" cy="20" r="2.4" fill="currentColor" opacity=".55"/>
+        <rect x="15" y="4" width="9" height="22" rx="4.5" transform="rotate(40 19.5 15)" fill="var(--signal)"/>
+      </svg>
+      <span class="brand-name">Remembra</span>
+    </a>
+    <nav class="nav-links" aria-label="Primary">
+      <a class="nav-hide-md" href="/#how">How it works</a>
+      <a class="nav-hide-sm" href="/pricing" aria-current="page">Pricing</a>
+      <a class="nav-hide-md" href="https://docs.remembra.dev">Docs</a>
+      <a class="nav-hide-md" href="https://github.com/remembra-ai/remembra">GitHub</a>
+      <button class="theme-btn" type="button" data-theme-toggle aria-label="Switch color theme">
+        <svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6" stroke-linecap="round"/></svg>
+        <svg class="moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" stroke-linejoin="round"/></svg>
+      </button>
+      <a class="btn-nav" href="https://app.remembra.dev/signup">Start free</a>
     </nav>
+  </div>
+</header>
 
-    <!-- Hero -->
-    <section class="pt-32 pb-12 px-6">
-        <div class="max-w-4xl mx-auto text-center">
-            <h1 class="text-5xl md:text-6xl font-bold mb-6 leading-tight">
-                Simple, <span class="gradient-text">Transparent</span> Pricing
-            </h1>
-            <p class="text-xl text-gray-400">
-                Start free. Upgrade when you need more power.
-            </p>
+<main id="main" class="pricing" data-billing="yearly">
+  <section class="wrap page-head" aria-labelledby="pricing-title">
+    <p class="eyebrow">Pricing</p>
+    <h1 id="pricing-title">Every handoff is free. Credits are only for <mark>new notes.</mark></h1>
+    <p class="lede"><strong>Handoffs, pickups, inbox, trail and search are always free.</strong> Credits are only for AI enrichment of new notes. Run out, and your notes still save.</p>
+
+    <div class="billing" id="billing" hidden>
+      <div class="toggle" role="group" aria-label="Billing period">
+        <button type="button" data-period="monthly" aria-pressed="false">Monthly</button>
+        <button type="button" data-period="yearly" aria-pressed="true">Yearly</button>
+      </div>
+      <p class="save"><b>Yearly: 2 months free</b> and the whole year's credits up front.</p>
+    </div>
+  </section>
+
+  <section class="wrap" aria-label="Plans">
+    <div class="founding">
+      <div>
+        <p class="k">Founding 100 · launch offer</p>
+        <h2>Solo for $9/mo, billed $108 yearly. Locked for life.</h2>
+        <p>For the first 100 accounts. Everything in Solo, and the price never goes up while you stay subscribed. Yearly billing only.</p>
+      </div>
+      <a class="btn" href="https://app.remembra.dev/signup">Claim a founding seat <span aria-hidden="true">&rarr;</span></a>
+    </div>
+
+    <div class="plans">
+      <!-- Free -->
+      <article class="plan" aria-labelledby="p-free">
+        <h2 class="name" id="p-free">Free</h2>
+        <p class="for">Try it across your agents. No card.</p>
+        <p class="price">$0</p>
+        <p class="price-note">Free forever.</p>
+        <p class="credits"><b>500</b> credits every month</p>
+        <ul>
+          <li class="free-note">Handoffs, pickups, inbox and trail (fair use 5,000 a month)</li>
+          <li>Unlimited agents</li>
+          <li>3 projects</li>
+          <li>10,000 searches a month</li>
+          <li>10,000 notes kept</li>
+        </ul>
+        <div class="cta"><a class="btn" href="https://app.remembra.dev/signup">Start free</a></div>
+      </article>
+
+      <!-- Solo -->
+      <article class="plan solo" aria-labelledby="p-solo">
+        <h2 class="name" id="p-solo">Solo</h2>
+        <p class="for">One developer, several agents, every project.</p>
+        <p class="price"><span class="y-only">$120<small>/yr</small></span><span class="m-only">$12<small>/mo</small></span></p>
+        <p class="price-note"><span class="y-only">That's $10/mo. 2 months free.</span><span class="m-only">Billed monthly.</span></p>
+        <p class="credits"><span class="y-only"><b>26,400</b> credits up front for the year</span><span class="m-only"><b>2,200</b> credits every month</span></p>
+        <ul>
+          <li class="free-note">Handoffs, pickups, inbox and trail (fair use 25,000 a month)</li>
+          <li>Unlimited agents and projects</li>
+          <li>50,000 searches a month</li>
+          <li>50,000 notes kept</li>
+          <li>Entity graph and timeline</li>
+          <li>Webhooks</li>
+          <li>Email support</li>
+        </ul>
+        <div class="cta"><a class="btn ink" href="https://app.remembra.dev/signup">Start with Solo</a></div>
+      </article>
+
+      <!-- Pro -->
+      <article class="plan" aria-labelledby="p-pro">
+        <h2 class="name" id="p-pro">Pro</h2>
+        <p class="for">Heavy use, or a product built on Remembra.</p>
+        <p class="price"><span class="y-only">$290<small>/yr</small></span><span class="m-only">$29<small>/mo</small></span></p>
+        <p class="price-note"><span class="y-only">About $24.17/mo. 2 months free.</span><span class="m-only">Billed monthly.</span></p>
+        <p class="credits"><span class="y-only"><b>60,000</b> credits up front for the year</span><span class="m-only"><b>5,000</b> credits every month</span></p>
+        <ul>
+          <li>Everything in Solo</li>
+          <li class="free-note">Handoffs, pickups, inbox and trail (fair use 100,000 a month)</li>
+          <li>250,000 searches a month</li>
+          <li>125,000 notes kept</li>
+          <li>5 read-only viewers</li>
+          <li>Faster background processing</li>
+          <li>Priority email support</li>
+        </ul>
+        <div class="cta"><a class="btn" href="https://app.remembra.dev/signup">Start with Pro</a></div>
+      </article>
+
+      <!-- Team -->
+      <article class="plan" aria-labelledby="p-team">
+        <h2 class="name" id="p-team">Team</h2>
+        <p class="for">Agents and people sharing one trail.</p>
+        <p class="price"><span class="y-only">$150<small>/seat/yr</small></span><span class="m-only">$15<small>/seat/mo</small></span></p>
+        <p class="price-note"><span class="y-only">That's $12.50/seat/mo. 3-seat minimum ($450/yr).</span><span class="m-only">3-seat minimum ($45/mo).</span></p>
+        <p class="credits"><span class="y-only"><b>26,400</b> credits per seat up front, pooled</span><span class="m-only"><b>2,200</b> credits per seat monthly, pooled</span></p>
+        <ul>
+          <li>Everything in Pro</li>
+          <li>Shared projects and a team inbox</li>
+          <li>Share notes between teammates</li>
+          <li>Roles: owner, admin, member, viewer</li>
+          <li>Per seat: 50,000 notes, 50,000 searches and 25,000 handoff events a month, pooled</li>
+        </ul>
+        <div class="cta"><a class="btn" href="https://app.remembra.dev/signup">Start a team</a></div>
+      </article>
+    </div>
+
+    <p class="after">Prices in US dollars, excluding tax. Sign up free, then pick a paid plan from Billing in your dashboard. Need more credits in a busy month? Any paid plan can add a Boost pack: 2,400 credits for $10.</p>
+
+    <div class="enterprise">
+      <p><b>Enterprise</b> SSO, an SLA, audit logs, a dedicated instance or support for your own hosting. Custom pricing.</p>
+      <a href="/contact">Talk to us <span aria-hidden="true">&rarr;</span></a>
+    </div>
+  </section>
+
+  <!-- What counts as a credit -->
+  <section class="sec" aria-labelledby="credit-title">
+    <div class="wrap sec-grid">
+      <div>
+        <p class="eyebrow">Credits, in plain words</p>
+        <h2 id="credit-title">You only pay for what's new.</h2>
+      </div>
+      <div>
+        <div class="split">
+          <div class="always">
+            <h3>Always free, on every plan</h3>
+            <ul>
+              <li>Handoffs, when an agent stops</li>
+              <li>Pickups, when the next agent starts</li>
+              <li>The inbox between your agents</li>
+              <li>The trail of every session</li>
+              <li>Searching your memory</li>
+            </ul>
+          </div>
+          <div class="uses">
+            <h3>Uses credits</h3>
+            <ul>
+              <li>AI enrichment of a new note: pulling out the facts, people and projects in it so search can connect them later</li>
+            </ul>
+          </div>
         </div>
-    </section>
-
-    <!-- Pricing Cards -->
-    <section class="py-12 px-6">
-        <div class="max-w-6xl mx-auto">
-            <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-
-                <!-- Free Tier -->
-                <div class="bg-dark-card border border-white/10 rounded-2xl p-6 flex flex-col">
-                    <div class="mb-6">
-                        <h3 class="text-xl font-bold mb-2">Free</h3>
-                        <div class="text-3xl font-bold mb-2">$0</div>
-                        <p class="text-gray-400 text-sm">For indie devs & testing</p>
-                    </div>
-
-                    <ul class="space-y-2 mb-6 flex-1 text-sm">
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 25,000 memories
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 50K API calls/month
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 2 API keys
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 1 project
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Hybrid search
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Entity resolution
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Community support
-                        </li>
-                    </ul>
-
-                    <a href="/signup.html"
-                       class="block w-full py-3 text-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl font-medium transition">
-                        Start Free
-                    </a>
-                </div>
-
-                <!-- Pro Tier -->
-                <div class="bg-dark-card border-2 border-primary rounded-2xl p-6 relative flex flex-col glow">
-                    <div class="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-primary rounded-full text-xs font-medium">
-                        Most Popular
-                    </div>
-
-                    <div class="mb-6">
-                        <h3 class="text-xl font-bold mb-2">Pro</h3>
-                        <div class="flex items-baseline gap-1">
-                            <span class="text-3xl font-bold">$49</span>
-                            <span class="text-gray-400 text-sm">/month</span>
-                        </div>
-                        <p class="text-gray-400 text-sm mt-1">For startups & side projects</p>
-                    </div>
-
-                    <ul class="space-y-2 mb-6 flex-1 text-sm">
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 500,000 memories
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 1M API calls/month
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 10 API keys
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 5 projects
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 5 team members
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Webhooks
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Usage analytics
-                        </li>
-                    </ul>
-
-                    <button onclick="subscribePro()" id="proButton"
-                       class="block w-full py-3 text-center bg-primary hover:bg-primary-dark rounded-xl font-semibold transition">
-                        Subscribe →
-                    </button>
-                </div>
-
-                <!-- Team Tier -->
-                <div class="bg-dark-card border border-purple-500/50 rounded-2xl p-6 flex flex-col">
-                    <div class="mb-6">
-                        <h3 class="text-xl font-bold mb-2">Team</h3>
-                        <div class="flex items-baseline gap-1">
-                            <span class="text-3xl font-bold">$199</span>
-                            <span class="text-gray-400 text-sm">/month</span>
-                        </div>
-                        <p class="text-gray-400 text-sm mt-1">For growing companies</p>
-                    </div>
-
-                    <ul class="space-y-2 mb-6 flex-1 text-sm">
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-purple-400">✓</span> 2,000,000 memories
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-purple-400">✓</span> 5M API calls/month
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-purple-400">✓</span> 50 API keys
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-purple-400">✓</span> 100 projects
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-purple-400">✓</span> 25 team members
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-purple-400">✓</span> Priority support
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-purple-400">✓</span> 99.9% uptime SLA
-                        </li>
-                    </ul>
-
-                    <button onclick="subscribeTeam()" id="teamButton"
-                       class="block w-full py-3 text-center bg-purple-600 hover:bg-purple-700 rounded-xl font-semibold transition">
-                        Subscribe →
-                    </button>
-                </div>
-
-                <!-- Enterprise Tier -->
-                <div class="bg-dark-card border border-white/10 rounded-2xl p-6 flex flex-col">
-                    <div class="mb-6">
-                        <h3 class="text-xl font-bold mb-2">Enterprise</h3>
-                        <div class="text-3xl font-bold mb-2">Custom</div>
-                        <p class="text-gray-400 text-sm">For large deployments</p>
-                    </div>
-
-                    <ul class="space-y-2 mb-6 flex-1 text-sm">
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Unlimited memories
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 50M+ API calls
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> 100 API keys
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> SSO / SAML
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Dedicated infra
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Custom SLA
-                        </li>
-                        <li class="flex items-center gap-2 text-gray-300">
-                            <span class="text-primary">✓</span> Dedicated support
-                        </li>
-                    </ul>
-
-                    <a href="mailto:sales@dolphytech.com?subject=Remembra Enterprise"
-                       class="block w-full py-3 text-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl font-medium transition">
-                        Contact Sales
-                    </a>
-                </div>
-            </div>
-
-            <!-- Self-hosted callout -->
-            <div class="mt-8 p-6 bg-dark-card border border-white/10 rounded-xl text-center">
-                <p class="text-gray-300">
-                    🔧 <strong>Self-hosting?</strong> Remembra is <a href="https://github.com/remembra-ai/remembra" class="text-primary hover:underline">open source (MIT)</a>.
-                    Deploy on your own infrastructure for free, with limits governed by your own storage and runtime configuration.
-                </p>
-            </div>
+        <div class="plain">
+          <p><b>One credit is about one normal note.</b> A note up to 8,000 characters (a few pages) uses one credit. Longer notes use one credit for each 8,000 characters.</p>
+          <p><b>Run out, and nothing breaks.</b> Your notes still save and your handoffs keep working; new notes just skip the AI enrichment until your credits refresh. Nothing is ever rejected for credits, and your dashboard shows where you stand.</p>
+          <p><b>Self-hosting is free.</b> The core is open source under the MIT license. Run it on your own server with your own AI key and there is nothing to meter.</p>
         </div>
-    </section>
+      </div>
+    </div>
+  </section>
 
-    <!-- FAQ Section -->
-    <section class="py-16 px-6 bg-dark-lighter">
-        <div class="max-w-3xl mx-auto">
-            <h2 class="text-3xl font-bold text-center mb-12">Frequently Asked Questions</h2>
+  <!-- Why yearly -->
+  <section class="sec" aria-labelledby="yearly-title">
+    <div class="wrap sec-grid">
+      <div>
+        <p class="eyebrow">Why yearly</p>
+        <h2 id="yearly-title">Pay once. Every project that year is covered.</h2>
+      </div>
+      <ol class="reasons">
+        <li>
+          <span class="n">01</span>
+          <h3>2 months free</h3>
+          <p>Every yearly plan costs 10 months of the monthly price: $120 instead of $144 on Solo, $290 instead of $348 on Pro.</p>
+        </li>
+        <li>
+          <span class="n">02</span>
+          <h3>A year of credits, up front</h3>
+          <p>Yearly plans get the whole year's credits on day one as a credit bank: 26,400 on Solo, 60,000 on Pro. Spend them in any month, so a heavy launch week is covered.</p>
+        </li>
+        <li>
+          <span class="n">03</span>
+          <h3>Founding 100, locked for life</h3>
+          <p>The first 100 yearly Solo accounts pay $108 a year, $9/mo, and that price never goes up as long as the subscription stays active.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
 
-            <div class="space-y-6">
-                <div class="bg-dark-card border border-white/10 rounded-xl p-6">
-                    <h3 class="text-lg font-semibold mb-2">What's the difference between self-hosted and Remembra Cloud?</h3>
-                    <p class="text-gray-400">Self-hosted runs on your own servers and gives you direct control over storage, scaling, and operations. Remembra Cloud is managed for you and applies the plan limits shown above.</p>
-                </div>
+  <section class="sec" aria-labelledby="faq-title">
+    <div class="wrap sec-grid">
+      <div>
+        <p class="eyebrow">Questions</p>
+        <h2 id="faq-title">Short answers.</h2>
+      </div>
+      <dl class="faq">
+        <div><dt>Do handoffs ever cost credits?</dt><dd>No. Handoffs, pickups, the inbox, the trail and search never use credits on any plan. Each plan has a generous fair-use limit on how many handoff events it sends a month.</dd></div>
+        <div><dt>What happens when my credits run out?</dt><dd>Your notes keep saving without AI enrichment until your credits refresh, or until you add a Boost pack on a paid plan. Nothing is blocked.</dd></div>
+        <div><dt>Is there a card required for Free?</dt><dd>No. Free is $0 with no card.</dd></div>
+        <div><dt>Can I run it myself?</dt><dd>Yes. The core is open source (MIT). <a href="https://docs.remembra.dev/getting-started/docker/">Self-hosting guide</a>.</dd></div>
+      </dl>
+    </div>
+  </section>
+</main>
 
-                <div class="bg-dark-card border border-white/10 rounded-xl p-6">
-                    <h3 class="text-lg font-semibold mb-2">Can I switch from self-hosted to Remembra Cloud?</h3>
-                    <p class="text-gray-400">Yes! Use our import/export feature to migrate your memories. We provide migration guides in the docs.</p>
-                </div>
+<footer class="site-footer">
+  <div class="wrap foot">
+    <div class="foot-brand">
+      <span class="brand-name">Remembra</span>
+      <p>One cloud memory for all your AI agents. &copy; 2026 DolphyTech.</p>
+    </div>
+    <nav aria-label="Footer">
+      <ul class="foot-links">
+        <li><a href="/pricing">Pricing</a></li>
+        <li><a href="https://docs.remembra.dev">Docs</a></li>
+        <li><a href="https://github.com/remembra-ai/remembra">GitHub</a></li>
+        <li><a href="/security">Security</a></li>
+        <li><a href="/privacy">Privacy</a></li>
+        <li><a href="/terms">Terms</a></li>
+        <li><a href="/contact">Contact</a></li>
+      </ul>
+    </nav>
+  </div>
+</footer>
 
-                <div class="bg-dark-card border border-white/10 rounded-xl p-6">
-                    <h3 class="text-lg font-semibold mb-2">What happens if I exceed my limits?</h3>
-                    <p class="text-gray-400">We'll notify you before you hit limits. If you exceed them, API calls will return a 429 error. You can upgrade anytime from your dashboard.</p>
-                </div>
-
-                <div class="bg-dark-card border border-white/10 rounded-xl p-6">
-                    <h3 class="text-lg font-semibold mb-2">How do I cancel?</h3>
-                    <p class="text-gray-400">Cancel anytime from your dashboard. Your access continues until the end of your billing period. You can export all your data before canceling.</p>
-                </div>
-
-                <div class="bg-dark-card border border-white/10 rounded-xl p-6">
-                    <h3 class="text-lg font-semibold mb-2">Do you offer refunds?</h3>
-                    <p class="text-gray-400">We offer a 14-day money-back guarantee. If you're not happy, contact us within 14 days of subscribing for a full refund.</p>
-                </div>
-            </div>
-        </div>
-    </section>
-
-    <!-- CTA -->
-    <section class="py-16 px-6">
-        <div class="max-w-4xl mx-auto text-center">
-            <h2 class="text-3xl font-bold mb-4">Ready to give your AI memory?</h2>
-            <p class="text-xl text-gray-400 mb-8">Start building with Remembra today.</p>
-            <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
-                <a href="https://app.remembra.dev/signup" class="px-8 py-4 bg-primary hover:bg-primary-dark text-white font-semibold rounded-xl transition">
-                    Start Free Trial →
-                </a>
-                <a href="https://docs.remembra.dev" class="px-8 py-4 bg-white/5 hover:bg-white/10 border border-white/10 font-semibold rounded-xl transition">
-                    Read the Docs
-                </a>
-            </div>
-        </div>
-    </section>
-
-    <!-- Footer -->
-    <footer class="py-12 px-6 border-t border-white/5">
-        <div class="max-w-6xl mx-auto">
-            <div class="flex flex-col md:flex-row items-center justify-between gap-6">
-                <div class="flex items-center gap-3">
-                    <img src="/logo.jpg" alt="Remembra" class="h-8 w-8 rounded-lg">
-                    <span class="font-bold">Remembra</span>
-                </div>
-                <div class="flex items-center gap-6 text-sm text-gray-400">
-                    <a href="/about.html" class="hover:text-white transition">About</a>
-                    <a href="/contact.html" class="hover:text-white transition">Contact</a>
-                    <a href="/privacy.html" class="hover:text-white transition">Privacy</a>
-                    <a href="/terms.html" class="hover:text-white transition">Terms</a>
-                </div>
-                <p class="text-sm text-gray-500">© 2026 DolphyTech. All rights reserved.</p>
-            </div>
-        </div>
-    </footer>
-
-    <!-- Paddle Checkout Script -->
-    <script>
-        let paddleConfigPromise = null;
-
-        async function getPaddleConfig() {
-            if (!paddleConfigPromise) {
-                paddleConfigPromise = fetch('https://app.remembra.dev/api/v1/billing/client-config')
-                    .then((response) => {
-                        if (!response.ok) {
-                            throw new Error('Billing config unavailable');
-                        }
-                        return response.json();
-                    });
-            }
-            return paddleConfigPromise;
-        }
-
-        async function openCheckout(plan, button, resetText) {
-            const config = await getPaddleConfig();
-            if (config.provider !== 'paddle' || !config.client_token || !config.prices?.[plan]) {
-                window.location.href = `https://app.remembra.dev/billing?plan=${plan}`;
-                return;
-            }
-
-            if (!Paddle.Initialized) {
-                Paddle.Initialize({ token: config.client_token });
-                Paddle.Initialized = true;
-            }
-
-            Paddle.Checkout.open({
-                items: [{ priceId: config.prices[plan], quantity: 1 }],
-                successUrl: config.success_url || 'https://app.remembra.dev/billing?success=true',
-                settings: {
-                    displayMode: 'overlay',
-                    theme: 'dark',
-                    locale: 'en'
-                }
-            });
-
-            setTimeout(() => {
-                button.textContent = resetText;
-                button.disabled = false;
-            }, 1000);
-        }
-
-        function subscribePro() {
-            const button = document.getElementById('proButton');
-            button.textContent = 'Loading...';
-            button.disabled = true;
-
-            openCheckout('pro', button, 'Subscribe →').catch(() => {
-                window.location.href = 'https://app.remembra.dev/billing?plan=pro';
-                button.disabled = false;
-            });
-        }
-
-        function subscribeTeam() {
-            const button = document.getElementById('teamButton');
-            button.textContent = 'Loading...';
-            button.disabled = true;
-
-            openCheckout('team', button, 'Subscribe →').catch(() => {
-                window.location.href = 'https://app.remembra.dev/billing?plan=team';
-                button.disabled = false;
-            });
-        }
-
-        // Check for success/cancelled states
-        const urlParams = new URLSearchParams(window.location.search);
-        if (urlParams.get('checkout') === 'success') {
-            console.log('Payment successful!');
-        }
-    </script>
+<script src="/site.js" defer></script>
+<script>
+  /* Monthly / yearly toggle. Without JavaScript the yearly prices show. */
+  (function () {
+    var root = document.querySelector("[data-billing]");
+    var bar = document.getElementById("billing");
+    if (!root || !bar) return;
+    var btns = Array.prototype.slice.call(bar.querySelectorAll("[data-period]"));
+    function set(period) {
+      root.setAttribute("data-billing", period);
+      btns.forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-period") === period)); });
+      try { sessionStorage.setItem("remembra-billing", period); } catch (e) { /* per-visit convenience only */ }
+    }
+    btns.forEach(function (b) { b.addEventListener("click", function () { set(b.getAttribute("data-period")); }); });
+    var saved = null;
+    try { saved = sessionStorage.getItem("remembra-billing"); } catch (e) { saved = null; }
+    set(saved === "monthly" ? "monthly" : "yearly");
+    bar.hidden = false;
+  })();
+</script>
 </body>
 </html>
