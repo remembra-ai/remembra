@@ -116,7 +116,8 @@ def test_entrypoint_missing_litestream_binary_fails(tmp_path) -> None:
 def test_cloud_dockerfile_installs_from_lock_with_rerank_and_checks_litestream() -> None:
     text = (ROOT / "Dockerfile.cloud").read_text()
     assert "COPY pyproject.toml uv.lock README.md ./" in text
-    assert 'install-locked-deps.sh "server cloud encryption rerank"' in text
+    # mcp: the API process serves the opt-in remote MCP connector (/mcp).
+    assert 'install-locked-deps.sh "server cloud encryption rerank mcp"' in text
     assert 'pip install --no-cache-dir ".[' not in text  # no unpinned resolution
     assert "sha256sum -c -" in text
     assert "ADD https://github.com/benbjohnson/litestream" not in text
@@ -128,6 +129,7 @@ def test_selfhost_dockerfile_installs_from_lock() -> None:
     text = (ROOT / "Dockerfile").read_text()
     assert "uv.lock" in text and "install-locked-deps.sh" in text
     assert 'pip install --no-cache-dir ".[' not in text
+    assert 'ARG REMEMBRA_EXTRAS="server encryption cloud mcp"' in text
 
 
 def test_install_script_skips_cuda_wheels_and_pins_cpu_torch() -> None:

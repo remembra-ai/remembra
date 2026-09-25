@@ -38,7 +38,8 @@ ENV PATH="/opt/venv/bin:$PATH" \
 # Install Python dependencies at the exact versions pinned in uv.lock (REL-18).
 # Add "rerank" to REMEMBRA_EXTRAS to include the CrossEncoder reranker
 # (CPU-only torch, ~+1 GB): docker build --build-arg REMEMBRA_EXTRAS="server encryption cloud rerank" .
-ARG REMEMBRA_EXTRAS="server encryption cloud"
+# "mcp" lets this image serve the opt-in remote MCP connector (REMEMBRA_CONNECTOR_ENABLED).
+ARG REMEMBRA_EXTRAS="server encryption cloud mcp"
 COPY pyproject.toml uv.lock README.md ./
 COPY scripts/install-locked-deps.sh /tmp/install-locked-deps.sh
 RUN sh /tmp/install-locked-deps.sh "${REMEMBRA_EXTRAS}"

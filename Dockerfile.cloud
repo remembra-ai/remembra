@@ -38,7 +38,9 @@ COPY scripts/install-locked-deps.sh /tmp/install-locked-deps.sh
 # enabled in prod but never installed). torch comes from the CPU-only index:
 # measured +~1.05 GB installed (165 MB -> 1.2 GB of site-packages) vs ~+6 GB
 # for the default CUDA wheels.
-RUN sh /tmp/install-locked-deps.sh "server cloud encryption rerank"
+# mcp: the remote MCP connector for the Claude apps / ChatGPT is served by this
+# API process (/mcp, opt-in with REMEMBRA_CONNECTOR_ENABLED).
+RUN sh /tmp/install-locked-deps.sh "server cloud encryption rerank mcp"
 
 COPY src/ ./src/
 RUN uv pip install --no-cache --no-deps .
