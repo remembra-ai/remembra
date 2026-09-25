@@ -53,7 +53,7 @@ export function useShortcuts(handlers: { onPalette: () => void; onHelp: () => vo
       }
       if (key === 'g') {
         pendingG = Date.now();
-      } else if (e.key === '?') {
+      } else if (e.key === '?' || (e.key === '/' && e.shiftKey)) {
         e.preventDefault();
         onHelp();
       } else if (key === '/') {

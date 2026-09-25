@@ -225,6 +225,19 @@ export function explainError(err: unknown, what: string): { title: string; fix: 
   if (status === 429) {
     return { title: 'Too many requests for a moment.', fix: 'Wait a few seconds; the page retries on its own.' };
   }
+  if (status === 502 || status === 504) {
+    return {
+      title: "The Remembra server isn't answering.",
+      fix: 'It may be restarting. The page retries on its own; if you self-host, check that the API process is running.',
+    };
+  }
+  if (status >= 500 && status !== 503) {
+    const detail = message && !/^API error: \d+$/.test(message) ? ` (${message})` : '';
+    return {
+      title: `The server hit an error loading ${what}.`,
+      fix: `The page retries every 30 seconds. If this persists, the server logs have the details${detail}.`,
+    };
+  }
   if (status === 503) {
     return {
       title: `${what[0].toUpperCase()}${what.slice(1)} is turned off on this server.`,

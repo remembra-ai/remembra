@@ -50,7 +50,7 @@
   --destructive: 5 73% 40%;
   --destructive-foreground: 0 0% 100%;
   --border: 86 6% 79%;
-  --input: 86 6% 79%;
+  --input: 60 20% 99%;
   --ring: 18 100% 54%;
   --radius: 0.25rem;
   --shell-glow: 18 100% 54%;
@@ -124,7 +124,7 @@
   --destructive: 5 81% 73%;
   --destructive-foreground: 216 11% 9%;
   --border: 214 7% 19%;
-  --input: 214 7% 19%;
+  --input: 220 7% 8%;
   --ring: 18 100% 58%;
   --shell-glow: 18 100% 58%;
   --shell-accent: 20 88% 47%;
@@ -239,8 +239,10 @@
 }
 
 /* ==========================================================================
-   Base
+   Base (layered, so Tailwind utilities can override it)
    ========================================================================== */
+
+@layer base {
 
 * {
   border-color: var(--rule);
@@ -261,7 +263,7 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-:focus-visible {
+  :focus-visible:not([tabindex="-1"]) {
   outline: 2px solid var(--signal);
   outline-offset: 2px;
 }
@@ -292,7 +294,9 @@ body {
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+}
 
+@layer components {
 /* ==========================================================================
    Shell
    ========================================================================== */
@@ -536,6 +540,7 @@ body {
 }
 .cmdk-item[data-selected="true"] {
   box-shadow: inset 2px 0 0 var(--signal);
+}
 }
 
 /* ==========================================================================

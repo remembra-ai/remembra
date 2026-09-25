@@ -70,7 +70,9 @@ function AgentCard({
       <div className="px-4 pt-3 sm:px-5">
         <div className="flex items-baseline justify-between font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3">
           <span>Last {days} days</span>
-          <span className="tabular normal-case tracking-normal">{total14} entries</span>
+          <span className="tabular normal-case tracking-normal">
+            {total14} {total14 === 1 ? 'entry' : 'entries'}
+          </span>
         </div>
         <Sparkline
           className="mt-1.5"

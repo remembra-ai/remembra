@@ -126,7 +126,8 @@ export function Home({ userName }: { userName?: string }) {
   const forYou = inbox.data?.agents.find((a) => a.agent_id === 'dashboard')?.unread ?? 0;
 
   let statusLine: string;
-  if (!loaded) statusLine = '';
+  if (!loaded && trail.error != null) statusLine = "Your agents' trail can't be loaded right now.";
+  else if (!loaded) statusLine = '';
   else if (!hasHandoffs && items.length === 0) statusLine = 'Connect an agent and its first handoff lands here.';
   else if (sinceDate && newItems.length > 0) {
     statusLine = `Since you last looked (${relativeTime(sinceDate, now)}): ${plural(
@@ -151,7 +152,7 @@ export function Home({ userName }: { userName?: string }) {
           <span className="text-signal">.</span>
         </h2>
         <div className="mt-2 min-h-[1.5rem] text-[15px] text-ink-2" aria-live="polite">
-          {loaded ? statusLine : <Skeleton className="h-4 w-72 max-w-full" />}
+          {statusLine || <Skeleton className="h-4 w-72 max-w-full" />}
         </div>
       </header>
 
@@ -282,11 +283,6 @@ export function Home({ userName }: { userName?: string }) {
 
           {summary.data && summary.data.total_handoffs + summary.data.total_checkpoints > 0 && (
             <WeeklyRecap summary={summary.data} now={now} />
-          )}
-          {!summary.data && summary.error != null && (
-            <div className="rr-card rounded-[3px]">
-              <ErrorNotice compact error={summary.error} what="this week's recap" onRetry={summary.refresh} />
-            </div>
           )}
 
           {usage.data && <PlanMeter usage={usage.data} />}
