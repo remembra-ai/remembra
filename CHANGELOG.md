@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Sign in with GitHub and Google.** "Continue with Google" / "Continue with GitHub" on the dashboard's
+  Sign in and Sign up pages (authorization code + PKCE; Google ID tokens verified against the JWKS with
+  nonce). Only verified provider emails are accepted, an existing account is linked only when its own email is
+  verified, and one account backs each verified email and provider account (`user_identities`). Providers
+  without credentials are hidden and 404. Setup: `docs/guides/sign-in-providers.md`.
+- `GET /api/v1/auth/providers`: enabled sign-in providers and the Turnstile site key; the Sign up page renders
+  Cloudflare Turnstile when a site key is published, and checks the same password rules as the server.
+- Email verification for `/cloud/signup` tenants (`/api/v1/cloud/verify-email/request` and `/confirm`); they
+  are now held at the unverified-email credit cap until verified. Password signups get their verification
+  link by email, completing a password reset verifies the email, and the dashboard has a `/verify-email` page.
 - **Remembra Relay: session continuity across agents.** Every agent leaves a structured handoff
   when it stops, and any agent picks it up at session start, whatever the tool, machine or checkout location.
   - Location-independent project identity: `POST /api/v1/projects/resolve` maps a normalized git
