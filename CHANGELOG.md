@@ -28,6 +28,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Agent-scoped API keys (`agent_id` on key creation). Relay attribution comes from the key, not the request body.
 - Migration 4: `project_fingerprints`, `project_links`, `api_keys.agent_id`.
 
+### Changed (breaking)
+- **`remembra-relay` / MCP location briefs: which project a git repository uses.** A repository the
+  server has not seen joins the configured project (`REMEMBRA_RELAY_PROJECT`, else `REMEMBRA_PROJECT`
+  from the environment, MCP env or credentials, unless it is `default`); only with nothing configured
+  does it get its own per-repository project. Existing users keep one namespace; bind a repository
+  elsewhere with `remembra-relay resolve --project <id> --bind`. `GET /session/brief` and `GET /trail`
+  no longer record bindings (only close and `POST /projects/resolve` do), and a brief warns when the
+  repository resolves to a project other than the configured one.
+- Project-restricted API keys can no longer bind (`403`) or record new location bindings.
+- The rendered brief wraps everything recorded by agents in `<remembra-data untrusted="true">…</remembra-data>`,
+  marks agents as key-verified or self-declared, labels an agent's next step as an unverified
+  suggestion, withholds low-trust text and flags a handoff from another branch/commit as possibly stale.
+- `POST /memories` (and batch, bulk, PATCH, supersede) drop the relay-only metadata keys `relay` and
+  `relay_key`; agent-scoped keys stamp their own `agent_id` on memories and inbox messages.
+- MCP `session_brief` returns the pre-relay fields again by default, plus `brief`, `handoff_id` and
+  `inbox_unread`; `compact=true` returns only the text brief (the unreleased `verbose` flag is gone).
+  `close_session` and `store_memory` default to the project the last `session_brief` resolved.
+- The SDK sends `X-Remembra-Agent-Id` only for ids the relay accepts (ASCII letters, digits and
+  `._:@/+-`), so ids such as "Claude Desktop" no longer break requests; `GET /session/brief` accepts
+  any agent id again.
+
 ## [0.16.0] - 2026-07-16
 
 **Lossless memory + production reliability.** The theme of this release: what you

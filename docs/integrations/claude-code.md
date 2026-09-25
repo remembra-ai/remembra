@@ -51,36 +51,20 @@ claude mcp add remembra \
 
 If `REMEMBRA_AGENT_ID` is missing, `health_check` returns a warning and the server prints a warning to stderr at startup.
 
-### Load context automatically at session start
+### Load context automatically at session start (Remembra Relay)
 
-`integrations/claude-code/session_start.py` is a SessionStart hook. It calls
-`GET /api/v1/session/brief` and prints the latest handoff, your unread inbox,
-current status values, and recent memories. Claude Code adds that output to the
-session context. The script uses only the Python standard library. It reads its
-settings from the environment. If those are not set, it reads the `env` block of
-the `remembra` MCP server in `~/.claude.json`, so the API key stays in one place.
-If the brief can't be fetched, it prints one line and exits 0, so it never blocks
-a session.
+`remembra-relay connect --apply` adds a SessionStart hook (`remembra-relay brief`) and a
+SessionEnd hook (`remembra-relay close`) to `~/.claude/settings.json`. At session start
+Claude Code gets the pickup brief: what the last agent did, what it did not finish, what
+is failing and its suggested next step, plus your unread inbox and recent memories. At
+session end the hook records a structured handoff from git and the session transcript.
+The hooks read the key from the `env` block of the `remembra` MCP server in
+`~/.claude.json`, so the API key stays in one place, and they never block a session.
 
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /path/to/remembra/integrations/claude-code/session_start.py",
-            "timeout": 15
-          }
-        ]
-      }
-    ]
-  }
-}
-```
+`connect` replaces the older `integrations/claude-code/session_start.py` hook if it finds
+it. The project comes from the repository; your `REMEMBRA_PROJECT` names a repository the
+first time it is seen, so your existing memories stay in view. See the
+[Relay guide](../guides/relay.md) for details.
 
 ### Keep the MCP server in step with the API
 

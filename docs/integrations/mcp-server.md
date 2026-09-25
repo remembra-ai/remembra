@@ -501,7 +501,9 @@ Returns server status and configuration.
 
 | Tool | Purpose |
 |------|---------|
-| `session_brief(project_id?, agent_id?, recent_n=10)` | Call first at session start. Returns the latest `handoff` for the project, this agent's unread inbox (count + previews), current `status_items`, and the most recent memories **by time**. |
+| `session_brief(project_id?, agent_id?, recent_n=10, git_remote?, root_path?, root_commit?, compact=false)` | Call first at session start. Returns the latest `handoff` for the project, this agent's unread inbox (count + previews), current `status_items`, `linked_projects` and the most recent memories **by time**, plus `brief` (the compact text, ~1500 tokens, with everything other agents recorded inside an untrusted-data block), `handoff_id` and `inbox_unread`. Pass `git_remote` or `root_path` to resolve the project from where you work (a local server reads the repository from `root_path` itself). `compact=true` returns only `status`, `project_id`, `agent_id`, `brief`, `handoff_id`, `inbox_unread` and `warnings`. |
+| `close_session(summary?, next_step?, todos_open?, errors?, facts?, end_reason?, project_id?, git_remote?, root_path?, session_id?)` | Call last. Stores ONE structured handoff (Done / Not done / Failing / Next step); a repeat call in the same session updates it. Without a project or location it uses the project your `session_brief` resolved. Facts passed here are shown to the next agent as *declared by the agent*. |
+| `resolve_project(git_remote?, root_path?, root_commit?, repo_name?, hint_project?, bind=false)` | Map a location to its project id (see the [Relay guide](../guides/relay.md)). |
 | `store_status(key, value, project_id?, ttl?)` | Set the current value of a key (deploy status, active sprint). The previous value for the same key+project is superseded (kept as history, hidden from recall). Re-sending the current value is a no-op. |
 | `list_status(project_id?)` | Current value per key. |
 | `list_spaces()` / `create_space(name, ...)` | Find or create a space id for `share_memory`. |
@@ -509,14 +511,17 @@ Returns server status and configuration.
 `store_memory` accepts `memory_type`:
 
 - `checkpoint`: progress note. Expires after `REMEMBRA_CHECKPOINT_DEFAULT_TTL` (server setting, default `7d`) unless you pass `ttl`. Stored as one unit and never merged into permanent memories.
-- `handoff`: end-of-session snapshot, stored verbatim as ONE memory. The newest one appears in the next agent's `session_brief`.
+- `handoff`: end-of-session snapshot, stored verbatim as ONE memory. The newest one appears in the next agent's `session_brief` (up to 2000 characters, labeled *self-declared*). Prefer `close_session`, which builds a structured handoff.
 - `fact`, `observation`, `inference`, `task`.
 - `status` is rejected. Use `store_status`.
 
 If every extracted fact already exists, `store_memory` returns `status: "duplicate"` with `duplicate_of` instead of `stored`.
 
 Every store is stamped with provenance metadata: `agent_id`, `session_id`, `host`,
-`client_version`, and `source: "mcp"`. Keys you pass in `metadata` take precedence.
+`client_version`, and `source: "mcp"`. Keys you pass in `metadata` take precedence, except
+that an agent-scoped API key always stamps its own `agent_id`, and the relay-only keys
+`relay` / `relay_key` are dropped. After a `session_brief` that resolved a project by
+location, `store_memory` stores into that project.
 Recall, timeline and list results include `metadata`, `memory_type`, `source_id` and `agent_id`.
 
 `recall_memories` also accepts `retrieval_mode` (`balanced`, `debug` for recent-first,
