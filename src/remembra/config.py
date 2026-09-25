@@ -382,6 +382,9 @@ class Settings(BaseSettings):
     )
     temporal_cleanup_interval_seconds: int = Field(3600, description="Seconds between TTL cleanup runs")
     qdrant_init_retries: int = Field(5, description="Attempts to reach Qdrant at startup (exponential backoff)")
+    reconcile_interval_hours: float = Field(
+        24.0, description="Hours between report-only SQLite/Qdrant/FTS drift scans (0 disables)"
+    )
     background_task_concurrency: int = Field(16, description="Max concurrently running tracked background tasks")
     alert_webhook_url: str | None = Field(
         None, description="POST JSON operator alerts here (e.g. first embedding quota_exhausted)"

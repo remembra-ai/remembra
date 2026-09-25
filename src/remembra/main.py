@@ -141,15 +141,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.tasks = TaskRegistry(max_concurrency=settings.background_task_concurrency)
     set_task_registry(app.state.tasks)
 
-    # Qdrant vector store — retried with backoff (REL-15) and dimension-checked
-    # against the configured embedding model (REL-6).
-    app.state.qdrant = QdrantStore(settings)
-    await app.state.qdrant.init_collection_with_retry(attempts=settings.qdrant_init_retries)
-
-    # SQLite metadata database
+    # SQLite metadata database (first: it holds the active vector collection)
     app.state.db = Database(settings.database_url)
     await app.state.db.connect()
     await app.state.db.init_schema()
+
+    # Qdrant vector store — pointed at the collection a completed rebuild
+    # swapped in (REL-9), retried with backoff (REL-15) and dimension-checked
+    # against the configured embedding model (REL-6).
+    from remembra.storage.reindex import apply_active_collection
+
+    app.state.qdrant = QdrantStore(settings)
+    active_collection = await apply_active_collection(app.state.db, app.state.qdrant)
+    if active_collection != settings.qdrant_collection:
+        log.info("qdrant_active_collection_override", configured=settings.qdrant_collection, active=active_collection)
+    await app.state.qdrant.init_collection_with_retry(attempts=settings.qdrant_init_retries)
 
     # Embedding service (circuit-breaker protected, REL-3)
     app.state.embeddings = EmbeddingService(settings)
@@ -424,6 +430,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         log.info("temporal_cleanup_loop_started", interval_seconds=settings.temporal_cleanup_interval_seconds)
     else:
         app.state.cleanup_job = None
+
+    # Report-only drift scan (REL-10): feeds remembra_reconcile_drift in /metrics.
+    # Repair is an explicit operator action: python -m remembra.storage.reconcile --repair
+    if settings.reconcile_interval_hours > 0:
+        from remembra.storage.reconcile import run_reconcile_loop
+
+        app.state.tasks.spawn(
+            run_reconcile_loop(app.state.db, app.state.qdrant, settings.reconcile_interval_hours * 3600),
+            name="reconcile-loop",
+            loop_task=True,
+        )
 
     log.info("storage_layer_ready")
 
