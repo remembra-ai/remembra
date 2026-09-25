@@ -447,7 +447,7 @@ class AgentSessionService:
             "generated_at": datetime.now(UTC).isoformat(),
             "handoff": handoff,
             "inbox": inbox,
-            "status": status_items,
+            "status_items": status_items,
             "recent": recent,
             "known_agents": known,
             "warnings": warnings,

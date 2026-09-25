@@ -218,7 +218,7 @@ async def test_session_brief_contents_and_ordering(env):
     item = brief["inbox"]["items"][0]
     assert item["subject"] == "review" and item["from_agent"] == "codex"
     assert len(item["body_preview"]) == 203  # 200 chars + "..."
-    assert [s["key"] for s in brief["status"]] == ["sprint"]
+    assert [s["key"] for s in brief["status_items"]] == ["sprint"]
     # recent: by time, newest first; no handoff/status/source/expired/other-project rows
     assert [m["id"] for m in brief["recent"]] == ["m2", "m1"]
     assert brief["recent"][0]["agent_id"] == "codex"

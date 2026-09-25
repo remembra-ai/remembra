@@ -5,7 +5,9 @@
   },
   "authentication": {
     "required": true,
-    "schemes": ["apiKey"]
+    "schemes": [
+      "apiKey"
+    ]
   },
   "configSchema": {
     "type": "object",
@@ -14,7 +16,9 @@
         "type": "string",
         "title": "API Key",
         "description": "Remembra API key for authentication. Get one at remembra.dev/dashboard",
-        "x-from": { "header": "x-remembra-api-key" }
+        "x-from": {
+          "header": "x-remembra-api-key"
+        }
       },
       "userId": {
         "type": "string",
@@ -38,7 +42,7 @@
       "annotations": {
         "title": "Store Memory",
         "readOnlyHint": false,
-        "destructiveHint": false,
+        "destructiveHint": true,
         "idempotentHint": false,
         "openWorldHint": false
       },
@@ -58,7 +62,9 @@
             "description": "Optional time-to-live. Examples: \"24h\", \"7d\", \"30d\", \"1y\", or omit for permanent storage."
           }
         },
-        "required": ["content"]
+        "required": [
+          "content"
+        ]
       }
     },
     {
@@ -89,12 +95,14 @@
             "default": 0.4
           }
         },
-        "required": ["query"]
+        "required": [
+          "query"
+        ]
       }
     },
     {
       "name": "forget_memories",
-      "description": "Delete memories from persistent storage. GDPR-compliant deletion. Provide exactly one of: memory_id, entity, or all_memories.",
+      "description": "Delete memories. Provide exactly one of memory_id, entity, or all_memories. all_memories requires project_id and is a dry run unless dry_run=false and confirm='DELETE ALL MEMORIES IN <project_id>'.",
       "annotations": {
         "title": "Forget Memories",
         "readOnlyHint": false,
@@ -116,6 +124,19 @@
           "all_memories": {
             "type": "boolean",
             "description": "Set to true to delete ALL memories. Use with extreme caution!"
+          },
+          "project_id": {
+            "type": "string",
+            "description": "Required with all_memories: the one project to wipe"
+          },
+          "confirm": {
+            "type": "string",
+            "description": "Confirmation phrase for all_memories"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "all_memories preview only (default true)",
+            "default": true
           }
         }
       }
@@ -155,12 +176,27 @@
               "type": "object",
               "description": "A single conversation message with required role/content fields and optional speaker metadata.",
               "properties": {
-                "role": {"type": "string", "description": "Message role: 'user', 'assistant', or 'system'"},
-                "content": {"type": "string", "description": "The message content"},
-                "name": {"type": "string", "description": "Optional speaker name"},
-                "timestamp": {"type": "string", "description": "Optional ISO timestamp"}
+                "role": {
+                  "type": "string",
+                  "description": "Message role: 'user', 'assistant', or 'system'"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "The message content"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Optional speaker name"
+                },
+                "timestamp": {
+                  "type": "string",
+                  "description": "Optional ISO timestamp"
+                }
               },
-              "required": ["role", "content"]
+              "required": [
+                "role",
+                "content"
+              ]
             }
           },
           "session_id": {
@@ -174,7 +210,11 @@
           },
           "extract_from": {
             "type": "string",
-            "enum": ["user", "assistant", "both"],
+            "enum": [
+              "user",
+              "assistant",
+              "both"
+            ],
             "description": "Which messages to extract from: 'user', 'assistant', or 'both'",
             "default": "both"
           },
@@ -184,7 +224,9 @@
             "default": true
           }
         },
-        "required": ["messages"]
+        "required": [
+          "messages"
+        ]
       }
     }
   ],
