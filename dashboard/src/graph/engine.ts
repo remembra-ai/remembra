@@ -270,7 +270,7 @@ export class ConstellationEngine {
       const ticks = this.layout.nodes.length > 1200 ? 1 : 2;
       for (let i = 0; i < ticks; i += 1) this.layout.tick();
       // Keep the whole picture framed while the layout settles, until the viewer pans or zooms.
-      if (!this.userMoved && !this.layout.settled && (!this.fitted || Math.floor(time / 250) !== Math.floor((time - dt * 1000) / 250))) {
+      if (!this.userMoved && (!this.fitted || (!this.layout.settled && Math.floor(time / 250) !== Math.floor((time - dt * 1000) / 250)))) {
         this.fit(this.fitted);
       }
       this.stepCamera();
@@ -368,6 +368,13 @@ export class ConstellationEngine {
     this.canvas.width = Math.round(this.W * this.dpr);
     this.canvas.height = Math.round(this.H * this.dpr);
     this.fieldAt = -1;
+    this.layout.setAspect(this.W / this.H);
+    if (!this.userMoved) this.fitted = false;
+    if (this.still) {
+      this.layout.settle();
+      if (!this.userMoved) this.fit(false);
+    }
+    this.kick();
   }
 
   private retheme(): void {

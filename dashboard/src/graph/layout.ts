@@ -33,8 +33,21 @@ export class ForceLayout {
   private springs: { a: LNode; b: LNode; rest: number; k: number }[] = [];
   private ring = new Map<string, { x: number; y: number }>();
   alpha = 1;
+  /** Canvas width / height: the project ring is an ellipse that matches it. */
+  private aspect = 1.6;
+  private lastNodes: GNode[] = [];
+  private lastEdges: GEdge[] = [];
+
+  setAspect(aspect: number): void {
+    if (!Number.isFinite(aspect) || aspect <= 0 || Math.abs(aspect - this.aspect) / this.aspect < 0.15) return;
+    this.aspect = aspect;
+    if (this.lastNodes.length) this.setGraph(this.lastNodes, this.lastEdges);
+    this.alpha = Math.max(this.alpha, 0.3);
+  }
 
   setGraph(nodes: GNode[], edges: GEdge[]): void {
+    this.lastNodes = nodes;
+    this.lastEdges = edges;
     const previous = this.byId;
     const projects = nodes.filter((n) => n.kind === 'project').sort((a, b) => a.id.localeCompare(b.id));
     // Each project needs room for its members (entities and trail entries);
@@ -45,9 +58,10 @@ export class ForceLayout {
     const ringR = projects.length <= 1 ? 0 : Math.max(150 + projects.length * 55, (projects.length * clusterR * 1.15) / Math.PI);
     this.ring = new Map(
       projects.map((p, i) => {
-        // A wide ellipse, starting on the left: screens are wider than tall.
+        // An ellipse shaped like the canvas, starting on the left.
         const a = (i / Math.max(1, projects.length)) * Math.PI * 2 + Math.PI;
-        return [p.id, { x: Math.cos(a) * ringR * 1.45, y: Math.sin(a) * ringR * 0.8 }];
+        const stretch = Math.min(1.4, Math.max(0.72, Math.sqrt(this.aspect)));
+        return [p.id, { x: Math.cos(a) * ringR * stretch, y: Math.sin(a) * (ringR / stretch) }];
       }),
     );
     const next = new Map<string, LNode>();
