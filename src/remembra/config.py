@@ -168,11 +168,29 @@ class Settings(BaseSettings):
     typesafe_entity_match_threshold: float = Field(
         0.8, ge=0.0, le=1.0, description="Enforce mode: min coreference probability to merge an entity mention"
     )
+    typesafe_intent_threshold: float = Field(
+        0.7, ge=0.0, le=1.0, description="Enforce mode: min Jev confidence to apply its recall query-intent mode"
+    )
 
     # -----------------------------------------------------------------------
     # Store reliability
     # -----------------------------------------------------------------------
     idempotency_ttl_hours: int = Field(24, ge=1, description="How long a completed Idempotency-Key is remembered")
+    store_pending_on_embedding_failure: bool = Field(
+        True,
+        description=(
+            "When the embedding provider fails (quota, outage, open circuit), keep the fact in SQLite + FTS, "
+            "queue it for the re-embedding worker and answer status='pending' instead of failing the store"
+        ),
+    )
+    store_time_budget_seconds: float = Field(
+        45.0,
+        gt=0,
+        description=(
+            "Overall budget for one store. Past it, optional steps degrade: extraction stores verbatim, "
+            "consolidation adds without a model decision, embedding is deferred to the pending queue"
+        ),
+    )
     idempotency_inflight_timeout_seconds: int = Field(
         300,
         ge=10,
@@ -228,6 +246,30 @@ class Settings(BaseSettings):
     enable_reranking: bool = Field(True, description="Enable CrossEncoder reranking for improved accuracy")
     rerank_model: str = Field("cross-encoder/ms-marco-MiniLM-L-6-v2", description="HuggingFace model for reranking")
     rerank_top_k: int = Field(20, description="Rerank top K results from hybrid search")
+    rerank_min_logit: float | None = Field(
+        None,
+        description=(
+            "Absolute CrossEncoder cutoff: candidates whose raw logit is below it are dropped "
+            "(ms-marco models: > 0 relevant, < -5 clearly irrelevant). None = keep all"
+        ),
+    )
+
+    # Recall behaviour (RET stream)
+    recall_keyword_fallback: bool = Field(
+        True,
+        description="If the query cannot be embedded, answer from keyword + graph search with degraded='keyword_only'",
+    )
+    recall_max_candidates: int = Field(
+        500, ge=10, description="Upper bound on vector hits scanned per recall while filling the requested limit"
+    )
+    recall_dedup_similarity: float = Field(
+        0.9, ge=0.0, le=1.0, description="Word-overlap (Jaccard) at or above which a lower-ranked result is a near-duplicate"
+    )
+    ranking_feedback_weight: float = Field(
+        0.05, ge=0.0, le=1.0, description="Weight of net helpful/unhelpful feedback in recall ranking"
+    )
+    status_stale_days: float = Field(7.0, gt=0, description="Age after which a status memory is flagged stale")
+    checkpoint_stale_days: float = Field(2.0, gt=0, description="Age after which a checkpoint memory is flagged stale")
 
     # Graph-Aware Retrieval
     enable_graph_retrieval: bool = Field(True, description="Enable entity graph traversal during recall")

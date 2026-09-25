@@ -104,6 +104,10 @@ class Memory(BaseModel):
     expires_at: datetime | None = None
     access_count: int = 0
     last_accessed: datetime | None = None
+    # UPG-1 validity window: when the fact became true / stopped being true
+    # (valid_to is set when a newer memory supersedes this one).
+    valid_from: datetime | None = None
+    valid_to: datetime | None = None
 
     @field_validator("content")
     @classmethod
@@ -111,6 +115,9 @@ class Memory(BaseModel):
         if not v.strip():
             raise ValueError("content must not be empty")
         return v.strip()
+
+
+RETRIEVAL_MODES = ("auto", "balanced", "debug", "operational", "strategic")
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +304,16 @@ class RecallRequest(BaseModel):
         description="Deprecated: user_id is determined from API key. This field is ignored.",
     )
     limit: int = Field(default=5, ge=1, le=50)
-    threshold: float = Field(default=0.40, ge=0.0, le=1.0)
+    threshold: float = Field(
+        default=0.40,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Minimum cosine similarity (0-1) between the query and a memory for a vector hit. "
+            "Keyword (BM25) and entity-graph hits are not subject to it. It is NOT a cutoff on "
+            "the composite `relevance` rank score."
+        ),
+    )
     max_tokens: int | None = Field(
         default=None,
         description="Maximum tokens in context output. Overrides server default.",
@@ -314,20 +330,35 @@ class RecallRequest(BaseModel):
     )
     as_of: datetime | None = Field(
         default=None,
-        description="Query memories as they existed at this point in time (historical/time-travel query).",
+        description=(
+            "Point-in-time query: return memories that were known and valid at this time, "
+            "including ones superseded since (their validity window covered as_of)."
+        ),
     )
     include_decay_score: bool = Field(
         default=False,
         description="Include decay scores in response (for debugging/analytics).",
     )
-    retrieval_mode: str = Field(
-        default="balanced",
+    retrieval_mode: str | None = Field(
+        default=None,
         description=(
-            "Retrieval mode to use for ranking. "
-            "Options: 'balanced' (default), 'debug' (high recency), "
-            "'operational' (entity-heavy), 'strategic' (historical depth)."
+            "Ranking mode: 'balanced', 'debug' (high recency), 'operational' (entity-heavy), "
+            "'strategic' (historical depth), or 'auto'. Omitted/'auto' = the server infers it from "
+            "the query (e.g. 'what was I just working on' -> debug); the chosen mode is echoed in "
+            "the response as `retrieval_mode`."
         ),
     )
+
+    @field_validator("retrieval_mode")
+    @classmethod
+    def valid_retrieval_mode(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        mode = v.strip().lower()
+        if mode not in RETRIEVAL_MODES:
+            raise ValueError(f"retrieval_mode must be one of: {', '.join(RETRIEVAL_MODES)}")
+        return mode
+
     filters: dict[str, str] | None = Field(
         default=None,
         description=(
@@ -407,6 +438,18 @@ class RecallResult(BaseModel):
         default_factory=dict,
         description="User-supplied metadata tags stored with this memory",
     )
+    project_id: str | None = Field(default=None, description="Project namespace of the memory")
+    match_sources: list[str] = Field(
+        default_factory=list,
+        description="Which retrievers found it: semantic | keyword | graph",
+    )
+    valid_from: datetime | None = Field(default=None, description="When this fact became valid (UPG-1)")
+    valid_to: datetime | None = Field(
+        default=None, description="When this fact stopped being valid (set once superseded); null = current"
+    )
+    superseded_by: str | None = Field(default=None, description="Newer memory that replaced this one, if any")
+    expires_at: datetime | None = Field(default=None, description="When this memory expires, if it has a TTL")
+    decay_score: float | None = Field(default=None, description="Age/access decay score (only when include_decay_score=true)")
 
 
 class DivergenceDetail(BaseModel):
@@ -447,6 +490,17 @@ class RecallResponse(BaseModel):
     usage_warning: dict[str, Any] | None = Field(
         default=None,
         description="Usage warning when approaching plan limits (cloud only).",
+    )
+    degraded: str | None = Field(
+        default=None,
+        description=(
+            "Set when recall ran in a reduced mode: 'keyword_only' = the query could not be "
+            "embedded (provider outage/quota), results come from keyword + entity-graph search."
+        ),
+    )
+    retrieval_mode: str | None = Field(default=None, description="Ranking mode actually used")
+    retrieval_mode_source: str | None = Field(
+        default=None, description="Where the mode came from: request | rules | jev | default"
     )
 
 

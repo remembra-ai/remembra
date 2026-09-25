@@ -50,12 +50,162 @@ VERSIONED_MIGRATIONS: list[tuple[int, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_pending_embeddings_due ON pending_embeddings(status, next_attempt_at)",
         ],
     ),
+    (
+        3,
+        "memory_validity_window",
+        [
+            # UPG-1 (bi-temporal, minimal): valid_from = when the fact became
+            # true, valid_to = when a newer memory superseded it (NULL = current).
+            "ALTER TABLE memories ADD COLUMN valid_from TEXT",
+            "ALTER TABLE memories ADD COLUMN valid_to TEXT",
+            "UPDATE memories SET valid_from = created_at WHERE valid_from IS NULL",
+            """
+            UPDATE memories SET valid_to = COALESCE(
+                (SELECT n.created_at FROM memories n WHERE n.id = memories.superseded_by),
+                superseded_at
+            )
+            WHERE superseded_by IS NOT NULL AND valid_to IS NULL
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_memories_valid ON memories(user_id, project_id, valid_from, valid_to)",
+        ],
+    ),
 ]
 
 
 def _is_duplicate_column_error(exc: Exception) -> bool:
     return "duplicate column name" in str(exc).lower()
 
+
+# English function words removed from keyword queries (RET-11). Deliberately
+# small: content words, negations with apostrophes ("don't") and anything
+# domain-like stay searchable.
+FTS_STOPWORDS: frozenset[str] = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "if",
+        "then",
+        "else",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "by",
+        "for",
+        "from",
+        "with",
+        "without",
+        "about",
+        "into",
+        "onto",
+        "over",
+        "under",
+        "as",
+        "is",
+        "am",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "do",
+        "does",
+        "did",
+        "doing",
+        "done",
+        "have",
+        "has",
+        "had",
+        "having",
+        "will",
+        "would",
+        "shall",
+        "should",
+        "can",
+        "could",
+        "may",
+        "might",
+        "must",
+        "i",
+        "me",
+        "my",
+        "mine",
+        "we",
+        "us",
+        "our",
+        "ours",
+        "you",
+        "your",
+        "yours",
+        "he",
+        "him",
+        "his",
+        "she",
+        "her",
+        "hers",
+        "it",
+        "its",
+        "they",
+        "them",
+        "their",
+        "theirs",
+        "this",
+        "that",
+        "these",
+        "those",
+        "there",
+        "here",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "when",
+        "where",
+        "why",
+        "how",
+        "all",
+        "any",
+        "some",
+        "each",
+        "every",
+        "no",
+        "not",
+        "nor",
+        "so",
+        "too",
+        "very",
+        "just",
+        "only",
+        "also",
+        "than",
+        "such",
+        "both",
+        "either",
+        "neither",
+        "up",
+        "down",
+        "out",
+        "off",
+        "again",
+        "further",
+        "once",
+        "more",
+        "most",
+        "other",
+        "same",
+        "own",
+        "s",
+        "t",
+        "now",
+    ]
+)
 
 # Token pattern for FTS5 query sanitization. Unicode word chars plus internal
 # apostrophes/hyphens (so "don't" / "co-op" stay whole). Everything else is a
@@ -79,8 +229,21 @@ def _build_fts_match_query(query: str) -> str | None:
     tokens = _FTS_TOKEN_RE.findall(query or "")
     if not tokens:
         return None
+    # RET-11: every token is OR-ed, so function words ("what", "was", "the")
+    # would match nearly every row and drown the real keywords. Drop them and
+    # duplicates; a query made only of stopwords has no keyword signal.
+    seen: set[str] = set()
+    kept: list[str] = []
+    for t in tokens:
+        key = t.casefold()
+        if key in FTS_STOPWORDS or key in seen:
+            continue
+        seen.add(key)
+        kept.append(t)
+    if not kept:
+        return None
     # Cap token count to bound query size on pathological input.
-    quoted = [f'"{t.replace(chr(34), chr(34) * 2)}"' for t in tokens[:32]]
+    quoted = [f'"{t.replace(chr(34), chr(34) * 2)}"' for t in kept[:32]]
     return " OR ".join(quoted)
 
 
@@ -706,16 +869,23 @@ class Database:
         contradicts: str | None = None,
         importance: float | None = None,
         pinned: bool = False,
+        valid_from: datetime | None = None,
     ) -> None:
-        """Save memory metadata to SQLite."""
+        """Save memory metadata to SQLite.
+
+        ``valid_from`` (UPG-1) defaults to ``created_at``; an existing row keeps
+        its original ``valid_from`` and ``valid_to`` on upsert.
+        """
         await self.conn.execute(
             """
             INSERT INTO memories (id, user_id, project_id, content, extracted_facts,
                                   metadata, created_at, updated_at, expires_at,
                                   source, trust_score, checksum, visibility, space_id, team_id,
-                                  memory_type, scope, supersedes, contradicts, importance, pinned)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  memory_type, scope, supersedes, contradicts, importance, pinned,
+                                  valid_from)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
+                valid_from = COALESCE(memories.valid_from, excluded.valid_from),
                 content = excluded.content,
                 extracted_facts = excluded.extracted_facts,
                 metadata = excluded.metadata,
@@ -756,6 +926,7 @@ class Database:
                 contradicts,
                 importance,
                 1 if pinned else 0,
+                (valid_from or created_at).isoformat(),
             ),
         )
         await self.conn.commit()
@@ -827,15 +998,17 @@ class Database:
                     m.get("visibility", "personal"),
                     m.get("space_id"),
                     m.get("team_id"),
+                    m["created_at"].isoformat() if hasattr(m["created_at"], "isoformat") else m["created_at"],
                 )
             )
 
         await self.conn.executemany(
             """
-            INSERT INTO memories (id, user_id, project_id, content, extracted_facts, 
+            INSERT INTO memories (id, user_id, project_id, content, extracted_facts,
                                   metadata, created_at, updated_at, expires_at,
-                                  source, trust_score, checksum, visibility, space_id, team_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  source, trust_score, checksum, visibility, space_id, team_id,
+                                  valid_from)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 content = excluded.content,
                 extracted_facts = excluded.extracted_facts,
@@ -865,7 +1038,8 @@ class Database:
         """List active memories for a user, optionally scoped to one project."""
         query = """
             SELECT id, user_id, project_id, content, metadata, created_at, updated_at,
-                   expires_at, access_count, last_accessed
+                   expires_at, access_count, last_accessed, memory_type, scope,
+                   superseded_by, superseded_at, valid_from, valid_to
             FROM memories
             WHERE user_id = ?
               AND (expires_at IS NULL OR expires_at > ?)
@@ -1012,9 +1186,28 @@ class Database:
         metadata JSON per candidate). The memory is kept, not deleted, so the
         belief-change history remains queryable.
         """
+        stamp = when or utcnow().isoformat()
+        # UPG-1: the old fact stops being valid when the new one starts. A
+        # validity window that is already closed is never reopened/moved.
         await self.conn.execute(
-            "UPDATE memories SET superseded_by = ?, superseded_at = ? WHERE id = ?",
-            (new_memory_id, when or utcnow().isoformat(), old_memory_id),
+            """
+            UPDATE memories
+            SET superseded_by = ?, superseded_at = ?,
+                valid_to = COALESCE(valid_to, (SELECT n.valid_from FROM memories n WHERE n.id = ?), ?)
+            WHERE id = ?
+            """,
+            (new_memory_id, stamp, new_memory_id, stamp, old_memory_id),
+        )
+        await self.conn.commit()
+
+    async def unmark_memory_superseded(self, old_memory_id: str, new_memory_id: str) -> None:
+        """Undo :meth:`mark_memory_superseded` (store rollback on hard failure)."""
+        await self.conn.execute(
+            """
+            UPDATE memories SET superseded_by = NULL, superseded_at = NULL, valid_to = NULL
+            WHERE id = ? AND superseded_by = ?
+            """,
+            (old_memory_id, new_memory_id),
         )
         await self.conn.commit()
 
@@ -1041,6 +1234,86 @@ class Database:
         placeholders = ",".join("?" for _ in memory_ids)
         cursor = await self.conn.execute(f"SELECT * FROM memories WHERE id IN ({placeholders})", tuple(memory_ids))
         return {row["id"]: dict(row) for row in await cursor.fetchall()}
+
+    async def get_feedback_scores(self, memory_ids: list[str], user_id: str) -> dict[str, float]:
+        """Net feedback per memory in [-1, 1]: (helpful - unhelpful) / total (RET-19).
+
+        Only the requesting user's own feedback counts. Memories without
+        feedback are omitted.
+        """
+        if not memory_ids:
+            return {}
+        placeholders = ",".join("?" for _ in memory_ids)
+        cursor = await self.conn.execute(
+            f"""
+            SELECT memory_id,
+                   SUM(CASE WHEN signal = 'helpful' THEN 1 ELSE 0 END) AS up,
+                   SUM(CASE WHEN signal = 'unhelpful' THEN 1 ELSE 0 END) AS down
+            FROM memory_feedback
+            WHERE user_id = ? AND memory_id IN ({placeholders})
+            GROUP BY memory_id
+            """,
+            (user_id, *memory_ids),
+        )
+        scores: dict[str, float] = {}
+        for row in await cursor.fetchall():
+            up, down = int(row["up"] or 0), int(row["down"] or 0)
+            if up + down:
+                scores[row["memory_id"]] = (up - down) / (up + down)
+        return scores
+
+    async def update_access_many(self, memory_ids: list[str]) -> None:
+        """Bump access_count/last_accessed for several memories in one statement (RET-16)."""
+        if not memory_ids:
+            return
+        placeholders = ",".join("?" for _ in memory_ids)
+        await self.conn.execute(
+            f"""
+            UPDATE memories SET access_count = COALESCE(access_count, 0) + 1, last_accessed = ?
+            WHERE id IN ({placeholders})
+            """,
+            (utcnow().isoformat(), *memory_ids),
+        )
+        await self.conn.commit()
+
+    async def get_memory_entities_many(self, memory_ids: list[str]) -> dict[str, list[EntityRef]]:
+        """Entity refs for several memories in one query, keyed by memory id."""
+        if not memory_ids:
+            return {}
+        placeholders = ",".join("?" for _ in memory_ids)
+        cursor = await self.conn.execute(
+            f"""
+            SELECT me.memory_id, e.id, e.canonical_name, e.type, me.confidence
+            FROM memory_entities me JOIN entities e ON e.id = me.entity_id
+            WHERE me.memory_id IN ({placeholders})
+            """,
+            tuple(memory_ids),
+        )
+        out: dict[str, list[EntityRef]] = {}
+        for row in await cursor.fetchall():
+            out.setdefault(row["memory_id"], []).append(
+                EntityRef(
+                    id=row["id"],
+                    canonical_name=row["canonical_name"],
+                    type=row["type"],
+                    confidence=max(0.0, min(1.0, float(row["confidence"] if row["confidence"] is not None else 1.0))),
+                )
+            )
+        return out
+
+    async def get_entity_memory_counts(self, entity_ids: list[str]) -> dict[str, int]:
+        """Number of linked memories per entity id (0 for unlinked ids)."""
+        if not entity_ids:
+            return {}
+        placeholders = ",".join("?" for _ in entity_ids)
+        cursor = await self.conn.execute(
+            f"SELECT entity_id, COUNT(*) AS n FROM memory_entities WHERE entity_id IN ({placeholders}) GROUP BY entity_id",
+            tuple(entity_ids),
+        )
+        counts = {eid: 0 for eid in entity_ids}
+        for row in await cursor.fetchall():
+            counts[row["entity_id"]] = int(row["n"])
+        return counts
 
     async def find_source_record(self, user_id: str, project_id: str, checksum: str) -> str | None:
         """Most recent live source record with this checksum (ING-18 retry dedupe)."""
@@ -1639,24 +1912,31 @@ class Database:
         limit: int = 100,
     ) -> list[dict[str, Any]]:
         """
-        Get memories that existed at a specific point in time.
+        Get memories that were known and valid at a specific point in time.
 
-        Returns memories where:
-        - created_at <= as_of
+        Returns memories where (UPG-1):
+        - created_at <= as_of (we knew it by then)
+        - valid_from <= as_of and (valid_to IS NULL OR valid_to > as_of)
+          — so a memory superseded *after* as_of is returned, one superseded
+          before it is not
         - (expires_at IS NULL OR expires_at > as_of)
 
-        This enables "time travel" queries to see historical state.
+        Source records are excluded. This enables "time travel" queries.
         """
+        stamp = as_of.isoformat()
         cursor = await self.conn.execute(
             """
             SELECT * FROM memories
             WHERE user_id = ? AND project_id = ?
               AND created_at <= ?
+              AND COALESCE(valid_from, created_at) <= ?
+              AND (valid_to IS NULL OR valid_to > ?)
               AND (expires_at IS NULL OR expires_at > ?)
+              AND (memory_type IS NULL OR memory_type != 'source')
             ORDER BY created_at DESC
             LIMIT ?
             """,
-            (user_id, project_id, as_of.isoformat(), as_of.isoformat(), limit),
+            (user_id, project_id, stamp, stamp, stamp, stamp, limit),
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -1826,6 +2106,9 @@ class Database:
         user_id: str,
         project_id: str | None = None,
         limit: int = 20,
+        *,
+        active_at: datetime | None = None,
+        exclude_superseded: bool = False,
     ) -> list[tuple[str, float]]:
         """
         Perform FTS5 BM25 search.
@@ -1854,34 +2137,35 @@ class Database:
         # waste a slot. The JOIN filters them out for both already-indexed rows
         # and any future ones. (New source records are also no longer indexed —
         # see _store_source_record.)
-        if project_id is None:
-            cursor = await self.conn.execute(
-                """
-                SELECT f.id, bm25(memories_fts) as score
-                FROM memories_fts f
-                JOIN memories m ON m.id = f.id
-                WHERE f.user_id = ?
-                  AND memories_fts MATCH ?
-                  AND (m.memory_type IS NULL OR m.memory_type != 'source')
-                ORDER BY score
-                LIMIT ?
-                """,
-                (user_id, safe_query, limit),
-            )
-        else:
-            cursor = await self.conn.execute(
-                """
-                SELECT f.id, bm25(memories_fts) as score
-                FROM memories_fts f
-                JOIN memories m ON m.id = f.id
-                WHERE f.user_id = ? AND f.project_id = ?
-                  AND memories_fts MATCH ?
-                  AND (m.memory_type IS NULL OR m.memory_type != 'source')
-                ORDER BY score
-                LIMIT ?
-                """,
-                (user_id, project_id, safe_query, limit),
-            )
+        # RET-2: expired rows are never keyword hits (expiry is judged at
+        # ``active_at`` — now, or the as_of time of a historical query).
+        # Scoping uses the memories row (source of truth), not the FTS copy.
+        clauses = [
+            "f.user_id = ?",
+            "m.user_id = ?",
+            "memories_fts MATCH ?",
+            "(m.memory_type IS NULL OR m.memory_type != 'source')",
+            "(m.expires_at IS NULL OR m.expires_at > ?)",
+        ]
+        params: list[Any] = [user_id, user_id, safe_query, (active_at or utcnow()).isoformat()]
+        if project_id is not None:
+            clauses.append("f.project_id = ?")
+            clauses.append("m.project_id = ?")
+            params.extend([project_id, project_id])
+        if exclude_superseded:
+            clauses.append("m.superseded_by IS NULL")
+        params.append(limit)
+        cursor = await self.conn.execute(
+            f"""
+            SELECT f.id, bm25(memories_fts) as score
+            FROM memories_fts f
+            JOIN memories m ON m.id = f.id
+            WHERE {" AND ".join(clauses)}
+            ORDER BY score
+            LIMIT ?
+            """,
+            tuple(params),
+        )
         rows = await cursor.fetchall()
 
         # Convert negative BM25 scores to positive (negate them)

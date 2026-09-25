@@ -71,4 +71,6 @@ def memory_from_row(row: dict[str, Any], entities: list[EntityRef] | None = None
         expires_at=_parse_dt(row.get("expires_at")),
         access_count=int(row.get("access_count") or 0),
         last_accessed=_parse_dt(row.get("last_accessed")),
+        valid_from=_parse_dt(row.get("valid_from")) or created_at,
+        valid_to=_parse_dt(row.get("valid_to")),
     )
