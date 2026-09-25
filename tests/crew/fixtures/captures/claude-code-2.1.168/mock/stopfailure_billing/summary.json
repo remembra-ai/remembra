@@ -1,0 +1,100 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "SessionStart",
+      "hook_id": "aeecb034-0302-4b5f-b4c2-bb297a0e3543",
+      "hook_name": "SessionStart:startup",
+      "session_id": "36ebda65-84cb-4c9e-b329-e3ba18f97ac2",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "f9cdd7d7-fbfc-448c-acbb-d56be82b8f2b"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "SessionStart",
+      "hook_id": "aeecb034-0302-4b5f-b4c2-bb297a0e3543",
+      "hook_name": "SessionStart:startup",
+      "outcome": "success",
+      "output": "",
+      "session_id": "36ebda65-84cb-4c9e-b329-e3ba18f97ac2",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "f94c810a-db06-47be-b145-d4aaffa38fe3"
+    },
+    {
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "3bcc9a37-f954-4d8f-89a7-4bcd0414a05f",
+      "hook_name": "UserPromptSubmit",
+      "session_id": "36ebda65-84cb-4c9e-b329-e3ba18f97ac2",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "82265c22-55f1-45cf-a744-83f0d4610408"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "3bcc9a37-f954-4d8f-89a7-4bcd0414a05f",
+      "hook_name": "UserPromptSubmit",
+      "outcome": "success",
+      "output": "",
+      "session_id": "36ebda65-84cb-4c9e-b329-e3ba18f97ac2",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "87420de4-416c-4635-84a1-3cde1c9d77f5"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 85,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "Credit balance is too low",
+  "scenario": "stopfailure_billing",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [],
+  "verdict": {
+    "duration_s": 0.46,
+    "error": "billing_error",
+    "error_details": null,
+    "events": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "SessionEnd",
+      "StopFailure"
+    ],
+    "last_assistant_message": "Credit balance is too low",
+    "ok": true,
+    "request_gaps_s": [],
+    "returncode": 1,
+    "sessionend_fired": true,
+    "stop_fired": false,
+    "stopfailure_fired": true
+  }
+}

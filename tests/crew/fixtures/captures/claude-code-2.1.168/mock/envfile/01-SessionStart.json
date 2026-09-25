@@ -1,0 +1,16 @@
+{
+  "action": "envfile",
+  "env": {
+    "CLAUDE_ENV_FILE_set": true,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-envfile/repo"
+  },
+  "event": "SessionStart",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-envfile/repo",
+    "hook_event_name": "SessionStart",
+    "session_id": "a8bf48a9-e194-41cd-86e9-0abcf0bd4c55",
+    "source": "startup",
+    "transcript_path": "<S0_TMP>/mock-envfile/config/projects/-S0-TMP-mock-envfile-repo/a8bf48a9-e194-41cd-86e9-0abcf0bd4c55.jsonl"
+  },
+  "received_at": 1790375252.7689579
+}

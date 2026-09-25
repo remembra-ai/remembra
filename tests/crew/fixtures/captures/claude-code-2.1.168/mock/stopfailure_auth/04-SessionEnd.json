@@ -1,0 +1,16 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-stopfailure_auth/repo"
+  },
+  "event": "SessionEnd",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-stopfailure_auth/repo",
+    "hook_event_name": "SessionEnd",
+    "reason": "other",
+    "session_id": "8f94e3ab-5d99-43be-91da-7a30b49c3fde",
+    "transcript_path": "<S0_TMP>/mock-stopfailure_auth/config/projects/-S0-TMP-mock-stopfailure-auth-repo/8f94e3ab-5d99-43be-91da-7a30b49c3fde.jsonl"
+  },
+  "received_at": 1790375308.610213
+}

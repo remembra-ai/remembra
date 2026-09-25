@@ -1,0 +1,17 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-deny/repo"
+  },
+  "event": "UserPromptSubmit",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-deny/repo",
+    "hook_event_name": "UserPromptSubmit",
+    "permission_mode": "acceptEdits",
+    "prompt": "S0 spike: use the Write tool to create pos/cart.txt containing 's0 write'. Then say what happened.",
+    "session_id": "78f4d722-de8e-4c95-854d-3b4a57d95ef2",
+    "transcript_path": "<S0_TMP>/mock-deny/config/projects/-S0-TMP-mock-deny-repo/78f4d722-de8e-4c95-854d-3b4a57d95ef2.jsonl"
+  },
+  "received_at": 1790375250.535595
+}

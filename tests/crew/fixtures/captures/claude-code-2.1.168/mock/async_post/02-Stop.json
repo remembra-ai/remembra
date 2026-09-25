@@ -1,0 +1,20 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-async_post/repo"
+  },
+  "event": "Stop",
+  "payload": {
+    "background_tasks": [],
+    "cwd": "<S0_TMP>/mock-async_post/repo",
+    "hook_event_name": "Stop",
+    "last_assistant_message": "S0 ack",
+    "permission_mode": "acceptEdits",
+    "session_crons": [],
+    "session_id": "418940c5-c2dc-4267-a42c-160f79e0e318",
+    "stop_hook_active": false,
+    "transcript_path": "<S0_TMP>/mock-async_post/config/projects/-S0-TMP-mock-async-post-repo/418940c5-c2dc-4267-a42c-160f79e0e318.jsonl"
+  },
+  "received_at": 1790375253.6252701
+}

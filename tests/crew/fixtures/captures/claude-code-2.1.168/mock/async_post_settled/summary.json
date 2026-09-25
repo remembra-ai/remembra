@@ -1,0 +1,141 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "PostToolUse",
+      "hook_id": "5ebb32db-56e9-4bee-b571-a9354794e2bd",
+      "hook_name": "PostToolUse:Write",
+      "session_id": "b732ed06-dfcc-4997-9c40-faeed40d6bfd",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "c463c9d3-0cad-4292-91b2-7a6707607c11"
+    },
+    {
+      "hook_event": "PostToolUse",
+      "hook_id": "5ebb32db-56e9-4bee-b571-a9354794e2bd",
+      "hook_name": "PostToolUse:Write",
+      "output": "{\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"S0-ASYNC-POST-CTX-7574289d\"}}\n",
+      "session_id": "b732ed06-dfcc-4997-9c40-faeed40d6bfd",
+      "stderr": "",
+      "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"S0-ASYNC-POST-CTX-7574289d\"}}\n",
+      "subtype": "hook_progress",
+      "type": "system",
+      "uuid": "95e9d080-9a97-4c5e-94f6-cb6212319e7c"
+    },
+    {
+      "hook_event": "Stop",
+      "hook_id": "7ca8340f-8c0c-4405-91d1-875c1404d8c3",
+      "hook_name": "Stop",
+      "session_id": "b732ed06-dfcc-4997-9c40-faeed40d6bfd",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "0852b521-9a3e-4ea6-8be1-652f9dddade7"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "Stop",
+      "hook_id": "7ca8340f-8c0c-4405-91d1-875c1404d8c3",
+      "hook_name": "Stop",
+      "outcome": "success",
+      "output": "",
+      "session_id": "b732ed06-dfcc-4997-9c40-faeed40d6bfd",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "4e67943c-3c02-4a15-852e-0762683088a8"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "PostToolUse",
+      "hook_id": "5ebb32db-56e9-4bee-b571-a9354794e2bd",
+      "hook_name": "PostToolUse:Write",
+      "outcome": "success",
+      "output": "{\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"S0-ASYNC-POST-CTX-7574289d\"}}\n",
+      "session_id": "b732ed06-dfcc-4997-9c40-faeed40d6bfd",
+      "stderr": "",
+      "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PostToolUse\", \"additionalContext\": \"S0-ASYNC-POST-CTX-7574289d\"}}\n",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "51a09e45-61d9-4231-bf5a-510038277179"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 166,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    },
+    {
+      "i": 1,
+      "last_message": {
+        "content": [
+          {
+            "cache_control": {
+              "type": "ephemeral"
+            },
+            "content": "File created successfully at: <S0_TMP>/mock-async_post_settled/repo/pos/cart.txt (file state is current in your context \u2014 no need to Read it back)",
+            "tool_use_id": "toolu_s0_9ca75b0eac80",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 3,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "S0 ack",
+  "scenario": "async_post_settled",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [
+    {
+      "cache_control": {
+        "type": "ephemeral"
+      },
+      "content": "File created successfully at: <S0_TMP>/mock-async_post_settled/repo/pos/cart.txt (file state is current in your context \u2014 no need to Read it back)",
+      "tool_use_id": "toolu_s0_9ca75b0eac80",
+      "type": "tool_result"
+    }
+  ],
+  "verdict": {
+    "async_ctx_reached_model": false,
+    "duration_s": 3.3,
+    "events": [
+      "PostToolUse",
+      "Stop",
+      "SessionEnd"
+    ],
+    "file_written": true,
+    "marker_after_wait": true,
+    "marker_at_exit": true,
+    "ok": true,
+    "request_gaps_s": [
+      0.05
+    ],
+    "returncode": 0,
+    "run_shorter_than_hook_sleep": true,
+    "sessionend_fired": true
+  }
+}

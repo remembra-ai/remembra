@@ -1,0 +1,50 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "SessionStart",
+      "hook_id": "307242ab-0b66-4767-839f-1613db6a0542",
+      "hook_name": "SessionStart:startup",
+      "session_id": "19272491-dcad-4ffe-a99a-25835dd1f066",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "5bc2041d-ae0b-4fad-adcd-6dd6002758eb"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "SessionStart",
+      "hook_id": "307242ab-0b66-4767-839f-1613db6a0542",
+      "hook_name": "SessionStart:startup",
+      "outcome": "success",
+      "output": "",
+      "session_id": "19272491-dcad-4ffe-a99a-25835dd1f066",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "1c12c8ad-0fb1-404e-8b3e-03e9b462c274"
+    }
+  ],
+  "mode": "real",
+  "nonce": "ed901294",
+  "result_text": "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+  "scenario": "real_stopfailure_model",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [],
+  "verdict": {
+    "duration_s": 1.14,
+    "error": "authentication_failed",
+    "error_details": null,
+    "events": [
+      "SessionStart",
+      "SessionEnd",
+      "StopFailure"
+    ],
+    "last_assistant_message": "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+    "ok": true,
+    "returncode": 1,
+    "sessionend_fired": true,
+    "stop_fired": false,
+    "stopfailure_fired": true
+  }
+}

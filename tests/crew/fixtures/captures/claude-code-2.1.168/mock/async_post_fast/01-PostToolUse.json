@@ -1,0 +1,31 @@
+{
+  "action": "sleepctx",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-async_post_fast/repo"
+  },
+  "event": "PostToolUse",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-async_post_fast/repo",
+    "duration_ms": 6,
+    "hook_event_name": "PostToolUse",
+    "permission_mode": "acceptEdits",
+    "session_id": "24babe4b-73c4-4529-b0a1-ac2270f57d1f",
+    "tool_input": {
+      "content": "s0 write\n",
+      "file_path": "<S0_TMP>/mock-async_post_fast/repo/pos/cart.txt"
+    },
+    "tool_name": "Write",
+    "tool_response": {
+      "content": "s0 write\n",
+      "filePath": "<S0_TMP>/mock-async_post_fast/repo/pos/cart.txt",
+      "originalFile": null,
+      "structuredPatch": [],
+      "type": "create",
+      "userModified": false
+    },
+    "tool_use_id": "toolu_s0_20b9560cef38",
+    "transcript_path": "<S0_TMP>/mock-async_post_fast/config/projects/-S0-TMP-mock-async-post-fast-repo/24babe4b-73c4-4529-b0a1-ac2270f57d1f.jsonl"
+  },
+  "received_at": 1790375260.3073978
+}

@@ -1,0 +1,16 @@
+{
+  "action": "ctx",
+  "env": {
+    "CLAUDE_ENV_FILE_set": true,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-context/repo"
+  },
+  "event": "SessionStart",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-context/repo",
+    "hook_event_name": "SessionStart",
+    "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+    "source": "startup",
+    "transcript_path": "<S0_TMP>/mock-context/config/projects/-S0-TMP-mock-context-repo/e1159370-3902-493b-92bd-33e8e543e6f8.jsonl"
+  },
+  "received_at": 1790375251.584309
+}

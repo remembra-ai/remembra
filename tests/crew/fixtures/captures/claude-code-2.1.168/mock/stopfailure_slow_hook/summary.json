@@ -1,0 +1,53 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 85,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "Credit balance is too low",
+  "scenario": "stopfailure_slow_hook",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [],
+  "verdict": {
+    "duration_s": 0.39,
+    "error": "billing_error",
+    "error_details": null,
+    "events": [
+      "StopFailure",
+      "SessionEnd"
+    ],
+    "last_assistant_message": "Credit balance is too low",
+    "ok": true,
+    "request_gaps_s": [],
+    "returncode": 1,
+    "sessionend_fired": true,
+    "slow_hook_finished_after_wait": true,
+    "slow_hook_finished_before_exit": false,
+    "stop_fired": false,
+    "stopfailure_fired": true
+  }
+}

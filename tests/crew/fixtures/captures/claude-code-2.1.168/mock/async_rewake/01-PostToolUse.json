@@ -1,0 +1,31 @@
+{
+  "action": "rewake",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-async_rewake/repo"
+  },
+  "event": "PostToolUse",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-async_rewake/repo",
+    "duration_ms": 3,
+    "hook_event_name": "PostToolUse",
+    "permission_mode": "acceptEdits",
+    "session_id": "d34664d2-3a2e-4c43-95f5-45640a823923",
+    "tool_input": {
+      "content": "s0 write\n",
+      "file_path": "<S0_TMP>/mock-async_rewake/repo/pos/cart.txt"
+    },
+    "tool_name": "Write",
+    "tool_response": {
+      "content": "s0 write\n",
+      "filePath": "<S0_TMP>/mock-async_rewake/repo/pos/cart.txt",
+      "originalFile": null,
+      "structuredPatch": [],
+      "type": "create",
+      "userModified": false
+    },
+    "tool_use_id": "toolu_s0_6ecd68dbacc9",
+    "transcript_path": "<S0_TMP>/mock-async_rewake/config/projects/-S0-TMP-mock-async-rewake-repo/d34664d2-3a2e-4c43-95f5-45640a823923.jsonl"
+  },
+  "received_at": 1790375270.850168
+}

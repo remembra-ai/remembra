@@ -1,0 +1,16 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-stopfailure_slow_hook/repo"
+  },
+  "event": "SessionEnd",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-stopfailure_slow_hook/repo",
+    "hook_event_name": "SessionEnd",
+    "reason": "other",
+    "session_id": "7e168d35-1bc9-49e4-89e9-55dba4133c16",
+    "transcript_path": "<S0_TMP>/mock-stopfailure_slow_hook/config/projects/-S0-TMP-mock-stopfailure-slow-hook-repo/7e168d35-1bc9-49e4-89e9-55dba4133c16.jsonl"
+  },
+  "received_at": 1790375300.292925
+}

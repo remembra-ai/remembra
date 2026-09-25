@@ -1,0 +1,100 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "SessionStart",
+      "hook_id": "d5891ad3-bc40-4d3a-878e-9ec701415772",
+      "hook_name": "SessionStart:startup",
+      "session_id": "5eba79cf-f4bf-45fe-a76c-c347ec8373da",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "96541ab3-82fe-4725-afd1-ea14780a16ff"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "SessionStart",
+      "hook_id": "d5891ad3-bc40-4d3a-878e-9ec701415772",
+      "hook_name": "SessionStart:startup",
+      "outcome": "success",
+      "output": "",
+      "session_id": "5eba79cf-f4bf-45fe-a76c-c347ec8373da",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "8a170112-6026-4a59-a14d-55fe5e894f4d"
+    },
+    {
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "db769f7f-c1c2-4e6d-9206-9d524f37132d",
+      "hook_name": "UserPromptSubmit",
+      "session_id": "5eba79cf-f4bf-45fe-a76c-c347ec8373da",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "86c85aa0-ae28-4564-8e4f-d962ca7325d7"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "db769f7f-c1c2-4e6d-9206-9d524f37132d",
+      "hook_name": "UserPromptSubmit",
+      "outcome": "success",
+      "output": "",
+      "session_id": "5eba79cf-f4bf-45fe-a76c-c347ec8373da",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "16775d4f-30da-4ca1-ad44-04900bf999a6"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 85,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "API Error: Request rejected (429) \u00b7 This request would exceed your rate limit.",
+  "scenario": "stopfailure_ratelimit",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [],
+  "verdict": {
+    "duration_s": 0.43,
+    "error": "rate_limit",
+    "error_details": null,
+    "events": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "StopFailure",
+      "SessionEnd"
+    ],
+    "last_assistant_message": "API Error: Request rejected (429) \u00b7 This request would exceed your rate limit.",
+    "ok": true,
+    "request_gaps_s": [],
+    "returncode": 1,
+    "sessionend_fired": true,
+    "stop_fired": false,
+    "stopfailure_fired": true
+  }
+}

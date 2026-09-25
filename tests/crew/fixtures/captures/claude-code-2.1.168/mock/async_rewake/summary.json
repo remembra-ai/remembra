@@ -1,0 +1,129 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "PostToolUse",
+      "hook_id": "b1a2ee25-7451-449d-bd51-2bce4188728b",
+      "hook_name": "PostToolUse:Write",
+      "session_id": "d34664d2-3a2e-4c43-95f5-45640a823923",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "71a8d535-5114-4321-8913-df422905e8d8"
+    },
+    {
+      "exit_code": 2,
+      "hook_event": "PostToolUse",
+      "hook_id": "b1a2ee25-7451-449d-bd51-2bce4188728b",
+      "hook_name": "PostToolUse:Write",
+      "outcome": "error",
+      "output": "S0-REWAKE-7574289d: claim on zone pos granted to you\n",
+      "session_id": "d34664d2-3a2e-4c43-95f5-45640a823923",
+      "stderr": "S0-REWAKE-7574289d: claim on zone pos granted to you\n",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "6cb90d51-a753-4370-b9c9-85d71a2c2f08"
+    },
+    {
+      "hook_event": "Stop",
+      "hook_id": "2deac6a0-a618-4bbc-8adc-715803c6df9f",
+      "hook_name": "Stop",
+      "session_id": "d34664d2-3a2e-4c43-95f5-45640a823923",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "ce31fc57-9da3-4f5c-8f0a-8896433ee5f7"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "Stop",
+      "hook_id": "2deac6a0-a618-4bbc-8adc-715803c6df9f",
+      "hook_name": "Stop",
+      "outcome": "success",
+      "output": "",
+      "session_id": "d34664d2-3a2e-4c43-95f5-45640a823923",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "fa50da4a-a5bd-4182-a97c-56329b434aea"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 166,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    },
+    {
+      "i": 1,
+      "last_message": {
+        "content": [
+          {
+            "content": "File created successfully at: <S0_TMP>/mock-async_rewake/repo/pos/cart.txt (file state is current in your context \u2014 no need to Read it back)",
+            "tool_use_id": "toolu_s0_6ecd68dbacc9",
+            "type": "tool_result"
+          },
+          {
+            "cache_control": {
+              "type": "ephemeral"
+            },
+            "text": "<system-reminder>\nPostToolUse:Write hook blocking error from command: \"<PYTHON> <S0_HOOK> <S0_TMP>/mock-async_rewake/raw PostToolUse rewake 3 'S0-REWAKE-7574289d: claim on zone pos granted to you' # remembra-crew-s0\": [<PYTHON> <S0_HOOK> <S0_TMP>/mock-async_rewake/raw PostToolUse rewake 3 'S0-REWAKE-7574289d: claim on zone pos granted to you' # remembra-crew-s0]: S0-REWAKE-7574289d: claim on zone pos granted to you\n\n</system-reminder>",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 3,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "S0 ack",
+  "scenario": "async_rewake",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [
+    {
+      "content": "File created successfully at: <S0_TMP>/mock-async_rewake/repo/pos/cart.txt (file state is current in your context \u2014 no need to Read it back)",
+      "tool_use_id": "toolu_s0_6ecd68dbacc9",
+      "type": "tool_result"
+    }
+  ],
+  "verdict": {
+    "duration_s": 3.65,
+    "events": [
+      "PostToolUse",
+      "Stop",
+      "SessionEnd"
+    ],
+    "file_written": true,
+    "marker_at_exit": true,
+    "messages_requests": 2,
+    "ok": true,
+    "request_gaps_s": [
+      3.1
+    ],
+    "returncode": 0,
+    "rewake_msg_reached_model": true,
+    "sessionend_fired": true
+  }
+}

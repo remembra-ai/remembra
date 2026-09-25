@@ -1,0 +1,178 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "SessionStart",
+      "hook_id": "96d76cee-a7ab-458e-bf3f-32ec129045cb",
+      "hook_name": "SessionStart:startup",
+      "session_id": "78f4d722-de8e-4c95-854d-3b4a57d95ef2",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "44e16426-067c-43dd-8a29-433ab63e83db"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "SessionStart",
+      "hook_id": "96d76cee-a7ab-458e-bf3f-32ec129045cb",
+      "hook_name": "SessionStart:startup",
+      "outcome": "success",
+      "output": "",
+      "session_id": "78f4d722-de8e-4c95-854d-3b4a57d95ef2",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "62a82b6b-7b13-478d-ae2f-8946bf40e0ce"
+    },
+    {
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "37b14619-42d4-4eec-971e-ae87bd4f7336",
+      "hook_name": "UserPromptSubmit",
+      "session_id": "78f4d722-de8e-4c95-854d-3b4a57d95ef2",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "2496cae9-bc2b-46b7-b4c6-eb61ab071653"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "37b14619-42d4-4eec-971e-ae87bd4f7336",
+      "hook_name": "UserPromptSubmit",
+      "outcome": "success",
+      "output": "",
+      "session_id": "78f4d722-de8e-4c95-854d-3b4a57d95ef2",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "aa78a05e-88fa-49b5-bbfe-88d03a3a79a2"
+    },
+    {
+      "hook_event": "PreToolUse",
+      "hook_id": "191324d1-8ced-4a9b-81f4-9c19a2695f37",
+      "hook_name": "PreToolUse:Write",
+      "session_id": "78f4d722-de8e-4c95-854d-3b4a57d95ef2",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "92f1eaf6-1c98-4edd-9dee-75ad0ac52314"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "PreToolUse",
+      "hook_id": "191324d1-8ced-4a9b-81f4-9c19a2695f37",
+      "hook_name": "PreToolUse:Write",
+      "outcome": "success",
+      "output": "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"S0-DENY-7574289d: Crew: src/pos is in zone pos held by codex-1. Do not modify it.\"}}\n",
+      "session_id": "78f4d722-de8e-4c95-854d-3b4a57d95ef2",
+      "stderr": "",
+      "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"permissionDecision\": \"deny\", \"permissionDecisionReason\": \"S0-DENY-7574289d: Crew: src/pos is in zone pos held by codex-1. Do not modify it.\"}}\n",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "b76df040-68e5-430f-8393-cdbf738642eb"
+    },
+    {
+      "hook_event": "Stop",
+      "hook_id": "59affc9d-800e-431b-ab37-54404ce263d5",
+      "hook_name": "Stop",
+      "session_id": "78f4d722-de8e-4c95-854d-3b4a57d95ef2",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "1fb5d72f-f45d-4e96-a125-ef08b385ad41"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "Stop",
+      "hook_id": "59affc9d-800e-431b-ab37-54404ce263d5",
+      "hook_name": "Stop",
+      "outcome": "success",
+      "output": "",
+      "session_id": "78f4d722-de8e-4c95-854d-3b4a57d95ef2",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "75c9a96e-2786-4521-ae75-59ad43f10f51"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 166,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    },
+    {
+      "i": 1,
+      "last_message": {
+        "content": [
+          {
+            "cache_control": {
+              "type": "ephemeral"
+            },
+            "content": "S0-DENY-7574289d: Crew: src/pos is in zone pos held by codex-1. Do not modify it.",
+            "is_error": true,
+            "tool_use_id": "toolu_s0_63707ad14dcc",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 3,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "S0 ack",
+  "scenario": "deny",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [
+    {
+      "cache_control": {
+        "type": "ephemeral"
+      },
+      "content": "S0-DENY-7574289d: Crew: src/pos is in zone pos held by codex-1. Do not modify it.",
+      "is_error": true,
+      "tool_use_id": "toolu_s0_63707ad14dcc",
+      "type": "tool_result"
+    }
+  ],
+  "verdict": {
+    "deny_reason_in_tool_result": true,
+    "duration_s": 3.0,
+    "events": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "PreToolUse",
+      "Stop",
+      "SessionEnd"
+    ],
+    "file_written": false,
+    "ok": true,
+    "posttooluse_fired": false,
+    "request_gaps_s": [
+      0.09
+    ],
+    "returncode": 0,
+    "sessionend_fired": true,
+    "tool_result_is_error": true
+  }
+}

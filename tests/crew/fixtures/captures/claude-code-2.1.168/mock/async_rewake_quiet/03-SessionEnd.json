@@ -1,0 +1,16 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-async_rewake_quiet/repo"
+  },
+  "event": "SessionEnd",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-async_rewake_quiet/repo",
+    "hook_event_name": "SessionEnd",
+    "reason": "other",
+    "session_id": "198799d3-5c8d-43df-b3f5-723f4010d695",
+    "transcript_path": "<S0_TMP>/mock-async_rewake_quiet/config/projects/-S0-TMP-mock-async-rewake-quiet-repo/198799d3-5c8d-43df-b3f5-723f4010d695.jsonl"
+  },
+  "received_at": 1790375283.996566
+}
