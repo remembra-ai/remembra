@@ -536,6 +536,104 @@ async def test_oauth_token_is_not_a_rest_credential(h):
     assert resp.status_code == 401
 
 
+async def test_consent_after_password_reset_is_refused(h):
+    """Someone who signed in with the old password can't finish connecting after
+    the owner resets it, however quickly they reach the consent step."""
+    alice = await _alice(h)
+    client_id = (await h.register()).json()["client_id"]
+    _verifier, challenge = pkce()
+    rid = h.request_id(await h.authorize(client_id, challenge))
+    assert (await h.login(rid, "alice@example.com")).status_code == 200
+    await security_state.invalidate_user_sessions(h.db, alice)  # what password reset/change calls
+    resp = await h.consent(rid, ["alpha"])
+    assert resp.status_code == 403
+    assert "location" not in resp.headers
+    assert "password changed" in resp.text
+    assert await h.app.state.connector_store.list_grants(alice) == []
+    # The sign-in is consumed; the flow has to start over.
+    assert (await h.consent(rid, ["alpha"])).status_code == 400
+
+
+async def test_sign_in_time_not_consent_time_decides_invalidation(h):
+    """Defense in depth at /oauth/token and /mcp: a grant whose sign-in predates the
+    account's session cut-off is dead even though it was created after it."""
+    import time
+
+    from remembra.connector.oauth import account_allows_grant
+
+    alice = await _alice(h)
+    client_id = (await h.register()).json()["client_id"]
+    verifier, challenge = pkce()
+    store = h.app.state.connector_store
+    signed_in = time.time() - 60
+    await security_state.invalidate_user_sessions(h.db, alice)
+    code = await store.create_grant_with_code(
+        user_id=alice,
+        client_id=client_id,
+        scopes=["session:brief"],
+        resource=RESOURCE,
+        project_ids=["alpha"],
+        agent_id="claude-app",
+        redirect_uri=CLAUDE_REDIRECT_URI,
+        code_challenge=challenge,
+        authenticated_at=signed_in,
+    )
+    grant = (await store.list_grants(alice))[0]
+    found = await store._grant_row(grant["connection_id"])
+    assert found is not None
+    assert found[0].signed_in_at_ms == int(signed_in * 1000) < found[0].created_at_ms
+    assert await account_allows_grant(h.db, found[0]) is False
+    tok = await h.token(
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": CLAUDE_REDIRECT_URI,
+            "client_id": client_id,
+            "code_verifier": verifier,
+        }
+    )
+    assert tok.status_code == 400 and tok.json()["error"] == "invalid_grant"
+    assert await store.list_grants(alice) == []
+
+
+async def test_schema_upgrade_adds_sign_in_columns(tmp_path):
+    """A database created before the sign-in time existed is upgraded in place."""
+    from remembra.connector.store import ConnectorStore, successor_key
+    from remembra.storage.database import Database
+
+    db = Database(str(tmp_path / "old.db"))
+    await db.connect()
+    try:
+        await db.conn.execute(
+            "CREATE TABLE oauth_auth_requests (request_id TEXT PRIMARY KEY, client_id TEXT NOT NULL, "
+            "redirect_uri TEXT NOT NULL, state TEXT, code_challenge TEXT NOT NULL, scope TEXT NOT NULL, "
+            "resource TEXT NOT NULL, csrf_hash TEXT NOT NULL, user_id TEXT, created_at REAL NOT NULL, "
+            "expires_at REAL NOT NULL)"
+        )
+        await db.conn.execute(
+            "CREATE TABLE oauth_grants (grant_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, client_id TEXT NOT NULL, "
+            "scope TEXT NOT NULL, resource TEXT NOT NULL, project_ids TEXT NOT NULL, agent_id TEXT NOT NULL, "
+            "created_at REAL NOT NULL, last_used_at REAL, revoked_at REAL, revoke_reason TEXT)"
+        )
+        await db.conn.execute(
+            "INSERT INTO oauth_grants VALUES ('grant_old', 'u1', 'c1', 'session:brief', 'r', '[\"alpha\"]', "
+            "'claude-app', 1000.0, NULL, NULL, NULL)"
+        )
+        await db.conn.commit()
+        store = ConnectorStore(db, rotation_key=successor_key("s3cret"))
+        await store.init_schema()
+        await store.init_schema()  # idempotent
+        for table in ("oauth_auth_requests", "oauth_grants"):
+            cursor = await db.conn.execute(f"PRAGMA table_info({table})")
+            assert "authenticated_at" in {r[1] for r in await cursor.fetchall()}
+        found = await store._grant_row("grant_old")
+        assert found is not None
+        # Old rows fall back to the approval time.
+        assert found[0].authenticated_at_ms is None and found[0].signed_in_at_ms == 1_000_000
+    finally:
+        await db.close()
+
+
 async def test_password_change_style_invalidation_ends_connections(h):
     alice = await _alice(h)
     conn = await h.connect("alice@example.com", ["alpha"])

@@ -119,12 +119,23 @@ def _csrf_cookie_name(request_id: str) -> str:
     return "rmb_oauth_" + request_id
 
 
+def signed_in_before_cutoff(signed_in_at_ms: int, valid_after_ms: int) -> bool:
+    """True when a sign-in happened at or before the account's session cut-off.
+
+    Ties count as before (fail closed): a sign-in in the same millisecond as a
+    password reset can't be told apart from one made with the old password.
+    """
+    return bool(valid_after_ms) and signed_in_at_ms <= valid_after_ms
+
+
 async def account_allows_grant(db: Any, grant: Grant) -> bool:
-    """The owning account is active and has not invalidated sessions since approval.
+    """The owning account is active and has not invalidated sessions since sign-in.
 
     ``invalidate_user_sessions`` (password change or reset, deactivation) moves the
-    user's cut-off forward; connections approved before it stop working, the
-    same rule dashboard JWTs follow.
+    user's cut-off forward; connections whose sign-in happened before it stop
+    working, the same rule dashboard JWTs follow. The sign-in time is used, not
+    the consent time, so a login made with the old password that finishes
+    consent after the reset is dead too.
     """
     try:
         user_row = await db.get_user_by_id(grant.user_id)
@@ -134,7 +145,7 @@ async def account_allows_grant(db: Any, grant: Grant) -> bool:
     except Exception as e:  # fail closed
         log.error("connector_account_check_failed", error_type=type(e).__name__)
         return False
-    return not (valid_after and grant.created_at_ms < valid_after)
+    return not signed_in_before_cutoff(grant.signed_in_at_ms, valid_after)
 
 
 # ---------------------------------------------------------------------------
@@ -464,7 +475,7 @@ async def authorize_consent(request: Request, store: StoreDep) -> Response:
     assert auth_req is not None and client is not None
     if form.get("decision") == "deny":
         return await _deny(store, auth_req, settings)
-    if not auth_req.user_id:
+    if not auth_req.user_id or auth_req.authenticated_at is None:
         return pages.error_page("Sign in first. Start connecting again from the app.", status_code=403)
 
     db = request.app.state.db
@@ -472,6 +483,15 @@ async def authorize_consent(request: Request, store: StoreDep) -> Response:
     if not user_row or not user_row.get("is_active", True):
         await store.delete_auth_request(auth_req.request_id)
         return pages.error_page("This account can't be connected.", status_code=403)
+    # A password change/reset (or deactivation) after this sign-in voids it:
+    # whoever signed in with the old password must not finish connecting.
+    valid_after = await security_state.get_tokens_valid_after_ms(db, auth_req.user_id)
+    if signed_in_before_cutoff(int(auth_req.authenticated_at * 1000), valid_after):
+        await store.delete_auth_request(auth_req.request_id)
+        log.warning("oauth_consent_after_session_invalidation", user_id=auth_req.user_id, client_id=auth_req.client_id)
+        return pages.error_page(
+            "Your password changed after you signed in. Start connecting again from the app.", status_code=403
+        )
 
     raw_projects = [str(v) for v in form.getlist("project")]
     new_project = str(form.get("new_project") or "")
@@ -503,6 +523,7 @@ async def authorize_consent(request: Request, store: StoreDep) -> Response:
         agent_id=agent_id,
         redirect_uri=auth_req.redirect_uri,
         code_challenge=auth_req.code_challenge,
+        authenticated_at=auth_req.authenticated_at,
     )
     log.info("oauth_consent_granted", user_id=auth_req.user_id, client_id=auth_req.client_id, projects=len(projects))
     response = _redirect_to_client(auth_req.redirect_uri, {"code": code, "state": auth_req.state}, settings)

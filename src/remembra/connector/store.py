@@ -75,10 +75,23 @@ class Grant:
     agent_id: str
     created_at_ms: int
     client_name: str = ""
+    # When the user proved their password for this connection (login on the
+    # sign-in page), which can be up to AUTH_REQUEST_TTL_SECONDS before consent.
+    authenticated_at_ms: int | None = None
 
     @property
     def default_project(self) -> str:
         return self.project_ids[0]
+
+    @property
+    def signed_in_at_ms(self) -> int:
+        """The moment the account's credentials authorized this grant.
+
+        Session invalidation (password change/reset) is compared against this,
+        not the consent time: a sign-in made with the old password must not
+        survive a reset that happens before its consent step.
+        """
+        return self.authenticated_at_ms if self.authenticated_at_ms is not None else self.created_at_ms
 
 
 @dataclass(frozen=True)
@@ -110,6 +123,7 @@ class AuthRequest:
     csrf_hash: str
     user_id: str | None
     expires_at: float
+    authenticated_at: float | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -155,6 +169,7 @@ CREATE TABLE IF NOT EXISTS oauth_auth_requests (
     resource TEXT NOT NULL,
     csrf_hash TEXT NOT NULL,
     user_id TEXT,
+    authenticated_at REAL,
     created_at REAL NOT NULL,
     expires_at REAL NOT NULL
 );
@@ -168,6 +183,7 @@ CREATE TABLE IF NOT EXISTS oauth_grants (
     project_ids TEXT NOT NULL,
     agent_id TEXT NOT NULL,
     created_at REAL NOT NULL,
+    authenticated_at REAL,
     last_used_at REAL,
     revoked_at REAL,
     revoke_reason TEXT
@@ -198,6 +214,12 @@ CREATE INDEX IF NOT EXISTS idx_oauth_tokens_grant ON oauth_tokens(grant_id);
 CREATE INDEX IF NOT EXISTS idx_oauth_tokens_expiry ON oauth_tokens(expires_at);
 """
 
+# (table, column, declaration) for columns added to existing deployments.
+_ADDED_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("oauth_auth_requests", "authenticated_at", "REAL"),
+    ("oauth_grants", "authenticated_at", "REAL"),
+)
+
 
 class ConnectorStore:
     """OAuth state on the application's SQLite database."""
@@ -224,6 +246,12 @@ class ConnectorStore:
 
     async def init_schema(self) -> None:
         await self._db.conn.executescript(SCHEMA_SQL)
+        # Columns added after the first schema; CREATE TABLE IF NOT EXISTS
+        # leaves an existing table as it was.
+        for table, column, decl in _ADDED_COLUMNS:
+            cursor = await self._db.conn.execute(f"PRAGMA table_info({table})")
+            if column not in {row[1] for row in await cursor.fetchall()}:
+                await self._db.conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
         await self._db.conn.commit()
 
     # ------------------------------------------------------------------
@@ -349,7 +377,7 @@ class ConnectorStore:
         cursor = await self._db.conn.execute(
             """
             SELECT request_id, client_id, redirect_uri, state, code_challenge, scope, resource,
-                   csrf_hash, user_id, expires_at
+                   csrf_hash, user_id, expires_at, authenticated_at
             FROM oauth_auth_requests WHERE request_id = ? AND expires_at > ?
             """,
             (request_id, self.now()),
@@ -368,6 +396,7 @@ class ConnectorStore:
             csrf_hash=row[7],
             user_id=row[8],
             expires_at=float(row[9]),
+            authenticated_at=float(row[10]) if row[10] is not None else None,
         )
 
     @staticmethod
@@ -375,9 +404,10 @@ class ConnectorStore:
         return bool(csrf) and hmac.compare_digest(req.csrf_hash, token_hash(csrf or ""))
 
     async def set_auth_request_user(self, request_id: str, user_id: str) -> None:
+        """Bind the request to the user who just signed in, and when they did."""
         await self._db.conn.execute(
-            "UPDATE oauth_auth_requests SET user_id = ? WHERE request_id = ?",
-            (user_id, request_id),
+            "UPDATE oauth_auth_requests SET user_id = ?, authenticated_at = ? WHERE request_id = ?",
+            (user_id, self.now(), request_id),
         )
         await self._db.conn.commit()
 
@@ -402,8 +432,13 @@ class ConnectorStore:
         agent_id: str,
         redirect_uri: str,
         code_challenge: str,
+        authenticated_at: float,
     ) -> str:
-        """Record an approved connection and return a single-use authorization code."""
+        """Record an approved connection and return a single-use authorization code.
+
+        ``authenticated_at`` is when the user signed in for this request; it is
+        what session invalidation is checked against for the grant's lifetime.
+        """
         grant_id = "grant_" + secrets.token_hex(12)
         code = _new_secret(CODE_PREFIX)
         now = self.now()
@@ -411,10 +446,20 @@ class ConnectorStore:
             await self._db.conn.execute(
                 """
                 INSERT INTO oauth_grants (grant_id, user_id, client_id, scope, resource, project_ids,
-                                          agent_id, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                          agent_id, created_at, authenticated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (grant_id, user_id, client_id, format_scope(scopes), resource, json.dumps(project_ids), agent_id, now),
+                (
+                    grant_id,
+                    user_id,
+                    client_id,
+                    format_scope(scopes),
+                    resource,
+                    json.dumps(project_ids),
+                    agent_id,
+                    now,
+                    authenticated_at,
+                ),
             )
             await self._db.conn.execute(
                 """
@@ -429,7 +474,7 @@ class ConnectorStore:
         cursor = await self._db.conn.execute(
             """
             SELECT g.grant_id, g.user_id, g.client_id, g.scope, g.resource, g.project_ids, g.agent_id,
-                   g.created_at, g.revoked_at, c.client_name
+                   g.created_at, g.revoked_at, c.client_name, g.authenticated_at
             FROM oauth_grants g LEFT JOIN oauth_clients c ON c.client_id = g.client_id
             WHERE g.grant_id = ?
             """,
@@ -448,6 +493,7 @@ class ConnectorStore:
             agent_id=row[6],
             created_at_ms=int(float(row[7]) * 1000),
             client_name=row[9] or "",
+            authenticated_at_ms=int(float(row[10]) * 1000) if row[10] is not None else None,
         )
         return grant, (float(row[8]) if row[8] is not None else None)
 
