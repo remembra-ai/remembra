@@ -157,6 +157,14 @@ class Settings(BaseSettings):
     typesafe_base_url: str = Field("https://api.typesafe.ai", description="TypeSafe API base URL")
     typesafe_model: str = Field("jev-latest", description="TypeSafe model name")
     typesafe_timeout: float = Field(2.0, gt=0, description="Per-request TypeSafe timeout in seconds")
+    typesafe_usd_per_request: float = Field(
+        0.0005,
+        ge=0,
+        description=(
+            "Dollar cost metered per TypeSafe request (smart credits on writes; free-breaker spend on recalls). "
+            "Set it to your TypeSafe contract price."
+        ),
+    )
     typesafe_supersede_threshold: float = Field(
         0.85, ge=0.0, le=1.0, description="Enforce mode: min P(supersedes) to retire an existing memory"
     )
@@ -349,6 +357,23 @@ class Settings(BaseSettings):
         le=1,
         description="Free-tier AI budget as a share of last month's net paid revenue, when that revenue is known",
     )
+    unverified_credit_cap_effective_at: datetime | None = Field(
+        None,
+        description=(
+            "Free accounts CREATED at or after this time are held at 25 smart credits until their email is "
+            "verified. Unset = the cap is off (set it once the dashboard verify-email flow is live); accounts "
+            "created earlier are grandfathered."
+        ),
+    )
+    annual_credit_upfront_months: int = Field(
+        12,
+        ge=1,
+        le=12,
+        description=(
+            "Annual plans: months of credits available in the first subscription month; one more month's "
+            "allowance is released each month after (12 = the whole yearly bank up front)."
+        ),
+    )
     credit_reservation_stale_minutes: int = Field(
         15,
         ge=1,
@@ -376,6 +401,10 @@ class Settings(BaseSettings):
         description="Turnstile siteverify endpoint",
     )
     signup_ip_rate_limit: str = Field("3/hour", description="Signups allowed per client IP /24 (IPv6: /56)")
+    signup_attempt_ip_rate_limit: str = Field(
+        "30/hour",
+        description="Signup ATTEMPTS per client /24 before Turnstile runs (bounds siteverify calls; only with Turnstile on)",
+    )
     signup_domain_rate_limit: str = Field("20/day", description="Signups allowed per email domain")
     signup_domain_limit_exempt: list[str] = Field(
         default_factory=lambda: [
@@ -474,6 +503,14 @@ class Settings(BaseSettings):
         description=(
             "CIDRs of reverse proxies whose X-Forwarded-For / X-Real-IP headers are trusted. "
             "Forwarding headers from any other peer are ignored. Set to [] when the API is exposed directly."
+        ),
+    )
+    trust_cloudflare_proxies: bool = Field(
+        True,
+        description=(
+            "Treat Cloudflare's published edge ranges as trusted proxies: behind Cloudflare the client IP comes "
+            "from CF-Connecting-IP (or the forwarded chain) instead of the edge IP. Only applies when the direct "
+            "peer is already a trusted proxy."
         ),
     )
     superadmin_user_ids: list[str] = Field(

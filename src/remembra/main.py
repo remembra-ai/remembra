@@ -2,7 +2,6 @@
 
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
-from datetime import timedelta
 from pathlib import Path
 from typing import Any, cast
 
@@ -274,11 +273,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Cloud services (billing, metering, limits)
     if settings.cloud_enabled:
+        from remembra.cloud.metering import now_utc as metering_now
+        from remembra.core import ai_spend
+
+        process_started_at = metering_now()
         app.state.usage_meter = UsageMeter(app.state.db)
         await app.state.usage_meter.init_schema()
-        # Enrichment work of the previous process died with it: release its
-        # credit holds (charged at the chunk minimum; a late settle adds the rest).
-        await app.state.usage_meter.expire_stale_reservations(older_than=timedelta(0))
+        # Enrichment work of the previous process died with it: release the
+        # holds opened before this process started (charged at the chunk
+        # minimum; a late settle adds the rest, capped at the hold). Holds of
+        # this process are never expired while their work is alive.
+        await app.state.usage_meter.expire_stale_reservations(created_before=process_started_at)
+        # Paid AI outside a metered write (Jev on recalls): skipped for the
+        # free group, recorded in the monthly AI-spend totals for the rest.
+        ai_spend.set_attribution_policy(app.state.usage_meter)
         log.info(
             "cloud_enabled",
             paddle_configured=bool(settings.paddle_api_key),
@@ -476,7 +484,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     unregister_state_listener(app.state.alert_listener)
     await app.state.pending_worker.stop()
+    # Let queued / running enrichment finish while the registry still accepts
+    # their credit settles, then stop the registry, then wait for every settle
+    # (including ones released by cancelled work) before the database closes.
+    from remembra.core import ai_spend
+    from remembra.extraction import background
+
+    await background.drain(timeout=10.0)
     await app.state.tasks.shutdown(timeout=10.0)
+    await ai_spend.drain_settles(timeout=10.0)
+    ai_spend.set_attribution_policy(None)
     set_task_registry(None)
     set_enrichment_queue(None)
     if app.state.plugin_manager:

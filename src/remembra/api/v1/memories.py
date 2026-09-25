@@ -749,6 +749,8 @@ async def bulk_import(
         [item.content for item in body.items],
         atomic=[True] * len(body.items),
         project_ids=[project_id],
+        # Rows arriving with their own embeddings cost nothing to embed.
+        count_unenriched=body.embeddings is None,
     )
     items = []
     embeddings: list[list[float]] | None = [] if body.embeddings is not None else None

@@ -37,6 +37,7 @@ from typing import Any
 import httpx
 import structlog
 
+from remembra.core import ai_spend
 from remembra.extraction import metrics
 
 log = structlog.get_logger(__name__)
@@ -118,10 +119,14 @@ class TypeSafeClient:
         model: str = "jev-latest",
         timeout: float = 2.0,
         transport: httpx.AsyncBaseTransport | None = None,
+        usd_per_request: float = 0.0,
     ) -> None:
         if not api_key:
             raise ValueError("TypeSafe api_key is required")
         self._api_key = api_key
+        # Flat price of one request: metered against the write's AI budget
+        # (smart credits) or, outside a write, recorded per user (free breaker).
+        self.usd_per_request = max(0.0, float(usd_per_request))
         self._url = base_url.rstrip("/") + "/v1/systemone"
         self.model = model
         self.timeout = timeout
@@ -140,6 +145,11 @@ class TypeSafeClient:
         errors or logs.
         """
         body = {"model": self.model, "state": state, "questions": questions}
+        usd = self.usd_per_request
+        try:
+            ai_spend.hold_flat(usd)
+        except ai_spend.SpendBudgetExceeded as e:
+            raise TypeSafeError("AI budget of this write is used up") from e
         try:
             resp = await asyncio.wait_for(
                 self._get_client().post(
@@ -150,9 +160,16 @@ class TypeSafeClient:
                 timeout=self.timeout + 0.5,
             )
         except (TimeoutError, httpx.TimeoutException) as e:
+            # The request may have reached TypeSafe: bill it (errs on the safe side).
+            await ai_spend.charge_flat(usd)
             raise TypeSafeError(f"timeout after {self.timeout}s") from e
         except httpx.HTTPError as e:
+            ai_spend.release_flat(usd)
             raise TypeSafeError(f"transport error: {type(e).__name__}") from e
+        except BaseException:
+            ai_spend.release_flat(usd)
+            raise
+        await ai_spend.charge_flat(usd)
         if resp.status_code != 200:
             raise TypeSafeError(f"HTTP {resp.status_code}")
         try:
@@ -280,6 +297,7 @@ class JevDecider:
                 base_url=settings.typesafe_base_url,
                 model=settings.typesafe_model,
                 timeout=settings.typesafe_timeout,
+                usd_per_request=float(getattr(settings, "typesafe_usd_per_request", 0.0) or 0.0),
             )
 
     @property

@@ -150,10 +150,14 @@ def make_llm_client(
 
 def classify_llm_exception(exc: BaseException) -> str:
     """Map an OpenAI/Anthropic SDK (or transport) exception to a ProviderErrorKind value."""
+    from remembra.core.ai_spend import SpendBudgetExceeded
+
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
+        if isinstance(current, SpendBudgetExceeded):
+            return "credit_budget"
         if isinstance(current, LLMCircuitOpenError):
             return current.kind or ProviderErrorKind.UNAVAILABLE.value
         status = getattr(current, "status_code", None)

@@ -247,7 +247,8 @@ async def signup(
     Hardening: 3 signups/hour per client /24 and 20/day per email domain
     (``client_ip`` from the calling backend, else the connection's IP), and a
     Cloudflare Turnstile check when ``REMEMBRA_TURNSTILE_SECRET`` is set.
-    New Free accounts get 25 smart credits until their email is verified.
+    Tenants created here have no user record, so the unverified-email credit
+    hold does not apply to them.
 
     Returns the API key — it is only shown once.
     """
@@ -355,7 +356,7 @@ async def get_usage_summary(
     user_id = current_user.user_id
     account = await meter.get_account(user_id)
     balance = await meter.get_credit_balance(account)
-    month = await meter.get_period_counters(user_id, CreditPeriod.monthly(now_utc()).start)
+    month = await meter.get_period_counters(account.pool, CreditPeriod.monthly(now_utc()).start)
     limits = account.limits
 
     reason: str | None = None
@@ -405,7 +406,7 @@ async def get_usage_summary(
             limit=limits.max_recalls_per_month,
             burst_per_min=limits.recall_burst_per_min,
         ),
-        memories=MemoryUsage(stored=await meter.count_memories(user_id), cap=account.memory_cap),
+        memories=MemoryUsage(stored=await meter.count_pool_memories(account), cap=account.memory_cap),
         stores=StoreUsage(this_month=month["stores"], degraded_this_month=month["degraded_stores"]),
     )
 

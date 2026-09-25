@@ -21,7 +21,7 @@ from enum import StrEnum
 import structlog
 from openai import AsyncOpenAI
 
-from remembra.core.ai_spend import record_llm_usage
+from remembra.core.ai_spend import metered_chat
 from remembra.core.llm_guard import classify_llm_exception, make_llm_client, mark_llm_fallback
 from remembra.extraction.prompting import wrap_untrusted
 
@@ -204,7 +204,8 @@ class MemoryConsolidator:
                 ensure_ascii=False,
                 indent=2,
             )
-            response = await self._get_client().chat.completions.create(
+            response = await metered_chat(
+                self._get_client(),
                 model=self.model,
                 messages=[
                     {"role": "system", "content": CONSOLIDATION_SYSTEM_PROMPT},
@@ -220,7 +221,6 @@ class MemoryConsolidator:
                 response_format={"type": "json_object"},
                 timeout=30.0,
             )
-            record_llm_usage(response, self.model)
             result_text = response.choices[0].message.content
             if not result_text:
                 return self._default_add("empty consolidation response")

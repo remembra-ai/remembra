@@ -13,12 +13,14 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 
 import structlog
 from openai import AsyncOpenAI
 
-from remembra.core.ai_spend import record_llm_usage
+from remembra.cloud.model_prices import anthropic_usage
+from remembra.core.ai_spend import estimate_chat_usd, hold_flat, metered_chat, record_llm_usage, release_flat
 from remembra.extraction import metrics
 from remembra.extraction.prompting import wrap_untrusted
 
@@ -346,7 +348,8 @@ class EntityExtractor:
 
             log.debug("extracting_entities", content_length=len(content))
 
-            response = await client.chat.completions.create(
+            response = await metered_chat(
+                client,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": ENTITY_EXTRACTION_PROMPT},
@@ -356,7 +359,6 @@ class EntityExtractor:
                 response_format={"type": "json_object"},
                 timeout=30.0,
             )
-            record_llm_usage(response, self.model)
 
             result_text = response.choices[0].message.content
             if not result_text:
@@ -490,18 +492,26 @@ class AnthropicEntityExtractor:
         try:
             log.debug("extracting_entities", provider="anthropic", content_length=len(content))
 
-            response = await self._client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                temperature=0.1,
-                system=ENTITY_EXTRACTION_PROMPT,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"Extract entities and relationships from:\n\n{wrap_untrusted(content)}",
-                    },
-                ],
-            )
+            messages = [
+                {
+                    "role": "user",
+                    "content": f"Extract entities and relationships from:\n\n{wrap_untrusted(content)}",
+                },
+            ]
+            # Same AI budget as the OpenAI path: estimate first, record the real cost after.
+            estimate = estimate_chat_usd(self.model, [{"content": ENTITY_EXTRACTION_PROMPT}, *messages], 4096)
+            hold_flat(estimate)
+            try:
+                response = await self._client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    temperature=0.1,
+                    system=ENTITY_EXTRACTION_PROMPT,
+                    messages=messages,
+                )
+            finally:
+                release_flat(estimate)
+            record_llm_usage(SimpleNamespace(usage=anthropic_usage(getattr(response, "usage", None))), self.model)
 
             # Claude returns content blocks; concatenate text blocks
             result_text = "".join(block.text for block in response.content if block.type == "text")

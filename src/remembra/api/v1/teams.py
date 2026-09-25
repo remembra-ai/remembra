@@ -6,6 +6,7 @@ Enables multi-user collaboration with shared memory spaces.
 import os
 from typing import Annotated, Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -15,6 +16,8 @@ from remembra.core.limiter import limiter
 from remembra.teams.manager import TeamManager
 
 router = APIRouter(prefix="/teams", tags=["teams"])
+
+log = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -202,24 +205,20 @@ async def create_team(
     manager: TeamManagerDep,
     user: CurrentUser,
 ) -> CreateTeamResponse:
-    # Look up owner's billing plan to inherit
-    from remembra.cloud.plans import PlanTier, get_plan
-
-    plan = "pro"  # Default fallback
+    plan = "pro"  # Self-hosted default (no metering)
     max_seats = 5
 
-    # Try to get the user's actual billing plan
+    # Cloud: the team inherits the owner's OWN plan and its seat-scaled limit
+    # (Team is sold per seat: the catalog value is one seat, the account's
+    # limits carry the seats actually paid for).
     meter = getattr(request.app.state, "usage_meter", None)
     if meter:
         try:
-            tenant = await meter.get_tenant(user.user_id)
-            if tenant and tenant.get("plan"):
-                plan = tenant["plan"]
-                plan_tier = PlanTier(plan)
-                plan_limits = get_plan(plan_tier)
-                max_seats = plan_limits.max_users
-        except Exception:
-            pass  # Use defaults if lookup fails
+            account = await meter.get_account(user.user_id, include_team=False)
+            plan = account.tier.value
+            max_seats = account.limits.max_users
+        except Exception as e:
+            log.warning("team_owner_plan_lookup_failed", error_type=type(e).__name__)
 
     team = await manager.create_team(
         name=body.name,

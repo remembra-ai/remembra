@@ -103,6 +103,13 @@ class EnrichmentQueue:
         async def _run() -> Any:
             try:
                 async with state.semaphore, self._global_sem():
+                    if droppable and job is not None and job.exhausted:
+                        # The write's AI budget ran out while this waited: skip the
+                        # optional pass (the memory itself is already stored).
+                        coro.close()
+                        self.dropped += 1
+                        log.info("enrichment_skipped_budget_exhausted", tenant=tenant_id, task=name)
+                        return None
                     state.running += 1
                     try:
                         return await coro

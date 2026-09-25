@@ -228,7 +228,13 @@ class SleepTimeWorker:
             charged: int = await meter.record_unreserved_spend(account, usd)
             return charged
 
-        return ai_spend.SpendJob(user_id=user_id, settle=settle, label="sleep_time"), True
+        from remembra.cloud.plans import CREDIT_USD
+
+        # The credits left are a hard budget for this pass (checked before every LLM call).
+        return (
+            ai_spend.SpendJob(user_id=user_id, settle=settle, label="sleep_time", budget_usd=balance.remaining * CREDIT_USD),
+            True,
+        )
 
     async def _brain_pass(self, user_id: str) -> int:
         """Recompute the brain layer for each project the user has entities in.

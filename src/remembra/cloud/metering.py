@@ -25,12 +25,13 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from remembra.cloud.plans import (
     CREDIT_USD,
+    FOUNDING_MAX_REDEMPTIONS,
     BillingInterval,
     PlanLimits,
     PlanTier,
@@ -42,6 +43,18 @@ from remembra.cloud.plans import (
 from remembra.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Embedding list prices, USD per 1M input tokens (unknown models: the priciest).
+EMBEDDING_PRICES_PER_M: dict[str, float] = {
+    "text-embedding-3-small": 0.02,
+    "text-embedding-3-large": 0.13,
+    "text-embedding-ada-002": 0.10,
+}
+UNKNOWN_EMBEDDING_PRICE_PER_M = 0.13
+EMBEDDING_CHARS_PER_TOKEN = 4
+
+# Tiers whose limits are shared by the members of the owner's teams.
+_POOLED_MIN_USERS = 2
 
 _LEGACY_MIGRATION = "2026_09_plans_v2_legacy_tiers"
 
@@ -78,6 +91,14 @@ def _add_years(value: datetime, years: int) -> datetime:
         return value.replace(year=value.year + years)
     except ValueError:  # Feb 29 -> Feb 28
         return value.replace(year=value.year + years, day=28)
+
+
+def _months_elapsed(start: datetime, now: datetime) -> int:
+    """Whole months from ``start`` to ``now`` (0 during the first month)."""
+    months = (now.year - start.year) * 12 + (now.month - start.month)
+    if (now.day, now.time()) < (start.day, start.time()):
+        months -= 1
+    return max(0, months)
 
 
 @dataclass(frozen=True)
@@ -121,6 +142,16 @@ class AccountState:
     period: CreditPeriod
     credit_limit: int
     memory_cap: int
+    # Users whose memories count against this account's cap (team members of a
+    # pooled plan share the owner's ledger, limits and memory cap).
+    pool_user_ids: tuple[str, ...] = field(default=())
+    # The requesting user when it is a team member billed to ``user_id`` (the owner).
+    member_user_id: str | None = None
+    created_at: datetime | None = None
+
+    @property
+    def pool(self) -> tuple[str, ...]:
+        return self.pool_user_ids or (self.user_id,)
 
 
 @dataclass(frozen=True)
@@ -244,7 +275,10 @@ class UsageMeter:
         await self._add_column("cloud_tenants", "period_anchor TEXT")
         await self._add_column("cloud_tenants", "seats INTEGER")
         await self._add_column("cloud_tenants", "founding INTEGER DEFAULT 0")
-        for column in ("relay_events", "credits_used", "degraded_stores"):
+        # Something about the account needs the owner's attention (e.g. a
+        # Founding 100 charge past the cap that must be refunded).
+        await self._add_column("cloud_tenants", "billing_flag TEXT")
+        for column in ("relay_events", "credits_used", "degraded_stores", "unenriched_writes"):
             await self._add_column("cloud_usage_daily", f"{column} INTEGER DEFAULT 0")
         await self._add_column("cloud_usage_daily", "llm_usd REAL DEFAULT 0")
 
@@ -496,45 +530,127 @@ class UsageMeter:
     # Account state (plan + period + effective limits)
     # -----------------------------------------------------------------------
 
-    async def get_account(self, user_id: str) -> AccountState:
-        """Plan, billing period, seat-scaled limits and the credit limit for ``user_id``."""
+    async def get_account(self, user_id: str, *, include_team: bool = True) -> AccountState:
+        """Plan, billing period, seat-scaled limits and the credit limit for ``user_id``.
+
+        A user without a paid plan of their own who is a member of a team whose
+        owner holds a pooled plan (Team, legacy Pro/Team, Enterprise) is billed
+        to that owner: the returned account is the owner's (ledger, period,
+        pooled limits, memory cap across the whole pool) with
+        ``member_user_id`` set. ``include_team=False`` returns the user's own
+        account only.
+        """
+        own = await self._own_account(user_id)
+        if not include_team or own.tier != PlanTier.FREE:
+            return own
+        owner = await self._pooled_billing_owner(user_id)
+        if owner is None:
+            return own
+        return replace(owner, member_user_id=user_id)
+
+    async def _own_account(self, user_id: str) -> AccountState:
         settings = get_settings()
         now = now_utc()
         tier = await self.get_tenant_plan(user_id)
         tenant = await self.get_tenant(user_id)
         user_row = await self._user_row(user_id)
         verified = bool(user_row and user_row.get("email_verified"))
+        created_at = _parse_dt((user_row or {}).get("created_at")) or _parse_dt((tenant or {}).get("created_at"))
 
         paid = tier not in (PlanTier.FREE,)
-        seats = int((tenant or {}).get("seats") or 1)
-        limits = get_plan(tier).scaled(seats)
+        raw_seats = (tenant or {}).get("seats")
+        limits = get_plan(tier).scaled(int(raw_seats) if raw_seats else None)
         interval = BillingInterval.MONTH
         if paid and tenant and tenant.get("billing_interval") == BillingInterval.YEAR.value:
             interval = BillingInterval.YEAR
         if interval == BillingInterval.YEAR:
             anchor = _parse_dt((tenant or {}).get("period_anchor")) or _parse_dt((tenant or {}).get("created_at")) or now
             period = CreditPeriod.yearly(now, anchor)
+            released = min(12, int(settings.annual_credit_upfront_months) + _months_elapsed(period.start, now))
+            credit_limit = limits.credit_allowance(interval, released)
         else:
             period = CreditPeriod.monthly(now)
+            credit_limit = limits.credit_allowance(interval)
 
-        credit_limit = limits.credit_allowance(interval)
-        if tier == PlanTier.FREE and not verified and limits.unverified_credit_cap is not None:
-            credit_limit = min(credit_limit, limits.unverified_credit_cap)
+        if tier == PlanTier.FREE and self._unverified_cap_applies(user_row, verified, created_at):
+            if limits.unverified_credit_cap is not None:
+                credit_limit = min(credit_limit, limits.unverified_credit_cap)
 
         trial = tier != PlanTier.FREE and self._is_trial(tenant)
+        pool: tuple[str, ...] = (user_id,)
+        if limits.max_users >= _POOLED_MIN_USERS:
+            pool = await self._team_pool(user_id, limits.max_users)
         return AccountState(
             user_id=user_id,
             tier=tier,
             limits=limits,
             interval=interval,
-            seats=limits.max_users if get_plan(tier).per_seat else seats,
+            seats=limits.max_users if get_plan(tier).per_seat else int(raw_seats or 1),
             founding=bool((tenant or {}).get("founding")),
             email_verified=verified,
             free_group=tier == PlanTier.FREE or trial,
             period=period,
             credit_limit=credit_limit,
             memory_cap=limits.memory_cap(now, settings.memory_cap_notice_effective_at),
+            pool_user_ids=pool,
+            created_at=created_at,
         )
+
+    @staticmethod
+    def _unverified_cap_applies(user_row: dict[str, Any] | None, verified: bool, created_at: datetime | None) -> bool:
+        """The 25-credit hold for unverified Free accounts.
+
+        Off until ``unverified_credit_cap_effective_at`` is set (the dashboard
+        verify-email flow must be live first); then it applies only to accounts
+        created at or after that time (existing users are grandfathered).
+        Tenants provisioned by the master-key ``/cloud/signup`` backend have no
+        user record and no way to verify, so they are exempt (that backend runs
+        its own Turnstile and signup limits).
+        """
+        if verified or user_row is None:
+            return False
+        effective = get_settings().unverified_credit_cap_effective_at
+        if effective is None:
+            return False
+        effective = effective if effective.tzinfo else effective.replace(tzinfo=UTC)
+        return created_at is None or created_at >= effective
+
+    async def _team_rows(self, query: str, params: tuple[Any, ...]) -> list[Any]:
+        try:
+            cursor = await self._db.conn.execute(query, params)
+            return list(await cursor.fetchall())
+        except Exception:  # no teams tables in minimal deployments
+            return []
+
+    async def _team_pool(self, owner_id: str, seats: int) -> tuple[str, ...]:
+        """The owner plus the members of the owner's teams, earliest joiners first, up to the paid seats."""
+        rows = await self._team_rows(
+            "SELECT m.user_id, MIN(m.joined_at) AS joined FROM team_members m JOIN teams t ON t.id = m.team_id"
+            " WHERE t.owner_id = ? AND m.user_id != ? GROUP BY m.user_id ORDER BY joined, m.user_id",
+            (owner_id, owner_id),
+        )
+        members = [str(r[0]) for r in rows if r[0]]
+        return (owner_id, *members[: max(0, seats - 1)])
+
+    async def _pooled_billing_owner(self, member_id: str) -> AccountState | None:
+        """The account of a team owner with a pooled paid plan that ``member_id`` belongs to."""
+        rows = await self._team_rows(
+            "SELECT DISTINCT t.owner_id FROM team_members m JOIN teams t ON t.id = m.team_id"
+            " WHERE m.user_id = ? AND t.owner_id != ?",
+            (member_id, member_id),
+        )
+        best: AccountState | None = None
+        for (owner_id,) in rows:
+            if not owner_id:
+                continue
+            candidate = await self._own_account(str(owner_id))
+            if candidate.tier == PlanTier.FREE or candidate.limits.max_users < _POOLED_MIN_USERS:
+                continue
+            if member_id not in candidate.pool:
+                continue
+            if best is None or candidate.credit_limit > best.credit_limit:
+                best = candidate
+        return best
 
     # -----------------------------------------------------------------------
     # Smart-credit ledger
@@ -615,7 +731,20 @@ class UsageMeter:
             if row is None or row[5] == "settled":
                 return 0
             user_id, period_key, reserved, min_credits, free_group, status, prior_charge = row
-            charged = charge_for(min_credits, actual_usd) if enriched else credits_for_usd(actual_usd)
+            uncapped = charge_for(min_credits, actual_usd) if enriched else credits_for_usd(actual_usd)
+            # The reservation is the write's hard AI budget: never charge past it,
+            # so credits_used cannot pass the plan ceiling. Spend above the hold
+            # (the last call's estimate was short) is a platform loss, logged.
+            charged = min(uncapped, int(reserved))
+            if uncapped > charged:
+                logger.warning(
+                    "credit_settle_over_reservation user=%s reservation=%s reserved=%s actual_credits=%s platform_loss_usd=%.5f",
+                    user_id,
+                    reservation_id,
+                    reserved,
+                    uncapped,
+                    max(0.0, actual_usd - int(reserved) * CREDIT_USD),
+                )
             if status == "expired":
                 # The hold was already released and the minimum charged.
                 delta = max(0, charged - int(prior_charge))
@@ -657,13 +786,22 @@ class UsageMeter:
         return final_charge
 
     async def record_unreserved_spend(self, account: AccountState, actual_usd: float) -> int:
-        """Charge AI spend that ran without a reservation (e.g. sleep-time work). Returns credits."""
+        """Charge AI spend that ran without a reservation (e.g. sleep-time work). Returns credits.
+
+        The charge never takes the account past its credit limit (the work was
+        budgeted by the credits left); any excess is logged as platform loss.
+        The real dollars are always recorded.
+        """
         if actual_usd <= 0:
             return 0
-        charged = credits_for_usd(actual_usd)
+        wanted = credits_for_usd(actual_usd)
         now = now_utc()
         async with self._tx():
             await self._ensure_period(account.user_id, account.period.key)
+            balance = await self.get_credit_balance(account)
+            charged = min(wanted, balance.remaining)
+            if wanted > charged:
+                logger.warning("unreserved_spend_over_limit user=%s credits=%s charged=%s", account.user_id, wanted, charged)
             await self._db.conn.execute(
                 "UPDATE cloud_credit_periods SET credits_used = credits_used + ?, llm_usd = llm_usd + ?"
                 " WHERE user_id = ? AND period_key = ?",
@@ -673,15 +811,30 @@ class UsageMeter:
             await self._add_ai_spend(now, "free" if account.free_group else "paid", actual_usd)
         return charged
 
-    async def expire_stale_reservations(self, *, user_id: str | None = None, older_than: timedelta | None = None) -> int:
+    async def expire_stale_reservations(
+        self,
+        *,
+        user_id: str | None = None,
+        older_than: timedelta | None = None,
+        created_before: datetime | None = None,
+    ) -> int:
         """Release reservations whose work never settled (lost task / restart).
 
         The hold is released and the chunk minimum is charged; if the work does
-        finish later, :meth:`settle_reservation` charges the difference.
+        finish later, :meth:`settle_reservation` charges the difference (capped
+        at the reservation). A reservation whose spend job is still alive in
+        this process is never expired, however old: its work is queued or
+        running and will settle. ``created_before`` (startup) expires the holds
+        of a previous process: everything opened before this one started.
         """
-        if older_than is None:
-            older_than = timedelta(minutes=get_settings().credit_reservation_stale_minutes)
-        cutoff = (now_utc() - older_than).isoformat()
+        from remembra.core import ai_spend
+
+        if created_before is not None:
+            cutoff = created_before.isoformat()
+        else:
+            if older_than is None:
+                older_than = timedelta(minutes=get_settings().credit_reservation_stale_minutes)
+            cutoff = (now_utc() - older_than).isoformat()
         query = (
             "SELECT id, user_id, period_key, credits, min_credits FROM cloud_credit_reservations"
             " WHERE status = 'open' AND created_at < ?"
@@ -691,7 +844,7 @@ class UsageMeter:
             query += " AND user_id = ?"
             params.append(user_id)
         cursor = await self._db.conn.execute(query, params)
-        rows = await cursor.fetchall()
+        rows = [row for row in await cursor.fetchall() if not ai_spend.is_live_reservation(str(row[0]))]
         if not rows:
             return 0
         now = now_utc()
@@ -766,12 +919,17 @@ class UsageMeter:
         return max(floor, float(settings.free_breaker_revenue_pct) * revenue)
 
     async def free_tier_spend(self, now: datetime | None = None) -> float:
-        """Free-group AI spend this month, including open (not yet settled) free reservations."""
+        """Free-group AI spend this month, including free reservations not settled yet.
+
+        Open holds count at their full size, and so do expired ones (released
+        from the account but not yet settled: their work may have spent up to
+        the hold and a late settle only then records the real dollars).
+        """
         now = now or now_utc()
         spent = await self.ai_spend_month("free", now)
         cursor = await self._db.conn.execute(
             "SELECT COALESCE(SUM(credits), 0) FROM cloud_credit_reservations"
-            " WHERE status = 'open' AND free_group = 1 AND created_at >= ?",
+            " WHERE status IN ('open', 'expired') AND free_group = 1 AND created_at >= ?",
             (_month_start(now).isoformat(),),
         )
         row = await cursor.fetchone()
@@ -784,6 +942,126 @@ class UsageMeter:
             return False
         now = now or now_utc()
         return await self.free_tier_spend(now) >= await self.free_breaker_budget(now)
+
+    # -----------------------------------------------------------------------
+    # AI spend outside a metered write (ai_spend.AttributionPolicy)
+    # -----------------------------------------------------------------------
+
+    async def allow_unattributed_ai(self, user_id: str) -> bool:
+        """Optional paid AI outside a write (Jev on a recall): never for the free group.
+
+        Recalls never use credits, so for Free accounts (unbounded in number)
+        that spend would be invisible to every ceiling; they just skip it.
+        """
+        account = await self.get_account(user_id)
+        return not account.free_group
+
+    async def record_unattributed_ai(self, user_id: str, usd: float) -> None:
+        """Count AI dollars spent outside a write in the monthly group totals (no credits)."""
+        if usd <= 0:
+            return
+        account = await self.get_account(user_id)
+        now = now_utc()
+        async with self._tx():
+            await self._add_ai_spend(now, "free" if account.free_group else "paid", usd)
+            await self._increment_daily(account.user_id, now, llm_usd=usd)
+
+    # -----------------------------------------------------------------------
+    # Unenriched writes (atomic / degraded / relay): daily cap + embedding spend
+    # -----------------------------------------------------------------------
+
+    async def take_unenriched_writes(self, account: AccountState, count: int) -> bool:
+        """Count ``count`` unenriched writes for today; False when the plan's daily cap would be passed.
+
+        Atomic (check and increment in one UPDATE), so concurrent requests
+        cannot overshoot the cap. Plans without a cap always succeed.
+        """
+        if count <= 0:
+            return True
+        cap = account.limits.max_unenriched_writes_per_day
+        today = now_utc().strftime("%Y-%m-%d")
+        async with self._tx():
+            await self._db.conn.execute(
+                "INSERT OR IGNORE INTO cloud_usage_daily (user_id, date) VALUES (?, ?)", (account.user_id, today)
+            )
+            if cap is None:
+                await self._db.conn.execute(
+                    "UPDATE cloud_usage_daily SET unenriched_writes = COALESCE(unenriched_writes, 0) + ?"
+                    " WHERE user_id = ? AND date = ?",
+                    (count, account.user_id, today),
+                )
+                return True
+            cursor = await self._db.conn.execute(
+                "UPDATE cloud_usage_daily SET unenriched_writes = COALESCE(unenriched_writes, 0) + ?"
+                " WHERE user_id = ? AND date = ? AND COALESCE(unenriched_writes, 0) + ? <= ?",
+                (count, account.user_id, today, count, cap),
+            )
+            return bool(cursor.rowcount)
+
+    @staticmethod
+    def embedding_usd(texts: list[str], model: str | None = None) -> float:
+        """Estimated embedding cost of ``texts`` (characters / 4 tokens at the model's list price)."""
+        name = (model or get_settings().embedding_model or "").strip().lower()
+        price = EMBEDDING_PRICES_PER_M.get(name, UNKNOWN_EMBEDDING_PRICE_PER_M)
+        tokens = sum(len(t or "") for t in texts) / EMBEDDING_CHARS_PER_TOKEN
+        return tokens * price / 1_000_000
+
+    async def record_embedding_spend(self, account: AccountState, texts: list[str]) -> float:
+        """Add the embedding cost of a write to the group's monthly AI spend (free breaker). No credits."""
+        usd = self.embedding_usd(texts)
+        if usd <= 0:
+            return 0.0
+        now = now_utc()
+        async with self._tx():
+            await self._add_ai_spend(now, "free" if account.free_group else "paid", usd)
+        return usd
+
+    # -----------------------------------------------------------------------
+    # Founding 100 and billing flags
+    # -----------------------------------------------------------------------
+
+    async def claim_founding(self, user_id: str) -> bool:
+        """Mark ``user_id`` as a Founding 100 holder if a seat is left (atomic). True if it holds one.
+
+        An account that already holds the founding price keeps it (renewals).
+        The count check and the flag are one UPDATE, so concurrent webhooks
+        cannot pass the cap.
+        """
+        tenant = await self.get_tenant(user_id)
+        if tenant is None:
+            return False
+        if tenant.get("founding"):
+            return True
+        async with self._tx():
+            cursor = await self._db.conn.execute(
+                """
+                UPDATE cloud_tenants SET founding = 1, updated_at = ?
+                WHERE user_id = ? AND COALESCE(founding, 0) = 0
+                  AND (SELECT COUNT(*) FROM cloud_tenants WHERE founding = 1) < ?
+                """,
+                (now_utc().isoformat(), user_id, FOUNDING_MAX_REDEMPTIONS),
+            )
+            return bool(cursor.rowcount)
+
+    async def set_billing_flag(self, user_id: str, flag: str | None) -> None:
+        await self._db.conn.execute(
+            "UPDATE cloud_tenants SET billing_flag = ?, updated_at = ? WHERE user_id = ?",
+            (flag, now_utc().isoformat(), user_id),
+        )
+        await self._db.conn.commit()
+
+    async def find_tenant_by_billing_ids(self, *, subscription_id: str | None, customer_id: str | None) -> str | None:
+        """The user id holding a Paddle subscription (preferred) or customer id."""
+        for column, value in (("stripe_subscription_id", subscription_id), ("stripe_customer_id", customer_id)):
+            if not value:
+                continue
+            cursor = await self._db.conn.execute(
+                f"SELECT user_id FROM cloud_tenants WHERE {column} = ? ORDER BY updated_at DESC LIMIT 1", (value,)
+            )
+            row = await cursor.fetchone()
+            if row:
+                return str(row[0])
+        return None
 
     # -----------------------------------------------------------------------
     # Usage tracking
@@ -850,6 +1128,16 @@ class UsageMeter:
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
+    async def count_pool_memories(self, account: AccountState) -> int:
+        """Memories stored by every user sharing the account's memory cap (a team pool)."""
+        pool = account.pool
+        if len(pool) == 1:
+            return await self.count_memories(pool[0])
+        marks = ",".join("?" for _ in pool)
+        cursor = await self._db.conn.execute(f"SELECT COUNT(*) FROM memories WHERE user_id IN ({marks})", pool)
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
     async def project_exists(self, user_id: str, project_id: str) -> bool:
         cursor = await self._db.conn.execute(
             "SELECT 1 FROM memories WHERE user_id = ? AND project_id = ? LIMIT 1", (user_id, project_id)
@@ -861,15 +1149,22 @@ class UsageMeter:
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
-    async def get_period_counters(self, user_id: str, start: datetime, end: datetime | None = None) -> dict[str, int]:
-        """Summed daily counters (stores, recalls, relay events, degraded stores) in [start, end)."""
-        query = """
+    async def get_period_counters(
+        self, user_id: str | tuple[str, ...], start: datetime, end: datetime | None = None
+    ) -> dict[str, int]:
+        """Summed daily counters (stores, recalls, relay events, degraded stores) in [start, end).
+
+        ``user_id`` may be a tuple of users (a team pool): their counters are summed.
+        """
+        users = (user_id,) if isinstance(user_id, str) else tuple(user_id)
+        marks = ",".join("?" for _ in users)
+        query = f"""
             SELECT
                 COALESCE(SUM(stores), 0), COALESCE(SUM(recalls), 0),
                 COALESCE(SUM(relay_events), 0), COALESCE(SUM(degraded_stores), 0)
-            FROM cloud_usage_daily WHERE user_id = ? AND date >= ?
+            FROM cloud_usage_daily WHERE user_id IN ({marks}) AND date >= ?
         """
-        params: list[Any] = [user_id, start.strftime("%Y-%m-%d")]
+        params: list[Any] = [*users, start.strftime("%Y-%m-%d")]
         if end is not None:
             query += " AND date < ?"
             params.append(end.strftime("%Y-%m-%d"))
@@ -893,7 +1188,7 @@ class UsageMeter:
         return UsageSnapshot(
             user_id=user_id,
             plan=account.tier,
-            memories_stored=await self.count_memories(user_id),
+            memories_stored=await self.count_pool_memories(account),
             recalls_this_month=month["recalls"],
             stores_this_month=month["stores"],
             api_keys_active=api_keys_active,

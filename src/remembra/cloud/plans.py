@@ -3,7 +3,8 @@ Plan catalog and limit checks for Remembra Cloud (the ONE plan module).
 
 Owner-approved prices (2026-09):
 
-  - free:        $0            relay free, 500 smart credits/mo (25 until email verified)
+  - free:        $0            relay free, 500 smart credits/mo (new accounts: 25 until
+                               email verified, once that hold is enabled), 300 unenriched stores/day
   - solo:        $12/mo  or $120/yr   2,200 credits/mo, 50K memories
   - founding:    Solo at $108/yr, price locked for life, annual only, first 100
   - pro:         $29/mo  or $290/yr   5,000 credits/mo, 125K memories
@@ -119,6 +120,11 @@ class PlanLimits:
     # Email verification gate (Free): credits available before the address is verified
     unverified_credit_cap: int | None = None
 
+    # Writes stored WITHOUT enrichment (atomic, degraded, relay) per UTC day.
+    # Each still embeds; None = unlimited (paid plans are bounded by rate limits
+    # and their memory cap).
+    max_unenriched_writes_per_day: int | None = None
+
     # Memory cap before the 30-day notice of a cap reduction takes effect
     # (None = the cap did not shrink for this tier).
     pre_notice_max_memories: int | None = None
@@ -150,10 +156,14 @@ class PlanLimits:
         """Hard monthly AI-spend ceiling implied by the credit allowance."""
         return round(self.max_smart_credits_per_month * CREDIT_USD, 4)
 
-    def credit_allowance(self, interval: BillingInterval) -> int:
-        """Credits available per billing period: a month, or a yearly bank of 12 months."""
+    def credit_allowance(self, interval: BillingInterval, months_released: int = MONTHS_PER_YEAR) -> int:
+        """Credits available in the billing period: a month, or the released part of the yearly bank.
+
+        ``months_released`` (annual only) is how many months of the yearly bank
+        are available so far (12 = the whole bank).
+        """
         if interval == BillingInterval.YEAR:
-            return self.max_smart_credits_per_month * MONTHS_PER_YEAR
+            return self.max_smart_credits_per_month * max(1, min(MONTHS_PER_YEAR, months_released))
         return self.max_smart_credits_per_month
 
     def memory_cap(self, now: datetime, notice_effective_at: datetime | None) -> int:
@@ -169,11 +179,15 @@ class PlanLimits:
             return self.pre_notice_max_memories
         return self.max_memories
 
-    def scaled(self, seats: int) -> PlanLimits:
-        """Pooled limits for ``seats`` billed seats (identity for non-seat plans)."""
+    def scaled(self, seats: int | None) -> PlanLimits:
+        """Pooled limits for ``seats`` billed seats (identity for non-seat plans).
+
+        Exactly the seats that were paid for: a quantity below the plan minimum
+        is not rounded up. Unknown seats (None, e.g. a promo trial) get the minimum.
+        """
         if not self.per_seat:
             return self
-        seats = max(self.min_seats, int(seats or 0))
+        seats = self.min_seats if not seats else max(1, int(seats))
         return replace(
             self,
             max_memories=self.max_memories * seats,
@@ -207,6 +221,7 @@ PLANS: dict[PlanTier, PlanLimits] = {
         max_storage_mb=250,
         max_smart_credits_per_month=500,  # $1.25 AI ceiling
         unverified_credit_cap=25,
+        max_unenriched_writes_per_day=300,
         max_recalls_per_month=10_000,
         max_relay_events_per_month=5_000,
         max_content_chars=8_000,

@@ -16,11 +16,19 @@ plan's input limits and memory cap, then decides whether the write may be
   ``X-Remembra-Enrichment: full|degraded|atomic`` and
   ``X-Remembra-Credits-Remaining``;
 * relay writes (handoff / checkpoint / status / inbox) and explicit atomic
-  stores never touch credits.
+  stores never touch credits;
+* an enriched write's spend job carries the reservation as a hard AI budget:
+  once it is used up, the rest of the write falls back to atomic
+  (:mod:`remembra.core.ai_spend`).
 
-The only 429 on a write is the memory cap. Recalls have their own monthly
-limit and per-plan burst limit; relay events have a per-plan burst limit and
-a soft monthly cap that is reported, not enforced.
+A write is rejected (429) only at the memory cap or, on Free, past the daily
+cap on unenriched writes (atomic, degraded and relay stores: 300/day), which
+bounds the embedding spend nothing else meters. Recalls have their own
+monthly limit and per-plan burst limit; relay events have a per-plan burst
+limit and a soft monthly cap that is reported, not enforced.
+
+Team members of a pooled plan (Team, legacy Pro/Team, Enterprise) are metered
+against the owner's account: shared ledger, limits and memory cap.
 
 All of this is a no-op when cloud features are disabled (self-hosted).
 """
@@ -44,6 +52,7 @@ from remembra.auth.middleware import (
 )
 from remembra.cloud.metering import AccountState, CreditPeriod, UsageMeter, now_utc
 from remembra.cloud.plans import (
+    CREDIT_USD,
     OUT_OF_CREDITS_HINT,
     RESERVE_CREDITS_PER_CHUNK,
     PlanTier,
@@ -189,7 +198,7 @@ async def _memory_cap_guard(
 ) -> None:
     """Usage headers + warning emails; 429 when ``adding`` memories would pass the cap."""
     user_id = account.user_id
-    stored = await meter.count_memories(user_id)
+    stored = await meter.count_pool_memories(account)
     cap = max(1, account.memory_cap)
     usage_percent = round(stored / cap * 100, 1)
 
@@ -248,7 +257,7 @@ async def _recall_guard(request: Request, response: Response | None, user_id: st
             status_code=422,
             detail=f"Your plan allows up to {limits.max_batch_recall_queries} queries per batch recall.",
         )
-    month = await meter.get_period_counters(user_id, _calendar_month_start())
+    month = await meter.get_period_counters(account.pool, _calendar_month_start())
     used = month["recalls"]
     usage_percent = round(used / max(1, limits.max_recalls_per_month) * 100, 1)
     if response is not None:
@@ -353,14 +362,14 @@ def _set_enrichment_headers(response: Response | None, grant: EnrichmentGrant, t
         response.headers[PLAN_HEADER] = tier
 
 
-async def _project_guard(meter: UsageMeter, account: AccountState, project_ids: Iterable[str]) -> None:
+async def _project_guard(meter: UsageMeter, account: AccountState, writer_id: str, project_ids: Iterable[str]) -> None:
     wanted = {p for p in project_ids if p}
     if not wanted:
         return
-    new = [p for p in wanted if not await meter.project_exists(account.user_id, p)]
+    new = [p for p in wanted if not await meter.project_exists(writer_id, p)]
     if not new:
         return
-    existing = await meter.count_projects(account.user_id)
+    existing = await meter.count_projects(writer_id)
     if existing + len(new) > account.limits.max_projects:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -370,6 +379,25 @@ async def _project_guard(meter: UsageMeter, account: AccountState, project_ids: 
                 "Solo includes unlimited projects."
             ),
         )
+
+
+async def _unenriched_guard(meter: UsageMeter, account: AccountState, texts: Sequence[str]) -> None:
+    """Free: 429 past the daily cap on unenriched writes; their embedding cost feeds the free breaker."""
+    if not texts:
+        return
+    cap = account.limits.max_unenriched_writes_per_day
+    if cap is not None and account.free_group and not await meter.take_unenriched_writes(account, len(texts)):
+        logger.warning("unenriched_daily_cap_reached", user_id=account.user_id, plan=account.tier.value, requested=len(texts))
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=(
+                f"Daily limit reached: {cap:,} stores without enrichment per day on the "
+                f"{account.limits.display_name} plan. It resets at 00:00 UTC; Solo has no daily limit."
+            ),
+            headers={"Retry-After": "3600", "X-RateLimit-Limit": str(cap), "X-RateLimit-Remaining": "0"},
+        )
+    if account.free_group:
+        await meter.record_embedding_spend(account, list(texts))
 
 
 async def relay_guard(request: Request, response: Response | None, user_id: str) -> None:
@@ -401,6 +429,7 @@ async def gate_write(
     enforce_batch_limit: bool = True,
     enforce_content_limit: bool = True,
     relay: bool = False,
+    count_unenriched: bool = True,
 ) -> EnrichmentGrant:
     """Gate one write request BEFORE any LLM call.
 
@@ -414,11 +443,13 @@ async def gate_write(
             size and per-store character limits (imports/ingest are chunk
             metered instead).
         relay: the write is a relay event (per-plan relay burst limit).
+        count_unenriched: count atomic / degraded items toward the plan's daily
+            unenriched-write cap (False when nothing is embedded server side).
 
     Raises:
         413 content over the plan's per-store limit; 422 batch too large;
-        403 new project over the plan's project cap; 429 memory cap (or a
-        relay burst).
+        403 new project over the plan's project cap; 429 memory cap, a
+        relay burst, or (Free) the daily unenriched-write cap.
     """
     meter = _get_meter_or_none(request)
     if meter is None:
@@ -444,11 +475,14 @@ async def gate_write(
             )
 
     await _memory_cap_guard(request, response, meter, account, len(contents) if memories_added is None else memories_added)
-    await _project_guard(meter, account, project_ids)
+    await _project_guard(meter, account, user_id, project_ids)
     if relay:
         await relay_guard(request, response, user_id)
 
     enrichable = [c for c, is_atomic in zip(contents, flags, strict=False) if not is_atomic]
+    atomic_items = [c for c, is_atomic in zip(contents, flags, strict=False) if is_atomic]
+    if count_unenriched:
+        await _unenriched_guard(meter, account, atomic_items)
     if not enrichable:
         balance = await meter.get_credit_balance(account)
         grant = EnrichmentGrant(mode="atomic", credits_remaining=balance.remaining, user_id=user_id, meter=meter)
@@ -468,6 +502,8 @@ async def gate_write(
     balance = await meter.get_credit_balance(account)
     if reservation_id is None:
         logger.info("enrichment_degraded", user_id=user_id, reason=reason, chunks=min_credits, plan=account.tier.value)
+        if count_unenriched:
+            await _unenriched_guard(meter, account, enrichable)
         grant = EnrichmentGrant(
             mode="degraded",
             reason=reason,
@@ -482,6 +518,9 @@ async def gate_write(
         return grant
 
     rid = reservation_id
+    reserved = min_credits * RESERVE_CREDITS_PER_CHUNK
+    if account.free_group:
+        await meter.record_embedding_spend(account, enrichable)
 
     async def _settle(usd: float, enriched: bool) -> int:
         return await meter.settle_reservation(rid, usd, enriched=enriched)
@@ -491,12 +530,15 @@ async def gate_write(
         settle=_settle,
         concurrency=limits.enrichment_concurrency,
         label=request.url.path,
+        # The reservation is a hard budget: no AI call may take the write past it.
+        budget_usd=reserved * CREDIT_USD,
+        reservation_id=rid,
     )
     grant = EnrichmentGrant(
         mode="full",
         job=job,
         credits_remaining=balance.remaining,
-        reserved_credits=min_credits * RESERVE_CREDITS_PER_CHUNK,
+        reserved_credits=reserved,
         min_credits=min_credits,
         user_id=user_id,
         meter=meter,

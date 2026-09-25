@@ -23,6 +23,16 @@ CHAT_PRICES_PER_M: dict[str, tuple[float, float, float]] = {
     "gpt-5-nano": (0.05, 0.005, 0.40),
     "gpt-5-mini": (0.25, 0.025, 2.00),
     "gpt-5": (1.25, 0.125, 10.00),
+    # Anthropic (entity extraction can run on Claude; usage is mapped to these fields)
+    "claude-haiku-4": (1.00, 0.10, 5.00),
+    "claude-sonnet-4": (3.00, 0.30, 15.00),
+    "claude-sonnet-5": (2.00, 0.20, 10.00),
+    "claude-opus-4": (15.00, 1.50, 75.00),  # Opus 4 / 4.1; newer Opus prefixes below
+    "claude-opus-4-5": (5.00, 0.50, 25.00),
+    "claude-opus-4-6": (5.00, 0.50, 25.00),
+    "claude-opus-4-7": (5.00, 0.50, 25.00),
+    "claude-opus-4-8": (5.00, 0.50, 25.00),
+    "claude-opus-5": (5.00, 0.50, 25.00),
 }
 # Conservative fallback for models not in the table.
 UNKNOWN_CHAT_PRICE_PER_M: tuple[float, float, float] = (2.50, 1.25, 10.00)
@@ -54,6 +64,20 @@ def _field(obj: Any, name: str) -> Any:
 
 def _int(value: Any) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else 0
+
+
+def anthropic_usage(usage: Any) -> dict[str, Any] | None:
+    """Map an Anthropic ``usage`` block (input/output/cache-read tokens) to the OpenAI field names."""
+    if usage is None:
+        return None
+    fresh = _int(_field(usage, "input_tokens"))
+    cached = _int(_field(usage, "cache_read_input_tokens"))
+    created = _int(_field(usage, "cache_creation_input_tokens"))
+    return {
+        "prompt_tokens": fresh + cached + created,
+        "completion_tokens": _int(_field(usage, "output_tokens")),
+        "prompt_tokens_details": {"cached_tokens": cached},
+    }
 
 
 def usd_for(usage: Any, model: str) -> float:

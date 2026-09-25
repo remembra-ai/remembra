@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import structlog
 from openai import AsyncOpenAI
 
-from remembra.core.ai_spend import record_llm_usage
+from remembra.core.ai_spend import metered_chat
 from remembra.extraction.entities import ExtractedEntity
 from remembra.extraction.prompting import wrap_untrusted
 
@@ -240,7 +240,8 @@ class EntityMatcher:
                 candidates=len(existing_json),
             )
 
-            response = await client.chat.completions.create(
+            response = await metered_chat(
+                client,
                 model=self.model,
                 messages=[
                     {"role": "system", "content": ENTITY_MATCHING_PROMPT},
@@ -260,7 +261,6 @@ Does the new mention match any existing entity?
                 response_format={"type": "json_object"},
                 timeout=30.0,
             )
-            record_llm_usage(response, self.model)
 
             result_text = response.choices[0].message.content
             if not result_text:

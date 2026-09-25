@@ -20,7 +20,7 @@ import structlog
 from openai import AsyncOpenAI
 
 from remembra.config import Settings
-from remembra.core.ai_spend import record_llm_usage
+from remembra.core.ai_spend import SpendBudgetExceeded, metered_chat
 from remembra.core.time import utcnow
 from remembra.extraction.prompting import reference_date_line, wrap_untrusted
 from remembra.extraction.prompts.conversation import (
@@ -131,6 +131,10 @@ class ConversationIngestService:
                 context=request.context,
             )
         except ConversationExtractionError as e:
+            if isinstance(e.__cause__, SpendBudgetExceeded):
+                # The write's reserved AI budget is used up: keep the messages verbatim.
+                log.info("conversation_extraction_skipped_budget")
+                return await self._store_raw_messages(request, start_time)
             log.error("conversation_extraction_failed", error=str(e))
             errors.append(f"Extraction failed: {e}")
             return response("error")
@@ -344,7 +348,8 @@ class ConversationIngestService:
         )
 
         try:
-            response = await self._get_client().chat.completions.create(
+            response = await metered_chat(
+                self._get_client(),
                 model=self.settings.extraction_model,
                 messages=[
                     {"role": "system", "content": CONVERSATION_EXTRACTION_SYSTEM_PROMPT},
@@ -356,7 +361,6 @@ class ConversationIngestService:
             )
         except Exception as e:
             raise ConversationExtractionError(type(e).__name__) from e
-        record_llm_usage(response, self.settings.extraction_model)
 
         result_text = response.choices[0].message.content
         if not result_text:
