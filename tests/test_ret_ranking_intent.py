@@ -54,6 +54,32 @@ async def test_regression_just_working_on_ranks_fresh_memory_first(stack) -> Non
     assert resp.memories[0].semantic_score == pytest.approx(0.55, abs=0.01)
 
 
+async def test_recency_query_surfaces_fresh_memory_with_no_shared_wording(stack) -> None:
+    """Live 2026-09-25: the newest handoff shared no wording with 'what was I
+    just working on' (cosine below the search threshold), so it never entered
+    the candidate pool and older 'context loaded' notes won. Recency-intent
+    recall must pull the newest memories into the pool itself."""
+    stack.emb.vectors[QUERY] = unit(1)
+    for i in range(6):
+        await stack.seed(f"Context loaded for workspace session {i}", vector=with_cosine(0.9), days_ago=6 + i)
+    fresh = await stack.seed("Remembra remediation is live at build 04017a2", vector=with_cosine(0.05))
+
+    resp = await _recall(stack, QUERY, limit=3)
+
+    assert resp.retrieval_mode == "debug"
+    assert resp.memories[0].id == fresh
+
+
+async def test_recent_pool_is_not_used_outside_recency_intent(stack) -> None:
+    stack.emb.vectors[QUERY] = unit(1)
+    await stack.seed("Context loaded for workspace session", vector=with_cosine(0.9), days_ago=6)
+    fresh = await stack.seed("Remembra remediation is live at build 04017a2", vector=with_cosine(0.05))
+
+    resp = await _recall(stack, QUERY, retrieval_mode="balanced")
+
+    assert fresh not in [m.id for m in resp.memories]
+
+
 async def test_explicit_mode_is_respected_over_inference(stack) -> None:
     """The same data with an explicit 'balanced' mode keeps similarity on top -
     proving the routing (not a ranking change) is what fixed the query."""

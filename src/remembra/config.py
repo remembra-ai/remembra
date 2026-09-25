@@ -515,6 +515,13 @@ class Settings(BaseSettings):
     pending_embeddings_poll_seconds: float = Field(5.0, description="Pending-embedding worker poll interval")
     pending_embeddings_batch_size: int = Field(20, description="Rows claimed per worker iteration")
     pending_embeddings_max_attempts: int = Field(12, description="Retryable failures before a pending embedding is dead-lettered")
+    recall_recent_pool: int = Field(
+        10,
+        description=(
+            "For recency-intent recalls (debug mode), also add this many of the newest memories to the "
+            "candidate pool so recent work surfaces even when it shares no wording with the query (0 disables)."
+        ),
+    )
     temporal_cleanup_enabled: bool = Field(
         False,
         description=(

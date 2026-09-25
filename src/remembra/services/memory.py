@@ -2037,6 +2037,26 @@ class MemoryService:
             except Exception as e:
                 log.warning("fts_search_failed", error=str(e))
 
+        # Step 3b: recency-intent queries ("what was I just working on") also
+        # consider the newest memories. Semantic/keyword search only surfaces
+        # rows that share wording with the query, so a fresh handoff phrased
+        # differently never entered the pool and debug-mode recency ranking had
+        # nothing recent to promote (RET-1, observed live 2026-09-25).
+        if mode.mode == "debug" and ctx.as_of is None and self.settings.recall_recent_pool > 0:
+            try:
+                recent = await self.db.list_memories(request.user_id, request.project_id, limit=self.settings.recall_recent_pool)
+                missing = [r["id"] for r in recent if r["id"] not in candidates]
+                rows = await self.db.get_memories_by_ids(missing)
+                for mid in missing:
+                    row = rows.get(mid)
+                    if row is None or not self._row_eligible(row, ctx):
+                        continue
+                    cand = _Candidate(id=mid, row=row)
+                    cand.sources.add("recent")
+                    candidates[mid] = cand
+            except Exception as e:
+                log.warning("recent_candidates_failed", error=str(e))
+
         # Step 4: entity graph (scoped to user + project)
         matched_entities: list[EntityRef] = []
         related_entities: list[EntityRef] = []

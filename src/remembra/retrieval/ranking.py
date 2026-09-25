@@ -70,7 +70,10 @@ class RankingConfig:
             return cls(
                 semantic_weight=0.35,
                 recency_weight=0.45,
-                recency_decay_days=7.0,  # Fast decay
+                # 2-day half-life: "what was I just doing" means today/yesterday.
+                # At 7 days a week-old note kept 55% of its recency score and
+                # out-ranked today's handoff on incidental wording (live 2026-09-25).
+                recency_decay_days=2.0,
                 entity_weight=0.10,
                 keyword_weight=0.10,
                 access_weight=0.0,

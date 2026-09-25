@@ -108,6 +108,9 @@ COPY --from=dashboard-builder /app/dashboard/dist /app/static
 COPY src/ ./src/
 COPY scripts/cloud-entrypoint.sh /app/cloud-entrypoint.sh
 RUN chmod +x /app/cloud-entrypoint.sh
+# Operator maintenance scripts (all dry-run by default), run with
+#   docker exec <container> python scripts/maintenance/<script>.py
+COPY scripts/maintenance/*.py ./scripts/maintenance/
 
 # Create data directory (volume mounted here)
 RUN mkdir -p /data && chown -R remembra:remembra /data
