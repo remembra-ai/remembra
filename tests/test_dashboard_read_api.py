@@ -115,6 +115,37 @@ def test_trail_filters_by_agent(api):
     _get(api, "/trail", {"agent_id": "bad agent!"}, status=400)
 
 
+def test_trail_cursor_pages_without_gaps_when_new_entries_arrive(api):
+    base = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+    # Six entries; two share a timestamp, so the id breaks the tie.
+    for i, minutes in enumerate([0, 1, 2, 3, 3, 4]):
+        _seed_handoff(api, f"h{i}", "claude-code", base + timedelta(minutes=minutes))
+    head = _get(api, "/trail", {"limit": 2})
+    assert [i["id"] for i in head["items"]] == ["h5", "h4"] and head["total"] == 6
+
+    oldest = head["items"][-1]
+    page = _get(api, "/trail", {"limit": 2, "before": oldest["created_at"], "before_id": oldest["id"]})
+    assert [i["id"] for i in page["items"]] == ["h3", "h2"]
+    assert page["total"] == 4  # entries older than the cursor
+    assert page["before"] == {"created_at": "2026-09-01T12:03:00", "id": "h4"} and head["before"] is None
+
+    # New handoffs land at the top. An offset page would now skip h1/h0's
+    # neighbours; the cursor continues exactly where the reader left off.
+    for i in range(3):
+        _seed_handoff(api, f"new{i}", "codex", base + timedelta(minutes=10 + i))
+    oldest = page["items"][-1]
+    rest = _get(api, "/trail", {"limit": 5, "before": oldest["created_at"], "before_id": oldest["id"]})
+    assert [i["id"] for i in rest["items"]] == ["h1", "h0"] and rest["total"] == 2
+
+    # Filters combine with the cursor; a time without an id keeps strictly older rows.
+    assert _get(api, "/trail", {"agent_id": "codex", "before": oldest["created_at"]})["total"] == 0
+    tie = _get(api, "/trail", {"before": head["items"][-1]["created_at"]})
+    assert [i["id"] for i in tie["items"]] == ["h2", "h1", "h0"]  # both 12:03 entries excluded
+
+    _get(api, "/trail", {"before": "yesterday"}, status=400)
+    _get(api, "/trail", {"before_id": "h1"}, status=400)
+
+
 # ---------------------------------------------------------------------------
 # Activity summary
 # ---------------------------------------------------------------------------

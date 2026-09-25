@@ -158,6 +158,7 @@ class AgentSessionService:
         offset: int = 0,
         newest_first: bool = False,
         agent_id: str | None = None,
+        before: tuple[datetime, str | None] | None = None,
     ) -> dict[str, Any]:
         """Chronological memories with server-side created_at range filtering.
 
@@ -165,8 +166,12 @@ class AgentSessionService:
         entity's canonical name or alias exactly (case-insensitive) — never a
         substring, so "A" or "bot" can't pull in unrelated memories.
         ``agent_id`` keeps only memories whose metadata names that agent.
+        ``before`` is a keyset cursor ``(created_at, id)``: only memories that
+        sort strictly after it in newest-first order (older, or the same time
+        with a smaller id) are returned, so a page does not shift when newer
+        rows arrive. A ``None`` id keeps rows strictly older than the time.
         Returns ``{"memories": [...], "total": N}`` where ``total`` counts all
-        matches ignoring limit/offset.
+        matches (after the cursor, when given) ignoring limit/offset.
         """
         where, params = self._active_clause(user_id, include_superseded)
         if project_id:
@@ -184,6 +189,14 @@ class AgentSessionService:
         if agent_id:
             where += " AND json_valid(metadata) AND json_extract(metadata, '$.agent_id') = ?"
             params.append(agent_id)
+        if before is not None:
+            before_at = _to_naive_utc_iso(before[0])
+            if before[1]:
+                where += " AND (julianday(created_at) < julianday(?) OR (julianday(created_at) = julianday(?) AND id < ?))"
+                params.extend([before_at, before_at, before[1]])
+            else:
+                where += " AND julianday(created_at) < julianday(?)"
+                params.append(before_at)
         if exclude_types:
             where += f" AND (memory_type IS NULL OR memory_type NOT IN ({','.join('?' for _ in exclude_types)}))"
             params.extend(exclude_types)

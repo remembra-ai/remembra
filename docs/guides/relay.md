@@ -35,7 +35,13 @@ remembra-relay connect --apply    # writes the hooks (backups kept as *.bak-rela
 
 `connect` reads your existing Remembra config (`REMEMBRA_URL` / `REMEMBRA_API_KEY`, the `remembra` MCP
 server in `~/.claude.json` or `~/.codex/config.toml`, or `~/.remembra/credentials`). It never writes API
-keys into new places.
+keys into new places. When it finds no key it still shows (or writes) the hooks, prints a warning on stderr
+and exits 1: without a key the hooks cannot load or save anything. To save one where the hooks read it:
+
+```bash
+pipx install --force 'remembra>=0.16'   # the first release with remembra-relay
+remembra-install --all --api-key <your key> --url <your server URL>   # writes ~/.remembra/credentials
+```
 
 | Agent | Hooks | Status |
 |-------|-------|--------|
@@ -46,7 +52,8 @@ keys into new places.
 | Qwen Code | `~/.qwen/settings.json` SessionStart / SessionEnd (JSON-only stdout) | unverified |
 | Kimi Code | `~/.kimi/config.toml` `[[hooks]]` | unverified |
 
-Unverified adapters are dry-run only unless you pass `--include-unverified`. For agents without hooks,
+Unverified adapters are dry-run only unless you pass `--include-unverified`; `connect --apply` ends by
+listing the ones it skipped and the command that writes them. For agents without hooks,
 `connect --agents-md PATH --apply` adds a short marked section to an `AGENTS.md`. Any MCP-capable agent is
 also told by the MCP server to call `session_brief` at start and `close_session` before finishing.
 
@@ -74,7 +81,7 @@ Use `resolve --project clawdbot --bind` to point an existing checkout at an exis
 | POST / GET / DELETE | `/api/v1/projects/links` | link projects (`from_project`, `to_project`, `relation`) |
 | POST | `/api/v1/session/close` | `{agent_id, session_id, project_id \| project:{locator}, facts:{…}, summary?, end_reason?}` → handoff id + rendered text |
 | GET | `/api/v1/session/brief` | `project_id` or locator params → brief JSON + `rendered` |
-| GET | `/api/v1/trail` | handoffs + checkpoints across agents, newest first; `agent_id` filters; each item's `detail` holds its sections |
+| GET | `/api/v1/trail` | handoffs + checkpoints across agents, newest first; `agent_id` filters; each item's `detail` holds its sections. Page with `before` (+ `before_id`), the oldest entry's `created_at` (and `id`): only older entries come back and `total` counts them, so new handoffs never shift a page |
 | GET | `/api/v1/trail/summary` | per-agent and per-project activity: last active, sessions in 7 days, a daily series (`days`, `tz_offset_minutes`) |
 | GET | `/api/v1/inbox/messages` | inbox messages across all agents (`status=open\|unread\|all`, `agent_id`, `limit`, `offset`) |
 | GET | `/api/v1/inbox/summary` | unread / open counts per agent |

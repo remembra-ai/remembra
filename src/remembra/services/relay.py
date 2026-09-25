@@ -454,8 +454,13 @@ class RelayService:
         limit: int = 20,
         offset: int = 0,
         agent_id: str | None = None,
+        before: tuple[datetime, str | None] | None = None,
     ) -> dict[str, Any]:
         """Handoffs and checkpoints across agents, newest first.
+
+        ``before`` (``(created_at, id)`` of the oldest entry already shown)
+        pages by cursor: the result holds only older entries, and ``total``
+        counts the entries older than the cursor.
 
         Each item carries the headline and counts for a compact list, plus
         ``detail`` (the handoff's Done / Not done / Failing / Next sections,
@@ -471,6 +476,7 @@ class RelayService:
             offset=offset,
             newest_first=True,
             agent_id=agent_id,
+            before=before,
         )
         items = []
         for mem in result["memories"]:
@@ -493,7 +499,10 @@ class RelayService:
                     "detail": _trail_detail(mem, relay),
                 }
             )
-        return {"project_id": project_id, "agent_id": agent_id, "items": items, "total": result["total"]}
+        out: dict[str, Any] = {"project_id": project_id, "agent_id": agent_id, "items": items, "total": result["total"]}
+        # Echo the cursor so a client can tell this server paged by it.
+        out["before"] = {"created_at": before[0].isoformat(), "id": before[1]} if before is not None else None
+        return out
 
     async def activity_summary(
         self,

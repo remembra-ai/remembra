@@ -415,7 +415,11 @@ def cmd_connect(args: argparse.Namespace) -> int:
     config = load_config()
     print(f"Remembra config: {json.dumps(config.redacted())} (keys are read from there at run time; none are written)")
     print(f"Relay command: {relay}")
+    missing_key = not config.api_key
+    if missing_key:
+        _warn_missing_key()
     exit_code = 0
+    skipped_unverified: list[str] = []
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     for name, adapter in REGISTRY.items():
         if wanted and name not in wanted:
@@ -448,6 +452,7 @@ def cmd_connect(args: argparse.Namespace) -> int:
             continue
         if not spec.verified and not args.include_unverified:
             print("  skipped: unverified adapter (add --include-unverified to write it anyway)")
+            skipped_unverified.append(name)
             continue
         backup = backup_and_write(change, stamp)
         print(f"  written{f' (backup: {backup})' if backup else ''}")
@@ -467,7 +472,28 @@ def cmd_connect(args: argparse.Namespace) -> int:
         else:
             print("  " + change.diff().replace("\n", "\n  ").rstrip())
             print("  (dry run: re-run with --apply to write)")
+
+    if skipped_unverified:
+        agents_flags = " ".join(f"--agent {name}" for name in skipped_unverified)
+        print(f"\nNot written (unverified adapters): {', '.join(skipped_unverified)}. To write them anyway:")
+        print(f"  remembra-relay connect --apply --include-unverified {agents_flags}")
+    if missing_key:
+        _warn_missing_key()  # again at the end, where it is seen
+        return 1
     return exit_code
+
+
+def _warn_missing_key() -> None:
+    """Loud notice that the hooks cannot reach the server: they will do nothing."""
+    red, reset = ("\033[31;1m", "\033[0m") if sys.stderr.isatty() else ("", "")
+    _err(
+        f"{red}no Remembra API key found{reset}: the hooks will not load or save handoffs until one is set.\n"
+        "  Checked: REMEMBRA_API_KEY, ~/.claude.json and ~/.codex/config.toml (remembra MCP server env),"
+        " ~/.remembra/credentials.\n"
+        "  Fix: create a key in the Remembra dashboard (Settings > API keys), then run\n"
+        "    remembra-install --all --api-key <your key> --url <your server URL>\n"
+        "  (or export REMEMBRA_API_KEY and REMEMBRA_URL where your agents start)."
+    )
 
 
 # ---------------------------------------------------------------------------
