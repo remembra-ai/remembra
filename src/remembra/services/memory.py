@@ -1156,7 +1156,15 @@ class MemoryService:
             if self.jev.enabled and not self.jev.enforcing:
                 spawn(
                     self._jev_shadow(
-                        fact, user_id, project_id, None, grounding_source, candidates, rows, heuristic_grounded, result
+                        fact,
+                        user_id,
+                        project_id,
+                        None,
+                        grounding_source,
+                        candidates,
+                        rows,
+                        heuristic_grounded,
+                        result if result.decided_by == "llm" else None,
                     ),
                     "jev_shadow",
                 )
@@ -1176,7 +1184,8 @@ class MemoryService:
         strategy = self.conflict_manager.default_strategy if self.conflict_manager is not None else ConflictStrategy.UPDATE
         retire_target = target_id is not None and strategy != ConflictStrategy.FLAG
         if target_id:
-            metadata["supersedes"] = target_id
+            # FLAG keeps both memories active: the link is a conflict, not a supersession.
+            metadata["supersedes" if retire_target else "conflicts_with"] = target_id
             metadata["consolidation_reason"] = result.reason[:300]
 
         memory = Memory(
@@ -1262,12 +1271,13 @@ class MemoryService:
                     candidates,
                     rows,
                     heuristic_grounded,
-                    result if candidates else None,
+                    # Only model decisions are comparable; rule/atomic ones would inflate agreement.
+                    result if result.decided_by == "llm" else None,
                 ),
                 "jev_shadow",
             )
 
-        action = "supersede" if target_id else "add"
+        action = "supersede" if retire_target else "add"
         return _FactResult(
             fact=fact,
             memory_id=memory.id,

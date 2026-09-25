@@ -295,6 +295,8 @@ async def test_flag_strategy_keeps_both_active_and_opens_conflict(tmp_path) -> N
     assert (await row(db, old))["superseded_by"] is None
     new = await row(db, resp.id)
     assert new["contradicts"] == old
+    entry = resp.consolidation[0]
+    assert (entry.action, entry.target_id) == ("add", old)  # nothing was retired
     conflicts = await cm.list_conflicts(user_id="u1")
     assert len(conflicts) == 1 and conflicts[0]["status"] == "open"
 

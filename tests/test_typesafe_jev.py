@@ -414,3 +414,18 @@ async def test_live_typesafe_shadow_store_end_to_end(tmp_path, capsys) -> None:
             f"shadow_log={logs[0]['jev_decision']} agreed={logs[0]['agreed']}"
         )
     await service.jev.close()
+
+
+@pytest.mark.asyncio
+async def test_shadow_does_not_compare_rule_decisions(tmp_path) -> None:
+    """Exact duplicates / no-candidate ADDs are rule decisions: logging them would inflate agreement."""
+    server = JevServer()
+    service, db, _, cons_llm, _ = await _jev_service(tmp_path, server, "shadow")
+    await seed(service, "Mani prefers dark mode")
+
+    dup = await service.store(StoreRequest(content="Mani prefers dark mode", user_id="u1"))
+    new = await service.store(StoreRequest(content="Totally unrelated astronomy fact about Jupiter moons", user_id="u1"))
+
+    assert dup.consolidation[0].decided_by == "rule" and new.consolidation[0].decided_by == "rule"
+    assert cons_llm.calls == []
+    assert await _decisions(db, "consolidation") == []
