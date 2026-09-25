@@ -3,13 +3,21 @@
 import json
 import time
 from collections.abc import AsyncGenerator
-from typing import Annotated, Any
+from typing import Annotated
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, ensure_project_access, get_client_ip, require_memory_store
+from remembra.auth.middleware import (
+    AuthenticatedUser,
+    CurrentUser,
+    get_client_ip,
+    require_memory_store,
+    resolve_project_or_default,
+)
+from remembra.cloud.limits import enforce_store_quota, record_store_usage
 from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
 from remembra.ingestion.changelog import ChangelogParser, ChangelogRelease
@@ -19,12 +27,21 @@ from remembra.models.memory import (
     StoreRequest,
 )
 from remembra.security.audit import AuditLogger
+from remembra.security.content_policy import prepare_content
 from remembra.security.pii_detector import PIIDetector
 from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.conversation_ingest import ConversationIngestService
 from remembra.services.memory import MemoryService
 
 router = APIRouter(prefix="/ingest", tags=["ingestion"], dependencies=[require_memory_store()])
+
+log = structlog.get_logger(__name__)
+
+
+def _resolve_body_project(user: AuthenticatedUser, body: BaseModel) -> str:
+    """Honour an explicit project_id; pin single-project keys when it was omitted (SEC-21)."""
+    explicit = getattr(body, "project_id", None) if "project_id" in body.model_fields_set else None
+    return resolve_project_or_default(user, explicit)
 
 
 def get_memory_service(request: Request) -> MemoryService:
@@ -72,17 +89,15 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 class ChangelogIngestRequest(BaseModel):
     """Request to ingest a changelog."""
 
-    content: str | None = Field(
-        default=None,
-        description="Raw markdown content of the changelog",
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=500_000,
+        description="Raw markdown content of the changelog (server-side file paths are not accepted)",
     )
-    file_path: str | None = Field(
+    project_id: str | None = Field(
         default=None,
-        description="Path to a CHANGELOG.md file (server-side)",
-    )
-    project_id: str = Field(
-        default="default",
-        description="Project namespace for stored memories",
+        description="Project namespace for stored memories (single-project keys default to their project)",
     )
     project_name: str | None = Field(
         default=None,
@@ -148,46 +163,20 @@ async def ingest_changelog(
     }
     ```
 
-    **Usage (file path):**
-    ```json
-    {
-      "file_path": "/path/to/CHANGELOG.md",
-      "project_name": "my-project"
-    }
-    ```
-
     Rate limit: 10 requests/minute.
     """
-    ensure_project_access(current_user, body.project_id)
-
-    if not body.content and not body.file_path:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Either 'content' or 'file_path' must be provided",
-        )
+    project_id = _resolve_body_project(current_user, body)
 
     parser = ChangelogParser()
-    releases: list[ChangelogRelease] = []
     errors: list[str] = []
 
-    # Parse changelog
     try:
-        if body.file_path:
-            releases = parser.parse_file(body.file_path)
-        else:
-            # Guaranteed non-None: the guard above rejects both-empty, and
-            # file_path is falsy in this branch, so content must be set.
-            assert body.content is not None
-            releases = parser.parse(body.content)
-    except FileNotFoundError as e:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Changelog file not found: {body.file_path}",
-        ) from e
+        releases: list[ChangelogRelease] = parser.parse(body.content)
     except Exception as e:
+        log.warning("changelog_parse_failed", error_type=type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to parse changelog: {str(e)}",
+            detail="Failed to parse changelog content.",
         ) from e
 
     if not releases:
@@ -204,6 +193,9 @@ async def ingest_changelog(
 
     releases = releases[: body.max_releases]
 
+    # Plan limits apply to every write path (SEC-11).
+    await enforce_store_quota(request, current_user.user_id, len(releases))
+
     # Store each release as a memory
     memory_ids: list[str] = []
 
@@ -214,6 +206,18 @@ async def ingest_changelog(
             if body.project_name:
                 content = f"Project {body.project_name} - {content}"
 
+            # Same PII + injection policy as single store; caller-supplied text
+            # is not "trusted" just because it is a changelog (SEC-13).
+            prepared = prepare_content(
+                request.app.state,
+                content,
+                source="changelog_ingestion",
+                sanitization_enabled=settings.sanitization_enabled,
+            )
+            if prepared.blocked:
+                errors.append(f"Release {release.version} blocked: PII detected ({', '.join(prepared.blocked_pii_types or [])})")
+                continue
+
             # Build metadata
             metadata = release.to_metadata()
             if body.project_name:
@@ -222,22 +226,26 @@ async def ingest_changelog(
             # Store via memory service
             store_request = StoreRequest(
                 user_id=current_user.user_id,
-                content=content,
-                project_id=body.project_id,
+                content=prepared.content,
+                project_id=project_id,
                 metadata=metadata,
             )
 
             result = await memory_service.store(
                 store_request,
                 source="changelog_ingestion",
-                trust_score=1.0,  # Changelogs are trusted
+                trust_score=prepared.trust_score,
+                checksum=prepared.checksum,
             )
 
             if result.id:
                 memory_ids.append(result.id)
 
         except Exception as e:
-            errors.append(f"Failed to store release {release.version}: {str(e)}")
+            log.warning("changelog_release_store_failed", version=release.version, error_type=type(e).__name__)
+            errors.append(f"Failed to store release {release.version}")
+
+    await record_store_usage(request, current_user.user_id, len(memory_ids))
 
     # Audit log
     await audit_logger.log_memory_store(
@@ -316,24 +324,20 @@ async def ingest_conversation(
 
     Rate limit: 20 requests/minute.
     """
-    ensure_project_access(current_user, body.project_id)
+    body.project_id = _resolve_body_project(current_user, body)
 
     # Override user_id with authenticated user (security: prevent spoofing)
     body.user_id = current_user.user_id
 
-    # Sanitize all message content
-    if settings.sanitization_enabled:
-        for msg in body.messages:
-            sanitization = sanitizer.analyze(msg.content, source="conversation_ingest")
-            if sanitization.trust_score < 0.3:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Message content failed security check: {sanitization.flagged_patterns}",
-                )
+    # PII + injection policy on every message; the sanitized text is what gets
+    # ingested (previously it was computed and then discarded).
+    _apply_message_policy(request, body, settings.sanitization_enabled)
+    await enforce_store_quota(request, current_user.user_id)
 
     try:
         # Process conversation through the ingest service
         result = await conversation_ingest.ingest(body)
+        await record_store_usage(request, current_user.user_id, result.stats.facts_stored)
 
         # Audit log
         await audit_logger.log_memory_store(
@@ -381,11 +385,12 @@ async def ingest_conversation(
             api_key_id=current_user.api_key_id,
             ip_address=get_client_ip(request),
             success=False,
-            error=str(e),
+            error=type(e).__name__,
         )
+        log.error("conversation_ingest_failed", error_type=type(e).__name__, error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Conversation ingestion failed: {str(e)}",
+            detail="Conversation ingestion failed.",
         ) from e
 
 
@@ -433,27 +438,13 @@ async def ingest_conversation_stream(
     Rate limit: 20 requests/minute.
     """
     # Authorize before opening the SSE stream or running any ingestion work.
-    ensure_project_access(current_user, body.project_id)
+    body.project_id = _resolve_body_project(current_user, body)
 
     # Override user_id with authenticated user
     body.user_id = current_user.user_id
 
-    # Pre-sanitize message content
-    if settings.sanitization_enabled:
-        for msg in body.messages:
-            sanitization = sanitizer.analyze(msg.content, source="conversation_ingest")
-            if sanitization.trust_score < 0.3:
-
-                async def error_generator(
-                    warnings: list[Any] = sanitization.flagged_patterns,
-                ) -> AsyncGenerator[str, None]:
-                    error_msg = f"Message content failed security check: {warnings}"
-                    yield f"data: {json.dumps({'phase': 'error', 'error': error_msg})}\n\n"
-
-                return StreamingResponse(
-                    error_generator(),
-                    media_type="text/event-stream",
-                )
+    _apply_message_policy(request, body, settings.sanitization_enabled)
+    await enforce_store_quota(request, current_user.user_id)
 
     async def event_generator() -> AsyncGenerator[str, None]:
         start = time.time()
@@ -466,6 +457,7 @@ async def ingest_conversation_stream(
 
             # Run the actual ingestion
             result = await conversation_ingest.ingest(body)
+            await record_store_usage(request, current_user.user_id, result.stats.facts_stored)
 
             # Phase 3: Storing
             yield f"data: {json.dumps({'phase': 'storing', 'progress': 80})}\n\n"
@@ -488,7 +480,8 @@ async def ingest_conversation_stream(
             )
 
         except Exception as e:
-            yield f"data: {json.dumps({'phase': 'error', 'error': str(e)})}\n\n"
+            log.error("conversation_stream_ingest_failed", error_type=type(e).__name__, error=str(e))
+            yield f"data: {json.dumps({'phase': 'error', 'error': 'Conversation ingestion failed.'})}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -498,3 +491,30 @@ async def ingest_conversation_stream(
             "Connection": "keep-alive",
         },
     )
+
+
+def _apply_message_policy(request: Request, body: ConversationIngestRequest, sanitization_enabled: bool) -> None:
+    """Run the shared PII + prompt-injection policy over every message, in place.
+
+    Blocks the request when PII block mode trips or a message is clearly an
+    injection attempt (trust < 0.3); otherwise the sanitized text replaces the
+    original so the extractor never sees the raw payload.
+    """
+    for msg in body.messages:
+        prepared = prepare_content(
+            request.app.state,
+            msg.content,
+            source="conversation_ingest",
+            sanitization_enabled=sanitization_enabled,
+        )
+        if prepared.blocked:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"error": "PII_DETECTED", "types": prepared.blocked_pii_types},
+            )
+        if prepared.trust_score < 0.3:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Message content failed security check.",
+            )
+        msg.content = prepared.content

@@ -2,11 +2,19 @@
 
 from typing import Annotated, Any
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, UploadFile, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, ensure_project_access, require_memory_recall, require_memory_store
+from remembra.auth.middleware import (
+    CurrentUser,
+    require_memory_recall,
+    require_memory_store,
+    resolve_project_or_default,
+)
+from remembra.cloud.limits import enforce_store_quota, record_store_usage
+from remembra.config import Settings, get_settings
 from remembra.core.limiter import limiter
 from remembra.io.export import export_csv, export_json, export_jsonl
 from remembra.io.importers import SUPPORTED_FORMATS, ImportedMemory
@@ -19,9 +27,18 @@ from remembra.io.importers.plaintext import (
     parse_plaintext,
 )
 from remembra.models.memory import StoreRequest
+from remembra.security.content_policy import prepare_content
+from remembra.security.secrets import scrub_memory_record
 from remembra.services.memory import MemoryService
 
 router = APIRouter(prefix="/transfer", tags=["import/export"])
+
+log = structlog.get_logger(__name__)
+
+SettingsDep = Annotated[Settings, Depends(get_settings)]
+
+# Imported text gets at most this trust (it is third-party content).
+_IMPORT_MAX_TRUST = 0.8
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +66,7 @@ class ImportRequest(BaseModel):
         description=f"Source format: {', '.join(SUPPORTED_FORMATS)}",
     )
     data: str = Field(description="Raw content to import")
-    project_id: str = Field("default", description="Target project")
+    project_id: str | None = Field(None, description="Target project (single-project keys default to their project)")
     split_mode: str = Field(
         "paragraph",
         description="For plaintext: paragraph, line, heading, none",
@@ -80,15 +97,15 @@ async def export_memories(
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
     format: str = Query("json", description="Export format: json, jsonl, csv"),
-    project_id: str = Query("default", description="Project to export"),
+    project_id: str | None = Query(None, description="Project to export (single-project keys default to theirs)"),
     include_metadata: bool = Query(True, description="Include metadata in export"),
     limit: int = Query(10000, ge=1, le=100000),
 ) -> Response:
     """Export all memories as JSON, JSONL, or CSV.
 
-    Streaming download for large datasets.
+    Streaming download for large datasets. Stored credentials are redacted.
     """
-    ensure_project_access(current_user, project_id)
+    project_id = resolve_project_or_default(current_user, project_id)
 
     # Fetch all memories for the user
     memories = await _fetch_all_memories(
@@ -135,23 +152,29 @@ async def import_memories(
     body: ImportRequest,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
+    settings: SettingsDep,
 ) -> ImportResponse:
     """Import memories from various formats.
 
     Supported formats: json, jsonl, csv, chatgpt, claude, plaintext.
     """
-    ensure_project_access(current_user, body.project_id)
+    project_id = resolve_project_or_default(current_user, body.project_id)
     parsed = _parse_import(body.format, body.data, body.split_mode)
 
     if not parsed:
         return ImportResponse(imported=0, skipped=0, errors=0, details=[])
 
-    return await _store_imported_memories(
+    await enforce_store_quota(request, current_user.user_id, len(parsed))
+    result = await _store_imported_memories(
+        request=request,
         memories=parsed,
         memory_service=memory_service,
         user_id=current_user.user_id,
-        project_id=body.project_id,
+        project_id=project_id,
+        sanitization_enabled=settings.sanitization_enabled,
     )
+    await record_store_usage(request, current_user.user_id, result.imported)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -171,15 +194,16 @@ async def import_from_file(
     file: UploadFile,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
+    settings: SettingsDep,
     format: str = Query(
         ...,
         description=f"Source format: {', '.join(SUPPORTED_FORMATS)}",
     ),
-    project_id: str = Query("default"),
+    project_id: str | None = Query(None),
     split_mode: str = Query("paragraph"),
 ) -> ImportResponse:
     """Import memories from an uploaded file."""
-    ensure_project_access(current_user, project_id)
+    project_id = resolve_project_or_default(current_user, project_id)
 
     # Read file content (limit to 50MB)
     max_size = 50 * 1024 * 1024
@@ -196,12 +220,17 @@ async def import_from_file(
     if not parsed:
         return ImportResponse(imported=0, skipped=0, errors=0, details=[])
 
-    return await _store_imported_memories(
+    await enforce_store_quota(request, current_user.user_id, len(parsed))
+    result = await _store_imported_memories(
+        request=request,
         memories=parsed,
         memory_service=memory_service,
         user_id=current_user.user_id,
         project_id=project_id,
+        sanitization_enabled=settings.sanitization_enabled,
     )
+    await record_store_usage(request, current_user.user_id, result.imported)
+    return result
 
 
 @router.get(
@@ -260,10 +289,12 @@ def _parse_import(format: str, data: str, split_mode: str = "paragraph") -> list
 
 
 async def _store_imported_memories(
+    request: Request,
     memories: list[ImportedMemory],
     memory_service: MemoryService,
     user_id: str,
     project_id: str,
+    sanitization_enabled: bool = True,
 ) -> ImportResponse:
     """Store a batch of parsed memories and return results."""
     imported = 0
@@ -273,8 +304,19 @@ async def _store_imported_memories(
 
     for i, mem in enumerate(memories):
         try:
+            # Same PII + injection policy as single store (SEC-11/SEC-13).
+            prepared = prepare_content(
+                request.app.state,
+                mem.content,
+                source=f"import_{mem.source_format}",
+                sanitization_enabled=sanitization_enabled,
+            )
+            if prepared.blocked:
+                errors += 1
+                details.append({"index": i, "status": "error", "reason": "PII_DETECTED"})
+                continue
             req = StoreRequest(
-                content=mem.content,
+                content=prepared.content,
                 user_id=user_id,
                 project_id=project_id,
                 metadata={
@@ -286,7 +328,8 @@ async def _store_imported_memories(
             result = await memory_service.store(
                 req,
                 source=f"import_{mem.source_format}",
-                trust_score=0.8,  # Slightly lower trust for imports
+                trust_score=min(_IMPORT_MAX_TRUST, prepared.trust_score),
+                checksum=prepared.checksum,
             )
 
             if result.id:
@@ -304,7 +347,8 @@ async def _store_imported_memories(
 
         except Exception as e:
             errors += 1
-            details.append({"index": i, "status": "error", "reason": str(e)})
+            log.warning("import_item_failed", index=i, error_type=type(e).__name__)
+            details.append({"index": i, "status": "error", "reason": type(e).__name__})
 
         # Cap detail reporting at 100 entries
         if len(details) >= 100:
@@ -353,18 +397,20 @@ async def _fetch_all_memories(
             metadata = {}
 
         memories.append(
-            {
-                "id": row[0],
-                "content": row[1],
-                "user_id": row[2],
-                "project_id": row[3],
-                "extracted_facts": facts,
-                "metadata": metadata,
-                "created_at": row[6],
-                "expires_at": row[7],
-                "source": row[8],
-                "trust_score": row[9],
-            }
+            scrub_memory_record(
+                {
+                    "id": row[0],
+                    "content": row[1],
+                    "user_id": row[2],
+                    "project_id": row[3],
+                    "extracted_facts": facts,
+                    "metadata": metadata,
+                    "created_at": row[6],
+                    "expires_at": row[7],
+                    "source": row[8],
+                    "trust_score": row[9],
+                }
+            )
         )
 
     return memories

@@ -70,9 +70,7 @@ async def test_store_endpoint_never_passes_secret_to_service(tmp_path):
             analyze=lambda c, source: SimpleNamespace(content=c, trust_score=1.0, checksum="x")
         )
         key, _ = await h.api_key("tenant-a", "editor")
-        r = await h.client.post(
-            "/api/v1/memories", json={"content": f"our resend key is {RESEND}"}, headers={"X-API-Key": key}
-        )
+        r = await h.client.post("/api/v1/memories", json={"content": f"our resend key is {RESEND}"}, headers={"X-API-Key": key})
         assert r.status_code == 201, r.text
         assert RESEND not in captured[0].content
         assert RESEND not in r.text

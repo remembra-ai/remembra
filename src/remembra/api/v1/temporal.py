@@ -13,6 +13,7 @@ from remembra.auth.middleware import (
     has_permission,
     require_memory_recall,
     require_memory_store,
+    resolve_project_or_default,
 )
 from remembra.core.limiter import limiter
 from remembra.core.time import utcnow
@@ -106,7 +107,7 @@ async def get_decay_report(
     request: Request,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
-    project_id: str = Query(default="default"),
+    project_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> DecayReportResponse:
     """
@@ -120,7 +121,7 @@ async def get_decay_report(
 
     Use this to understand memory health and identify stale data.
     """
-    ensure_project_access(current_user, project_id)
+    project_id = resolve_project_or_default(current_user, project_id)
     db = memory_service.db
     config = DecayConfig()
 
@@ -189,7 +190,7 @@ async def run_cleanup(
     request: Request,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
-    project_id: str = Query(default="default"),
+    project_id: str | None = Query(default=None),
     dry_run: bool = Query(default=True, description="If true, don't actually delete"),
     include_decayed: bool = Query(default=False, description="Also clean up decayed memories"),
 ) -> CleanupResponse:
@@ -209,7 +210,7 @@ async def run_cleanup(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Permission denied: {permission} required",
         )
-    ensure_project_access(current_user, project_id)
+    project_id = resolve_project_or_default(current_user, project_id)
     start_time = utcnow()
 
     # Create cleanup job
@@ -360,7 +361,7 @@ async def list_archived_memories(
     request: Request,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
-    project_id: str = Query(default="default"),
+    project_id: str | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     reason: str | None = Query(default=None, description="Filter by archive reason"),
@@ -373,7 +374,7 @@ async def list_archived_memories(
     """
     db = memory_service.db
 
-    ensure_project_access(current_user, project_id)
+    project_id = resolve_project_or_default(current_user, project_id)
     archived = await db.get_archived_memories(
         user_id=current_user.user_id,
         project_id=project_id,
@@ -415,7 +416,7 @@ async def get_archive_stats(
     request: Request,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
-    project_id: str = Query(default="default"),
+    project_id: str | None = Query(default=None),
 ) -> ArchiveStatsResponse:
     """
     Get statistics about archived memories.
@@ -424,7 +425,7 @@ async def get_archive_stats(
     """
     db = memory_service.db
 
-    ensure_project_access(current_user, project_id)
+    project_id = resolve_project_or_default(current_user, project_id)
     stats = await db.get_archive_stats(
         user_id=current_user.user_id,
         project_id=project_id,
@@ -438,6 +439,60 @@ async def get_archive_stats(
         newest_archive=stats.get("newest_archive"),
         total_restores=stats.get("total_restores", 0) or 0,
         by_reason=stats.get("by_reason", {}),
+    )
+
+
+# Registered before "/archive/{memory_id}" so "search" is not captured as an id.
+@router.get(
+    "/archive/search",
+    response_model=ArchiveListResponse,
+    summary="Search archived memories",
+    dependencies=[require_memory_recall()],
+)
+@limiter.limit("20/minute")
+async def search_archive(
+    request: Request,
+    memory_service: MemoryServiceDep,
+    current_user: CurrentUser,
+    q: str = Query(..., description="Search query"),
+    project_id: str | None = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> ArchiveListResponse:
+    """
+    Search archived memories by keyword.
+
+    Note: This is keyword search only, not semantic search.
+    For full semantic search, restore the memory first.
+    """
+    db = memory_service.db
+
+    project_id = resolve_project_or_default(current_user, project_id)
+    results = await db.search_archived_memories(
+        user_id=current_user.user_id,
+        query=q,
+        project_id=project_id,
+        limit=limit,
+    )
+
+    memories = [
+        ArchivedMemory(
+            id=m["id"],
+            content=m["content"],
+            created_at=m["created_at"],
+            archived_at=m["archived_at"],
+            archive_reason=m.get("archive_reason", "unknown"),
+            final_relevance_score=m.get("final_relevance_score"),
+            restore_count=m.get("restore_count", 0),
+            metadata=m.get("metadata"),
+        )
+        for m in results
+    ]
+
+    return ArchiveListResponse(
+        user_id=current_user.user_id,
+        project_id=project_id,
+        total=len(memories),
+        memories=memories,
     )
 
 
@@ -571,59 +626,6 @@ async def restore_memory(
     }
 
 
-@router.get(
-    "/archive/search",
-    response_model=ArchiveListResponse,
-    summary="Search archived memories",
-    dependencies=[require_memory_recall()],
-)
-@limiter.limit("20/minute")
-async def search_archive(
-    request: Request,
-    memory_service: MemoryServiceDep,
-    current_user: CurrentUser,
-    q: str = Query(..., description="Search query"),
-    project_id: str = Query(default="default"),
-    limit: int = Query(default=20, ge=1, le=100),
-) -> ArchiveListResponse:
-    """
-    Search archived memories by keyword.
-
-    Note: This is keyword search only, not semantic search.
-    For full semantic search, restore the memory first.
-    """
-    db = memory_service.db
-
-    ensure_project_access(current_user, project_id)
-    results = await db.search_archived_memories(
-        user_id=current_user.user_id,
-        query=q,
-        project_id=project_id,
-        limit=limit,
-    )
-
-    memories = [
-        ArchivedMemory(
-            id=m["id"],
-            content=m["content"],
-            created_at=m["created_at"],
-            archived_at=m["archived_at"],
-            archive_reason=m.get("archive_reason", "unknown"),
-            final_relevance_score=m.get("final_relevance_score"),
-            restore_count=m.get("restore_count", 0),
-            metadata=m.get("metadata"),
-        )
-        for m in results
-    ]
-
-    return ArchiveListResponse(
-        user_id=current_user.user_id,
-        project_id=project_id,
-        total=len(memories),
-        memories=memories,
-    )
-
-
 # ---------------------------------------------------------------------------
 # Adaptive Threshold Endpoints
 # ---------------------------------------------------------------------------
@@ -640,7 +642,7 @@ async def get_adaptive_threshold(
     request: Request,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
-    project_id: str = Query(default="default"),
+    project_id: str | None = Query(default=None),
 ) -> AdaptiveThresholdResponse:
     """
     Get the current adaptive prune threshold for this session.
@@ -651,7 +653,7 @@ async def get_adaptive_threshold(
     - Memory density
     - Warm-up calibration phase
     """
-    ensure_project_access(current_user, project_id)
+    project_id = resolve_project_or_default(current_user, project_id)
     db = memory_service.db
     manager = create_adaptive_manager(db)
 
@@ -684,7 +686,7 @@ async def set_session_mode(
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
     mode: str = Query(..., description="Session mode: exploratory, operational, or balanced"),
-    project_id: str = Query(default="default"),
+    project_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
     """
     Explicitly set the session mode for adaptive thresholds.
@@ -694,7 +696,7 @@ async def set_session_mode(
     - **operational**: Higher threshold, prune more (focused work)
     - **balanced**: Auto-adjust based on behavior (default)
     """
-    ensure_project_access(current_user, project_id)
+    project_id = resolve_project_or_default(current_user, project_id)
     valid_modes = ["exploratory", "operational", "balanced"]
     if mode not in valid_modes:
         raise HTTPException(
@@ -734,7 +736,7 @@ async def reset_adaptive_session(
     request: Request,
     memory_service: MemoryServiceDep,
     current_user: CurrentUser,
-    project_id: str = Query(default="default"),
+    project_id: str | None = Query(default=None),
 ) -> dict[str, Any]:
     """
     Reset the adaptive threshold session.
@@ -742,7 +744,7 @@ async def reset_adaptive_session(
     This clears all calibration data and starts fresh with
     a new warm-up period.
     """
-    ensure_project_access(current_user, project_id)
+    project_id = resolve_project_or_default(current_user, project_id)
     db = memory_service.db
     manager = create_adaptive_manager(db)
 
