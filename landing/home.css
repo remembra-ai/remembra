@@ -446,3 +446,7 @@
   .pixbar { transition: none !important; }
   .cnode:active { transform: translate(-50%, -50%); }
 }
+
+/* Fine print under a section's copy */
+#agents-note { margin-top: 22px; }
+#connector-note { margin-top: 18px; }

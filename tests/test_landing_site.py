@@ -144,7 +144,9 @@ def test_signup_links_point_at_the_dashboard_signup_route() -> None:
 # Deploy gates: what the pages depend on that does not exist yet
 # ---------------------------------------------------------------------------
 
-RELAY_GATE = "<!-- requires PyPI release with remembra-relay and the published relay setup guide -->"
+RELAY_GATE = (
+    "<!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->"
+)
 BILLING_GATE = "<!-- requires billing: Solo, Pro, Team and Founding 100 live in Paddle and the dashboard -->"
 RELAY_GUIDE = "https://docs.remembra.dev/guides/relay/"
 KEY_STEP = "remembra-install --all --api-key <your-key>"
@@ -153,9 +155,7 @@ KEY_STEP = "remembra-install --all --api-key <your-key>"
 def _install_blocks(page_html: str) -> list[tuple[str, str, str]]:
     """(comment line before, the command block, the meta line after) for every install block."""
     out = []
-    block = re.compile(
-        r'(?P<gate>[^\n]*)\n\s*<div class="cmd steps"(?P<body>.*?)</div>\s*<p class="cmd-meta">(?P<meta>.*?)</p>', re.S
-    )
+    block = re.compile(r'(?P<gate>[^\n]*)\n\s*<div class="cmd"(?P<body>.*?)</div>\s*<p class="cmd-meta">(?P<meta>.*?)</p>', re.S)
     for m in block.finditer(page_html):
         out.append((m.group("gate").strip(), m.group("body"), m.group("meta")))
     return out
@@ -220,22 +220,93 @@ def test_lede_does_not_promise_a_handoff_after_a_closed_lid() -> None:
 
 
 def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
-    note = _text(re.search(r'<p class="fine">.*?</p>', (LANDING / "index.html").read_text(), re.S).group(0))
+    note = _text(re.search(r'<p class="fine" id="agents-note">.*?</p>', (LANDING / "index.html").read_text(), re.S).group(0))
     assert "Claude Code's session hooks are verified" in note
-    assert "unverified" in note and "beta" not in note
+    assert "unverified" in note and "beta" not in note.lower()
     assert "through Remembra's MCP tools" in note
+    # what remembra-relay connect really does (relay/cli.py): a dry run until --apply, unverified adapters opt-in
+    assert "dry run until you add --apply" in note and "--include-unverified" in note
+    from remembra.relay.adapters import REGISTRY
+
+    specs = [adapter.spec for adapter in REGISTRY.values()]
+    unverified = [spec for spec in specs if not spec.verified]
+    assert [spec.name for spec in specs if spec.verified] == ["claude-code"]
+    assert len(unverified) == 5  # Codex, Cursor, Gemini CLI, Qwen Code and Kimi, as the note names them
 
 
-def test_pricing_shows_the_spec_monthly_credits_and_no_yearly_bank() -> None:
+def _plan_card(page: str, plan_id: str) -> str:
+    return re.search(rf'<article class="plan[^"]*" aria-labelledby="{plan_id}">(.*?)</article>', page, re.S).group(1)
+
+
+def test_pricing_shows_the_credits_the_code_grants_monthly_and_yearly() -> None:
+    """Monthly plans refill every month; yearly plans get the whole year's credits up front (plans.py, metering.py)."""
+    from remembra.cloud.plans import PLANS, BillingInterval, PlanTier
+    from remembra.config import Settings
+
+    assert Settings.model_fields["annual_credit_upfront_months"].default == 12  # the whole bank on day one
     pricing = (LANDING / "pricing.html").read_text()
+    free = PLANS[PlanTier.FREE]
+    assert f"<b>{free.max_smart_credits_per_month:,}</b> credits every month" in _plan_card(pricing, "p-free")
+    for tier, plan_id, per_seat in (
+        (PlanTier.SOLO, "p-solo", ""),
+        (PlanTier.PRO, "p-pro", ""),
+        (PlanTier.TEAM, "p-team", " per seat"),
+    ):
+        plan = PLANS[tier]
+        card = _plan_card(pricing, plan_id)
+        month = plan.credit_allowance(BillingInterval.MONTH)
+        year = plan.credit_allowance(BillingInterval.YEAR)
+        assert year == 12 * month
+        pooled = ", pooled" if plan.per_seat else ""
+        up_front = ", pooled" if plan.per_seat else ", up front"
+        assert f'<span class="m-only"><b>{month:,}</b> credits{per_seat} every month{pooled}</span>' in card, tier
+        assert f'<span class="y-only"><b>{year:,}</b> credits{per_seat} for the year{up_front}</span>' in card, tier
     text = _text(pricing)
-    for invented in ("up front", "credit bank", "26,400", "60,000"):
-        assert invented not in text, invented
-    assert "<b>2,200</b> credits every month" in pricing
-    assert "<b>5,000</b> credits every month" in pricing
-    assert "<b>2,200</b> credits per seat every month, pooled" in pricing
-    # the credit line is the same for monthly and yearly billing
-    assert not re.search(r'class="credits"><span class="[my]-only"', pricing)
+    assert "Twelve months of credits land up front (26,400 on Solo)" in text
+    assert PLANS[PlanTier.SOLO].credit_allowance(BillingInterval.YEAR) == 26_400
+    assert "credit bank" in text and "refill" not in text.split("A yearly credit bank")[1][:40]
+
+
+def test_pricing_numbers_are_the_plans_in_plans_py() -> None:
+    from remembra.cloud.plans import FOUNDING_ANNUAL_PRICE_CENTS, PLANS, PlanTier
+
+    pricing = (LANDING / "pricing.html").read_text()
+
+    def usd(cents: int) -> str:
+        return f"${cents // 100:,}" if cents % 100 == 0 else f"${cents / 100:,.2f}"
+
+    free = _plan_card(pricing, "p-free")
+    assert '<p class="price">$0</p>' in free and PLANS[PlanTier.FREE].price_monthly_cents == 0
+    for tier, plan_id, unit in ((PlanTier.SOLO, "p-solo", ""), (PlanTier.PRO, "p-pro", ""), (PlanTier.TEAM, "p-team", "/seat")):
+        plan = PLANS[tier]
+        card = _plan_card(pricing, plan_id)
+        assert plan.price_monthly_cents is not None and plan.price_annual_cents is not None
+        assert f'<span class="m-only">{usd(plan.price_monthly_cents)}<small>{unit}/mo</small></span>' in card, tier
+        assert f'<span class="y-only">{usd(plan.price_annual_cents)}<small>{unit}/yr</small></span>' in card, tier
+        assert plan.price_annual_cents == 10 * plan.price_monthly_cents  # "2 months free"
+        assert "2 months free" in card or plan.per_seat  # the Team card spends that line on the seat minimum
+        assert f"{plan.max_memories:,} notes" in card, tier
+        assert f"{plan.max_recalls_per_month:,} searches" in card, tier
+        assert f"{plan.max_relay_events_per_month:,}" in card, tier
+    team = PLANS[PlanTier.TEAM]
+    team_card = _text(_plan_card(pricing, "p-team"))
+    assert f"{team.min_seats}-seat minimum ({usd(team.min_seats * team.price_annual_cents)}/yr)" in team_card
+    assert f"{team.min_seats}-seat minimum ({usd(team.min_seats * team.price_monthly_cents)}/mo)" in team_card
+    free_plan = PLANS[PlanTier.FREE]
+    free_text = _text(free)
+    assert f"{free_plan.max_projects} projects" in free_text and f"{free_plan.max_memories:,} notes kept" in free_text
+    assert f"{free_plan.max_recalls_per_month:,} searches a month" in free_text
+    assert f"fair use {free_plan.max_relay_events_per_month:,} a month" in free_text
+    # Founding 100: Solo, yearly only, locked price
+    founding = _text(re.search(r'<div class="founding">.*?</div>\s*<a', pricing, re.S).group(0))
+    assert f"billed {usd(FOUNDING_ANNUAL_PRICE_CENTS)} yearly" in founding
+    assert f"Solo for {usd(FOUNDING_ANNUAL_PRICE_CENTS // 12)}/mo" in founding
+    # the home page's price strip says the same
+    home = html.unescape(re.search(r'<div class="prices">.*?</div>', (LANDING / "index.html").read_text(), re.S).group(0))
+    for tier in (PlanTier.SOLO, PlanTier.PRO):
+        assert f"{usd(PLANS[tier].price_monthly_cents or 0)} a month" in home
+    assert f"Team {usd(team.price_monthly_cents or 0)} a seat a month" in home
+    assert f"{usd(FOUNDING_ANNUAL_PRICE_CENTS)} yearly" in home
 
 
 # ---------------------------------------------------------------------------
@@ -260,28 +331,31 @@ def _tokens(block: str) -> dict[str, str]:
 
 
 def _themes() -> dict[str, dict[str, str]]:
+    """Dark is the default for every visitor (the :root block); light is the toggle's data-theme="light"."""
     css = (LANDING / "site.css").read_text()
-    light = _tokens(re.search(r"^:root \{(.*?)^\}", css, re.S | re.M).group(1))
-    dark = _tokens(re.search(r'^:root\[data-theme="dark"\] \{(.*?)^\}', css, re.S | re.M).group(1))
-    system_block = r'@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\) \{(.*?)\}'
-    system_dark = _tokens(re.search(system_block, css, re.S).group(1))
-    assert dark == system_dark  # the two dark-mode blocks must stay in step
-    return {"light": light, "dark": {**light, **dark}}
+    dark = _tokens(re.search(r'^:root,\n:root\[data-theme="dark"\] \{(.*?)^\}', css, re.S | re.M).group(1))
+    light = _tokens(re.search(r'^:root\[data-theme="light"\] \{(.*?)^\}', css, re.S | re.M).group(1))
+    assert "prefers-color-scheme" not in css  # no system block that could override the tokens
+    assert set(light) == set(dark)  # each theme sets every color token
+    return {"light": light, "dark": dark}
 
 
 def test_focus_rings_clear_3_to_1_in_both_themes() -> None:
     css = (LANDING / "site.css").read_text()
-    home = (LANDING / "index.html").read_text()
+    home = (LANDING / "home.css").read_text()
     ring = re.search(r"^:focus-visible \{ outline: 2px solid var\((--[\w-]+)\)", css, re.M).group(1)
-    cmd_ring = re.search(r"^\.cmd :focus-visible \{ outline-color: var\((--[\w-]+)\)", css, re.M).group(1)
+    copy_ring = re.search(r"^\.copy:focus-visible \{[^}]*outline-color: (#[0-9A-Fa-f]{6})", css, re.M).group(1)
+    cmd_bgs = re.findall(r"^(?::root\[data-theme=\"light\"\] )?\.cmd \{[^}]*background: (#[0-9A-Fa-f]{6})", css, re.M | re.S)
     band_ring = re.search(r"^\.band :focus-visible \{ outline-color: var\((--[\w-]+)\)", home, re.M).group(1)
     band_cmd_ring = re.search(r"^\.band \.cmd :focus-visible \{ outline-color: (#[0-9A-Fa-f]{6})", home, re.M).group(1)
     band_cmd_bg = re.search(r"^\.band \.cmd \{[^}]*background: (#[0-9A-Fa-f]{6})", home, re.M).group(1)
+    assert len(cmd_bgs) == 2  # the command block on dark paper and on light paper
     for name, t in _themes().items():
         for surface in ("--paper", "--panel", "--paper-2"):
             assert _contrast(t[ring], t[surface]) >= 3, (name, ring, surface)
-        assert _contrast(t[cmd_ring], t["--ink"]) >= 3, (name, "cmd")  # .cmd is filled with --ink
         assert _contrast(t[band_ring], t["--signal"]) >= 3, (name, "band")
+    for bg in cmd_bgs:
+        assert _contrast(copy_ring, bg) >= 3, ("copy", bg)  # the copy button sits inside .cmd in both themes
     assert _contrast(band_cmd_ring, band_cmd_bg) >= 3
 
 
@@ -361,9 +435,14 @@ PAUSE = _click("button.pause")
 
 
 def test_harness_visibility_model_is_the_page_css() -> None:
-    home = (LANDING / "index.html").read_text()
-    assert ".relay.is-animating [data-at] { opacity: 0;" in home
-    assert ".relay.is-animating [data-at].on { opacity: 1;" in home
+    css = (LANDING / "home.css").read_text()
+    assert '<link rel="stylesheet" href="home.css">' in (LANDING / "index.html").read_text()
+    assert ".relay.is-animating [data-at] { opacity: 0;" in css
+    assert ".relay.is-animating [data-at].on { opacity: 1;" in css
+    # no other rule may hide a [data-at] element: the harness would not see it
+    assert len(re.findall(r"\[data-at\][^{]*\{[^}]*(?:opacity: 0|display: none|visibility: hidden)", css)) == 1
+    harness = HARNESS.read_text()
+    assert 'animating && !e.classList.contains("on")' in harness
 
 
 @needs_node
@@ -615,6 +694,82 @@ def test_hero_status_strip_sits_in_the_room_right_of_the_handoff_window() -> Non
     assert "position: relative" in stacked_strip and "min-height" in stacked_strip
     hero = (LANDING / "hero.js").read_text()
     assert "keep clear of two lines" in hero
+
+
+# ---------------------------------------------------------------------------
+# The constellation: one story with the trail, the hero and the status strips
+# ---------------------------------------------------------------------------
+
+
+def _demo_agents() -> list[str]:
+    js = (LANDING / "relay-demo.js").read_text()
+    return json.loads(re.search(r"var AGENTS = (\[.*?\]);", js).group(1))
+
+
+def _constellation_nodes() -> list[str]:
+    home = (LANDING / "index.html").read_text()
+    block = re.search(r'<div class="const" id="constellation">(.*?)<div class="const-foot">', home, re.S).group(1)
+    return re.findall(r'<button type="button" class="cnode[^"]*" data-agent="([^"]+)"', block)
+
+
+def test_constellation_listens_to_the_trail_bus_and_taps_hand_off_through_it() -> None:
+    js = (LANDING / "constellation.js").read_text()
+    assert "window.RemembraTrail.on(onTrail)" in js  # the same events the trail and the hero draw
+    assert 'window.RemembraTrail.handOff(n.getAttribute("data-agent"))' in js  # a tap is a real handoff in the story
+    assert "statusEl.textContent = ev.line" in js
+    nodes = _constellation_nodes()
+    assert len(nodes) == 6 and set(nodes) == set(_demo_agents())  # every tappable agent is one the demo can hand to
+
+
+@needs_node
+def test_a_constellation_tap_moves_the_trail_to_that_agent() -> None:
+    first, *after = _demo(
+        [SNAP]
+        + [
+            step
+            for agent in ("Cursor", "Gemini CLI", "Claude Code")
+            for step in ({"do": "handoff", "agent": agent}, _wait(ANIMATION_MS + 100), SNAP)
+        ]
+    )
+    holder = first["toAgent"]
+    for agent, s in zip(("Cursor", "Gemini CLI", "Claude Code"), after, strict=True):
+        assert s["toAgent"] == agent and s["trail"]["to"]["agent"] == agent
+        assert s["fromAgent"] == holder and s["trail"]["from"]["agent"] == holder  # whoever held the work hands it on
+        assert s["trail"]["stage"] == 6 and s["hidden"] == []
+        _check_agent_facts(s)
+        holder = agent
+
+
+# ---------------------------------------------------------------------------
+# Labels for what is not generally available: crew mode and the connector
+# ---------------------------------------------------------------------------
+
+
+def test_connector_section_is_labelled_beta_and_says_what_is_unverified() -> None:
+    home = (LANDING / "index.html").read_text()
+    section = re.search(r'<section class="sec" id="anywhere".*?</section>', home, re.S).group(0)
+    assert re.search(r'<p class="eyebrow">.*?<span class="tag signal">Beta</span></p>', section)
+    note = _text(re.search(r'<p class="fine" id="connector-note">.*?</p>', section, re.S).group(0))
+    assert note.startswith("Beta:") and "still verifying it inside the live Claude and ChatGPT apps" in note
+    assert "Nothing over the connector edits or deletes memories." in _text(section)
+    gate = home[: home.index('id="anywhere"')].rsplit("<section", 1)[0]
+    assert (
+        "<!-- beta: the connector is built and tested locally; not yet verified inside the live Claude and ChatGPT apps -->"
+        in gate
+    )
+
+
+def test_crew_page_is_labelled_part_of_launch_only_by_the_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    partials = _script("site_partials")
+    crew = (LANDING / "crew.html").read_text()
+    eyebrow = re.compile(r'<p class="eyebrow">Crew mode <!-- @crew-tag -->(.*?)<!-- /@crew-tag --></p>')
+    assert eyebrow.search(crew).group(1) == '<span class="tag">Not available yet</span>'  # off: crew is not merged yet
+    assert "<!-- requires Crew mode (feat/crew) merged and live before launch -->" in crew
+    monkeypatch.setattr(partials, "CREW_LIVE", True)
+    live = partials.render(crew)
+    assert eyebrow.search(live).group(1) == '<span class="tag signal">Part of launch</span>'
+    section = (SCRIPTS / "site-crew-section.html").read_text()
+    assert '<span class="tag signal">Part of launch</span>' in section
 
 
 # ---------------------------------------------------------------------------

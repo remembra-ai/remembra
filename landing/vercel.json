@@ -34,6 +34,16 @@
       "source": "/dashboard",
       "destination": "https://app.remembra.dev",
       "permanent": false
+    },
+    {
+      "source": "/signup.html",
+      "destination": "https://app.remembra.dev/signup",
+      "permanent": false
+    },
+    {
+      "source": "/dashboard.html",
+      "destination": "https://app.remembra.dev",
+      "permanent": false
     }
   ]
 }

@@ -5,11 +5,12 @@
    stdin: {"script": path, "dom": node-tree, "reduce": bool, "steps": [...]}
      node-tree: {"t": tag, "a": {attr: value}, "c": [child | "text"]}
      steps:     {"do": "click", "sel": css} | {"do": "advance", "ms": n} | {"do": "snap"}
+                | {"do": "handoff", "agent": name}   (what a constellation tap calls: RemembraTrail.handOff)
    stdout: JSON list with one snapshot per "snap" step.
 
    Visibility mirrors the page CSS: while the figure has .is-animating, a
    [data-at] element without .on is at opacity 0. test_landing_site.py checks
-   that rule is still in index.html. */
+   that rule is still in the page CSS (landing/home.css). */
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
@@ -253,6 +254,8 @@ for (const step of input.steps) {
     const el = body.querySelector(step.sel);
     if (!el) throw new Error("no element for " + step.sel);
     el.click();
+  } else if (step.do === "handoff") {
+    windowV.RemembraTrail.handOff(step.agent);
   } else throw new Error("unknown step " + JSON.stringify(step));
 }
 process.stdout.write(JSON.stringify(out));

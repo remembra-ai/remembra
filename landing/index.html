@@ -88,7 +88,7 @@
       <div class="hero-copy">
         <p class="eyebrow">Out of credits on one? Keep going on another.</p>
         <h1 id="hero-title"><span class="l">One agent stops.</span> <span class="l">The next one <mark>already knows.</mark></span></h1>
-        <p class="lede"><strong>Remembra is one cloud memory for all your AI agents.</strong> When one stops, whether it ran out of credits, hit a usage limit, or you closed the lid for the day, the next one picks up from the trail it left. <em>Any tool, any machine.</em></p>
+        <p class="lede"><strong>Remembra is one cloud memory for all your AI agents.</strong> When one runs out of credits or hits a usage limit, end its session and the next one picks up from its handoff. <em>Any tool, any machine.</em></p>
 
         <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
         <div class="cmd" role="group" aria-label="Install commands">
@@ -100,9 +100,9 @@
           <span class="sr-only" role="status" data-copy-status></span>
         </div>
         <p class="cmd-meta">
-          <a href="https://app.remembra.dev/signup"><b>Free to start</b></a><span class="sep" aria-hidden="true"></span>
-          <a href="https://github.com/remembra-ai/remembra">Open source</a><span class="sep" aria-hidden="true"></span>
-          <a href="https://docs.remembra.dev/getting-started/docker/">or self-host it</a>
+          <a href="https://app.remembra.dev/signup"><b>Get a free key</b></a><span class="sep" aria-hidden="true"></span>
+          <a href="https://docs.remembra.dev/guides/relay/">Setup guide</a><span class="sep" aria-hidden="true"></span>
+          <a href="https://github.com/remembra-ai/remembra">Open source</a>
         </p>
       </div>
 
@@ -246,7 +246,7 @@
         <ul class="places" aria-label="Where your agents can run">
           <li>laptop</li><li>desktop</li><li>cloud VM</li><li>server</li>
         </ul>
-        <p class="fine" style="margin-top:22px">Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet, so <code>connect</code> only previews them unless you opt in. Until then, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent.</p>
+        <p class="fine" id="agents-note">Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet. <code>connect</code> is a dry run until you add <code>--apply</code>, and it leaves the unverified hooks out unless you also add <code>--include-unverified</code>. Until they are tested, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent.</p>
       </div>
       <div>
         <div class="const" id="constellation">
@@ -376,7 +376,7 @@
           <li><b>ChatGPT</b><span>On the web, in developer mode (Plus, Pro, Business, Enterprise and Education).</span></li>
           <li><b>Read-mostly</b><span>Nothing over the connector edits or deletes memories. It can add a note and message an agent's inbox.</span></li>
         </ul>
-        <p class="fine" style="margin-top:18px">Beta: the connector is built and tested against Remembra's own server, and we are still verifying it inside the live Claude and ChatGPT apps. <a class="link" href="https://docs.remembra.dev/integrations/claude-and-chatgpt-apps/">Connector setup</a></p>
+        <p class="fine" id="connector-note">Beta: the connector is built and tested against Remembra's own server, and we are still verifying it inside the live Claude and ChatGPT apps. <a class="link" href="https://docs.remembra.dev/integrations/claude-and-chatgpt-apps/">Connector setup</a></p>
       </div>
       <div class="phone" role="img" aria-label="Example chat in the Claude app with the Remembra connector: asking where the invoices work was left, then telling claude-code to fix the rounding first thing tomorrow.">
         <div class="ph-top" aria-hidden="true"><b>Claude</b><span>Remembra connector · on</span></div>
@@ -430,7 +430,7 @@
       <dl class="trust" aria-label="How your memory is protected">
         <div><dt>Redacted</dt><dd>Keys, tokens and other secrets are stripped out before anything is saved.</dd></div>
         <div><dt>Isolated</dt><dd>Every account's memory is walled off, and project-scoped keys only see their own projects.</dd></div>
-        <div><dt>Attributed</dt><dd>Every handoff names the agent, session and time that wrote it, and whether its facts came from git or from the agent. Give an agent its own scoped key and it is key-verified; it can't write as another.</dd></div>
+        <div><dt>Attributed</dt><dd>Every handoff records the agent, session and time that wrote it, and whether its facts came from git or from the agent. Give each agent its own scoped key and it can't write as another.</dd></div>
         <div><dt>Open</dt><dd>The core is MIT-licensed open source. Read it, run it, <a href="https://docs.remembra.dev/getting-started/docker/">host it yourself</a>.</dd></div>
       </dl>
     </div>
