@@ -34,36 +34,39 @@ services:
       - REMEMBRA_QDRANT_URL=http://qdrant:6333
       - REMEMBRA_QDRANT_COLLECTION=memories
       
-      # Embedding model (default: local sentence-transformers)
-      - REMEMBRA_EMBEDDING_MODEL=${REMEMBRA_EMBEDDING_MODEL:-all-MiniLM-L6-v2}
-      
-      # Optional: OpenAI embeddings
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Embeddings (default provider: OpenAI). Settings use the REMEMBRA_ prefix;
+      # a bare OPENAI_API_KEY is ignored (REL-13).
+      - REMEMBRA_EMBEDDING_PROVIDER=${REMEMBRA_EMBEDDING_PROVIDER:-openai}
+      - REMEMBRA_EMBEDDING_MODEL=${REMEMBRA_EMBEDDING_MODEL:-text-embedding-3-small}
+      - REMEMBRA_OPENAI_API_KEY=${REMEMBRA_OPENAI_API_KEY:-}
       
       # LLM for fact extraction (optional)
-      - REMEMBRA_LLM_PROVIDER=${REMEMBRA_LLM_PROVIDER:-}
-      - REMEMBRA_LLM_MODEL=${REMEMBRA_LLM_MODEL:-}
+      - REMEMBRA_LLM_PROVIDER=${REMEMBRA_LLM_PROVIDER:-openai}
+      - REMEMBRA_LLM_MODEL=${REMEMBRA_LLM_MODEL:-gpt-4o-mini}
       
       # Security
-      - REMEMBRA_REQUIRE_API_KEY=${REMEMBRA_REQUIRE_API_KEY:-true}
-      - REMEMBRA_CORS_ORIGINS=${REMEMBRA_CORS_ORIGINS:-*}
+      - REMEMBRA_AUTH_ENABLED=${REMEMBRA_AUTH_ENABLED:-true}
+      - REMEMBRA_JWT_SECRET=${REMEMBRA_JWT_SECRET:?REMEMBRA_JWT_SECRET is required (32+ chars)}
+      # JSON list — a bare * fails settings parsing at boot
+      - REMEMBRA_CORS_ORIGINS=${REMEMBRA_CORS_ORIGINS:-["http://localhost:8787"]}
       
       # Rate limiting
-      - REMEMBRA_RATE_LIMIT_STORE=${REMEMBRA_RATE_LIMIT_STORE:-30/minute}
-      - REMEMBRA_RATE_LIMIT_RECALL=${REMEMBRA_RATE_LIMIT_RECALL:-60/minute}
+      - REMEMBRA_RATE_LIMIT_ENABLED=${REMEMBRA_RATE_LIMIT_ENABLED:-true}
+      - REMEMBRA_ENABLE_RERANKING=${REMEMBRA_ENABLE_RERANKING:-false}
       
-      # TTL defaults
-      - REMEMBRA_DEFAULT_TTL_DAYS=${REMEMBRA_DEFAULT_TTL_DAYS:-}
+      # TTL default: add REMEMBRA_DEFAULT_TTL_DAYS=<int> to expire memories by default
+      # (an empty value fails integer parsing at boot, so it is not set here)
       
       # Logging
-      - REMEMBRA_LOG_LEVEL=${REMEMBRA_LOG_LEVEL:-INFO}
+      - REMEMBRA_LOG_LEVEL=${REMEMBRA_LOG_LEVEL:-info}
     volumes:
       - remembra_data:/data
     depends_on:
       qdrant:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
+      # The self-host image has no curl
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8787/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -75,7 +78,8 @@ services:
   # Qdrant - Vector Database
   # ==========================================================================
   qdrant:
-    image: qdrant/qdrant:v1.7.4
+    # Matches the pinned qdrant-client (1.17.x, uses query_points) — REL-13
+    image: qdrant/qdrant:v1.17.0
     container_name: remembra-qdrant
     restart: unless-stopped
     ports:
@@ -86,7 +90,8 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      # The qdrant image has no curl/wget: plain TCP check via bash (REL-19)
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3

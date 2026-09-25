@@ -396,6 +396,16 @@ class Settings(BaseSettings):
     )
 
     @model_validator(mode="after")
+    def fill_build_sha(self) -> "Settings":
+        """Fall back to the deploy platform's commit (Coolify sets SOURCE_COMMIT)
+        when REMEMBRA_BUILD_SHA is unset or empty (REL-18)."""
+        if not self.build_sha:
+            import os
+
+            object.__setattr__(self, "build_sha", os.environ.get("SOURCE_COMMIT") or None)
+        return self
+
+    @model_validator(mode="after")
     def check_security_settings(self) -> "Settings":
         """Warn about insecure settings in production and filter CORS origins."""
         if self.auth_enabled and not self.debug:

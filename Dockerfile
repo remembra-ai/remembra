@@ -31,14 +31,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create virtual environment
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+RUN python -m venv /opt/venv && pip install --no-cache-dir "uv==0.10.0"
+ENV PATH="/opt/venv/bin:$PATH" \
+    VIRTUAL_ENV=/opt/venv
 
-# Install Python dependencies
-COPY pyproject.toml README.md ./
+# Install Python dependencies at the exact versions pinned in uv.lock (REL-18).
+# Add "rerank" to REMEMBRA_EXTRAS to include the CrossEncoder reranker
+# (CPU-only torch, ~+1 GB): docker build --build-arg REMEMBRA_EXTRAS="server encryption cloud rerank" .
+ARG REMEMBRA_EXTRAS="server encryption cloud"
+COPY pyproject.toml uv.lock README.md ./
+COPY scripts/install-locked-deps.sh /tmp/install-locked-deps.sh
+RUN sh /tmp/install-locked-deps.sh "${REMEMBRA_EXTRAS}"
 COPY src/ ./src/
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir ".[server,encryption,cloud]"
+RUN uv pip install --no-cache --no-deps .
 
 # =============================================================================
 # Stage 3: Production Image
@@ -83,6 +88,8 @@ ENV REMEMBRA_DATABASE_URL=sqlite:////data/remembra.db
 ENV REMEMBRA_QDRANT_URL=http://localhost:6333
 ENV REMEMBRA_STATIC_DIR=/app/static
 ENV REMEMBRA_BUILD_SHA=${REMEMBRA_BUILD_SHA}
+# Reranker model cache on the data volume (only used when built with "rerank")
+ENV HF_HOME=/data/hf-cache
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 

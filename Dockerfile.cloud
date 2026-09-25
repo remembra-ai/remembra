@@ -1,5 +1,5 @@
-# Remembra Cloud — Production Dockerfile for Fly.io
-# Optimized for managed cloud deployment (Paddle billing)
+# Remembra Cloud — Production Dockerfile
+# Built by Coolify app `remembra-api` (see docs/DEPLOYING.md).
 
 # =============================================================================
 # Stage 1: Build Dashboard
@@ -15,7 +15,7 @@ COPY dashboard/ ./
 RUN npm run build
 
 # =============================================================================
-# Stage 2: Python Dependencies
+# Stage 2: Python Dependencies (exact versions from uv.lock — REL-18)
 # =============================================================================
 FROM python:3.11-slim AS python-builder
 
@@ -27,15 +27,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
+RUN python -m venv /opt/venv && pip install --no-cache-dir "uv==0.10.0"
+ENV PATH="/opt/venv/bin:$PATH" \
+    VIRTUAL_ENV=/opt/venv
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml uv.lock README.md ./
+COPY scripts/install-locked-deps.sh /tmp/install-locked-deps.sh
+
+# server + cloud + encryption + rerank (RET-4: the CrossEncoder reranker was
+# enabled in prod but never installed). torch comes from the CPU-only index:
+# measured +~1.05 GB installed (165 MB -> 1.2 GB of site-packages) vs ~+6 GB
+# for the default CUDA wheels.
+RUN sh /tmp/install-locked-deps.sh "server cloud encryption rerank"
+
 COPY src/ ./src/
+RUN uv pip install --no-cache --no-deps .
 
-# Install with cloud + encryption extras
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir ".[server,cloud,encryption]"
+# Bake the default reranker model into the image so the first recall doesn't
+# block on a Hugging Face download (and works if HF is unreachable).
+ENV HF_HOME=/opt/hf-cache
+RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
 
 # =============================================================================
 # Stage 3: Production Image
@@ -46,6 +57,11 @@ LABEL org.opencontainers.image.title="Remembra Cloud"
 LABEL org.opencontainers.image.description="AI Memory Layer — Managed Cloud"
 LABEL org.opencontainers.image.url="https://remembra.dev"
 LABEL org.opencontainers.image.vendor="Remembra"
+
+# Build identifier surfaced via /health and /health/ready. Coolify passes
+# SOURCE_COMMIT; an explicit REMEMBRA_BUILD_SHA build-arg wins.
+ARG SOURCE_COMMIT=""
+ARG REMEMBRA_BUILD_SHA="${SOURCE_COMMIT}"
 
 # Create non-root user
 RUN groupadd -r remembra && useradd -r -g remembra remembra
@@ -58,13 +74,31 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Litestream — continuous SQLite replication to object storage (S3/R2/Tigris).
 # Inert unless LITESTREAM_REPLICA_URL is set at runtime (see cloud-entrypoint.sh).
-ADD https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz /tmp/litestream.tar.gz
-RUN tar -C /usr/local/bin -xzf /tmp/litestream.tar.gz litestream && rm /tmp/litestream.tar.gz
+# The tarball is verified against a pinned SHA-256 (REL-14). Upstream publishes
+# no checksum file for v0.3.13; these were computed from the GitHub release
+# assets on 2026-09-25.
+ARG TARGETARCH=amd64
+ARG LITESTREAM_VERSION=0.3.13
+ARG LITESTREAM_SHA256_AMD64=eb75a3de5cab03875cdae9f5f539e6aedadd66607003d9b1e7a9077948818ba0
+ARG LITESTREAM_SHA256_ARM64=9585f5a508516bd66af2b2376bab4de256a5ef8e2b73ec760559e679628f2d59
+RUN set -eu; \
+    case "${TARGETARCH}" in \
+        amd64) sha="${LITESTREAM_SHA256_AMD64}" ;; \
+        arm64) sha="${LITESTREAM_SHA256_ARM64}" ;; \
+        *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
+    esac; \
+    curl -fsSL -o /tmp/litestream.tar.gz \
+        "https://github.com/benbjohnson/litestream/releases/download/v${LITESTREAM_VERSION}/litestream-v${LITESTREAM_VERSION}-linux-${TARGETARCH}.tar.gz"; \
+    echo "${sha}  /tmp/litestream.tar.gz" | sha256sum -c -; \
+    tar -C /usr/local/bin -xzf /tmp/litestream.tar.gz litestream; \
+    rm /tmp/litestream.tar.gz; \
+    litestream version
 
 WORKDIR /app
 
-# Copy Python environment
+# Copy Python environment + baked reranker model
 COPY --from=python-builder /opt/venv /opt/venv
+COPY --from=python-builder --chown=remembra:remembra /opt/hf-cache /opt/hf-cache
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy dashboard build
@@ -75,7 +109,7 @@ COPY src/ ./src/
 COPY scripts/cloud-entrypoint.sh /app/cloud-entrypoint.sh
 RUN chmod +x /app/cloud-entrypoint.sh
 
-# Create data directory (Fly.io mounts volume here)
+# Create data directory (volume mounted here)
 RUN mkdir -p /data && chown -R remembra:remembra /data
 
 # Environment
@@ -84,12 +118,16 @@ ENV REMEMBRA_PORT=8787
 ENV REMEMBRA_DATABASE_URL=sqlite+aiosqlite:////data/remembra.db
 ENV REMEMBRA_STATIC_DIR=/app/static
 ENV REMEMBRA_CLOUD_ENABLED=true
+ENV REMEMBRA_BUILD_SHA=${REMEMBRA_BUILD_SHA}
+ENV HF_HOME=/opt/hf-cache
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 
 EXPOSE 8787
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+# Liveness only. Readiness (provider/quota/Qdrant/SQLite) is GET /health/ready,
+# which always answers 200 with status ok|degraded — never wire it to restarts.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8787/health || exit 1
 
 USER remembra
