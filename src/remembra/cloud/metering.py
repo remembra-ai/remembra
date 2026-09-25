@@ -76,6 +76,15 @@ class UsageMeter:
         except Exception:
             pass  # Column already exists
 
+        # Promo trials store an expiry; update_plan() has always written it, but
+        # the column was never created, so every redemption failed.
+        try:
+            await self._db.conn.execute("ALTER TABLE cloud_tenants ADD COLUMN promo_expires_at TEXT")
+            await self._db.conn.commit()
+            logger.info("Added promo_expires_at column to cloud_tenants")
+        except Exception:
+            pass  # Column already exists
+
     # -----------------------------------------------------------------------
     # Tenant management
     # -----------------------------------------------------------------------
@@ -166,6 +175,15 @@ class UsageMeter:
         tenant = await self.get_tenant(user_id)
         if tenant is None:
             return PlanTier.FREE
+        # A promo trial ends at promo_expires_at unless a paid subscription exists.
+        promo_expires = tenant.get("promo_expires_at")
+        if promo_expires and not tenant.get("stripe_subscription_id"):
+            try:
+                expired = datetime.fromisoformat(str(promo_expires)).replace(tzinfo=None) < datetime.now(UTC).replace(tzinfo=None)
+            except ValueError:
+                expired = False
+            if expired:
+                return PlanTier.FREE
         return PlanTier(tenant["plan"])
 
     async def update_plan(

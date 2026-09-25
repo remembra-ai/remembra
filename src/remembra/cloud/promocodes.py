@@ -114,13 +114,13 @@ PROMO_CODES: dict[str, PromoCode] = {
         expires_at=datetime(2026, 4, 30, 23, 59, 59),  # End of April 2026
         description="Launch special: 30 days of Pro free (first 100 users)",
     ),
-    # Early adopter code - unlimited, 14 day trial
+    # Early adopter code - capped (was unlimited), 14 day trial
     "EARLYADOPTER": PromoCode(
         code="EARLYADOPTER",
         promo_type=PromoType.TRIAL,
         plan_tier=PlanTier.PRO,
         duration_days=14,
-        max_redemptions=None,  # Unlimited
+        max_redemptions=1000,
         expires_at=datetime(2026, 6, 30, 23, 59, 59),  # End of June 2026
         description="Early adopter: 14 days of Pro free",
     ),
@@ -167,36 +167,86 @@ PROMO_CODES: dict[str, PromoCode] = {
 }
 
 
-class PromoCodeManager:
-    """Manages promotional code redemption (plan-access grants)."""
+_REDEMPTIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS promo_redemptions (
+    code TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    redeemed_at TEXT NOT NULL,
+    expires_at TEXT,
+    PRIMARY KEY (code, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_promo_redemptions_code ON promo_redemptions(code);
+"""
 
-    def __init__(self) -> None:
+
+class PromoCodeManager:
+    """Manages promotional code redemption (plan-access grants).
+
+    Redemptions are persisted in SQLite (``promo_redemptions``), so limits and
+    the one-redemption-per-user-per-code rule survive restarts and hold across
+    workers. The check-and-insert is a single atomic statement.
+    """
+
+    def __init__(self, db: Any) -> None:
+        self._db = db
         self._codes = PROMO_CODES.copy()
+        self._schema_ready = False
+
+    async def _ensure_schema(self) -> None:
+        if not self._schema_ready:
+            await self._db.conn.executescript(_REDEMPTIONS_SCHEMA)
+            await self._db.conn.commit()
+            self._schema_ready = True
+
+    async def redemption_count(self, code: str) -> int:
+        await self._ensure_schema()
+        cursor = await self._db.conn.execute("SELECT COUNT(*) FROM promo_redemptions WHERE code = ?", (code.upper(),))
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def has_redeemed(self, code: str, user_id: str) -> bool:
+        await self._ensure_schema()
+        cursor = await self._db.conn.execute(
+            "SELECT 1 FROM promo_redemptions WHERE code = ? AND user_id = ?", (code.upper(), user_id)
+        )
+        return await cursor.fetchone() is not None
 
     def get_code(self, code: str) -> PromoCode | None:
         """Get a promo code by its code string (case-insensitive)."""
         return self._codes.get(code.upper())
 
-    def list_active_codes(self) -> list[dict[str, Any]]:
-        """List all active promo codes with stats."""
+    async def _check(self, promo: PromoCode, user_id: str) -> str | None:
+        if promo.expires_at and utcnow() > promo.expires_at:
+            return "This promo code has expired"
+        if promo.max_redemptions is not None and await self.redemption_count(promo.code) >= promo.max_redemptions:
+            return f"This promo code has reached its limit ({promo.max_redemptions} redemptions)"
+        if await self.has_redeemed(promo.code, user_id):
+            return "You've already redeemed this promo code"
+        return None
+
+    async def list_active_codes(self) -> list[dict[str, Any]]:
+        """List all active promo codes with persisted redemption stats."""
         active = []
         for code in self._codes.values():
-            valid, _ = code.is_valid()
-            if valid:
-                active.append(
-                    {
-                        "code": code.code,
-                        "type": code.promo_type.value,
-                        "plan": code.plan_tier.value,
-                        "duration_days": code.duration_days,
-                        "discount_percent": code.discount_percent,
-                        "redemptions": code.redemption_count,
-                        "max_redemptions": code.max_redemptions,
-                        "remaining": (code.max_redemptions - code.redemption_count if code.max_redemptions else "unlimited"),
-                        "expires_at": code.expires_at.isoformat() if code.expires_at else None,
-                        "description": code.description,
-                    }
-                )
+            if code.expires_at and utcnow() > code.expires_at:
+                continue
+            count = await self.redemption_count(code.code)
+            if code.max_redemptions is not None and count >= code.max_redemptions:
+                continue
+            active.append(
+                {
+                    "code": code.code,
+                    "type": code.promo_type.value,
+                    "plan": code.plan_tier.value,
+                    "duration_days": code.duration_days,
+                    "discount_percent": code.discount_percent,
+                    "redemptions": count,
+                    "max_redemptions": code.max_redemptions,
+                    "remaining": (code.max_redemptions - count if code.max_redemptions is not None else "unlimited"),
+                    "expires_at": code.expires_at.isoformat() if code.expires_at else None,
+                    "description": code.description,
+                }
+            )
         return active
 
     async def validate(self, code: str, user_id: str) -> RedemptionResult:
@@ -206,23 +256,13 @@ class PromoCodeManager:
         """
         promo = self.get_code(code)
         if not promo:
-            return RedemptionResult(
-                success=False,
-                error="Invalid promo code",
-            )
+            return RedemptionResult(success=False, error="Invalid promo code")
 
-        can_redeem, error = promo.can_user_redeem(user_id)
-        if not can_redeem:
-            return RedemptionResult(
-                success=False,
-                error=error,
-            )
+        error = await self._check(promo, user_id)
+        if error:
+            return RedemptionResult(success=False, error=error)
 
-        # Calculate expiration
-        expires_at = None
-        if promo.duration_days > 0:
-            expires_at = utcnow() + timedelta(days=promo.duration_days)
-
+        expires_at = utcnow() + timedelta(days=promo.duration_days) if promo.duration_days > 0 else None
         return RedemptionResult(
             success=True,
             plan_tier=promo.plan_tier,
@@ -238,82 +278,87 @@ class PromoCodeManager:
         email: str | None = None,
         stripe_customer_id: str | None = None,
     ) -> RedemptionResult:
-        """Redeem a promo code for a user.
+        """Redeem a promo code for a user (at most once per user per code).
 
-        For TRIAL codes: Grants plan access for duration_days.
-        For DISCOUNT codes: Creates/applies Stripe coupon.
-
-        Args:
-            code: The promo code to redeem
-            user_id: The user's ID
-            email: User's email (for logging)
-            stripe_customer_id: Stripe customer ID (for discount codes)
-
-        Returns:
-            RedemptionResult with success status and details.
+        For TRIAL codes: grants plan access for ``duration_days``.
+        DISCOUNT codes are no longer supported.
         """
-        # Validate first
-        result = await self.validate(code, user_id)
-        if not result.success:
-            return result
-
         promo = self.get_code(code)
         if not promo:
             return RedemptionResult(success=False, error="Invalid promo code")
-
-        # Handle different promo types
-        if promo.promo_type == PromoType.TRIAL:
-            # Grant plan access directly (no Stripe needed)
-            expires_at = utcnow() + timedelta(days=promo.duration_days)
-
-            # Record redemption
-            promo.redemption_count += 1
-            promo.redeemed_by.append(user_id)
-
-            logger.info(
-                "Promo redeemed: code=%s user=%s email=%s plan=%s days=%d",
-                code,
-                user_id,
-                email,
-                promo.plan_tier.value,
-                promo.duration_days,
-            )
-
-            return RedemptionResult(
-                success=True,
-                plan_tier=promo.plan_tier,
-                duration_days=promo.duration_days,
-                expires_at=expires_at,
-                message=f"🎉 Success! You now have {promo.plan_tier.value.title()} access for {promo.duration_days} days!",
-            )
-
-        elif promo.promo_type == PromoType.DISCOUNT:
-            # Stripe-based discount coupons were removed. Discount codes are no
-            # longer supported — use a plan-access promo code to grant access.
+        if promo.promo_type == PromoType.DISCOUNT:
             return RedemptionResult(
                 success=False,
                 error="Discount codes are no longer supported. Please use a plan-access code.",
             )
+        if promo.promo_type != PromoType.TRIAL:
+            return RedemptionResult(success=False, error="Unknown promo type")
 
-        return RedemptionResult(success=False, error="Unknown promo type")
+        error = await self._check(promo, user_id)
+        if error:
+            return RedemptionResult(success=False, error=error)
+
+        now = utcnow()
+        expires_at = now + timedelta(days=promo.duration_days)
+        # Atomic claim: succeeds only if this user has not redeemed the code and
+        # the global cap still has room — no in-memory race, survives restarts.
+        cursor = await self._db.conn.execute(
+            """
+            INSERT INTO promo_redemptions (code, user_id, redeemed_at, expires_at)
+            SELECT ?, ?, ?, ?
+            WHERE NOT EXISTS (SELECT 1 FROM promo_redemptions WHERE code = ? AND user_id = ?)
+              AND (? IS NULL OR (SELECT COUNT(*) FROM promo_redemptions WHERE code = ?) < ?)
+            """,
+            (
+                promo.code,
+                user_id,
+                now.isoformat(),
+                expires_at.isoformat(),
+                promo.code,
+                user_id,
+                promo.max_redemptions,
+                promo.code,
+                promo.max_redemptions,
+            ),
+        )
+        await self._db.conn.commit()
+        if cursor.rowcount != 1:
+            error = await self._check(promo, user_id) or "This promo code can no longer be redeemed"
+            return RedemptionResult(success=False, error=error)
+
+        logger.info(
+            "Promo redeemed: code=%s user=%s plan=%s days=%d",
+            promo.code,
+            user_id,
+            promo.plan_tier.value,
+            promo.duration_days,
+        )
+        return RedemptionResult(
+            success=True,
+            plan_tier=promo.plan_tier,
+            duration_days=promo.duration_days,
+            expires_at=expires_at,
+            message=f"Success! You now have {promo.plan_tier.value.title()} access for {promo.duration_days} days.",
+        )
 
     def add_code(self, promo: PromoCode) -> None:
         """Add a new promo code (for dynamic creation)."""
         self._codes[promo.code.upper()] = promo
         logger.info("Added promo code: %s", promo.code)
 
-    def get_stats(self, code: str) -> dict[str, Any] | None:
-        """Get redemption stats for a promo code."""
+    async def get_stats(self, code: str) -> dict[str, Any] | None:
+        """Get persisted redemption stats for a promo code."""
         promo = self.get_code(code)
         if not promo:
             return None
-
+        count = await self.redemption_count(promo.code)
         return {
             "code": promo.code,
-            "redemption_count": promo.redemption_count,
+            "redemption_count": count,
             "max_redemptions": promo.max_redemptions,
-            "remaining": (promo.max_redemptions - promo.redemption_count if promo.max_redemptions else "unlimited"),
-            "redeemed_by_count": len(promo.redeemed_by),
+            "remaining": (promo.max_redemptions - count if promo.max_redemptions is not None else "unlimited"),
+            "redeemed_by_count": count,
             "expires_at": promo.expires_at.isoformat() if promo.expires_at else None,
-            "is_valid": promo.is_valid()[0],
+            "is_valid": not (promo.expires_at and utcnow() > promo.expires_at)
+            and (promo.max_redemptions is None or count < promo.max_redemptions),
         }
