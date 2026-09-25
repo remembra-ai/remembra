@@ -60,16 +60,32 @@ class Permission(StrEnum):
     ADMIN_EXPORT = "admin:export"
     ADMIN_USERS = "admin:users"
 
+    # Crew mode (spec §3.1). CREW_OVERRIDE and CREW_ADMIN are human-only: no API-key
+    # role ever carries them (see HUMAN_ONLY_PERMISSIONS); they are granted per request
+    # by remembra.crew.access to a dashboard login holding the crew role owner/admin.
+    CREW_READ = "crew:read"
+    CREW_WRITE = "crew:write"
+    CREW_CLAIM = "crew:claim"
+    CREW_OVERRIDE = "crew:override"
+    CREW_ADMIN = "crew:admin"
+
 
 # Credential ids that are not real API keys (shared by every JWT / dev session).
 SYNTHETIC_KEY_IDS = frozenset({"jwt_auth", "dev_key"})
+
+# Permissions only a human principal (dashboard JWT + crew role owner/admin) can hold
+# (spec D27). Every agent holds an admin API key, so these are never part of any role.
+HUMAN_ONLY_PERMISSIONS: frozenset[Permission] = frozenset({Permission.CREW_OVERRIDE, Permission.CREW_ADMIN})
+CREW_PERMISSIONS: frozenset[Permission] = frozenset(p for p in Permission if p.value.startswith("crew:"))
 
 ROLE_LEVEL: dict[Role, int] = {Role.VIEWER: 1, Role.EDITOR: 2, Role.ADMIN: 3}
 
 
 # Default permission sets per role
 ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
-    Role.ADMIN: set(Permission),  # all permissions
+    # Every permission except the human-only crew ones (D27): an admin API key is still
+    # an agent credential and must never be able to override a claim or change policy.
+    Role.ADMIN: set(Permission) - HUMAN_ONLY_PERMISSIONS,
     Role.EDITOR: {
         Permission.MEMORY_STORE,
         Permission.MEMORY_RECALL,
@@ -78,11 +94,15 @@ ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
         Permission.ENTITY_READ,
         Permission.WEBHOOK_MANAGE,
         Permission.CONFLICT_MANAGE,
+        Permission.CREW_READ,
+        Permission.CREW_WRITE,
+        Permission.CREW_CLAIM,
     },
     Role.VIEWER: {
         Permission.MEMORY_RECALL,
         Permission.KEY_LIST,
         Permission.ENTITY_READ,
+        Permission.CREW_READ,
     },
 }
 

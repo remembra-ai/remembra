@@ -140,3 +140,11 @@ RequireWebhook = Annotated[KeyRole, Depends(require_permission(Permission.WEBHOO
 RequireConflict = Annotated[KeyRole, Depends(require_permission(Permission.CONFLICT_MANAGE))]
 RequireAdmin = Annotated[KeyRole, Depends(require_role(Role.ADMIN))]
 RequireAuditExport = Annotated[KeyRole, Depends(require_permission(Permission.ADMIN_EXPORT))]
+
+# Crew mode (spec §3.1, §6). These check only the API-key side of crew access; every
+# crew route must still resolve the crew through ``remembra.crew.access`` (membership,
+# project restriction, 404 semantics, human principal). There is deliberately no alias
+# for crew:override / crew:admin: no key role carries them (HUMAN_ONLY_PERMISSIONS).
+RequireCrewRead = Annotated[KeyRole, Depends(require_permission(Permission.CREW_READ))]
+RequireCrewWrite = Annotated[KeyRole, Depends(require_permission(Permission.CREW_WRITE))]
+RequireCrewClaim = Annotated[KeyRole, Depends(require_permission(Permission.CREW_CLAIM))]

@@ -18,7 +18,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from remembra.auth.middleware import AuthenticatedUser, CurrentUser
-from remembra.auth.rbac import ROLE_LEVEL, SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
+from remembra.auth.rbac import ROLE_LEVEL, ROLE_PERMISSIONS, SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
 from remembra.auth.scopes import RequireAdmin, RequireAuditExport
 from remembra.auth.superadmin import RequireSuperadmin, is_superadmin
 from remembra.auth.users import UserManager
@@ -447,26 +447,9 @@ async def list_permissions(request: Request) -> dict[str, Any]:
     """List all available permissions and default role mappings."""
     return {
         "permissions": [p.value for p in Permission],
-        "roles": {
-            role.value: [p.value for p in perms]
-            for role, perms in {
-                Role.ADMIN: set(Permission),
-                Role.EDITOR: {
-                    Permission.MEMORY_STORE,
-                    Permission.MEMORY_RECALL,
-                    Permission.MEMORY_DELETE,
-                    Permission.KEY_LIST,
-                    Permission.ENTITY_READ,
-                    Permission.WEBHOOK_MANAGE,
-                    Permission.CONFLICT_MANAGE,
-                },
-                Role.VIEWER: {
-                    Permission.MEMORY_RECALL,
-                    Permission.KEY_LIST,
-                    Permission.ENTITY_READ,
-                },
-            }.items()
-        },
+        # The enforced mapping (single source of truth): ADMIN excludes the human-only
+        # crew permissions, which no API-key role carries.
+        "roles": {role.value: sorted(p.value for p in perms) for role, perms in ROLE_PERMISSIONS.items()},
     }
 
 
