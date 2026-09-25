@@ -185,6 +185,7 @@
 }
 .handoff-h { display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; font-size: var(--t-12); letter-spacing: .06em; text-transform: uppercase; color: var(--signal-ink); font-weight: 700; }
 .handoff-h .sig { font-weight: 400; color: var(--ink-3); text-transform: none; letter-spacing: 0; }
+.handoff .src { margin-top: 2px; font-size: var(--t-12); color: var(--ink-3); }
 .facts { margin-top: 4px; }
 .facts li { display: grid; grid-template-columns: 1.6ch minmax(0,1fr); gap: 8px; color: var(--ink); overflow-wrap: anywhere; }
 .facts li::before { font-weight: 700; }
@@ -192,6 +193,7 @@
 .facts .warn::before { content: "!";      color: var(--signal-ink); }
 .facts .todo::before { content: "\2192"; color: var(--signal-ink); }
 .facts .todo { font-weight: 500; }
+.facts .note::before { content: "\2022"; color: var(--ink-3); }
 
 .to .line { color: var(--ink); }
 .to .line .p { color: var(--signal-ink); margin-right: .6ch; }
@@ -381,7 +383,7 @@
     <div class="hero-copy">
       <p class="eyebrow">Out of credits on one? Keep going on another.</p>
       <h1 id="hero-title"><span class="l">One agent stops.</span> <span class="l">The next one <mark>already knows.</mark></span></h1>
-      <p class="lede"><strong>Remembra is one cloud memory for all your AI agents.</strong> When one stops, whether it hit a usage limit, ran out of credits, the lid closed or the day ended, the next one picks up from its handoff<span class="long"> without you re-explaining anything</span>. Any tool, any machine.</p>
+      <p class="lede"><strong>Remembra is one cloud memory for all your AI agents.</strong> When one stops, whether it hit a usage limit, ran out of credits or the day ended, the next one picks up from its handoff<span class="long"> without you re-explaining anything</span>. Any tool, any machine.</p>
 
       <!-- requires PyPI release with remembra-relay -->
       <div class="cmd" role="group" aria-label="Install command">
@@ -401,7 +403,7 @@
 
     <!-- Signature: the trail. One agent stops, the baton passes, the next one picks up. -->
     <figure class="relay" id="relay" data-stage="6" aria-labelledby="relay-cap">
-      <figcaption id="relay-cap" class="sr-only">Example trail: Claude Code on studio-laptop runs out of API credits and leaves a signed handoff with 3 commits on feat/pdf-export, 4 changed files, 41 tests passing and 1 failing, and one open item. OpenAI Codex on studio-laptop picks it up a minute later and finishes the fix.</figcaption>
+      <figcaption id="relay-cap" class="sr-only">Example trail for invoices-api: Claude Code on studio-laptop stops (credit balance too low · session ended) and leaves a handoff from its session hook: 3 commits on feat/pdf-export · pushed; 4 files changed; 41 tests passed · 1 failing; open: rounding in totals(). OpenAI Codex on studio-laptop reads the brief through MCP at 14:03 and carries on: fixing rounding in totals().</figcaption>
       <div class="relay-head" aria-hidden="true">
         <span class="cmdname">trail</span>
         <span class="repo" data-k="repo">invoices-api</span>
@@ -439,7 +441,8 @@
             <li class="e hand" data-at="3">
               <span class="node" aria-hidden="true"></span>
               <div class="handoff">
-                <p class="handoff-h"><span data-k="kind">Handoff 3c9e</span> <span class="sig" data-k="sig">signed by claude-code · 14:02</span></p>
+                <p class="handoff-h"><span data-k="kind">Handoff 3c9e</span> <span class="sig" data-k="sig">from claude-code · session hook · 14:02</span></p>
+                <p class="src" data-k="src">facts from git and the session transcript</p>
                 <ul class="facts" id="facts">
                   <li class="ok">3 commits on feat/pdf-export · pushed</li>
                   <li class="ok">4 files changed</li>
@@ -453,7 +456,7 @@
               <div>
                 <p class="who"><button class="agent" type="button" data-slot="to" data-k="toAgent">OpenAI Codex</button><span class="where" data-k="toWhere">studio-laptop · 14:03</span></p>
                 <div id="toLines">
-                  <p class="line" data-at="6"><span class="p">&rsaquo;</span>brief: claude-code, 1m ago, feat/pdf-export@a41f2c9</p>
+                  <p class="line" data-at="6"><span class="p">&rsaquo;</span>session_brief (MCP): claude-code, 1m ago, feat/pdf-export@a41f2c9</p>
                   <p class="line" data-at="6"><span class="p">&rarr;</span>fixing rounding in totals()</p>
                   <p class="line ok" data-at="6"><span class="p">&#10003;</span>42 passed · pushed<span class="cursor" aria-hidden="true"></span></p>
                 </div>
@@ -529,7 +532,7 @@
           <li><span class="lane">06</span><span class="name">Kimi CLI</span><span class="note">terminal</span></li>
           <li class="any"><span class="lane" aria-hidden="true"></span><span class="name">Any MCP-capable agent</span><span class="note">bring your own</span></li>
         </ol>
-        <p class="fine">Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi are in beta, and <code>connect</code> only previews them unless you opt in. Any MCP agent can also read the brief and write the handoff through Remembra's MCP tools.</p>
+        <p class="fine">Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet, so <code>connect</code> only previews them unless you opt in. Until then, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent.</p>
       </div>
     </div>
   </section>
@@ -572,7 +575,7 @@
       <dl class="trust" aria-label="How your memory is protected">
         <div><dt>Redacted</dt><dd>Keys, tokens and other secrets are stripped out before anything is saved.</dd></div>
         <div><dt>Isolated</dt><dd>Every account's memory is walled off, and project-scoped keys only see their own projects.</dd></div>
-        <div><dt>Signed</dt><dd>Each handoff carries the agent, machine and time that wrote it. An agent's key can't write as another agent.</dd></div>
+        <div><dt>Traceable</dt><dd>Each handoff records the agent, session and time that wrote it, and whether its facts came from git or from the agent. Give each agent its own scoped key and it can't write as another.</dd></div>
         <div><dt>Open</dt><dd>The core is MIT-licensed open source. Read it, run it, host it yourself.</dd></div>
       </dl>
     </div>

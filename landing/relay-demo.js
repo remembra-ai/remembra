@@ -40,6 +40,13 @@
   function money(v) { return "$" + v.toFixed(2); }
   function pct(v) { return Math.round(v) + "%"; }
 
+  /* Only Claude Code's session hooks are verified, and only its transcript
+     is parsed for test results. Every other agent reads the brief and
+     writes its handoff through Remembra's MCP tools, so its facts are
+     declared by the agent and never include captured test counts. */
+  var HOOKED = "Claude Code";
+  function hooked(agent) { return agent === HOOKED; }
+
   /* Every number below is internally consistent: times, ids, test counts,
      and which facts a stopped agent can still leave behind. */
   var SCN = {
@@ -50,7 +57,7 @@
       task: "PDF export for invoices",
       meter: { lab: "API credits", from: 1.8, to: 0, max: 1.8, fmt: money },
       stop: "credit balance too low · session ended",
-      kind: "Handoff", id: "3c9e", verb: "signed by", sigT: 842,
+      kind: "Handoff", id: "3c9e", sigT: 842,
       facts: [["ok", "3 commits on feat/pdf-export · pushed"], ["ok", "4 files changed"], ["warn", "41 tests passed · 1 failing"], ["todo", "open: rounding in totals()"]],
       to: { agent: "OpenAI Codex", host: "studio-laptop", t: 843 },
       doing: "fixing rounding in totals()", tests: 42,
@@ -58,28 +65,32 @@
     },
     usage: {
       repo: "shop-api", branch: "feat/rate-limit", sha: "8e07b1c",
-      past: { agent: "Gemini CLI", where: "office-pc · 09:12", line: "handoff 2b7e · picked up by codex" },
-      from: { agent: "OpenAI Codex", host: "office-pc", t: 700 },
+      past: { agent: "Gemini CLI", where: "office-pc · 09:12", line: "handoff 2b7e · picked up by claude-code" },
+      from: { agent: "Claude Code", host: "office-pc", t: 700 },
       task: "rate limiting on /checkout",
       meter: { lab: "usage left", from: 14, to: 0, max: 100, fmt: pct },
       stop: "usage limit reached · resets 16:00",
-      kind: "Handoff", id: "8b41", verb: "signed by", sigT: 700,
+      kind: "Handoff", id: "8b41", sigT: 700,
       facts: [["ok", "2 commits on feat/rate-limit"], ["ok", "5 files changed · 1 uncommitted"], ["warn", "1 commit not pushed yet"], ["todo", "open: src/middleware/rateLimit.ts"]],
-      to: { agent: "Claude Code", host: "office-pc", t: 702 },
+      to: { agent: "Cursor", host: "office-pc", t: 702 },
       doing: "finishing rateLimit.ts, then the tests", tests: 15, pushedNote: "pushed 2 commits",
       followups: ["adding a burst-window test", "documenting the rate limits", "tuning limits for the admin API"]
     },
+    /* A closed lid ends nothing cleanly: no hook fires and no handoff is
+       written. The next agent's brief leads with the last real handoff
+       (Qwen Code's, this morning) and lists the checkpoint Cursor chose to
+       save through MCP before the lid closed. */
     lid: {
       repo: "booking-app", branch: "auth-sessions", sha: "5d90e3a",
-      past: { agent: "Qwen Code", where: "home-desktop · 08:30", line: "handoff 44a2 · picked up by cursor" },
+      past: { agent: "Qwen Code", where: "home-desktop · 08:30", line: "handoff 44a2 · picked up by cursor", id: "44a2", t: 510 },
       from: { agent: "Cursor", host: "work-laptop", t: 1068 },
       task: "moving login to sessions",
       meter: { lab: "connection", from: 100, to: 0, max: 100, fmt: function (v) { return v > 0.5 ? "online" : "offline"; } },
-      stop: "lid closed · session never closed out",
-      kind: "Checkpoint", id: "5c21", verb: "saved by", sigT: 1066,
-      facts: [["ok", "2 commits on auth-sessions · pushed"], ["ok", "login moved to sessions"], ["warn", "18 tests passed · 3 failing"], ["todo", "next: token refresh in middleware"]],
+      stop: "lid closed · no handoff written",
+      kind: "Checkpoint", id: "5c21", sigT: 1066,
+      facts: [["note", "login moved to sessions, 2 commits pushed"], ["todo", "next: token refresh in middleware"]],
       to: { agent: "Claude Code", host: "home-desktop", t: 1180 },
-      doing: "fixing token refresh, 3 tests to go", tests: 21,
+      doing: "fixing token refresh in middleware", tests: 21,
       followups: ["removing the old login tokens", "adding a session timeout test", "updating the auth docs"]
     },
     day: {
@@ -89,8 +100,8 @@
       task: "nightly import job",
       meter: { lab: "workday", from: 0.5, to: 0, max: 1, fmt: function (v) { return (Math.round(v * 10) / 10).toFixed(1) + "h left"; } },
       stop: "you logged off · session closed",
-      kind: "Handoff", id: "e09b", verb: "signed by", sigT: 1085,
-      facts: [["ok", "5 commits on import-v2 · pushed"], ["ok", "9 files changed"], ["ok", "all 64 tests passed"], ["todo", "next: retry on network timeout"]],
+      kind: "Handoff", id: "e09b", sigT: 1085,
+      facts: [["ok", "5 commits on import-v2 · pushed"], ["ok", "9 files changed"], ["todo", "next: retry on network timeout"]],
       to: { agent: "OpenAI Codex", host: "cloud VM", t: 1925 },
       doing: "adding retry on network timeout", tests: 66,
       followups: ["logging failed imports", "adding a retry test for timeouts", "scheduling the import on the VM"]
@@ -104,18 +115,36 @@
     c.fi = 0;
     return c;
   }
-  function briefLine(s) {
-    var gap = s.to.t - s.sigT;
+  /* Who wrote the entry and how: a verified session hook, or an MCP call. */
+  function sigOf(s) {
+    var id = AGENT_ID[s.from.agent];
+    if (s.kind === "Checkpoint") return "saved by " + id + " via MCP · " + clock(s.sigT);
+    return "from " + id + (hooked(s.from.agent) ? " · session hook · " : " · via MCP · ") + clock(s.sigT);
+  }
+  /* Where the facts came from, as the brief labels them. */
+  function srcOf(s) {
+    if (s.kind === "Checkpoint") return "the agent's own note, not checked";
+    return hooked(s.from.agent) ? "facts from git and the session transcript" : "declared by the agent, not checked";
+  }
+  /* The brief as the next agent receives it: from its session hook, or by
+     calling session_brief over MCP. After a checkpoint (no handoff), it
+     leads with the last handoff and lists the checkpoint as recent. */
+  function briefLines(s) {
+    var via = hooked(s.to.agent) ? "brief" : "session_brief (MCP)";
     var fromId = AGENT_ID[s.from.agent];
-    if (s.kind === "Checkpoint") return "trail: last checkpoint " + s.id + " from " + fromId + ", " + ago(gap);
-    return "brief: " + fromId + ", " + ago(gap) + ", " + s.branch + "@" + s.sha;
+    if (s.kind === "Checkpoint") {
+      return [
+        via + ": last handoff " + s.past.id + " from " + AGENT_ID[s.past.agent] + ", " + ago(s.to.t - s.past.t),
+        "recent: checkpoint " + s.id + " from " + fromId + ", " + ago(s.to.t - s.sigT)
+      ];
+    }
+    return [via + ": " + fromId + ", " + ago(s.to.t - s.sigT) + ", " + s.branch + "@" + s.sha];
   }
   function toLinesOf(s) {
-    return [
-      ["", "›", briefLine(s)],
-      ["", "→", s.doing],
-      ["ok", "✓", s.tests + " passed · " + (s.pushedNote || "pushed")]
-    ];
+    var lines = briefLines(s).map(function (t) { return ["", "›", t]; });
+    lines.push(["", "→", s.doing]);
+    lines.push(["ok", "✓", s.tests + " passed · " + (s.pushedNote || "pushed")]);
+    return lines;
   }
 
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -161,7 +190,8 @@
     setK("stop", s.stop);
     nStop.classList.toggle("calm", !s.meter);
     setK("kind", s.kind + " " + s.id);
-    setK("sig", s.verb + " " + AGENT_ID[s.from.agent] + " · " + clock(s.sigT));
+    setK("sig", sigOf(s));
+    setK("src", srcOf(s));
     setK("toAgent", s.to.agent);
     setK("toWhere", s.to.host + " · " + clock(s.to.t));
 
@@ -194,9 +224,13 @@
         : "Hand the work off to " + name + " on another machine");
     });
 
-    cap.textContent = "Example trail for " + s.repo + ": " + s.from.agent + " on " + s.from.host + " stops (" + s.stop + ") and leaves a " +
-      s.kind.toLowerCase() + ": " + s.facts.map(function (f) { return f[1]; }).join("; ") + ". " +
-      s.to.agent + " on " + s.to.host + " picks it up at " + clock(s.to.t) + " and carries on: " + s.doing + ".";
+    var left = s.kind === "Checkpoint"
+      ? " and writes no handoff. Earlier it saved a checkpoint through MCP: "
+      : " and leaves a handoff " + (hooked(s.from.agent) ? "from its session hook" : "through MCP") + ": ";
+    cap.textContent = "Example trail for " + s.repo + ": " + s.from.agent + " on " + s.from.host + " stops (" + s.stop + ")" + left +
+      s.facts.map(function (f) { return f[1]; }).join("; ") + ". " +
+      s.to.agent + " on " + s.to.host + " reads the brief " + (hooked(s.to.agent) ? "from its session hook" : "through MCP") +
+      " at " + clock(s.to.t) + " and carries on: " + s.doing + ".";
 
     buttons.forEach(function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-scn") === current)); });
   }
@@ -270,8 +304,11 @@
     relay.classList.remove("no-tr");
   }
 
+  /* Hold the finished frame long enough to read, then advance. After a tap
+     handoff there is no current tab (current is ""), so the next scenario
+     is the first tab: Play returns to the tab cycle from the start. */
   function startHold() {
-    if (paused || reduce || !current) return;
+    if (paused || reduce) return;
     var btn = buttons.filter(function (b) { return b.getAttribute("data-scn") === current; })[0];
     var p = btn && btn.querySelector(".prog");
     if (p) {
@@ -347,17 +384,21 @@
     var closeT = holder.t + 9;
     var pickT = closeT + 2 + (taps % 4);
     var follow = s.followups[s.fi % s.followups.length];
+    /* Only a hook-closed session (Claude Code) captures test results. */
+    var facts = [["ok", "1 commit on " + s.branch + " · pushed"]];
+    if (hooked(holder.agent)) facts.push(["ok", s.tests + " tests passed"]);
+    facts.push(["todo", "next: " + follow]);
     taps += 1;
 
     S = {
       repo: s.repo, branch: s.branch, sha: hex(7),
-      past: { agent: s.from.agent, where: s.from.host + " · " + clock(s.from.t), line: s.kind.toLowerCase() + " " + s.id + " · picked up by " + AGENT_ID[holder.agent] },
+      past: { agent: s.from.agent, where: s.from.host + " · " + clock(s.from.t), line: s.kind.toLowerCase() + " " + s.id + " · picked up by " + AGENT_ID[holder.agent], id: s.id, t: s.sigT },
       from: { agent: holder.agent, host: holder.host, t: closeT },
       task: s.doing,
       meter: null,
       stop: "you switched to " + target + " on " + host + " · session closed",
-      kind: "Handoff", id: hex(4), verb: "signed by", sigT: closeT,
-      facts: [["ok", "1 commit on " + s.branch + " · pushed"], ["ok", s.tests + " tests passed"], ["todo", "next: " + follow]],
+      kind: "Handoff", id: hex(4), sigT: closeT,
+      facts: facts,
       to: { agent: target, host: host, t: pickT },
       doing: follow, tests: s.tests + 1 + (taps % 3),
       followups: s.followups, fi: s.fi + 1
@@ -387,11 +428,14 @@
     pauseBtn = el("button", "pause");
     pauseBtn.type = "button";
     row.appendChild(pauseBtn);
+    /* Pausing shows the finished frame of the current story, never a
+       half-revealed one. Play holds that frame, then moves on; if a story
+       is still animating (a tap while paused), its own end starts the hold. */
     pauseBtn.addEventListener("click", function () {
       paused = !paused;
       syncPause();
-      if (paused) clearTimers();
-      else next();
+      if (paused) showStill(S);
+      else if (!relay.classList.contains("is-animating")) startHold();
     });
     syncPause();
   }

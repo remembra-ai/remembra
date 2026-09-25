@@ -5,16 +5,23 @@ internal links and #anchors must resolve under the ``vercel.json`` rules
 (cleanUrls plus redirects), and the rebuilt home and pricing pages may only
 load external assets from Google Fonts.
 
-They also check the focus ring's contrast in both themes.
+They also hold the pages to what the product does today: the claims in the
+copy, the facts the trail demo shows for each agent, the focus-ring contrast,
+and the demo's behavior, which runs the real ``relay-demo.js`` against the
+real markup in Node (``tests/js/relay_demo_harness.js``).
 """
 
 from __future__ import annotations
 
+import html
 import json
 import re
+import shutil
+import subprocess
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote, urlsplit
 
 import pytest
@@ -141,6 +148,41 @@ def test_signup_links_point_at_the_dashboard_signup_route() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Copy claims
+# ---------------------------------------------------------------------------
+
+
+def _text(fragment: str) -> str:
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", fragment)).split())
+
+
+def test_no_page_calls_handoffs_signed() -> None:
+    for name in ("index.html", "pricing.html", "relay-demo.js"):
+        assert not re.search(r"\bsigned\b", (LANDING / name).read_text(), re.I), name
+
+
+def test_trust_row_claims_only_what_a_handoff_records() -> None:
+    home = (LANDING / "index.html").read_text()
+    trust = _text(re.search(r'<dl class="trust".*?</dl>', home, re.S).group(0))
+    assert "machine" not in trust
+    assert "Give each agent its own scoped key and it can't write as another." in trust
+    assert "records the agent, session and time" in trust
+
+
+def test_lede_does_not_promise_a_handoff_after_a_closed_lid() -> None:
+    lede = _text(re.search(r'<p class="lede">.*?</p>', (LANDING / "index.html").read_text(), re.S).group(0))
+    assert "picks up from its handoff" in lede
+    assert "lid" not in lede
+
+
+def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
+    note = _text(re.search(r'<p class="fine">.*?</p>', (LANDING / "index.html").read_text(), re.S).group(0))
+    assert "Claude Code's session hooks are verified" in note
+    assert "unverified" in note and "beta" not in note
+    assert "through Remembra's MCP tools" in note
+
+
+# ---------------------------------------------------------------------------
 # Focus ring contrast (WCAG 1.4.11: 3:1 against the adjacent color)
 # ---------------------------------------------------------------------------
 
@@ -191,3 +233,213 @@ def test_contrast_check_rejects_the_old_orange_ring_on_light_paper() -> None:
     light = _themes()["light"]
     assert _contrast(light["--signal"], light["--paper"]) < 3
     assert _contrast(light["--signal"], light["--panel"]) < 3
+
+
+# ---------------------------------------------------------------------------
+# The trail demo, run for real in Node
+# ---------------------------------------------------------------------------
+
+NODE = shutil.which("node")
+HARNESS = Path(__file__).resolve().parent / "js" / "relay_demo_harness.js"
+needs_node = pytest.mark.skipif(NODE is None, reason="node is not installed")
+HOLD_MS = 6200  # relay-demo.js HOLD
+ANIMATION_MS = 7400  # a scenario with a meter, start to finished frame
+VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
+ORDER = ["credits", "usage", "lid", "day"]
+
+
+class _RelayTree(HTMLParser):
+    """The #relay figure as a {"t", "a", "c"} tree for the harness."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[dict[str, Any]] = []
+        self.root: dict[str, Any] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        node: dict[str, Any] = {"t": tag, "a": {k: v or "" for k, v in attrs}, "c": []}
+        if self.stack:
+            self.stack[-1]["c"].append(node)
+        elif node["a"].get("id") == "relay":
+            self.root = node
+        else:
+            return
+        if tag not in VOID_TAGS:
+            self.stack.append(node)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.stack and self.stack[-1]["t"] == tag:
+            self.stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        if self.stack:
+            self.stack[-1]["c"].append(data)
+
+
+def _relay_tree() -> dict[str, Any]:
+    parser = _RelayTree()
+    parser.feed((LANDING / "index.html").read_text())
+    assert parser.root is not None
+    return parser.root
+
+
+def _demo(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    assert NODE is not None
+    payload = {"script": str(LANDING / "relay-demo.js"), "dom": _relay_tree(), "steps": steps}
+    run = subprocess.run([NODE, str(HARNESS)], input=json.dumps(payload), capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    snaps: list[dict[str, Any]] = json.loads(run.stdout)
+    return snaps
+
+
+def _click(sel: str) -> dict[str, Any]:
+    return {"do": "click", "sel": sel}
+
+
+def _wait(ms: int) -> dict[str, Any]:
+    return {"do": "advance", "ms": ms}
+
+
+SNAP = {"do": "snap"}
+PAUSE = _click("button.pause")
+
+
+def test_harness_visibility_model_is_the_page_css() -> None:
+    home = (LANDING / "index.html").read_text()
+    assert ".relay.is-animating [data-at] { opacity: 0;" in home
+    assert ".relay.is-animating [data-at].on { opacity: 1;" in home
+
+
+@needs_node
+def test_pause_mid_animation_shows_the_finished_frame_and_play_resumes_the_same_tab() -> None:
+    mid, paused, played, held = _demo(
+        [_click('[data-scn="lid"]'), _wait(1500), SNAP, PAUSE, _wait(10_000), SNAP, PAUSE, _wait(100), SNAP, _wait(HOLD_MS), SNAP]
+    )
+    # mid-animation, most of the frame is still hidden: the check below can fail
+    assert "is-animating" in mid["classes"] and mid["hidden"]
+
+    assert "is-animating" not in paused["classes"]
+    assert paused["stage"] == "6"
+    assert paused["hidden"] == []
+    assert paused["pressed"] == ["lid"] and paused["pause"] == "Play"
+    assert paused["meter"] == "offline"  # the meter shows its end state, not a frozen drain
+    assert paused["pending"] == 0  # nothing runs while paused
+
+    assert played["pressed"] == ["lid"] and played["pause"] == "Pause"
+    assert "is-animating" not in played["classes"] and played["hidden"] == []
+    assert held["pressed"] == ["day"]  # only after the hold does it move on
+
+
+@needs_node
+def test_play_after_a_tap_finishes_that_trail_then_returns_to_the_first_tab() -> None:
+    tapped, playing, finished, first, second = _demo(
+        [
+            _click('button[data-slot="to"]'),
+            _wait(1000),
+            SNAP,
+            PAUSE,
+            _wait(100),
+            SNAP,
+            _wait(6000),
+            SNAP,
+            _wait(5000),
+            SNAP,
+            _wait(ANIMATION_MS + HOLD_MS),
+            SNAP,
+        ]
+    )
+    assert tapped["pause"] == "Play" and tapped["pressed"] == []
+    assert tapped["fromAgent"] == "OpenAI Codex"  # the holder closes, a different agent picks up
+    assert tapped["toAgent"] != "OpenAI Codex"
+    assert playing["pause"] == "Pause" and "is-animating" in playing["classes"]
+    assert "is-animating" not in finished["classes"] and finished["hidden"] == []
+    assert finished["pressed"] == []
+    assert first["pressed"] == ["credits"]
+    assert second["pressed"] == ["usage"]  # one step per hold, never two
+
+
+TEST_RESULT = re.compile(r"\btests? passed\b|\bfailing\b")  # a verdict, not a to-do about tests
+
+
+def _check_agent_facts(s: dict[str, Any]) -> None:
+    closer, reader = s["fromAgent"], s["toAgent"]
+    tests = [f["text"] for f in s["facts"] if TEST_RESULT.search(f["text"])]
+    if closer == "Claude Code":
+        assert s["kind"].startswith("Handoff")
+        assert "· session hook ·" in s["sig"]
+        assert s["src"] == "facts from git and the session transcript"
+    else:
+        assert tests == [], s
+        assert "via MCP" in s["sig"] and "session hook" not in s["sig"]
+        assert s["src"] in ("declared by the agent, not checked", "the agent's own note, not checked")
+    brief = s["toLines"][0]
+    if reader == "Claude Code":
+        assert brief.startswith("›brief: "), s
+    else:
+        assert brief.startswith("›session_brief (MCP): "), s
+
+
+@needs_node
+def test_only_claude_code_handoffs_carry_test_results_and_other_agents_use_mcp() -> None:
+    steps: list[dict[str, Any]] = []
+    for key in ORDER:
+        steps += [_click(f'[data-scn="{key}"]'), _wait(ANIMATION_MS + 100), SNAP]
+    for slot in ["to", "to", "from", "to", "past", "to", "to", "from", "to", "to", "to", "to"]:
+        steps += [_click(f'button[data-slot="{slot}"]'), _wait(ANIMATION_MS + 100), SNAP]
+    snaps = _demo(steps)
+    for s in snaps:
+        _check_agent_facts(s)
+    closers = {s["fromAgent"] for s in snaps}
+    assert "Claude Code" in closers and len(closers) >= 4  # both branches were exercised
+    assert any(re.search(r"\btests passed\b", f["text"]) for s in snaps[len(ORDER) :] for f in s["facts"])
+
+
+@needs_node
+def test_lid_tab_shows_the_brief_as_the_relay_renders_it() -> None:
+    (s,) = _demo([_click('[data-scn="lid"]'), _wait(ANIMATION_MS + 100), SNAP])
+    assert s["kind"] == "Checkpoint 5c21"
+    assert s["sig"] == "saved by cursor via MCP · 17:46"
+    assert s["stop"] == "lid closed · no handoff written"
+    assert s["toLines"][:2] == [
+        "›brief: last handoff 44a2 from qwen-code, 11h10m ago",
+        "›recent: checkpoint 5c21 from cursor, 1h54m ago",
+    ]
+    assert [f["cls"] for f in s["facts"]] == ["note", "todo"]
+
+
+def _static_text(node: Any) -> str:
+    if isinstance(node, str):
+        return node
+    return "".join(_static_text(c) for c in node["c"])
+
+
+def _find(node: Any, pred: Any) -> list[dict[str, Any]]:
+    if isinstance(node, str):
+        return []
+    found = [node] if pred(node) else []
+    for c in node["c"]:
+        found += _find(c, pred)
+    return found
+
+
+@needs_node
+def test_still_frame_markup_matches_what_the_script_renders() -> None:
+    """Without JavaScript (or before it runs) the page shows the markup; it must say what the demo says."""
+    tree = _relay_tree()
+    (s,) = _demo([SNAP])
+
+    def norm(t: str) -> str:
+        return " ".join(t.split())
+
+    def by_key(key: str) -> str:
+        return norm(_static_text(_find(tree, lambda n: n["a"].get("data-k") == key)[0]))
+
+    def children_of(node_id: str) -> list[str]:
+        (parent,) = _find(tree, lambda n: n["a"].get("id") == node_id)
+        return [norm(_static_text(c)) for c in parent["c"] if not isinstance(c, str)]
+
+    for key in ("kind", "sig", "src", "fromAgent", "toAgent", "stop"):
+        assert by_key(key) == s[key], key
+    assert children_of("facts") == [f["text"] for f in s["facts"]]
+    assert children_of("toLines") == s["toLines"]
+    assert norm(_static_text(_find(tree, lambda n: n["a"].get("id") == "relay-cap")[0])) == s["caption"]
