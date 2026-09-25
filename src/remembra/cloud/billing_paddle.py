@@ -441,12 +441,14 @@ class PaddleBillingManager:
         event: dict[str, Any] = json.loads(payload)
         return event
 
-    def _resolve_purchase(self, data: dict[str, Any]) -> tuple[PriceMapping | None, int, bool]:
-        """(what the items buy, quantity, whether it came from a known price ID).
+    def _resolve_purchase(self, data: dict[str, Any]) -> tuple[PriceMapping | None, int]:
+        """(what the items buy, quantity paid) — from the Paddle price ID only.
 
-        The price ID is authoritative: renewals of the grandfathered $49/$199
-        prices keep mapping to the legacy tiers whatever custom_data says. Falls
-        back to our own checkout custom_data (plan / interval / founding).
+        The price ID is the ONLY source of the plan: ``custom_data`` is set by
+        the browser (Paddle.js) and is never trusted for tier, interval or the
+        Founding price. Renewals of the grandfathered $49/$199 prices map to
+        the legacy tiers because those price IDs are fixed in the config. An
+        event whose items carry no configured price returns (None, 0).
         """
         config = get_paddle_config("sandbox" if self._sandbox else "production")
         for item in data.get("items") or []:
@@ -457,22 +459,8 @@ class PaddleBillingManager:
             mapping = config.resolve_price(price_id)
             if mapping is not None:
                 quantity = item.get("quantity")
-                return mapping, quantity if isinstance(quantity, int) and quantity > 0 else 1, True
-
-        custom = data.get("custom_data") or {}
-        plan_name = str(custom.get("plan") or "").strip().lower()
-        try:
-            interval = BillingInterval.parse(custom.get("interval"))
-        except ValueError:
-            interval = BillingInterval.MONTH
-        founding = bool(custom.get("founding")) or plan_name == "founding"
-        if founding:
-            return PriceMapping(PlanTier.SOLO, BillingInterval.YEAR, founding=True), 1, False
-        try:
-            tier = PlanTier(plan_name)
-        except ValueError:
-            return None, 1, False
-        return PriceMapping(tier, interval), 1, False
+                return mapping, quantity if isinstance(quantity, int) and not isinstance(quantity, bool) and quantity > 0 else 1
+        return None, 0
 
     @staticmethod
     def _period_anchor(data: dict[str, Any]) -> datetime | None:
@@ -501,23 +489,87 @@ class PaddleBillingManager:
     def _subscription_result(
         self, action: str, data: dict[str, Any], user_id: str | None, subscription_id: str | None, **extra: Any
     ) -> WebhookResult:
-        mapping, quantity, from_price = self._resolve_purchase(data)
+        mapping, quantity = self._resolve_purchase(data)
         if mapping is None:
-            logger.warning("paddle_event_without_known_plan action=%s", action)
+            # Unknown / unconfigured price (old, test or not-yet-configured): never
+            # fall back to client-controlled custom_data. Alert the owner.
+            price_ids = [
+                ((i.get("price") or {}).get("id") if isinstance(i.get("price"), dict) else i.get("price_id"))
+                for i in (data.get("items") or [])
+                if isinstance(i, dict)
+            ]
+            logger.error("paddle_event_unknown_price action=%s prices=%s; ignored", action, price_ids)
             return WebhookResult(action="ignored", event_type=action, user_id=user_id)
         limits = get_plan(mapping.tier)
+        seats: int | None = None
+        below_minimum = False
+        if limits.per_seat:
+            # Grant exactly the seats that were paid for; never round up.
+            seats = quantity
+            below_minimum = quantity < limits.min_seats
+            if below_minimum:
+                logger.error(
+                    "paddle_seats_below_minimum user=%s plan=%s quantity=%s minimum=%s; granting the paid quantity"
+                    " (set quantity.minimum on the Paddle price)",
+                    user_id,
+                    mapping.tier.value,
+                    quantity,
+                    limits.min_seats,
+                )
         return WebhookResult(
             action=action,
             user_id=user_id,
             plan=mapping.tier,
             paddle_subscription_id=subscription_id,
             interval=mapping.interval,
-            seats=max(limits.min_seats, quantity) if limits.per_seat else None,
+            seats=seats,
             founding=mapping.founding,
             period_anchor=self._period_anchor(data),
-            plan_from_price=from_price,
+            plan_from_price=True,
+            seats_below_minimum=below_minimum,
             **extra,
         )
+
+    def _adjustment_result(self, event_type: str, data: dict[str, Any]) -> WebhookResult:
+        """Refunds and chargebacks: claw back the plan and the revenue.
+
+        Only approved adjustments count (refunds start as ``pending_approval``;
+        ``adjustment.updated`` carries the approval). A chargeback, or a full
+        refund, ends the paid plan at once, so the unspent credit bank goes with
+        it; a partial refund only reduces recorded revenue. Credits (account
+        credit notes) and chargeback reversals change neither.
+        """
+        action = str(data.get("action") or "").lower()
+        status = str(data.get("status") or "").lower()
+        if action not in ("refund", "chargeback") or status != "approved":
+            return WebhookResult(action="ignored", event_type=event_type)
+        refund_type = str(data.get("type") or "").lower()
+        downgrade = action == "chargeback" or refund_type == "full"
+        totals = data.get("totals") or {}
+        revenue: float | None = None
+        if str(totals.get("currency_code") or data.get("currency_code") or "").upper() == "USD":
+            earnings = totals.get("earnings")
+            if earnings is None:
+                earnings = totals.get("total")
+            try:
+                revenue = -abs(int(str(earnings))) / 100 if earnings is not None else None
+            except ValueError:
+                revenue = None
+        result = WebhookResult(
+            action="refund_downgrade" if downgrade else "refund_partial",
+            event_type=event_type,
+            plan=PlanTier.FREE if downgrade else None,
+            paddle_customer_id=data.get("customer_id"),
+            paddle_subscription_id=data.get("subscription_id"),
+        )
+        result.transaction_id = f"adj:{data.get('id')}" if data.get("id") else None
+        result.revenue_usd = revenue
+        result.refunded_transaction_id = data.get("transaction_id")
+        result.adjustment_action = action
+        logger.warning(
+            "paddle_adjustment action=%s type=%s status=%s downgrade=%s", action, refund_type or "-", status, downgrade
+        )
+        return result
 
     async def handle_webhook_event(
         self,
@@ -527,6 +579,7 @@ class PaddleBillingManager:
 
         Handles:
         - transaction.completed → activate subscription (+ record net revenue)
+        - adjustment.created / adjustment.updated → approved refund or chargeback
         - subscription.activated → subscription active
         - subscription.updated → plan / seat / interval change
         - subscription.canceled → back to Free
@@ -582,6 +635,9 @@ class PaddleBillingManager:
                 plan=PlanTier.FREE,
             )
 
+        if event_type in ("adjustment.created", "adjustment.updated"):
+            return self._adjustment_result(event_type, data)
+
         if event_type == "subscription.past_due":
             logger.warning("Subscription past due for user %s", user_id)
             return WebhookResult(
@@ -613,6 +669,7 @@ class WebhookResult:
         plan_from_price: bool = False,
         transaction_id: str | None = None,
         revenue_usd: float | None = None,
+        seats_below_minimum: bool = False,
     ) -> None:
         self.action = action
         self.user_id = user_id
@@ -629,6 +686,9 @@ class WebhookResult:
         self.plan_from_price = plan_from_price
         self.transaction_id = transaction_id
         self.revenue_usd = revenue_usd
+        self.seats_below_minimum = seats_below_minimum
+        self.refunded_transaction_id: str | None = None
+        self.adjustment_action: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"action": self.action}

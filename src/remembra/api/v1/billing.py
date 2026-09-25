@@ -218,6 +218,12 @@ async def get_client_config(
 
     Returns price IDs and client token so the frontend can open
     Paddle.Checkout.open() with items directly (no server-side transaction needed).
+
+    Only single-quantity plans are listed. Team (per seat, 3-seat minimum) and
+    the Founding 100 price (capped, one per account) are sold only through
+    server-created transactions (``POST /billing/checkout``), where the seat
+    minimum and the redemption cap are enforced; the dashboard falls back to
+    that path when a plan has no client price.
     """
     provider = get_billing_provider(settings)
 
@@ -231,14 +237,14 @@ async def get_client_config(
         # configured prices are listed (a missing key = not purchasable yet).
         prices: dict[str, str] = {}
         for tier in SELF_SERVE_TIERS:
+            if get_plan(tier).per_seat:
+                continue  # quantity is client-controlled in Paddle.js: server checkout only
             monthly = config.price_for(tier, BillingInterval.MONTH)
             annual = config.price_for(tier, BillingInterval.YEAR)
             if monthly:
                 prices[tier.value] = monthly
             if annual:
                 prices[f"{tier.value}_annual"] = annual
-        if config.founding_price_id:
-            prices["founding"] = config.founding_price_id
 
         return ClientConfigResponse(
             provider="paddle",
@@ -510,6 +516,9 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
             detail="Usage metering is not available; retry later.",
         )
 
+    if result.action in ("refund_downgrade", "refund_partial"):
+        return await _apply_paddle_refund(request, meter, result)
+
     user_id = result.user_id
     db = request.app.state.db
     known = bool(user_id) and (await db.get_user_by_id(user_id) is not None or await meter.get_tenant(user_id) is not None)
@@ -520,17 +529,6 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
     plan = PlanTier.FREE if result.action == "cancel_subscription" else result.plan
     if plan is None:
         return "no_change"
-    tenant = await meter.get_tenant(user_id)
-    current = (tenant or {}).get("plan")
-    if (
-        not result.plan_from_price
-        and plan in (PlanTier.PRO, PlanTier.TEAM)
-        and current in (PlanTier.LEGACY_PRO.value, PlanTier.LEGACY_TEAM.value)
-        and (not result.paddle_subscription_id or result.paddle_subscription_id == (tenant or {}).get("stripe_subscription_id"))
-    ):
-        # A renewal/update of a grandfathered subscription without a price we
-        # recognise: keep the grandfathered tier rather than silently repricing.
-        plan = PlanTier(current)
 
     await meter.apply_subscription(
         user_id,
@@ -538,12 +536,20 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
         interval=result.interval,
         seats=result.seats,
         period_anchor=result.period_anchor,
-        founding=result.founding,
+        founding=False,  # claimed below, against the cap
         customer_id=result.paddle_customer_id,
         subscription_id=result.paddle_subscription_id,
         email=result.customer_email,
         name=result.customer_name,
     )
+    if result.founding and not await meter.claim_founding(user_id):
+        # Over the Founding 100 cap (the price was bought client-side or raced
+        # the last seat): the account gets plain Solo annual and the charge is
+        # flagged for a refund of the difference.
+        await meter.set_billing_flag(user_id, "founding_over_cap_refund_due")
+        log.error("paddle_founding_over_cap", user_id=user_id, transaction_id=result.transaction_id)
+    if result.seats_below_minimum:
+        await meter.set_billing_flag(user_id, "team_seats_below_minimum")
 
     team_manager = getattr(request.app.state, "team_manager", None)
     if team_manager is not None:
@@ -554,4 +560,39 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
             log.warning("paddle_team_plan_sync_failed", user_id=user_id, error_type=type(e).__name__)
 
     log.info("paddle_plan_applied", user_id=user_id, plan=plan.value, action=result.action)
+    return "applied"
+
+
+async def _apply_paddle_refund(request: Request, meter: Any, result: Any) -> str:
+    """Approved refund / chargeback: a full refund or chargeback ends the paid plan at once.
+
+    The subscription (preferred) or customer id finds the account; the webhook
+    carries no custom_data for adjustments. Downgrading to Free also ends the
+    annual credit bank, so credits that were paid for and refunded cannot be
+    spent afterwards. Revenue was already reduced by the caller.
+    """
+    user_id = await meter.find_tenant_by_billing_ids(
+        subscription_id=result.paddle_subscription_id, customer_id=result.paddle_customer_id
+    )
+    if user_id is None:
+        log.warning("paddle_refund_unmatched", action=result.action)
+        return "unmatched"
+    if result.action != "refund_downgrade":
+        log.info("paddle_partial_refund_recorded", user_id=user_id)
+        return "no_change"
+    tenant = await meter.get_tenant(user_id) or {}
+    held = tenant.get("stripe_subscription_id")
+    if result.paddle_subscription_id and held and held != result.paddle_subscription_id:
+        # A refund of an older subscription the account no longer holds.
+        log.info("paddle_refund_for_other_subscription", user_id=user_id)
+        return "no_change"
+    await meter.apply_subscription(user_id, PlanTier.FREE)
+    await meter.set_billing_flag(user_id, f"{result.adjustment_action or 'refund'}_downgraded")
+    team_manager = getattr(request.app.state, "team_manager", None)
+    if team_manager is not None:
+        try:
+            await team_manager.update_owner_teams_plan(owner_id=user_id, plan=PlanTier.FREE.value, max_seats=1)
+        except Exception as e:
+            log.warning("paddle_team_plan_sync_failed", user_id=user_id, error_type=type(e).__name__)
+    log.warning("paddle_refund_downgraded", user_id=user_id)
     return "applied"
