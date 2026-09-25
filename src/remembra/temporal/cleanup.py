@@ -48,6 +48,7 @@ class TemporalCleanupJob:
         prune_to_archive: bool = True,  # Archive instead of delete
         adaptive_manager: AdaptiveThresholdManager | None = None,
         use_adaptive_thresholds: bool = True,  # Use adaptive when available
+        archive_expired: bool = False,
     ) -> None:
         """
         Initialize cleanup job.
@@ -61,6 +62,9 @@ class TemporalCleanupJob:
             prune_to_archive: Archive decayed memories instead of deleting
             adaptive_manager: Adaptive threshold manager for dynamic thresholds
             use_adaptive_thresholds: Whether to use adaptive thresholds
+            archive_expired: Move TTL-expired memories to the cold archive
+                (restorable) instead of hard-deleting them. The unattended
+                background loop always sets this.
         """
         self.db = database
         self.qdrant = qdrant_store
@@ -70,6 +74,7 @@ class TemporalCleanupJob:
         self.use_adaptive_thresholds = use_adaptive_thresholds
         self.auto_prune_decayed = auto_prune_decayed
         self.prune_to_archive = prune_to_archive
+        self.archive_expired = archive_expired
 
         # Metrics
         self._last_run: datetime | None = None
@@ -172,10 +177,10 @@ class TemporalCleanupJob:
         errors: list[str] = []
 
         try:
-            # Get expired memory IDs
+            # Get expired memory IDs (project_id=None means every project)
             expired_ids = await self.db.get_expired_memories(
                 user_id=user_id,
-                project_id=project_id or "default",
+                project_id=project_id,
             )
             found = len(expired_ids)
 
@@ -186,6 +191,17 @@ class TemporalCleanupJob:
             # Delete each expired memory
             for memory_id in expired_ids:
                 try:
+                    if self.archive_expired:
+                        # Atomic SQLite move (row + links + FTS) into the archive,
+                        # then drop the vector. Restorable via restore_memory().
+                        if not await self.db.archive_memory(memory_id, reason="ttl_expired"):
+                            errors.append(f"Failed to archive {memory_id}")
+                            continue
+                        if self.qdrant:
+                            await self.qdrant.delete(memory_id)
+                        deleted += 1
+                        continue
+
                     # Delete from SQLite
                     await self.db.delete_memory(memory_id)
 

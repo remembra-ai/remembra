@@ -1280,6 +1280,14 @@ class Database:
                     (memory_id,),
                 )
 
+                # The archive holds no vector: queue re-embedding (the worker
+                # upserts to Qdrant and re-indexes FTS) in the same transaction.
+                from remembra.storage.pending_embeddings import PendingEmbeddingQueue
+
+                await PendingEmbeddingQueue(self).enqueue(
+                    memory_id, archived["user_id"], archived["project_id"], reason="restored"
+                )
+
             log.info("memory_restored", memory_id=memory_id)
             return True
 
