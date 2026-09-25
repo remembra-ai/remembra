@@ -569,89 +569,97 @@ class SleepTimeWorker:
         2. relationships.from_entity_id
         3. relationships.to_entity_id
 
-        Operation Circuit Breaker fix (March 19, 2026):
-        - Added relationship table updates to prevent FK constraint failures
-        - Added transaction rollback on failure
-        - Added duplicate relationship cleanup after merge
-        """
-        try:
-            # Start transaction
-            await self.db.conn.execute("BEGIN TRANSACTION")
+        Runs as ONE isolated transaction (``db.transaction()``): a failure rolls
+        back only this merge, never another request's writes (REL-11).
 
-            # 1. Transfer aliases from deleted to kept
-            cursor = await self.db.conn.execute(
-                "SELECT aliases FROM entities WHERE id = ?",
-                (delete_id,),
-            )
-            row = await cursor.fetchone()
-            if row and row[0]:
+        Post-merge cleanup is scoped to relationships touching ``keep_id`` and
+        preserves temporal history (REL-12): duplicate *currently valid* edges
+        are closed (``valid_to`` + ``superseded_by``) rather than deleted, and
+        historical (``valid_to IS NOT NULL``) edges are never touched.
+        """
+        now = utcnow().isoformat()
+        try:
+            async with self.db.transaction():
+                # 1. Transfer aliases from deleted to kept
+                cursor = await self.db.conn.execute(
+                    "SELECT aliases FROM entities WHERE id = ?",
+                    (delete_id,),
+                )
+                row = await cursor.fetchone()
+                if row and row[0]:
+                    await self.db.conn.execute(
+                        """
+                        UPDATE entities 
+                        SET aliases = aliases || ',' || ?
+                        WHERE id = ?
+                        """,
+                        (row[0], keep_id),
+                    )
+
+                # 2. Update memory_entities references (skip links the kept
+                # entity already has — (memory_id, entity_id) is the PK)
                 await self.db.conn.execute(
                     """
-                    UPDATE entities 
-                    SET aliases = aliases || ',' || ?
-                    WHERE id = ?
+                    UPDATE OR IGNORE memory_entities
+                    SET entity_id = ?
+                    WHERE entity_id = ?
                     """,
-                    (row[0], keep_id),
+                    (keep_id, delete_id),
+                )
+                await self.db.conn.execute("DELETE FROM memory_entities WHERE entity_id = ?", (delete_id,))
+
+                # 3/4. Re-point relationships where the deleted entity is source/target
+                await self.db.conn.execute(
+                    "UPDATE relationships SET from_entity_id = ? WHERE from_entity_id = ?",
+                    (keep_id, delete_id),
+                )
+                await self.db.conn.execute(
+                    "UPDATE relationships SET to_entity_id = ? WHERE to_entity_id = ?",
+                    (keep_id, delete_id),
                 )
 
-            # 2. Update memory_entities references
-            await self.db.conn.execute(
-                """
-                UPDATE memory_entities 
-                SET entity_id = ? 
-                WHERE entity_id = ?
-                """,
-                (keep_id, delete_id),
-            )
-
-            # 3. Update relationships where deleted entity is the SOURCE
-            await self.db.conn.execute(
-                """
-                UPDATE relationships 
-                SET from_entity_id = ? 
-                WHERE from_entity_id = ?
-                """,
-                (keep_id, delete_id),
-            )
-
-            # 4. Update relationships where deleted entity is the TARGET
-            await self.db.conn.execute(
-                """
-                UPDATE relationships 
-                SET to_entity_id = ? 
-                WHERE to_entity_id = ?
-                """,
-                (keep_id, delete_id),
-            )
-
-            # 5. Clean up duplicate relationships that may have been created
-            # (same from/to/type after merge - keep the newest one)
-            await self.db.conn.execute(
-                """
-                DELETE FROM relationships 
-                WHERE id NOT IN (
-                    SELECT MAX(id) 
-                    FROM relationships 
-                    GROUP BY from_entity_id, to_entity_id, type
+                # 5. Close duplicate currently-valid edges created by the merge.
+                # Scope: edges touching keep_id only. Keep the most recently
+                # valid edge per (from, to, type); the others end now and point
+                # at the survivor.
+                await self.db.conn.execute(
+                    """
+                    WITH ranked AS (
+                        SELECT id,
+                               FIRST_VALUE(id) OVER w AS survivor,
+                               ROW_NUMBER() OVER w AS rn
+                        FROM relationships
+                        WHERE (from_entity_id = ? OR to_entity_id = ?)
+                          AND valid_to IS NULL
+                        WINDOW w AS (
+                            PARTITION BY from_entity_id, to_entity_id, type
+                            ORDER BY COALESCE(valid_from, created_at) DESC, created_at DESC, id DESC
+                        )
+                    )
+                    UPDATE relationships
+                    SET valid_to = ?,
+                        superseded_by = (SELECT survivor FROM ranked WHERE ranked.id = relationships.id)
+                    WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+                    """,
+                    (keep_id, keep_id, now),
                 )
-                """
-            )
 
-            # 6. Remove self-referential relationships (entity pointing to itself)
-            await self.db.conn.execute(
-                """
-                DELETE FROM relationships 
-                WHERE from_entity_id = to_entity_id
-                """
-            )
+                # 6. Self-referential edges produced by the merge (A->B became
+                # A->A) are meaningless; close them instead of deleting history.
+                await self.db.conn.execute(
+                    """
+                    UPDATE relationships
+                    SET valid_to = ?
+                    WHERE from_entity_id = ? AND to_entity_id = ? AND valid_to IS NULL
+                    """,
+                    (now, keep_id, keep_id),
+                )
 
-            # 7. Now safe to delete the duplicate entity
-            await self.db.conn.execute(
-                "DELETE FROM entities WHERE id = ?",
-                (delete_id,),
-            )
-
-            await self.db.conn.commit()
+                # 7. Now safe to delete the duplicate entity
+                await self.db.conn.execute(
+                    "DELETE FROM entities WHERE id = ?",
+                    (delete_id,),
+                )
 
             log.info(
                 "entities_merged",
@@ -660,8 +668,7 @@ class SleepTimeWorker:
             )
 
         except Exception as e:
-            # Rollback on any failure
-            await self.db.conn.rollback()
+            # The transaction already rolled back just this merge.
             log.error(
                 "merge_entities_failed",
                 keep=keep_id,

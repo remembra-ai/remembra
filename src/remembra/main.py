@@ -2,6 +2,7 @@
 
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, cast
 
 import structlog
@@ -23,6 +24,7 @@ from remembra.cloud.metering import UsageMeter
 from remembra.config import get_settings
 from remembra.core.health import build_health_response, check_qdrant
 from remembra.core.logging import configure_logging
+from remembra.core.tasks import set_task_registry
 from remembra.extraction.conflicts import ConflictManager, ConflictStrategy
 from remembra.inbox.manager import InboxManager
 from remembra.plugins.manager import PluginManager
@@ -132,17 +134,80 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Initialize storage layer
     log.info("initializing_storage_layer")
 
-    # Qdrant vector store
-    app.state.qdrant = QdrantStore(settings)
-    await app.state.qdrant.init_collection()
+    # Tracked background tasks (REL-16): strong refs, bounded concurrency,
+    # graceful shutdown. Published globally for library code.
+    from remembra.core.tasks import TaskRegistry
 
-    # SQLite metadata database
+    app.state.tasks = TaskRegistry(max_concurrency=settings.background_task_concurrency)
+    set_task_registry(app.state.tasks)
+
+    # SQLite metadata database (first: it holds the active vector collection)
     app.state.db = Database(settings.database_url)
     await app.state.db.connect()
     await app.state.db.init_schema()
 
-    # Embedding service
+    # Qdrant vector store — pointed at the collection a completed rebuild
+    # swapped in (REL-9), retried with backoff (REL-15) and dimension-checked
+    # against the configured embedding model (REL-6).
+    from remembra.storage.reindex import apply_active_collection
+
+    app.state.qdrant = QdrantStore(settings)
+    active_collection = await apply_active_collection(app.state.db, app.state.qdrant)
+    if active_collection != settings.qdrant_collection:
+        log.info("qdrant_active_collection_override", configured=settings.qdrant_collection, active=active_collection)
+    await app.state.qdrant.init_collection_with_retry(attempts=settings.qdrant_init_retries)
+
+    # Embedding service (circuit-breaker protected, REL-3)
     app.state.embeddings = EmbeddingService(settings)
+    missing = app.state.embeddings.config_problem()
+    if missing:
+        # Don't crash: keyword paths still work. /health/ready reports it.
+        log.error("embedding_provider_not_configured", detail=missing)
+
+    # Operator alerts on quota/auth circuit opens (REL-8)
+    from remembra.core.alerts import AlertNotifier, email_sender_from_settings
+    from remembra.core.circuit_breaker import register_state_listener
+
+    app.state.alerts = AlertNotifier(
+        webhook_url=settings.alert_webhook_url,
+        email_to=settings.alert_email,
+        email_sender=email_sender_from_settings(settings) if settings.alert_email else None,
+        cooldown_seconds=settings.alert_cooldown_seconds,
+    )
+    app.state.alert_listener = app.state.alerts.breaker_listener(lambda coro, name: app.state.tasks.spawn(coro, name=name))
+    register_state_listener(app.state.alert_listener)
+
+    # Durable re-embedding queue + worker (REL-4/REL-10 primitive). Drains rows
+    # whose vector is missing once the embedding breaker lets traffic through.
+    from remembra.storage.pending_embeddings import PendingEmbeddingQueue, PendingEmbeddingWorker
+
+    app.state.pending_embeddings = PendingEmbeddingQueue(
+        app.state.db,
+        max_attempts=settings.pending_embeddings_max_attempts,
+    )
+    app.state.pending_worker = PendingEmbeddingWorker(
+        app.state.pending_embeddings,
+        db=app.state.db,
+        qdrant=app.state.qdrant,
+        embeddings=app.state.embeddings,
+        batch_size=settings.pending_embeddings_batch_size,
+        poll_seconds=settings.pending_embeddings_poll_seconds,
+    )
+    if settings.pending_embeddings_worker_enabled:
+        app.state.pending_worker.start(app.state.tasks)
+        log.info("pending_embedding_worker_enabled")
+
+    # Readiness (REL-2)
+    from remembra.core.readiness import ReadinessChecker
+
+    app.state.readiness = ReadinessChecker(
+        settings=settings,
+        db=app.state.db,
+        qdrant=app.state.qdrant,
+        embeddings=app.state.embeddings,
+        pending_queue=app.state.pending_embeddings,
+        probe_interval=settings.readiness_probe_interval_seconds,
+    )
 
     # Security services (Week 7)
     app.state.api_key_manager = APIKeyManager(app.state.db)
@@ -308,10 +373,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     except Exception as e:
                         log.error("scheduled_consolidation_failed", error=str(e))
 
-            # Start background task
-            import asyncio
-
-            asyncio.create_task(scheduled_consolidation())
+            # Start tracked background task (cancelled cleanly on shutdown)
+            app.state.tasks.spawn(scheduled_consolidation(), name="sleep-time-scheduler", loop_task=True)
             log.info("sleep_time_scheduler_started")
     else:
         app.state.sleep_worker = None
@@ -341,11 +404,43 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 recall_p99_ms=cached_calibration.recall_p99_ms,
             )
     else:
-        # Run calibration in background (don't block startup)
-        log.info("calibration_cache_miss_will_run_async")
+        # No valid cache. Calibration is only produced on demand by
+        # POST /api/v1/debug/calibrate (it issues real recall queries, so it is
+        # never run automatically at boot).
+        log.info("calibration_cache_miss", hint="run POST /api/v1/debug/calibrate to populate")
         app.state.calibration = None
-        # Note: Actual calibration runs on first few requests
-        # and gets saved to cache after warmup
+
+    # TTL cleanup loop (REL-16: run_cleanup_loop existed but was never started).
+    # Unattended runs archive expired memories (restorable) instead of deleting.
+    if settings.temporal_cleanup_enabled:
+        from remembra.temporal.cleanup import TemporalCleanupJob, run_cleanup_loop
+
+        app.state.cleanup_job = TemporalCleanupJob(
+            database=app.state.db,
+            qdrant_store=app.state.qdrant,
+            auto_delete_expired=True,
+            auto_prune_decayed=False,
+            archive_expired=True,
+        )
+        app.state.tasks.spawn(
+            run_cleanup_loop(app.state.cleanup_job, interval_seconds=settings.temporal_cleanup_interval_seconds),
+            name="temporal-cleanup-loop",
+            loop_task=True,
+        )
+        log.info("temporal_cleanup_loop_started", interval_seconds=settings.temporal_cleanup_interval_seconds)
+    else:
+        app.state.cleanup_job = None
+
+    # Report-only drift scan (REL-10): feeds remembra_reconcile_drift in /metrics.
+    # Repair is an explicit operator action: python -m remembra.storage.reconcile --repair
+    if settings.reconcile_interval_hours > 0:
+        from remembra.storage.reconcile import run_reconcile_loop
+
+        app.state.tasks.spawn(
+            run_reconcile_loop(app.state.db, app.state.qdrant, settings.reconcile_interval_hours * 3600),
+            name="reconcile-loop",
+            loop_task=True,
+        )
 
     log.info("storage_layer_ready")
 
@@ -353,6 +448,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Cleanup
     log.info("remembra_shutdown")
+    from remembra.core.circuit_breaker import unregister_state_listener
+
+    unregister_state_listener(app.state.alert_listener)
+    await app.state.pending_worker.stop()
+    await app.state.tasks.shutdown(timeout=10.0)
+    set_task_registry(None)
     if app.state.plugin_manager:
         await app.state.plugin_manager.shutdown()
     # Close persistent HTTP clients
@@ -367,6 +468,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
+
+
+def register_provider_error_handlers(app: FastAPI) -> None:
+    """Map upstream embedding failures honestly on every route (REL-1).
+
+    Store/recall catch these themselves; this covers every other route that
+    embeds (batch, ingest, spaces, update, ...), which would otherwise turn a
+    quota outage into an opaque 500.
+    """
+    from remembra.core.http_errors import embedding_error_response
+    from remembra.storage.embeddings import EmbeddingProviderError
+
+    async def _embedding_provider_error(request: Request, exc: Exception) -> JSONResponse:
+        code, body, headers = embedding_error_response(exc, operation="other")
+        headers = {**headers, "X-Remembra-Error-Kind": body["error"]["kind"]}
+        log.error(
+            "embedding_provider_error",
+            path=request.url.path,
+            kind=body["error"]["kind"],
+            circuit_open=body["error"]["circuit_open"],
+        )
+        return JSONResponse(status_code=code, content=body, headers=headers)
+
+    app.add_exception_handler(EmbeddingProviderError, _embedding_provider_error)
 
 
 def create_app() -> FastAPI:
@@ -400,6 +525,8 @@ def create_app() -> FastAPI:
         RateLimitExceeded,
         cast(Callable[[Request, Exception], Response], _rate_limit_exceeded_handler),
     )
+
+    register_provider_error_handlers(app)
 
     # Validation error handler - sanitize validation messages
     @app.exception_handler(RequestValidationError)
@@ -558,7 +685,9 @@ def create_app() -> FastAPI:
     # No rate limit on health - load balancers and orchestrators need unrestricted access
     async def health(request: Request) -> JSONResponse:
         cfg = get_settings()
-        qdrant_status = await check_qdrant(cfg.qdrant_url)
+        # Check Qdrant over the client the app actually uses (gRPC) when the
+        # store is initialized; fall back to the HTTP URL otherwise (REL-19).
+        qdrant_status = await check_qdrant(getattr(request.app.state, "qdrant", None) or cfg.qdrant_url)
         body: dict[str, Any] = build_health_response(
             version=__version__,
             qdrant=qdrant_status,
@@ -567,6 +696,35 @@ def create_app() -> FastAPI:
         )
         status_code = 200 if body["status"] == "ok" else 503
         return JSONResponse(content=body, status_code=status_code)
+
+    @app.get("/health/ready", tags=["ops"], include_in_schema=False)
+    async def health_ready(request: Request) -> JSONResponse:
+        """Readiness: can this instance store and recall right now? Always 200."""
+        checker = getattr(request.app.state, "readiness", None)
+        if checker is None:
+            body: dict[str, Any] = {"status": "degraded", "degraded_components": ["app"], "components": {}}
+        else:
+            body = await checker.check()
+        body["version"] = __version__
+        if get_settings().build_sha:
+            body["build_sha"] = get_settings().build_sha
+        return JSONResponse(content=body, status_code=200)
+
+    @app.get("/metrics", tags=["ops"], include_in_schema=False)
+    async def metrics(request: Request) -> Response:
+        """Prometheus text metrics. Requires ``Authorization: Bearer $REMEMBRA_METRICS_TOKEN``;
+        disabled (404) when no token is configured."""
+        import hmac
+
+        from remembra.core.metrics import REGISTRY
+
+        token = get_settings().metrics_token
+        if not token:
+            return JSONResponse({"detail": "Not found"}, status_code=404)
+        supplied = request.headers.get("authorization", "")
+        if not hmac.compare_digest(supplied.encode(), f"Bearer {token}".encode()):
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401, headers={"WWW-Authenticate": "Bearer"})
+        return Response(content=REGISTRY.render(), media_type="text/plain; version=0.0.4; charset=utf-8")
 
     @app.get("/", tags=["ops"], include_in_schema=False)
     async def root() -> dict[str, str]:
@@ -630,6 +788,7 @@ def create_app() -> FastAPI:
 
             # Serve static files at /static
             app.mount("/static", StaticFiles(directory=static_path), name="static")
+            static_root = static_path.resolve()
 
             # Serve index.html for SPA routes
             @app.get("/{full_path:path}", include_in_schema=False)
@@ -649,9 +808,11 @@ def create_app() -> FastAPI:
                 if any(full_path.startswith(p) for p in api_paths):
                     return JSONResponse({"detail": "Not found"}, status_code=404)
 
-                # Try to serve the file directly
-                file_path = static_path / full_path
-                if file_path.exists() and file_path.is_file():
+                # Try to serve the file directly — only if it resolves INSIDE the
+                # static root (blocks ../ and absolute-path traversal, and
+                # symlinks pointing outside it; REL-20).
+                file_path = _safe_static_file(static_root, full_path)
+                if file_path is not None:
                     return FileResponse(file_path)
 
                 # Fall back to index.html for SPA routing
@@ -664,6 +825,19 @@ def create_app() -> FastAPI:
             log.info("static_files_enabled", path=str(static_path))
 
     return app
+
+
+def _safe_static_file(static_root: Path, requested: str) -> Path | None:
+    """Resolve ``requested`` under ``static_root``; None if missing or outside the root."""
+    if "\x00" in requested:
+        return None
+    try:
+        candidate = (static_root / requested).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not candidate.is_relative_to(static_root):
+        return None
+    return candidate if candidate.is_file() else None
 
 
 app = create_app()

@@ -23,6 +23,7 @@ from remembra.cloud.limits import (
     record_store_usage,
 )
 from remembra.config import Settings, get_settings
+from remembra.core.http_errors import embedding_http_exception
 from remembra.core.limiter import limiter
 from remembra.core.time import utcnow
 from remembra.models.memory import (
@@ -410,6 +411,7 @@ async def store_memory(
             "store_memory_embedding_upstream_error",
             user_id=current_user.user_id,
             upstream_status=e.status_code,
+            kind=e.kind.value,
         )
         await audit_logger.log_memory_store(
             user_id=current_user.user_id,
@@ -419,17 +421,7 @@ async def store_memory(
             success=False,
             error=str(e),
         )
-        if e.status_code == 429:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Embedding provider rate limit hit. Retry shortly.",
-                headers={"Retry-After": "5"},
-            ) from e
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Embedding provider error. The memory was not stored — retry shortly.",
-            headers={"Retry-After": "5"},
-        ) from e
+        raise embedding_http_exception(e, "store") from e
     except Exception as e:
         await _release_idempotency(memory_service, current_user.user_id, idem_key)
         # Log full error internally for debugging (never expose to users)
@@ -836,6 +828,7 @@ async def recall_memories(
             "recall_embedding_upstream_error",
             user_id=current_user.user_id,
             upstream_status=e.status_code,
+            kind=e.kind.value,
         )
         await audit_logger.log_memory_recall(
             user_id=current_user.user_id,
@@ -844,17 +837,7 @@ async def recall_memories(
             success=False,
             error=str(e),
         )
-        if e.status_code == 429:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Embedding provider rate limit hit. Retry shortly.",
-                headers={"Retry-After": "5"},
-            ) from e
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Embedding provider error during recall — retry shortly.",
-            headers={"Retry-After": "5"},
-        ) from e
+        raise embedding_http_exception(e, "recall") from e
     except Exception as e:
         # Log full error internally for debugging (never expose to users)
         _internal_log.error(

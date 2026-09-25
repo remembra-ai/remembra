@@ -3,6 +3,8 @@
 import json
 import re
 import uuid
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any
 
@@ -12,8 +14,48 @@ import structlog
 from remembra.config import Settings
 from remembra.core.time import utcnow
 from remembra.models.memory import Entity, EntityRef, Relationship
+from remembra.storage.sqlite_tx import GuardedConnection, TxCoordinator
 
 log = structlog.get_logger(__name__)
+
+# How long a statement waits on a lock held by ANOTHER connection/process
+# (litestream checkpoints, CLI tools) before raising "database is locked".
+SQLITE_BUSY_TIMEOUT_MS = 5000
+
+# Versioned migrations (REL-15). Each entry runs once, inside a transaction,
+# and is recorded in schema_version. Append only — never edit an applied entry.
+# Version 1 marks the legacy idempotent ALTER list in _run_migrations().
+VERSIONED_MIGRATIONS: list[tuple[int, str, list[str]]] = [
+    (1, "legacy_idempotent_columns", []),
+    (
+        2,
+        "pending_embeddings_queue",
+        [
+            """
+            CREATE TABLE IF NOT EXISTS pending_embeddings (
+                memory_id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                project_id TEXT NOT NULL DEFAULT 'default',
+                reason TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',  -- pending | in_progress | failed
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_attempt_at TEXT NOT NULL,
+                claimed_at TEXT,
+                last_error TEXT,
+                last_error_kind TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_pending_embeddings_due ON pending_embeddings(status, next_attempt_at)",
+        ],
+    ),
+]
+
+
+def _is_duplicate_column_error(exc: Exception) -> bool:
+    return "duplicate column name" in str(exc).lower()
+
 
 # Token pattern for FTS5 query sanitization. Unicode word chars plus internal
 # apostrophes/hyphens (so "don't" / "co-op" stay whole). Everything else is a
@@ -414,6 +456,8 @@ class Database:
             db_path = db_path.split("///")[-1]
         self.db_path = db_path
         self._connection: aiosqlite.Connection | None = None
+        self._tx = TxCoordinator()
+        self._guarded: GuardedConnection | None = None
 
     async def connect(self) -> None:
         """Open database connection with optimized settings."""
@@ -427,6 +471,7 @@ class Database:
         await self.conn.execute("PRAGMA cache_size = -64000")  # 64MB cache
         await self.conn.execute("PRAGMA temp_store = MEMORY")  # Temp tables in RAM
         await self.conn.execute("PRAGMA mmap_size = 268435456")  # 256MB mmap
+        await self.conn.execute(f"PRAGMA busy_timeout = {SQLITE_BUSY_TIMEOUT_MS}")
 
         log.info("database_connected", path=self.db_path, journal_mode="WAL")
 
@@ -491,9 +536,14 @@ class Database:
         for migration in migrations:
             try:
                 await self.conn.execute(migration)
-            except Exception:
-                # Column likely already exists, ignore
-                pass
+            except Exception as e:
+                # Only "column already exists" is expected on an upgraded DB.
+                # Anything else (missing table, disk I/O, locked) must fail boot
+                # loudly instead of leaving a half-migrated schema (REL-15).
+                if _is_duplicate_column_error(e):
+                    continue
+                log.error("schema_migration_failed", statement=migration, error=str(e))
+                raise
 
         # Brain layer: discovered communities (themes) with summaries.
         # Recomputed by the sleep-time worker; rows are replaced per (user, project).
@@ -547,17 +597,88 @@ class Database:
         for index_sql in indexes:
             try:
                 await self.conn.execute(index_sql)
-            except Exception:
-                # Index or column might not exist in some edge cases
-                pass
+            except Exception as e:
+                log.error("schema_index_failed", statement=index_sql, error=str(e))
+                raise
 
         await self.conn.commit()
 
+        await self._apply_versioned_migrations()
+
+    async def _apply_versioned_migrations(self) -> None:
+        """Apply VERSIONED_MIGRATIONS not yet recorded in schema_version."""
+        await self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        await self.conn.commit()
+        cursor = await self.conn.execute("SELECT version FROM schema_version")
+        applied = {row[0] for row in await cursor.fetchall()}
+        for version, name, statements in VERSIONED_MIGRATIONS:
+            if version in applied:
+                continue
+            async with self.transaction():
+                for statement in statements:
+                    await self.conn.execute(statement)
+                await self.conn.execute(
+                    "INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)",
+                    (version, name, utcnow().isoformat()),
+                )
+            log.info("schema_migration_applied", version=version, name=name)
+
+    async def get_schema_version(self) -> int:
+        """Highest applied versioned migration (0 if none)."""
+        cursor = await self.conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
     @property
     def conn(self) -> aiosqlite.Connection:
+        """The shared connection, wrapped so foreign statements can't interleave
+        with an open :meth:`transaction` (see ``storage/sqlite_tx.py``)."""
         if not self._connection:
             raise RuntimeError("Database not connected. Call connect() first.")
-        return self._connection
+        guarded: GuardedConnection | None = getattr(self, "_guarded", None)
+        if guarded is None or guarded.raw is not self._connection:
+            guarded = GuardedConnection(self._connection, self._coordinator)
+            self._guarded = guarded
+        # GuardedConnection is a structural stand-in for aiosqlite.Connection.
+        return guarded  # type: ignore[return-value]
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[None]:
+        """Atomic, isolated unit of work on the shared connection.
+
+        ``BEGIN IMMEDIATE`` ... ``COMMIT`` on success, ``ROLLBACK`` on any
+        exception. While it is open, statements/commits/rollbacks from other
+        requests wait. Nested calls join the outer transaction. Legacy
+        ``commit()`` calls made inside are deferred to the end.
+
+        Do not await network I/O inside the block.
+        """
+        if not self._connection:
+            raise RuntimeError("Database not connected. Call connect() first.")
+        async with self._coordinator.transaction(self._connection):
+            yield
+
+    @property
+    def _coordinator(self) -> TxCoordinator:
+        # getattr: some tests build Database via __new__ and set _connection.
+        coord: TxCoordinator | None = getattr(self, "_tx", None)
+        if coord is None:
+            coord = TxCoordinator()
+            self._tx = coord
+        return coord
+
+    @property
+    def in_transaction(self) -> bool:
+        """True while some task holds an explicit transaction open."""
+        return self._coordinator.in_transaction
 
     # -----------------------------------------------------------------------
     # Memory operations
@@ -846,37 +967,37 @@ class Database:
         extracted_facts: list[str],
         metadata: dict[str, Any],
     ) -> None:
-        """Update memory content, facts, and metadata."""
-        await self.conn.execute(
-            """
-            UPDATE memories 
-            SET content = ?, extracted_facts = ?, metadata = ?, updated_at = ?
-            WHERE id = ?
-            """,
-            (
-                content,
-                json.dumps(extracted_facts),
-                json.dumps(metadata),
-                utcnow().isoformat(),
-                memory_id,
-            ),
-        )
-        # Update FTS index
-        await self.conn.execute(
-            "DELETE FROM memories_fts WHERE id = ?",
-            (memory_id,),
-        )
-        # Re-fetch to get user_id and project_id for FTS
-        mem = await self.get_memory(memory_id)
-        if mem:
+        """Update memory content, facts, and metadata (row + FTS atomically)."""
+        async with self.transaction():
             await self.conn.execute(
                 """
-                INSERT INTO memories_fts (id, user_id, project_id, content)
-                VALUES (?, ?, ?, ?)
+                UPDATE memories 
+                SET content = ?, extracted_facts = ?, metadata = ?, updated_at = ?
+                WHERE id = ?
                 """,
-                (memory_id, mem["user_id"], mem["project_id"], content),
+                (
+                    content,
+                    json.dumps(extracted_facts),
+                    json.dumps(metadata),
+                    utcnow().isoformat(),
+                    memory_id,
+                ),
             )
-        await self.conn.commit()
+            # Update FTS index
+            await self.conn.execute(
+                "DELETE FROM memories_fts WHERE id = ?",
+                (memory_id,),
+            )
+            # Re-fetch to get user_id and project_id for FTS
+            mem = await self.get_memory(memory_id)
+            if mem:
+                await self.conn.execute(
+                    """
+                    INSERT INTO memories_fts (id, user_id, project_id, content)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (memory_id, mem["user_id"], mem["project_id"], content),
+                )
 
     async def mark_memory_superseded(
         self,
@@ -1071,27 +1192,30 @@ class Database:
         When ``user_id`` is given the delete only happens if that user owns the
         memory (ING-2: no unscoped deletes from request paths).
         Properly handles FK constraints by deleting relationships first.
+        All steps (relationships, entity links, FTS row, memory row) commit
+        or roll back together.
         """
-        if user_id is not None:
-            owner = await self.conn.execute("SELECT 1 FROM memories WHERE id = ? AND user_id = ?", (memory_id, user_id))
-            if await owner.fetchone() is None:
-                return False
-        # Delete relationships that reference this memory as source
-        # (source_memory_id FK doesn't have CASCADE)
-        await self.conn.execute(
-            "DELETE FROM relationships WHERE source_memory_id = ?",
-            (memory_id,),
-        )
+        async with self.transaction():
+            if user_id is not None:
+                owner = await self.conn.execute("SELECT 1 FROM memories WHERE id = ? AND user_id = ?", (memory_id, user_id))
+                if await owner.fetchone() is None:
+                    return False
+            # Delete relationships that reference this memory as source
+            # (source_memory_id FK doesn't have CASCADE)
+            await self.conn.execute(
+                "DELETE FROM relationships WHERE source_memory_id = ?",
+                (memory_id,),
+            )
 
-        # memory_entities has ON DELETE CASCADE, but explicit delete is cleaner
-        await self.conn.execute(
-            "DELETE FROM memory_entities WHERE memory_id = ?",
-            (memory_id,),
-        )
+            # memory_entities has ON DELETE CASCADE, but explicit delete is cleaner
+            await self.conn.execute(
+                "DELETE FROM memory_entities WHERE memory_id = ?",
+                (memory_id,),
+            )
+            await self.conn.execute("DELETE FROM memories_fts WHERE id = ?", (memory_id,))
 
-        # Now safe to delete the memory
-        cursor = await self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
-        await self.conn.commit()
+            # Now safe to delete the memory
+            cursor = await self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
         return cursor.rowcount > 0
 
     async def delete_user_memories(self, user_id: str) -> int:
@@ -1099,30 +1223,31 @@ class Database:
 
         Properly handles FK constraints by deleting relationships first.
         """
-        # First, get all memory IDs for this user
-        cursor = await self.conn.execute("SELECT id FROM memories WHERE user_id = ?", (user_id,))
-        memory_ids = [row[0] for row in await cursor.fetchall()]
+        async with self.transaction():
+            # First, get all memory IDs for this user
+            cursor = await self.conn.execute("SELECT id FROM memories WHERE user_id = ?", (user_id,))
+            memory_ids = [row[0] for row in await cursor.fetchall()]
 
-        if not memory_ids:
-            return 0
+            if not memory_ids:
+                return 0
 
-        # Delete relationships that reference these memories as source
-        # (source_memory_id FK doesn't have CASCADE)
-        placeholders = ",".join("?" * len(memory_ids))
-        await self.conn.execute(
-            f"DELETE FROM relationships WHERE source_memory_id IN ({placeholders})",
-            memory_ids,
-        )
+            # Delete relationships that reference these memories as source
+            # (source_memory_id FK doesn't have CASCADE)
+            placeholders = ",".join("?" * len(memory_ids))
+            await self.conn.execute(
+                f"DELETE FROM relationships WHERE source_memory_id IN ({placeholders})",
+                memory_ids,
+            )
 
-        # Delete memory_entities (has CASCADE but explicit is cleaner)
-        await self.conn.execute(
-            f"DELETE FROM memory_entities WHERE memory_id IN ({placeholders})",
-            memory_ids,
-        )
+            # Delete memory_entities (has CASCADE but explicit is cleaner)
+            await self.conn.execute(
+                f"DELETE FROM memory_entities WHERE memory_id IN ({placeholders})",
+                memory_ids,
+            )
+            await self.conn.execute("DELETE FROM memories_fts WHERE user_id = ?", (user_id,))
 
-        # Now safe to delete the memories
-        cursor = await self.conn.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))
-        await self.conn.commit()
+            # Now safe to delete the memories
+            cursor = await self.conn.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))
         return cursor.rowcount
 
     async def delete_project_memories(self, user_id: str, project_id: str) -> int:
@@ -1131,35 +1256,39 @@ class Database:
         SECURITY: Always requires user_id to prevent cross-user deletion.
         Properly handles FK constraints by deleting relationships first.
         """
-        # First, get all memory IDs for this user/project
-        cursor = await self.conn.execute(
-            "SELECT id FROM memories WHERE user_id = ? AND project_id = ?",
-            (user_id, project_id),
-        )
-        memory_ids = [row[0] for row in await cursor.fetchall()]
+        async with self.transaction():
+            # First, get all memory IDs for this user/project
+            cursor = await self.conn.execute(
+                "SELECT id FROM memories WHERE user_id = ? AND project_id = ?",
+                (user_id, project_id),
+            )
+            memory_ids = [row[0] for row in await cursor.fetchall()]
 
-        if not memory_ids:
-            return 0
+            if not memory_ids:
+                return 0
 
-        # Delete relationships that reference these memories as source
-        placeholders = ",".join("?" * len(memory_ids))
-        await self.conn.execute(
-            f"DELETE FROM relationships WHERE source_memory_id IN ({placeholders})",
-            memory_ids,
-        )
+            # Delete relationships that reference these memories as source
+            placeholders = ",".join("?" * len(memory_ids))
+            await self.conn.execute(
+                f"DELETE FROM relationships WHERE source_memory_id IN ({placeholders})",
+                memory_ids,
+            )
 
-        # Delete memory_entities
-        await self.conn.execute(
-            f"DELETE FROM memory_entities WHERE memory_id IN ({placeholders})",
-            memory_ids,
-        )
+            # Delete memory_entities
+            await self.conn.execute(
+                f"DELETE FROM memory_entities WHERE memory_id IN ({placeholders})",
+                memory_ids,
+            )
+            await self.conn.execute(
+                "DELETE FROM memories_fts WHERE user_id = ? AND project_id = ?",
+                (user_id, project_id),
+            )
 
-        # Now safe to delete the memories
-        cursor = await self.conn.execute(
-            "DELETE FROM memories WHERE user_id = ? AND project_id = ?",
-            (user_id, project_id),
-        )
-        await self.conn.commit()
+            # Now safe to delete the memories
+            cursor = await self.conn.execute(
+                "DELETE FROM memories WHERE user_id = ? AND project_id = ?",
+                (user_id, project_id),
+            )
         return cursor.rowcount
 
     async def migrate_memory_relationships(
@@ -1172,23 +1301,22 @@ class Database:
 
         Used during UPDATE consolidation to preserve entity links.
         """
-        # Update relationships that reference the old memory as source
-        cursor = await self.conn.execute(
-            "UPDATE relationships SET source_memory_id = ? WHERE source_memory_id = ?",
-            (new_memory_id, old_memory_id),
-        )
-        rel_count = cursor.rowcount
+        async with self.transaction():
+            # Update relationships that reference the old memory as source
+            cursor = await self.conn.execute(
+                "UPDATE relationships SET source_memory_id = ? WHERE source_memory_id = ?",
+                (new_memory_id, old_memory_id),
+            )
+            rel_count = cursor.rowcount
 
-        # Migrate memory_entity links
-        await self.conn.execute(
-            """
-            INSERT OR IGNORE INTO memory_entities (memory_id, entity_id, confidence)
-            SELECT ?, entity_id, confidence FROM memory_entities WHERE memory_id = ?
-            """,
-            (new_memory_id, old_memory_id),
-        )
-
-        await self.conn.commit()
+            # Migrate memory_entity links
+            await self.conn.execute(
+                """
+                INSERT OR IGNORE INTO memory_entities (memory_id, entity_id, confidence)
+                SELECT ?, entity_id, confidence FROM memory_entities WHERE memory_id = ?
+                """,
+                (new_memory_id, old_memory_id),
+            )
         return rel_count
 
     # -----------------------------------------------------------------------
@@ -1224,42 +1352,45 @@ class Database:
         now = utcnow().isoformat()
 
         try:
-            # Insert into archive table
-            await self.conn.execute(
-                """
-                INSERT INTO archived_memories (
-                    id, user_id, project_id, content, extracted_facts, metadata,
-                    created_at, updated_at, expires_at, access_count, last_accessed,
-                    source, trust_score, checksum, visibility, space_id, team_id,
-                    archived_at, archive_reason, final_relevance_score
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    memory["id"],
-                    memory["user_id"],
-                    memory["project_id"],
-                    memory["content"],
-                    memory.get("extracted_facts"),
-                    memory.get("metadata"),
-                    memory["created_at"],
-                    memory.get("updated_at", now),
-                    memory.get("expires_at"),
-                    memory.get("access_count", 0),
-                    memory.get("last_accessed"),
-                    memory.get("source", "user_input"),
-                    memory.get("trust_score", 1.0),
-                    memory.get("checksum"),
-                    memory.get("visibility", "personal"),
-                    memory.get("space_id"),
-                    memory.get("team_id"),
-                    now,
-                    reason,
-                    final_relevance,
-                ),
-            )
+            # Archive insert + active delete are one atomic move: a failure
+            # can no longer leave a memory in both tables (or in neither).
+            async with self.transaction():
+                # Insert into archive table
+                await self.conn.execute(
+                    """
+                    INSERT INTO archived_memories (
+                        id, user_id, project_id, content, extracted_facts, metadata,
+                        created_at, updated_at, expires_at, access_count, last_accessed,
+                        source, trust_score, checksum, visibility, space_id, team_id,
+                        archived_at, archive_reason, final_relevance_score
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        memory["id"],
+                        memory["user_id"],
+                        memory["project_id"],
+                        memory["content"],
+                        memory.get("extracted_facts"),
+                        memory.get("metadata"),
+                        memory["created_at"],
+                        memory.get("updated_at", now),
+                        memory.get("expires_at"),
+                        memory.get("access_count", 0),
+                        memory.get("last_accessed"),
+                        memory.get("source", "user_input"),
+                        memory.get("trust_score", 1.0),
+                        memory.get("checksum"),
+                        memory.get("visibility", "personal"),
+                        memory.get("space_id"),
+                        memory.get("team_id"),
+                        now,
+                        reason,
+                        final_relevance,
+                    ),
+                )
 
-            # Delete from active storage (this also cleans up relationships)
-            await self.delete_memory(memory_id)
+                # Delete from active storage (this also cleans up relationships)
+                await self.delete_memory(memory_id)
 
             log.info(
                 "memory_archived",
@@ -1297,43 +1428,50 @@ class Database:
         now = utcnow().isoformat()
 
         try:
-            # Insert back into active memories
-            await self.conn.execute(
-                """
-                INSERT INTO memories (
-                    id, user_id, project_id, content, extracted_facts, metadata,
-                    created_at, updated_at, expires_at, access_count, last_accessed,
-                    source, trust_score, checksum, visibility, space_id, team_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    archived["id"],
-                    archived["user_id"],
-                    archived["project_id"],
-                    archived["content"],
-                    archived.get("extracted_facts"),
-                    archived.get("metadata"),
-                    archived["created_at"],
-                    now,  # Updated timestamp
-                    archived.get("expires_at"),
-                    archived.get("access_count", 0),
-                    now,  # Mark as accessed now
-                    archived.get("source", "user_input"),
-                    archived.get("trust_score", 1.0),
-                    archived.get("checksum"),
-                    archived.get("visibility", "personal"),
-                    archived.get("space_id"),
-                    archived.get("team_id"),
-                ),
-            )
+            async with self.transaction():
+                # Insert back into active memories
+                await self.conn.execute(
+                    """
+                    INSERT INTO memories (
+                        id, user_id, project_id, content, extracted_facts, metadata,
+                        created_at, updated_at, expires_at, access_count, last_accessed,
+                        source, trust_score, checksum, visibility, space_id, team_id
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        archived["id"],
+                        archived["user_id"],
+                        archived["project_id"],
+                        archived["content"],
+                        archived.get("extracted_facts"),
+                        archived.get("metadata"),
+                        archived["created_at"],
+                        now,  # Updated timestamp
+                        archived.get("expires_at"),
+                        archived.get("access_count", 0),
+                        now,  # Mark as accessed now
+                        archived.get("source", "user_input"),
+                        archived.get("trust_score", 1.0),
+                        archived.get("checksum"),
+                        archived.get("visibility", "personal"),
+                        archived.get("space_id"),
+                        archived.get("team_id"),
+                    ),
+                )
 
-            # Increment restore count and delete from archive
-            await self.conn.execute(
-                "DELETE FROM archived_memories WHERE id = ?",
-                (memory_id,),
-            )
+                # Increment restore count and delete from archive
+                await self.conn.execute(
+                    "DELETE FROM archived_memories WHERE id = ?",
+                    (memory_id,),
+                )
 
-            await self.conn.commit()
+                # The archive holds no vector: queue re-embedding (the worker
+                # upserts to Qdrant and re-indexes FTS) in the same transaction.
+                from remembra.storage.pending_embeddings import PendingEmbeddingQueue
+
+                await PendingEmbeddingQueue(self).enqueue(
+                    memory_id, archived["user_id"], archived["project_id"], reason="restored"
+                )
 
             log.info("memory_restored", memory_id=memory_id)
             return True
@@ -1660,19 +1798,19 @@ class Database:
         content: str,
     ) -> None:
         """Index a memory in FTS5 for keyword search."""
-        # Delete existing entry first (upsert)
-        await self.conn.execute(
-            "DELETE FROM memories_fts WHERE id = ?",
-            (memory_id,),
-        )
-        await self.conn.execute(
-            """
-            INSERT INTO memories_fts (id, user_id, project_id, content)
-            VALUES (?, ?, ?, ?)
-            """,
-            (memory_id, user_id, project_id, content),
-        )
-        await self.conn.commit()
+        async with self.transaction():
+            # Delete existing entry first (upsert)
+            await self.conn.execute(
+                "DELETE FROM memories_fts WHERE id = ?",
+                (memory_id,),
+            )
+            await self.conn.execute(
+                """
+                INSERT INTO memories_fts (id, user_id, project_id, content)
+                VALUES (?, ?, ?, ?)
+                """,
+                (memory_id, user_id, project_id, content),
+            )
 
     async def delete_memory_fts(self, memory_id: str) -> None:
         """Remove a memory from FTS5 index."""

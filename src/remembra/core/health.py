@@ -7,16 +7,24 @@ import structlog
 log = structlog.get_logger(__name__)
 
 
-async def check_qdrant(qdrant_url: str) -> dict[str, Any]:
+async def check_qdrant(target: Any) -> dict[str, Any]:
     """Ping Qdrant and return status details.
+
+    ``target`` is either the app's ``QdrantStore`` — checked through its own
+    client, i.e. the transport actually used for traffic (gRPC) — or a base
+    URL string, checked over HTTP ``/healthz`` (used before the store exists).
 
     Note: Internal URLs are not exposed in the response for security.
     """
+    if not isinstance(target, str) and hasattr(target, "health_check"):
+        ok = bool(await target.health_check())
+        return {"status": "ok" if ok else "degraded"}
+
     import httpx
 
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
-            r = await client.get(f"{qdrant_url}/healthz")
+            r = await client.get(f"{target}/healthz")
             ok = r.status_code == 200
     except Exception as exc:
         log.warning("qdrant_health_check_failed", error=str(exc))

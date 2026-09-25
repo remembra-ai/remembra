@@ -13,6 +13,7 @@ from typing import Any
 import structlog
 from openai import AsyncOpenAI
 
+from remembra.core.llm_guard import classify_llm_exception, make_llm_client, mark_llm_fallback
 from remembra.extraction.prompting import reference_date_line, wrap_untrusted
 
 log = structlog.get_logger()
@@ -83,7 +84,7 @@ class ExtractionConfig:
     max_facts_per_input: int = 25  # per chunk; truncation is flagged, not silent
     chunk_chars: int = 8000
     temperature: float = 0.1  # Low for consistency
-    timeout: float = 30.0
+    timeout: float = 20.0
 
 
 @dataclass
@@ -174,7 +175,8 @@ class FactExtractor:
     def _get_client(self) -> AsyncOpenAI:
         """Get or create OpenAI client."""
         if self._client is None:
-            self._client = AsyncOpenAI(api_key=self.config.api_key, max_retries=1)
+            # Low retries + shared LLM circuit breaker (REL-7)
+            self._client = make_llm_client(self.config.api_key, timeout=self.config.timeout)
             log.info(
                 "extraction_client_initialized",
                 provider=self.config.provider,
@@ -268,9 +270,12 @@ class FactExtractor:
             return facts, None, truncated
         except json.JSONDecodeError as e:
             log.error("extraction_json_error", error=str(e))
+            mark_llm_fallback("extraction", "bad_response")
             return [], "invalid JSON", False
         except Exception as e:
-            log.error("extraction_error", error=str(e))
+            kind = classify_llm_exception(e)
+            log.error("extraction_error", error=str(e), kind=kind)
+            mark_llm_fallback("extraction", kind)
             return [], type(e).__name__, False
 
     def _simple_extract(self, content: str) -> list[str]:

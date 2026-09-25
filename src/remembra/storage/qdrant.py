@@ -26,6 +26,18 @@ FIELD_EXPIRES_AT = "expires_at"
 FIELD_METADATA = "metadata"
 
 
+def _vector_size(collection_info: Any) -> int | None:
+    """Vector size of a collection (single unnamed vector, or the first named one)."""
+    try:
+        vectors = collection_info.config.params.vectors
+    except AttributeError:
+        return None
+    if isinstance(vectors, dict):
+        vectors = next(iter(vectors.values()), None)
+    size = getattr(vectors, "size", None)
+    return int(size) if size is not None else None
+
+
 class QdrantStore:
     """
     Async Qdrant client wrapper for memory vector storage.
@@ -42,6 +54,7 @@ class QdrantStore:
         self.collection_name = settings.qdrant_collection
         self._client: AsyncQdrantClient | None = None
         self._encryptor = encryptor or FieldEncryptor(settings.encryption_key)
+        self.dimension_status: dict[str, Any] | None = None
 
     async def _get_client(self) -> AsyncQdrantClient:
         if self._client is None:
@@ -53,36 +66,94 @@ class QdrantStore:
             )
         return self._client
 
-    async def init_collection(self) -> None:
+    async def init_collection(self, expected_dimensions: int | None = None) -> None:
         """
         Ensure the memories collection exists with correct configuration.
         Safe to call multiple times (idempotent).
+
+        For an existing collection, verifies its vector size matches the
+        configured embedding dimensions (REL-6). A mismatch makes every upsert
+        and search fail, so it is logged as critical and surfaced via
+        ``dimension_status`` (reported by ``/health/ready``) — boot continues
+        so the process doesn't crash-loop and keyword paths keep working.
         """
         client = await self._get_client()
+        expected = expected_dimensions or self.settings.embedding_dimensions
 
-        try:
+        if await client.collection_exists(self.collection_name):
             collection_info = await client.get_collection(self.collection_name)
+            actual = _vector_size(collection_info)
+            self.dimension_status = {
+                "collection": self.collection_name,
+                "expected": expected,
+                "actual": actual,
+                "ok": actual is None or expected is None or actual == expected,
+            }
+            if not self.dimension_status["ok"]:
+                log.critical(
+                    "qdrant_collection_dimension_mismatch",
+                    name=self.collection_name,
+                    collection_dimensions=actual,
+                    embedding_dimensions=expected,
+                    fix="set REMEMBRA_EMBEDDING_DIMENSIONS/MODEL to match, or rebuild via the reindex job",
+                )
             log.info(
                 "qdrant_collection_exists",
                 name=self.collection_name,
                 points_count=getattr(collection_info, "points_count", "unknown"),
+                dimensions=actual,
             )
-        except UnexpectedResponse as e:
-            if "Not found" in str(e) or e.status_code == 404:
-                log.info("qdrant_creating_collection", name=self.collection_name)
-                await client.create_collection(
-                    collection_name=self.collection_name,
-                    vectors_config=qmodels.VectorParams(
-                        size=self.settings.embedding_dimensions,
-                        distance=qmodels.Distance.COSINE,
-                    ),
-                )
-                # Create payload indexes for filtering
-                await self._create_indexes(client)
-            else:
-                raise
+            return
 
-    async def _create_indexes(self, client: AsyncQdrantClient) -> None:
+        log.info("qdrant_creating_collection", name=self.collection_name, dimensions=expected)
+        await self.create_collection(self.collection_name, expected)
+        self.dimension_status = {
+            "collection": self.collection_name,
+            "expected": expected,
+            "actual": expected,
+            "ok": True,
+        }
+
+    async def create_collection(self, name: str, dimensions: int) -> None:
+        """Create a cosine collection of ``dimensions`` with Remembra's payload indexes."""
+        client = await self._get_client()
+        await client.create_collection(
+            collection_name=name,
+            vectors_config=qmodels.VectorParams(
+                size=dimensions,
+                distance=qmodels.Distance.COSINE,
+            ),
+        )
+        await self._create_indexes(client, name)
+
+    async def init_collection_with_retry(
+        self,
+        expected_dimensions: int | None = None,
+        attempts: int = 5,
+        base_delay: float = 1.0,
+    ) -> None:
+        """``init_collection`` with exponential backoff (REL-15).
+
+        Qdrant often starts slower than the API container; without retries
+        one slow start crash-loops the app. Raises the last error after
+        ``attempts`` tries.
+        """
+        attempts = max(1, attempts)
+        for attempt in range(1, attempts + 1):
+            try:
+                await self.init_collection(expected_dimensions)
+                return
+            except Exception as e:
+                if attempt == attempts:
+                    log.error("qdrant_init_failed", attempts=attempt, error=str(e))
+                    raise
+                delay = base_delay * (2 ** (attempt - 1))
+                log.warning("qdrant_init_retry", attempt=attempt, delay=delay, error=str(e))
+                # A failed gRPC channel can stay broken; reconnect next attempt.
+                await self.close()
+                await asyncio.sleep(delay)
+
+    async def _create_indexes(self, client: AsyncQdrantClient, collection_name: str | None = None) -> None:
         """Create payload field indexes for efficient filtering."""
         index_fields = [
             (FIELD_USER_ID, qmodels.PayloadSchemaType.KEYWORD),
@@ -94,7 +165,7 @@ class QdrantStore:
         for field_name, field_type in index_fields:
             try:
                 await client.create_payload_index(
-                    collection_name=self.collection_name,
+                    collection_name=collection_name or self.collection_name,
                     field_name=field_name,
                     field_schema=field_type,
                 )
@@ -408,11 +479,12 @@ class QdrantStore:
             result[FIELD_METADATA] = self._encryptor.decrypt_dict(result[FIELD_METADATA])
         return result
 
-    async def health_check(self) -> bool:
-        """Check if Qdrant is reachable."""
+    async def health_check(self, timeout: float = 3.0) -> bool:
+        """Check Qdrant over the transport the app actually uses (gRPC when
+        ``prefer_grpc``) — an HTTP ``/healthz`` can pass while gRPC is broken (REL-19)."""
         try:
             client = await self._get_client()
-            await client.get_collections()
+            await asyncio.wait_for(client.get_collections(), timeout=timeout)
             return True
         except Exception as e:
             log.warning("qdrant_health_check_failed", error=str(e))

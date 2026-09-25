@@ -435,6 +435,57 @@ class Settings(BaseSettings):
         description="Model for background consolidation (uses cheaper model if set)",
     )
 
+    # -----------------------------------------------------------------------
+    # Reliability: provider failure handling, readiness, background work
+    # (2026-09-25 REL remediation — see docs/DEPLOYING.md)
+    # -----------------------------------------------------------------------
+    embedding_timeout_seconds: float = Field(20.0, description="Per-request timeout for embedding provider HTTP calls")
+    embedding_breaker_failure_threshold: int = Field(
+        5, description="Consecutive 5xx/timeout/429 embedding failures before the circuit opens"
+    )
+    embedding_breaker_reset_seconds: float = Field(30.0, description="Seconds an opened circuit waits before one probe")
+    provider_quota_reset_seconds: float = Field(
+        900.0, description="Seconds a circuit stays open after a quota_exhausted error before probing again"
+    )
+    llm_timeout_seconds: float = Field(20.0, description="Per-request timeout for extraction/consolidation LLM calls")
+    llm_max_retries: int = Field(1, description="OpenAI SDK retries for LLM calls (SDK default 2 burns quota)")
+    readiness_probe_interval_seconds: float = Field(
+        300.0, description="Minimum seconds between active embedding probes made by /health/ready"
+    )
+    pending_embeddings_worker_enabled: bool = Field(
+        True, description="Run the background worker that re-embeds rows queued in pending_embeddings"
+    )
+    pending_embeddings_poll_seconds: float = Field(5.0, description="Pending-embedding worker poll interval")
+    pending_embeddings_batch_size: int = Field(20, description="Rows claimed per worker iteration")
+    pending_embeddings_max_attempts: int = Field(12, description="Retryable failures before a pending embedding is dead-lettered")
+    temporal_cleanup_enabled: bool = Field(
+        True, description="Run the TTL cleanup loop (expired memories are archived, not deleted)"
+    )
+    temporal_cleanup_interval_seconds: int = Field(3600, description="Seconds between TTL cleanup runs")
+    qdrant_init_retries: int = Field(5, description="Attempts to reach Qdrant at startup (exponential backoff)")
+    reconcile_interval_hours: float = Field(
+        24.0, description="Hours between report-only SQLite/Qdrant/FTS drift scans (0 disables)"
+    )
+    background_task_concurrency: int = Field(16, description="Max concurrently running tracked background tasks")
+    alert_webhook_url: str | None = Field(
+        None, description="POST JSON operator alerts here (e.g. first embedding quota_exhausted)"
+    )
+    alert_email: str | None = Field(None, description="Also email operator alerts here (requires email backend)")
+    alert_cooldown_seconds: float = Field(3600.0, description="Minimum seconds between repeats of the same alert")
+    metrics_token: str | None = Field(
+        None, description="Bearer token required for GET /metrics. When unset, /metrics is disabled (404)."
+    )
+
+    @model_validator(mode="after")
+    def fill_build_sha(self) -> "Settings":
+        """Fall back to the deploy platform's commit (Coolify sets SOURCE_COMMIT)
+        when REMEMBRA_BUILD_SHA is unset or empty (REL-18)."""
+        if not self.build_sha:
+            import os
+
+            object.__setattr__(self, "build_sha", os.environ.get("SOURCE_COMMIT") or None)
+        return self
+
     @model_validator(mode="after")
     def check_security_settings(self) -> "Settings":
         """Warn about insecure settings in production and filter CORS origins."""

@@ -45,7 +45,8 @@ services:
       # Embedding provider
       - REMEMBRA_EMBEDDING_PROVIDER=${REMEMBRA_EMBEDDING_PROVIDER:-openai}
       - REMEMBRA_EMBEDDING_MODEL=${REMEMBRA_EMBEDDING_MODEL:-text-embedding-3-small}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:?OPENAI_API_KEY is required}
+      # Settings are read with the REMEMBRA_ prefix; a bare OPENAI_API_KEY is ignored (REL-13)
+      - REMEMBRA_OPENAI_API_KEY=${REMEMBRA_OPENAI_API_KEY:?REMEMBRA_OPENAI_API_KEY is required}
       
       # LLM for extraction
       - REMEMBRA_LLM_PROVIDER=${REMEMBRA_LLM_PROVIDER:-openai}
@@ -56,7 +57,9 @@ services:
       - REMEMBRA_PII_MODE=redact
       - REMEMBRA_ANOMALY_DETECTION_ENABLED=true
       - REMEMBRA_ENABLE_HYBRID_SEARCH=true
-      - REMEMBRA_ENABLE_RERANKING=true
+      # Needs an image built with the "rerank" extra (Dockerfile.cloud has it;
+      # for Dockerfile use --build-arg REMEMBRA_EXTRAS="server encryption cloud rerank")
+      - REMEMBRA_ENABLE_RERANKING=${REMEMBRA_ENABLE_RERANKING:-false}
       - REMEMBRA_ENABLE_GRAPH_RETRIEVAL=true
       - REMEMBRA_SLEEP_TIME_ENABLED=true
       
@@ -68,13 +71,18 @@ services:
       
       # Logging
       - REMEMBRA_LOG_LEVEL=${REMEMBRA_LOG_LEVEL:-info}
+
+      # Observability (optional): /metrics bearer token, operator alerts
+      - REMEMBRA_METRICS_TOKEN=${REMEMBRA_METRICS_TOKEN:-}
+      - REMEMBRA_ALERT_WEBHOOK_URL=${REMEMBRA_ALERT_WEBHOOK_URL:-}
     volumes:
       - remembra_data:/data
     depends_on:
       qdrant:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
+      # The self-host image has no curl
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8787/health', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -86,7 +94,8 @@ services:
   # Qdrant - Vector Database (INTERNAL ONLY)
   # ==========================================================================
   qdrant:
-    image: qdrant/qdrant:v1.7.4
+    # Matches the pinned qdrant-client (1.17.x, uses query_points) — REL-13
+    image: qdrant/qdrant:v1.17.0
     container_name: remembra-qdrant
     restart: unless-stopped
     # NOTE: No ports exposed - only accessible via Docker network
@@ -95,7 +104,8 @@ services:
     volumes:
       - qdrant_data:/qdrant/storage
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/"]
+      # The qdrant image has no curl/wget: plain TCP check via bash (REL-19)
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
