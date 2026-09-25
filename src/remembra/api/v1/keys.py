@@ -46,6 +46,13 @@ class CreateKeyRequest(BaseModel):
         None,
         description="Optional list of project IDs this key may access. Omit for all projects.",
     )
+    agent_id: str | None = Field(
+        None,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]*$",
+        description="Bind the key to one agent id (e.g. 'codex'): relay close-outs made with it are attributed to "
+        "that agent and cannot claim another. Omit for an unscoped key.",
+    )
 
 
 class CreateKeyResponse(BaseModel):
@@ -61,6 +68,7 @@ class CreateKeyResponse(BaseModel):
         default_factory=list,
         description="Project restrictions applied to the key. Empty means all projects.",
     )
+    agent_id: str | None = Field(default=None, description="Agent the key is scoped to (None = unscoped)")
     message: str = Field(
         default="Store this key securely. It cannot be retrieved again.", description="Important security notice"
     )
@@ -310,12 +318,21 @@ async def create_api_key(
             body.project_ids = list(current_user.project_ids)
         _check_grant_allowed(current_user, role, body.project_ids)
         inherited_scopes = current_user.scopes or None
+        # An agent-scoped key can only mint keys for its own agent.
+        if current_user.agent_id:
+            if body.agent_id and body.agent_id != current_user.agent_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"This key is scoped to agent '{current_user.agent_id}' and cannot create keys for another agent.",
+                )
+            body.agent_id = current_user.agent_id
 
     try:
         api_key = await key_manager.create_key(
             user_id=user_id,
             name=body.name,
             rate_limit_tier=body.rate_limit_tier,
+            agent_id=body.agent_id,
         )
 
         # Assign role to the new key
@@ -341,6 +358,7 @@ async def create_api_key(
             rate_limit_tier=api_key.rate_limit_tier,
             role=role.value,
             project_ids=body.project_ids or [],
+            agent_id=body.agent_id,
         )
 
     except Exception as e:

@@ -1,0 +1,505 @@
+"""Relay endpoints: project identity, links, session close-out, trail, pickup brief.
+
+- ``POST   /api/v1/projects/resolve``  location (git remote / root commit / path) -> stable project id
+- ``POST   /api/v1/projects/links``    link two projects (from, to, relation)
+- ``GET    /api/v1/projects/links``    links of a project (both directions)
+- ``DELETE /api/v1/projects/links``    remove a link
+- ``POST   /api/v1/session/close``     session facts -> ONE structured handoff (idempotent per agent+session)
+- ``GET    /api/v1/session/brief``     pickup brief (accepts a project id or a location)
+- ``GET    /api/v1/trail``             handoffs + checkpoints across agents, newest first
+
+Attribution: when the API key is agent-scoped, the agent id comes from the key
+and a different id in the body or the ``X-Remembra-Agent-Id`` header is
+rejected. Unscoped keys may name the agent in the body or the header (they
+must agree). Every stored string passes ``redact_secrets``; access to each
+project is checked with the key's project restrictions.
+"""
+
+from __future__ import annotations
+
+import re
+import uuid
+from collections.abc import Callable
+from typing import Annotated, Any
+
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from remembra.api.v1.agent_session import screen_text
+from remembra.auth.middleware import AuthenticatedUser, CurrentUser, has_permission, resolve_project_access
+from remembra.client.project import normalize_project_id
+from remembra.cloud.limits import EnforceStoreLimit, record_store_usage
+from remembra.core.limiter import limiter
+from remembra.relay.identity import ProjectLocator
+from remembra.services.relay import ProjectAccessDenied, RelayService
+
+router = APIRouter(tags=["relay"])
+
+AGENT_HEADER = "X-Remembra-Agent-Id"
+_AGENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$")
+_SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+=-]{0,199}$")
+_RELATION_RE = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
+
+
+def _service(request: Request) -> RelayService:
+    return RelayService(db=request.app.state.db, memory_service=getattr(request.app.state, "memory_service", None))
+
+
+def _require(current_user: Any, permission: str) -> None:
+    if not has_permission(current_user, permission):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission denied: {permission} required")
+
+
+def _clean_agent(value: str | None, source: str) -> str | None:
+    agent = (value or "").strip()
+    if not agent:
+        return None
+    if not _AGENT_RE.match(agent):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid agent id in {source}: use 1-128 chars of letters, digits and ._:@/+-",
+        )
+    return agent
+
+
+def effective_agent(request: Request, user: AuthenticatedUser, body_agent: str | None) -> tuple[str | None, bool]:
+    """Resolve the agent a relay call acts as. Returns ``(agent_id, verified)``.
+
+    ``verified`` is True when the id comes from an agent-scoped key.
+    """
+    header_agent = _clean_agent(request.headers.get(AGENT_HEADER), f"the {AGENT_HEADER} header")
+    claimed = _clean_agent(body_agent, "the request")
+    scoped = getattr(user, "agent_id", None)
+    if scoped:
+        for other, where in ((claimed, "request"), (header_agent, f"{AGENT_HEADER} header")):
+            if other and other != scoped:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"This API key is scoped to agent '{scoped}'; the {where} claims '{other}'.",
+                )
+        return scoped, True
+    if claimed and header_agent and claimed != header_agent:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"agent_id '{claimed}' does not match the {AGENT_HEADER} header '{header_agent}'.",
+        )
+    return claimed or header_agent, False
+
+
+def pii_scrubber(request: Request) -> Callable[[str], str] | None:
+    """Per-value PII scrub for close-out facts: redact, never reject.
+
+    A blocked PII match in one commit subject must not lose the whole
+    handoff, so blocked values are replaced with ``[REDACTED:pii]``.
+    """
+    detector = getattr(request.app.state, "pii_detector", None)
+    if detector is None:
+        return None
+
+    def scrub(text: str) -> str:
+        result = detector.scan(text, source="user_input")
+        if not result.has_pii:
+            return text
+        if result.blocked:
+            return "[REDACTED:pii]"
+        return str(result.redacted_content) if result.redacted_content else text  # detect mode: warn only
+
+    return scrub
+
+
+def _check_project(user: AuthenticatedUser, project_id: str) -> str:
+    resolved = resolve_project_access(user, project_id)
+    return resolved or project_id
+
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+
+
+def _clip(value: Any, limit: int) -> Any:
+    return value[:limit] if isinstance(value, str) else value
+
+
+class LocatorIn(BaseModel):
+    git_remote: str | None = Field(default=None, max_length=2000, description="Remote URL, any form (https/ssh/scp)")
+    root_commit: str | None = Field(default=None, max_length=64, description="git rev-list --max-parents=0 HEAD (smallest)")
+    root_path: str | None = Field(default=None, max_length=4096, description="Absolute path of the working tree")
+    repo_name: str | None = Field(default=None, max_length=200)
+    host: str | None = Field(default=None, max_length=255, description="Machine name; qualifies path fingerprints")
+
+    def locator(self) -> ProjectLocator:
+        return ProjectLocator(
+            git_remote=self.git_remote,
+            root_commit=self.root_commit,
+            root_path=self.root_path,
+            repo_name=self.repo_name,
+            host=self.host,
+        )
+
+
+class ResolveRequest(LocatorIn):
+    hint_project: str | None = Field(default=None, max_length=128, description="Project id to use for a new location")
+    bind: bool = Field(default=False, description="Re-bind an already-known location to hint_project")
+
+
+class CommitIn(BaseModel):
+    sha: str = Field(..., max_length=64)
+    subject: str = ""
+
+    @field_validator("subject", mode="before")
+    @classmethod
+    def _subject(cls, v: Any) -> Any:
+        return _clip(v or "", 300)
+
+
+class CommandIn(BaseModel):
+    cmd: str
+    exit_code: int | None = None
+
+    @field_validator("cmd", mode="before")
+    @classmethod
+    def _cmd(cls, v: Any) -> Any:
+        return _clip(v, 1000)
+
+
+class TestRunIn(BaseModel):
+    __test__ = False  # not a pytest class
+
+    cmd: str
+    passed: bool
+    summary: str | None = None
+
+    @field_validator("cmd", mode="before")
+    @classmethod
+    def _cmd(cls, v: Any) -> Any:
+        return _clip(v, 1000)
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def _summary(cls, v: Any) -> Any:
+        return _clip(v, 300)
+
+
+# (field, max items, max chars per item): oversized input is truncated, never
+# rejected — a close-out must not fail because an agent did a lot of work.
+_LIST_CAPS = {
+    "commits": 100,
+    "files_changed": 500,
+    "uncommitted_files": 500,
+    "commands": 200,
+    "tests": 100,
+    "errors": 50,
+    "todos_open": 100,
+}
+_STR_CAPS = {"branch": 255, "head_commit": 64, "upstream": 255, "diff_stat": 300, "notes": 6000, "next_step": 1000}
+
+
+class FactsIn(BaseModel):
+    branch: str | None = None
+    head_commit: str | None = None
+    upstream: str | None = None
+    unpushed_commits: int | None = Field(default=None, ge=0)
+    no_upstream: bool = False
+    commits: list[CommitIn] = Field(default_factory=list)
+    files_changed: list[str] = Field(default_factory=list)
+    uncommitted_files: list[str] = Field(default_factory=list)
+    diff_stat: str | None = None
+    commands: list[CommandIn] = Field(default_factory=list)
+    tests: list[TestRunIn] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
+    todos_open: list[str] = Field(default_factory=list)
+    notes: str | None = None
+    next_step: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _truncate(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        for name, cap in _LIST_CAPS.items():
+            value = data.get(name)
+            if isinstance(value, list):
+                # Keep the most recent entries for event lists, the first ones for file lists.
+                value = value[-cap:] if name in ("commands", "tests", "errors") else value[:cap]
+                if name in ("files_changed", "uncommitted_files", "errors", "todos_open"):
+                    value = [_clip(v, 1000) for v in value if isinstance(v, str)]
+                data[name] = value
+        for name, cap in _STR_CAPS.items():
+            data[name] = _clip(data.get(name), cap)
+        return data
+
+
+class CloseRequest(BaseModel):
+    agent_id: str | None = Field(default=None, max_length=128)
+    session_id: str | None = Field(
+        default=None, max_length=200, description="Stable per agent session; a repeat close updates the same handoff"
+    )
+    project_id: str | None = Field(default=None, max_length=128)
+    project: str | ResolveRequest | None = Field(default=None, description="Project id or a location to resolve")
+    facts: FactsIn = Field(default_factory=FactsIn)
+    summary: str | None = Field(default=None, description="Optional agent-written summary; grounding-checked, never trusted")
+    end_reason: str | None = None
+
+    @field_validator("summary", mode="before")
+    @classmethod
+    def _summary(cls, v: Any) -> Any:
+        return _clip(v, 6000)
+
+    @field_validator("end_reason", mode="before")
+    @classmethod
+    def _reason(cls, v: Any) -> Any:
+        return _clip(v, 100)
+
+
+class LinkRequest(BaseModel):
+    from_project: str = Field(..., min_length=1, max_length=128)
+    to_project: str = Field(..., min_length=1, max_length=128)
+    relation: str = Field(default="related", max_length=40, description="e.g. related, depends_on, frontend_of")
+
+
+# ---------------------------------------------------------------------------
+# Project identity
+# ---------------------------------------------------------------------------
+
+
+async def _resolve(
+    request: Request, user: AuthenticatedUser, locator: LocatorIn, hint: str | None, bind: bool, create: bool
+) -> dict[str, Any]:
+    try:
+        return await _service(request).registry.resolve(
+            user_id=user.user_id,
+            locator=locator.locator(),
+            hint_project=hint,
+            bind=bind,
+            create=create,
+            allowed_projects=user.project_ids,
+        )
+    except ProjectAccessDenied as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@router.post("/projects/resolve", summary="Resolve a location (git remote / root commit / path) to a project id")
+@limiter.limit("120/minute")
+async def resolve_project(request: Request, body: ResolveRequest, current_user: CurrentUser) -> dict[str, Any]:
+    """Same repo on any machine, drive or worktree -> the same project id.
+
+    A new location is registered (``created``) unless the key is read-only, in
+    which case the id is computed but not persisted (``persisted: false``).
+    """
+    _require(current_user, "memory:recall")
+    can_write = has_permission(current_user, "memory:store")
+    if body.bind and not can_write:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied: memory:store required to bind")
+    return await _resolve(request, current_user, body, body.hint_project, body.bind, create=can_write)
+
+
+# ---------------------------------------------------------------------------
+# Links
+# ---------------------------------------------------------------------------
+
+
+def _relation(value: str) -> str:
+    relation = (value or "related").strip().lower()
+    if not _RELATION_RE.match(relation):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="relation must match [a-z][a-z0-9_-]{0,39}")
+    return relation
+
+
+@router.post("/projects/links", summary="Link two projects")
+@limiter.limit("60/minute")
+async def add_link(request: Request, body: LinkRequest, current_user: CurrentUser) -> dict[str, Any]:
+    _require(current_user, "memory:store")
+    source = _check_project(current_user, normalize_project_id(body.from_project))
+    target = _check_project(current_user, normalize_project_id(body.to_project))
+    agent, _ = effective_agent(request, current_user, None)
+    try:
+        return await _service(request).registry.add_link(current_user.user_id, source, target, _relation(body.relation), agent)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
+
+@router.get("/projects/links", summary="Links of a project (both directions)")
+@limiter.limit("60/minute")
+async def list_links(
+    request: Request,
+    current_user: CurrentUser,
+    project_id: Annotated[str, Query(min_length=1, max_length=128)],
+) -> dict[str, Any]:
+    _require(current_user, "memory:recall")
+    project = _check_project(current_user, normalize_project_id(project_id))
+    items = await _service(request).registry.links_for(current_user.user_id, project)
+    if current_user.project_ids:
+        items = [i for i in items if i["project_id"] in current_user.project_ids]
+    return {"project_id": project, "count": len(items), "items": items}
+
+
+@router.delete("/projects/links", summary="Remove a project link")
+@limiter.limit("60/minute")
+async def remove_link(
+    request: Request,
+    current_user: CurrentUser,
+    from_project: Annotated[str, Query(min_length=1, max_length=128)],
+    to_project: Annotated[str, Query(min_length=1, max_length=128)],
+    relation: Annotated[str, Query(max_length=40)] = "related",
+) -> dict[str, Any]:
+    _require(current_user, "memory:store")
+    source = _check_project(current_user, normalize_project_id(from_project))
+    target = _check_project(current_user, normalize_project_id(to_project))
+    removed = await _service(request).registry.remove_link(current_user.user_id, source, target, _relation(relation))
+    return {"removed": removed}
+
+
+# ---------------------------------------------------------------------------
+# Close-out
+# ---------------------------------------------------------------------------
+
+
+@router.post("/session/close", summary="Close a session: store ONE structured handoff")
+@limiter.limit("60/minute")
+async def close_session(
+    request: Request,
+    body: CloseRequest,
+    current_user: CurrentUser,
+    _limit: EnforceStoreLimit = None,
+) -> dict[str, Any]:
+    """Build the handoff (Done / Not done / Failing / Next) from the session's
+    facts. Idempotent per (agent_id, session_id): closing again updates the same
+    handoff (the previous version is superseded, never duplicated)."""
+    _require(current_user, "memory:store")
+    agent, verified = effective_agent(request, current_user, body.agent_id)
+    if not agent:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"agent_id is required (in the body or the {AGENT_HEADER} header).",
+        )
+    session_id = (body.session_id or "").strip() or None
+    if session_id is None:
+        session_id = f"adhoc-{uuid.uuid4().hex[:16]}"
+    elif not _SESSION_RE.match(session_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid session_id characters")
+
+    resolution: dict[str, Any] | None = None
+    requested: str | None
+    if isinstance(body.project, ResolveRequest):
+        resolution = await _resolve(
+            request, current_user, body.project, body.project.hint_project, body.project.bind, create=True
+        )
+        requested = resolution["project_id"]
+    else:
+        raw = body.project if isinstance(body.project, str) else body.project_id
+        requested = normalize_project_id(raw) if raw and raw.strip() else None
+    project = resolve_project_access(current_user, requested) or "default"
+
+    result = await _service(request).close_session(
+        user_id=current_user.user_id,
+        project_id=project,
+        agent_id=agent,
+        session_id=session_id,
+        facts=body.facts.model_dump(),
+        summary=body.summary,
+        end_reason=body.end_reason,
+        agent_verified=verified,
+        screen=lambda text: screen_text(request, text),
+        scrub=pii_scrubber(request),
+    )
+    if result["changed"]:
+        await record_store_usage(request, current_user.user_id)
+    return {
+        "project_id": project,
+        "agent_id": agent,
+        "agent_verified": verified,
+        "session_id": session_id,
+        "resolution": resolution,
+        **result,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Brief (pickup) and trail
+# ---------------------------------------------------------------------------
+
+
+async def _project_from_query(
+    request: Request,
+    user: AuthenticatedUser,
+    project_id: str | None,
+    locator: LocatorIn,
+    hint_project: str | None,
+) -> tuple[str | None, dict[str, Any] | None]:
+    if project_id:
+        return resolve_project_access(user, project_id), None
+    if not locator.locator().is_empty():
+        resolution = await _resolve(request, user, locator, hint_project, bind=False, create=has_permission(user, "memory:store"))
+        return resolve_project_access(user, resolution["project_id"]), resolution
+    if hint_project:
+        return resolve_project_access(user, normalize_project_id(hint_project)), None
+    return resolve_project_access(user, None), None
+
+
+def _locator_from_query(
+    git_remote: str | None, root_commit: str | None, root_path: str | None, repo_name: str | None, host: str | None
+) -> LocatorIn:
+    return LocatorIn(git_remote=git_remote, root_commit=root_commit, root_path=root_path, repo_name=repo_name, host=host)
+
+
+@router.get("/session/brief", summary="Session-start brief for an agent (pickup)")
+@limiter.limit("60/minute")
+async def session_brief(
+    request: Request,
+    current_user: CurrentUser,
+    project_id: Annotated[str | None, Query(max_length=128)] = None,
+    agent_id: Annotated[str | None, Query(max_length=128)] = None,
+    recent_n: Annotated[int, Query(ge=0, le=50)] = 10,
+    inbox_limit: Annotated[int, Query(ge=0, le=50)] = 10,
+    git_remote: Annotated[str | None, Query(max_length=2000)] = None,
+    root_commit: Annotated[str | None, Query(max_length=64)] = None,
+    root_path: Annotated[str | None, Query(max_length=4096)] = None,
+    repo_name: Annotated[str | None, Query(max_length=200)] = None,
+    host: Annotated[str | None, Query(max_length=255)] = None,
+    hint_project: Annotated[str | None, Query(max_length=128)] = None,
+) -> dict[str, Any]:
+    """Latest handoff ("Last session: ..."), unread inbox, status, linked
+    projects and recent memories by time, plus ``rendered`` — a compact
+    (~1500 token) text version. Pass ``project_id`` or a location
+    (``git_remote`` / ``root_commit`` / ``root_path``) to resolve it."""
+    _require(current_user, "memory:recall")
+    agent, _ = effective_agent(request, current_user, agent_id)
+    locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host)
+    project, resolution = await _project_from_query(request, current_user, project_id, locator, hint_project)
+    brief = await _service(request).brief(
+        user_id=current_user.user_id,
+        project_id=project,
+        agent_id=agent,
+        recent_n=recent_n,
+        inbox_limit=inbox_limit,
+        allowed=current_user.project_ids,
+    )
+    brief["resolution"] = resolution
+    return brief
+
+
+@router.get("/trail", summary="Handoffs and checkpoints across agents, newest first")
+@limiter.limit("60/minute")
+async def trail(
+    request: Request,
+    current_user: CurrentUser,
+    project_id: Annotated[str | None, Query(max_length=128)] = None,
+    project: Annotated[str | None, Query(max_length=128, description="Alias of project_id")] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+    git_remote: Annotated[str | None, Query(max_length=2000)] = None,
+    root_commit: Annotated[str | None, Query(max_length=64)] = None,
+    root_path: Annotated[str | None, Query(max_length=4096)] = None,
+    repo_name: Annotated[str | None, Query(max_length=200)] = None,
+    host: Annotated[str | None, Query(max_length=255)] = None,
+) -> dict[str, Any]:
+    _require(current_user, "memory:recall")
+    locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host)
+    resolved, resolution = await _project_from_query(request, current_user, project_id or project, locator, None)
+    result = await _service(request).trail(current_user.user_id, resolved, limit=limit, offset=offset)
+    result["resolution"] = resolution
+    return result

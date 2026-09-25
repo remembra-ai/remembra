@@ -69,6 +69,41 @@ VERSIONED_MIGRATIONS: list[tuple[int, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_memories_valid ON memories(user_id, project_id, valid_from, valid_to)",
         ],
     ),
+    (
+        4,
+        "relay_project_identity_links_agent_keys",
+        [
+            # Relay (A): per-user map from a location-independent fingerprint
+            # (normalized git remote / root commit / path) to a project id.
+            """
+            CREATE TABLE IF NOT EXISTS project_fingerprints (
+                user_id TEXT NOT NULL,
+                fingerprint TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, fingerprint)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_project_fingerprints_project ON project_fingerprints(user_id, project_id)",
+            """
+            CREATE TABLE IF NOT EXISTS project_links (
+                user_id TEXT NOT NULL,
+                from_project TEXT NOT NULL,
+                to_project TEXT NOT NULL,
+                relation TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                created_by_agent TEXT,
+                PRIMARY KEY (user_id, from_project, to_project, relation)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_project_links_to ON project_links(user_id, to_project)",
+            # Relay (G): a key bound to one agent id; the server attributes
+            # every relay write to it instead of trusting the request body.
+            "ALTER TABLE api_keys ADD COLUMN agent_id TEXT",
+        ],
+    ),
 ]
 
 
@@ -2885,14 +2920,19 @@ class Database:
         name: str | None = None,
         rate_limit_tier: str = "standard",
         key_lookup: str | None = None,
+        agent_id: str | None = None,
     ) -> None:
-        """Save a new API key (bcrypt hash + deterministic lookup hash)."""
+        """Save a new API key (bcrypt hash + deterministic lookup hash).
+
+        ``agent_id`` binds the key to one agent: relay writes made with it are
+        attributed to that agent regardless of what the request body claims.
+        """
         await self.conn.execute(
             """
-            INSERT INTO api_keys (id, key_hash, key_lookup, user_id, name, created_at, active, rate_limit_tier)
-            VALUES (?, ?, ?, ?, ?, ?, TRUE, ?)
+            INSERT INTO api_keys (id, key_hash, key_lookup, user_id, name, created_at, active, rate_limit_tier, agent_id)
+            VALUES (?, ?, ?, ?, ?, ?, TRUE, ?, ?)
             """,
-            (key_id, key_hash, key_lookup, user_id, name, utcnow().isoformat(), rate_limit_tier),
+            (key_id, key_hash, key_lookup, user_id, name, utcnow().isoformat(), rate_limit_tier, agent_id),
         )
         await self.conn.commit()
 

@@ -187,12 +187,12 @@ class Memory:
         """Make an HTTP request to the Remembra server."""
         url = f"{self.base_url}{path}"
 
-        response = self._client.request(
-            method=method,
-            url=url,
-            json=json,
-            params=params,
-        )
+        kwargs: dict[str, Any] = {"method": method, "url": url, "json": json, "params": params}
+        agent = getattr(self, "agent_id", None)
+        if agent:
+            # Declared identity; an agent-scoped API key overrides it server-side.
+            kwargs["headers"] = {"X-Remembra-Agent-Id": agent}
+        response = self._client.request(**kwargs)
 
         if response.status_code >= 400:
             try:
@@ -779,14 +779,17 @@ class Memory:
         agent_id: str | None = None,
         recent_n: int = 10,
         inbox_limit: int = 10,
+        locator: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Session-start brief: latest handoff, unread inbox, status, recent-by-time.
+        """Session-start brief: last session, unread inbox, status, linked projects, recent-by-time.
 
         Args:
             project_id: Project to brief on (default: the client's project).
             agent_id: Inbox owner (default: the client's ``agent_id``).
             recent_n: Number of most recent memories (by creation time).
             inbox_limit: Max unread inbox previews.
+            locator: Resolve the project from a location instead
+                (git_remote / root_commit / root_path / repo_name / host / hint_project).
         """
         params: dict[str, Any] = {
             "project_id": self._project(project_id),
@@ -796,7 +799,90 @@ class Memory:
         agent = (agent_id or self.agent_id or "").strip()
         if agent:
             params["agent_id"] = agent
+        if locator:
+            params.pop("project_id")
+            params.update({k: v for k, v in locator.items() if v is not None})
         return self._request("GET", "/api/v1/session/brief", params=params)
+
+    def resolve_project(
+        self,
+        git_remote: str | None = None,
+        root_commit: str | None = None,
+        root_path: str | None = None,
+        repo_name: str | None = None,
+        host: str | None = None,
+        hint_project: str | None = None,
+        bind: bool = False,
+    ) -> dict[str, Any]:
+        """Resolve a location (git remote / root commit / path) to a stable project id.
+
+        Returns ``{project_id, created, persisted, fingerprint, kind, bound}``.
+        """
+        payload = {
+            "git_remote": git_remote,
+            "root_commit": root_commit,
+            "root_path": root_path,
+            "repo_name": repo_name,
+            "host": host,
+            "hint_project": hint_project,
+            "bind": bind,
+        }
+        return self._request("POST", "/api/v1/projects/resolve", json={k: v for k, v in payload.items() if v is not None})
+
+    def close_session(
+        self,
+        facts: dict[str, Any] | None = None,
+        summary: str | None = None,
+        end_reason: str | None = None,
+        session_id: str | None = None,
+        agent_id: str | None = None,
+        project_id: str | None = None,
+        locator: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Close this session: the server stores ONE structured handoff.
+
+        ``facts`` follows the ``/api/v1/session/close`` schema (branch,
+        head_commit, commits, files_changed, commands, tests, errors,
+        todos_open, notes, next_step, ...). ``locator`` (git_remote /
+        root_commit / root_path / repo_name / hint_project) resolves the
+        project instead of ``project_id``. Closing again with the same
+        session id updates the same handoff.
+        """
+        payload: dict[str, Any] = {
+            "session_id": session_id or self.session_id,
+            "facts": facts or {},
+        }
+        agent = (agent_id or self.agent_id or "").strip()
+        if agent:
+            payload["agent_id"] = agent
+        if locator:
+            payload["project"] = {k: v for k, v in locator.items() if v is not None}
+        else:
+            payload["project_id"] = self._project(project_id)
+        if summary:
+            payload["summary"] = summary
+        if end_reason:
+            payload["end_reason"] = end_reason
+        return self._request("POST", "/api/v1/session/close", json=payload)
+
+    def trail(self, project_id: str | None = None, limit: int = 20, offset: int = 0) -> dict[str, Any]:
+        """Handoffs and checkpoints across agents for a project, newest first."""
+        return self._request(
+            "GET", "/api/v1/trail", params={"project_id": self._project(project_id), "limit": limit, "offset": offset}
+        )
+
+    def link_projects(self, from_project: str, to_project: str, relation: str = "related") -> dict[str, Any]:
+        """Link two projects; the brief of either shows the other's latest handoff headline."""
+        return self._request(
+            "POST",
+            "/api/v1/projects/links",
+            json={"from_project": self._project(from_project), "to_project": self._project(to_project), "relation": relation},
+        )
+
+    def project_links(self, project_id: str | None = None) -> builtins.list[dict[str, Any]]:
+        data = self._request("GET", "/api/v1/projects/links", params={"project_id": self._project(project_id)})
+        items = data.get("items", [])
+        return items if isinstance(items, builtins.list) else []
 
     def store_status(
         self,

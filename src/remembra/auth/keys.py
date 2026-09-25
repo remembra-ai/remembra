@@ -114,12 +114,14 @@ class APIKeyManager:
         user_id: str,
         name: str | None = None,
         rate_limit_tier: str = "standard",
+        agent_id: str | None = None,
     ) -> APIKey:
         """
         Create a new API key for a user.
 
         Returns the APIKey with the raw key - this is the ONLY time
-        the raw key is available. It's hashed before storage.
+        the raw key is available. It's hashed before storage. ``agent_id``
+        makes the key agent-scoped (relay attribution is taken from the key).
         """
         key_id = self.generate_key_id()
         raw_key = self.generate_key()
@@ -133,6 +135,7 @@ class APIKeyManager:
             name=name,
             rate_limit_tier=rate_limit_tier,
             key_lookup=key_lookup,
+            agent_id=agent_id,
         )
 
         log.info(
