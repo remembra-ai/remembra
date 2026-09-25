@@ -375,11 +375,29 @@ async def signup(
             # Don't fail signup if email fails
             log.warning("welcome_email_failed", user_id=user.id, error_type=type(e).__name__)
 
+    await _send_signup_verification(user_manager, user.id, user.email)
+
     return SignupResponse(
         id=user.id,
         email=user.email,
         name=user.name,
     )
+
+
+async def _send_signup_verification(user_manager: UserManager, user_id: str, email: str) -> None:
+    """Email the verification link right after signup (best effort; never fails the signup)."""
+    if not EMAIL_AVAILABLE or not get_settings().resend_api_key:
+        return
+    try:
+        token = await security_state.create_email_verification(user_manager.db, user_id, email)
+        email_service = EmailService.create(provider=EmailProvider.RESEND)
+        result = await email_service.send_email_verification_email(
+            to=email, verify_url=dashboard_link(f"/verify-email?token={token}")
+        )
+        if not result.success:
+            log.warning("signup_verification_email_failed", user_id=user_id)
+    except Exception as e:
+        log.warning("signup_verification_email_failed", user_id=user_id, error_type=type(e).__name__)
 
 
 @router.post(

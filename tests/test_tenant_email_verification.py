@@ -175,3 +175,20 @@ async def test_signup_without_email_delivery_still_succeeds(tmp_path, monkeypatc
         assert body["email_verification_sent"] is False
         r = await c.h.client.post("/api/v1/cloud/verify-email/request", headers={"X-API-Key": body["api_key"]})
         assert r.status_code == 503 and r.json()["detail"] == "Email delivery is not configured"
+
+
+async def test_password_signup_emails_a_dashboard_verification_link(tmp_path, outbox) -> None:
+    async with cost_app(tmp_path, unverified_credit_cap_effective_at=CAP_ON, resend_api_key="re_test_key") as c:
+        r = await c.h.client.post("/api/v1/auth/signup", json={"email": "pw@example.com", "password": "Str0ng!Passw0rd"})
+        assert r.status_code == 201, r.text
+        uid = r.json()["id"]
+        to, url = outbox.verification_urls[-1]
+        assert to == "pw@example.com" and url.startswith("https://app.remembra.dev/verify-email?")
+        params = token_from(url)
+        assert "account" not in params
+        # Dashboard accounts confirm while signed in; the tenant endpoint refuses the token.
+        assert (await c.h.client.post("/api/v1/cloud/verify-email/confirm", json={"token": params["token"]})).status_code == 400
+        r = await c.h.client.post(
+            "/api/v1/auth/verify-email/confirm", json={"token": params["token"]}, headers=c.h.jwt(uid, "pw@example.com")
+        )
+        assert r.status_code == 200 and (await c.meter.get_account(uid)).credit_limit == 500
