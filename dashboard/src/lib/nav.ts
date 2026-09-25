@@ -20,6 +20,7 @@ export type TabType =
   | 'brain'
   | 'settings'
   | 'keys'
+  | 'connections'
   | 'billing'
   | 'teams'
   | 'projects'
@@ -48,6 +49,7 @@ export const TABS: Record<TabType, TabMeta> = {
   brain: { label: 'Brain', title: 'Graph', subtitle: 'Themes, central memories and surprising links.' },
   settings: { label: 'General', title: 'Settings', subtitle: 'Profile, preferences and workspace defaults.' },
   keys: { label: 'API keys', title: 'Settings', subtitle: 'Keys for your agents, apps and automation.' },
+  connections: { label: 'Apps & connections', title: 'Settings', subtitle: 'Apps connected to your memory through the remote connector.' },
   billing: { label: 'Billing', title: 'Settings', subtitle: 'Plan, usage and invoices.' },
   teams: { label: 'Teams', title: 'Settings', subtitle: 'Shared memory across people and agents.' },
   projects: { label: 'Projects', title: 'Settings', subtitle: 'Memory workspaces and their boundaries.' },
@@ -61,7 +63,7 @@ export const SECTIONS: { id: SectionId; label: string; tabs: TabType[]; adminOnl
   { id: 'inbox', label: 'Inbox', tabs: ['inbox'] },
   { id: 'memory', label: 'Memory', tabs: ['memories', 'timeline', 'analytics', 'decay', 'debugger'] },
   { id: 'graph', label: 'Graph', tabs: ['graph', 'entities', 'brain'] },
-  { id: 'settings', label: 'Settings', tabs: ['settings', 'keys', 'billing', 'teams', 'projects'] },
+  { id: 'settings', label: 'Settings', tabs: ['settings', 'keys', 'connections', 'billing', 'teams', 'projects'] },
   { id: 'admin', label: 'Admin', tabs: ['admin'], adminOnly: true },
 ];
 

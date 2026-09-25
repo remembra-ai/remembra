@@ -6,6 +6,7 @@ import {
   Database,
   Users,
   Orbit,
+  Plug,
   History,
   BarChart3,
   TrendingDown,
@@ -118,6 +119,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
     // Settings
     { id: 'nav-settings', label: 'Settings', description: 'Profile and preferences', icon: Settings, section: 'Settings', action: go('settings'), shortcut: 'g s' },
     { id: 'nav-keys', label: 'API keys', description: 'Keys for agents and apps', icon: Key, section: 'Settings', action: go('keys'), keywords: ['token', 'access'] },
+    { id: 'nav-connections', label: 'Apps & connections', description: 'Claude, ChatGPT and other connected apps', icon: Plug, section: 'Settings', action: go('connections'), keywords: ['connector', 'oauth', 'revoke', 'claude', 'chatgpt'] },
     { id: 'nav-billing', label: 'Billing', description: 'Plan and usage', icon: CreditCard, section: 'Settings', action: go('billing'), keywords: ['plan', 'credits', 'upgrade'] },
     { id: 'nav-teams', label: 'Teams', description: 'Collaboration', icon: UsersRound, section: 'Settings', action: go('teams') },
     { id: 'nav-projects', label: 'Projects', description: 'Memory workspaces', icon: FolderOpen, section: 'Settings', action: go('projects') },

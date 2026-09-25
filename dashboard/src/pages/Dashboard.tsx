@@ -42,6 +42,9 @@ const MemoryTimeline = lazy(() =>
 const ApiKeyManager = lazy(() =>
   import('../components/ApiKeyManager').then((module) => ({ default: module.ApiKeyManager })),
 );
+const Connections = lazy(() =>
+  import('../components/Connections').then((module) => ({ default: module.Connections })),
+);
 const Billing = lazy(() =>
   import('../components/Billing').then((module) => ({ default: module.Billing })),
 );
@@ -459,6 +462,13 @@ export function Dashboard({ activeTab, onLogout, showNewMemory: showNewMemoryPro
         return (
           <Suspense fallback={<SectionLoading label="Loading API keys..." />}>
             <ApiKeyManager />
+          </Suspense>
+        );
+
+      case 'connections':
+        return (
+          <Suspense fallback={<SectionLoading label="Loading connected apps..." />}>
+            <Connections />
           </Suspense>
         );
 
