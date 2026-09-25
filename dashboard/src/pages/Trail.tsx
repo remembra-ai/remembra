@@ -2,7 +2,7 @@
 // on a dashed rail grouped by day. Filter by project and agent; expand any
 // node to its full handoff.
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { useRelayData } from '../hooks/relayData';
@@ -79,6 +79,17 @@ export function Trail() {
     setLastOpenParam(openParam);
     if (openParam) setExpanded((prev) => new Set(prev).add(openParam));
   }
+
+  // Bring a linked entry (#/trail?open=<id>) into view once it is on the page.
+  const scrolledTo = useRef<string | null>(null);
+  const headCount = head.data?.items.length ?? 0;
+  useEffect(() => {
+    if (!openParam || scrolledTo.current === openParam) return;
+    const node = document.getElementById(`trail-${openParam}`);
+    if (!node) return;
+    scrolledTo.current = openParam;
+    node.scrollIntoView({ block: 'start' });
+  }, [openParam, headCount]);
 
   const olderItems = older.key === key ? older.items : [];
   const seen = new Set<string>();
@@ -242,7 +253,7 @@ export function Trail() {
                   <TrailNode
                     key={item.id}
                     item={item}
-                    latest={item.id === latestHandoffId && !filtered}
+                    latest={item.id === latestHandoffId}
                     showProject={!project}
                     now={now}
                     expanded={expanded.has(item.id)}

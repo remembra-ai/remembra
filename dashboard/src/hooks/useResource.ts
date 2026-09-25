@@ -1,4 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ApiError } from '../lib/api';
+
+/**
+ * Failures that polling cannot fix: signed out, no permission, the feature is
+ * missing or turned off on this server. Polling stops until a manual refresh.
+ */
+export function isPermanentFailure(error: unknown): boolean {
+  return error instanceof ApiError && [401, 403, 404, 405, 501, 503].includes(error.status);
+}
 
 interface ResourceState<T> {
   key: string | null;
@@ -25,7 +34,8 @@ export interface Resource<T> {
  * Load data for `key` (null = don't load) and optionally poll it.
  *
  * Polling pauses while the tab is hidden and catches up as soon as it is
- * visible again. A failed poll keeps the last good data and reports the error.
+ * visible again. A failed poll keeps the last good data and reports the error;
+ * a permanent failure (see isPermanentFailure) stops polling until refresh().
  * Responses for a key that is no longer current are dropped.
  */
 export function useResource<T>(
@@ -47,6 +57,8 @@ export function useResource<T>(
     if (key === null) return undefined;
     let cancelled = false;
     let inFlight = false;
+    let stopped = false;
+    let timer: number | undefined;
 
     const run = () => {
       if (inFlight) return;
@@ -61,6 +73,10 @@ export function useResource<T>(
         (error: unknown) => {
           inFlight = false;
           if (cancelled) return;
+          if (isPermanentFailure(error)) {
+            stopped = true;
+            if (timer !== undefined) window.clearInterval(timer);
+          }
           setState((prev) => ({
             key,
             data: prev.key === key ? prev.data : undefined,
@@ -74,13 +90,12 @@ export function useResource<T>(
 
     run();
 
-    let timer: number | undefined;
     const onVisible = () => {
-      if (document.visibilityState === 'visible') run();
+      if (document.visibilityState === 'visible' && !stopped) run();
     };
     if (pollMs) {
       timer = window.setInterval(() => {
-        if (document.visibilityState === 'visible') run();
+        if (document.visibilityState === 'visible' && !stopped) run();
       }, pollMs);
       document.addEventListener('visibilitychange', onVisible);
     }

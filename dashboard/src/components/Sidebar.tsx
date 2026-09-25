@@ -154,14 +154,23 @@ export function Sidebar({
           {darkMode ? <Sun className="h-[18px] w-[18px] shrink-0" aria-hidden="true" /> : <Moon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />}
           <span className="hidden lg:inline">{darkMode ? 'Light theme' : 'Dark theme'}</span>
         </button>
-        <div className="flex items-center gap-2 pt-2 lg:px-1">
+        <button
+          type="button"
+          onClick={onLogout}
+          title="Sign out"
+          className="flex w-full items-center justify-center rounded-[3px] px-3 py-2 text-ink-2 hover:bg-paper hover:text-fail lg:hidden"
+        >
+          <LogOut className="h-[18px] w-[18px]" aria-hidden="true" />
+          <span className="sr-only">Sign out</span>
+        </button>
+        <div className="hidden items-center gap-2 px-1 pt-2 lg:flex">
           <span
             aria-hidden="true"
-            className="mx-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink font-mono text-xs font-bold text-paper lg:mx-0"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-ink font-mono text-xs font-bold text-paper"
           >
             {(userName || '?').charAt(0).toUpperCase()}
           </span>
-          <span className="hidden min-w-0 flex-1 truncate text-sm text-ink lg:block" title={userName}>
+          <span className="min-w-0 flex-1 truncate text-sm text-ink" title={userName}>
             {userName || 'Signed in'}
           </span>
           <button
@@ -169,7 +178,7 @@ export function Sidebar({
             onClick={onLogout}
             title="Sign out"
             aria-label="Sign out"
-            className="hidden rounded-[3px] p-1.5 text-ink-3 hover:bg-paper hover:text-fail lg:block"
+            className="rounded-[3px] p-1.5 text-ink-3 hover:bg-paper hover:text-fail"
           >
             <LogOut className="h-4 w-4" />
           </button>

@@ -27,6 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`verbose=True` for the full JSON). The server instructions tell every MCP agent to brief at start and close before finishing.
   - Agent-scoped API keys (`agent_id` on key creation). Relay attribution comes from the key, not the request body.
 - Migration 4: `project_fingerprints`, `project_links`, `api_keys.agent_id`.
+- **Relay dashboard.** The signed-in dashboard is now mission control for Relay: Home (what changed since
+  your last visit, the last handoff with a copyable continue command, unread messages, weekly recap, plan
+  usage, a connect checklist), Trail (every handoff on a dashed rail, filterable by project and agent),
+  Agents (activity per agent with a 14-day sparkline) and Inbox (write to an agent; the note leads its next
+  brief). New read endpoints back it: `GET /api/v1/trail/summary`, `GET /api/v1/inbox/messages`,
+  `GET /api/v1/inbox/summary`; `GET /api/v1/trail` gains `agent_id` and a per-item `detail`.
+  Existing pages are restyled with the new light and dark tokens and work at phone width.
 
 ## [0.16.0] - 2026-07-16
 

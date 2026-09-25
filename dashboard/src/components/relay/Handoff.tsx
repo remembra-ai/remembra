@@ -174,7 +174,7 @@ export function TrailNode({
   const meta = agentMeta(item.agent_id);
   const checkpoint = item.memory_type === 'checkpoint';
   return (
-    <li className="relative grid grid-cols-[32px_minmax(0,1fr)] gap-x-3">
+    <li id={`trail-${item.id}`} className="relative grid scroll-mt-12 grid-cols-[32px_minmax(0,1fr)] gap-x-3">
       <span className="relative flex justify-center pt-4" aria-hidden="true">
         <span
           className={clsx(

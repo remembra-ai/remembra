@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '../api';
 import { explainError } from '../relay';
 import { agentMeta, canonicalAgentId } from '../agents';
+import { isPermanentFailure } from '../../hooks/useResource';
 
 describe('explainError', () => {
   it('explains each failure with a fix', () => {
@@ -38,5 +39,13 @@ describe('agents', () => {
     expect(meta.monogram).toBe('TB');
     expect(agentMeta('trademind-bot').lane).toBe(meta.lane);
     expect(agentMeta(null).name).toBe('Unattributed');
+  });
+});
+
+describe('isPermanentFailure', () => {
+  it('stops polling only for failures a retry cannot fix', () => {
+    for (const status of [401, 403, 404, 503]) expect(isPermanentFailure(new ApiError('x', status))).toBe(true);
+    for (const status of [0, 429, 500, 502, 504]) expect(isPermanentFailure(new ApiError('x', status))).toBe(false);
+    expect(isPermanentFailure(new Error('network'))).toBe(false);
   });
 });

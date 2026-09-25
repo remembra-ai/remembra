@@ -224,7 +224,7 @@ export function Home({ userName }: { userName?: string }) {
               title={
                 inbox.data ? (
                   <span className="flex items-baseline gap-2">
-                    <span className="tabular text-3xl font-extrabold">{inbox.data.unread_total}</span>
+                    <span className="tabular text-3xl font-extrabold">{inbox.data.unread_total}</span>{' '}
                     <span className="text-base font-bold text-ink-2">unread</span>
                   </span>
                 ) : (
