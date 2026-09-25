@@ -35,7 +35,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import shutil
 import sqlite3
 import sys
 from collections import defaultdict
@@ -45,15 +44,97 @@ from pathlib import Path
 from typing import Any
 
 STOPWORDS = frozenset(
-    """
-    a an the i me my we us our you your he him his she her it its they them their
-    this that these those here there who what when where why how which
-    and or but if then so not no yes ok okay
-    is are was were be been being am do does did done have has had
-    to of in on at by for from with about as into over under
-    user assistant system someone something anything everything nothing thing things
-    today tomorrow yesterday now later
-    """.split()
+    [
+        "a",
+        "an",
+        "the",
+        "i",
+        "me",
+        "my",
+        "we",
+        "us",
+        "our",
+        "you",
+        "your",
+        "he",
+        "him",
+        "his",
+        "she",
+        "her",
+        "it",
+        "its",
+        "they",
+        "them",
+        "their",
+        "this",
+        "that",
+        "these",
+        "those",
+        "here",
+        "there",
+        "who",
+        "what",
+        "when",
+        "where",
+        "why",
+        "how",
+        "which",
+        "and",
+        "or",
+        "but",
+        "if",
+        "then",
+        "so",
+        "not",
+        "no",
+        "yes",
+        "ok",
+        "okay",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "am",
+        "do",
+        "does",
+        "did",
+        "done",
+        "have",
+        "has",
+        "had",
+        "to",
+        "of",
+        "in",
+        "on",
+        "at",
+        "by",
+        "for",
+        "from",
+        "with",
+        "about",
+        "as",
+        "into",
+        "over",
+        "under",
+        "user",
+        "assistant",
+        "system",
+        "someone",
+        "something",
+        "anything",
+        "everything",
+        "nothing",
+        "thing",
+        "things",
+        "today",
+        "tomorrow",
+        "yesterday",
+        "now",
+        "later",
+    ]
 )
 
 KNOWN_TYPES = frozenset(
