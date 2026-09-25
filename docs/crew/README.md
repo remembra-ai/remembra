@@ -22,6 +22,10 @@ contracts pin down the exact shapes, orders and texts so that independently buil
 | Redaction corpus (§11) | — | [redaction.md](redaction.md) | `redaction/corpus.json` | `run_redaction_corpus(outbound_fn)` | owner of `crew/redact.py` (see below) |
 | Console scripts | `schemas.CONSOLE_SCRIPTS`, `pyproject.toml` | this page | — | pyproject test | WP-9 fills the modules |
 
+Spike S0 (WP-0b owns it) records the live Claude Code hook proofs and the D13/D14 go/no-go
+decisions in [S0-results.md](S0-results.md), with the captured payloads under
+`tests/crew/fixtures/captures/`. WP-9 and WP-10 read it before building hooks.
+
 `remembra.crew.schemas` and `remembra.crew.reducer` import only the standard library (a test runs
 them under `python -I` with every non-stdlib import blocked), so the vendored gate
 (`crew-gate.py`) and the CLI can use or vendor them without the server extras.
