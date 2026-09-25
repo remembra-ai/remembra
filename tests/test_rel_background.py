@@ -592,6 +592,8 @@ async def test_lifespan_boots_background_work_and_shuts_down(tmp_path, monkeypat
     monkeypatch.setenv("REMEMBRA_DEBUG", "true")
     monkeypatch.setenv("REMEMBRA_SLEEP_TIME_ENABLED", "false")
     monkeypatch.setenv("REMEMBRA_PENDING_EMBEDDINGS_POLL_SECONDS", "0.01")
+    # The TTL cleanup loop is opt-in (default off until prod rows are audited).
+    monkeypatch.setenv("REMEMBRA_TEMPORAL_CLEANUP_ENABLED", "true")
     monkeypatch.setattr(remembra.config, "_settings", None)
     local = AsyncQdrantClient(location=":memory:")
 
@@ -637,3 +639,10 @@ async def test_lifespan_boots_background_work_and_shuts_down(tmp_path, monkeypat
         tasks = app.state.tasks
     assert tasks.running == 0
     assert "remembra_background_tasks" in REGISTRY.render()
+
+
+def test_temporal_cleanup_is_opt_in_by_default(monkeypatch) -> None:
+    from remembra.config import Settings
+
+    monkeypatch.delenv("REMEMBRA_TEMPORAL_CLEANUP_ENABLED", raising=False)
+    assert Settings().temporal_cleanup_enabled is False

@@ -474,7 +474,12 @@ class Settings(BaseSettings):
     pending_embeddings_batch_size: int = Field(20, description="Rows claimed per worker iteration")
     pending_embeddings_max_attempts: int = Field(12, description="Retryable failures before a pending embedding is dead-lettered")
     temporal_cleanup_enabled: bool = Field(
-        True, description="Run the TTL cleanup loop (expired memories are archived, not deleted)"
+        False,
+        description=(
+            "Run the TTL cleanup loop (expired memories are archived, not deleted). Off by default "
+            "until existing rows are audited: the pre-2026-09-25 consolidation bug (ING-5) could copy "
+            "a short TTL onto permanent memories."
+        ),
     )
     temporal_cleanup_interval_seconds: int = Field(3600, description="Seconds between TTL cleanup runs")
     qdrant_init_retries: int = Field(5, description="Attempts to reach Qdrant at startup (exponential backoff)")
