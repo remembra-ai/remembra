@@ -8,11 +8,14 @@ account pages. React 19, Vite 7, Tailwind 4, TypeScript (strict).
 
 | Route | What it shows | APIs |
 |-------|---------------|------|
-| `#/home` | Greeting, what changed since the last visit, the last handoff with a copyable "continue with" command, unread messages, the week's recap, plan usage, the connect checklist for new users | `GET /trail`, `/trail/summary`, `/inbox/summary`, `/inbox/messages`, `/cloud/usage` |
+| `#/home` | Greeting, what changed since the last visit, the last handoff with a copyable "continue with" command, unread messages, the week's recap, smart credits left, the connect checklist (create a relay key, one-line install) for new users | `GET /trail`, `/trail/summary`, `/inbox/summary`, `/inbox/messages`, `/cloud/usage/summary`, `POST /keys` |
 | `#/trail?project=&agent=&open=` | Every handoff and checkpoint, newest first, grouped by day; each node expands to its Done / Not done / Failing / Next | `GET /trail` |
 | `#/agents` | One card per agent: last active, sessions this week, 14-day sparkline, active-now pulse | `GET /trail/summary` |
 | `#/inbox?status=&agent=&compose=1&to=` | Agent-to-agent messages; mark read / done; write to an agent (it leads that agent's next session brief) | `GET /inbox/messages`, `POST /inbox/send`, `POST /inbox/{id}/ack` |
-| `#/memories` … `#/admin` | Memory, graph and settings pages | existing endpoints |
+| `#/graph?project=&agent=&window=` | The Constellation: agents, projects, handoffs, checkpoints and entities on a canvas; orange packets travel when a handoff lands or a note is sent; click a node for its drawer | `GET /trail`, `/trail/summary`, `/inbox/messages`, `/debug/entities/graph`, `/entities/{id}/…`, `/ws` |
+| `#/billing` | Smart credits for the period (monthly or yearly bank), degraded state, relay/recall/memory usage, plans and Paddle checkout (Team seats >= 3) | `GET /cloud/usage/summary`, `/cloud/context`, `/billing/plans`, `POST /billing/checkout`, `/billing/portal` |
+| `#/connections` | Apps connected through the remote connector (Claude, ChatGPT): scopes, projects, last used, revoke | `GET/DELETE /connector/connections` (email sign-in) |
+| `#/memories` … `#/admin` | Memory, entities, brain and settings pages | existing endpoints |
 
 Relay data is polled every 30 seconds while the tab is visible. Polling stops on
 failures a retry cannot fix (401, 403, 404, 503) until the user retries.
@@ -26,6 +29,22 @@ Tailwind as `paper`, `panel`, `ink`, `ink-2`, `ink-3`, `rule`, `signal`,
 tokens and the stock gray / purple scales, which are mapped onto the same
 palette. Fonts: Bricolage Grotesque (display), Hanken Grotesk (body),
 JetBrains Mono (metadata).
+
+Dark is the default theme for every visitor; the theme toggle saves an explicit
+choice (`darkMode` in local storage) that always wins.
+
+## Brand assets
+
+The mark, lockups, favicons and `src/brand/geometry.ts` are generated, not
+drawn by hand in an editor: `brand/geometry.py` builds the five-lobe brain as
+one compound path and the monoline wordmark; `brand/build.py` writes
+`public/brand/*.svg`, `public/favicon.svg` (a hand-hinted 16 px pixel tile),
+`favicon.ico`, the PNG icons and the TypeScript geometry the React mark, the
+sign-in pixel hero and the first-handoff scene draw from.
+
+```bash
+python3 brand/build.py   # needs shapely, Pillow, rsvg-convert, ImageMagick
+```
 
 ## Develop
 
