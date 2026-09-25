@@ -271,13 +271,29 @@ class QdrantStore:
 
         return [(str(r.id), r.score, self._decrypt_payload(r.payload or {})) for r in results.points]
 
-    async def delete(self, memory_id: str) -> bool:
-        """Delete a single memory by ID."""
+    async def delete(self, memory_id: str, user_id: str | None = None) -> bool:
+        """Delete a single memory by ID.
+
+        With ``user_id`` the delete is filtered to that owner, so a point owned
+        by another user is never removed (ING-2).
+        """
         client = await self._get_client()
 
+        selector: qmodels.PointIdsList | qmodels.FilterSelector
+        if user_id is None:
+            selector = qmodels.PointIdsList(points=[memory_id])
+        else:
+            selector = qmodels.FilterSelector(
+                filter=qmodels.Filter(
+                    must=[
+                        qmodels.HasIdCondition(has_id=[memory_id]),
+                        qmodels.FieldCondition(key=FIELD_USER_ID, match=qmodels.MatchValue(value=user_id)),
+                    ]
+                )
+            )
         result = await client.delete(
             collection_name=self.collection_name,
-            points_selector=qmodels.PointIdsList(points=[memory_id]),
+            points_selector=selector,
         )
 
         log.debug("qdrant_deleted", memory_id=memory_id, status=result.status)

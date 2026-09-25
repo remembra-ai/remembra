@@ -5,6 +5,9 @@ import os
 # Disable auth and rate limiting for all tests
 os.environ.setdefault("REMEMBRA_AUTH_ENABLED", "false")
 os.environ.setdefault("REMEMBRA_RATE_LIMIT_ENABLED", "false")
+# Never let the suite reach the live TypeSafe API because a developer shell
+# exports TYPESAFE_API_KEY. The opt-in live smoke test sets its own mode.
+os.environ["REMEMBRA_TYPESAFE_MODE"] = "off"
 
 import aiosqlite
 import pytest

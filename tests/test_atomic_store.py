@@ -93,9 +93,35 @@ async def test_skip_extraction_never_consolidates() -> None:
 
 @pytest.mark.asyncio
 async def test_normal_store_still_consolidates() -> None:
-    # Sanity: without skip_extraction, the consolidator IS consulted.
+    # Sanity: without skip_extraction, the consolidator IS consulted when a
+    # live candidate exists (with no candidates the decision is a rule-based
+    # ADD and no model call is made).
     settings = Settings(openai_api_key="test", enable_entity_resolution=False)
     db, qd = FakeDB(), FakeQdrant()
+
+    async def search(**kwargs: Any) -> list[Any]:
+        qd.searches += 1
+        return [("existing-1", 0.9, {"content": "ship it later"})]
+
+    async def get_memories_by_ids(ids: list[str]) -> dict[str, dict[str, Any]]:
+        return {
+            "existing-1": {
+                "id": "existing-1",
+                "user_id": "u1",
+                "project_id": "default",
+                "content": "ship it later",
+                "visibility": "personal",
+                "space_id": None,
+                "team_id": None,
+                "expires_at": None,
+                "superseded_by": None,
+                "memory_type": None,
+                "pinned": 0,
+            }
+        }
+
+    qd.search = search  # type: ignore[method-assign]
+    db.get_memories_by_ids = get_memories_by_ids  # type: ignore[attr-defined]
     svc = MemoryService(settings=settings, qdrant=qd, db=db, embeddings=FakeEmbeddings())
 
     called = {"n": 0}

@@ -1,10 +1,12 @@
 """Memory service - core business logic for store, recall, update, forget."""
 
 import asyncio
+import hashlib
 import json
 import math
 import re
 import uuid
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -12,6 +14,8 @@ import structlog
 
 from remembra.config import Settings
 from remembra.core.time import utcnow
+from remembra.extraction import metrics
+from remembra.extraction.background import spawn
 from remembra.extraction.conflicts import (
     ConflictManager,
     ConflictStatus,
@@ -23,12 +27,17 @@ from remembra.extraction.consolidator import (
     ConsolidationResult,
     ExistingMemory,
     MemoryConsolidator,
+    validate_decision,
 )
 from remembra.extraction.entities import create_entity_extractor
 from remembra.extraction.extractor import ExtractionConfig, FactExtractor
-from remembra.extraction.matcher import EntityMatcher, ExistingEntity
+from remembra.extraction.matcher import EntityMatcher, ExistingEntity, rank_candidates
+from remembra.extraction.typesafe import JevDecider
+from remembra.extraction.typesafe import decide as jev_decide
 from remembra.models.memory import (
+    ConsolidationEntry,
     DivergenceDetail,
+    DroppedFact,
     Entity,
     EntityRef,
     ForgetResponse,
@@ -54,6 +63,107 @@ from remembra.storage.embeddings import EmbeddingService
 from remembra.storage.qdrant import QdrantStore
 
 log = structlog.get_logger(__name__)
+
+
+_USER_MEMORY_TYPES = {"observation", "fact", "inference", "task"}
+_ENTITY_CANDIDATE_LIMIT = 500
+
+
+def _decision_label(action: str, target_id: str | None) -> str:
+    """Comparable label for decision_log: 'ADD', 'NOOP:<id>', 'SUPERSEDE:<id>'."""
+    return action if action == "ADD" or not target_id else f"{action}:{target_id}"
+
+
+def _parse_date(value: Any) -> datetime | None:
+    """Parse an ISO date/datetime (or pass a datetime through); None if absent or invalid."""
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo else value
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+
+
+@dataclass
+class _FactResult:
+    """Outcome of the per-fact pipeline."""
+
+    fact: str
+    action: str  # "add" | "noop" | "supersede" | "dropped"
+    decided_by: str
+    memory_id: str | None = None
+    target_id: str | None = None
+    confidence: float | None = None
+    reason: str | None = None
+    grounding_score: float | None = None
+
+
+@dataclass
+class _StoreOutcome:
+    """Everything one store() call did, in order."""
+
+    extracted: list[str]
+    source_id: str | None
+    extraction: str
+    results: list[_FactResult] = field(default_factory=list)
+
+    def add(self, result: _FactResult) -> None:
+        self.results.append(result)
+
+    @property
+    def stored(self) -> list[_FactResult]:
+        return [r for r in self.results if r.memory_id]
+
+    @property
+    def decided(self) -> list[_FactResult]:
+        return [r for r in self.results if r.action == "noop"]
+
+    @property
+    def dropped(self) -> list[_FactResult]:
+        return [r for r in self.results if r.action == "dropped"]
+
+    def to_response(self, expires_at: datetime | None, entities_status: str) -> StoreResponse:
+        stored = self.stored
+        noops = self.decided
+        if stored:
+            status, rid, dup = "stored", stored[0].memory_id or "", None
+        elif noops:
+            # ING-24: nothing new was stored; say so instead of passing the
+            # pre-existing id off as a fresh store.
+            status, rid, dup = "duplicate", noops[0].target_id or "", noops[0].target_id
+        else:
+            status, rid, dup = "not_stored", "", None
+        return StoreResponse(
+            id=rid,
+            extracted_facts=[r.fact for r in stored],
+            entities=[],
+            status=status,
+            duplicate_of=dup,
+            consolidation=[
+                ConsolidationEntry(
+                    fact=r.fact,
+                    action=r.action,
+                    target_id=r.target_id,
+                    memory_id=r.memory_id,
+                    confidence=r.confidence,
+                    decided_by=r.decided_by,
+                    reason=r.reason,
+                )
+                for r in self.results
+                if r.action != "dropped"
+            ],
+            dropped_facts=[
+                DroppedFact(fact=r.fact, reason=r.reason or "", grounding_score=r.grounding_score, decided_by=r.decided_by)
+                for r in self.dropped
+            ],
+            entities_status=entities_status,
+            extraction=self.extraction,
+            expires_at=expires_at,
+            source_id=self.source_id,
+        )
 
 
 def _coerce_metadata(value: Any) -> dict[str, Any]:
@@ -206,6 +316,8 @@ class MemoryService:
             enabled=settings.smart_extraction_enabled,
             model=settings.extraction_model,
             api_key=settings.openai_api_key,
+            max_facts_per_input=settings.extraction_max_facts,
+            chunk_chars=settings.extraction_chunk_chars,
         )
         self.extractor = FactExtractor(extraction_config)
         self.consolidator = MemoryConsolidator(
@@ -213,14 +325,19 @@ class MemoryService:
             api_key=settings.openai_api_key,
             similarity_threshold=settings.consolidation_threshold,
         )
+        # TypeSafe/Jev decisions (UPG-5): off | shadow | enforce
+        self.jev = JevDecider(settings)
 
         # Initialize entity resolution (Week 5)
         self.entity_extractor = create_entity_extractor(settings)
         self.entity_matcher = EntityMatcher(
             model=settings.extraction_model,
             api_key=settings.openai_api_key,
-            min_confidence=0.6,
+            min_confidence=settings.entity_matching_threshold,
         )
+        # ING-12: entity resolution for one user is serialized so concurrent
+        # stores cannot create duplicate entities or lose alias updates.
+        self._entity_locks: dict[str, asyncio.Lock] = {}
 
         # Initialize advanced retrieval (Week 6)
         # Hybrid search with FTS5 BM25 + vector fusion
@@ -307,6 +424,10 @@ class MemoryService:
         hits = sum(1 for w in fact_tokens if w in source_tokens)
         return hits / len(fact_tokens)
 
+    @staticmethod
+    def _content_checksum(content: str) -> str:
+        return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
     async def _store_source_record(
         self,
         request: StoreRequest,
@@ -319,11 +440,21 @@ class MemoryService:
         """Persist the verbatim original content as an immutable source record.
 
         Source records are evidence, not derived knowledge: they are stored in
-        SQLite + FTS only (no vector), so they never pollute semantic recall
-        with near-duplicates of their own facts, and they skip consolidation —
-        the original text must never be LLM-merged or rewritten. Derived facts
-        point back via metadata.source_id (the receipt).
+        SQLite only (no vector, no FTS), so they never pollute recall with
+        near-duplicates of their own facts, and they are never consolidation
+        candidates — the original text is never LLM-merged or rewritten.
+        Derived facts point back via metadata.source_id (the receipt).
+
+        A retried store of the same content (same user, project and checksum)
+        reuses the existing source row instead of duplicating it (ING-18).
         """
+        assert request.user_id is not None
+        checksum = checksum or self._content_checksum(request.content)
+        existing_id = await self.db.find_source_record(request.user_id, request.project_id, checksum)
+        if existing_id:
+            log.info("source_record_reused", memory_id=existing_id)
+            return existing_id
+
         record = Memory(
             user_id=request.user_id,
             project_id=request.project_id,
@@ -354,13 +485,40 @@ class MemoryService:
             memory_type="source",
             scope=request.scope,
         )
-        # Source records are deliberately NOT indexed into FTS: they are
-        # evidence fetched by their source_id receipt, not recall candidates.
-        # Indexing them would surface blank-content results in keyword recall
-        # (they have no vector payload). See search_fts for the belt-and-braces
-        # exclusion of any legacy source rows already in the index.
         log.info("source_record_stored", memory_id=record.id, chars=len(record.content))
         return record.id
+
+    @staticmethod
+    def _resolve_expiry(
+        expires_at: datetime | None,
+        ttl: str | None,
+        now: datetime,
+        default_ttl_days: int | None,
+    ) -> datetime | None:
+        """Explicit expires_at > ttl > server default."""
+        if expires_at:
+            return expires_at
+        if ttl:
+            delta = parse_ttl(ttl)
+            if delta:
+                return now + delta
+        elif default_ttl_days:
+            return now + timedelta(days=default_ttl_days)
+        return None
+
+    @staticmethod
+    def _apply_metadata_type(request: StoreRequest) -> None:
+        """Honour ``metadata.type`` as the memory type when none was given (ING-25)."""
+        if request.memory_type is not None:
+            return
+        meta_type = (request.metadata or {}).get("type")
+        if isinstance(meta_type, str) and meta_type.strip().lower() in _USER_MEMORY_TYPES:
+            request.memory_type = meta_type.strip().lower()  # type: ignore[assignment]
+
+    def _entities_status(self, stored_any: bool) -> str:
+        if not stored_any:
+            return "none"
+        return "pending" if self.settings.enable_entity_resolution else "disabled"
 
     async def store(
         self,
@@ -371,21 +529,24 @@ class MemoryService:
         skip_extraction: bool = False,
     ) -> StoreResponse:
         """
-        Store a new memory with intelligent extraction and consolidation.
+        Store a new memory: extract facts, ground them, decide consolidation, persist.
 
         Steps:
-        1. Extract atomic facts from content (LLM-powered) - skipped if skip_extraction=True
-        2. For each fact, check for similar existing memories
-        3. Consolidate: ADD new, UPDATE existing, or skip duplicates
-        4. Store in Qdrant (vector) + SQLite (metadata)
+        1. Extract atomic facts from content (LLM) — skipped if skip_extraction=True
+        2. Grounding: every derived fact is checked against the source text;
+           unsupported facts are dropped (or flagged, per ``grounding_action``)
+        3. Consolidation *decision* per fact against filtered candidates:
+           ADD / NOOP (duplicate) / SUPERSEDE(target). Existing memories are
+           never rewritten or deleted — superseded ones are marked, not removed.
+        4. Store the fact exactly as extracted in Qdrant (vector) + SQLite + FTS
 
         Args:
             request: StoreRequest with content, user_id, etc.
             source: Content provenance (user_input, agent_generated, external_api)
             trust_score: Security trust score (0.0-1.0)
             checksum: SHA-256 hash for integrity verification
-            skip_extraction: If True, skip LLM extraction and store content as-is.
-                           Embeddings are still generated. Useful for pre-structured data.
+            skip_extraction: If True, store content as one atomic memory with no
+                extraction and no consolidation. Embeddings are still generated.
         """
         log.info(
             "storing_memory",
@@ -396,26 +557,11 @@ class MemoryService:
         )
 
         now = utcnow()
-
-        # Calculate expiration: explicit expires_at > ttl > default
-        expires_at = None
-        if request.expires_at:
-            # Explicit expires_at takes precedence
-            expires_at = request.expires_at
-            log.debug("using_explicit_expires_at", expires_at=expires_at.isoformat())
-        elif request.ttl:
-            # Calculate from TTL string
-            ttl_delta = parse_ttl(request.ttl)
-            if ttl_delta:
-                expires_at = now + ttl_delta
-        elif self.settings.default_ttl_days:
-            # Fall back to server default
-            expires_at = now + timedelta(days=self.settings.default_ttl_days)
+        expires_at = self._resolve_expiry(request.expires_at, request.ttl, now, self.settings.default_ttl_days)
+        self._apply_metadata_type(request)
 
         # ── Lossless memory: async fast path ─────────────────────────────
         # Persist the verbatim source immediately and enrich in background.
-        # The original is stored + keyword-searchable before we return; the
-        # derived facts (LLM extraction + consolidation) land shortly after.
         if self.settings.async_enrichment and self.settings.enable_source_records and not skip_extraction:
             source_id = await self._store_source_record(
                 request=request,
@@ -440,20 +586,23 @@ class MemoryService:
                     )
                     log.info("bg_enrichment_done", source_id=source_id)
                 except Exception as e:
+                    metrics.incr("enrichment_failures_total")
                     log.error("bg_enrichment_failed", source_id=source_id, error=str(e))
 
-            asyncio.ensure_future(_bg_enrichment())
+            spawn(_bg_enrichment(), "store_enrichment")
             return StoreResponse(
                 id=source_id,
-                extracted_facts=[request.content.strip()],
+                extracted_facts=[],
                 entities=[],
+                status="pending",
+                entities_status="pending" if self.settings.enable_entity_resolution else "disabled",
                 expires_at=expires_at,
                 source_id=source_id,
                 enrichment="pending",
             )
 
         # ── Synchronous path (default) ────────────────────────────────────
-        memory_id, stored_facts, extracted_facts, matched_existing_id, derived_source_id = await self._extract_and_store_facts(
+        outcome = await self._extract_and_store_facts(
             request=request,
             now=now,
             expires_at=expires_at,
@@ -462,34 +611,17 @@ class MemoryService:
             checksum=checksum,
             skip_extraction=skip_extraction,
         )
-
-        # If nothing stored (all NOOPs), return the matched existing memory ID
-        if not memory_id:
-            response_id = matched_existing_id or ""
-            log.info("all_facts_skipped", user_id=request.user_id, matched_id=response_id)
-            return StoreResponse(
-                id=response_id,
-                extracted_facts=extracted_facts,
-                entities=[],
-                expires_at=expires_at,
-                source_id=derived_source_id,
-            )
-
+        response = outcome.to_response(expires_at=expires_at, entities_status=self._entities_status(bool(outcome.stored)))
         log.info(
             "memory_stored",
-            memory_id=memory_id,
-            facts_extracted=len(extracted_facts),
-            facts_stored=len(stored_facts),
-            source_id=derived_source_id,
+            memory_id=response.id,
+            status=response.status,
+            facts_extracted=len(outcome.extracted),
+            facts_stored=len(outcome.stored),
+            facts_dropped=len(outcome.dropped),
+            source_id=outcome.source_id,
         )
-
-        return StoreResponse(
-            id=memory_id,
-            extracted_facts=stored_facts,
-            entities=[],  # Entity extraction runs in background per fact
-            expires_at=expires_at,
-            source_id=derived_source_id,
-        )
+        return response
 
     async def _extract_and_store_facts(
         self,
@@ -501,38 +633,35 @@ class MemoryService:
         checksum: str | None,
         skip_extraction: bool,
         source_id: str | None = None,
-    ) -> tuple[str | None, list[str], list[str], str | None, str | None]:
-        """Extract facts from content and store each with consolidation.
+    ) -> "_StoreOutcome":
+        """Extract facts from content and run each through the fact pipeline.
 
-        Lossless-memory behaviour: when extraction actually derives facts
-        (rather than passing raw content through), the verbatim original is
-        preserved as an immutable source record (unless one was already
-        created by the async fast path), every derived fact carries a
-        metadata.source_id receipt, and each fact is lexically verified
-        against the source — facts that don't overlap it are stored flagged
-        verified=false instead of being silently trusted.
+        Lossless-memory behaviour: when extraction derives facts (rather than
+        passing raw content through), the verbatim original is preserved as an
+        immutable source record (unless the async fast path already made one)
+        and every derived fact carries a metadata.source_id receipt.
 
-        Returns (memory_id, stored_facts, extracted_facts, matched_existing_id, source_id).
+        Grounding: each derived fact must be supported by the source text or it
+        is dropped/flagged. If *every* derived fact is dropped the verbatim
+        content is stored as the single fact instead, so nothing the caller
+        sent is silently lost.
         """
-        # The API layer overrides request.user_id with the authenticated user_id
-        # before calling store() (memories.py: body.user_id = current_user.user_id),
-        # so it is always set here despite the model default of None.
+        # The API layer overrides request.user_id with the authenticated user_id.
         assert request.user_id is not None, "user_id must be set by the API layer before store"
+        content = request.content.strip()
 
-        # Step 1: Extract atomic facts using LLM (skip if skip_extraction=True)
+        extraction_method = "skipped"
         if skip_extraction:
-            extracted_facts = [request.content.strip()]
-            log.debug("extraction_skipped", content_length=len(request.content))
+            extracted_facts = [content]
         else:
-            extracted_facts = await self.extractor.extract(request.content)
-            if not extracted_facts:
-                # If no facts extracted, store raw content
-                extracted_facts = [request.content.strip()]
-            log.debug("facts_extracted", count=len(extracted_facts))
+            extraction = await self.extractor.extract_detailed(request.content, reference_date=now)
+            extraction_method = extraction.method
+            extracted_facts = extraction.facts or [content]
+            if extraction.method == "fallback":
+                metrics.incr("extraction_fallbacks_total")
+            log.debug("facts_extracted", count=len(extracted_facts), method=extraction_method)
 
-        # Lossless memory: preserve the verbatim original whenever extraction
-        # transformed it (sync path only — async path stored it already).
-        derived = extracted_facts != [request.content.strip()]
+        derived = extracted_facts != [content]
         if source_id is None and derived and self.settings.enable_source_records and not skip_extraction:
             source_id = await self._store_source_record(
                 request=request,
@@ -543,31 +672,19 @@ class MemoryService:
                 checksum=checksum,
             )
 
-        # Step 2 & 3: Process each fact with consolidation
-        stored_facts: list[str] = []
-        memory_id = None  # Track primary memory ID
-        matched_existing_id = None  # Track matched existing memory for NOOPs
+        outcome = _StoreOutcome(extracted=list(extracted_facts), source_id=source_id, extraction=extraction_method)
+        sibling_ids: set[str] = set()
 
-        for fact in extracted_facts:
+        async def run(fact: str, grounding_source: str | None) -> None:
             fact_metadata = dict(request.metadata or {})
             if source_id:
-                # The receipt: derived fact -> exact original text
                 fact_metadata["source_id"] = source_id
-            if derived:
-                overlap = self._fact_source_overlap(fact, request.content)
-                verified = overlap >= self.settings.fact_verification_threshold
-                fact_metadata["verified"] = verified
-                if not verified:
-                    log.warning(
-                        "fact_verification_failed",
-                        overlap=round(overlap, 3),
-                        fact_preview=fact[:80],
-                        source_id=source_id,
-                    )
-
-            fact_result = await self._store_single_fact(
+            if extraction_method in ("fallback", "disabled"):
+                # Sentence-split fallback: mark for reprocessing (REL-7).
+                fact_metadata["extraction"] = extraction_method
+            result = await self._store_single_fact(
                 fact=fact,
-                user_id=request.user_id,
+                user_id=request.user_id or "",
                 project_id=request.project_id,
                 metadata=fact_metadata,
                 expires_at=expires_at,
@@ -584,18 +701,58 @@ class MemoryService:
                 contradicts=request.contradicts,
                 # Atomic stores (skip_extraction) must not be merged/deduped.
                 skip_consolidation=skip_extraction,
+                grounding_source=grounding_source,
+                exclude_ids=sibling_ids,
             )
-            if fact_result:
-                # Track matched existing memory ID (for NOOP cases)
-                if fact_result.get("matched_id") and matched_existing_id is None:
-                    matched_existing_id = fact_result["matched_id"]
-                # Only track stored facts (not NOOPs)
-                if fact_result.get("content") and fact_result.get("id"):
-                    stored_facts.append(fact_result["content"])
-                    if memory_id is None:
-                        memory_id = fact_result["id"]
+            outcome.add(result)
+            if result.memory_id:
+                # ING-7: facts from the same store never consolidate each other.
+                sibling_ids.add(result.memory_id)
 
-        return memory_id, stored_facts, extracted_facts, matched_existing_id, source_id
+        for fact in extracted_facts:
+            await run(fact, request.content if derived else None)
+
+        if derived and not outcome.stored and not outcome.decided and outcome.dropped:
+            # Every derived fact failed grounding. Keep the caller's content
+            # verbatim (trivially grounded) rather than storing nothing.
+            log.warning("all_facts_ungrounded_storing_verbatim", dropped=len(outcome.dropped))
+            outcome.extraction = "grounding_fallback"
+            await run(content, None)
+
+        return outcome
+
+    async def store_fact(
+        self,
+        fact: str,
+        user_id: str,
+        project_id: str,
+        metadata: dict[str, Any],
+        source: str,
+        trust_score: float = 1.0,
+        grounding_source: str | None = None,
+        consolidate: bool = True,
+        exclude_ids: set[str] | None = None,
+        expires_at: datetime | None = None,
+    ) -> "_FactResult":
+        """Run one already-extracted fact through grounding, consolidation and storage.
+
+        Public entry point for pipelines that do their own extraction
+        (conversation ingest), so they share the exact same decision and
+        persistence path as store() instead of re-implementing it.
+        """
+        return await self._store_single_fact(
+            fact=fact,
+            user_id=user_id,
+            project_id=project_id,
+            metadata=metadata,
+            expires_at=expires_at,
+            now=utcnow(),
+            source=source,
+            trust_score=trust_score,
+            skip_consolidation=not consolidate,
+            grounding_source=grounding_source,
+            exclude_ids=exclude_ids,
+        )
 
     async def bulk_import(
         self,
@@ -656,17 +813,7 @@ class MemoryService:
 
         for item, embedding in zip(items, computed_embeddings, strict=False):
             memory_id = str(uuid.uuid4())
-
-            # Calculate expiration
-            expires_at = None
-            if item.expires_at:
-                expires_at = item.expires_at
-            elif item.ttl:
-                ttl_delta = parse_ttl(item.ttl)
-                if ttl_delta:
-                    expires_at = now + ttl_delta
-            elif self.settings.default_ttl_days:
-                expires_at = now + timedelta(days=self.settings.default_ttl_days)
+            expires_at = self._resolve_expiry(item.expires_at, item.ttl, now, self.settings.default_ttl_days)
 
             memory = Memory(
                 id=memory_id,
@@ -710,6 +857,7 @@ class MemoryService:
             return {"stored": 0, "errors": errors}
 
         # Bulk insert to SQLite
+        db_count = 0
         try:
             db_count = await self.db.save_memories_bulk(memory_dicts)
         except Exception as e:
@@ -733,6 +881,186 @@ class MemoryService:
             "errors": errors,
         }
 
+    # -- Consolidation candidates ---------------------------------------------
+
+    async def _consolidation_candidates(
+        self,
+        embedding: list[float],
+        user_id: str,
+        project_id: str,
+        visibility: str,
+        space_id: str | None,
+        team_id: str | None,
+        now: datetime,
+        exclude_ids: set[str],
+    ) -> tuple[list[ExistingMemory], dict[str, dict[str, Any]]]:
+        """Existing memories a new fact may be a duplicate of or supersede.
+
+        Candidates must (ING-4/6/7): belong to the same user and project, share
+        the fact's visibility bucket (visibility + space + team), be live (not
+        expired, not superseded), not be source records, and not be siblings
+        stored earlier in the same call. The SQLite row is the source of truth
+        for these fields; vector hits without a row are ignored.
+        """
+        similar = await self.qdrant.search(
+            query_vector=embedding,
+            user_id=user_id,
+            project_id=project_id,
+            limit=self.settings.consolidation_candidate_limit * 2,
+            score_threshold=self.settings.consolidation_threshold,
+        )
+        if not similar:
+            return [], {}
+        rows = await self.db.get_memories_by_ids([str(mid) for mid, _, _ in similar])
+        now_iso = now.isoformat()
+        candidates: list[ExistingMemory] = []
+        kept_rows: dict[str, dict[str, Any]] = {}
+        for mid, score, _payload in similar:
+            mid = str(mid)
+            row = rows.get(mid)
+            if row is None or mid in exclude_ids:
+                continue
+            if row.get("user_id") != user_id or row.get("project_id") != project_id:
+                continue
+            if row.get("superseded_by") or row.get("memory_type") == "source":
+                continue
+            expires = row.get("expires_at")
+            if expires and str(expires) <= now_iso:
+                continue
+            if (row.get("visibility") or "personal") != (visibility or "personal"):
+                continue
+            if row.get("space_id") != space_id or row.get("team_id") != team_id:
+                continue
+            candidates.append(ExistingMemory(id=mid, content=row.get("content") or "", score=float(score)))
+            kept_rows[mid] = row
+            if len(candidates) >= self.settings.consolidation_candidate_limit:
+                break
+        return candidates, kept_rows
+
+    @staticmethod
+    def _outlives(existing_row: dict[str, Any], new_expires_at: datetime | None) -> bool:
+        """True if the existing memory lives at least as long as the new fact would.
+
+        A NOOP must never replace a permanent fact with a copy that expires
+        (ING-5: keep the stricter lifetime).
+        """
+        existing_exp = existing_row.get("expires_at")
+        if not existing_exp:
+            return True
+        if new_expires_at is None:
+            return False
+        return str(existing_exp) >= new_expires_at.isoformat()
+
+    def _apply_guardrails(
+        self,
+        result: ConsolidationResult,
+        candidates: list[ExistingMemory],
+        rows: dict[str, dict[str, Any]],
+        new_expires_at: datetime | None,
+        gate_confidence: bool,
+    ) -> ConsolidationResult:
+        """Deterministic safety rules applied to every decider's output."""
+        result = validate_decision(result, {c.id for c in candidates})
+        if result.action == ConsolidationAction.SUPERSEDE and result.target_id:
+            row = rows.get(result.target_id, {})
+            if row.get("pinned"):
+                return ConsolidationResult(
+                    action=ConsolidationAction.ADD,
+                    target_id=None,
+                    reason=f"target {result.target_id} is pinned; not superseded automatically",
+                    confidence=result.confidence,
+                    decided_by=result.decided_by,
+                )
+            if gate_confidence and (result.confidence is None or result.confidence < self.settings.supersede_min_confidence):
+                return ConsolidationResult(
+                    action=ConsolidationAction.ADD,
+                    target_id=None,
+                    reason=f"possible conflict with {result.target_id}; confidence below gate",
+                    confidence=result.confidence,
+                    decided_by=result.decided_by,
+                )
+        if result.action == ConsolidationAction.NOOP and result.target_id:
+            if not self._outlives(rows.get(result.target_id, {}), new_expires_at):
+                return ConsolidationResult(
+                    action=ConsolidationAction.ADD,
+                    target_id=None,
+                    reason=f"duplicate of {result.target_id} but that memory expires sooner",
+                    confidence=result.confidence,
+                    decided_by=result.decided_by,
+                )
+        return result
+
+    @staticmethod
+    def _exact_duplicate(fact: str, candidates: list[ExistingMemory]) -> ExistingMemory | None:
+        key = " ".join(fact.casefold().split())
+        for c in candidates:
+            if " ".join(c.content.casefold().split()) == key:
+                return c
+        return None
+
+    async def _log_decision(self, **kwargs: Any) -> None:
+        try:
+            await self.db.log_decision(**kwargs)
+        except Exception as e:  # noqa: BLE001 — logging must never break a store
+            log.warning("decision_log_write_failed", error=str(e))
+
+    async def _jev_shadow(
+        self,
+        fact: str,
+        user_id: str,
+        project_id: str,
+        memory_id: str | None,
+        grounding_source: str | None,
+        candidates: list[ExistingMemory],
+        rows: dict[str, dict[str, Any]],
+        heuristic_grounded: bool | None,
+        llm_result: ConsolidationResult | None,
+    ) -> None:
+        """Background: ask Jev the same questions and log it next to the LLM path."""
+        assessment = await self.jev.assess_fact(fact, grounding_source, [(c.id, c.content) for c in candidates])
+        if assessment is None:
+            return
+        if assessment.grounding is not None and heuristic_grounded is not None:
+            jev_grounded = assessment.grounding >= self.settings.typesafe_grounding_threshold
+            await self._log_decision(
+                decision_type="grounding",
+                mode="shadow",
+                user_id=user_id,
+                project_id=project_id,
+                memory_id=memory_id,
+                subject=fact,
+                llm_decision="grounded" if heuristic_grounded else "ungrounded",
+                jev_decision="grounded" if jev_grounded else "ungrounded",
+                jev_probs={"grounding": assessment.grounding},
+                agreed=jev_grounded == heuristic_grounded,
+                latency_ms=assessment.latency_ms,
+            )
+        if llm_result is not None and assessment.relations:
+            pinned = {cid for cid, row in rows.items() if row.get("pinned")}
+            jd = jev_decide(
+                assessment,
+                pinned,
+                self.settings.typesafe_supersede_threshold,
+                self.settings.typesafe_duplicate_threshold,
+            )
+            llm_label = _decision_label(llm_result.action.value, llm_result.target_id)
+            jev_label = _decision_label(jd.action, jd.target_id)
+            await self._log_decision(
+                decision_type="consolidation",
+                mode="shadow",
+                user_id=user_id,
+                project_id=project_id,
+                memory_id=memory_id,
+                subject=fact,
+                llm_decision=llm_label,
+                jev_decision=jev_label,
+                jev_probs=assessment.probs_json(),
+                agreed=llm_label == jev_label,
+                latency_ms=assessment.latency_ms,
+            )
+
+    # -- Per-fact pipeline ---------------------------------------------------
+
     async def _store_single_fact(
         self,
         fact: str,
@@ -752,137 +1080,110 @@ class MemoryService:
         supersedes: str | None = None,
         contradicts: str | None = None,
         skip_consolidation: bool = False,
-    ) -> dict[str, Any] | None:
+        grounding_source: str | None = None,
+        exclude_ids: set[str] | None = None,
+    ) -> "_FactResult":
+        """Ground, decide and persist ONE fact. The stored text is always ``fact``.
+
+        ``grounding_source`` is the text the fact was derived from; when given,
+        the fact must be supported by it (heuristic always; Jev in enforce
+        mode). ``skip_consolidation`` stores atomically: no candidate search,
+        no dedupe, no supersession.
         """
-        Store a single fact with consolidation logic.
+        exclude_ids = exclude_ids or set()
+        metadata = dict(metadata)
 
-        When ``skip_consolidation`` is True, the fact is embedded and added
-        directly with no similarity search, dedup, or merge — required for
-        atomic records (chat messages, logs, pre-structured data) where every
-        item is a distinct entry that must never be merged into another.
+        # ── Grounding (UPG-2) ────────────────────────────────────────────
+        heuristic_grounded: bool | None = None
+        overlap: float | None = None
+        if grounding_source is not None:
+            overlap = self._fact_source_overlap(fact, grounding_source)
+            heuristic_grounded = overlap >= self.settings.fact_verification_threshold
+        drop_ungrounded = self.settings.grounding_action == "drop"
 
-        Returns dict with id and content if stored, None if skipped.
-
-        Args:
-            fact: The extracted fact to store
-            user_id: User ID
-            project_id: Project namespace
-            metadata: Additional metadata
-            expires_at: Optional expiration time
-            now: Current timestamp
-            source: Content provenance (user_input, agent_generated, external_api)
-            trust_score: Security trust score (0.0-1.0)
-            checksum: SHA-256 hash for integrity verification
-            visibility: Memory visibility (personal, project, team)
-            space_id: Space/project ID for project visibility
-            team_id: Team ID for team visibility
-        """
-        # Generate embedding for this fact
-        embedding = await self.embeddings.embed(fact)
-
-        if skip_consolidation:
-            # Atomic path: no similarity search, no dedup, no merge — always ADD.
-            result = ConsolidationResult(action=ConsolidationAction.ADD, content=fact, reason="atomic", target_id=None)
-            existing_memories = []
-        else:
-            # Search for similar existing memories
-            similar = await self.qdrant.search(
-                query_vector=embedding,
-                user_id=user_id,
-                project_id=project_id,
-                limit=5,
-                score_threshold=0.4,  # Lower threshold to find candidates
+        if heuristic_grounded is False and drop_ungrounded and not self.jev.enforcing:
+            log.warning("fact_dropped_ungrounded", overlap=round(overlap or 0.0, 3), fact_preview=fact[:80])
+            if self.jev.enabled:
+                spawn(
+                    self._jev_shadow(fact, user_id, project_id, None, grounding_source, [], {}, False, None),
+                    "jev_shadow",
+                )
+            return _FactResult(
+                fact=fact,
+                action="dropped",
+                decided_by="heuristic",
+                reason="not supported by source text",
+                grounding_score=overlap,
             )
 
-            # Convert to ExistingMemory objects
-            existing_memories = [
-                ExistingMemory(id=str(mid), content=payload.get("content", ""), score=score) for mid, score, payload in similar
-            ]
+        # ── Candidates + decision ─────────────────────────────────────────
+        embedding = await self.embeddings.embed(fact)
+        candidates: list[ExistingMemory] = []
+        rows: dict[str, dict[str, Any]] = {}
+        jev_grounding: float | None = None
+        if skip_consolidation:
+            result = ConsolidationResult(ConsolidationAction.ADD, None, reason="atomic", decided_by="atomic")
+        else:
+            candidates, rows = await self._consolidation_candidates(
+                embedding, user_id, project_id, visibility, space_id, team_id, now, exclude_ids
+            )
+            result, jev_grounding = await self._decide(fact, candidates, rows, grounding_source, expires_at, user_id, project_id)
 
-            # Consolidate: decide ADD/UPDATE/DELETE/NOOP
-            result = await self.consolidator.consolidate(fact, existing_memories)
+        grounding_score = overlap
+        grounded = heuristic_grounded
+        grounding_by = "heuristic"
+        if jev_grounding is not None:
+            # Enforce mode: Jev's grounding verdict is authoritative.
+            grounding_score = jev_grounding
+            grounded = jev_grounding >= self.settings.typesafe_grounding_threshold
+            grounding_by = "jev"
+        if grounded is False and drop_ungrounded:
+            log.warning("fact_dropped_ungrounded", by=grounding_by, fact_preview=fact[:80])
+            return _FactResult(
+                fact=fact,
+                action="dropped",
+                decided_by=grounding_by,
+                reason="not supported by source text",
+                grounding_score=grounding_score,
+            )
+        if grounded is not None:
+            metadata["verified"] = bool(grounded)
+            if grounding_score is not None:
+                metadata["grounding_score"] = round(grounding_score, 3)
 
         if result.action == ConsolidationAction.NOOP:
-            # Return matched existing memory ID so caller can reference it
-            matched_id = existing_memories[0].id if existing_memories else None
-            log.debug("fact_skipped_noop", fact=fact[:50], matched_id=matched_id)
-            return {"id": None, "content": None, "matched_id": matched_id}
-
-        # ── Conflict detection ───────────────────────────────────────────
-        # When the consolidator detects a contradiction (DELETE) or update,
-        # record the conflict and apply the configured strategy.
-        is_conflict = (
-            result.action
-            in (
-                ConsolidationAction.DELETE,
-                ConsolidationAction.UPDATE,
-            )
-            and result.target_id is not None
-        )
-
-        conflict_target = None  # The existing memory that was contradicted
-        if is_conflict:
-            conflict_target = next((m for m in existing_memories if m.id == result.target_id), None)
-
-        strategy = ConflictStrategy.UPDATE  # default: overwrite
-        if is_conflict and self.conflict_manager is not None:
-            strategy = self.conflict_manager.default_strategy
-            try:
-                conflict = MemoryConflict(
-                    user_id=user_id,
-                    project_id=project_id,
-                    new_fact=fact,
-                    existing_memory_id=result.target_id or "",
-                    existing_content=conflict_target.content if conflict_target else "",
-                    similarity_score=conflict_target.score if conflict_target else 0.0,
-                    reason=result.reason,
-                    strategy_applied=strategy,
-                    status=(ConflictStatus.RESOLVED if strategy == ConflictStrategy.UPDATE else ConflictStatus.OPEN),
+            log.debug("fact_skipped_noop", fact=fact[:50], matched_id=result.target_id)
+            if self.jev.enabled and not self.jev.enforcing:
+                spawn(
+                    self._jev_shadow(
+                        fact, user_id, project_id, None, grounding_source, candidates, rows, heuristic_grounded, result
+                    ),
+                    "jev_shadow",
                 )
-                await self.conflict_manager.record(conflict)
-            except Exception as exc:
-                log.warning("conflict_recording_failed", error=str(exc))
-
-        # ── Apply conflict strategy ──────────────────────────────────────
-        old_memory_id = None
-
-        if strategy == ConflictStrategy.VERSION and is_conflict:
-            # Keep both memories — don't delete the old one.
-            # Store the new fact as-is alongside the existing one.
-            content = result.content or fact
-            log.debug(
-                "conflict_versioned",
-                old_id=result.target_id,
-                fact=fact[:50],
+            return _FactResult(
+                fact=fact,
+                action="noop",
+                target_id=result.target_id,
+                confidence=result.confidence,
+                decided_by=result.decided_by,
+                reason=result.reason,
+                grounding_score=grounding_score,
             )
-        elif strategy == ConflictStrategy.FLAG and is_conflict:
-            # Store the new fact but don't delete the old one.
-            # Both are kept; the conflict record stays open for review.
-            content = result.content or fact
-            log.debug(
-                "conflict_flagged",
-                old_id=result.target_id,
-                fact=fact[:50],
-            )
-        else:
-            # strategy == UPDATE (or no conflict): original behaviour
-            if result.action == ConsolidationAction.DELETE and result.target_id:
-                old_memory_id = result.target_id
-                log.debug("old_memory_will_be_deleted", memory_id=result.target_id)
 
-            if result.action == ConsolidationAction.UPDATE and result.target_id:
-                content = result.content or fact
-                old_memory_id = result.target_id
-                log.debug("memory_will_be_updated", old_id=result.target_id)
-            else:
-                content = result.content or fact
+        # ── Conflict strategy for SUPERSEDE ──────────────────────────────
+        target_id = result.target_id if result.action == ConsolidationAction.SUPERSEDE else None
+        target = next((c for c in candidates if c.id == target_id), None)
+        strategy = self.conflict_manager.default_strategy if self.conflict_manager is not None else ConflictStrategy.UPDATE
+        retire_target = target_id is not None and strategy != ConflictStrategy.FLAG
+        if target_id:
+            metadata["supersedes"] = target_id
+            metadata["consolidation_reason"] = result.reason[:300]
 
-        # Create and store the memory
         memory = Memory(
             user_id=user_id,
             project_id=project_id,
-            content=content,
-            extracted_facts=[content],
+            content=fact,
+            extracted_facts=[fact],
             entities=[],
             embedding=embedding,
             metadata=metadata,
@@ -909,21 +1210,33 @@ class MemoryService:
             team_id=team_id,
             memory_type=memory_type,
             scope=scope,
-            supersedes=supersedes,
-            contradicts=contradicts,
+            supersedes=(target_id if retire_target else None) or supersedes,
+            contradicts=(target_id if target_id and not retire_target else None) or contradicts,
         )
 
-        # VERSION strategy: the new memory is the current version, so retire the
-        # contradicted one — it stays queryable as history but is excluded from
-        # default recall. FLAG is intentionally left alone (unresolved, awaiting
-        # human review); UPDATE already deletes the old memory above.
-        if is_conflict and strategy == ConflictStrategy.VERSION and result.target_id:
-            try:
-                await self.db.mark_memory_superseded(result.target_id, memory.id)
-            except Exception as exc:
-                log.warning("version_supersede_mark_failed", error=str(exc))
+        if retire_target and target_id:
+            # Mark, never delete: the old memory stays queryable as history.
+            await self.db.mark_memory_superseded(target_id, memory.id)
 
-        # Index in FTS5 for hybrid search (Week 6)
+        if target_id and self.conflict_manager is not None:
+            try:
+                await self.conflict_manager.record(
+                    MemoryConflict(
+                        user_id=user_id,
+                        project_id=project_id,
+                        new_fact=fact,
+                        existing_memory_id=target_id,
+                        existing_content=target.content if target else "",
+                        similarity_score=target.score if target else 0.0,
+                        reason=f"[{result.decided_by}] {result.reason}",
+                        strategy_applied=strategy,
+                        status=ConflictStatus.OPEN if strategy == ConflictStrategy.FLAG else ConflictStatus.RESOLVED,
+                        resolved_memory_id=None if strategy == ConflictStrategy.FLAG else memory.id,
+                    )
+                )
+            except Exception as exc:
+                log.warning("conflict_recording_failed", error=str(exc))
+
         if self.settings.enable_hybrid_search:
             try:
                 await self.db.index_memory_fts(
@@ -935,55 +1248,122 @@ class MemoryService:
             except Exception as e:
                 log.warning("fts_indexing_failed", error=str(e), memory_id=memory.id)
 
-        # Extract and link entities (Week 5) — runs in background to avoid
-        # blocking the store response.  The memory is already persisted in
-        # Qdrant + SQLite + FTS by this point, so it's safe to return early.
         if self.settings.enable_entity_resolution:
+            spawn(self._bg_entities(memory.id, fact, user_id, project_id), "entity_resolution")
 
-            async def _bg_entity_extraction() -> None:
-                try:
-                    await self._process_entities_for_memory(
-                        memory_id=memory.id,
-                        content=content,
+        if self.jev.enabled and not self.jev.enforcing and not skip_consolidation:
+            spawn(
+                self._jev_shadow(
+                    fact,
+                    user_id,
+                    project_id,
+                    memory.id,
+                    grounding_source,
+                    candidates,
+                    rows,
+                    heuristic_grounded,
+                    result if candidates else None,
+                ),
+                "jev_shadow",
+            )
+
+        action = "supersede" if target_id else "add"
+        return _FactResult(
+            fact=fact,
+            memory_id=memory.id,
+            action=action,
+            target_id=target_id,
+            confidence=result.confidence,
+            decided_by=result.decided_by,
+            reason=result.reason,
+            grounding_score=grounding_score,
+        )
+
+    async def _decide(
+        self,
+        fact: str,
+        candidates: list[ExistingMemory],
+        rows: dict[str, dict[str, Any]],
+        grounding_source: str | None,
+        expires_at: datetime | None,
+        user_id: str,
+        project_id: str,
+    ) -> tuple[ConsolidationResult, float | None]:
+        """Pick ADD / NOOP / SUPERSEDE for a fact; guard rails always applied.
+
+        Returns (decision, jev_grounding). jev_grounding is only set in enforce
+        mode when Jev answered, and then overrides the heuristic grounding.
+        """
+        exact = self._exact_duplicate(fact, candidates)
+        if exact is not None and self._outlives(rows.get(exact.id, {}), expires_at):
+            # Byte-for-byte duplicate (e.g. a retried store): no model needed.
+            dup = ConsolidationResult(
+                ConsolidationAction.NOOP, exact.id, reason="exact duplicate", confidence=1.0, decided_by="rule"
+            )
+            return dup, None
+
+        if self.jev.enforcing and (candidates or grounding_source is not None):
+            assessment = await self.jev.assess_fact(fact, grounding_source, [(c.id, c.content) for c in candidates])
+            if assessment is not None:
+                pinned = {cid for cid, row in rows.items() if row.get("pinned")}
+                jd = jev_decide(
+                    assessment,
+                    pinned,
+                    self.settings.typesafe_supersede_threshold,
+                    self.settings.typesafe_duplicate_threshold,
+                )
+                result = ConsolidationResult(
+                    action=ConsolidationAction(jd.action),
+                    target_id=jd.target_id,
+                    reason=jd.reason,
+                    confidence=round(jd.confidence, 4),
+                    decided_by="jev" if candidates else "rule",
+                )
+                result = self._apply_guardrails(result, candidates, rows, expires_at, gate_confidence=False)
+                if candidates:
+                    await self._log_decision(
+                        decision_type="consolidation",
+                        mode="enforce",
                         user_id=user_id,
                         project_id=project_id,
+                        memory_id=None,
+                        subject=fact,
+                        llm_decision=None,
+                        jev_decision=_decision_label(result.action.value, result.target_id),
+                        jev_probs=assessment.probs_json(),
+                        agreed=None,
+                        latency_ms=assessment.latency_ms,
                     )
-                    log.info(
-                        "bg_entity_extraction_done",
-                        memory_id=memory.id,
-                    )
-                except Exception as e:
-                    # Don't fail the whole store if entity extraction fails
-                    log.warning("entity_extraction_failed", error=str(e), memory_id=memory.id)
+                return result, assessment.grounding
+            log.warning("jev_enforce_fallback_to_llm", fact_preview=fact[:60])
 
-            asyncio.ensure_future(_bg_entity_extraction())
+        if not candidates:
+            add = ConsolidationResult(ConsolidationAction.ADD, None, reason="No similar existing memories", decided_by="rule")
+            return add, None
+        result = await self.consolidator.consolidate(fact, candidates)
+        return self._apply_guardrails(result, candidates, rows, expires_at, gate_confidence=True), None
 
-        # Clean up old memory AFTER new one is fully created (fixes FK constraint bug)
-        if old_memory_id:
-            try:
-                # Migrate entity links and relationships to the new memory
-                await self.db.migrate_memory_relationships(old_memory_id, memory.id)
+    # -- Entities -------------------------------------------------------------
 
-                # Now safe to delete the old memory (relationships migrated)
-                await self.qdrant.delete(old_memory_id)
-                await self.db.delete_memory_fts(old_memory_id)
-                await self.db.delete_memory(old_memory_id)
+    def _entity_lock(self, user_id: str) -> asyncio.Lock:
+        lock = self._entity_locks.get(user_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._entity_locks[user_id] = lock
+        return lock
 
-                log.debug(
-                    "old_memory_cleaned_up",
-                    old_id=old_memory_id,
-                    new_id=memory.id,
-                    action=result.action.value,
-                )
-            except Exception as e:
-                log.warning(
-                    "old_memory_cleanup_failed",
-                    error=str(e),
-                    old_id=old_memory_id,
-                    new_id=memory.id,
-                )
-
-        return {"id": memory.id, "content": content}
+    async def _bg_entities(self, memory_id: str, content: str, user_id: str, project_id: str) -> None:
+        try:
+            await self._process_entities_for_memory(
+                memory_id=memory_id,
+                content=content,
+                user_id=user_id,
+                project_id=project_id,
+            )
+            log.info("bg_entity_extraction_done", memory_id=memory_id)
+        except Exception as e:
+            metrics.incr("entity_processing_failures_total")
+            log.warning("entity_extraction_failed", error=str(e), memory_id=memory_id)
 
     async def _process_entities_for_memory(
         self,
@@ -993,108 +1373,143 @@ class MemoryService:
         project_id: str,
     ) -> list[EntityRef]:
         """
-        Extract entities from content and link to memory.
+        Extract entities from content and link them to the memory.
 
-        Steps:
-        1. Extract entities and relationships
-        2. Match each entity against existing ones
-        3. Create new entities or add aliases
-        4. Store relationships
-        5. Link memory to entities
+        Runs under a per-user lock (ING-12) so concurrent stores cannot create
+        duplicate entities. Matcher ids are only accepted if they are among
+        the candidates offered; canonical-name suggestions and relationship
+        validity windows are persisted (ING-22). Candidate loads are bounded
+        and cached per type for the whole memory (ING-23).
         """
         try:
-            # Step 1: Extract entities
-            extraction = await self.entity_extractor.extract(content)
+            async with self._entity_lock(user_id):
+                extraction = await self.entity_extractor.extract(content)
+                if not extraction.entities:
+                    return []
 
-            if not extraction.entities:
-                return []
+                entity_refs: list[EntityRef] = []
+                entity_id_map: dict[str, str] = {}
+                by_type: dict[str, list[ExistingEntity]] = {}
 
-            log.debug(
-                "processing_entities",
-                memory_id=memory_id,
-                entity_count=len(extraction.entities),
-            )
+                for extracted in extraction.entities:
+                    etype = extracted.type.lower()
+                    if etype not in by_type:
+                        by_type[etype] = await self._get_existing_entities(user_id, project_id, extracted.type)
+                    existing = by_type[etype]
+                    valid_ids = {e.id for e in existing}
 
-            entity_refs: list[EntityRef] = []
-            entity_id_map: dict[str, str] = {}  # name -> entity_id
+                    match_result = await self.entity_matcher.match(extracted, existing)
+                    entity_id: str | None = None
+                    if match_result.match and match_result.matched_entity_id in valid_ids:
+                        entity_id = match_result.matched_entity_id
+                    deterministic = match_result.match and match_result.confidence >= 0.95
 
-            # Step 2 & 3: Match or create entities
-            for extracted in extraction.entities:
-                # Get existing entities for matching
-                existing = await self._get_existing_entities(user_id, project_id, extracted.type)
+                    if self.jev.enabled and existing and not deterministic:
+                        entity_id = await self._jev_entity_check(extracted, existing, entity_id, user_id, project_id, memory_id)
 
-                # Try to match
-                match_result = await self.entity_matcher.match(extracted, existing)
+                    if entity_id:
+                        aliases = list(match_result.suggested_aliases)
+                        matched = next((e for e in existing if e.id == entity_id), None)
+                        if matched and extracted.name.casefold() != matched.name.casefold():
+                            aliases.append(extracted.name)
+                        if aliases:
+                            await self._add_entity_aliases(entity_id, aliases)
+                        canonical = matched.name if matched else extracted.name
+                    else:
+                        suggestion = match_result.new_entity
+                        canonical = (suggestion.name if suggestion and suggestion.name else extracted.name).strip()
+                        aliases = [*extracted.aliases, *(suggestion.aliases if suggestion else [])]
+                        if canonical.casefold() != extracted.name.casefold():
+                            aliases.append(extracted.name)
+                        aliases = list(dict.fromkeys(a for a in aliases if isinstance(a, str) and a.strip() and a != canonical))
+                        entity = Entity(
+                            canonical_name=canonical,
+                            type=etype,
+                            aliases=aliases,
+                            attributes={"description": (suggestion.description if suggestion else "") or extracted.description},
+                            confidence=1.0,
+                        )
+                        await self.db.save_entity(entity, user_id, project_id)
+                        entity_id = entity.id
+                        # Later mentions in this same memory can match it.
+                        existing.append(
+                            ExistingEntity(
+                                id=entity.id,
+                                name=canonical,
+                                type=etype,
+                                description=str(entity.attributes.get("description", "")),
+                                aliases=aliases,
+                            )
+                        )
 
-                if match_result.match and match_result.matched_entity_id:
-                    # Matched existing entity - add alias if suggested
-                    entity_id = match_result.matched_entity_id
-                    if match_result.suggested_aliases:
-                        await self._add_entity_aliases(entity_id, match_result.suggested_aliases)
-                    log.debug(
-                        "entity_matched",
-                        name=extracted.name,
-                        matched_id=entity_id,
-                    )
-                else:
-                    # Create new entity
-                    entity = Entity(
-                        canonical_name=extracted.name,
-                        type=extracted.type.lower(),
-                        aliases=extracted.aliases,
-                        attributes={"description": extracted.description},
-                        confidence=1.0,
-                    )
-                    await self.db.save_entity(entity, user_id, project_id)
-                    entity_id = entity.id
-                    log.debug("entity_created", name=extracted.name, id=entity_id)
+                    entity_id_map[extracted.name] = entity_id
+                    entity_refs.append(EntityRef(id=entity_id, canonical_name=canonical, type=etype, confidence=1.0))
 
-                entity_id_map[extracted.name] = entity_id
-                entity_refs.append(
-                    EntityRef(
-                        id=entity_id,
-                        canonical_name=extracted.name,
-                        type=extracted.type.lower(),
-                        confidence=1.0,
-                    )
-                )
+                for rel in extraction.relationships:
+                    subject_id = entity_id_map.get(rel.subject)
+                    object_id = entity_id_map.get(rel.object)
+                    if subject_id and object_id:
+                        valid_from = _parse_date(rel.valid_from)
+                        relationship = Relationship(
+                            from_entity_id=subject_id,
+                            to_entity_id=object_id,
+                            type=rel.predicate.lower(),
+                            properties={},
+                            confidence=1.0,
+                            source_memory_id=memory_id,
+                            valid_to=_parse_date(rel.valid_to),
+                            **({"valid_from": valid_from} if valid_from else {}),
+                        )
+                        try:
+                            await self.db.save_relationship(relationship)
+                        except Exception as e:
+                            log.warning("relationship_save_failed", error=str(e))
 
-            # Step 4: Store relationships (only between valid entities)
-            for rel in extraction.relationships:
-                subject_id = entity_id_map.get(rel.subject)
-                object_id = entity_id_map.get(rel.object)
+                for eid in dict.fromkeys(entity_id_map.values()):
+                    await self.db.link_memory_to_entity(memory_id, eid)
 
-                # Only save relationships where both ends are entities
-                # Skip value relationships like ROLE -> "CEO"
-                if subject_id and object_id:
-                    relationship = Relationship(
-                        from_entity_id=subject_id,
-                        to_entity_id=object_id,
-                        type=rel.predicate.lower(),
-                        properties={},
-                        confidence=1.0,
-                        source_memory_id=memory_id,
-                    )
-                    try:
-                        await self.db.save_relationship(relationship)
-                    except Exception as e:
-                        log.warning("relationship_save_failed", error=str(e))
-
-            # Step 5: Link memory to entities
-            for entity_id in entity_id_map.values():
-                await self.db.link_memory_to_entity(memory_id, entity_id)
-
-            log.info(
-                "entities_processed",
-                memory_id=memory_id,
-                entities_linked=len(entity_id_map),
-            )
-
-            return entity_refs
+                log.info("entities_processed", memory_id=memory_id, entities_linked=len(set(entity_id_map.values())))
+                return entity_refs
 
         except Exception as e:
-            log.error("entity_processing_error", error=str(e), memory_id=memory_id)
+            metrics.incr("entity_processing_failures_total")
+            log.warning("entity_processing_error", error=str(e), memory_id=memory_id)
             return []
+
+    async def _jev_entity_check(
+        self,
+        extracted: Any,
+        existing: list[ExistingEntity],
+        llm_choice: str | None,
+        user_id: str,
+        project_id: str,
+        memory_id: str,
+    ) -> str | None:
+        """Jev coreference for one mention. Shadow: log only. Enforce: Jev picks."""
+        ranked = rank_candidates(extracted, existing, limit=5)
+        result = await self.jev.entity_coreference(
+            {"name": extracted.name, "type": extracted.type, "description": extracted.description},
+            [(e.id, {"name": e.name, "type": e.type, "description": e.description, "aliases": e.aliases}) for e in ranked],
+        )
+        if result is None:
+            return llm_choice
+        probs, latency = result
+        best_id, best_p = max(probs.items(), key=lambda kv: kv[1])
+        jev_choice = best_id if best_p >= self.settings.typesafe_entity_match_threshold else None
+        await self._log_decision(
+            decision_type="entity_coref",
+            mode=self.jev.mode,
+            user_id=user_id,
+            project_id=project_id,
+            memory_id=memory_id,
+            subject=extracted.name,
+            llm_decision=llm_choice or "new",
+            jev_decision=jev_choice or "new",
+            jev_probs=probs,
+            agreed=(llm_choice or "new") == (jev_choice or "new"),
+            latency_ms=latency,
+        )
+        return jev_choice if self.jev.enforcing else llm_choice
 
     async def _get_existing_entities(
         self,
@@ -1102,8 +1517,8 @@ class MemoryService:
         project_id: str,
         entity_type: str,
     ) -> list[ExistingEntity]:
-        """Get existing entities for matching."""
-        entities = await self.db.get_entities_by_type(user_id, project_id, entity_type)
+        """Existing entities for matching (bounded to the most recently updated)."""
+        entities = await self.db.get_entities_by_type(user_id, project_id, entity_type, limit=_ENTITY_CANDIDATE_LIMIT)
         return [
             ExistingEntity(
                 id=e.id,
@@ -1119,35 +1534,9 @@ class MemoryService:
         """Add aliases to an existing entity."""
         entity = await self.db.get_entity(entity_id)
         if entity:
-            new_aliases = list(set(entity.aliases + aliases))
-            await self.db.update_entity_aliases(entity_id, new_aliases)
-
-    def _simple_fact_extraction(self, content: str) -> list[str]:
-        """
-        Simple rule-based fact extraction.
-        Splits content into sentences as basic facts.
-
-        TODO(Week 4): Replace with LLM-powered extraction.
-        """
-        # Split by sentence-ending punctuation
-        sentences = []
-        current = []
-
-        for char in content:
-            current.append(char)
-            if char in ".!?":
-                sentence = "".join(current).strip()
-                if len(sentence) > 10:  # Skip very short fragments
-                    sentences.append(sentence)
-                current = []
-
-        # Don't forget the last sentence without punctuation
-        if current:
-            sentence = "".join(current).strip()
-            if len(sentence) > 10:
-                sentences.append(sentence)
-
-        return sentences[:10]  # Limit to 10 facts per memory
+            new_aliases = list(dict.fromkeys([*entity.aliases, *aliases]))
+            if new_aliases != entity.aliases:
+                await self.db.update_entity_aliases(entity_id, new_aliases)
 
     # -----------------------------------------------------------------------
     # Recall (v0.4.0 - Advanced Retrieval)
@@ -1975,7 +2364,7 @@ class MemoryService:
         project_id = existing.get("project_id", "default")
 
         # 2. Re-extract facts from new content
-        extracted_facts = await self.extractor.extract(new_content)
+        extracted_facts = await self.extractor.extract(new_content, reference_date=utcnow())
         if not extracted_facts:
             extracted_facts = [new_content.strip()]
 
@@ -1990,18 +2379,13 @@ class MemoryService:
             log.error("embedding_empty_during_update", memory_id=memory_id)
             raise ValueError("Embedding returned empty result")
 
-        # 4. Update vector in Qdrant
-        import json
+        # 4. Build the full current record once, so Qdrant and SQLite agree
+        # (ING-20: previously Qdrant got stale metadata, a fresh created_at
+        # and no expires_at).
 
-        from remembra.models.memory import Memory
-
-        # Parse metadata if it's a JSON string (SQLite stores as text)
-        raw_meta = existing.get("metadata") or {}
-        if isinstance(raw_meta, str):
-            try:
-                raw_meta = json.loads(raw_meta)
-            except json.JSONDecodeError:
-                raw_meta = {}
+        merged_metadata = {**_coerce_metadata(existing.get("metadata")), **(new_metadata or {})}
+        created_at = _parse_date(existing.get("created_at")) or utcnow()
+        expires_at = _parse_date(existing.get("expires_at"))
 
         memory = Memory(
             id=memory_id,
@@ -2011,18 +2395,14 @@ class MemoryService:
             extracted_facts=extracted_facts,
             entities=[],
             embedding=embedding,
-            metadata=raw_meta,
+            metadata=merged_metadata,
+            created_at=created_at,
+            updated_at=utcnow(),
+            expires_at=expires_at,
         )
         await self.qdrant.upsert(memory)
 
-        # 5. Update metadata in SQLite
-        existing_meta = {}
-        if existing.get("metadata"):
-            import json
-
-            existing_meta = json.loads(existing["metadata"]) if isinstance(existing["metadata"], str) else existing["metadata"]
-        merged_metadata = {**existing_meta, **(new_metadata or {})}
-
+        # 5. Update metadata in SQLite (also refreshes the FTS row)
         await self.db.update_memory(
             memory_id=memory_id,
             content=new_content,
@@ -2035,20 +2415,7 @@ class MemoryService:
 
         entity_refs: list[EntityRef] = []
         if self.settings.enable_entity_resolution:
-
-            async def _bg_entity_update() -> None:
-                try:
-                    await self._process_entities_for_memory(
-                        memory_id=memory_id,
-                        content=new_content,
-                        user_id=user_id,
-                        project_id=project_id,
-                    )
-                    log.info("bg_entity_update_done", memory_id=memory_id)
-                except Exception as e:
-                    log.warning("entity_update_failed", error=str(e), memory_id=memory_id)
-
-            asyncio.ensure_future(_bg_entity_update())
+            spawn(self._bg_entities(memory_id, new_content, user_id, project_id), "entity_update")
 
         # 7. Handle conflict detection if enabled
         if self.conflict_manager:
@@ -2136,14 +2503,24 @@ class MemoryService:
             user_id=user_id,
             project_id=project_id,
             metadata=store_metadata,
+            supersedes=old_memory_id,
+            visibility=old_memory.get("visibility") or "personal",
+            space_id=old_memory.get("space_id"),
+            team_id=old_memory.get("team_id"),
         )
 
+        # ING-13: the replacement is stored atomically — no extraction and no
+        # consolidation — so it can never be deduped into, or supersede, the
+        # memory it is replacing (or anything else).
         store_result = await self.store(
             store_request,
             source="supersession",
             trust_score=1.0,
+            skip_extraction=True,
         )
         new_memory_id = store_result.id
+        if not new_memory_id or new_memory_id == old_memory_id:
+            raise ValueError("Supersession did not produce a new memory")
 
         # 3. Mark old memory as superseded (update metadata, don't delete)
         old_meta = old_memory.get("metadata") or {}
@@ -2236,10 +2613,11 @@ class MemoryService:
                     log.warning("forget_memory_unauthorized", memory_id=memory_id, user_id=user_id)
                     return ForgetResponse(deleted_memories=0, deleted_entities=0, deleted_relationships=0)
 
-            # Delete specific memory (ownership verified)
-            await self.qdrant.delete(memory_id)
+            # Delete specific memory (ownership verified; deletes are also
+            # user-scoped at the storage layer — ING-2)
+            await self.qdrant.delete(memory_id, user_id=user_id)
             await self.db.delete_memory_fts(memory_id)  # Clean FTS5 index
-            if await self.db.delete_memory(memory_id):
+            if await self.db.delete_memory(memory_id, user_id=user_id):
                 deleted_memories = 1
             log.info("forgot_memory", memory_id=memory_id, user_id=user_id)
 
@@ -2260,6 +2638,7 @@ class MemoryService:
             await self.db.delete_user_memories(user_id)
             deleted_relationships = await self.db.delete_user_relationships(user_id)
             deleted_entities = await self.db.delete_user_entities(user_id)
+            await self.db.delete_user_decision_logs(user_id)
             log.info(
                 "forgot_user",
                 user_id=user_id,
