@@ -1,8 +1,8 @@
 """Memory CRUD endpoints – /api/v1/memories."""
 
+import asyncio
+import hashlib
 import logging
-import threading
-import time
 from datetime import datetime
 from typing import Annotated, Any
 
@@ -65,35 +65,24 @@ _internal_log = structlog.get_logger("remembra.api.errors")
 _webhook_log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Idempotency cache — maps "user_id:key" → (memory_id, timestamp)
-# Entries expire after 1 hour. Thread-safe via lock.
+# Idempotency (ING-18) — persisted in SQLite with in-flight state, so a retry
+# after a client timeout (or a server restart) replays the original response
+# instead of storing twice, and a concurrent duplicate gets 409.
 # ---------------------------------------------------------------------------
-_IDEMPOTENCY_TTL = 3600  # 1 hour
-_idempotency_cache: dict[str, tuple[str, float]] = {}
-_idempotency_lock = threading.Lock()
 
 
-def _idempotency_check(user_id: str, key: str) -> str | None:
-    """Return existing memory_id if this key was seen within TTL, else None."""
-    cache_key = f"{user_id}:{key}"
-    now = time.monotonic()
-    with _idempotency_lock:
-        # Lazy eviction of expired entries (cap at 100 evictions per call)
-        expired = [k for i, (k, (_, ts)) in enumerate(_idempotency_cache.items()) if now - ts > _IDEMPOTENCY_TTL and i < 100]
-        for k in expired:
-            del _idempotency_cache[k]
-
-        entry = _idempotency_cache.get(cache_key)
-        if entry and now - entry[1] <= _IDEMPOTENCY_TTL:
-            return entry[0]
-    return None
+def _idempotency_request_hash(body: StoreRequest) -> str:
+    return hashlib.sha256(body.model_dump_json().encode("utf-8")).hexdigest()
 
 
-def _idempotency_record(user_id: str, key: str, memory_id: str) -> None:
-    """Record a successful store for dedup within TTL."""
-    cache_key = f"{user_id}:{key}"
-    with _idempotency_lock:
-        _idempotency_cache[cache_key] = (memory_id, time.monotonic())
+async def _release_idempotency(memory_service: MemoryService, user_id: str, key: str | None) -> None:
+    """Free an in-flight key after a failed store so the client can retry."""
+    if not key:
+        return
+    try:
+        await memory_service.db.idempotency_release(user_id, key)
+    except Exception as exc:  # noqa: BLE001 — never mask the original error
+        log.warning("idempotency_release_failed", error=str(exc))
 
 
 def _is_memory_expired(memory: dict[str, Any]) -> bool:
@@ -280,19 +269,6 @@ async def store_memory(
     body.user_id = current_user.user_id
     body.project_id = resolve_project_access(current_user, body.project_id) or "default"
 
-    # Idempotency check — return cached result on duplicate key
-    idem_key = request.headers.get("Idempotency-Key")
-    if idem_key:
-        existing_id = _idempotency_check(current_user.user_id, idem_key)
-        if existing_id:
-            log.info("idempotency_hit", key=idem_key, memory_id=existing_id)
-            return StoreResponse(
-                id=existing_id,
-                extracted_facts=[],
-                entities=[],
-                usage_warning=None,
-            )
-
     # PII Detection (OWASP ASI06)
     pii_result = None
     if pii_detector:
@@ -319,6 +295,32 @@ async def store_memory(
         # SECURITY: Use sanitized content (XSS stripped)
         body.content = sanitization.content
 
+    # Idempotency — claim the key durably before doing any work (after
+    # validation/PII/sanitization, so a rejected request never holds a key)
+    idem_key = (request.headers.get("Idempotency-Key") or "").strip()[:200] or None
+    if idem_key:
+        state, cached = await memory_service.db.idempotency_claim(
+            current_user.user_id,
+            idem_key,
+            _idempotency_request_hash(body),
+            ttl_seconds=settings.idempotency_ttl_hours * 3600,
+            inflight_timeout_seconds=settings.idempotency_inflight_timeout_seconds,
+        )
+        if state == "done" and cached:
+            log.info("idempotency_replay", key=idem_key)
+            return StoreResponse.model_validate_json(cached)
+        if state == "in_flight":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="A request with this Idempotency-Key is still being processed. Retry shortly.",
+                headers={"Retry-After": "2"},
+            )
+        if state == "mismatch":
+            raise HTTPException(
+                status_code=422,
+                detail="Idempotency-Key was already used with a different request body.",
+            )
+
     try:
         result = await memory_service.store(
             body,
@@ -340,42 +342,45 @@ async def store_memory(
         # Record usage for metering (no-op if cloud disabled)
         await record_store_usage(request, current_user.user_id)
 
-        # Dispatch webhook event (no-op if webhooks disabled)
-        await _dispatch_webhook(
-            request,
-            memory_stored_event(
-                user_id=current_user.user_id,
-                memory_id=result.id,
-                extracted_facts=getattr(result, "facts", None),
-                entities=getattr(result, "entities", None),
-                project_id=body.project_id or "default",
-            ),
-        )
+        # Only announce memories that were actually created (ING-24): a
+        # duplicate store created nothing.
+        if result.status in ("stored", "pending"):
+            await _dispatch_webhook(
+                request,
+                memory_stored_event(
+                    user_id=current_user.user_id,
+                    memory_id=result.id,
+                    extracted_facts=result.extracted_facts,
+                    entities=[e.canonical_name for e in result.entities],
+                    project_id=body.project_id or "default",
+                ),
+            )
 
-        # Broadcast to WebSocket clients for real-time updates
-        await _broadcast_websocket(
-            event_type="memory.created",
-            data={
-                "memory_id": result.id,
-                "user_id": current_user.user_id,
-                "facts": result.extracted_facts or [],
-                "entities": [e.model_dump() if hasattr(e, "model_dump") else e for e in (result.entities or [])],
-            },
-            project_id=body.project_id or "default",
-        )
+            # Broadcast to WebSocket clients for real-time updates
+            await _broadcast_websocket(
+                event_type="memory.created",
+                data={
+                    "memory_id": result.id,
+                    "user_id": current_user.user_id,
+                    "facts": result.extracted_facts or [],
+                    "entities": [e.model_dump() for e in result.entities],
+                },
+                project_id=body.project_id or "default",
+            )
 
         # Attach usage warning if set by cloud limit enforcement
         usage_warning = getattr(request.state, "usage_warning", None)
         if usage_warning is not None:
             result.usage_warning = usage_warning
 
-        # Record idempotency key for dedup on retries
         if idem_key:
-            _idempotency_record(current_user.user_id, idem_key, result.id)
+            await memory_service.db.idempotency_complete(current_user.user_id, idem_key, result.model_dump_json())
+            idem_key = None
 
         return result
 
     except ValueError as e:
+        await _release_idempotency(memory_service, current_user.user_id, idem_key)
         # ValueError is typically a validation error - safe to show to user
         error_msg = str(e)
         await audit_logger.log_memory_store(
@@ -391,6 +396,7 @@ async def store_memory(
             detail=error_msg,
         ) from e
     except EmbeddingProviderError as e:
+        await _release_idempotency(memory_service, current_user.user_id, idem_key)
         # Upstream embedding provider failed — surface an honest status
         # instead of collapsing it into a generic 500.
         _internal_log.error(
@@ -418,6 +424,7 @@ async def store_memory(
             headers={"Retry-After": "5"},
         ) from e
     except Exception as e:
+        await _release_idempotency(memory_service, current_user.user_id, idem_key)
         # Log full error internally for debugging (never expose to users)
         _internal_log.error(
             "store_memory_failed",
@@ -460,6 +467,7 @@ async def batch_store(
     sanitizer: SanitizerDep,
     pii_detector: PIIDetectorDep,
     current_user: CurrentUser,
+    settings: SettingsDep,
 ) -> BatchStoreResponse:
     """
     Store up to 100 memories in a single request.
@@ -485,7 +493,8 @@ async def batch_store(
     - `succeeded`: Count of successful stores
     - `failed`: Count of failed stores
 
-    Rate limit: 5 requests/minute.
+    Items are stored with bounded concurrency (``batch_store_concurrency``).
+    Rate limit: 30 requests/minute.
     """
     # RBAC: Check permission
     if not has_permission(current_user, "memory:store"):
@@ -498,38 +507,55 @@ async def batch_store(
     # (raising otherwise), so it is always populated by the time we get here.
     assert body.items is not None, "items is guaranteed non-None by request validation"
 
-    results: list[BatchStoreResult] = []
-    succeeded = 0
+    items = body.items
+    semaphore = asyncio.Semaphore(settings.batch_store_concurrency)
 
-    for i, item in enumerate(body.items):
+    async def store_item(i: int, item: StoreRequest) -> BatchStoreResult:
+        # Enforce authenticated user
+        item.user_id = current_user.user_id
         try:
-            # Enforce authenticated user
-            item.user_id = current_user.user_id
             item.project_id = resolve_project_access(current_user, item.project_id) or "default"
+        except HTTPException as e:
+            return BatchStoreResult(index=i, success=False, error=str(e.detail))
 
-            # PII Detection for batch items
-            if pii_detector:
-                pii_result = pii_detector.scan(item.content, source="batch_input")
-                if pii_result.has_pii:
-                    if pii_result.blocked:
-                        results.append(
-                            BatchStoreResult(
-                                index=i, success=False, error=f"PII_DETECTED: {[m.type for m in pii_result.matches]}"
-                            )
-                        )
-                        continue
-                    elif pii_result.redacted_content:
-                        item.content = pii_result.redacted_content
+        # PII Detection for batch items
+        if pii_detector:
+            pii_result = pii_detector.scan(item.content, source="batch_input")
+            if pii_result.has_pii:
+                if pii_result.blocked:
+                    return BatchStoreResult(index=i, success=False, error=f"PII_DETECTED: {[m.type for m in pii_result.matches]}")
+                elif pii_result.redacted_content:
+                    item.content = pii_result.redacted_content
 
-            # SECURITY: XSS sanitization for batch items
+        # SECURITY: XSS sanitization; trust score + checksum are persisted like
+        # single stores (ING-21: previously dropped for batch items).
+        sanitization = None
+        if settings.sanitization_enabled:
             sanitization = sanitizer.analyze(item.content, source="batch_input")
             item.content = sanitization.content
 
-            resp = await memory_service.store(item, skip_extraction=body.skip_extraction)
-            results.append(BatchStoreResult(index=i, success=True, response=resp))
-            succeeded += 1
-        except Exception as e:
-            results.append(BatchStoreResult(index=i, success=False, error=str(e)))
+        async with semaphore:
+            try:
+                resp = await memory_service.store(
+                    item,
+                    source="user_input",
+                    trust_score=sanitization.trust_score if sanitization else 1.0,
+                    checksum=sanitization.checksum if sanitization else None,
+                    skip_extraction=body.skip_extraction or item.skip_extraction,
+                )
+                return BatchStoreResult(index=i, success=True, response=resp)
+            except ValueError as e:
+                return BatchStoreResult(index=i, success=False, error=str(e))
+            except EmbeddingProviderError as e:
+                _internal_log.error("batch_store_item_embedding_error", index=i, upstream_status=e.status_code)
+                return BatchStoreResult(index=i, success=False, error="Embedding provider error; item not stored")
+            except Exception as e:
+                # Never echo internal exception text to the client (ING-21).
+                _internal_log.error("batch_store_item_failed", index=i, error=str(e), error_type=type(e).__name__)
+                return BatchStoreResult(index=i, success=False, error="Failed to store item")
+
+    results = list(await asyncio.gather(*(store_item(i, item) for i, item in enumerate(items))))
+    succeeded = sum(1 for r in results if r.success)
 
     await audit_logger.log_memory_store(
         user_id=current_user.user_id,
