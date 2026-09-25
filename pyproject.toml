@@ -62,7 +62,8 @@ server = [
     "qrcode[pil]>=7.4.0",
     "structlog>=24.4.0",
     "aiosqlite>=0.20.0",
-    "openai>=1.0.0",
+    # openai 3.x switched its http client type (httpx2); code targets the 2.x client.
+    "openai>=1.0.0,<3",
     "tiktoken>=0.7.0",
     "bcrypt>=4.0.0",
     "slowapi>=0.1.9",
@@ -77,7 +78,8 @@ server = [
 # `remembra-mcp` binary crashes at import with ModuleNotFoundError when
 # installed via `pipx install .[mcp]` alone.
 mcp = [
-    "mcp>=1.0.0",
+    # mcp 2.x renamed FastMCP -> MCPServer and changed APIs; server.py targets 1.x.
+    "mcp>=1.23,<2",
     "structlog>=24.4.0",
 ]
 
