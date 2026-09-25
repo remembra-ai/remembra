@@ -923,7 +923,10 @@ async def get_memory(
     if project_id:
         resolve_project_access(current_user, project_id)
 
-    return result
+    # SEC-23: never hand back stored credentials (rows predating redaction).
+    from remembra.security.secrets import scrub_memory_record
+
+    return scrub_memory_record(result)
 
 
 # ---------------------------------------------------------------------------
