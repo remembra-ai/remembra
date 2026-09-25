@@ -134,6 +134,21 @@ All environment variables for Remembra.
 |----------|---------|-------------|
 | `REMEMBRA_STATIC_DIR` | - | Path to dashboard build |
 
+## Sign in with GitHub / Google
+
+A provider is enabled only when its client ID and secret, `REMEMBRA_PUBLIC_URL`
+and `REMEMBRA_PUBLIC_DASHBOARD_URL` are all set; otherwise its routes answer 404
+and the dashboard hides its button. Setup: [Sign-in providers](../guides/sign-in-providers.md).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REMEMBRA_PUBLIC_URL` | - | Public HTTPS origin of the API (e.g. `https://api.remembra.dev`). Callback URLs are `<this>/api/v1/auth/oauth/{github,google}/callback` |
+| `REMEMBRA_PUBLIC_DASHBOARD_URL` | - | Public HTTPS origin of the dashboard (e.g. `https://app.remembra.dev`). Sign-in only ever redirects here; also the base of emailed verification links (default `https://app.remembra.dev`) |
+| `REMEMBRA_GITHUB_CLIENT_ID` | - | GitHub OAuth app client ID |
+| `REMEMBRA_GITHUB_CLIENT_SECRET` | - | GitHub OAuth app client secret |
+| `REMEMBRA_GOOGLE_CLIENT_ID` | - | Google OAuth web client ID |
+| `REMEMBRA_GOOGLE_CLIENT_SECRET` | - | Google OAuth web client secret |
+
 ## Auto-Forgetting (v0.12.0)
 
 | Variable | Default | Description |
@@ -170,7 +185,7 @@ Only used when `REMEMBRA_CLOUD_ENABLED=true`. See
 | `REMEMBRA_FREE_BREAKER_MIN_USD` | `50` | Free-tier AI budget floor per month |
 | `REMEMBRA_FREE_BREAKER_REVENUE_PCT` | `0.20` | Budget as a share of last month's net paid revenue, when known |
 | `REMEMBRA_CREDIT_RESERVATION_STALE_MINUTES` | `15` | Credit holds older than this whose work is no longer running are released (charged at the chunk minimum) |
-| `REMEMBRA_UNVERIFIED_CREDIT_CAP_EFFECTIVE_AT` | - | Free accounts created at or after this time get 25 credits until the email is verified. Unset = off. Enable it only once the dashboard verify-email page is live |
+| `REMEMBRA_UNVERIFIED_CREDIT_CAP_EFFECTIVE_AT` | - | Free accounts created at or after this time get 25 credits until the email is verified. Unset = off. Enable it only once the dashboard verify-email page (`/verify-email`) is live. Applies to dashboard signups (verify via `/auth/verify-email`) and to `/cloud/signup` tenants (verify via `/cloud/verify-email`); accounts from Sign in with GitHub / Google start verified |
 | `REMEMBRA_ANNUAL_CREDIT_UPFRONT_MONTHS` | `12` | Annual plans: months of credits available in the first month, one more each month after (`12` = whole bank up front) |
 | `REMEMBRA_TYPESAFE_USD_PER_REQUEST` | `0.0005` | Dollar cost metered per TypeSafe (Jev) request. Set it to your TypeSafe contract price |
 | `REMEMBRA_ENRICHMENT_GLOBAL_CONCURRENCY` | `16` | Enrichment jobs running at once across all tenants |
@@ -190,6 +205,7 @@ plans only).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REMEMBRA_TURNSTILE_SECRET` | - | Cloudflare Turnstile secret. When set, `POST /api/v1/auth/signup` and `POST /api/v1/cloud/signup` require a Turnstile token (`turnstile_token` field or `CF-Turnstile-Response` header), verified server-side |
+| `REMEMBRA_TURNSTILE_SITE_KEY` | - | Turnstile site key (public). Published by `GET /api/v1/auth/providers` while the secret is also set; the dashboard then renders the widget on Sign up. Set both or neither |
 | `REMEMBRA_SIGNUP_IP_RATE_LIMIT` | `3/hour` | Signups per client network (/24 for IPv4, /56 for IPv6) |
 | `REMEMBRA_SIGNUP_DOMAIN_RATE_LIMIT` | `20/day` | Signups per email domain |
 | `REMEMBRA_SIGNUP_ATTEMPT_IP_RATE_LIMIT` | `30/hour` | Signup attempts per client network before Turnstile runs (only with Turnstile on). The two limits above are charged only after Turnstile passes |

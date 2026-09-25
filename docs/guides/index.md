@@ -20,6 +20,7 @@ In-depth guides for using Remembra effectively.
 - [RBAC](rbac.md) — Role-based access control
 - [Webhooks](webhooks.md) — Real-time event notifications
 - [Security](security.md) — Encryption, PII detection, hardening
+- [Sign in with GitHub & Google](sign-in-providers.md) — Social sign-in setup and email verification
 - [Import/Export](import-export.md) — Migrate data in and out
 - [Plugins](plugins.md) — Extend with custom functionality
 

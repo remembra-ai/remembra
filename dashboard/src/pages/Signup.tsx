@@ -1,11 +1,24 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { UserPlus, Loader2, Eye, EyeOff, Check, X } from 'lucide-react';
 import { API_V1 } from '../config';
 import { BrandLockup } from '../brand/Brand';
+import { SocialSignIn } from '../components/auth/SocialSignIn';
+import { TurnstileWidget } from '../components/auth/TurnstileWidget';
+import { useAuthConfig } from '../hooks/useAuthConfig';
+import { passwordChecks as checkPassword } from '../lib/authProviders';
 
 interface SignupProps {
   onSignup: (user: { id: string; email: string; name?: string }) => void;
   onSwitchToLogin: () => void;
+}
+
+function detailMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === 'string') return detail;
+  // FastAPI validation errors: [{ msg: "Value error, Password must contain: ..." }]
+  if (Array.isArray(detail) && detail[0] && typeof detail[0].msg === 'string') {
+    return detail[0].msg.replace(/^Value error, /, '');
+  }
+  return fallback;
 }
 
 export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
@@ -16,18 +29,22 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileReset, setTurnstileReset] = useState(0);
+  const { config, loading: configLoading } = useAuthConfig();
+  const siteKey = config.turnstile_site_key;
+  const dark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 
-  // Password validation
-  const passwordChecks = {
-    length: password.length >= 8,
-    match: password === confirmPassword && password.length > 0,
-  };
+  const rules = checkPassword(password);
+  const passwordMatch = password === confirmPassword && password.length > 0;
+  const isPasswordValid = Object.values(rules).every(Boolean) && passwordMatch;
+  const needsHumanCheck = !!siteKey && !turnstileToken;
 
-  const isPasswordValid = passwordChecks.length && passwordChecks.match;
+  const onTurnstileToken = useCallback((token: string | null) => setTurnstileToken(token), []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!email.trim()) {
       setError('Please enter your email');
       return;
@@ -35,6 +52,11 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
 
     if (!isPasswordValid) {
       setError('Please fix the password requirements');
+      return;
+    }
+
+    if (needsHumanCheck) {
+      setError('Please complete the human check');
       return;
     }
 
@@ -47,22 +69,26 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
-          email, 
+        body: JSON.stringify({
+          email,
           password,
           name: name.trim() || undefined,
+          turnstile_token: turnstileToken || undefined,
         }),
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(data.detail || 'Signup failed');
+        if (response.status === 429) throw new Error(detailMessage(data.detail, 'Too many signups. Please try again later.'));
+        throw new Error(detailMessage(data.detail, 'Signup failed'));
       }
 
       onSignup({ id: data.id, email: data.email, name: data.name });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Signup failed');
+      // Turnstile tokens are single use: get a fresh one for the retry.
+      if (siteKey) setTurnstileReset((n) => n + 1);
     } finally {
       setLoading(false);
     }
@@ -70,7 +96,7 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
 
   const PasswordCheck = ({ valid, text }: { valid: boolean; text: string }) => (
     <div className={`flex items-center gap-2 text-sm ${valid ? 'text-green-400' : 'text-[hsl(var(--muted-foreground))]'}`}>
-      {valid ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
+      {valid ? <Check className="w-4 h-4" aria-hidden="true" /> : <X className="w-4 h-4" aria-hidden="true" />}
       <span>{text}</span>
     </div>
   );
@@ -92,6 +118,12 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
 
         <form onSubmit={handleSubmit} className="bg-[hsl(var(--card))] rounded-xl shadow-sm border border-[hsl(var(--border))] p-6">
           <div className="space-y-4">
+            <SocialSignIn
+              providers={config.providers}
+              from="signup"
+              disabled={loading}
+              dividerLabel="or sign up with email"
+            />
             <div>
               <label htmlFor="name" className="block text-sm font-medium text-[hsl(var(--foreground))] mb-2">
                 Name <span className="text-[hsl(var(--muted-foreground))]">(optional)</span>
@@ -103,6 +135,7 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Your name"
                 autoComplete="name"
+                maxLength={100}
                 className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent"
               />
             </div>
@@ -136,11 +169,13 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
                   placeholder="••••••••"
                   autoComplete="new-password"
                   required
+                  aria-describedby="password-rules"
                   className="w-full px-4 py-3 rounded-lg bg-[hsl(var(--input))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] placeholder-[hsl(var(--muted-foreground))] focus:outline-none focus:ring-2 focus:ring-signal focus:border-transparent pr-12"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"
                 >
                   {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
@@ -164,21 +199,28 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
               />
             </div>
 
-            {/* Password requirements */}
-            <div className="space-y-2 py-2">
-              <PasswordCheck valid={passwordChecks.length} text="At least 8 characters" />
-              <PasswordCheck valid={passwordChecks.match} text="Passwords match" />
+            {/* Password requirements (the same rules the server enforces) */}
+            <div id="password-rules" className="grid grid-cols-1 gap-2 py-2 sm:grid-cols-2">
+              <PasswordCheck valid={rules.length} text="At least 8 characters" />
+              <PasswordCheck valid={rules.upper && rules.lower} text="Upper and lower case" />
+              <PasswordCheck valid={rules.number} text="A number" />
+              <PasswordCheck valid={rules.special} text="A symbol (!@#$…)" />
+              <PasswordCheck valid={passwordMatch} text="Passwords match" />
             </div>
 
+            {siteKey && (
+              <TurnstileWidget siteKey={siteKey} onToken={onTurnstileToken} resetKey={turnstileReset} dark={dark} />
+            )}
+
             {error && (
-              <div className="p-3 rounded-lg bg-red-900/20 border border-red-800">
+              <div className="p-3 rounded-lg bg-red-900/20 border border-red-800" role="alert">
                 <p className="text-sm text-red-400">{error}</p>
               </div>
             )}
 
             <button
               type="submit"
-              disabled={loading || !isPasswordValid}
+              disabled={loading || configLoading || !isPasswordValid || needsHumanCheck}
               className="w-full py-3 px-4 rounded-lg bg-accent hover:bg-accent-hover disabled:bg-accent/50 disabled:cursor-not-allowed text-white font-medium transition-colors flex items-center justify-center gap-2"
             >
               {loading ? (
@@ -193,6 +235,9 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
                 </>
               )}
             </button>
+            {siteKey && needsHumanCheck && isPasswordValid && (
+              <p className="text-center text-xs text-[hsl(var(--muted-foreground))]">Complete the human check to continue.</p>
+            )}
           </div>
         </form>
 

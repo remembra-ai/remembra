@@ -450,7 +450,8 @@ async def test_unverified_cap_is_off_by_default_and_grandfathers_existing_accoun
         await c.h.db.update_user_email_verified(new_uid, True)
         assert (await c.meter.get_account(new_uid)).credit_limit == 500
 
-        # A master-key /cloud/signup tenant (no user record, no way to verify) is exempt.
+        # A tenant-only record not created by /cloud/signup (nothing to verify) is exempt;
+        # /cloud/signup tenants are held until verified (tests/test_tenant_email_verification.py).
         await c.meter.register_tenant("tenant_only_user", email="api-signup@example.com")
         assert (await c.meter.get_account("tenant_only_user")).credit_limit == 500
 

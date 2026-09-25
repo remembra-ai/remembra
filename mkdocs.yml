@@ -115,6 +115,7 @@ nav:
     - Import & Export: guides/import-export.md
     - Plugins: guides/plugins.md
     - Security: guides/security.md
+    - Sign in with GitHub & Google: guides/sign-in-providers.md
   - Concepts:
     - How It Works: concepts/how-it-works.md
     - Memory Model: concepts/memory-model.md

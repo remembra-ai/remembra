@@ -10,7 +10,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from remembra.auth.middleware import authenticate_jwt, get_client_ip
 from remembra.auth.superadmin import account_is_owner
-from remembra.auth.users import UserManager
+from remembra.auth.users import UserManager, email_verified_on_another_account
 from remembra.cloud.signup_guard import TURNSTILE_HEADER, guard_signup
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
@@ -31,6 +31,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 # HTTP Bearer token security
 bearer_scheme = HTTPBearer(auto_error=False)
+
+DEFAULT_DASHBOARD_URL = "https://app.remembra.dev"
+
+
+def dashboard_link(path: str) -> str:
+    """Absolute dashboard URL for emailed links (``REMEMBRA_PUBLIC_DASHBOARD_URL``, else the hosted app)."""
+    return f"{get_settings().public_dashboard_url or DEFAULT_DASHBOARD_URL}{path}"
 
 
 # ---------------------------------------------------------------------------
@@ -368,11 +375,29 @@ async def signup(
             # Don't fail signup if email fails
             log.warning("welcome_email_failed", user_id=user.id, error_type=type(e).__name__)
 
+    await _send_signup_verification(user_manager, user.id, user.email)
+
     return SignupResponse(
         id=user.id,
         email=user.email,
         name=user.name,
     )
+
+
+async def _send_signup_verification(user_manager: UserManager, user_id: str, email: str) -> None:
+    """Email the verification link right after signup (best effort; never fails the signup)."""
+    if not EMAIL_AVAILABLE or not get_settings().resend_api_key:
+        return
+    try:
+        token = await security_state.create_email_verification(user_manager.db, user_id, email)
+        email_service = EmailService.create(provider=EmailProvider.RESEND)
+        result = await email_service.send_email_verification_email(
+            to=email, verify_url=dashboard_link(f"/verify-email?token={token}")
+        )
+        if not result.success:
+            log.warning("signup_verification_email_failed", user_id=user_id)
+    except Exception as e:
+        log.warning("signup_verification_email_failed", user_id=user_id, error_type=type(e).__name__)
 
 
 @router.post(
@@ -1066,7 +1091,7 @@ async def request_email_verification(
         email_service = EmailService.create(provider=EmailProvider.RESEND)
         result = await email_service.send_email_verification_email(
             to=user_row["email"],
-            verify_url=f"https://app.remembra.dev/verify-email?token={token}",
+            verify_url=dashboard_link(f"/verify-email?token={token}"),
         )
     except Exception as e:
         log.error("verification_email_error", error_type=type(e).__name__)
@@ -1092,6 +1117,16 @@ async def confirm_email_verification(
     user_row = await user_manager.db.get_user_by_id(current_user["id"])
     if not user_row:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    found = await security_state.find_email_verification(user_manager.db, body.token)
+    if found is None or found != (user_row["id"], str(user_row["email"]).strip().lower()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")
+    # One free account per verified email: an API-signup tenant (or another
+    # dashboard account) may already have verified this address.
+    if await email_verified_on_another_account(user_manager.db, user_row["email"], exclude_user_id=user_row["id"]):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This email address is already verified on another Remembra account.",
+        )
     ok = await security_state.consume_email_verification(user_manager.db, user_row["id"], user_row["email"], body.token)
     if not ok:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired verification token")

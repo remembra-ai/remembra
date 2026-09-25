@@ -21,6 +21,7 @@ from remembra.api.v1 import (
     memories,
     plugins,
     relay,
+    social_auth,
     spaces,
     teams,
     temporal,
@@ -32,6 +33,7 @@ from remembra.api.v1 import (
 
 api_router = APIRouter(prefix="/api")
 api_router.include_router(auth.router, prefix="/v1")
+api_router.include_router(social_auth.router, prefix="/v1")
 api_router.include_router(billing.router, prefix="/v1")
 api_router.include_router(memories.router, prefix="/v1")
 api_router.include_router(keys.router, prefix="/v1")

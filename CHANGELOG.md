@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Sign in with GitHub and Google.** "Continue with Google" / "Continue with GitHub" on the dashboard's
+  Sign in and Sign up pages (authorization code + PKCE; Google ID tokens verified against the JWKS with
+  nonce). Only verified provider emails are accepted, and one account backs each verified email and provider
+  account (`user_identities`). Google links into an existing account only when that account's email is
+  verified; GitHub never links by email and is connected from **Settings → Security → Sign-in methods**
+  (`POST /api/v1/auth/oauth/{provider}/link`, `GET`/`DELETE /api/v1/auth/identities`). The login code is bound
+  to the browser by an `HttpOnly` cookie, so a code cannot be replayed from another browser (login CSRF). The
+  owner is emailed when a provider is added. Providers without credentials are hidden and 404. Setup:
+  `docs/guides/sign-in-providers.md`.
+- `GET /api/v1/auth/providers`: enabled sign-in providers and the Turnstile site key; the Sign up page renders
+  Cloudflare Turnstile when a site key is published, and checks the same password rules as the server.
+- Email verification for `/cloud/signup` tenants (`/api/v1/cloud/verify-email/request` and `/confirm`); they
+  are now held at the unverified-email credit cap until verified. Password signups get their verification
+  link by email, completing a password reset verifies the email, and the dashboard has a `/verify-email` page
+  and a **Resend verification email** button (Settings → Profile). One free account per verified email is
+  enforced on every path (dashboard verify, API-signup verify, password reset, social sign-up).
 - **Remembra Relay: session continuity across agents.** Every agent leaves a structured handoff
   when it stops, and any agent picks it up at session start, whatever the tool, machine or checkout location.
   - Location-independent project identity: `POST /api/v1/projects/resolve` maps a normalized git
@@ -34,6 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   brief). New read endpoints back it: `GET /api/v1/trail/summary`, `GET /api/v1/inbox/messages`,
   `GET /api/v1/inbox/summary`; `GET /api/v1/trail` gains `agent_id` and a per-item `detail`.
   Existing pages are restyled with the new light and dark tokens and work at phone width.
+
+### Security
+- A password reset on an account whose email was never verified now clears everything set up before it: API
+  keys, sessions, 2FA, connector grants, webhooks and provider links. It protects a mailbox owner who takes
+  back an address someone else pre-registered.
 
 ### Changed (breaking)
 - **`remembra-relay` / MCP location briefs: which project a git repository uses.** A repository the
