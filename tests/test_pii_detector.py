@@ -100,3 +100,14 @@ class TestStorePathRoundTrip:
 
         assert stored == original
         assert "178.156.226.84" in stored
+
+
+def test_compact_dates_are_not_bank_accounts():
+    """Live 2026-09-25: '~/.remembra-config-backups-20260925' came back as
+    '[REDACTED_BANK_ACCOUNT]'."""
+    text = "backups in ~/.remembra-config-backups-20260925 and snapshot 19991231"
+    assert redact_pii(text) == text
+
+
+def test_long_account_numbers_still_redacted():
+    assert "4000123456789" not in redact_pii("acct 4000123456789 on file")

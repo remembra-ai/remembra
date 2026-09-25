@@ -53,7 +53,9 @@ PII_PATTERNS: dict[str, re.Pattern[str]] = {
     # Driver's License (generic patterns)
     "drivers_license": re.compile(r"\b[A-Z]{1,2}\d{6,8}\b"),
     # Bank Account (generic)
-    "bank_account": re.compile(r"\b\d{8,17}\b"),  # Very generic, use with caution
+    # Very generic, use with caution. Compact YYYYMMDD dates (20260925, as in
+    # backup/folder names) are excluded: they were being redacted as accounts.
+    "bank_account": re.compile(r"\b(?!(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\b)\d{8,17}\b"),
     # Date of Birth patterns
     "dob": re.compile(r"\b(?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01])[-/](?:19|20)\d{2}\b"),
 }

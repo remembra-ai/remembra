@@ -91,3 +91,24 @@ def test_ordinary_text_untouched(text):
 def test_redaction_is_idempotent():
     once = redact_secrets(f"key {FAKE['resend_key']}").text
     assert redact_secrets(once).text == once
+
+
+# Live 2026-09-25 dry run: most "high_entropy_token" hits were file paths with
+# digits (/Volumes/T7/..., /Users/.../v2). Paths must survive; slash-bearing
+# base64 secrets must not.
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/Volumes/T7/Projects/ChairTime2026/build42/ios/Runner",
+        "/Users/dolphy/Projects/remembra-wt/ret/src/remembra/services",
+        "~/Developer/CheckTheFridge/App/Sources/Views2",
+        "clawd/projects/trademind/pxexec_practice/runs2026",
+    ],
+)
+def test_file_paths_are_not_redacted(path: str) -> None:
+    assert redact_secrets(f"repo lives at {path} now").text == f"repo lives at {path} now"
+
+
+def test_slash_bearing_random_secret_is_still_redacted() -> None:
+    secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYzk9sQ2Lm8Ew"
+    assert secret not in redact_secrets(f"aws secret {secret}").text

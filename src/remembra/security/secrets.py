@@ -127,11 +127,26 @@ def _looks_random(value: str, min_len: int = 16, min_entropy: float = 3.0) -> bo
     return classes >= 2 and any(c.isdigit() for c in value) and _entropy(value) >= min_entropy
 
 
+_PATH_WORD_RE = re.compile(r"^(?:[A-Z]?[a-z0-9_-]*|[A-Z0-9_-]+)$")
+
+
+def _looks_like_path(token: str) -> bool:
+    """Filesystem paths contain digits often enough (T7, v2, 2026-09) to pass
+    the entropy check, but their segments read like words. Base64-style
+    secrets that contain '/' have random mixed-case segments and stay flagged."""
+    if token.startswith(("/", "~/", "./")):
+        return True
+    parts = [p for p in token.split("/") if p]
+    if len(parts) < 2:
+        return False
+    return all(_PATH_WORD_RE.fullmatch(p) for p in parts)
+
+
 def _is_high_entropy_token(token: str) -> bool:
     if _HEX_RE.fullmatch(token) or _UUID_RE.fullmatch(token):
         return False  # commit SHAs, digests, ids
-    if "/" in token and token.count("/") >= 2 and not any(c.isdigit() for c in token):
-        return False  # paths
+    if _looks_like_path(token):
+        return False  # file paths (/Volumes/T7/..., ~/Projects/...) are not credentials
     stripped = token.strip("=")
     classes = sum(
         (
