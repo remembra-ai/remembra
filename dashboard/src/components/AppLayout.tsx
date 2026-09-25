@@ -4,7 +4,7 @@ import { Search } from 'lucide-react';
 import { MobileNav, Sidebar } from './Sidebar';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { SettingsPanel } from './SettingsPanel';
-import { BrandMark } from './relay/ui';
+import { BrandMark } from '../brand/Brand';
 import { TABS, hrefFor, sectionOf, type TabType } from '../lib/nav';
 
 interface AppLayoutProps {
@@ -69,7 +69,7 @@ export function AppLayout({
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex h-14 shrink-0 items-center gap-3 border-b border-rule bg-paper px-4 md:h-16 md:px-6">
           <a href={hrefFor('home')} className="md:hidden" aria-label="Remembra home">
-            <BrandMark size={26} className="text-ink" />
+            <BrandMark size={32} className="text-ink" />
           </a>
           <div className="min-w-0 flex-1">
             <h1 className="font-display truncate text-lg font-bold leading-tight tracking-[-0.02em] text-ink md:text-xl">{meta.title}</h1>

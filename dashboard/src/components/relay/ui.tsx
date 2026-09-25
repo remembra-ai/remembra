@@ -8,15 +8,7 @@ import { agentMeta } from '../../lib/agents';
 import { explainError } from '../../lib/relay';
 import { useCopy } from '../../hooks/useCopy';
 
-export function BrandMark({ size = 28, className }: { size?: number; className?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 32 32" aria-hidden="true" className={className}>
-      <circle cx="6" cy="25" r="2.4" fill="currentColor" opacity=".3" />
-      <circle cx="11.5" cy="20" r="2.4" fill="currentColor" opacity=".55" />
-      <rect x="15" y="4" width="9" height="22" rx="4.5" transform="rotate(40 19.5 15)" fill="var(--signal)" />
-    </svg>
-  );
-}
+export { BrandMark } from '../../brand/Brand';
 
 export function Card({
   children,

@@ -1,0 +1,14 @@
+{
+  "name": "Remembra",
+  "short_name": "Remembra",
+  "description": "Mission control for your AI agents: the handoff trail, agent activity, inbox and shared memory.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121615",
+  "theme_color": "#121615",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/brand/app-icon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

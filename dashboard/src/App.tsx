@@ -19,18 +19,20 @@ import { ForgotPassword } from './pages/ForgotPassword';
 import { InviteAccept } from './pages/InviteAccept';
 import { api } from './lib/api';
 import { API_V1 } from './config';
+import { AuthFrame } from './brand/AuthFrame';
 
 type AuthMode = 'login' | 'signup' | 'forgot-password' | 'reset-password' | 'api-key' | 'invite';
 
 function App() {
+  // Dark by default for every visitor. An explicit choice made with the theme
+  // toggle is saved as `darkMode` and always wins (index.html applies it before
+  // first paint, so there is no flash).
   const [darkMode, setDarkMode] = useState(() => {
     try {
-      const saved = localStorage.getItem('darkMode');
-      if (saved === 'true' || saved === 'false') return saved === 'true';
+      return localStorage.getItem('darkMode') !== 'false';
     } catch {
-      // Storage unavailable: follow the system theme.
+      return true;
     }
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
   });
   const [themeChosen, setThemeChosen] = useState(() => {
     try {
@@ -39,7 +41,7 @@ function App() {
       return false;
     }
   });
-  
+
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
     // Check for JWT token first, then API key
     return !!localStorage.getItem('remembra_jwt_token') || !!api.getApiKey();
@@ -78,15 +80,6 @@ function App() {
       // Storage unavailable: the choice lasts for this visit.
     }
   }, [darkMode, themeChosen]);
-
-  // Follow the system theme until the user picks one.
-  useEffect(() => {
-    if (themeChosen || !window.matchMedia) return undefined;
-    const query = window.matchMedia('(prefers-color-scheme: dark)');
-    const onChange = (e: MediaQueryListEvent) => setDarkMode(e.matches);
-    query.addEventListener('change', onChange);
-    return () => query.removeEventListener('change', onChange);
-  }, [themeChosen]);
 
   // Verify JWT token on mount
   useEffect(() => {
@@ -239,52 +232,55 @@ function App() {
   if (!isAuthenticated) {
     return (
       <div className={darkMode ? 'dark' : ''}>
-        {authMode === 'login' && (
-          <Login
-            onLogin={handleLogin}
-            onSwitchToSignup={() => setAuthMode('signup')}
-            onForgotPassword={() => setAuthMode('forgot-password')}
-          />
-        )}
-        {authMode === 'signup' && (
-          <Signup
-            onSignup={handleSignup}
-            onSwitchToLogin={() => setAuthMode('login')}
-          />
-        )}
-        {authMode === 'forgot-password' && (
-          <ForgotPassword
-            onBackToLogin={() => setAuthMode('login')}
-          />
-        )}
-        {authMode === 'reset-password' && (
-          <ForgotPassword
-            onBackToLogin={() => setAuthMode('login')}
-            initialStep="reset"
-          />
-        )}
-        {authMode === 'api-key' && (
-          <ApiKeyForm onAuthenticated={handleApiKeyAuth} />
-        )}
-        {authMode === 'invite' && inviteToken && (
-          <InviteAccept
-            token={inviteToken}
-            isAuthenticated={false}
-            onAccepted={() => {
-              window.history.replaceState({}, '', '/');
-              setActiveTab('teams');
-            }}
-            onSwitchToLogin={() => {
-              localStorage.setItem('pending_invite_token', inviteToken);
-              setAuthMode('login');
-            }}
-            onSwitchToSignup={() => {
-              localStorage.setItem('pending_invite_token', inviteToken);
-              setAuthMode('signup');
-            }}
-          />
-        )}
+        <AuthFrame>
+          {authMode === 'login' && (
+            <Login
+              onLogin={handleLogin}
+              onSwitchToSignup={() => setAuthMode('signup')}
+              onForgotPassword={() => setAuthMode('forgot-password')}
+            />
+          )}
+          {authMode === 'signup' && (
+            <Signup
+              onSignup={handleSignup}
+              onSwitchToLogin={() => setAuthMode('login')}
+            />
+          )}
+          {authMode === 'forgot-password' && (
+            <ForgotPassword
+              onBackToLogin={() => setAuthMode('login')}
+            />
+          )}
+          {authMode === 'reset-password' && (
+            <ForgotPassword
+              onBackToLogin={() => setAuthMode('login')}
+              initialStep="reset"
+            />
+          )}
+          {authMode === 'api-key' && (
+            <ApiKeyForm onAuthenticated={handleApiKeyAuth} />
+          )}
+          {authMode === 'invite' && inviteToken && (
+            <InviteAccept
+              token={inviteToken}
+              isAuthenticated={false}
+              onAccepted={() => {
+                window.history.replaceState({}, '', '/');
+                setActiveTab('teams');
+              }}
+              onSwitchToLogin={() => {
+                localStorage.setItem('pending_invite_token', inviteToken);
+                setAuthMode('login');
+              }}
+              onSwitchToSignup={() => {
+                localStorage.setItem('pending_invite_token', inviteToken);
+                setAuthMode('signup');
+              }}
+            />
+          )}
         
+        </AuthFrame>
+
         {/* Toggle between user auth and API key auth */}
         {authMode !== 'api-key' && authMode !== 'invite' && (
           <div className="fixed bottom-4 right-4">

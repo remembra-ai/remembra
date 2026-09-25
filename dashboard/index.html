@@ -2,10 +2,12 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/site.webmanifest" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#ECEDE8" media="(prefers-color-scheme: light)" />
-    <meta name="theme-color" content="#131416" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#121615" />
     <title>Remembra</title>
     <meta name="description" content="Mission control for your AI agents: the handoff trail, agent activity, inbox and shared memory." />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -15,14 +17,14 @@
       rel="stylesheet"
     />
     <script>
-      /* Apply the saved (or system) theme before first paint. Storage may be unavailable. */
+      /* Dark by default for every visitor; an explicit choice (the theme toggle,
+         saved as darkMode) wins. Applied before first paint. Storage may be unavailable. */
       (function () {
-        var dark;
+        var dark = true;
         try {
           var saved = localStorage.getItem('darkMode');
-          if (saved === 'true' || saved === 'false') dark = saved === 'true';
+          if (saved === 'false') dark = false;
         } catch (e) {}
-        if (dark === undefined) dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
         if (dark) document.documentElement.classList.add('dark');
       })();
     </script>
