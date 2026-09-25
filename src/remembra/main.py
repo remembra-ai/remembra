@@ -446,7 +446,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     log.info("storage_layer_ready")
 
-    yield
+    # Remote MCP connector (Claude apps / ChatGPT): OAuth tables + MCP session
+    # manager. No-op unless REMEMBRA_CONNECTOR_ENABLED.
+    from remembra.connector import connector_lifespan
+
+    async with connector_lifespan(app, settings):
+        yield
 
     # Cleanup
     log.info("remembra_shutdown")
@@ -643,10 +648,13 @@ def create_app() -> FastAPI:
             response.headers["X-Content-Type-Options"] = "nosniff"
             response.headers["X-Frame-Options"] = "DENY"
             response.headers["X-XSS-Protection"] = "1; mode=block"
-            response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+            # Pages that render HTML (the connector's OAuth sign-in/consent)
+            # set their own stricter-than-default policies; keep those.
+            response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
             # Content Security Policy - API-focused policy
-            response.headers["Content-Security-Policy"] = (
-                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
             )
             if not settings.debug:
                 response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
@@ -777,6 +785,13 @@ def create_app() -> FastAPI:
     app.include_router(ws_router)
 
     # -----------------------------------------------------------------------
+    # Remote MCP connector (/mcp + OAuth 2.1), before the SPA catch-all
+    # -----------------------------------------------------------------------
+    from remembra.connector import install_connector
+
+    install_connector(app, settings)
+
+    # -----------------------------------------------------------------------
     # Static files (Dashboard UI)
     # -----------------------------------------------------------------------
     static_dir = settings.static_dir
@@ -806,6 +821,9 @@ def create_app() -> FastAPI:
                     "openapi",
                     "ws",
                     "health",
+                    "mcp",
+                    "oauth",
+                    ".well-known",
                 )
                 if any(full_path.startswith(p) for p in api_paths):
                     return JSONResponse({"detail": "Not found"}, status_code=404)
