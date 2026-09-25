@@ -10,8 +10,13 @@
   ``siteverify`` endpoint. Inert when the secret is unset. Fails closed: an
   unreachable siteverify rejects the signup (503) rather than letting it in.
 
-Free accounts are additionally held at 25 smart credits until the email is
-verified (see :meth:`remembra.cloud.metering.UsageMeter.get_account`).
+Order: a loose per-network attempt cap (only with Turnstile on, bounding
+siteverify calls), then Turnstile, then the strict signup limits, so
+requests without a valid token cannot use up a network's or a domain's quota.
+
+New Free accounts can additionally be held at 25 smart credits until the
+email is verified, once ``unverified_credit_cap_effective_at`` is set (see
+:meth:`remembra.cloud.metering.UsageMeter.get_account`).
 """
 
 from __future__ import annotations
@@ -102,7 +107,28 @@ def enforce_signup_rate_limits(client_ip: str, email: str) -> None:
         )
 
 
+def enforce_signup_attempt_limit(client_ip: str) -> None:
+    """Loose per-network cap on signup ATTEMPTS, checked before Turnstile (bounds siteverify calls)."""
+    if not rate_limits_enabled() or not turnstile_enabled():
+        return
+    limit = get_settings().signup_attempt_ip_rate_limit
+    if not get_cloud_rate_limiter().hit("signup_attempt_ip", network_key(client_ip), limit):
+        log.warning("signup_rate_limited", scope="attempts")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many signup attempts from your network. Please try again later.",
+            headers={"Retry-After": "3600"},
+        )
+
+
 async def guard_signup(*, client_ip: str, email: str, turnstile_token: str | None) -> None:
-    """Run every signup check in order: rate limits, then Turnstile."""
-    enforce_signup_rate_limits(client_ip, email)
+    """Run every signup check in order: attempt cap, Turnstile, then the signup limits.
+
+    The strict per-network and per-domain signup limits are only charged once
+    the human check has passed, so requests without a valid token (or with
+    random addresses at someone else's domain) cannot use them up and lock
+    real users out.
+    """
+    enforce_signup_attempt_limit(client_ip)
     await verify_turnstile(turnstile_token, client_ip)
+    enforce_signup_rate_limits(client_ip, email)

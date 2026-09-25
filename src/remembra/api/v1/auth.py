@@ -308,8 +308,9 @@ async def signup(
     - **turnstile_token**: Cloudflare Turnstile token (or the ``CF-Turnstile-Response``
       header) — required when Turnstile is enabled on this server
 
-    Hardening: 3 signups/hour per client /24, 20/day per email domain. Free
-    accounts get 25 smart credits until the email is verified.
+    Hardening: 3 signups/hour per client /24, 20/day per email domain (charged
+    after Turnstile passes). Once ``unverified_credit_cap_effective_at`` is set,
+    new Free accounts get 25 smart credits until the email is verified.
     """
     await guard_signup(
         client_ip=get_client_ip(request),
