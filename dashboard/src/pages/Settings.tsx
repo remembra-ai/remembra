@@ -4,6 +4,15 @@ import clsx from 'clsx';
 import { api } from '../lib/api';
 import { API_V1 } from '../config';
 import type { UserResponse } from '../lib/api';
+import { useRoute } from '../lib/nav';
+import { SignInMethods } from '../components/auth/SignInMethods';
+import { EmailVerificationStatus } from '../components/auth/EmailVerificationStatus';
+
+const SETTINGS_TABS: readonly SettingsTab[] = ['profile', 'password', 'security', 'workspace', 'retrieval', 'diagnostics', 'account'];
+
+function isSettingsTab(value: string | null): value is SettingsTab {
+  return !!value && (SETTINGS_TABS as readonly string[]).includes(value);
+}
 
 type SettingsTab = 'profile' | 'password' | 'security' | 'workspace' | 'retrieval' | 'diagnostics' | 'account';
 
@@ -12,7 +21,13 @@ interface SettingsProps {
 }
 
 export function Settings({ onLogout }: SettingsProps) {
-  const [activeTab, setActiveTab] = useState<SettingsTab>('profile');
+  // #/settings?section=security opens a tab directly (e.g. back from connecting a provider).
+  const { params } = useRoute();
+  const section = params.get('section');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(() => (isSettingsTab(section) ? section : 'profile'));
+  useEffect(() => {
+    if (isSettingsTab(section)) setActiveTab(section);
+  }, [section]);
   const [user, setUser] = useState<UserResponse | null>(null);
   const [authMode, setAuthMode] = useState<'jwt' | 'api_key' | 'none'>(() => api.getAuthMode());
   const [loading, setLoading] = useState(true);
@@ -256,7 +271,10 @@ export function Settings({ onLogout }: SettingsProps) {
         <PasswordSettings />
       )}
       {activeTab === 'security' && (
-        <SecuritySettings />
+        <div className="space-y-6">
+          <SignInMethods onLogout={onLogout} />
+          <SecuritySettings />
+        </div>
       )}
       {activeTab === 'workspace' && (
         <WorkspaceSettings />
@@ -317,6 +335,7 @@ function ProfileSettings({ user, onUpdate }: { user: UserResponse; onUpdate: () 
             disabled
             className="w-full px-4 py-3 rounded-lg bg-gray-100 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed"
           />
+          <EmailVerificationStatus verified={!!user.email_verified} onVerified={onUpdate} />
           <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
             Email cannot be changed. Contact support if you need to update it.
           </p>

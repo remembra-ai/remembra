@@ -7,6 +7,8 @@
 import { API_BASE_URL, API_V1 } from '../config';
 
 export type AuthPage = 'login' | 'signup';
+/** Where a provider round trip started: a sign-in page, or Settings (connecting a provider). */
+export type OAuthOrigin = AuthPage | 'settings';
 
 /** The route path without the app's base URL or a trailing slash ("/oauth/callback/" -> "/oauth/callback"). */
 export function appPath(pathname: string = window.location.pathname, base: string = import.meta.env.BASE_URL): string {
@@ -70,18 +72,36 @@ export interface OAuthFragment {
   code: string | null;
   error: string | null;
   provider: string | null;
-  from: AuthPage;
+  from: OAuthOrigin;
+  /** A provider was connected to the signed-in account (Settings flow); there is no code. */
+  linked: boolean;
 }
 
 export function parseOAuthFragment(hash: string): OAuthFragment {
   const params = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
-  const from = params.get('from') === 'signup' ? 'signup' : 'login';
+  const rawFrom = params.get('from');
+  const from: OAuthOrigin = rawFrom === 'signup' || rawFrom === 'settings' ? rawFrom : 'login';
   return {
     code: params.get('code'),
     error: params.get('error'),
     provider: params.get('provider'),
     from,
+    linked: params.get('linked') === '1',
   };
+}
+
+/**
+ * Trade the single-use login code for a session. `credentials: 'include'` sends
+ * the HttpOnly cookie the API set alongside the code: the API refuses a code
+ * that arrives without it (a code planted from another browser).
+ */
+export function exchangeLoginCode(code: string, totpCode?: string): Promise<Response> {
+  return fetch(`${API_V1}/auth/oauth/exchange`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(totpCode ? { code, totp_code: totpCode } : { code }),
+  });
 }
 
 export function providerName(id: string | null): string {
@@ -105,9 +125,15 @@ export function oauthErrorMessage(code: string | null, provider: string | null):
     case 'email_not_authoritative':
       return 'Google cannot confirm who owns this email address. Use a Gmail or Google Workspace account, or sign up with email and password.';
     case 'account_exists_unverified':
-      return `An account with this email already exists but its email is not verified. Sign in with your password (or use "Forgot password"), then ${name} sign-in will work.`;
+      return `An account with this email exists, but its email address is not verified yet. Use "Forgot password" (or the verification link we emailed) to verify it, then try ${name} again.`;
+    case 'account_exists_link_required':
+      return `An account with this email already exists. Sign in with your password or Google, then connect ${name} in Settings → Security.`;
+    case 'email_in_use':
+      return 'This email address is already verified on another Remembra account (an API signup). Use that account, or sign up with a different email address.';
     case 'identity_conflict':
       return `This Remembra account is already linked to a different ${name} account. Sign in with that ${name} account or with your password.`;
+    case 'identity_in_use':
+      return `That ${name} account is already connected to a different Remembra account. Disconnect it there first, or use another ${name} account.`;
     case 'account_disabled':
       return 'This account is deactivated. Contact support if you think this is a mistake.';
     case 'rate_limited':
@@ -133,5 +159,85 @@ export function passwordChecks(password: string): PasswordChecks {
     lower: /[a-z]/.test(password),
     number: /\d/.test(password),
     special: /[!@#$%^&*(),.?":{}|<>_\-+=[\]\\/`~]/.test(password),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Connected sign-in methods (Settings → Security)
+// ---------------------------------------------------------------------------
+
+export interface ConnectedIdentity {
+  provider: string;
+  name: string;
+  email: string;
+  created_at: string | null;
+  last_login_at: string | null;
+}
+
+export interface IdentitiesState {
+  identities: ConnectedIdentity[];
+  available: AuthProvider[];
+}
+
+/** Thrown when connecting needs a fresh sign-in (the API wants a session from the last 15 minutes). */
+export class ReauthRequiredError extends Error {}
+
+async function detailOf(response: Response, fallback: string): Promise<string> {
+  const data = await response.json().catch(() => ({}));
+  return typeof data.detail === 'string' ? data.detail : fallback;
+}
+
+export async function fetchIdentities(jwt: string): Promise<IdentitiesState> {
+  const response = await fetch(`${API_V1}/auth/identities`, { headers: { Authorization: `Bearer ${jwt}` } });
+  if (!response.ok) throw new Error(await detailOf(response, 'Could not load sign-in methods.'));
+  const data = (await response.json()) as { identities?: unknown; available?: unknown };
+  const identities = Array.isArray(data.identities)
+    ? data.identities.filter(
+        (i): i is ConnectedIdentity =>
+          !!i && typeof i === 'object' && typeof (i as ConnectedIdentity).provider === 'string' && typeof (i as ConnectedIdentity).email === 'string',
+      )
+    : [];
+  return { identities, available: normalizeAuthConfig({ providers: data.available }).providers };
+}
+
+/**
+ * The browser URL that starts connecting `provider` to the signed-in account.
+ * Only a path on the API origin is accepted, so a bad response cannot send the
+ * browser anywhere else.
+ */
+export async function requestProviderLink(jwt: string, provider: string): Promise<string> {
+  const response = await fetch(`${API_V1}/auth/oauth/${encodeURIComponent(provider)}/link`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+  if (response.status === 403) throw new ReauthRequiredError(await detailOf(response, 'Sign in again to continue.'));
+  if (!response.ok) throw new Error(await detailOf(response, 'Could not start connecting the account.'));
+  const data = (await response.json()) as { start_path?: unknown };
+  const path = typeof data.start_path === 'string' ? data.start_path : '';
+  if (!path.startsWith(`/api/v1/auth/oauth/${provider}/start?link=`)) throw new Error('Could not start connecting the account.');
+  return `${API_BASE_URL}${path}`;
+}
+
+export async function disconnectProvider(jwt: string, provider: string): Promise<void> {
+  const response = await fetch(`${API_V1}/auth/identities/${encodeURIComponent(provider)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+  if (!response.ok) throw new Error(await detailOf(response, 'Could not disconnect.'));
+}
+
+/** Email the verification link again (signed-in dashboard account). */
+export async function requestVerificationEmail(jwt: string): Promise<{ message: string; verified: boolean }> {
+  const response = await fetch(`${API_V1}/auth/verify-email/request`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${jwt}` },
+  });
+  if (response.status === 429) throw new Error('Too many requests. Wait a minute, then try again.');
+  if (!response.ok) throw new Error(await detailOf(response, 'Could not send the verification email.'));
+  const data = (await response.json().catch(() => ({}))) as { email_verified?: unknown };
+  const verified = data.email_verified === true;
+  return {
+    verified,
+    message: verified ? 'Your email is already verified.' : 'Verification email sent. Open the link in it to finish.',
   };
 }

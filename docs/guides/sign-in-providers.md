@@ -20,6 +20,14 @@ it refuses.
 Both origins are exact (scheme + host, no path, no trailing slash). HTTPS is
 required; plain `http://` is accepted only for `localhost` / `127.0.0.1`.
 
+The two origins must be **same-site**: subdomains of one registrable domain,
+like `api.remembra.dev` and `app.remembra.dev`. The login code the dashboard
+receives only works together with an `HttpOnly` cookie the API sets on its own
+origin, and browsers send that cookie on the dashboard's request to the API
+only when the two are same-site. The API origin must also be in
+`REMEMBRA_CORS_ORIGINS` for the dashboard origin (credentials are allowed only
+for listed origins; never `*`).
+
 ## 1. Create the GitHub OAuth app
 
 1. Open **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**
@@ -132,16 +140,43 @@ and you land in the dashboard. Repeat with Google.
       `@gmail.com`, or a Google Workspace account (`hd` claim).
 3. The API picks exactly one account:
     - the account already linked to this provider account signs in;
-    - else an account with the same email is **linked**, only if that
-      account's email is already verified;
+    - else, **Google only**: an account with the same email is **linked**, only
+      if that account's email is already verified. The account owner gets an
+      email saying Google sign-in was added;
+    - else **GitHub** is refused when an account with that email exists
+      ("connect GitHub in Settings"). GitHub never re-verifies addresses, so a
+      "verified" primary email can belong to someone who no longer owns the
+      mailbox (a former employer's address, a lapsed domain). GitHub is added
+      to an existing account only from a signed-in session (below);
     - else a new account is created with the email marked verified, under the
-      same per-network and per-domain signup limits as password signup.
+      same per-network and per-domain signup limits as password signup, unless
+      another account (including an API signup) already verified that address.
 4. It redirects to `https://app.remembra.dev/oauth/callback#code=...` with a
-   single-use login code (5 minutes). The dashboard trades it at
-   `POST /api/v1/auth/oauth/exchange` for the normal session. Accounts with 2FA
-   must still enter their TOTP code there.
+   single-use login code (5 minutes), and sets a second `HttpOnly`,
+   `SameSite=Lax` cookie (`__Host-remembra_oauth_login`) holding a secret bound
+   to that code. The dashboard trades the code at
+   `POST /api/v1/auth/oauth/exchange` with `credentials: 'include'`; the API
+   refuses and burns a code sent without the matching cookie. A code minted in
+   someone else's browser (an attacker sending a victim a
+   `/oauth/callback#code=...` link to sign them into the attacker's account)
+   therefore cannot be used. Accounts with 2FA must still enter their TOTP code
+   there, from the same browser.
 
 Accounts created this way have no password. **Forgot password** sets one.
+
+### Connecting a provider to an existing account
+
+**Settings → Security → Sign-in methods** lists Google and GitHub with
+**Connect** / **Disconnect**. Connect calls
+`POST /api/v1/auth/oauth/{provider}/link` with the dashboard session, which
+returns a single-use start path (2 minutes) that the browser opens; the rest is
+the normal flow, and the callback attaches the provider account to the signed-in
+account (the provider email may differ from the account email) and sends the
+browser back to Settings. It needs a session from the last 15 minutes; with an
+older one the page asks the user to sign in again. A provider account already
+connected to another Remembra account is refused. The owner is emailed whenever
+a provider is added. `GET /api/v1/auth/identities` lists connections and
+`DELETE /api/v1/auth/identities/{provider}` removes one.
 
 ## What is refused, and what users see
 
@@ -150,8 +185,11 @@ Accounts created this way have no password. **Forgot password** sets one.
 | GitHub primary email not verified, or a noreply address | "needs a verified primary email address" |
 | Google `email_verified` false | "did not confirm your email address" |
 | Google address that is neither Gmail nor Workspace | "Google cannot confirm who owns this email address" (sign up with email instead) |
-| An account with that email exists but was never verified | Refused, never linked (protects against someone pre-registering a victim's address). The owner signs in with the password, or uses **Forgot password**; completing a reset verifies the email, and the provider then links |
+| An account with that email exists but was never verified | Refused, never linked (protects against someone pre-registering a victim's address). The owner uses **Forgot password** (or the verification link emailed at signup, while signed in). Signing in with the password alone does not verify the email |
+| GitHub, and an account with that email already exists | Refused: sign in with the password or Google, then connect GitHub in Settings |
+| No account has the email, but an API signup already verified it | Refused (one free account per verified email) |
 | This Remembra account is already linked to a different GitHub / Google account | Refused |
+| Connecting a provider account that is already connected to another Remembra account | Refused |
 | State missing, expired, replayed, from another browser, or nonce mismatch | Refused ("did not start in this browser") |
 | Deactivated account | Refused |
 | Too many new accounts from one network | Refused (signup limits) |
@@ -160,8 +198,18 @@ One account per verified email and per provider account: `user_identities` is
 unique on `(provider, provider_user_id)` and on `(user_id, provider)`, and
 `users.email` is unique.
 
+### Pre-registered accounts
+
+Someone can sign up with another person's address and never verify it. When
+the real owner of the mailbox completes **Forgot password** on such an account
+(the first proof that anyone controls the address), the API treats them as a new
+owner: it revokes every API key and dashboard session, turns 2FA off, revokes
+Claude / ChatGPT connector grants, pauses webhooks, and removes provider links,
+then marks the email verified. A reset of an account whose email was already
+verified keeps its keys, as before.
+
 Rate limits per client IP: `start` 20/minute, `callback` 30/minute, `exchange`
-10/minute, `providers` 60/minute.
+10/minute, `providers` 60/minute, `link` 10/minute.
 
 ## Logs
 
@@ -187,10 +235,16 @@ curl -X POST https://api.remembra.dev/api/v1/cloud/verify-email/request \
 The link opens `https://app.remembra.dev/verify-email?token=...&account=api`,
 which confirms it with `POST /api/v1/cloud/verify-email/confirm` (token only,
 single use, 24 hours). An address already verified on another account cannot be
-verified again, so one email backs one free account. Once
+verified again, so one email backs one free account. The rule holds in every
+direction: the dashboard's verify-email confirm answers `409`, Sign in with
+Google / GitHub will not create a second account, and a password reset does not
+mark the address verified, when another account (dashboard or API signup)
+already verified it. Once
 `REMEMBRA_UNVERIFIED_CREDIT_CAP_EFFECTIVE_AT` is set, these tenants are held at
 25 credits until they verify, like dashboard signups.
 
 Dashboard password signups receive their link automatically (when email is
 configured) and confirm it while signed in; the `/verify-email` page asks them
-to sign in first if needed.
+to sign in first if needed. **Settings → Profile** shows whether the email is
+verified and has **Resend verification email** (`POST /api/v1/auth/verify-email/request`)
+for links that expired.

@@ -267,6 +267,11 @@ function App() {
           }}
           onBack={(page) => {
             setLanding(null);
+            if (page === 'settings') {
+              // Connected a provider (or it failed) from Settings while signed in.
+              navigate('settings', { section: 'security' }, true);
+              return;
+            }
             setAuthMode(page);
           }}
         />

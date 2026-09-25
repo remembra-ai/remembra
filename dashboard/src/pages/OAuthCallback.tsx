@@ -1,33 +1,35 @@
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Loader2, ShieldCheck } from 'lucide-react';
-import { API_V1 } from '../config';
+import { AlertTriangle, ArrowLeft, CheckCircle2, Loader2, ShieldCheck } from 'lucide-react';
 import { BrandMark } from '../components/relay/ui';
-import { oauthErrorMessage, parseOAuthFragment, providerName, type AuthPage } from '../lib/authProviders';
+import { exchangeLoginCode, oauthErrorMessage, parseOAuthFragment, providerName, type OAuthOrigin } from '../lib/authProviders';
 
 type SessionUser = { id: string; email: string; name?: string; is_admin?: boolean };
 
 interface OAuthCallbackProps {
   onLogin: (token: string, user: SessionUser) => void;
-  onBack: (page: AuthPage) => void;
+  /** Back to where the round trip started: a sign-in page, or Settings after connecting a provider. */
+  onBack: (page: OAuthOrigin) => void;
 }
 
 type Phase =
   | { kind: 'exchanging' }
   | { kind: 'totp'; code: string }
+  | { kind: 'linked' }
   | { kind: 'error'; message: string };
 
 /**
- * Landing page for /oauth/callback#code=... (or #error=...). Trades the
- * single-use login code for a dashboard session, asking for a 2FA code when
- * the account has it on. The fragment is wiped from the address bar at once.
+ * Landing page for /oauth/callback#code=... (or #error=..., or #linked=1 after
+ * connecting a provider from Settings). Trades the single-use login code for a
+ * dashboard session, asking for a 2FA code when the account has it on. The
+ * fragment is wiped from the address bar at once.
  */
 export function OAuthCallback({ onLogin, onBack }: OAuthCallbackProps) {
   const [fragment] = useState(() => parseOAuthFragment(window.location.hash));
-  const [phase, setPhase] = useState<Phase>(() =>
-    fragment.code
-      ? { kind: 'exchanging' }
-      : { kind: 'error', message: oauthErrorMessage(fragment.error ?? 'provider_error', fragment.provider) },
-  );
+  const [phase, setPhase] = useState<Phase>(() => {
+    if (fragment.code) return { kind: 'exchanging' };
+    if (fragment.linked && !fragment.error) return { kind: 'linked' };
+    return { kind: 'error', message: oauthErrorMessage(fragment.error ?? 'provider_error', fragment.provider) };
+  });
   const [totp, setTotp] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [totpError, setTotpError] = useState<string | null>(null);
@@ -35,11 +37,7 @@ export function OAuthCallback({ onLogin, onBack }: OAuthCallbackProps) {
   const name = providerName(fragment.provider);
 
   const exchange = async (code: string, totpCode?: string): Promise<void> => {
-    const response = await fetch(`${API_V1}/auth/oauth/exchange`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(totpCode ? { code, totp_code: totpCode } : { code }),
-    });
+    const response = await exchangeLoginCode(code, totpCode);
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
       const detail = typeof data.detail === 'string' ? data.detail : 'Sign-in failed. Please try again.';
@@ -95,6 +93,8 @@ export function OAuthCallback({ onLogin, onBack }: OAuthCallbackProps) {
     window.history.replaceState({}, '', fragment.from === 'signup' ? '/signup' : '/');
     onBack(fragment.from);
   };
+  const backLabel =
+    fragment.from === 'settings' ? 'Back to settings' : fragment.from === 'signup' ? 'Back to sign up' : 'Back to sign in';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[hsl(var(--background))] px-4">
@@ -155,12 +155,36 @@ export function OAuthCallback({ onLogin, onBack }: OAuthCallbackProps) {
             </form>
           )}
 
+          {phase.kind === 'linked' && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3" role="status">
+                <CheckCircle2 className="mt-0.5 h-5 w-5 flex-none text-green-500" aria-hidden="true" />
+                <div>
+                  <h1 className="font-display text-xl font-bold text-[hsl(var(--foreground))]">{name} connected</h1>
+                  <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">
+                    You can now sign in with {name}. Manage sign-in methods in Settings → Security.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={back}
+                className="w-full py-3 px-4 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                <ArrowLeft className="w-5 h-5" aria-hidden="true" />
+                {backLabel}
+              </button>
+            </div>
+          )}
+
           {phase.kind === 'error' && (
             <div className="space-y-4">
               <div className="flex items-start gap-3" role="alert">
                 <AlertTriangle className="mt-0.5 h-5 w-5 flex-none text-red-400" aria-hidden="true" />
                 <div>
-                  <h1 className="font-display text-xl font-bold text-[hsl(var(--foreground))]">Couldn't sign you in</h1>
+                  <h1 className="font-display text-xl font-bold text-[hsl(var(--foreground))]">
+                    {fragment.from === 'settings' ? `Couldn't connect ${name}` : "Couldn't sign you in"}
+                  </h1>
                   <p className="mt-1 text-sm text-[hsl(var(--muted-foreground))]">{phase.message}</p>
                 </div>
               </div>
@@ -170,7 +194,7 @@ export function OAuthCallback({ onLogin, onBack }: OAuthCallbackProps) {
                 className="w-full py-3 px-4 rounded-lg bg-accent hover:bg-accent-hover text-white font-medium transition-colors flex items-center justify-center gap-2"
               >
                 <ArrowLeft className="w-5 h-5" aria-hidden="true" />
-                {fragment.from === 'signup' ? 'Back to sign up' : 'Back to sign in'}
+                {backLabel}
               </button>
             </div>
           )}
