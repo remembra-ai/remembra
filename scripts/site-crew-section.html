@@ -1,0 +1,42 @@
+<!-- The home page's Crew mode section. scripts/site_partials.py puts it between
+     the @crew-section markers in landing/index.html only while CREW_LIVE is True.
+     Edit it here; the copy in index.html is rewritten on every run. -->
+  <!-- requires Crew mode (feat/crew) merged and live before launch -->
+  <section class="sec" id="crew" aria-labelledby="crew-title">
+    <div class="wrap">
+      <div class="sec-head">
+        <p class="eyebrow"><span class="n">03</span> Crew mode <span class="tag signal">Part of launch</span></p>
+        <h2 id="crew-title">Many agents on one project. Nobody steps on anybody.</h2>
+        <p class="intro">Crew mode lets several agents work the same repo at the same time. Each one holds the zones it is working in, checkpoints on its own, and hands off the moment it stops. <b>You watch it all live.</b></p>
+      </div>
+      <div class="crew-grid">
+        <div>
+          <div class="zones" role="img" aria-label="Zones in the yaadbooks repo: POS held by claude-code for task T-14, refund flow. Reports held by codex for the GCT report. Auth and docs are free.">
+            <div class="zh" aria-hidden="true"><b>crew zones</b><span>yaadbooks · 3 agents</span></div>
+            <ol aria-hidden="true">
+              <li class="zone pos"><span class="path">src/pos/</span><span class="who2"><span class="zn">POS</span><span class="held">held by <b>claude-code</b> · T-14 refund flow</span></span></li>
+              <li class="zone held-by"><span class="path">src/reports/</span><span class="who2"><span class="zn">reports</span><span class="held">held by <b>codex</b> · GCT report</span></span></li>
+              <li class="zone free"><span class="path">src/auth/</span><span class="who2"><span class="zn">auth</span><span class="held">free</span></span></li>
+              <li class="zone free"><span class="path">docs/</span><span class="who2"><span class="zn">docs</span><span class="held">free</span></span></li>
+            </ol>
+          </div>
+          <div class="win blocked" style="margin-top:22px">
+            <div class="tb"><i></i><span>edit.blocked</span><span class="id">codex · pre-write hook</span></div>
+            <div class="bd"><span class="x">&#10007; Edit blocked:</span> src/pos/refunds.ts is in zone POS<br>held by claude-code (task T-14 "refund flow"), active 2 min ago.<br>Pick another task, or post to the crew channel to ask for a handover.</div>
+          </div>
+        </div>
+        <div>
+          <p class="eyebrow">When credits run out</p>
+          <ol class="outage">
+            <li><span class="t">0 s</span><span><b>Claude Code's limit fires.</b> Remembra records a stall checkpoint straight away.</span></li>
+            <li><span class="t">+2 s</span><span><b>A handoff is written from facts:</b> task, files, tests, what is unfinished.</span></li>
+            <li><span class="t">+3 s</span><span><b>Uncommitted code is saved to git as a baton,</b> so nothing on disk is lost, and the POS zone is held for the next agent.</span></li>
+            <li><span class="t">+5 s</span><span><b>You get an email or webhook alert,</b> and the project inbox shows the baton waiting.</span></li>
+            <li><span class="t">next</span><span><b>The next agent starts with the brief</b> and one restore command, and carries on.</span></li>
+          </ol>
+          <p class="fine" style="margin-top:16px">On your own machine, crew guards stop mistakes, not a deliberately hostile agent. Agents cannot switch protection off, and every bypass is logged.</p>
+        </div>
+      </div>
+      <p class="crew-more"><a class="btn" href="/crew">How crew mode works <span aria-hidden="true">&rarr;</span></a></p>
+    </div>
+  </section>

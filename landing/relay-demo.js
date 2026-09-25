@@ -274,15 +274,31 @@ var RemembraTrail = window.RemembraTrail = window.RemembraTrail || (function () 
     baton.style.transform = "translateY(" + (holder - 13) + "px)";
   }
 
-  /* What the other views need to draw this handoff. */
+  /* What the other views need to draw this handoff, worded once here so
+     the hero window, its status strip and the constellation say the same
+     thing. None of them claims a signature: a handoff records who wrote it and
+     where its facts came from. Only Claude Code's session hook reads its
+     facts from git; an MCP handoff or checkpoint is declared by the agent,
+     so the views mark it self-declared, as the brief does. */
+  function agentId(a) { return AGENT_ID[a] || a.toLowerCase().replace(/\s+/g, "-"); }
+  function summaryOf(s) {
+    var from = agentId(s.from.agent), to = agentId(s.to.agent);
+    if (s.kind === "Checkpoint") return from + " went offline · checkpoint " + s.id + " (self-declared) → " + to + " picks up from it";
+    var src = hooked(s.from.agent) ? "facts from git" : "self-declared";
+    return from + " stopped · handoff " + s.id + " (" + src + ") → " + to + " already knows";
+  }
   function publish(n, still) {
-    var id = function (a) { return AGENT_ID[a] || a.toLowerCase().replace(/\s+/g, "-"); };
+    var declared = S.kind === "Checkpoint" || !hooked(S.from.agent);
     RemembraTrail.emit({
       stage: n, still: !!still, scenario: current, seq: seq,
       repo: S.repo, branch: S.branch, kind: S.kind, id: S.id, stop: S.stop,
       facts: S.facts.length, via: hooked(S.from.agent) ? "session hook" : "MCP",
-      from: { agent: S.from.agent, id: id(S.from.agent), host: S.from.host },
-      to: { agent: S.to.agent, id: id(S.to.agent), host: S.to.host }
+      declared: declared,
+      title: S.kind === "Checkpoint" ? "checkpoint.saved" : "handoff.saved",
+      source: declared ? "self-declared" : "from git",
+      line: summaryOf(S),
+      from: { agent: S.from.agent, id: agentId(S.from.agent), host: S.from.host },
+      to: { agent: S.to.agent, id: agentId(S.to.agent), host: S.to.host }
     });
   }
 
@@ -476,8 +492,38 @@ var RemembraTrail = window.RemembraTrail = window.RemembraTrail || (function () 
     syncPause();
   }
 
+  /* Hold the trail at the height of its tallest story. The stories differ
+     (four facts or two, a meter or none, one brief line or two), and a
+     figure that changed height with each one would move the headline
+     beside it and everything below it every few seconds. Each story is
+     rendered into the real markup and measured in one synchronous pass,
+     so none of them is ever painted; the current frame is put back after.
+     Measured again only when the width changes, or once fonts load. */
+  var reservedW = -1;
+  function reserve(force) {
+    var w = relay.offsetWidth || 0;
+    if (!force && w === reservedW) return;
+    reservedW = w;
+    relay.classList.add("no-tr");
+    track.style.minHeight = "";
+    var tallest = 0;
+    ORDER.map(function (k) { return SCN[k]; }).concat([S]).forEach(function (s) {
+      render(s);
+      tallest = Math.max(tallest, track.offsetHeight || 0);
+    });
+    render(S);
+    relay.querySelectorAll("[data-at]").forEach(function (x) {
+      x.classList.toggle("on", Number(x.getAttribute("data-at")) <= stage);
+    });
+    track.style.minHeight = tallest ? tallest + "px" : "";
+    place();
+    void relay.offsetWidth;
+    relay.classList.remove("no-tr");
+  }
+
   /* Initial state: the complete, finished story as a still frame. */
   showStill(S);
+  reserve(true);
   relay.classList.add("is-ready");
 
   function relayout() {
@@ -485,10 +531,11 @@ var RemembraTrail = window.RemembraTrail = window.RemembraTrail || (function () 
     place();
     void relay.offsetWidth;
     relay.classList.remove("no-tr");
+    reserve(false);
   }
   if (window.ResizeObserver) new ResizeObserver(relayout).observe(track);
   else window.addEventListener("resize", relayout);
-  if (document.fonts && document.fonts.ready) document.fonts.ready.then(relayout);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { reserve(true); relayout(); });
 
   /* The story keeps moving while any view of it is on screen: the trail
      itself, the hero canvas or the constellation further down. */

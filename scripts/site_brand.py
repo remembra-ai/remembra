@@ -520,6 +520,10 @@ def main() -> None:
         "word": {"ink": ink_paths, "sig": sig_paths, "sw": SW, "width": width, "top": CT - 6 - SW / 2, "bottom": BASE + SW / 2},
         "eBar": [float(sig_paths[0].split()[0][1:]), CY, float(sig_paths[0].split("H")[1]), CY],
         "lockH": {"k": LOCK_K, "tx": -LOCK_GAP - 5.5 - hmaxx * LOCK_K, "ty": CY - BATON[0][1] * LOCK_K},
+        # the fold centre lines and their width: at hero scale the canvas cuts
+        # the folds wider than KNOCK so each one stays at least two cells open
+        "folds": list(FOLDS.values()),
+        "knock": KNOCK,
     }
     geo_json = json.dumps(geo, separators=(",", ":"))
     (BRAND / "geometry.json").write_text(geo_json)

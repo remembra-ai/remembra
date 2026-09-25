@@ -107,16 +107,13 @@
     var fn = nodeFor(from), tn = nodeFor(to);
     if (fn) setHost(fn, ev.from.host);
     mark(from, "is-from", true);
-    var msg = ev.kind === "Checkpoint"
-      ? ev.from.id + " went offline · checkpoint " + ev.id + " saved → " + ev.to.id + " picks up from it"
-      : ev.from.id + " stopped · handoff " + ev.id + " signed → " + ev.to.id + " already knows";
     if (ev.still || ev.stage >= 5) {
       if (tn) setHost(tn, ev.to.host);
       mark(to, "is-to", true);
       setState(fn, ev.kind === "Checkpoint" ? "offline" : "stopped");
       setState(tn, "picked up");
       done = true;
-      if (statusEl) statusEl.textContent = msg;
+      if (statusEl) statusEl.textContent = ev.line;
     } else if (ev.stage === 2) {
       setState(fn, ev.kind === "Checkpoint" ? "offline" : "stopped");
       if (statusEl) statusEl.textContent = ev.from.id + " stopped · " + ev.stop;

@@ -15,7 +15,23 @@ and fills brand snippets wherever a page asks for them (any number of times):
     <!-- @mark --><!-- /@mark -->           vector brain mark, decorative
     <!-- @pixbrain --><!-- /@pixbrain -->   the 32 px pixel brain, decorative
 
-The current page is marked from the body's data-page attribute.
+The current page is marked from the body's data-page attribute. The
+home page's section eyebrows (<p class="eyebrow"><span class="n">NN</span>)
+are numbered in page order.
+
+Crew mode is behind one switch, CREW_LIVE. While it is False (Crew mode is
+not built yet), no page links to /crew, the home page leaves out its crew
+section, sitemap.xml leaves out /crew, and crew.html itself is noindex and
+says the feature is not available yet. When feat/crew is merged and live,
+set CREW_LIVE = True and run this script; every crew link, the home section
+(kept in scripts/site-crew-section.html), the sitemap entry and the page's
+launch label come back in one step. The regions it owns:
+
+    <!-- @crew-section --> ... <!-- /@crew-section -->   index.html: the section, or nothing
+    <!-- @crew-url --><!-- /@crew-url -->                sitemap.xml: the /crew entry, or nothing
+    <!-- @crew-robots --><!-- /@crew-robots -->          crew.html: noindex while off
+    <!-- @crew-tag --><!-- /@crew-tag -->                crew.html: "Part of launch" / "Not available yet"
+    <!-- @crew-note --><!-- /@crew-note -->              crew.html: the not-available notice while off
 
     python scripts/site_partials.py          # rewrite in place
     python scripts/site_partials.py --check  # exit 1 if any page is out of date
@@ -30,6 +46,12 @@ from pathlib import Path
 
 LANDING = Path(__file__).resolve().parents[1] / "landing"
 PAGES = ["index.html", "pricing.html", "crew.html", "about.html", "contact.html", "security.html", "privacy.html", "terms.html"]
+SITEMAP = "sitemap.xml"
+CREW_SECTION = Path(__file__).resolve().parent / "site-crew-section.html"
+
+# Crew mode is not built yet: keep this False until feat/crew is merged and live.
+CREW_LIVE = False
+CREW_URL = "https://remembra.dev/crew"
 
 DOCS = "https://docs.remembra.dev"
 GITHUB = "https://github.com/remembra-ai/remembra"
@@ -107,11 +129,16 @@ def cur(key: str, page: str) -> str:
     return ' aria-current="page"' if key == page else ""
 
 
+def shown(key: str) -> bool:
+    """Every link is shown, except Crew mode while it is not live."""
+    return key != "crew" or CREW_LIVE
+
+
 def header(page: str) -> str:
     links = "\n      ".join(
-        f'<a class="nav-link{cls}" href="{href}"{cur(key, page)}>{label}</a>' for key, label, href, cls in NAV
+        f'<a class="nav-link{cls}" href="{href}"{cur(key, page)}>{label}</a>' for key, label, href, cls in NAV if shown(key)
     )
-    menu = "\n    ".join(f'<a href="{href}"{cur(key, page)}>{label}</a>' for key, label, href in MENU)
+    menu = "\n    ".join(f'<a href="{href}"{cur(key, page)}>{label}</a>' for key, label, href in MENU if shown(key))
     return f"""<a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
   <div class="wrap bar">
@@ -130,7 +157,7 @@ def header(page: str) -> str:
 
 
 def footer(page: str) -> str:
-    links = "\n        ".join(f'<li><a href="{href}"{cur(key, page)}>{label}</a></li>' for key, label, href in FOOT)
+    links = "\n        ".join(f'<li><a href="{href}"{cur(key, page)}>{label}</a></li>' for key, label, href in FOOT if shown(key))
     return f"""<footer class="site-footer">
   <div class="terrain" aria-hidden="true"></div>
   <div class="ground"><div class="wrap foot">
@@ -179,23 +206,66 @@ def replace_block(html: str, name: str, body: str) -> str:
     return pattern.sub(lambda _: f"<!-- @{name} -->\n{body}\n<!-- /@{name} -->", html, count=1)
 
 
+def fill_inline(html: str, name: str, body: str) -> str:
+    """Fill an inline <!-- @name --><!-- /@name --> region, if the page has one."""
+    pattern = re.compile(rf"<!-- @{name} -->.*?<!-- /@{name} -->", re.S)
+    return pattern.sub(lambda _: f"<!-- @{name} -->{body}<!-- /@{name} -->", html)
+
+
+def crew_regions(html: str) -> str:
+    """Everything Crew mode adds to a page, on or off with CREW_LIVE."""
+    if "<!-- @crew-section -->" in html:
+        if CREW_LIVE:
+            section = CREW_SECTION.read_text()
+            section = section[section.index("-->") + 3 :].strip("\n")  # drop the file's own note
+            html = replace_block(html, "crew-section", section)
+        else:
+            note = "  <!-- Crew mode is off: CREW_LIVE in scripts/site_partials.py; the section is scripts/site-crew-section.html -->"
+            html = replace_block(html, "crew-section", note)
+    url = f"<url><loc>{CREW_URL}</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>"
+    html = fill_inline(html, "crew-url", url if CREW_LIVE else "")
+    html = fill_inline(html, "crew-robots", "" if CREW_LIVE else '<meta name="robots" content="noindex">')
+    tag = '<span class="tag signal">Part of launch</span>' if CREW_LIVE else '<span class="tag">Not available yet</span>'
+    html = fill_inline(html, "crew-tag", tag)
+    note = (
+        ""
+        if CREW_LIVE
+        else '<p class="crew-status" role="note"><b>Crew mode is still being built and is not available yet.</b> '
+        "This page describes how it will work when it ships.</p>"
+    )
+    return fill_inline(html, "crew-note", note)
+
+
+def number_sections(html: str) -> str:
+    """Number the section eyebrows 01, 02, ... in page order."""
+    count = iter(range(1, 100))
+    return re.sub(
+        r'(<p class="eyebrow"><span class="n">)\d\d(</span>)', lambda m: f"{m.group(1)}{next(count):02d}{m.group(2)}", html
+    )
+
+
 def render(html: str) -> str:
     m = re.search(r'<body[^>]*data-page="([a-z-]+)"', html)
     page = m.group(1) if m else ""
     html = replace_block(html, "head", HEAD)
     html = replace_block(html, "header", header(page))
     html = replace_block(html, "footer", footer(page))
-    return fill_snippets(html)
+    html = crew_regions(html)
+    return number_sections(fill_snippets(html))
+
+
+def render_sitemap(xml: str) -> str:
+    return crew_regions(xml)
 
 
 def main() -> int:
     check = "--check" in sys.argv
     only = [a for a in sys.argv[1:] if not a.startswith("--")]
     stale = []
-    for name in only or PAGES:
+    for name in only or [*PAGES, SITEMAP]:
         path = LANDING / name
         before = path.read_text()
-        after = render(before)
+        after = render_sitemap(before) if name == SITEMAP else render(before)
         if after != before:
             stale.append(name)
             if not check:

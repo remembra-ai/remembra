@@ -35,16 +35,25 @@
 .hero-band .fallback { position: absolute; left: 50%; top: 44%; transform: translate(-50%, -50%); width: min(78%, 900px); color: var(--ink); }
 .hero-band .fallback .lockup { display: block; width: 100%; height: auto; }
 .hero.sky-on .hero-band .fallback { visibility: hidden; }
-.hero-win { position: absolute; left: var(--gutter); bottom: clamp(26px, 3vw, 44px); width: 262px; z-index: 1; }
+/* The handoff window pins to the band's left edge. The status strip is
+   centred in the room to the right of it (the same room the lockup is
+   placed in), so the two never overlap, and a long status wraps to a
+   second line instead of running under the window. hero.js keeps the
+   lockup clear of a two-line strip. Below 960px the three stack. */
+.hero-band { --win-w: 262px; --win-gap: 24px; }
+.hero-win { position: absolute; left: var(--gutter); bottom: clamp(26px, 3vw, 44px); width: var(--win-w); z-index: 1; }
 .hero-win .row .v { color: var(--ink); }
+.hero-win .row > :last-child { flex: 1; min-width: 0; }   /* a fixed box: a new value never moves it */
 .hero-status {
-  position: absolute; left: 50%; bottom: clamp(20px, 2.4vw, 34px); transform: translateX(-50%);
-  display: flex; align-items: center; gap: 10px; max-width: min(640px, calc(100% - 2 * var(--gutter)));
-  font-family: var(--f-mono); font-size: .8125rem; color: var(--ink);
+  position: absolute; bottom: clamp(20px, 2.4vw, 34px);
+  left: calc(var(--gutter) + var(--win-w) + var(--win-gap)); right: var(--gutter);
+  width: fit-content; max-width: 680px; margin-inline: auto;
+  display: flex; align-items: center; gap: 10px;
+  font-family: var(--f-mono); font-size: .8125rem; line-height: 1.5; color: var(--ink);
   background: var(--panel); border: 1px solid var(--rule); padding: 7px 12px;
 }
 .hero-status i { width: 8px; height: 8px; background: var(--signal); flex: none; }
-.hero-status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hero-status span { min-width: 0; overflow-wrap: anywhere; text-wrap: balance; }
 
 /* ------------------------------------------------------------------
    The trail ("git log for agents")
@@ -381,6 +390,12 @@
   .side-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 960px) {
+  .hero-band { height: auto; padding: 0 0 20px; }
+  .hero-band .canvas-room { position: relative; inset: auto; height: clamp(150px, 42vw, 240px); }
+  .hero-win { position: relative; left: auto; bottom: auto; margin: 0 var(--gutter); width: auto; max-width: 340px; }
+  /* stacked, the strip's height is in the page flow: hold room for two lines (three on phones) so a longer status never moves what follows */
+  .hero-status { position: relative; left: auto; right: auto; bottom: auto; width: auto; margin: 14px var(--gutter) 0; max-width: none; min-height: calc(2 * 1.5em + 16px); align-items: flex-start; }
+  .hero-status i { margin-top: calc(.75em - 4px); }
   .hero-grid { grid-template-columns: minmax(0,1fr); min-height: 0; gap: 28px; padding-top: 8px; padding-bottom: 20px; align-items: start; }
   .hero h1 { margin-top: 12px; }
   .lede { font-size: var(--t-16); margin-top: 14px; }
@@ -396,10 +411,6 @@
   .app-side { display: none; }
 }
 @media (max-width: 720px) {
-  .hero-band { height: auto; padding: 0 0 20px; }
-  .hero-band .canvas-room { position: relative; inset: auto; height: clamp(150px, 42vw, 240px); }
-  .hero-win { position: relative; left: auto; bottom: auto; margin: 0 var(--gutter); width: auto; max-width: 340px; }
-  .hero-status { position: relative; left: auto; bottom: auto; transform: none; margin: 14px var(--gutter) 0; max-width: none; }
   .const { aspect-ratio: auto; height: 600px; min-height: 0; }
   .n2 { --x: 50%; --y: 6%; } .n1 { --x: 23%; --y: 21%; } .n3 { --x: 77%; --y: 21%; }
   .n7 { --x: 22%; --y: 77%; } .n4 { --x: 78%; --y: 77%; } .n6 { --x: 30%; --y: 94%; } .n5 { --x: 70%; --y: 94%; }
@@ -408,6 +419,7 @@
 }
 @media (max-width: 520px) {
   :root { --t-hero: 2.2rem; }
+  .hero-status { min-height: calc(3 * 1.5em + 16px); }
   .relay { font-size: .75rem; }
   .relay-body { padding: 10px 12px 6px 8px; }
   .relay-head { padding: 8px 12px; }

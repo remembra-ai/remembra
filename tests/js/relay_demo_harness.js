@@ -116,6 +116,17 @@ class Element {
   getBoundingClientRect() { return { top: 0, left: 0, width: 0, height: 0, right: 0, bottom: 0 }; }
   get offsetParent() { return this.hidden ? null : this.parentNode; }
   get offsetWidth() { return 0; }
+  /* A layout stand-in: every shown <p> or <li> is one 20px line, and a box
+     is as tall as the lines inside it (or its min-height, when larger).
+     Enough to see a story with more facts or brief lines make the trail
+     taller, and whether the reserved height covers the tallest one. */
+  get offsetHeight() {
+    if (this.hidden) return 0;
+    const own = this.tagName === "P" || this.tagName === "LI" ? 20 : 0;
+    const inner = this.tagName === "P" ? 0 : this.children.reduce((sum, c) => sum + c.offsetHeight, 0);
+    const min = parseFloat(this.style.minHeight) || 0;
+    return Math.max(own + inner, min);
+  }
 }
 
 /* Selectors: descendant combinator over compounds of tag, #id, .class,
@@ -221,6 +232,16 @@ function snap() {
     meter: text(documentV.getElementById("meterVal")),
     caption: text(documentV.getElementById("relay-cap")),
     pending: timers.size,
+    trail: windowV.RemembraTrail ? windowV.RemembraTrail.last : null,
+    minHeight: documentV.getElementById("track").style.minHeight || "",
+    contentHeight: (() => {
+      const track = documentV.getElementById("track");
+      const saved = track.style.minHeight;
+      track.style.minHeight = "";
+      const h = track.offsetHeight;
+      track.style.minHeight = saved;
+      return h;
+    })(),
   };
 }
 
