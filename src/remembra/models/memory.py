@@ -18,7 +18,10 @@ def _scrub_secrets(value: str) -> str:
 # TTL applied on store), "handoff" = a session snapshot stored as ONE unit (never
 # fact-split), "status" = current value for a key, upserted via the session
 # status endpoint (the prior value for the same key is superseded).
-MEMORY_TYPES = Literal["observation", "fact", "inference", "task", "source", "checkpoint", "handoff", "status"]
+# Crew mode (spec §3.1): "decision" = a human-confirmed crew decision (D-n)
+# promoted to memory, stored atomically as ONE unit; "checkpoint" also receives
+# crew checkpoint promotions (D15).
+MEMORY_TYPES = Literal["observation", "fact", "inference", "task", "source", "checkpoint", "handoff", "status", "decision"]
 
 # Agent relay memory types: stored atomically, never enriched, never metered as smart credits.
 RELAY_MEMORY_TYPES: frozenset[str] = frozenset({"handoff", "checkpoint", "status"})

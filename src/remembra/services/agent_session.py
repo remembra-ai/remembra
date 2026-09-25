@@ -55,6 +55,9 @@ def apply_memory_type_policy(request: StoreRequest, checkpoint_default_ttl: str)
       never lends its TTL to) a permanent memory.
     - ``handoff``: stored atomically as one unit — a session snapshot must be
       readable verbatim by the next agent, not split into facts.
+    - ``decision``: stored atomically as one unit with no default TTL — a
+      decision (crew ``D-n``, spec §3.1) is recalled word for word, never
+      fact-split, merged into another memory or re-worded by extraction.
     - ``status``: rejected here; use the status upsert endpoint.
     """
     memory_type = request.memory_type
@@ -62,7 +65,7 @@ def apply_memory_type_policy(request: StoreRequest, checkpoint_default_ttl: str)
         if not request.ttl and not request.expires_at:
             request.ttl = checkpoint_default_ttl
         request.skip_extraction = True
-    elif memory_type == "handoff":
+    elif memory_type in ("handoff", "decision"):
         request.skip_extraction = True
     elif memory_type == "status":
         raise MemoryTypePolicyError(
