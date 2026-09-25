@@ -1,9 +1,11 @@
-"""Static checks for the marketing site in ``landing/`` (deployed by Vercel).
+"""Checks for the marketing site in ``landing/`` (deployed by Vercel).
 
 The site is plain HTML, so these tests guard what can silently break it:
 internal links and #anchors must resolve under the ``vercel.json`` rules
 (cleanUrls plus redirects), and the rebuilt home and pricing pages may only
 load external assets from Google Fonts.
+
+They also check the focus ring's contrast in both themes.
 """
 
 from __future__ import annotations
@@ -136,3 +138,56 @@ def test_signup_links_point_at_the_dashboard_signup_route() -> None:
     for page in ("index.html", "pricing.html"):
         hrefs = [url for tag, _a, url in _parse(LANDING / page).refs if tag == "a"]
         assert "https://app.remembra.dev/signup" in hrefs, page
+
+
+# ---------------------------------------------------------------------------
+# Focus ring contrast (WCAG 1.4.11: 3:1 against the adjacent color)
+# ---------------------------------------------------------------------------
+
+
+def _luminance(hex_color: str) -> float:
+    h = hex_color.lstrip("#")
+    channels = [int(h[i : i + 2], 16) / 255 for i in (0, 2, 4)]
+    lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in channels]
+    return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+
+def _contrast(a: str, b: str) -> float:
+    hi, lo = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (hi + 0.05) / (lo + 0.05)
+
+
+def _tokens(block: str) -> dict[str, str]:
+    return dict(re.findall(r"(--[\w-]+):\s*(#[0-9A-Fa-f]{6})\b", block))
+
+
+def _themes() -> dict[str, dict[str, str]]:
+    css = (LANDING / "site.css").read_text()
+    light = _tokens(re.search(r"^:root \{(.*?)^\}", css, re.S | re.M).group(1))
+    dark = _tokens(re.search(r'^:root\[data-theme="dark"\] \{(.*?)^\}', css, re.S | re.M).group(1))
+    system_block = r'@media \(prefers-color-scheme: dark\) \{\s*:root:not\(\[data-theme="light"\]\) \{(.*?)\}'
+    system_dark = _tokens(re.search(system_block, css, re.S).group(1))
+    assert dark == system_dark  # the two dark-mode blocks must stay in step
+    return {"light": light, "dark": {**light, **dark}}
+
+
+def test_focus_rings_clear_3_to_1_in_both_themes() -> None:
+    css = (LANDING / "site.css").read_text()
+    home = (LANDING / "index.html").read_text()
+    ring = re.search(r"^:focus-visible \{ outline: 2px solid var\((--[\w-]+)\)", css, re.M).group(1)
+    cmd_ring = re.search(r"^\.cmd :focus-visible \{ outline-color: var\((--[\w-]+)\)", css, re.M).group(1)
+    band_ring = re.search(r"^\.band :focus-visible \{ outline-color: var\((--[\w-]+)\)", home, re.M).group(1)
+    band_cmd_ring = re.search(r"^\.band \.cmd :focus-visible \{ outline-color: (#[0-9A-Fa-f]{6})", home, re.M).group(1)
+    band_cmd_bg = re.search(r"^\.band \.cmd \{[^}]*background: (#[0-9A-Fa-f]{6})", home, re.M).group(1)
+    for name, t in _themes().items():
+        for surface in ("--paper", "--panel", "--paper-2"):
+            assert _contrast(t[ring], t[surface]) >= 3, (name, ring, surface)
+        assert _contrast(t[cmd_ring], t["--ink"]) >= 3, (name, "cmd")  # .cmd is filled with --ink
+        assert _contrast(t[band_ring], t["--signal"]) >= 3, (name, "band")
+    assert _contrast(band_cmd_ring, band_cmd_bg) >= 3
+
+
+def test_contrast_check_rejects_the_old_orange_ring_on_light_paper() -> None:
+    light = _themes()["light"]
+    assert _contrast(light["--signal"], light["--paper"]) < 3
+    assert _contrast(light["--signal"], light["--panel"]) < 3
