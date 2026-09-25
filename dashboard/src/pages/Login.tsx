@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { LogIn, Loader2, Eye, EyeOff } from 'lucide-react';
 import { API_V1 } from '../config';
 import { BrandMark } from '../components/relay/ui';
+import { SocialSignIn } from '../components/auth/SocialSignIn';
+import { useAuthConfig } from '../hooks/useAuthConfig';
 
 interface LoginProps {
   onLogin: (token: string, user: { id: string; email: string; name?: string; is_admin?: boolean }) => void;
@@ -15,6 +17,7 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProp
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { config } = useAuthConfig();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -68,6 +71,12 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProp
 
         <form onSubmit={handleSubmit} className="bg-[hsl(var(--card))] rounded-xl shadow-sm border border-[hsl(var(--border))] p-6">
           <div className="space-y-4">
+            <SocialSignIn
+              providers={config.providers}
+              from="login"
+              disabled={loading}
+              dividerLabel="or sign in with email"
+            />
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-[hsl(var(--foreground))] mb-2">
                 Email

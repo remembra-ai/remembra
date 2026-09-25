@@ -17,10 +17,17 @@ import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { ForgotPassword } from './pages/ForgotPassword';
 import { InviteAccept } from './pages/InviteAccept';
+import { OAuthCallback } from './pages/OAuthCallback';
+import { VerifyEmail } from './pages/VerifyEmail';
+import { confirmDashboardEmail, takePendingVerifyToken } from './lib/verifyEmail';
+import { toast } from 'sonner';
 import { api } from './lib/api';
 import { API_V1 } from './config';
+import { appPath } from './lib/authProviders';
 
 type AuthMode = 'login' | 'signup' | 'forgot-password' | 'reset-password' | 'api-key' | 'invite';
+/** Pages that handle a link from outside (provider redirect, email) whether or not signed in. */
+type Landing = 'oauth-callback' | 'verify-email';
 
 function App() {
   const [darkMode, setDarkMode] = useState(() => {
@@ -47,19 +54,25 @@ function App() {
   
   const [inviteToken, setInviteToken] = useState<string | null>(() => {
     // Check for invite URL: /invite/:token
-    const path = window.location.pathname;
+    const path = appPath();
     const match = path.match(/^\/invite\/(.+)$/);
     return match ? match[1] : localStorage.getItem('pending_invite_token');
   });
 
   const [authMode, setAuthMode] = useState<AuthMode>(() => {
     // Check URL path to determine initial auth mode
-    const path = window.location.pathname;
+    const path = appPath();
     if (path.startsWith('/invite/')) return 'invite';
     if (path === '/signup') return 'signup';
     if (path === '/forgot-password') return 'forgot-password';
     if (path === '/reset-password') return 'reset-password';
     return 'login';
+  });
+  const [landing, setLanding] = useState<Landing | null>(() => {
+    const path = appPath();
+    if (path === '/oauth/callback') return 'oauth-callback';
+    if (path === '/verify-email') return 'verify-email';
+    return null;
   });
   const [currentUser, setCurrentUser] = useState<{ id: string; email: string; name?: string; is_admin?: boolean } | null>(() => {
     const saved = localStorage.getItem('remembra_user');
@@ -139,6 +152,14 @@ function App() {
     api.setJwtToken(token);
     setCurrentUser({ ...user, is_admin: user.is_admin ?? false });
     setIsAuthenticated(true);
+
+    // Finish an email verification that was opened while signed out.
+    const pendingVerify = takePendingVerifyToken();
+    if (pendingVerify) {
+      confirmDashboardEmail(token, pendingVerify)
+        .then((message) => toast.success(message))
+        .catch((err: unknown) => toast.error(err instanceof Error ? err.message : 'Email verification failed'));
+    }
     
     // Check for pending invite
     const pendingInvite = localStorage.getItem('pending_invite_token');
@@ -188,6 +209,7 @@ function App() {
     }
     setCurrentUser(user);
     setAuthMode('login');
+    toast.success('Account created. Sign in to continue.');
   };
 
   const handleApiKeyAuth = () => {
@@ -234,6 +256,38 @@ function App() {
     onPalette: handleSearch,
     onHelp: () => setShortcutsOpen(true),
   });
+
+  if (landing === 'oauth-callback') {
+    return (
+      <div className={darkMode ? 'dark' : ''}>
+        <OAuthCallback
+          onLogin={(token, user) => {
+            setLanding(null);
+            void handleLogin(token, user);
+          }}
+          onBack={(page) => {
+            setLanding(null);
+            setAuthMode(page);
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (landing === 'verify-email') {
+    return (
+      <div className={darkMode ? 'dark' : ''}>
+        <VerifyEmail
+          jwt={localStorage.getItem('remembra_jwt_token')}
+          onContinue={() => setLanding(null)}
+          onSignIn={() => {
+            setLanding(null);
+            setAuthMode('login');
+          }}
+        />
+      </div>
+    );
+  }
 
   // Not authenticated - show auth screens
   if (!isAuthenticated) {
