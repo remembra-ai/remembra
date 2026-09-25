@@ -1,13 +1,13 @@
 // Home page cards: connect checklist, weekly recap and the first-handoff
 // celebration. The plan meter lives in ../credits/Credits.
 
-import { useId } from 'react';
+import { useId, useState } from 'react';
 import clsx from 'clsx';
-import { motion, useReducedMotion } from 'framer-motion';
-import { ArrowRight, Check, Copy, X } from 'lucide-react';
+import { PixelHandoff } from '../../brand/PixelHandoff';
+import { ArrowRight, Check, Copy, KeyRound, Loader2, X } from 'lucide-react';
 import type { ActivitySummary, AgentActivity, TrailItem } from '../../lib/relay';
 import { api } from '../../lib/api';
-import { CONNECTABLE_AGENTS, PIPX_INSTALL, agentMeta, canonicalAgentId, saveKeyCommand } from '../../lib/agents';
+import { CONNECTABLE_AGENTS, agentMeta, canonicalAgentId, oneLineInstall } from '../../lib/agents';
 import { hrefFor } from '../../lib/nav';
 import { relativeTime } from '../../lib/time';
 import { useCopy } from '../../hooks/useCopy';
@@ -17,6 +17,51 @@ function agentConnectCommand(agentId: string): string {
   const meta = agentMeta(agentId);
   if (meta.verified) return `remembra-relay connect --apply --agent ${meta.adapter}`;
   return `remembra-relay connect --apply --agent ${meta.adapter} --include-unverified`;
+}
+
+/** Create an editor key for the relay right here; it is shown once and dropped into the one-liner. */
+function RelayKeyStep({ newKey, onKey }: { newKey: string | null; onKey: (key: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const create = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const host = typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform) ? 'mac' : 'machine';
+      const created = await api.createKey(`relay (${host}, ${new Date().toISOString().slice(0, 10)})`, 'editor');
+      onKey(created.key);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'The key could not be created.');
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (newKey) {
+    return (
+      <p className="mt-2 flex items-start gap-2 border-l-[3px] border-ok bg-ok-wash px-3 py-2 text-sm text-ink">
+        <Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden="true" />
+        <span>
+          Key created and placed in the command below. It is shown only on this page: run the command now, or copy it somewhere safe.
+        </span>
+      </p>
+    );
+  }
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2">
+      <button type="button" onClick={create} disabled={busy} className="rr-btn-primary inline-flex items-center gap-1.5 px-3 py-2 text-sm">
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <KeyRound className="h-4 w-4" aria-hidden="true" />}
+        Create a relay key
+      </button>
+      <a href={hrefFor('keys')} className="text-sm font-semibold text-ink underline decoration-signal decoration-2 underline-offset-4">
+        or use one from API keys
+      </a>
+      {error && (
+        <p role="alert" className="basis-full text-sm text-fail">
+          {error}
+        </p>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -35,6 +80,7 @@ export function ConnectChecklist({
 }) {
   const titleId = useId();
   const [copy] = useCopy();
+  const [newKey, setNewKey] = useState<string | null>(null);
   const seen = new Map<string, AgentActivity>();
   for (const agent of agents) seen.set(canonicalAgentId(agent.agent_id), agent);
   const connected = CONNECTABLE_AGENTS.filter((id) => seen.has(id)).length;
@@ -65,42 +111,39 @@ export function ConnectChecklist({
         <ol className="space-y-4">
           <li>
             <p className="text-sm text-ink-2">
-              <span className="font-semibold text-ink">1. Create an API key.</span> The relay signs in to this server with it; without one
-              nothing reaches your trail.{' '}
-              <a href={hrefFor('keys')} className="font-semibold text-ink underline decoration-signal decoration-2 underline-offset-4">
-                Open API keys
-              </a>
+              <span className="font-semibold text-ink">1. A key for this machine.</span> The relay signs in with it; without one nothing
+              reaches your trail.
             </p>
+            <RelayKeyStep onKey={setNewKey} newKey={newKey} />
           </li>
           <li>
             <p className="text-sm text-ink-2">
-              <span className="font-semibold text-ink">2. Install, then save the key.</span> Replace{' '}
-              <code className="font-mono text-[13px]">&lt;your-key&gt;</code>. This stores it in{' '}
-              <code className="font-mono text-[13px]">~/.remembra/credentials</code>, where the relay reads it, and adds the Remembra MCP
-              server to the agents it finds. Skip it if your agents already have <code className="font-mono text-[13px]">REMEMBRA_API_KEY</code>.
+              <span className="font-semibold text-ink">2. One line in your terminal.</span> Installs Remembra, saves the key in{' '}
+              <code className="font-mono text-[13px]">~/.remembra/credentials</code>, adds the MCP server to the agents it finds and
+              writes the relay hooks.
+              {!newKey && (
+                <>
+                  {' '}
+                  Replace <code className="font-mono text-[13px]">&lt;your-key&gt;</code> first.
+                </>
+              )}
             </p>
-            <CopyCommand className="mt-2" command={PIPX_INSTALL} label="Install command" toastText="Install command copied" />
             <CopyCommand
               className="mt-2"
-              command={saveKeyCommand(api.getApiBaseUrl())}
-              label="Save-key command"
-              toastText="Command copied: replace <your-key> before running it"
+              command={oneLineInstall(api.getApiBaseUrl(), newKey)}
+              label="One-line install and connect"
+              toastText={newKey ? 'Command copied, with your new key' : 'Command copied: replace <your-key> before running it'}
             />
-          </li>
-          <li>
-            <p className="text-sm text-ink-2">
-              <span className="font-semibold text-ink">3. Connect.</span> <code className="font-mono text-[13px]">remembra-relay connect</code>{' '}
-              is a dry run that shows every change; nothing is written until you add <code className="font-mono text-[13px]">--apply</code>.
-            </p>
-            <CopyCommand className="mt-2" command="remembra-relay connect --apply" label="Apply command" toastText="Apply command copied" />
             <p className="mt-1.5 text-xs text-ink-3">
-              This writes hooks for {verifiedNames.join(', ')} only, the verified adapter today. For {unverifiedNames.join(', ')}, copy that
-              agent’s command below: it adds <code className="font-mono">--include-unverified</code>.
+              Want to see every change first? Run <code className="font-mono">remembra-relay connect</code> without{' '}
+              <code className="font-mono">--apply</code>: it is a dry run. It writes hooks for {verifiedNames.join(', ')}, the verified
+              adapter today; for {unverifiedNames.join(', ')}, copy that agent’s command below (it adds{' '}
+              <code className="font-mono">--include-unverified</code>).
             </p>
           </li>
           <li>
             <p className="text-sm text-ink-2">
-              <span className="font-semibold text-ink">4. Start a session and end it.</span> Each agent ticks off here when its first handoff
+              <span className="font-semibold text-ink">3. Start a session and end it.</span> Each agent ticks off here when its first handoff
               arrives.
             </p>
             <div className="mt-2 flex gap-1" aria-hidden="true">
@@ -242,7 +285,6 @@ export function WeeklyRecap({ summary, now }: { summary: ActivitySummary; now: D
 
 /** Shown once, the first time a new user's first handoff is on the trail. */
 export function FirstHandoffCelebration({ item, onDismiss }: { item: TrailItem; onDismiss: () => void }) {
-  const reduceMotion = useReducedMotion();
   const meta = agentMeta(item.agent_id);
   const project = item.project_id && item.project_id !== 'default' ? item.project_id : 'this project';
   return (
@@ -250,18 +292,10 @@ export function FirstHandoffCelebration({ item, onDismiss }: { item: TrailItem; 
       aria-labelledby="first-handoff-title"
       className="relative overflow-hidden rounded-[3px] border border-rule-strong bg-head text-head-ink"
     >
-      <div className="relative h-10" aria-hidden="true">
-        <span className="rr-rail-h absolute left-4 right-4 top-1/2 h-[2px] -translate-y-1/2 opacity-60" />
-        <motion.span
-          className="rr-baton absolute top-1/2 h-[12px] w-[30px] -translate-y-1/2"
-          initial={reduceMotion ? false : { left: '2%', opacity: 0 }}
-          animate={{ left: 'calc(100% - 48px)', opacity: 1 }}
-          transition={{ duration: 1.4, ease: [0.6, 0, 0.2, 1] }}
-        />
-      </div>
+      <PixelHandoff agentColor={meta.lane} className="block h-[60px] w-full text-head-ink" />
       <div className="flex flex-col gap-3 px-4 pb-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
         <div className="min-w-0">
-          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-signal">First handoff received</p>
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-signal">handoff.signed · your first one</p>
           <h2 id="first-handoff-title" className="font-display mt-1 text-2xl font-extrabold leading-tight tracking-tight">
             {meta.name} left its first trail.
           </h2>
