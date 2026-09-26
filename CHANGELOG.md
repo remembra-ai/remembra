@@ -55,6 +55,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A password reset on an account whose email was never verified now clears everything set up before it: API
   keys, sessions, 2FA, connector grants, webhooks and provider links. It protects a mailbox owner who takes
   back an address someone else pre-registered.
+- Connecting Google or GitHub from Settings is bound to the browser that asked: `POST
+  /api/v1/auth/oauth/{provider}/link` sets an `HttpOnly` cookie, and the start path is refused (and burned) in
+  any other browser. Before, a start path minted for one account and opened by someone else attached their
+  Google/GitHub identity to the first account (account-link CSRF).
+- Paddle events only change the subscription an account holds. A cancel or update for another subscription no
+  longer drops the account to Free or re-plans it, a new purchase is credited only with the server's checkout
+  signature (or the account's own Paddle customer), a second subscription is flagged instead of overwriting
+  the first, and checkout returns 409 while a subscription is active (legacy $49/$199 included).
+
+### Fixed (deploy)
+- `POST /mcp` (remote connector) returned 500 whenever rate limiting was on.
+- An unreachable Redis rate-limit backend no longer turns rate-limited routes into 500s: limits fall back to
+  process memory and `/health/ready` reports a degraded `rate_limit` component.
+- Blank env values (`REMEMBRA_PUBLIC_URL=`, the `*_EFFECTIVE_AT` dates, list settings) no longer crash the
+  boot, and list settings accept `a,b` as well as a JSON array.
 
 ### Changed (breaking)
 - **`remembra-relay` / MCP location briefs: which project a git repository uses.** A repository the

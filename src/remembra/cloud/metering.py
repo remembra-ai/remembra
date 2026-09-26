@@ -1092,6 +1092,21 @@ class UsageMeter:
         )
         await self._db.conn.commit()
 
+    @staticmethod
+    def active_subscription_id(tenant: dict[str, Any] | None) -> str | None:
+        """The paid subscription a tenant row holds right now, or None.
+
+        A tenant on a paid plan with a recorded subscription id holds it until
+        a cancel, refund or chargeback for that id drops it to Free (the id is
+        kept after that, but no longer counts). Promo trials record no id.
+        """
+        if not tenant:
+            return None
+        held = tenant.get("stripe_subscription_id")
+        if not held or str(tenant.get("plan") or PlanTier.FREE.value) == PlanTier.FREE.value:
+            return None
+        return str(held)
+
     async def find_tenant_by_billing_ids(self, *, subscription_id: str | None, customer_id: str | None) -> str | None:
         """The user id holding a Paddle subscription (preferred) or customer id."""
         for column, value in (("stripe_subscription_id", subscription_id), ("stripe_customer_id", customer_id)):

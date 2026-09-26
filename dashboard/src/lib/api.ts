@@ -931,9 +931,13 @@ export interface PlanInfoResponse {
 
 export interface BillingClientConfigResponse {
   provider: string;
-  client_token?: string;
+  client_token?: string | null;
   prices: Record<string, string>;  // plan -> price_id
   success_url?: string;
+  /** Signed-in only: goes in customData as remembra_binding, or the webhook will not credit the purchase. */
+  checkout_binding?: string | null;
+  /** Signed in and already subscribed: no prices; change plans in the billing portal. */
+  has_subscription?: boolean;
 }
 
 export interface CheckoutResponse {
@@ -973,6 +977,8 @@ export interface UsageSummaryResponse {
   recalls: { this_month: number; limit: number; burst_per_min: number };
   memories: { stored: number; cap: number };
   stores: { this_month: number; degraded_this_month: number };
+  /** The account holds an active paid subscription (legacy tiers included). */
+  subscription_active?: boolean;
 }
 
 export interface PlanCatalogEntry {

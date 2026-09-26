@@ -8,6 +8,7 @@ import json
 import time
 
 from remembra.api.v1 import billing, cloud
+from remembra.cloud.billing_paddle import checkout_binding
 from remembra.cloud.metering import UsageMeter
 from remembra.cloud.plans import PlanTier
 from tests.security_harness import make_settings, secure_app
@@ -26,7 +27,8 @@ TEAM_SEAT_PRICE = "pri_team_seat_sec"
 
 
 def _event(event_type: str, user_id: str, plan: str = "pro", price: str | None = None, quantity: int = 1) -> dict:
-    data: dict = {"id": "sub_1", "status": "active", "custom_data": {"remembra_user_id": user_id, "plan": plan}}
+    custom = {"remembra_user_id": user_id, "remembra_binding": checkout_binding(user_id), "plan": plan}
+    data: dict = {"id": "sub_1", "status": "active", "custom_data": custom}
     if price:
         data["items"] = [{"price": {"id": price}, "quantity": quantity}]
     return {"event_type": event_type, "data": data}
@@ -82,11 +84,21 @@ async def test_verified_webhook_is_applied_to_the_plan(tmp_path):
         assert r.json()["applied"] == "applied"
         assert await h.app.state.usage_meter.get_tenant_plan(uid) == PlanTier.TEAM
 
+        # A cancel that names the account but not the subscription it holds changes nothing.
         body, headers = _signed({"event_type": "subscription.canceled", "data": {"custom_data": {"remembra_user_id": uid}}})
+        r = await h.client.post("/api/v1/billing/webhook/paddle", content=body, headers=headers)
+        assert r.status_code == 200 and r.json()["applied"] == "unmatched"
+        assert await h.app.state.usage_meter.get_tenant_plan(uid) == PlanTier.TEAM
+
+        body, headers = _signed(
+            {"event_type": "subscription.canceled", "data": {"id": "sub_1", "custom_data": {"remembra_user_id": uid}}}
+        )
         assert (await h.client.post("/api/v1/billing/webhook/paddle", content=body, headers=headers)).status_code == 200
         assert await h.app.state.usage_meter.get_tenant_plan(uid) == PlanTier.FREE
 
-        body, headers = _signed(_event("subscription.activated", "user_does_not_exist", price=TEAM_SEAT_PRICE, quantity=3))
+        unknown = _event("subscription.activated", "user_does_not_exist", price=TEAM_SEAT_PRICE, quantity=3)
+        unknown["data"]["id"] = "sub_unknown"
+        body, headers = _signed(unknown)
         r = await h.client.post("/api/v1/billing/webhook/paddle", content=body, headers=headers)
         assert r.status_code == 200 and r.json()["applied"] == "unmatched"
     finally:

@@ -201,6 +201,9 @@ class UsageSummaryResponse(BaseModel):
     recalls: RecallUsage
     memories: MemoryUsage
     stores: StoreUsage
+    subscription_active: bool = Field(
+        False, description="The account holds an active paid subscription: change plans in the billing portal"
+    )
 
 
 def _catalog_limits_dict(plan_limits: PlanLimits) -> dict[str, Any]:
@@ -537,6 +540,7 @@ async def get_usage_summary(
         ),
         memories=MemoryUsage(stored=await meter.count_pool_memories(account), cap=account.memory_cap),
         stores=StoreUsage(this_month=month["stores"], degraded_this_month=month["degraded_stores"]),
+        subscription_active=meter.active_subscription_id(await meter.get_tenant(account.user_id)) is not None,
     )
 
 

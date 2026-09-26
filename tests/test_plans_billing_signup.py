@@ -18,6 +18,7 @@ import remembra.config as config_module
 from remembra.cloud import signup_guard
 from remembra.cloud.metering import UsageMeter
 from remembra.cloud.plans import BillingInterval, PlanTier
+from remembra.cloud.billing_paddle import checkout_binding
 from remembra.cloud.ratelimit import CloudRateLimiter, network_key, set_cloud_rate_limiter, storage_uri_from_setting
 from remembra.core import ai_spend
 from remembra.models.memory import RecallResponse
@@ -131,7 +132,7 @@ async def test_webhook_maps_prices_seats_founding_and_revenue(tmp_path) -> None:
                 "details": {"totals": {"earnings": "10210"}},
                 "billing_period": {"starts_at": "2026-09-25T10:00:00Z"},
                 "items": [{"price": {"id": "pri_founding"}, "quantity": 1}],
-                "custom_data": {"remembra_user_id": uid, "plan": "solo"},
+                "custom_data": {"remembra_user_id": uid, "remembra_binding": checkout_binding(uid), "plan": "solo"},
             },
         }
         for _ in range(2):  # Paddle retries: revenue must not double count
@@ -150,7 +151,7 @@ async def test_webhook_maps_prices_seats_founding_and_revenue(tmp_path) -> None:
             "data": {
                 "id": "sub_t",
                 "items": [{"price": {"id": "pri_team_m"}, "quantity": 5}],
-                "custom_data": {"remembra_user_id": team_uid, "plan": "team"},
+                "custom_data": {"remembra_user_id": team_uid, "remembra_binding": checkout_binding(team_uid), "plan": "team"},
             },
         }
         body, headers = _signed(event)
@@ -164,6 +165,8 @@ async def test_legacy_renewals_keep_the_grandfathered_tier(tmp_path) -> None:
     async with cost_app(tmp_path) as c:
         _paddle(c)
         uid = await c.h.create_user("legacy@example.com")
+        # The account holds sub_old from before the relaunch (no checkout signature in its custom_data).
+        await c.meter.register_tenant(uid, PlanTier.FREE, stripe_subscription_id="sub_old")
         # Renewal carrying the old $49 price ID.
         event = {
             "event_type": "subscription.updated",
