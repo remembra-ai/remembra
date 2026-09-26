@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------
-   Constellation: every agent, on every machine, around one memory.
+   Constellation: your agents, on your machines, around one memory.
 
    The agent nodes are real buttons laid over a canvas. The canvas draws
    the dotted pixel links to the memory at the centre, a small drifting

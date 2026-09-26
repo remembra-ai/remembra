@@ -101,6 +101,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PII redaction** no longer replaces the project number of a Google OAuth client id (and UUIDs or
   similar machine identifiers) with `[REDACTED_BANK_ACCOUNT]`. Account numbers written with a suffix
   (`123456789012-checking`, `...-SAV`, `ACCT-...-01`) are still redacted.
+- **Public copy says what the code does.** The Founding 100 price holds while the subscription stays active,
+  and 14 days after it ends (as the Terms say), with no lifetime promise. Pages no longer claim that every agent
+  or tool is covered: the session hooks are verified for Claude Code and Codex (a prerelease), and any MCP agent
+  can call `session_brief` and `close_session`. Transcript facts are read from Codex rollouts as well as Claude
+  Code transcripts, and the pages say so. The Claude and ChatGPT connector and the hosted remote MCP are marked
+  as coming (the connector is off at api.remembra.dev). The Team plan lists what the teams API enforces. The
+  PyPI summary describes Remembra Relay, and the MCP Registry text names the agent its handoffs are recorded
+  under. The DPA page says a deleted account is erased automatically after 7 days (backups age out), the plans
+  page says a new yearly bank unlocks after 14 days, and the durability page no longer promises atomic writes
+  across SQLite, Qdrant and the keyword index. The SDK and REST guides show the delete calls the client and
+  server have, the MCP pages count the 21 tools the server registers, and reconstructed blog examples say so.
+  `tests/test_site_truth_polish.py` scans every public file for these claims.
 - **The install line connects.** On remembra.dev, the README and the docs, the copyable install ended in a bare
   `remembra-relay connect`, a dry run that writes nothing, so a new user following it stayed unconnected. Every
   block now asks for the free key first and ends in `remembra-relay connect --apply`; the dashboard's empty
@@ -160,9 +172,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.16.0] - 2026-09-26 - Remembra Relay
 
 **Remembra Relay: one agent stops, the next one already knows.** When a session ends, `remembra-relay close`
-saves a handoff built from facts it reads from git (and, for Claude Code, the session's test runs); the agent's
-own summary is checked against them. When the next session starts, in any tool or on any machine, that agent
-gets a short brief. Every handoff stays on the trail.
+saves a handoff built from facts it reads from git (and, for Claude Code and Codex, the session's commands and
+test runs); the agent's own summary is checked against them. When the next session starts, in another tool or on
+another machine, that agent gets a short brief. Every handoff stays on the trail.
 
 ```bash
 pipx install --force 'remembra[mcp]>=0.16'
@@ -170,8 +182,8 @@ remembra-install --all            # asks for the key at a hidden prompt
 remembra-relay connect            # dry run; add --apply to write the hooks
 ```
 
-- **Handoff:** done / not done / failing / next step, from git and the Claude Code transcript; the transcript
-  never leaves the machine. **Brief:** about 1,500 tokens, everything recorded wrapped as untrusted data.
+- **Handoff:** done / not done / failing / next step, from git and the Claude Code transcript or Codex rollout;
+  neither leaves the machine. **Brief:** about 1,500 tokens, everything recorded wrapped as untrusted data.
   **Trail:** every handoff and checkpoint in order (`remembra-relay trail`, the dashboard's Trail page).
 - **Agent-scoped keys:** a handoff closed with one is key-verified; that key cannot write as another agent.
 - **Adapters:** Claude Code and Codex (codex-cli 0.155.0-alpha.16.4, a prerelease) verified. Cursor, Gemini CLI,
@@ -233,8 +245,9 @@ remembra-relay connect            # dry run; add --apply to write the hooks
   link by email, completing a password reset verifies the email, and the dashboard has a `/verify-email` page
   and a **Resend verification email** button (Settings → Profile). One free account per verified email is
   enforced on every path (dashboard verify, API-signup verify, password reset, social sign-up).
-- **Remembra Relay: session continuity across agents.** Every agent leaves a structured handoff
-  when it stops, and any agent picks it up at session start, whatever the tool, machine or checkout location.
+- **Remembra Relay: session continuity across agents.** A connected agent leaves a structured handoff
+  when it stops, and the next one picks it up at session start, in another tool, on another machine or in
+  another checkout.
   - Location-independent project identity: `POST /api/v1/projects/resolve` maps a normalized git
     remote (then root commit, then path) to a per-user project id. The same repo on any machine,
     drive or worktree gets the same id. Adds project links (`/api/v1/projects/links`); a brief shows
@@ -245,9 +258,9 @@ remembra-relay connect            # dry run; add --apply to write the hooks
   - `GET /api/v1/session/brief` accepts a location, leads with a "Last session: …" line and returns a
     compact `rendered` text (~1500 tokens). `GET /api/v1/trail` lists handoffs and checkpoints.
   - `remembra-relay` CLI (`brief`, `close`, `trail`, `resolve`, `connect`) gathers facts from git and
-    Claude Code transcripts without uploading them. It is hook-safe (≤10 s, always exits 0). `connect` wires
-    agent hooks through an adapter registry (Claude Code verified; Codex, Cursor, Gemini, Qwen and Kimi
-    shipped unverified and dry-run only).
+    Claude Code transcripts or Codex rollouts without uploading them. It is hook-safe (≤10 s, always exits 0).
+    `connect` wires agent hooks through an adapter registry (Claude Code and Codex verified; Cursor, Gemini,
+    Qwen and Kimi shipped unverified and dry-run only).
   - MCP: new `close_session` and `resolve_project` tools. `session_brief` is compact by default
     (`verbose=True` for the full JSON). The server instructions tell every MCP agent to brief at start and close before finishing.
   - Agent-scoped API keys (`agent_id` on key creation). Relay attribution comes from the key, not the request body.

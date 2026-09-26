@@ -12,7 +12,7 @@ REMEMBRA_URL=https://api.remembra.dev REMEMBRA_API_KEY=rem_... uvx remembra-mcp
 | --- | --- | --- |
 | `REMEMBRA_API_KEY` | yes | Your API key (dashboard, Settings > API keys). Keep it secret. |
 | `REMEMBRA_URL` | yes | `https://api.remembra.dev` for the hosted service, or your own server. Unset, it falls back to `http://localhost:8787`. |
-| `REMEMBRA_AGENT_ID` | no | The name this agent signs handoffs with, e.g. `claude-code` or `codex`. |
+| `REMEMBRA_AGENT_ID` | no | The name this agent's handoffs are recorded under, e.g. `claude-code` or `codex`. With a key scoped to one agent, handoffs are recorded under that agent and show as key-verified (a different name here is refused); otherwise the name is self-declared. |
 
 The tools let an agent read the brief another agent left for a repository
 (`session_brief`) and leave its own handoff when it stops (`close_session`),

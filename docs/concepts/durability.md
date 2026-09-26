@@ -15,8 +15,6 @@ This section documents Remembra's **explicit guarantees** about data safety and 
 | Guarantee | Commitment |
 |-----------|------------|
 | **Committed writes are durable** | Once `POST /memories` returns 2xx, data survives crashes |
-| **No silent data loss** | Failures are explicit (4xx/5xx), never silent corruption |
-| **Atomic operations** | Each store/update/delete is all-or-nothing |
 | **Bounded staleness** | Reads reflect writes within the snapshot window |
 | **Crash recovery** | Server restarts recover all committed data |
 
@@ -27,6 +25,7 @@ This section documents Remembra's **explicit guarantees** about data safety and 
 | **Sub-millisecond consistency** | Distributed systems have inherent propagation delay |
 | **Infinite retention** | Memories with TTL expire; decayed memories rank lower |
 | **Cross-region replication** | Not built-in (use Qdrant cluster for this) |
+| **Atomicity across stores** | A store or delete writes SQLite, Qdrant and the keyword index without a shared transaction. A partial failure can leave a memory missing from search, or an orphan vector. The reconcile job reports it (`remembra_reconcile_drift` in /metrics), and `python -m remembra.storage.reconcile --repair` fixes what it can do safely. |
 
 ## Snapshot Window
 
@@ -102,7 +101,7 @@ These terms are often confused:
 
 | Concept | Meaning | Remembra Behavior |
 |---------|---------|-------------------|
-| **Atomicity** | Operations complete fully or not at all | ✅ Each store/update is atomic |
+| **Atomicity** | Operations complete fully or not at all | Not across stores: SQLite, Qdrant and the keyword index are written without a shared transaction |
 | **Durability** | Committed data survives crashes | ✅ Data is fsync'd to disk |
 
 ### What This Means in Practice
@@ -115,8 +114,9 @@ When `POST /memories` returns success:
 
 If the server crashes mid-operation:
 
-- **Before commit**: Nothing is written (atomic rollback)
-- **After commit**: Data is fully persisted
+- **Before the SQLite commit**: The memory is not stored
+- **Between the SQLite commit and the vector write**: The memory is stored but missing from semantic search; the reconcile job reports it, and `--repair` queues it to be embedded again
+- **After both writes**: Data is fully persisted
 
 ## SQLite Configuration
 
@@ -235,7 +235,7 @@ storage:
 ### "Lose at most the last memory" — What does this mean?
 
 If the server crashes during a `store` operation:
-- **Before commit**: The memory is not stored (atomic)
+- **Before the SQLite commit**: The memory is not stored
 - **After commit**: The memory is fully durable
 
 You cannot lose previously committed memories.

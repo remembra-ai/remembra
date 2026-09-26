@@ -25,7 +25,7 @@ No OpenAI or other API keys are required. Ollama runs entirely locally for both 
 
 ## Configure Your AI Agents
 
-Once Remembra is running, configure all your AI agents to use it:
+Once Remembra is running, configure your AI agents to use it:
 
 ```bash
 pip install remembra
@@ -157,7 +157,7 @@ print(context)
 
 ## Next Steps
 
-- [Agent Setup](agent-setup.md) - Configure all your AI agents with one command
+- [Agent Setup](agent-setup.md) - Configure the agents it supports with one command
 - [Installation Guide](installation.md) - All installation options
 - [Docker Deployment](docker.md) - Production Docker setup
 - [Python SDK Guide](../guides/python-sdk.md) - Full SDK reference

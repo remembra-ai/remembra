@@ -1,6 +1,6 @@
 # Chatbot Memory
 
-Building a chatbot that remembers everything.
+Building a chatbot that remembers what users tell it.
 
 ## The Problem
 

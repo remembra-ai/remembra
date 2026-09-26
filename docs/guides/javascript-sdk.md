@@ -145,18 +145,14 @@ console.log(detail.access_count);
 
 ### forget()
 
-Delete memories (GDPR-compliant).
+Delete memories. They leave the database and the vector store at once; copies in backups age out (see Retention on [remembra.dev/security](https://remembra.dev/security#retention)).
 
 ```typescript
 // By ID
 await memory.forget({ memoryId: '01HQ...' });
-
-// By entity
-await memory.forget({ entity: 'Acme Corp' });
-
-// All memories (careful!)
-await memory.forget({ all: true });
 ```
+
+Pass `memoryId`. Delete by entity is not implemented yet: `entity` does not limit what is deleted, so do not pass it. A call with neither option is rejected by the server.
 
 **Returns:** `ForgetResult`
 

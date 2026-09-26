@@ -827,12 +827,21 @@ def test_a_constellation_tap_moves_the_trail_to_that_agent() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_connector_section_is_labelled_beta_and_says_what_is_unverified() -> None:
+def test_connector_section_is_labelled_coming_and_says_it_is_not_live() -> None:
+    # The connector is off unless REMEMBRA_CONNECTOR_ENABLED is set, and it is not set on api.remembra.dev
+    # (POST /mcp answers 405 there), so the section says "coming", never "Beta" or "Add the connector".
+    from remembra.config import Settings
+
+    assert Settings.model_fields["connector_enabled"].default is False
     home = (LANDING / "index.html").read_text()
     section = re.search(r'<section class="sec" id="anywhere".*?</section>', home, re.S).group(0)
-    assert re.search(r'<p class="eyebrow">.*?<span class="tag signal">Beta</span></p>', section)
+    assert re.search(r'<p class="eyebrow">.*?<span class="tag">Coming, not live yet</span></p>', section)
+    assert ">Beta<" not in section
     note = _text(re.search(r'<p class="fine" id="connector-note">.*?</p>', section, re.S).group(0))
-    assert note.startswith("Beta:") and "still verifying it inside the live Claude and ChatGPT apps" in note
+    assert note.startswith("Coming, not live yet:") and "not switched on at api.remembra.dev" in note
+    assert "not yet verified it inside the live Claude and ChatGPT apps" in note
+    assert _text(re.search(r'<h2 id="anywhere-title">.*?</h2>', section, re.S).group(0)).startswith("Soon:")
+    assert "Once the connector is switched on" in _text(section) and "Add the Remembra connector" not in section
     assert "Nothing over the connector edits or deletes memories." in _text(section)
     gate = home[: home.index('id="anywhere"')].rsplit("<section", 1)[0]
     assert (

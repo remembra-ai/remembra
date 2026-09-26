@@ -193,24 +193,26 @@ memory.update(memory_id, "John is a senior software engineer at Google")
 
 ### forget()
 
-Delete memories (GDPR-compliant).
+Delete memories. They leave the database and the vector store at once; copies in backups age out (see Retention on [remembra.dev/security](https://remembra.dev/security#retention)).
 
 ```python
 memory.forget(
-    memory_ids: list[str] = None,
-    user_id: str = None,
-    all: bool = False
-) -> dict
+    memory_id: str | None = None,
+    user_id: str | None = None,
+    entity: str | None = None,
+) -> ForgetResult
 ```
+
+Pass `memory_id`. The server rejects a delete by `user_id` alone. Delete by entity is not implemented yet: `entity` does not limit what is deleted, so do not pass it. To delete every memory in one project, use `forget_project(project_id)`.
 
 **Example:**
 
 ```python
-# Forget specific memory
-memory.forget(memory_ids=["mem_abc123"])
+# Forget one memory
+memory.forget(memory_id="mem_abc123")
 
-# Forget all memories for a user
-memory.forget(user_id="user_123", all=True)
+# Forget every memory in one project
+memory.forget_project("my-project")
 ```
 
 ## Advanced Methods

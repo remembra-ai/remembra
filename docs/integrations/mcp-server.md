@@ -9,7 +9,7 @@ Use Remembra as persistent memory for AI assistants via the [Model Context Proto
 
 ## Quick Setup (v0.10.1)
 
-Configure all your AI tools with one command:
+Configure the AI tools it supports with one command:
 
 ```bash
 pip install "remembra[mcp]"
@@ -531,6 +531,7 @@ full response lists only entities that are named in the returned memories
 (`entities_total` holds the unfiltered count).
 
 `get_inbox(summary=true)` returns subject, sender and a 200-character preview instead of full bodies.
+`ack_inbox(inbox_id, result?, note?)` marks an inbox item read after you act on it, or `done`, `blocked` or `rejected` with an optional note.
 `send_to_inbox` warns when the recipient is not in `REMEMBRA_KNOWN_AGENTS` and accepts `expires_in` (`12h`, `7d`, `2w`).
 `list_memories` accepts `offset` and returns `next_offset`.
 

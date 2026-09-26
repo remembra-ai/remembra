@@ -58,8 +58,8 @@ The done, not done and failing sections come from git and the session's test run
 
 ## How it works
 
-1. **Close.** When a session ends, `remembra-relay close` reads the branch, commits, changed and uncommitted files and unpushed commits from git, and for Claude Code the test runs and open items in the local transcript. The transcript never leaves your machine; secrets are redacted before anything does.
-2. **Brief.** When the next session starts, in any tool, `remembra-relay brief` (or the `session_brief` MCP tool) gives the agent who worked last, what is done, what is failing and the next step, in about 1,500 tokens. Everything another agent recorded is wrapped as untrusted data.
+1. **Close.** When a session ends, `remembra-relay close` reads the branch, commits, changed and uncommitted files and unpushed commits from git, and, for Claude Code and Codex, the commands, test runs and open items in the local transcript (Codex's is its rollout file). The transcript never leaves your machine; secrets are redacted before anything does.
+2. **Brief.** When the next session starts, in the same tool or another, `remembra-relay brief` (run by the verified session hooks) or the `session_brief` MCP tool (any MCP agent can call it) gives the agent who worked last, what is done, what is failing and the next step, in about 1,500 tokens. Everything another agent recorded is wrapped as untrusted data.
 3. **Trail.** Every handoff stays in order: `remembra-relay trail`, or the Trail page in the dashboard. A git log for your agents.
 
 The same repository on a laptop, a server or in a worktree is one project, because it is identified by its git remote. Give each agent its own scoped key and its handoffs show as key-verified.
@@ -143,9 +143,9 @@ curl -X POST http://localhost:8787/api/v1/memories/recall \
   -d '{"query": "Who runs Acme?", "user_id": "demo"}'
 ```
 
-### Connect ALL Your AI Agents (NEW in v0.10.0)
+### Connect your agents (since v0.10.0)
 
-**One command configures everything:**
+**One command configures the agents it detects:**
 
 ```bash
 pip install remembra
@@ -274,7 +274,7 @@ Run it yourself: `python benchmarks/locomo_runner.py --data /tmp/locomo/data/loc
 
 ## 🛠️ MCP Server
 
-Give any AI coding tool persistent memory with one command. Works with **Claude Code**, **Cursor**, **VS Code + Copilot**, **Windsurf**, **JetBrains**, **Zed**, **OpenAI Codex**, and any MCP-compatible client.
+Give an MCP-capable coding agent persistent memory. Works with **Claude Code**, **Cursor**, **VS Code + Copilot**, **Windsurf**, **JetBrains**, **Zed**, **OpenAI Codex**, and any MCP-compatible client.
 
 ```bash
 pip install remembra[mcp]

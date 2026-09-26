@@ -48,17 +48,17 @@ pip install remembra
 ```
 
 This includes:
-- **`remembra-install`** — Configure all your AI agents with one command
+- **`remembra-install`** — Configure the agents it supports with one command
 - **`remembra-doctor`** — Diagnose connection issues
 - **`remembra-bridge`** — Tunnel for sandboxed agents
 - **`remembra-mcp`** — MCP server for Claude/Cursor
 
 ### Configure Your AI Agents
 
-After installing, set up all your AI tools:
+After installing, set up the agents it supports:
 
 ```bash
-# Auto-detect and configure all agents (asks for the key, shows the changes, writes after a "y")
+# Auto-detect and configure the supported agents (asks for the key, shows the changes, writes after a "y")
 remembra-install --all
 
 # Verify setup

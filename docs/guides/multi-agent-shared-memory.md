@@ -1,6 +1,6 @@
 # Multi-Agent Shared Memory Setup
 
-Connect all your AI agents to the same Remembra memory pool. What one agent stores, all agents can recall.
+Connect your AI agents to the same Remembra memory pool. What one agent stores, the others can recall.
 
 !!! success "New in v0.10.0: One-Command Setup"
     ```bash

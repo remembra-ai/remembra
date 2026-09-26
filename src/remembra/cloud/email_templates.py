@@ -267,7 +267,7 @@ def price_line(
     (Solo, annual only); it is ignored for any other plan or interval.
     ``founding_held`` is whether the account holds one of the 100 Founding
     seats: a Founding charge that arrived after the offer was full is quoted
-    at what was charged, without the lifetime lock.
+    at what was charged, without the Founding price hold.
     """
     limits = get_plan(tier)
     yearly = BillingInterval.parse(str(interval)) == BillingInterval.YEAR if interval else False
@@ -276,7 +276,7 @@ def price_line(
     if founding and limits.tier == PlanTier.SOLO and yearly:
         price = f"{money(FOUNDING_ANNUAL_PRICE_CENTS)}/year"
         if founding_held:
-            return f"{price} (Founding 100, price locked for life)"
+            return f"{price} (Founding 100: the price holds while this subscription stays active)"
         return f"{price}, the Founding 100 price (the offer was full when this payment arrived; we will contact you about it)"
     cents = limits.price_annual_cents if yearly and limits.price_annual_cents is not None else limits.price_monthly_cents
     if cents is None:
