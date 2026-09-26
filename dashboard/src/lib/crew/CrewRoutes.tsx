@@ -3,11 +3,11 @@
 // WP-12 owns the routes and the data layer; the designed screens are WP-13's
 // and plug in here per screen: the Site Board (#/crews) and Mission Control
 // (the track view) are WP-13a's, Zone Map and Policy WP-13b's, Task Board and
-// report receipts WP-13c's. Views whose screens have not landed yet render a
-// plain, fully live view of the same data so every crew route works end to
-// end: per crew the sessions with presence, who holds each zone, reserved
-// batons, Needs-you and the latest moments. Untrusted text (titles, messages)
-// is rendered as plain text only.
+// report receipts WP-13c's, the Channel WP-13d's. Views whose screens have not
+// landed yet render a plain, fully live view of the same data so every crew
+// route works end to end: per crew the sessions with presence, who holds each
+// zone, reserved batons, Needs-you and the latest moments. Untrusted text
+// (titles, messages) is rendered as plain text only.
 
 import { HardHat, RadioTower } from 'lucide-react';
 import { PolicyPage } from '../../pages/crew/Policy';
@@ -18,6 +18,7 @@ import { Receipt } from '../../pages/crew/Receipt';
 import { useNow } from '../../hooks/useResource';
 import { absoluteTime, relativeTime } from '../time';
 import { Card, CardHeader, CopyCommand, ErrorNotice, Pill, PulseDot, TrailSkeleton } from '../../components/relay/ui';
+import { ChannelScreen } from '../../components/crew/channel/ChannelScreen';
 import { MissionControl } from '../../pages/crew/MissionControl';
 import { SiteBoard } from '../../pages/crew/SiteBoard';
 import { useCrewForProject } from './hooks';
@@ -189,8 +190,8 @@ function CrewScreen() {
     );
   }
   // WP-13a: the track is Mission Control; WP-13b: Zone Map and Policy;
-  // WP-13c: Task Board and report receipts. The other views keep the live
-  // overview until their WPs land.
+  // WP-13c: Task Board and report receipts; WP-13d: the Channel. The other
+  // views keep the live overview until their WPs land.
   if (route?.screen === 'track') return <MissionControl crewId={lookup.crewId} project={project} />;
   if (route?.screen === 'zones') return <ZonesPage crewId={lookup.crewId} project={project} zoneSlug={route.zone} />;
   if (route?.screen === 'policy') return <PolicyPage crewId={lookup.crewId} project={project} />;
@@ -198,6 +199,7 @@ function CrewScreen() {
   if (route?.screen === 'report' && route.report) {
     return <Receipt crewId={lookup.crewId} project={project} reportId={route.report} taskParam={route.task} />;
   }
+  if (route?.screen === 'channel') return <ChannelScreen crewId={lookup.crewId} project={project} thread={route.thread} />;
   return <CrewLive crewId={lookup.crewId} project={project} />;
 }
 

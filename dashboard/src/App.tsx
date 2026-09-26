@@ -12,6 +12,7 @@ import { Trail } from './pages/Trail';
 import { Agents } from './pages/Agents';
 import { AgentRoute } from './pages/crew/AgentPage';
 import { Inbox } from './pages/Inbox';
+import { useNeedsYouTotal } from './components/crew/inbox/useInbox';
 import { useRelayData } from './hooks/relayData';
 import { inboxCounts } from './lib/relay';
 import { useShortcuts } from './hooks/useShortcuts';
@@ -401,6 +402,7 @@ function AuthenticatedShell({
   onTabChange: (tab: TabType) => void;
 }) {
   const { inbox } = useRelayData();
+  const needsYou = useNeedsYouTotal();
   const tab: TabType = activeTab === 'admin' && !isAdmin ? 'home' : activeTab;
   return (
     <AppLayout
@@ -412,7 +414,7 @@ function AuthenticatedShell({
       onSearch={onSearch}
       onShowShortcuts={onShowShortcuts}
       isAdmin={isAdmin}
-      inboxUnread={inboxCounts(inbox.data).forYou}
+      inboxUnread={inboxCounts(inbox.data).forYou + needsYou}
     >
       {tab === 'home' && <Home userName={userName} />}
       {(tab === 'crews' || tab === 'crew') && <CrewRoutes tab={tab} />}

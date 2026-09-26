@@ -1,0 +1,121 @@
+/* Crew live-view pixel craft: dithered stone-dust banks, orange pixel packets
+   on the dashed trail, and the live status strip (owner art direction:
+   brand/trail-brain hero). Tones are our own: stone dust plus ember flecks. */
+
+.crew-px {
+  --dz1: #e0e1da;
+  --dz2: #d2d4cc;
+  --dz3: #c1c4bb;
+  --dz-ember: #ff8a52;
+  --px-trail: var(--rule);
+}
+.dark .crew-px,
+.dark.crew-px {
+  /* one notch above the hero's tones: these banks sit on the panel, not the page */
+  --dz1: #222925;
+  --dz2: #2b3530;
+  --dz3: #38453e;
+  --dz-ember: #9a4119;
+  --px-trail: #45494e;
+}
+
+.crew-dither {
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+/* The dashed trail with packets riding it. */
+.crew-trail {
+  position: relative;
+  height: 6px;
+  background: repeating-linear-gradient(90deg, var(--px-trail) 0 5px, transparent 5px 10px) center / 100% 2px no-repeat;
+  overflow: hidden;
+}
+.crew-trail-v {
+  position: relative;
+  width: 6px;
+  background: repeating-linear-gradient(180deg, var(--px-trail) 0 4px, transparent 4px 8px) center / 2px 100% no-repeat;
+}
+.crew-packet {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  background: var(--signal);
+  box-shadow: 6px 0 0 -1px rgb(255 91 20 / 0.35), 12px 0 0 -2px rgb(255 91 20 / 0.15);
+  animation: crew-packet var(--dur, 2.6s) steps(26, end) infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes crew-packet {
+  from {
+    left: -18px;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+/* A single packet dropped down the thread rail when a new message lands. */
+.crew-drop {
+  position: absolute;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  background: var(--signal);
+  animation: crew-drop 560ms steps(14, end) forwards;
+}
+@keyframes crew-drop {
+  from {
+    top: 0;
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  to {
+    top: calc(100% - 6px);
+    opacity: 0;
+  }
+}
+
+/* Status strip dot: solid and ringed while live, hollow otherwise. */
+.crew-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  background: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-wash);
+}
+.crew-dot[data-live="false"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--ink-3);
+}
+
+/* New-item flash: one blink of the signal wash, pixel-stepped. */
+@keyframes crew-flash {
+  0%,
+  40% {
+    background-color: var(--signal-wash);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.crew-flash {
+  animation: crew-flash 1.2s steps(6, end) 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crew-packet,
+  .crew-drop,
+  .crew-flash {
+    animation: none;
+  }
+  .crew-packet {
+    left: calc(var(--rest, 50) * 1%);
+  }
+  .crew-drop {
+    display: none;
+  }
+}
