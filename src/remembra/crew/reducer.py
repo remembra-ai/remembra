@@ -366,9 +366,37 @@ def _collision(state: State, event: Mapping[str, Any], p: Mapping[str, Any]) -> 
         state["collisions"].pop(c["id"], None)
 
 
+# Task events that move a session's current task the way the server does (crew_sessions.current_task_id):
+# claim, start, adopt, the join's auto-adopt (status_changed to claimed / in_progress), recovery and a
+# human's assign give it to the owner; release, stall, cancel and done take it away.
+_TAKES_TO: Final = ("claimed", "in_progress")
+_RELEASES_TO: Final = ("ready", "backlog", "stalled", "cancelled", "done")
+
+
+def _task_current(state: State, etype: str, p: Mapping[str, Any]) -> None:
+    t = p["task"]
+    tid = t["id"]
+    takes: str | None = None
+    if etype == "task.assigned":
+        takes = p.get("to_session") or t.get("owner_session_id")
+    elif etype == "task.recovered" or (etype == "task.status_changed" and p.get("to") in _TAKES_TO):
+        takes = t.get("owner_session_id")
+    releases = etype in ("task.stalled", "task.done", "task.assigned") or (
+        etype == "task.status_changed" and p.get("to") in _RELEASES_TO
+    )
+    if not takes and not releases:
+        return
+    for sid, s in state["sessions"].items():
+        if s.get("current_task_id") == tid and sid != takes:
+            s["current_task_id"] = None
+    if takes and takes in state["sessions"]:
+        state["sessions"][takes]["current_task_id"] = tid
+
+
 def _task(state: State, event: Mapping[str, Any], p: Mapping[str, Any]) -> None:
     t = p["task"]
     state["tasks"][t["id"]] = copy.deepcopy(dict(t))
+    _task_current(state, event["type"], p)
 
 
 def _checkpoint(state: State, event: Mapping[str, Any], p: Mapping[str, Any]) -> None:

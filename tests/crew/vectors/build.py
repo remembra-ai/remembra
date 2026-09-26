@@ -223,6 +223,117 @@ def reducer_vectors() -> list[dict[str, Any]]:
         )
     )
 
+    owned = {"owner_agent_id": "claude-code"}
+    lane_frames = [
+        # a human hands T-14 (cs_a's current task) to cs_b
+        E(
+            11,
+            "task.assigned",
+            {
+                "task": task("tsk_14", 14, "in_progress", zone_ids=["zn_pos"], owner_session_id="cs_b", owner_agent_id="codex"),
+                "to_session": "cs_b",
+            },
+            by=HUMAN,
+        ),
+        # cs_a claims T-9: its current task
+        E(
+            12,
+            "task.status_changed",
+            {"task": task("tsk_9", 9, "claimed", owner_session_id="cs_a", **owned), "from": "ready", "to": "claimed"},
+            by=A,
+        ),
+        # editing T-9 moves nothing
+        E(
+            13,
+            "task.updated",
+            {"task": task("tsk_9", 9, "claimed", owner_session_id="cs_a", **owned), "changed": ["title"]},
+            by=A,
+        ),
+        # cs_b stalls on T-14: no current task
+        E(
+            14,
+            "task.stalled",
+            {
+                "task": task("tsk_14", 14, "stalled", zone_ids=["zn_pos"], owner_session_id="cs_b", owner_agent_id="codex"),
+                "reason": "quota",
+            },
+        ),
+        # cs_a adopts T-14 (stalled -> claimed): it becomes cs_a's current task
+        E(
+            15,
+            "task.status_changed",
+            {
+                "task": task("tsk_14", 14, "claimed", zone_ids=["zn_pos"], owner_session_id="cs_a", **owned),
+                "from": "stalled",
+                "to": "claimed",
+            },
+            by=A,
+        ),
+        # T-14 done: cs_a has no current task
+        E(
+            16,
+            "task.done",
+            {
+                "task": task("tsk_14", 14, "done", zone_ids=["zn_pos"], owner_session_id="cs_a", **owned),
+                "report_id": "rpt_1",
+            },
+            by=A,
+        ),
+    ]
+    v.append(
+        vec(
+            "task_owner_moves_the_lane_current_task",
+            "A session's current task follows the server: assign moves it (old owner cleared), claim and adopt"
+            " set it, stall and done clear it, an edit moves nothing (the Track lanes read it).",
+            [frame(e) for e in lane_frames[:1]],
+            [
+                eq("sessions.cs_a.current_task_id", None),
+                eq("sessions.cs_b.current_task_id", "tsk_14"),
+                eq("tasks.tsk_14.owner_session_id", "cs_b"),
+            ],
+        )
+    )
+    v.append(
+        vec(
+            "task_owner_moves_through_claim_stall_adopt_done",
+            "After the assign: claim sets cs_a's current task, an edit keeps it, stall clears cs_b's, adopt sets"
+            " cs_a's to the adopted task and done clears it.",
+            [frame(e) for e in lane_frames],
+            [
+                eq("sessions.cs_a.current_task_id", None),
+                eq("sessions.cs_b.current_task_id", None),
+                eq("tasks.tsk_14.status", "done"),
+                eq("tasks.tsk_9.owner_session_id", "cs_a"),
+                eq("last_seq", 16),
+            ],
+        )
+    )
+    v.append(
+        vec(
+            "task_owner_moves_claim_then_edit",
+            "Claim sets the current task and a later edit of that task keeps it.",
+            [frame(e) for e in lane_frames[:3]],
+            [
+                eq("sessions.cs_a.current_task_id", "tsk_9"),
+                eq("sessions.cs_b.current_task_id", "tsk_14"),
+            ],
+        )
+    )
+    v.append(
+        vec(
+            "task_owner_moves_adopt",
+            "Adopting a stalled task makes it the adopter's current task.",
+            [frame(e) for e in lane_frames[:5]],
+            [
+                eq("sessions.cs_a.current_task_id", "tsk_14"),
+                eq("sessions.cs_b.current_task_id", None),
+                eq("tasks.tsk_14.status", "claimed"),
+                eq("tasks.tsk_9.status", "claimed"),
+                eq("last_seq", 15),
+            ],
+        )
+    )
+
     passed = {
         "baton_id": "bat_1",
         "task_id": "tsk_14",

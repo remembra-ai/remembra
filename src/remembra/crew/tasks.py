@@ -2262,7 +2262,10 @@ class TaskService:
             await tx.conn.execute(
                 "UPDATE crew_sessions SET current_task_id = ? WHERE id = ? AND crew_id = ?", (task_id, target["id"], crew_id)
             )
-            await resolve_inbox_items(tx, crew_id, [f"task_ready:{task_id}", f"baton:{task_id}"], resolved_by=caller.user_id)
+            # the baton is handed over: every item about it closes (Needs-you baton_available, crew baton_reserved)
+            await resolve_inbox_items(
+                tx, crew_id, [f"task_ready:{task_id}", *baton_inbox_keys(task_id)], resolved_by=caller.user_id
+            )
         return TaskResult(detail, seq, {"claims": claims, "baton": baton})
 
     # -- lost / quota / recovery (WP-4 seam) ------------------------------------------------------

@@ -419,9 +419,35 @@ const collision: Handler = (state, _e, p) => {
   return { ...state, collisions };
 };
 
-const task: Handler = (state, _e, p) => {
+// Task events that move a session's current task the way the server does (crew_sessions.current_task_id):
+// claim, start, adopt, the join's auto-adopt (status_changed to claimed / in_progress), recovery and a
+// human's assign give it to the owner; release, stall, cancel and done take it away.
+const TAKES_TO = new Set(['claimed', 'in_progress']);
+const RELEASES_TO = new Set(['ready', 'backlog', 'stalled', 'cancelled', 'done']);
+
+function taskCurrent(sessions: CrewState['sessions'], type: string, p: Record<string, unknown>): CrewState['sessions'] {
   const t = p.task as TaskView;
-  return { ...state, tasks: put(state.tasks, t.id, t) };
+  let takes: string | null = null;
+  if (type === 'task.assigned') takes = (p.to_session as string | undefined) || t.owner_session_id || null;
+  else if (type === 'task.recovered' || (type === 'task.status_changed' && TAKES_TO.has(p.to as string)))
+    takes = t.owner_session_id || null;
+  const releases =
+    type === 'task.stalled' ||
+    type === 'task.done' ||
+    type === 'task.assigned' ||
+    (type === 'task.status_changed' && RELEASES_TO.has(p.to as string));
+  if (!takes && !releases) return sessions;
+  let next = sessions;
+  for (const [sid, s] of Object.entries(sessions)) {
+    if (s.current_task_id === t.id && sid !== takes) next = put(next, sid, { ...s, current_task_id: null });
+  }
+  if (takes && next[takes] !== undefined) next = put(next, takes, { ...next[takes], current_task_id: t.id });
+  return next;
+}
+
+const task: Handler = (state, event, p) => {
+  const t = p.task as TaskView;
+  return { ...state, tasks: put(state.tasks, t.id, t), sessions: taskCurrent(state.sessions, event.type, p) };
 };
 
 const checkpoint: Handler = (state, _e, p) => {

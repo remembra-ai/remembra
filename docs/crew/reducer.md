@@ -88,7 +88,7 @@ The session an event concerns is `refs.session_id`, else `actor.id` when `actor.
 | `guard.tamper_blocked` | `tamper_blocks[session] += 1` |
 | `githook.missing` | `githook_state = payload.state` |
 | `collision.*` | upsert if open/acknowledged, else remove |
-| `task.*` | upsert `payload.task` |
+| `task.*` | upsert `payload.task`; then move sessions' `current_task_id` as the server does: `task.assigned` gives it to `to_session`, `task.status_changed` to `claimed`/`in_progress` and `task.recovered` to the task's owner (any other session holding it is cleared); `task.stalled`, `task.done` and `task.status_changed` to `ready`/`backlog`/`stalled`/`cancelled`/`done` clear it |
 | `checkpoint.created` | `checkpoints[session_id] = checkpoint` |
 | `report.*` | current → `reports[task_id] = report`; not current → remove only if it is the stored current one |
 | `message.posted` | append, sort by `seq`, keep last 100 |
