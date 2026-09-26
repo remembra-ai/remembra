@@ -74,6 +74,11 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger(__name__)
 
+
+def _sessions_text(n: int) -> str:
+    return f"{n} session" if n == 1 else f"{n} sessions"
+
+
 REAPER_INTERVAL_S: Final = 30.0
 REAPER_ORDER: Final = 40
 SWEPT_STATES: Final = ("joining", "active", "idle", "quiet")
@@ -230,7 +235,7 @@ class CrewReaper:
                         type="host.unreachable",
                         actor=Actor.system(),
                         payload={"host_id": host["id"], "silent_s": silent, "session_ids": session_ids[:50]},
-                        summary=f"host {host['host_label']} unreachable ({len(session_ids)} session{'' if len(session_ids) == 1 else 's'} quiet)",
+                        summary=f"host {host['host_label']} unreachable ({_sessions_text(len(session_ids))} quiet)",
                         refs={"host_id": host["id"]},
                         now=now,
                     )
