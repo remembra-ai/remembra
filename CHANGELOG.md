@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   similar machine identifiers) with `[REDACTED_BANK_ACCOUNT]`. Account numbers written with a suffix
   (`123456789012-checking`, `...-SAV`, `ACCT-...-01`) are still redacted.
 
-## [0.16.0] - unreleased (date set when tagged) - Remembra Relay
+## [0.16.0] - 2026-09-26 - Remembra Relay
 
 **Remembra Relay: one agent stops, the next one already knows.** When a session ends, `remembra-relay close`
 saves a handoff built from facts it reads from git (and, for Claude Code, the session's test runs); the agent's

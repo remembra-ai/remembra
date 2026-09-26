@@ -1,0 +1,3 @@
+# The built docs site under site/ is generated (mkdocs build); keep it out of the
+# language statistics so GitHub shows the project as the Python it is.
+site/** linguist-generated

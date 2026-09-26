@@ -1,0 +1,5 @@
+# Build context for docs.Dockerfile only. BuildKit reads <Dockerfile>.dockerignore
+# instead of .dockerignore, which excludes docs/ and *.md for the API image.
+*
+!mkdocs.yml
+!docs/
