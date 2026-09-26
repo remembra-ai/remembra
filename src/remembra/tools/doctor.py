@@ -17,7 +17,7 @@ import httpx
 # Default config paths for each agent
 DEFAULT_CODEX_CONFIG = Path.home() / ".codex" / "config.toml"
 DEFAULT_CLAUDE_DESKTOP_CONFIG = Path.home() / "Library/Application Support/Claude/claude_desktop_config.json"
-DEFAULT_CLAUDE_CODE_CONFIG = Path.home() / ".claude" / "settings.json"
+DEFAULT_CLAUDE_CODE_CONFIG = Path.home() / ".claude.json"  # user-scope MCP servers (`claude mcp add --scope user`)
 DEFAULT_GEMINI_CONFIG = Path.home() / ".gemini" / "settings.json"
 DEFAULT_CURSOR_CONFIG = Path.home() / ".cursor" / "mcp.json"
 DEFAULT_WINDSURF_CONFIG = Path.home() / ".windsurf" / "mcp_config.json"

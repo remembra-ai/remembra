@@ -2,7 +2,11 @@
 
 Most agents keep MCP servers in a JSON file under ``mcpServers``. Codex keeps
 them in TOML (``~/.codex/config.toml``), so it goes through the Codex
-installer in :mod:`remembra.tools.codex`.
+installer in :mod:`remembra.tools.codex`. Claude Code reads its user-scope MCP
+servers from ``~/.claude.json`` (what ``claude mcp add --scope user`` writes),
+not from ``~/.claude/settings.json``; an entry an older installer put in
+``settings.json`` is taken out again, since Claude Code never loaded it and it
+held the key.
 
 ``remembra-install`` is a dry run by default: it shows each change as a diff
 (the Remembra key masked, every other secret in the file hidden; see
@@ -41,7 +45,8 @@ from remembra.tools.keyinput import mask_key, resolve_api_key
 # Default config paths for each agent
 AGENT_CONFIGS = {
     "claude-desktop": Path.home() / "Library/Application Support/Claude/claude_desktop_config.json",
-    "claude-code": Path.home() / ".claude" / "settings.json",
+    # User scope: the file `claude mcp add --scope user` writes. settings.json is not read for MCP servers.
+    "claude-code": Path.home() / ".claude.json",
     "gemini": Path.home() / ".gemini" / "settings.json",
     "cursor": Path.home() / ".cursor" / "mcp.json",
     "windsurf": Path.home() / ".windsurf" / "mcp_config.json",
@@ -50,6 +55,14 @@ AGENT_CONFIGS = {
 
 # Agents whose config is not the JSON mcpServers shape.
 TOML_AGENTS = {"codex"}
+
+
+def claude_code_old_config() -> Path:
+    """Where remembra-install <= 0.16.0 put Claude Code's entry: ``~/.claude/settings.json``
+    (next to the configured ``~/.claude.json``). Claude Code does not load MCP servers from
+    it, so that entry, and the key in it, is taken out again."""
+    return AGENT_CONFIGS["claude-code"].parent / ".claude" / "settings.json"
+
 
 # Centralized credentials
 REMEMBRA_HOME = Path.home() / ".remembra"
@@ -162,6 +175,9 @@ def build_mcp_server_config(
     }
     if agent_id:
         env["REMEMBRA_AGENT_ID"] = agent_id
+    if agent_id == "claude-code":
+        # The shape `claude mcp add --scope user` writes.
+        return {"type": "stdio", "command": command, "args": [], "env": env}
     return {"command": command, "env": env}
 
 
@@ -177,8 +193,13 @@ def _json_object(text: str | None, path: Path) -> dict[str, Any]:
     return data
 
 
-def plan_json_config(config_path: Path, server_config: dict[str, Any]) -> Change:
-    """The JSON config with ``mcpServers.remembra`` set (not yet saved); an invalid file raises."""
+def plan_json_config(config_path: Path, server_config: dict[str, Any], *, first: bool = False) -> Change:
+    """The JSON config with ``mcpServers.remembra`` set (not yet saved); an invalid file raises.
+
+    With ``first``, a missing ``mcpServers`` goes at the top of the file, so the
+    printed diff's context is the file's first lines rather than its last ones
+    (``~/.claude.json`` also holds account details).
+    """
     before = config_path.read_text(encoding="utf-8") if config_path.exists() else None
     data = _json_object(before, config_path)
     servers = data.get("mcpServers")
@@ -187,15 +208,18 @@ def plan_json_config(config_path: Path, server_config: dict[str, Any]) -> Change
     existing = (servers or {}).get("remembra")
     if existing == server_config:
         return Change(path=config_path, before=before, after=before or "", summary=[])
-    new = dict(data)
-    new["mcpServers"] = {**(servers or {}), "remembra": server_config}
+    merged = {**(servers or {}), "remembra": server_config}
+    new = {"mcpServers": merged, **data} if first and servers is None else {**data, "mcpServers": merged}
     after = json.dumps(new, indent=2, ensure_ascii=False) + "\n"
     summary = ["update the remembra MCP server" if existing is not None else "add the remembra MCP server"]
     return Change(path=config_path, before=before, after=after, summary=summary)
 
 
-def plan_json_removal(config_path: Path) -> Change:
-    """The JSON config without ``mcpServers.remembra`` (unchanged when it has none)."""
+def plan_json_removal(config_path: Path, *, keep_file: bool = False) -> Change:
+    """The JSON config without ``mcpServers.remembra`` (unchanged when it has none).
+
+    The file is deleted when nothing else is left in it, unless ``keep_file``.
+    """
     before = config_path.read_text(encoding="utf-8") if config_path.exists() else None
     if before is None:
         return Change(path=config_path, before=None, after="", summary=[], delete=True)
@@ -210,7 +234,29 @@ def plan_json_removal(config_path: Path) -> Change:
     else:
         del new["mcpServers"]
     after = json.dumps(new, indent=2, ensure_ascii=False) + "\n"
-    return Change(path=config_path, before=before, after=after, summary=["remove the remembra MCP server"], delete=not new)
+    return Change(
+        path=config_path, before=before, after=after, summary=["remove the remembra MCP server"], delete=not new and not keep_file
+    )
+
+
+def plan_claude_code_old_entry() -> Change | None:
+    """Taking out the entry an older installer wrote to ~/.claude/settings.json (None when there is none)."""
+    path = claude_code_old_config()
+    if not path.is_file():
+        return None
+    change = plan_json_removal(path, keep_file=True)
+    if not change.changed:
+        return None
+    change.summary = ["remove the old remembra entry (Claude Code never loaded it from settings.json; it held the key)"]
+    return change
+
+
+def agent_detected(agent: str) -> bool:
+    """True when ``agent`` looks installed: its config file's directory exists (Claude Code: ``~/.claude``)."""
+    config_path = AGENT_CONFIGS[agent]
+    if config_path.name == ".claude.json":  # it sits in HOME, which always exists: look for ~/.claude too
+        return config_path.exists() or (config_path.parent / ".claude").is_dir()
+    return config_path.parent.exists()
 
 
 def upsert_mcp_config(
@@ -304,7 +350,7 @@ def install_agent_config(
         user_id=user_id,
         agent_id=agent,
     )
-    change = plan_json_config(config_path, server_config)
+    change = plan_json_config(config_path, server_config, first=agent == "claude-code")
     created = change.before is None
     had = (_json_object(change.before, config_path).get("mcpServers") or {}) if change.before else {}
     updated = isinstance(had, dict) and "remembra" in had
@@ -339,9 +385,8 @@ def install_all_agents(
     results: list[AgentInstallResult] = []
 
     for agent, config_path in AGENT_CONFIGS.items():
-        # Only install if the agent's config directory exists
-        # (indicates the agent is installed)
-        if config_path.parent.exists():
+        # Only install if the agent looks installed (see agent_detected).
+        if agent_detected(agent):
             try:
                 result = install_agent_config(
                     agent,
@@ -361,11 +406,7 @@ def install_all_agents(
 
 def detect_agents() -> list[str]:
     """Detect which agents are installed based on config directory existence."""
-    detected = []
-    for agent, config_path in AGENT_CONFIGS.items():
-        if config_path.parent.exists():
-            detected.append(agent)
-    return detected
+    return [agent for agent in AGENT_CONFIGS if agent_detected(agent)]
 
 
 def plan_agent(
@@ -384,7 +425,7 @@ def plan_agent(
             config_path, api_key=api_key, project=project, user_id=user_id, url=url, command=command, agent_id=agent
         )
     server = build_mcp_server_config(command=command, url=url, api_key=api_key, project=project, user_id=user_id, agent_id=agent)
-    return plan_json_config(config_path, server)
+    return plan_json_config(config_path, server, first=agent == "claude-code")
 
 
 def plan_agent_removal(agent: str, config_path: Path) -> Change:
@@ -399,7 +440,8 @@ def plan_agent_removal(agent: str, config_path: Path) -> Change:
         return Change(
             path=config_path, before=before, after=after, summary=["remove [mcp_servers.remembra]"], delete=not after.strip()
         )
-    return plan_json_removal(config_path)
+    # ~/.claude.json is Claude Code's own state file: never deleted, even when nothing else is in it.
+    return plan_json_removal(config_path, keep_file=agent == "claude-code")
 
 
 def plan_credentials(api_key: str, project: str, user_id: str, url: str) -> Change:
@@ -429,8 +471,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Add (or --remove) the Remembra MCP server in your AI agents' configs. A dry run unless --apply.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Agents: Claude Desktop, Claude Code, Codex, Cursor, Gemini CLI and Windsurf.
---all configures each one whose config directory exists. Qwen Code and Kimi
+Agents: Claude Desktop, Claude Code (user scope, ~/.claude.json), Codex,
+Cursor, Gemini CLI and Windsurf. --all configures each one whose config
+directory exists. Qwen Code and Kimi
 are not written here yet; add remembra-mcp to them by hand:
 https://docs.remembra.dev/guides/relay/#mcp-by-hand
 
@@ -576,6 +619,16 @@ def main(argv: list[str] | None = None) -> int:
             except (OSError, ValueError) as e:
                 print(f"\n[{agent}] cannot read its config: {e}")
                 problems += 1
+
+    if "claude-code" in agents:
+        try:
+            old = plan_claude_code_old_entry()
+        except (OSError, ValueError) as e:
+            print(f"\n[claude-code] cannot read {claude_code_old_config()}: {e}")
+            old = None
+            problems += 1
+        if old is not None:
+            planned.append(("claude-code (old entry)", old))
 
     for agent, change in planned:
         _show(agent, change, keys, removing=args.remove)

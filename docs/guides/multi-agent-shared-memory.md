@@ -92,12 +92,13 @@ All agents need these same values to share memory:
 
 ### Claude Code (Terminal)
 
-**Config file:** `~/.claude/settings.json`
+**Config file:** `~/.claude.json` (the top-level `mcpServers`, user scope; Claude Code does not read MCP servers from `~/.claude/settings.json`). Check it with `claude mcp get remembra`.
 
 ```json
 {
   "mcpServers": {
     "remembra": {
+      "type": "stdio",
       "command": "/Users/YOUR_USERNAME/.local/bin/remembra-mcp",
       "env": {
         "REMEMBRA_URL": "https://api.remembra.dev",

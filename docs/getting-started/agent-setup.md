@@ -32,7 +32,7 @@ This command:
 | Agent | Config Location | Status |
 |-------|----------------|--------|
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | ✅ Auto-configured |
-| Claude Code | `~/.claude/settings.json` | ✅ Auto-configured |
+| Claude Code | `~/.claude.json` (user scope, as `claude mcp add --scope user` writes it) | ✅ Auto-configured |
 | Codex CLI | `~/.codex/config.toml` | ✅ Auto-configured |
 | Gemini | `~/.gemini/settings.json` | ✅ Auto-configured |
 | Cursor | `~/.cursor/mcp.json` | ✅ Auto-configured |
@@ -185,13 +185,18 @@ If you prefer to configure manually, add this to your agent's MCP config:
 
 === "Claude Code"
 
-    Edit `~/.claude/settings.json`:
+    Claude Code reads user-scope MCP servers from `~/.claude.json`, not from
+    `~/.claude/settings.json`. Add this under the top-level `mcpServers` of
+    `~/.claude.json` (Claude Code keeps its own state in that file: edit it with
+    Claude Code closed), then check it with `claude mcp get remembra`:
 
     ```json
     {
       "mcpServers": {
         "remembra": {
+          "type": "stdio",
           "command": "remembra-mcp",
+          "args": [],
           "env": {
             "REMEMBRA_URL": "https://api.remembra.dev",
             "REMEMBRA_API_KEY": "your-api-key"

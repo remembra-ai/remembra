@@ -31,7 +31,7 @@ The doctor command checks:
 **Example output:**
 ```
 🔍 Diagnosing claude-code...
-  ✅ Config: Found at ~/.claude/settings.json
+  ✅ Config: Found at ~/.claude.json
   ✅ Command: remembra-mcp resolves to /usr/local/bin/remembra-mcp
   ✅ Health: https://api.remembra.dev responding (v0.10.1)
   ✅ Recall: Working (found 3 memories)

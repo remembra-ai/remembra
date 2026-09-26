@@ -13,6 +13,7 @@ import json
 import os
 import pty
 import select
+import shutil
 import stat
 import subprocess
 import sys
@@ -76,7 +77,7 @@ def home(tmp_path: Path) -> Path:
 
 
 PATHS = {
-    "claude-code": ".claude/settings.json",
+    "claude-code": ".claude.json",
     "cursor": ".cursor/mcp.json",
     "codex": ".codex/config.toml",
     "gemini": ".gemini/settings.json",
@@ -132,6 +133,64 @@ def test_apply_writes_0600_files_with_backups_and_one_agent_id_each(home: Path) 
     assert len(list((home / ".cursor").glob("mcp.json.bak-remembra-*"))) == 1
 
 
+def test_claude_code_gets_a_user_scope_entry_in_claude_json_and_the_old_one_is_removed(home: Path) -> None:
+    """Claude Code loads user-scope MCP servers from ~/.claude.json, not ~/.claude/settings.json.
+    An entry an older installer wrote to settings.json (Claude Code never loaded it) is taken out."""
+    settings = home / ".claude" / "settings.json"
+    old_entry = {"command": "remembra-mcp", "env": {"REMEMBRA_API_KEY": OLD_KEY}}
+    old = {"model": "opus", "hooks": {}, "mcpServers": {"remembra": old_entry}}
+    settings.write_text(json.dumps(old, indent=2))
+    state = home / ".claude.json"
+    state.write_text(json.dumps({"numStartups": 3, "projects": {"/w": {"allowedTools": []}}}, indent=2))
+    os.chmod(state, 0o600)
+
+    dry = install(home, "--agent", "claude-code", env={"REMEMBRA_API_KEY": KEY})
+    assert dry.returncode == EXIT_NOT_WRITTEN, dry.stderr
+    assert f"[claude-code] {state}" in dry.stdout and "[claude-code (old entry)]" in dry.stdout
+    assert OLD_KEY not in dry.stdout and KEY not in dry.stdout
+
+    applied = install(home, "--agent", "claude-code", "--apply", env={"REMEMBRA_API_KEY": KEY})
+    assert applied.returncode == 0, applied.stderr
+    data = json.loads(state.read_text())
+    assert list(data)[0] == "mcpServers"  # at the top: the printed diff's context is not the file's tail
+    entry = data["mcpServers"]["remembra"]
+    assert entry["type"] == "stdio" and entry["command"] == "remembra-mcp" and entry["args"] == []
+    assert entry["env"]["REMEMBRA_API_KEY"] == KEY and entry["env"]["REMEMBRA_AGENT_ID"] == "claude-code"
+    assert data["numStartups"] == 3 and data["projects"] == {"/w": {"allowedTools": []}}
+    assert _mode(state) == 0o600
+    assert json.loads(settings.read_text()) == {"model": "opus", "hooks": {}}  # the rest of settings.json is kept
+
+    removed = install(home, "--remove", "--agent", "claude-code", "--apply")
+    assert removed.returncode == 0, removed.stderr
+    assert json.loads(state.read_text()) == {"numStartups": 3, "projects": {"/w": {"allowedTools": []}}}
+
+
+@pytest.mark.skipif(shutil.which("claude") is None, reason="Claude Code (claude) is not on PATH")
+def test_claude_code_itself_sees_the_installed_server(tmp_path: Path) -> None:
+    """The real check: `claude mcp get remembra` finds what remembra-install wrote (temp HOME only)."""
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    # A command that is not a real server and a dead URL: nothing leaves this machine.
+    result = install(
+        home,
+        "--agent",
+        "claude-code",
+        "--apply",
+        "--command",
+        "/usr/bin/true",
+        "--url",
+        "http://127.0.0.1:9",
+        env={"REMEMBRA_API_KEY": KEY},
+    )
+    assert result.returncode == 0, result.stderr
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home), "DISABLE_AUTOUPDATER": "1", "DISABLE_TELEMETRY": "1"}
+    got = subprocess.run(
+        ["claude", "mcp", "get", "remembra"], capture_output=True, text=True, env=env, cwd=str(home), timeout=120
+    )
+    assert got.returncode == 0, got.stdout + got.stderr
+    assert "remembra" in got.stdout and "/usr/bin/true" in got.stdout and "User" in got.stdout
+
+
 def test_the_saved_key_is_used_and_no_code_path_needs_it_on_argv(home: Path) -> None:
     install(home, "--agent", "cursor", "--apply", env={"REMEMBRA_API_KEY": KEY})
     # No env, no flag, no terminal: the key saved in ~/.remembra/credentials is used.
@@ -174,7 +233,7 @@ def test_an_invalid_config_is_reported_not_overwritten(home: Path) -> None:
     assert result.returncode == 1
     assert "[cursor] cannot read its config" in result.stdout and "not valid JSON" in result.stdout
     assert broken.read_text() == "{ not json"
-    assert "REMEMBRA_AGENT_ID" in (home / ".claude" / "settings.json").read_text()  # the others still went ahead
+    assert "REMEMBRA_AGENT_ID" in (home / ".claude.json").read_text()  # the others still went ahead
 
 
 def test_an_unchanged_config_readable_by_others_is_tightened(home: Path) -> None:
@@ -318,7 +377,9 @@ def test_remove_restores_the_configs_and_is_a_dry_run_first(home: Path) -> None:
     assert removed.returncode == 0, removed.stderr
     for agent, rel in PATHS.items():
         path = home / rel
-        if agent not in originals:
+        if agent == "claude-code":
+            assert json.loads(path.read_text()) == {}  # Claude Code's own state file is kept, just without the entry
+        elif agent not in originals:
             assert not path.exists(), agent  # the file only ever held the Remembra entry
         elif agent == "codex":
             assert tomllib.loads(path.read_text()) == tomllib.loads(originals[agent])

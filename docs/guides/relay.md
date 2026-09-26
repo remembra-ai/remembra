@@ -108,8 +108,9 @@ also told by the MCP server to call `session_brief` at start and `close_session`
 
 ### MCP by hand {#mcp-by-hand}
 
-`remembra-install --all` adds the `remembra` MCP server to Claude Desktop, Claude Code, Codex
-(`~/.codex/config.toml`), Cursor, Gemini CLI and Windsurf, for each one whose config directory already
+`remembra-install --all` adds the `remembra` MCP server to Claude Desktop, Claude Code (user scope, in
+`~/.claude.json`; `claude mcp get remembra` shows it), Codex (`~/.codex/config.toml`), Cursor, Gemini CLI
+and Windsurf, for each one whose config directory already
 exists. Run `remembra-install --detect` to see which it found.
 
 It does not write Qwen Code or Kimi yet. Add the server to them yourself. Qwen Code reads the same
