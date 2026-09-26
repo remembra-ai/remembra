@@ -1,23 +1,19 @@
 // Home page cards: connect checklist, weekly recap and the first-handoff
 // celebration. The plan meter lives in ../credits/Credits.
 
-import { useId, useState } from 'react';
+import { useId, useState, type KeyboardEvent } from 'react';
 import clsx from 'clsx';
 import { PixelHandoff } from '../../brand/PixelHandoff';
 import { ArrowRight, Check, Copy, KeyRound, Loader2, X } from 'lucide-react';
 import type { ActivitySummary, AgentActivity, TrailItem } from '../../lib/relay';
 import { api } from '../../lib/api';
-import { CONNECTABLE_AGENTS, agentMeta, canonicalAgentId, oneLineInstall } from '../../lib/agents';
+import { CONNECTABLE_AGENTS, agentConnectCommand, agentMeta, canonicalAgentId, oneLineInstall } from '../../lib/agents';
+import { rowState, type RowState } from '../../lib/marshal';
 import { hrefFor } from '../../lib/nav';
 import { relativeTime } from '../../lib/time';
 import { useCopy } from '../../hooks/useCopy';
 import { Card, CardHeader, CopyCommand, Sparkline } from './ui';
-
-function agentConnectCommand(agentId: string): string {
-  const meta = agentMeta(agentId);
-  if (meta.verified) return `remembra-relay connect --apply --agent ${meta.adapter}`;
-  return `remembra-relay connect --apply --agent ${meta.adapter} --include-unverified`;
-}
+import { WhySlip } from './WhySlip';
 
 /**
  * Create an editor key for the relay right here. It is shown once, with its
@@ -83,6 +79,110 @@ function RelayKeyStep({ newKey, onKey }: { newKey: string | null; onKey: (key: s
   );
 }
 
+const STATUS: Record<Exclude<RowState, 'connected'>, string> = {
+  'codex-trust': 'needs you to trust 3 hooks: Codex Settings > Hooks > Trust · /hooks in the CLI',
+  briefed: 'read a brief · waiting for its first handoff',
+  waiting: 'waiting for its first handoff',
+  unverified: 'waiting · adapter not yet verified',
+};
+
+/**
+ * One agent on the checklist. A waiting row has `why?` (Marshal's exchange
+ * slip, opened inline under the row) next to `command`. Esc or `why?` again
+ * closes the slip and puts focus back on `why?`.
+ */
+export function AgentRow({
+  agentId,
+  activity,
+  state,
+  now,
+  open,
+  onToggle,
+  onCopy,
+  idBase,
+}: {
+  agentId: string;
+  activity: AgentActivity | undefined;
+  state: RowState;
+  now: Date;
+  open: boolean;
+  onToggle: () => void;
+  onCopy: () => void;
+  idBase: string;
+}) {
+  const meta = agentMeta(agentId);
+  const slipId = `${idBase}-why-${agentId}`;
+  const whyId = `${slipId}-button`;
+  const trust = state === 'codex-trust';
+  const onKeyDown = (event: KeyboardEvent<HTMLLIElement>) => {
+    if (event.key !== 'Escape' || !open) return;
+    event.stopPropagation();
+    onToggle();
+    document.getElementById(whyId)?.focus();
+  };
+  return (
+    <li onKeyDown={onKeyDown} data-row-state={state}>
+      <div className="flex items-center gap-3 py-2">
+        <span
+          className={clsx(
+            'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2',
+            activity ? 'border-ok bg-ok text-panel' : trust ? 'border-dashed border-fail' : 'border-rule',
+          )}
+          aria-hidden="true"
+        >
+          {activity && <Check className="h-3 w-3" strokeWidth={3} />}
+          {trust && <span className="font-mono text-[10px] font-bold leading-none text-fail">!</span>}
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-semibold text-ink">{meta.name}</span>
+          <span className={clsx('block font-mono text-[11px]', trust ? 'text-ink-2' : 'truncate text-ink-3')}>
+            {activity ? (
+              `connected · last handoff ${relativeTime(activity.last_active, now)}`
+            ) : trust ? (
+              <>
+                <span className="font-bold text-fail">needs you</span> to trust 3 hooks: Codex Settings &gt; Hooks &gt; Trust ·{' '}
+                <code className="font-mono">/hooks</code> in the CLI
+              </>
+            ) : (
+              STATUS[state === 'connected' ? 'waiting' : state]
+            )}
+          </span>
+        </span>
+        <span className="sr-only">
+          {activity ? 'Connected' : trust ? 'Not connected yet: Codex needs you to trust its 3 hooks' : 'Not connected yet'}
+        </span>
+        {!activity && (
+          <span className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              id={whyId}
+              onClick={onToggle}
+              aria-expanded={open}
+              aria-controls={slipId}
+              aria-label={`Why is ${meta.name} waiting?`}
+              className={clsx(
+                'rr-btn-ghost inline-flex min-h-11 items-center px-2 font-mono text-[11px] sm:min-h-0 sm:py-1',
+                open && 'border-ink text-ink',
+              )}
+            >
+              why?
+            </button>
+            <button
+              type="button"
+              onClick={onCopy}
+              className="rr-btn-ghost inline-flex min-h-11 items-center gap-1 px-2 font-mono text-[11px] sm:min-h-0 sm:py-1"
+              aria-label={`Copy the connect command for ${meta.name}`}
+            >
+              <Copy className="h-3 w-3" aria-hidden="true" /> command
+            </button>
+          </span>
+        )}
+      </div>
+      {!activity && open && <WhySlip id={slipId} agentId={agentId} now={now} serverUrl={api.getApiBaseUrl()} />}
+    </li>
+  );
+}
+
 /**
  * Setup checklist: a key, the install, connect, then one row per agent that
  * ticks itself off when that agent's first handoff arrives. Without a key the
@@ -92,14 +192,18 @@ export function ConnectChecklist({
   agents,
   now,
   onDismiss,
+  trail,
 }: {
   agents: AgentActivity[];
   now: Date;
   onDismiss?: () => void;
+  /** The newest trail entries: a pickup or close there ends a row's "needs you" state. */
+  trail?: TrailItem[];
 }) {
   const titleId = useId();
   const [copy] = useCopy();
   const [newKey, setNewKey] = useState<string | null>(null);
+  const [openWhy, setOpenWhy] = useState<string | null>(null);
   const seen = new Map<string, AgentActivity>();
   for (const agent of agents) seen.set(canonicalAgentId(agent.agent_id), agent);
   const connected = CONNECTABLE_AGENTS.filter((id) => seen.has(id)).length;
@@ -167,44 +271,19 @@ export function ConnectChecklist({
               ))}
             </div>
             <ul className="mt-2 divide-y divide-rule border-y border-rule">
-              {CONNECTABLE_AGENTS.map((id) => {
-                const activity = seen.get(id);
-                const meta = agentMeta(id);
-                return (
-                  <li key={id} className="flex items-center gap-3 py-2">
-                    <span
-                      className={clsx(
-                        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2',
-                        activity ? 'border-ok bg-ok text-panel' : 'border-rule',
-                      )}
-                      aria-hidden="true"
-                    >
-                      {activity && <Check className="h-3 w-3" strokeWidth={3} />}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-semibold text-ink">{meta.name}</span>
-                      <span className="block truncate font-mono text-[11px] text-ink-3">
-                        {activity
-                          ? `connected · last handoff ${relativeTime(activity.last_active, now)}`
-                          : meta.verified
-                            ? 'waiting for its first handoff'
-                            : 'waiting · adapter not yet verified'}
-                      </span>
-                    </span>
-                    <span className="sr-only">{activity ? 'Connected' : 'Not connected yet'}</span>
-                    {!activity && (
-                      <button
-                        type="button"
-                        onClick={() => copy(agentConnectCommand(id), `Command for ${meta.name} copied`)}
-                        className="rr-btn-ghost inline-flex shrink-0 items-center gap-1 px-2 py-1 font-mono text-[11px]"
-                        aria-label={`Copy the connect command for ${meta.name}`}
-                      >
-                        <Copy className="h-3 w-3" aria-hidden="true" /> command
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
+              {CONNECTABLE_AGENTS.map((id) => (
+                <AgentRow
+                  key={id}
+                  agentId={id}
+                  activity={seen.get(id)}
+                  state={rowState(id, seen.get(id), trail)}
+                  now={now}
+                  open={openWhy === id}
+                  onToggle={() => setOpenWhy(openWhy === id ? null : id)}
+                  onCopy={() => copy(agentConnectCommand(id), `Command for ${agentMeta(id).name} copied`)}
+                  idBase={titleId}
+                />
+              ))}
               {others.map((agent) => (
                 <li key={agent.agent_id} className="flex items-center gap-3 py-2">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 border-ok bg-ok text-panel" aria-hidden="true">

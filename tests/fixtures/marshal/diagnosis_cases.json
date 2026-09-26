@@ -1,0 +1,731 @@
+{
+  "about": "Marshal 'why?' verdicts: the dashboard's lib/marshal.ts diagnoseAgent runs every case (vitest), and the M2 server port runs the same file. First match wins; lines are 'label: text'.",
+  "now": "2026-09-26T12:00:00Z",
+  "server_url": "https://api.remembra.dev",
+  "cases": [
+    {
+      "name": "no active key: Codex still owes its trust step after the key",
+      "input": {
+        "agent_id": "codex",
+        "keys": [],
+        "trail": [],
+        "agent_trail": []
+      },
+      "expect": {
+        "code": "NO_KEY",
+        "proven": true,
+        "verdict": "No relay key yet. Create one above; hooks can't reach Remembra without it.",
+        "lines": [
+          "keys: none active",
+          "entries: codex: no handoffs or checkpoints yet",
+          "pickups: codex read 0 briefs · 0 handoffs from other agents (last 0 entries)"
+        ],
+        "then": "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. In the Codex CLI: run /hooks and trust SessionStart, UserPromptSubmit and SessionEnd.",
+        "commands": [
+          "remembra-relay doctor --agent codex",
+          "run remembra_doctor for codex",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent codex"
+        ],
+        "caveat": null
+      }
+    },
+    {
+      "name": "a revoked key does not count",
+      "input": {
+        "agent_id": "claude-code",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": false
+          }
+        ],
+        "trail": [],
+        "agent_trail": []
+      },
+      "expect": {
+        "code": "NO_KEY",
+        "proven": true,
+        "then": "End one Claude Code session; its handoff ticks this row.",
+        "commands": [
+          "remembra-relay doctor --agent claude-code",
+          "run remembra_doctor for claude-code",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent claude-code"
+        ],
+        "caveat": null
+      }
+    },
+    {
+      "name": "keys exist but none was ever used",
+      "input": {
+        "agent_id": "claude-code",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "trail": [],
+        "agent_trail": []
+      },
+      "expect": {
+        "code": "KEY_NEVER_USED",
+        "proven": true,
+        "verdict": "Your keys have never been used: the install never saved one, or no hook ran.",
+        "lines": [
+          "keys: 1 active · never used",
+          "entries: claude-code: no handoffs or checkpoints yet",
+          "pickups: claude-code read 0 briefs · 0 handoffs from other agents (last 0 entries)"
+        ],
+        "commands": [
+          "pipx install --force 'remembra[mcp]>=0.16' && remembra-install --all --url https://api.remembra.dev && remembra-relay connect --apply",
+          "remembra-relay doctor --agent claude-code",
+          "run remembra_doctor for claude-code",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent claude-code"
+        ],
+        "caveat": "One key can serve every agent on a machine, so Remembra can't tell which agent used it. Doctor on that machine can."
+      }
+    },
+    {
+      "name": "Codex picked up two briefs and never closed",
+      "input": {
+        "agent_id": "codex",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": true
+          },
+          {
+            "name": "ci",
+            "created_at": "2026-09-01T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "agent_trail": [],
+        "trail": [
+          {
+            "id": "h2",
+            "project_id": "widget",
+            "memory_type": "handoff",
+            "agent_id": "claude-code",
+            "session_id": "s-h2",
+            "created_at": "2026-09-26T10:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": [
+              {
+                "agent_id": "codex",
+                "agent_verified": true,
+                "picked_up_at": "2026-09-26T10:05:00Z",
+                "gap_seconds": 300
+              }
+            ]
+          },
+          {
+            "id": "h1",
+            "project_id": "widget",
+            "memory_type": "handoff",
+            "agent_id": "claude-code",
+            "session_id": "s-h1",
+            "created_at": "2026-09-25T10:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": [
+              {
+                "agent_id": "codex-cli",
+                "agent_verified": true,
+                "picked_up_at": "2026-09-26T10:05:00Z",
+                "gap_seconds": 300
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "code": "PICKS_UP_NEVER_CLOSES",
+        "proven": true,
+        "verdict": "Codex read 2 briefs but never handed off: its close hasn't reached Remembra.",
+        "detail": "Codex closes in the background and logs to ~/.remembra/relay/last-detached-close.log on that machine.",
+        "lines": [
+          "keys: 2 active · newest used 3h ago (\"relay (mac, 2026-09-20)\")",
+          "entries: codex: no handoffs or checkpoints yet",
+          "pickups: codex read 2 briefs · 2 handoffs from other agents (last 2 entries)"
+        ],
+        "commands": [
+          "remembra-relay doctor --agent codex",
+          "run remembra_doctor for codex",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent codex"
+        ],
+        "caveat": null
+      }
+    },
+    {
+      "name": "Claude Code picked up a brief and never closed (no detached close)",
+      "input": {
+        "agent_id": "claude-code",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": true
+          },
+          {
+            "name": "ci",
+            "created_at": "2026-09-01T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "agent_trail": [],
+        "trail": [
+          {
+            "id": "h1",
+            "project_id": "widget",
+            "memory_type": "handoff",
+            "agent_id": "codex",
+            "session_id": "s-h1",
+            "created_at": "2026-09-26T10:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": [
+              {
+                "agent_id": "claude",
+                "agent_verified": true,
+                "picked_up_at": "2026-09-26T10:05:00Z",
+                "gap_seconds": 300
+              }
+            ]
+          }
+        ]
+      },
+      "expect": {
+        "code": "PICKS_UP_NEVER_CLOSES",
+        "proven": true,
+        "detail": null,
+        "commands": [
+          "remembra-relay doctor --agent claude-code",
+          "run remembra_doctor for claude-code",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent claude-code"
+        ]
+      }
+    },
+    {
+      "name": "Codex: handoffs from others waited, no brief and no close: the trust step",
+      "input": {
+        "agent_id": "codex",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": true
+          },
+          {
+            "name": "ci",
+            "created_at": "2026-09-01T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "agent_trail": [],
+        "trail": [
+          {
+            "id": "h1",
+            "project_id": "widget",
+            "memory_type": "handoff",
+            "agent_id": "claude-code",
+            "session_id": "s-h1",
+            "created_at": "2026-09-26T10:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          }
+        ]
+      },
+      "expect": {
+        "code": "CODEX_TRUST",
+        "proven": false,
+        "verdict": "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust.",
+        "detail": "Codex skips untrusted hooks without a message, so no brief or handoff from Codex has reached Remembra.",
+        "causes": [
+          "Codex hooks not trusted yet",
+          "connect ran as a dry run (the old homepage lines did this)",
+          "Codex runs on a machine without the install"
+        ],
+        "then": "End one Codex session; its handoff ticks this row.",
+        "commands": [
+          "/hooks",
+          "remembra-relay doctor --agent codex",
+          "run remembra_doctor for codex",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent codex"
+        ],
+        "caveat": null
+      }
+    },
+    {
+      "name": "Codex: nothing on the trail at all is still the trust step",
+      "input": {
+        "agent_id": "codex",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": true
+          },
+          {
+            "name": "ci",
+            "created_at": "2026-09-01T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "agent_trail": [],
+        "trail": []
+      },
+      "expect": {
+        "code": "CODEX_TRUST",
+        "proven": false,
+        "verdict": "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust."
+      }
+    },
+    {
+      "name": "Claude Code: nothing was waiting for it",
+      "input": {
+        "agent_id": "claude-code",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": true
+          },
+          {
+            "name": "ci",
+            "created_at": "2026-09-01T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "agent_trail": [],
+        "trail": [
+          {
+            "id": "c1",
+            "project_id": "widget",
+            "memory_type": "checkpoint",
+            "agent_id": "codex",
+            "session_id": "s-c1",
+            "created_at": "2026-09-26T10:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          }
+        ]
+      },
+      "expect": {
+        "code": "NOTHING_WAITING",
+        "proven": true,
+        "verdict": "Claude Code hasn't ended a session with the hooks yet, and no handoff was waiting for it.",
+        "unverified": null,
+        "commands": [
+          "remembra-relay doctor --agent claude-code",
+          "run remembra_doctor for claude-code",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent claude-code"
+        ],
+        "caveat": null
+      }
+    },
+    {
+      "name": "Gemini CLI (unverified): nothing waiting, and its hooks need --include-unverified",
+      "input": {
+        "agent_id": "gemini",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": true
+          },
+          {
+            "name": "ci",
+            "created_at": "2026-09-01T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "agent_trail": [],
+        "trail": []
+      },
+      "expect": {
+        "code": "NOTHING_WAITING",
+        "proven": true,
+        "unverified": "Gemini CLI's adapter is built from its hook docs and has never been run against the real tool.",
+        "commands": [
+          "remembra-relay connect --apply --agent gemini --include-unverified",
+          "remembra-relay doctor --agent gemini",
+          "run remembra_doctor for gemini",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent gemini"
+        ],
+        "then": "End one Gemini CLI session; its handoff ticks this row."
+      }
+    },
+    {
+      "name": "Claude Code: the key works and others handed off, but nothing from it",
+      "input": {
+        "agent_id": "claude-code",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": true
+          },
+          {
+            "name": "ci",
+            "created_at": "2026-09-01T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "agent_trail": [],
+        "trail": [
+          {
+            "id": "h1",
+            "project_id": "widget",
+            "memory_type": "handoff",
+            "agent_id": "codex",
+            "session_id": "s-h1",
+            "created_at": "2026-09-26T10:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          },
+          {
+            "id": "c1",
+            "project_id": "widget",
+            "memory_type": "checkpoint",
+            "agent_id": "codex",
+            "session_id": "s-c1",
+            "created_at": "2026-09-26T10:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          }
+        ]
+      },
+      "expect": {
+        "code": "HOOKS_NOT_FIRING",
+        "proven": false,
+        "verdict": "The key works, but nothing from Claude Code has reached Remembra.",
+        "causes": [
+          "connect ran as a dry run (the old homepage lines did this)",
+          "Claude Code runs on a machine without the install",
+          "no Claude Code session has ended since connect"
+        ],
+        "fix": "On the machine where you run Claude Code, doctor names the cause:",
+        "commands": [
+          "remembra-relay doctor --agent claude-code",
+          "run remembra_doctor for claude-code",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent claude-code"
+        ],
+        "caveat": "One key can serve every agent on a machine, so Remembra can't tell which agent used it. Doctor on that machine can."
+      }
+    },
+    {
+      "name": "Cursor (unverified): the key works, others handed off, nothing from Cursor",
+      "input": {
+        "agent_id": "cursor",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": true
+          },
+          {
+            "name": "ci",
+            "created_at": "2026-09-01T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "agent_trail": [],
+        "trail": [
+          {
+            "id": "h1",
+            "project_id": "widget",
+            "memory_type": "handoff",
+            "agent_id": "claude-code",
+            "session_id": "s-h1",
+            "created_at": "2026-09-26T10:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          }
+        ]
+      },
+      "expect": {
+        "code": "HOOKS_NOT_FIRING",
+        "proven": false,
+        "causes": [
+          "connect --apply left Cursor's hooks out (they need --include-unverified)",
+          "connect ran as a dry run (the old homepage lines did this)",
+          "Cursor runs on a machine without the install"
+        ],
+        "unverified": "Cursor's adapter is built from its hook docs and has never been run against the real tool.",
+        "commands": [
+          "remembra-relay connect --apply --agent cursor --include-unverified",
+          "remembra-relay doctor --agent cursor",
+          "run remembra_doctor for cursor",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent cursor"
+        ],
+        "caveat": "One key can serve every agent on a machine, so Remembra can't tell which agent used it. Doctor on that machine can."
+      }
+    },
+    {
+      "name": "Claude Code's last session stopped on a checkpoint",
+      "input": {
+        "agent_id": "claude-code",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": true
+          },
+          {
+            "name": "ci",
+            "created_at": "2026-09-01T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "agent_trail": [
+          {
+            "id": "c2",
+            "project_id": "widget",
+            "memory_type": "checkpoint",
+            "agent_id": "claude-code",
+            "session_id": "s-c2",
+            "created_at": "2026-09-26T09:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          },
+          {
+            "id": "h0",
+            "project_id": "widget",
+            "memory_type": "handoff",
+            "agent_id": "claude-code",
+            "session_id": "s-h0",
+            "created_at": "2026-09-25T09:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          }
+        ],
+        "trail": [
+          {
+            "id": "c2",
+            "project_id": "widget",
+            "memory_type": "checkpoint",
+            "agent_id": "claude-code",
+            "session_id": "s-c2",
+            "created_at": "2026-09-26T09:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          },
+          {
+            "id": "h1",
+            "project_id": "widget",
+            "memory_type": "handoff",
+            "agent_id": "codex",
+            "session_id": "s-h1",
+            "created_at": "2026-09-26T08:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          }
+        ]
+      },
+      "expect": {
+        "code": "STALE_CHECKPOINT",
+        "proven": true,
+        "verdict": "Claude Code's last session stopped without a handoff.",
+        "detail": "Its newest entry is a checkpoint from 3h ago, with no handoff after it.",
+        "lines": [
+          "keys: 2 active · newest used 3h ago (\"relay (mac, 2026-09-20)\")",
+          "entries: claude-code: 1 handoff · 1 checkpoint in its last 2 · newest 3h ago",
+          "pickups: claude-code read 0 briefs · 1 handoff from other agents (last 2 entries)"
+        ],
+        "commands": [
+          "remembra-relay close --agent claude-code",
+          "remembra-relay doctor --agent claude-code",
+          "run remembra_doctor for claude-code",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent claude-code"
+        ]
+      }
+    },
+    {
+      "name": "a checkpoint inside the working window is not stale",
+      "input": {
+        "agent_id": "claude-code",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": true
+          },
+          {
+            "name": "ci",
+            "created_at": "2026-09-01T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "agent_trail": [
+          {
+            "id": "c3",
+            "project_id": "widget",
+            "memory_type": "checkpoint",
+            "agent_id": "claude-code",
+            "session_id": "s-c3",
+            "created_at": "2026-09-26T11:40:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          }
+        ],
+        "trail": [
+          {
+            "id": "h1",
+            "project_id": "widget",
+            "memory_type": "handoff",
+            "agent_id": "codex",
+            "session_id": "s-h1",
+            "created_at": "2026-09-26T10:00:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          }
+        ]
+      },
+      "expect": {
+        "code": "HANDED_OFF",
+        "proven": true,
+        "verdict": "Claude Code is connected: its newest entry arrived 20m ago.",
+        "commands": []
+      }
+    },
+    {
+      "name": "a handed-off agent has nothing to fix",
+      "input": {
+        "agent_id": "codex",
+        "keys": [
+          {
+            "name": "relay (mac, 2026-09-20)",
+            "created_at": "2026-09-20T10:00:00Z",
+            "last_used_at": "2026-09-26T09:00:00Z",
+            "active": true
+          },
+          {
+            "name": "ci",
+            "created_at": "2026-09-01T10:00:00Z",
+            "last_used_at": null,
+            "active": true
+          }
+        ],
+        "agent_trail": [
+          {
+            "id": "h9",
+            "project_id": "widget",
+            "memory_type": "handoff",
+            "agent_id": "codex",
+            "session_id": "s-h9",
+            "created_at": "2026-09-26T11:50:00Z",
+            "branch": "main",
+            "head_commit": null,
+            "headline": "entry",
+            "failing": 0,
+            "open": 0,
+            "picked_up_by": []
+          }
+        ],
+        "trail": [],
+        "summary_agent": {
+          "agent_id": "codex",
+          "handoffs": 4,
+          "checkpoints": 1,
+          "last_active": "2026-09-26T11:50:00Z",
+          "sessions_7d": 4,
+          "daily": [],
+          "projects": [
+            "widget"
+          ]
+        }
+      },
+      "expect": {
+        "code": "HANDED_OFF",
+        "proven": true,
+        "verdict": "Codex is connected: its newest entry arrived 10m ago.",
+        "lines": [
+          "keys: 2 active · newest used 3h ago (\"relay (mac, 2026-09-20)\")",
+          "entries: codex: 4 handoffs · 1 checkpoint · newest 10m ago",
+          "pickups: codex read 0 briefs · 0 handoffs from other agents (last 0 entries)"
+        ],
+        "commands": []
+      }
+    }
+  ]
+}
