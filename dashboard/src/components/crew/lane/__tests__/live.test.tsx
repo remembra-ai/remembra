@@ -134,7 +134,7 @@ describe.skipIf(!URL_)('WP-13a views against a live crew', () => {
       '✦ baton',
     ]);
     const reports = tree.phases.find((p) => p.label === 'Phase 3 · Reports')!;
-    expect(reports.children[0]).toMatchObject({ kind: 'session', glyph: '◉', right: 'REPORTS ▨ excl · advisory' });
+    expect(reports.children[0]).toMatchObject({ kind: 'session', glyph: '◉', right: 'REPORTS ▨ excl · read-only fence' });
     expect(tree.loose.map((l) => l.kind === 'session' && l.session.callsign)).toEqual(['cc-2']);
 
     // -- human actions, for real ----------------------------------------------------------

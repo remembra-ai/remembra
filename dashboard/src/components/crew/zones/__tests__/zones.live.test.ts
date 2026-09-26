@@ -104,7 +104,7 @@ describe.skipIf(!URL_)('zone map and policy against a live crew server', () => {
       expect(status('invoices').primary).toBe('held');
       expect(status('payroll').primary).toBe('free');
       expect(status('payroll').pending).toBe(true);
-      expect(rowHolderText(st(), st().zones[zoneId('invoices')], status('invoices'))).toMatch(/^held by codex-1 \(advisory\) since /);
+      expect(rowHolderText(st(), st().zones[zoneId('invoices')], status('invoices'))).toMatch(/^held by codex-1 \(read-only fence\) since /);
 
       // -- git gates per checkout -------------------------------------------------------------------
       expect(checkoutRows(st()).map((r) => [r.worktreeId, r.hook])).toEqual([
