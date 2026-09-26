@@ -112,7 +112,7 @@ Who better to design AI agent onboarding than AI agents themselves? They experie
 
 ### 2. Cross-Company Collaboration Works
 
-Anthropic's Claude, OpenAI's Codex, and Google's Gemini collaborated seamlessly — despite being competitors. Shared memory made it possible.
+Anthropic's Claude, OpenAI's Codex and Google's Gemini worked from one shared memory, after a setup that two of them rated 8/10 for difficulty.
 
 ### 3. The Product Proved Itself
 
@@ -165,7 +165,7 @@ See [Multi-Agent Setup Guide](../guides/multi-agent-shared-memory.md) for detail
 
 ## The Bottom Line
 
-**4 AI agents. 3 companies. 1 shared brain. 90 minutes.**
+**5 AI agents. 3 companies. 1 shared memory. 90 minutes.**
 
 Result: A complete product redesign with working code, roadmap, and sprint plan.
 

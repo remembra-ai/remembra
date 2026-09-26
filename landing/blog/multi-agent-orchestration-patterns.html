@@ -181,7 +181,7 @@ remembra.share_memory(
     from_space="production-incidents",
     to_space="development"
 )</code></pre>
-<h2>Real-World Example: Feature Development</h2>
+<h2>Example: Feature Development (illustrative)</h2>
 <p>Here's how these patterns combine in practice. Building the <code>remembra-doctor</code> diagnostic tool:</p>
 <pre><code>1. Human: "Build a diagnostic tool for agent setups"
 
@@ -208,7 +208,7 @@ remembra.share_memory(
    - Implements: Full diagnostic tool
    - Stores: "remembra-doctor implemented. 5 check types:
              config, command, health, auth, recall_test.
-             PR ready: #127"
+             PR ready."
 
 6. Testing Agent:
    - Recalls: Implementation details
@@ -224,7 +224,7 @@ remembra.share_memory(
    - Recalls: Full feature context
    - Writes: Documentation with examples
    - Stores: "Docs complete: getting-started/agent-setup"</code></pre>
-<p>Eight handoffs, zero context loss. Each agent knew exactly what it needed to know.</p>
+<p>Eight handoffs, and each agent started from what the one before it stored.</p>
 <h2>Key Takeaways</h2>
 <ol>
 <li><strong>Memory is the coordination layer</strong> — Shared persistent memory replaces complex agent-to-agent protocols.</li>

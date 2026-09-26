@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Why Your AI Forgets Everything (And How to Fix It) · Remembra</title>
-<meta name="description" content="AI assistants forget everything between sessions. Learn why ChatGPT, Claude, and Copilot have no persistent memory—and how to give your AI perfect recall.">
+<meta name="description" content="AI assistants forget everything between sessions. Learn why ChatGPT, Claude, and Copilot have no persistent memory—and how to give your AI a memory it can recall.">
 <link rel="canonical" href="https://remembra.dev/blog/why-your-ai-forgets-everything">
 <meta property="og:title" content="Why Your AI Forgets Everything (And How to Fix It)">
 <meta property="og:description" content="AI assistants forget everything between sessions. Here's why—and how to fix it.">
@@ -116,10 +116,10 @@
 <h2>The Solution: MCP Memory Servers</h2>
 <p>The <strong>Model Context Protocol (MCP)</strong> is an open standard that lets AI tools share context. With an MCP memory server, your AI assistant gains persistent memory with a single command:</p>
 <pre><code>claude mcp add remembra -- remembra-mcp</code></pre>
-<p>That's it. Now Claude Code remembers everything across sessions.</p>
+<p>That's it. Now Claude Code can store what matters and recall it in later sessions, when it calls the memory tools.</p>
 <p>How it works:</p>
 <ol>
-<li>You mention preferences → automatically stored as memories</li>
+<li>You mention a preference → the agent can store it as a memory</li>
 <li>You ask a question → relevant memories are retrieved</li>
 <li>Entities are extracted and linked → "John" connects to past context about John</li>
 <li>Time-aware queries → "What did we decide last week about the database?"</li>
@@ -127,7 +127,7 @@
 <h2>Self-Host or Cloud</h2>
 <p>AI memory is sensitive data. Many developers want to keep it on their own infrastructure:</p>
 <pre><code>docker run -d -p 8787:8787 remembra/remembra</code></pre>
-<p>That's a full memory server running locally. Your data never leaves your machine.</p>
+<p>That's a full memory server running locally: your memories are stored on your machine. With the default settings their text is still sent to OpenAI for embeddings; to keep everything on the machine, use the Ollama quickstart (<code>docker-compose.quickstart.yml</code>).</p>
 <p>For teams that want managed infrastructure, cloud options provide the same features without the ops overhead.</p>
 <h2>The Future Is Contextual AI</h2>
 <p>We're moving from <em>stateless AI</em> to <em>contextual AI</em>—assistants that understand your work, remember your preferences, and build on past interactions.</p>
