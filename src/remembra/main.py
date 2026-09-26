@@ -538,6 +538,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from remembra.account.erasure import AccountEraser, run_erasure_loop
 
     app.state.account_eraser = AccountEraser(app.state.db, app.state.qdrant)
+    # crew.db is covered before the loop's first run, and whenever the file exists (Crew
+    # mode off included): an account erased without it would leave its crew rows for good.
+    from remembra.crew.erasure import cover_crew_db, release_crew_db
+
+    await cover_crew_db(app.state, settings.database_url, crew_mode=bool(getattr(app.state, "crew_registered", False)))
     app.state.tasks.spawn(
         run_erasure_loop(
             app.state.account_eraser,
@@ -583,6 +588,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await background.drain(timeout=10.0)
     await app.state.tasks.shutdown(timeout=10.0)
+    await release_crew_db(app.state)
     await ai_spend.drain_settles(timeout=10.0)
     ai_spend.set_attribution_policy(None)
     set_task_registry(None)

@@ -392,23 +392,38 @@ class ExtraDatabase:
     # tombstones the account's events in other owners' hash-chained logs). ``(conn, user_id,
     # email) -> {label: count}``; the counts go into the receipt as ``<name>:<label>``.
     prepare: Callable[[Any, str, str | None], Awaitable[Mapping[str, int]]] | None = None
+    # Every account id this database holds rows for (``conn -> ids``). With it the eraser finds
+    # accounts the main database already erased while this one was not covered (a release
+    # without it, a boot that could not open it) and erases them here too:
+    # :meth:`AccountEraser.erase_orphans`.
+    account_ids: Callable[[Any], Awaitable[set[str]]] | None = None
 
     def __post_init__(self) -> None:
         if not self.rules:
             raise ValueError(f"extra database {self.name!r} needs explicit erasure rules")
 
 
+class ErasureDeferred(RuntimeError):
+    """An account cannot be erased yet: a database that may hold its rows is not attached.
+
+    Raised before anything is deleted, so the ``users`` row stays and the next run retries.
+    """
+
+
 class AccountEraser:
     """Erases accounts: Qdrant points, then every SQLite row, then a content-free receipt.
 
     ``extra_databases`` are further SQLite databases, each an :class:`ExtraDatabase`
-    carrying its own erasure rules (e.g. Crew mode's ``crew.db``).
+    carrying its own erasure rules (e.g. Crew mode's ``crew.db``). :meth:`require`
+    names a database that must be attached whenever it exists: until it is, every
+    erase is deferred rather than leaving that database's rows behind for good.
     """
 
     def __init__(self, db: Any, qdrant: Any | None, *, extra_databases: list[ExtraDatabase] | None = None) -> None:
         self._db = db
         self._qdrant = qdrant
         self._extra = [d for d in (extra_databases or []) if d is not None]
+        self._required: dict[str, Callable[[], bool]] = {}
         for extra in self._extra:
             if not isinstance(extra, ExtraDatabase):
                 raise TypeError("extra_databases takes ExtraDatabase entries (a database plus its erasure rules)")
@@ -431,6 +446,47 @@ class AccountEraser:
     def databases(self) -> list[str]:
         """Names of the extra databases covered, in erase order."""
         return [d.name for d in self._extra]
+
+    def require(self, name: str, exists: Callable[[], bool]) -> None:
+        """Defer every erase while ``exists()`` is true and no database ``name`` is attached.
+
+        ``crew.db`` is attached by the process that opened it; if it exists on disk but
+        is not attached (it could not be opened, or it is being reopened), erasing the
+        main database now would delete the ``users`` row and orphan the crew rows.
+        """
+        self._required[name] = exists
+
+    def _missing_required(self) -> list[str]:
+        attached = set(self.databases)
+        missing: list[str] = []
+        for name, exists in self._required.items():
+            if name in attached:
+                continue
+            try:
+                present = bool(exists())
+            except Exception:  # cannot tell: treat it as present, never orphan its rows
+                present = True
+            if present:
+                missing.append(name)
+        return missing
+
+    async def _erase_extra(self, extra: ExtraDatabase, user_id: str, email: str | None, receipt: ErasureReceipt) -> None:
+        async with extra.db.transaction():
+            if extra.prepare is not None:
+                for label, n in (await extra.prepare(extra.db.conn, user_id, email)).items():
+                    if n:
+                        receipt.rows[f"{extra.name}:{label}"] = int(n)
+            rows, unregistered = await erase_rows(
+                extra.db.conn,
+                user_id,
+                email,
+                rules=extra.rules,
+                exempt=extra.exempt,
+                exempt_prefixes=extra.exempt_prefixes,
+            )
+        for table, n in rows.items():
+            receipt.rows[f"{extra.name}:{table}"] = n
+        receipt.unregistered_tables.extend(f"{extra.name}:{t}" for t in unregistered)
 
     async def _reindex_collections(self) -> set[str]:
         """Collections recorded by reindex jobs (rollback copies may have been renamed by config since)."""
@@ -459,28 +515,16 @@ class AccountEraser:
         one transaction with the receipt). A failure anywhere raises before the
         ``users`` row is gone, so the next run of the job finds and retries it.
         """
+        missing = self._missing_required()
+        if missing:
+            raise ErasureDeferred(f"required databases not attached: {', '.join(missing)}")
         email = await self._email_of(user_id)
         receipt = ErasureReceipt(user_id=user_id, digest=erasure_digest(user_id))
         if self._qdrant is not None:
             also = await self._reindex_collections()
             receipt.vectors = int(await self._qdrant.delete_by_user_everywhere(user_id, also=also))
-        for extra in self._extra:
-            async with extra.db.transaction():
-                if extra.prepare is not None:
-                    for label, n in (await extra.prepare(extra.db.conn, user_id, email)).items():
-                        if n:
-                            receipt.rows[f"{extra.name}:{label}"] = int(n)
-                rows, unregistered = await erase_rows(
-                    extra.db.conn,
-                    user_id,
-                    email,
-                    rules=extra.rules,
-                    exempt=extra.exempt,
-                    exempt_prefixes=extra.exempt_prefixes,
-                )
-            for table, n in rows.items():
-                receipt.rows[f"{extra.name}:{table}"] = n
-            receipt.unregistered_tables.extend(f"{extra.name}:{t}" for t in unregistered)
+        for extra in list(self._extra):
+            await self._erase_extra(extra, user_id, email, receipt)
         async with self._db.transaction():
             rows, unregistered = await erase_rows(self._db.conn, user_id, email)
             receipt.rows.update(rows)
@@ -538,9 +582,85 @@ class AccountEraser:
                 due.append(str(user_id))
         return due
 
-    async def erase_due(self, grace: timedelta, now: datetime | None = None) -> list[ErasureReceipt]:
-        """Erase every account past its grace period; one failure never blocks the others."""
+    async def _erased_on_main(self, user_ids: Iterable[str]) -> set[str]:
+        """Of ``user_ids``, those with no ``users`` row and an ``account_erased`` receipt in the main database."""
+        ids = sorted(set(user_ids))
+        if not ids:
+            return set()
+        out: set[str] = set()
+        for i in range(0, len(ids), 200):
+            chunk = ids[i : i + 200]
+            marks = ", ".join("?" for _ in chunk)
+            cursor = await self._db.conn.execute(f"SELECT id FROM users WHERE id IN ({marks})", chunk)
+            live = {str(r[0]) for r in await cursor.fetchall()}
+            by_digest = {f"sha256:{erasure_digest(u)}": u for u in chunk if u not in live}
+            if not by_digest:
+                continue
+            refs = list(by_digest)
+            marks = ", ".join("?" for _ in refs)
+            cursor = await self._db.conn.execute(
+                f"SELECT DISTINCT resource_id FROM audit_log WHERE action = ? AND resource_id IN ({marks})",
+                [AuditAction.ACCOUNT_ERASED.value, *refs],
+            )
+            out.update(by_digest[str(r[0])] for r in await cursor.fetchall())
+        return out
+
+    async def erase_orphans(self) -> list[ErasureReceipt]:
+        """Erase, in the attached extra databases, accounts the main database has already erased.
+
+        An account erased while an extra database was not covered (a release that did not know
+        it, a boot that could not open it) has no ``users`` row any more, so :meth:`erase_due`
+        never selects it again. Each extra database that can list its account ids is checked
+        against the main database: an id with no ``users`` row **and** an ``account_erased``
+        receipt for its digest is erased there now (its email is gone, so events are matched on
+        its ids only). An id without a receipt is never touched: a missing ``users`` row alone
+        does not prove an erasure.
+        """
         receipts: list[ErasureReceipt] = []
+        for extra in list(self._extra):
+            if extra.account_ids is None:
+                continue
+            try:
+                held = await extra.account_ids(extra.db.conn)
+                orphans = await self._erased_on_main(held)
+            except Exception as e:
+                log.error("account_erasure_orphan_scan_failed", database=extra.name, error_type=type(e).__name__)
+                continue
+            for user_id in sorted(orphans):
+                receipt = ErasureReceipt(user_id=user_id, digest=erasure_digest(user_id))
+                try:
+                    await self._erase_extra(extra, user_id, None, receipt)
+                except Exception as e:
+                    log.error(
+                        "account_erasure_orphan_failed",
+                        database=extra.name,
+                        digest=receipt.digest[:16],
+                        error_type=type(e).__name__,
+                    )
+                    continue
+                log.info(
+                    "account_erasure_orphan_erased", database=extra.name, digest=receipt.digest[:16], rows=receipt.total_rows
+                )
+                receipts.append(receipt)
+        return receipts
+
+    async def erase_due(self, grace: timedelta, now: datetime | None = None) -> list[ErasureReceipt]:
+        """Erase every account past its grace period; one failure never blocks the others.
+
+        Runs :meth:`erase_orphans` first (those receipts are logged, not returned), and defers
+        the whole run (every account keeps its ``users`` row) while a database named by
+        :meth:`require` exists but is not attached.
+        """
+        receipts: list[ErasureReceipt] = []
+        missing = self._missing_required()
+        if missing:
+            due = await self.due_accounts(grace, now)
+            if due:
+                log.warning("account_erasure_deferred", databases=missing, accounts=len(due))
+            return receipts
+        orphans = await self.erase_orphans()
+        if orphans:
+            log.info("account_erasure_orphans_run", erased=len(orphans))
         for user_id in await self.due_accounts(grace, now):
             try:
                 receipts.append(await self.erase(user_id))

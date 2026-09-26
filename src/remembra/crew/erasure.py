@@ -38,12 +38,17 @@ schema, so a crew table added later fails that test until it has a rule.
 
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 from collections.abc import Mapping
 from typing import Any, Final
 
-from remembra.account.erasure import ExtraDatabase, TableRule
+import structlog
+
+from remembra.account.erasure import ExtraDatabase, TableRule, is_user_key_column
 from remembra.crew.events import tombstone_events
+
+log = structlog.get_logger(__name__)
 
 # Subqueries: crews the account owns, its crew sessions (in any crew), messages it wrote.
 _CREWS = "SELECT id FROM crews WHERE owner_user_id = :uid"
@@ -327,8 +332,97 @@ async def tombstone_account_events(conn: Any, user_id: str, email: str | None) -
     return {"crew_events_tombstoned": total}
 
 
+async def crew_account_ids(conn: Any) -> set[str]:
+    """Every account id ``crew.db`` holds rows for: the values of each user-keyed column of each table.
+
+    ``crew_events.owner_user_id`` is the crew owner's id, so an owner whose crews outlived its
+    account shows up here too. Used by :meth:`remembra.account.erasure.AccountEraser.erase_orphans`.
+    """
+    cursor = await conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'")
+    tables = [str(r[0]) for r in await cursor.fetchall()]
+    ids: set[str] = set()
+    for table in tables:
+        info = await conn.execute(f'PRAGMA table_info("{table}")')
+        for column in [str(r[1]) for r in await info.fetchall() if is_user_key_column(str(r[1]))]:
+            rows = await conn.execute(f'SELECT DISTINCT "{column}" FROM "{table}" WHERE "{column}" IS NOT NULL')
+            ids.update(str(r[0]) for r in await rows.fetchall() if r[0])
+    return ids
+
+
 def crew_extra_database(db: Any) -> ExtraDatabase:
     """``crew.db`` as the account eraser covers it (its rules, exemptions and event tombstones)."""
     return ExtraDatabase(
-        name="crew", db=db, rules=CREW_ERASURE_RULES, exempt=CREW_EXEMPT_TABLES, prepare=tombstone_account_events
+        name="crew",
+        db=db,
+        rules=CREW_ERASURE_RULES,
+        exempt=CREW_EXEMPT_TABLES,
+        prepare=tombstone_account_events,
+        account_ids=crew_account_ids,
     )
+
+
+CREW_DB_OWNED_BY_MAIN: Final = "crew_db_owned_by_main"
+
+
+async def cover_crew_db(app_state: Any, database_url: str, *, crew_mode: bool) -> None:
+    """Make the account eraser cover ``crew.db`` before the erasure job's first run (R-23).
+
+    Called by the main lifespan right after it builds ``app_state.account_eraser`` and before
+    it starts the erasure loop, whatever ``REMEMBRA_CREW_MODE`` says:
+
+    * the eraser requires ``crew`` (:meth:`~remembra.account.erasure.AccountEraser.require`)
+      whenever the ``crew.db`` file exists, so no account is erased while it is not attached;
+    * with Crew mode on, ``crew.db`` is opened and migrated here and set as
+      ``app_state.crew_db`` (the ``crew.db`` startup hook then uses it as provided);
+    * with Crew mode off and a ``crew.db`` left on disk, it is opened for erasure only, as
+      ``app_state.crew_erasure_db``: ``app_state.crew_db`` stays unset, so no crew route,
+      relay path or readiness check turns on. If it cannot be opened, the error is logged
+      and erasure is deferred until it can be (the ``users`` rows stay).
+
+    :func:`release_crew_db` closes what this opened, after the erasure loop has stopped.
+    """
+    from remembra.crew.db import open_crew_db, resolve_crew_db_path
+
+    eraser = getattr(app_state, "account_eraser", None)
+    if eraser is None:
+        return
+    path = resolve_crew_db_path(database_url)
+    on_disk = path != ":memory:"
+    eraser.require("crew", lambda: on_disk and os.path.exists(path))
+    provided = getattr(app_state, "crew_db", None)
+    if provided is not None:
+        eraser.attach(crew_extra_database(provided))
+        return
+    if not crew_mode and not (on_disk and os.path.exists(path)):
+        return
+    try:
+        db = await open_crew_db(database_url)
+    except Exception as e:
+        if crew_mode:
+            raise
+        log.error("crew_db_erasure_open_failed", error_type=type(e).__name__, hint="account erasure is deferred")
+        return
+    if crew_mode:
+        app_state.crew_db = db
+    else:
+        app_state.crew_erasure_db = db
+    setattr(app_state, CREW_DB_OWNED_BY_MAIN, db)
+    eraser.attach(crew_extra_database(db))
+    log.info("crew_db_erasure_attached", crew_mode=crew_mode)
+
+
+async def release_crew_db(app_state: Any) -> None:
+    """Detach and close the ``crew.db`` :func:`cover_crew_db` opened (call after the erasure loop stopped)."""
+    owned: Any = getattr(app_state, CREW_DB_OWNED_BY_MAIN, None)
+    eraser = getattr(app_state, "account_eraser", None)
+    if eraser is not None:
+        eraser.detach("crew")
+    if owned is None:
+        return
+    db: Any = owned
+    setattr(app_state, CREW_DB_OWNED_BY_MAIN, None)
+    if getattr(app_state, "crew_db", None) is db:
+        app_state.crew_db = None
+    if getattr(app_state, "crew_erasure_db", None) is db:
+        app_state.crew_erasure_db = None
+    await db.close()
