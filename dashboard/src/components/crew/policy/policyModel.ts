@@ -11,7 +11,8 @@ export const ENFORCEMENT_CHOICES: { value: EnforcementLevel; label: string; mean
   {
     value: 'enforce',
     label: 'Enforce',
-    meaning: 'Held zones are denied before the write, at commit and at push. The default.',
+    meaning:
+      'Held zones are denied to other agents before the write where their hooks enforce it, and at commit and push where the git gates are installed. The default.',
   },
   {
     value: 'observe',
@@ -111,7 +112,7 @@ export const TRUTH_TABLE: { agent: string; before: string; commit: string; push:
 ];
 
 export const TRUST_FOOTNOTE =
-  'Local enforcement coordinates cooperative agents. It cannot stop an agent deliberately working around it on your machine; every bypass is recorded. L1 adds a server-side check on your git host.';
+  'Local enforcement coordinates cooperative agents. It cannot stop an agent deliberately working around it on your machine; every bypass is recorded. A server-side check on your git host is not part of this release.';
 
 /** Which truth-table row describes a live session. */
 export function truthRowFor(session: Pick<SessionState, 'agent_id' | 'adapter' | 'adapter_enforcement' | 'client_kind'>): number {

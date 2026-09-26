@@ -16,6 +16,7 @@ import { useNow, useResource } from '../../../hooks/useResource';
 import type { UseCrewSocket } from '../../../hooks/useCrewSocket';
 import type { CrewApi } from '../../../lib/crew/api';
 import { navigate } from '../../../lib/nav';
+import { revealSelectedTab } from './tabs';
 import type { CrewDetail } from '../../../lib/crew/types';
 import { ErrorNotice, StaleNotice, TrailSkeleton } from '../../relay/ui';
 import { explainActionError, loadBoard, reopenTask, type BoardData } from './actions';
@@ -575,9 +576,14 @@ function PhoneBoard({
   hotColumns: ColumnId[];
 }) {
   const shown = lanes.filter((l) => l.cells[column].length > 0);
+  const strip = useRef<HTMLDivElement | null>(null);
+  // the selected column's tab stays in view on a narrow screen (it may start as Stalled, off to the right)
+  useEffect(() => {
+    if (strip.current) revealSelectedTab(strip.current);
+  }, [column]);
   return (
     <div className="space-y-2">
-      <div role="tablist" aria-label="Columns" className="scrollbar-hide -mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1">
+      <div ref={strip} role="tablist" aria-label="Columns" className="scrollbar-hide -mx-4 flex gap-1.5 overflow-x-auto px-4 pb-1">
         {BOARD_COLUMNS.map((c) => (
           <button
             key={c.id}

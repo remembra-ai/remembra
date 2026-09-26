@@ -6,7 +6,7 @@
 // only render what these return. Text is built from ids, slugs, callsigns and
 // globs; titles are rendered by the screens as plain text (§9, untrusted text).
 
-import { describeHolder, presenceText, taskRef } from '../../../lib/crew/selectors';
+import { beforeWriteLabel, describeHolder, presenceText, taskRef } from '../../../lib/crew/selectors';
 import type { ClaimView, CollisionView, CrewState, SessionState, ZoneView } from '../../../lib/crew/types';
 
 /** A folder of the tree snapshot (`PUT /crews/{id}/tree`): names and file counts only (§11). */
@@ -383,7 +383,8 @@ export function holderLabel(state: CrewState, claim: ClaimView): string {
   if (claim.holder_kind === 'human') return 'a human';
   const session = claim.holder_session_id ? state.sessions[claim.holder_session_id] : undefined;
   if (!session) return claim.holder_agent_id ?? claim.holder_session_id ?? 'a session';
-  return `${session.callsign} (${session.adapter_enforcement})`;
+  const parent = session.parent_session_id ? state.sessions[session.parent_session_id]?.callsign : undefined;
+  return `${session.callsign} (${beforeWriteLabel(session)}${session.parent_session_id ? `, sub-agent of ${parent ?? 'another session'}` : ''})`;
 }
 
 /** Local wall-clock time, `14:02`. */
@@ -445,11 +446,7 @@ export function enforcementLayers(session: Pick<SessionState, 'adapter_enforceme
 } {
   const hooks = session.githook_state === 'ok' || session.githook_state === 'chained';
   const gate = session.githook_state === 'missing' ? 'missing' : hooks ? 'enforced' : 'unknown';
-  let beforeWrite: string;
-  if (session.client_kind === 'mcp') beforeWrite = 'advisory (crew_guard)';
-  else if (session.adapter_enforcement === 'enforced') beforeWrite = 'enforced';
-  else beforeWrite = 'read-only fence';
-  return { beforeWrite, commit: gate, push: gate };
+  return { beforeWrite: beforeWriteLabel(session), commit: gate, push: gate };
 }
 
 export function sessionPresence(session: SessionState | undefined): string {

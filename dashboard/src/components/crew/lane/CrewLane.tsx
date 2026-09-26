@@ -9,7 +9,7 @@ import { useCopy } from '../../../hooks/useCopy';
 import { agentMeta } from '../../../lib/agents';
 import { crewHref } from '../../../lib/crew/routes';
 import { parseServerTime } from '../../../lib/time';
-import { presenceText } from '../../../lib/crew/selectors';
+import { callsignWithParent, presenceText } from '../../../lib/crew/selectors';
 import type { CrewState, SessionState } from '../../../lib/crew/types';
 import { ActivityStrip } from './ActivityStrip';
 import type { Strip } from './activity';
@@ -80,7 +80,7 @@ export function CrewLane({
 
   const targets = Object.values(state.sessions)
     .filter((s) => s.id !== session.id && !['ended', 'lost'].includes(s.state))
-    .map((s) => ({ id: s.id, label: s.callsign, detail: `${agentMeta(s.agent_id).name} · ${presenceText(s)}` }));
+    .map((s) => ({ id: s.id, label: callsignWithParent(state, s), detail: `${agentMeta(s.agent_id).name} · ${presenceText(s)}` }));
   const request = (id: LaneActionId): ActionRequest => ({
     input: { action: id, sessionId: session.id, names: { session: session.callsign } },
     subject: session.callsign,

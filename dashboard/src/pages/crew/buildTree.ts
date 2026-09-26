@@ -37,6 +37,8 @@ export interface SessionRow {
   /** "POS ▨ excl · enforced", "⧗ waiting on POS", "fenced" … */
   right: string;
   alarm: boolean;
+  /** The parent's callsign when this session is a sub-agent (it sits right under its parent). */
+  parentCallsign: string | null;
 }
 
 export interface BatonRow {
@@ -108,7 +110,27 @@ function sessionRow(state: CrewState | null, session: SessionView, nowMs: number
     taskTitle: task?.title ?? null,
     right: parts.join(' · '),
     alarm: presence.settled || session.stuck || enforcement.alarm,
+    parentCallsign: session.parent_session_id ? (state?.sessions[session.parent_session_id]?.callsign ?? 'another session') : null,
   };
+}
+
+/** Each sub-agent leaf moves right after its parent's leaf when both are in the same list. */
+function nestSubAgents(leaves: TreeLeaf[]): TreeLeaf[] {
+  const children = new Map<string, TreeLeaf[]>();
+  const present = new Set(leaves.filter((l) => l.kind === 'session').map((l) => (l as SessionRow).session.id));
+  const top: TreeLeaf[] = [];
+  for (const leaf of leaves) {
+    const parent = leaf.kind === 'session' ? leaf.session.parent_session_id : null;
+    if (parent && present.has(parent)) children.set(parent, [...(children.get(parent) ?? []), leaf]);
+    else top.push(leaf);
+  }
+  const out: TreeLeaf[] = [];
+  const add = (leaf: TreeLeaf, depth: number) => {
+    out.push(leaf);
+    if (leaf.kind === 'session' && depth < 8) for (const c of children.get(leaf.session.id) ?? []) add(c, depth + 1);
+  };
+  for (const leaf of top) add(leaf, 0);
+  return out;
 }
 
 function batonRow(slot: PickupSlotView, nowMs: number): BatonRow {
@@ -151,9 +173,13 @@ export function buildTree(item: CrewListItem, snapshot: CrewSnapshot | null, now
     if (node) node.children.push(leaf);
     else loose.push(leaf);
   };
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const taskOf = (session: SessionView | undefined) =>
+    state && session?.current_task_id ? state.tasks[session.current_task_id] : undefined;
   for (const session of sessions) {
     const row = sessionRow(state, session, nowMs);
-    const task = state && session.current_task_id ? state.tasks[session.current_task_id] : undefined;
+    // a sub-agent without a task of its own works where its parent works
+    const task = taskOf(session) ?? (session.parent_session_id ? taskOf(byId.get(session.parent_session_id)) : undefined);
     place(task ? (task.phase ?? null) : undefined, row);
   }
   if (state) {
@@ -175,8 +201,9 @@ export function buildTree(item: CrewListItem, snapshot: CrewSnapshot | null, now
       node.status = 'in progress';
     }
     node.children.sort((a, b) => Number(a.kind === 'baton') - Number(b.kind === 'baton'));
+    node.children = nestSubAgents(node.children);
   }
-  return { phases: [...phases.values()], loose, live: item.live, partial: state === null };
+  return { phases: [...phases.values()], loose: nestSubAgents(loose), live: item.live, partial: state === null };
 }
 
 /** A progress rail drawn in mono blocks: `▰▰▰▱▱▱` (width cells). */

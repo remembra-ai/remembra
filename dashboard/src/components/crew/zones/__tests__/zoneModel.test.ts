@@ -166,6 +166,6 @@ describe('zone status', () => {
     expect(leaseText({ lease_expires_at: null }, NOW)).toBeNull();
     expect(enforcementLayers(state.sessions.cs_a)).toEqual({ beforeWrite: 'enforced', commit: 'enforced', push: 'enforced' });
     expect(enforcementLayers(state.sessions.cs_b)).toEqual({ beforeWrite: 'read-only fence', commit: 'missing', push: 'missing' });
-    expect(enforcementLayers({ ...state.sessions.cs_b, client_kind: 'mcp', githook_state: null }).beforeWrite).toBe('advisory (crew_guard)');
+    expect(enforcementLayers({ ...state.sessions.cs_b, client_kind: 'mcp', githook_state: null }).beforeWrite).toBe('advisory');
   });
 });

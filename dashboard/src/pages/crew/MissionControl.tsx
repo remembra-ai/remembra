@@ -32,6 +32,7 @@ import { pickupSlots } from '../../components/crew/lane/pickup';
 import { PickupSlot } from '../../components/crew/lane/PickupSlot';
 import { useCrewActivity } from '../../components/crew/lane/useCrewActivity';
 import { liveStatus, quotaSources, trackBranch } from './trackModel';
+import { humanSummary } from '../../lib/crew/summary';
 
 const VIEWS: { screen: CrewScreen; label: string }[] = [
   { screen: 'track', label: 'Track' },
@@ -183,7 +184,7 @@ function NeedsYouRail({ crewId, project, count }: { crewId: string; project: str
   );
 }
 
-function FeedRail({ events, project, nowMs }: { events: CrewEvent[]; project: string; nowMs: number }) {
+function FeedRail({ events, project, nowMs, state }: { events: CrewEvent[]; project: string; nowMs: number; state: CrewState }) {
   const id = useId();
   const recent = events.slice(-10).reverse();
   return (
@@ -207,7 +208,7 @@ function FeedRail({ events, project, nowMs }: { events: CrewEvent[]; project: st
                 className={clsx('absolute left-[1px] top-[9px] h-[6px] w-[6px]', e.moment ? 'bg-signal' : 'bg-ink-3')}
               />
               <span className={clsx('min-w-0 flex-1 font-mono text-[11px] leading-snug', e.moment ? 'text-ink' : 'text-ink-2')}>
-                {e.summary}
+                {humanSummary(state, e)}
               </span>
               <span className="shrink-0 font-mono text-[10px] text-ink-3">{at ? shortAge((nowMs - at.getTime()) / 1000) : ''}</span>
             </li>
@@ -355,7 +356,7 @@ export function MissionControl({ crewId, project }: { crewId: string; project: s
         <aside className="min-w-0 space-y-4" aria-label="Crew at a glance">
           <NeedsYouRail crewId={crewId} project={project} count={state.inbox_counts.project} />
           <DecisionsRail decisions={Object.values(state.decisions)} canAct={canAct} />
-          <FeedRail events={activity.events} project={project} nowMs={nowMs} />
+          <FeedRail events={activity.events} project={project} nowMs={nowMs} state={state} />
         </aside>
       </div>
 

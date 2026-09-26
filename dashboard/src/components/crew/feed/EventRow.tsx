@@ -8,6 +8,7 @@ import clsx from 'clsx';
 import { ChevronRight } from 'lucide-react';
 import { absoluteTime } from '../../../lib/time';
 import type { CrewState } from '../../../lib/crew/types';
+import { humanSummary } from '../../../lib/crew/summary';
 import { motion } from 'framer-motion';
 import { useCrewMotion } from '../../../lib/motion';
 import { BatonRow } from './BatonRow';
@@ -111,7 +112,7 @@ export function EventRow({ row, state, project, nowMs, index, total, selected, r
           {row.kind === 'baton' ? (
             <BatonRow event={e} state={state} />
           ) : (
-            <span className="min-w-0 truncate text-ink-2">{e.summary}</span>
+            <span className="min-w-0 truncate text-ink-2">{humanSummary(state, e)}</span>
           )}
           {e.moment && (
             <span className="ml-auto hidden shrink-0 rounded-[2px] border border-rule px-1 font-mono text-[10px] text-ink-3 sm:inline" title="A moment: kept forever">

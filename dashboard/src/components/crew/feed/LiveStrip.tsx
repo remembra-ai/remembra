@@ -9,7 +9,8 @@ import { motion } from 'framer-motion';
 import { useCrewMotion } from '../../../lib/motion';
 import type { CrewStreamStatus } from '../../../lib/crew/store';
 import type { ConnectionStatus } from '../../../lib/crew/socket';
-import type { CrewEvent } from '../../../lib/crew/types';
+import type { CrewEvent, CrewState } from '../../../lib/crew/types';
+import { humanSummary } from '../../../lib/crew/summary';
 import { liveWords, recentCount } from './live';
 import { ageText } from './model';
 
@@ -22,7 +23,9 @@ export function LiveStrip({
   newestSeq,
   arrivals,
   nowMs,
+  state = null,
 }: {
+  state?: CrewState | null;
   status: CrewStreamStatus;
   connection: ConnectionStatus;
   events: readonly CrewEvent[];
@@ -51,7 +54,7 @@ export function LiveStrip({
         </span>
         {last && (
           <span className="min-w-0 truncate text-ink-3">
-            · {ageText(last.ts, nowMs)} ago <span className="text-ink-2">{last.summary}</span>
+            · {ageText(last.ts, nowMs)} ago <span className="text-ink-2">{humanSummary(state, last)}</span>
           </span>
         )}
       </div>

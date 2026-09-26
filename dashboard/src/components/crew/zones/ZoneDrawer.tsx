@@ -11,7 +11,7 @@ import { useId, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 import { Check, Copy, Lock, Snowflake, X } from 'lucide-react';
 import type { CrewApi } from '../../../lib/crew/api';
-import { callsignOf, liveSessions, presenceText, sessionLabel, taskRef } from '../../../lib/crew/selectors';
+import { callsignOf, isSubAgent, liveSessions, presenceText, sessionLabel, taskRef } from '../../../lib/crew/selectors';
 import type { ClaimView, CrewEvent, CrewState, EnforcementLevel, ZoneView } from '../../../lib/crew/types';
 import { absoluteTime, relativeTime } from '../../../lib/time';
 import { useCopy } from '../../../hooks/useCopy';
@@ -82,6 +82,7 @@ function HolderCard({ state, claim, now }: { state: CrewState; claim: ClaimView;
         <div className="min-w-0 flex-1">
           <p className="font-mono text-[13px] font-semibold text-ink">
             {session ? sessionLabel(session) : (claim.holder_agent_id ?? claim.holder_session_id)}
+            {session?.parent_session_id ? ` of ${callsignOf(state, session.parent_session_id)}` : ''}
           </p>
           <p className="font-mono text-[11.5px] text-ink-2">
             {session ? presenceText(session) : 'session ended'} · {claim.mode}
@@ -238,7 +239,7 @@ function EditZone({
     return (
       <div>
         <p className="text-sm text-ink-2">
-          <span className="font-mono">{zone.slug}</span> is declared in <span className="font-mono">.remembra/zones.yml</span>, which is the authority for it (D9). Commit this patch on the default branch; crewd uploads it. A loosening change then waits for your approval here.
+          <span className="font-mono">{zone.slug}</span> is declared in <span className="font-mono">.remembra/zones.yml</span>, which is the authority for it. Commit this patch on the default branch; crewd uploads it. A loosening change then waits for your approval here.
         </p>
         <PatchBlock patch={patch || '# no change'} label="git apply" />
         <button type="button" className="rr-btn-ghost mt-3 px-3 py-1.5 text-sm" onClick={onDone}>
@@ -368,7 +369,8 @@ export function ZoneDrawer({
       title: status.reserved && !holder ? `Hand baton to…` : `Transfer ${zone.slug} to…`,
       consequence: 'The zone (and its saved work, if any) moves to this session with a new epoch. The current holder is told at its next tool call.',
       confirmLabel: 'Transfer',
-      sessions: live.filter((s) => s.id !== target?.holder_session_id),
+      // a baton goes to a top-level session (sub-agents work for their parent); a zone can go to anyone
+      sessions: live.filter((s) => s.id !== target?.holder_session_id && !(status.reserved && !holder && isSubAgent(s))),
     },
     revoke: {
       title: `Revoke ${zone.slug}`,

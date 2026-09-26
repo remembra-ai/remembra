@@ -105,7 +105,7 @@ describe.skipIf(!URL_)('WP-13a views against a live crew', () => {
     const strip3 = buildStrip(events, cc2.id, now);
     expect(strip3.buckets.some((b) => b.marks.includes('guard'))).toBe(true);
 
-    // codex-1's lane: T-2 with the REPORTS chip, advisory before write, self-declared
+    // codex-1's lane: T-2 with the REPORTS chip, a read-only fence before write (hook client, advisory adapter), self-declared
     const codexHtml = renderToStaticMarkup(
       <CrewLane
         state={state}
@@ -120,7 +120,7 @@ describe.skipIf(!URL_)('WP-13a views against a live crew', () => {
     );
     expect(codexHtml).toContain('Reports export');
     expect(codexHtml).toContain('zone reports, exclusive');
-    expect(codexHtml).toContain('before write: advisory · commit ✓ · push ✓');
+    expect(codexHtml).toContain('before write: read-only fence · commit ✓ · push ✓');
     expect(codexHtml).toContain('self-declared');
     expect(liveStatus(state, events[events.length - 1], now).text.length).toBeGreaterThan(0);
 

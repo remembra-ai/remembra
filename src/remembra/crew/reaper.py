@@ -230,7 +230,7 @@ class CrewReaper:
                         type="host.unreachable",
                         actor=Actor.system(),
                         payload={"host_id": host["id"], "silent_s": silent, "session_ids": session_ids[:50]},
-                        summary=f"host {host['host_label']} unreachable ({len(session_ids)} sessions quiet)",
+                        summary=f"host {host['host_label']} unreachable ({len(session_ids)} session{'' if len(session_ids) == 1 else 's'} quiet)",
                         refs={"host_id": host["id"]},
                         now=now,
                     )

@@ -287,7 +287,8 @@ export interface OwnerInfo {
   note: string | null;
 }
 
-const LIVE_STATES = new Set(['joining', 'active', 'idle', 'quiet', 'quota_blocked', 'paused']);
+// Running: an agent that is working or can pick work up. Stopped on its credits or paused by a human is not.
+const RUNNING_STATES = new Set(['joining', 'active', 'idle', 'quiet']);
 
 export function ownerOf(task: Pick<TaskDetail, 'owner_session_id' | 'owner_agent_id'>, state: CrewState | null): OwnerInfo {
   const session = task.owner_session_id && state ? state.sessions[task.owner_session_id] : undefined;
@@ -297,7 +298,7 @@ export function ownerOf(task: Pick<TaskDetail, 'owner_session_id' | 'owner_agent
       callsign: session.callsign,
       agentId: session.agent_id,
       verified: session.agent_verified,
-      live: LIVE_STATES.has(session.state),
+      live: RUNNING_STATES.has(session.state),
       note: session.state === 'active' || session.state === 'idle' || session.state === 'joining' ? (session.stuck ? 'stuck' : null) : presenceText(session),
     };
   }

@@ -6,7 +6,7 @@ import { useState } from 'react';
 import clsx from 'clsx';
 import { toast } from 'sonner';
 import type { CrewApi } from '../../../lib/crew/api';
-import { liveSessions, presenceText } from '../../../lib/crew/selectors';
+import { batonTargets, beforeWriteLabel, presenceText } from '../../../lib/crew/selectors';
 import type { CrewState } from '../../../lib/crew/types';
 import { explainActionError, pickUpBaton, type ActionResult } from './actions';
 import { Dialog } from './Dialog';
@@ -26,7 +26,7 @@ export function PickUpBaton({
   onClose: () => void;
   onChanged: (result: ActionResult) => void;
 }) {
-  const sessions = state ? liveSessions(state).filter((s) => s.id !== task.owner_session_id && s.state !== 'quota_blocked') : [];
+  const sessions = state ? batonTargets(state, [task.owner_session_id]) : [];
   const [choice, setChoice] = useState<string | null>(sessions.length === 1 ? sessions[0].id : null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +85,7 @@ export function PickUpBaton({
                     />
                     <span className="font-mono text-sm font-semibold text-ink">{s.callsign}</span>
                     <span className="text-xs text-ink-3">
-                      {s.agent_id} ({s.agent_verified ? 'key-verified' : 'self-declared'}) · {s.adapter_enforcement}
+                      {s.agent_id} ({s.agent_verified ? 'key-verified' : 'self-declared'}) · {beforeWriteLabel(s)}
                     </span>
                     <span className="ml-auto font-mono text-[11px] text-ink-2">{presenceText(s)}</span>
                   </label>

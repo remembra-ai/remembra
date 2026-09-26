@@ -135,8 +135,12 @@ export function ZonesPage({ crewId, project, zoneSlug }: { crewId: string; proje
         title="Zone map"
         lede={
           <>
-            Who is working where, and what must not be touched. Zones cover folders; a held zone is denied to every other agent
-            {enforcement === 'enforce' ? ' before the write, at commit and at push.' : enforcement === 'observe' ? ' (observe mode: logged, not denied).' : ' (the gate is off).'}
+            Who is working where, and what must not be touched. Zones cover folders; a held zone is closed to the other agents
+            {enforcement === 'enforce'
+              ? ': denied before the write where their hooks enforce it, read-only where they get a fence, and at commit and push where the git gates are installed.'
+              : enforcement === 'observe'
+                ? ' (observe mode: logged, not denied).'
+                : ' (the gate is off).'}
           </>
         }
         seq={state.last_seq}

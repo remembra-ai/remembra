@@ -6,6 +6,7 @@
 // are tested without a browser. Text built here uses ids, slugs and callsigns
 // only; titles are returned separately and rendered as plain text (§9).
 
+import { beforeWriteLabel, type BeforeWrite } from '../../../lib/crew/selectors';
 import { hrefFor } from '../../../lib/nav';
 import { parseServerTime } from '../../../lib/time';
 import type { ClaimView, CrewState, GithookState, LimitView, SessionState, TaskView, ZoneView } from '../../../lib/crew/types';
@@ -120,7 +121,7 @@ export function presenceView(session: SessionState, claims: ClaimView[], nowMs: 
 export type LayerState = 'ok' | 'missing' | 'unknown';
 
 export interface EnforcementView {
-  beforeWrite: 'enforced' | 'advisory';
+  beforeWrite: BeforeWrite;
   commit: LayerState;
   push: LayerState;
   /** A git gate is missing: shown in the alarm style. */
@@ -136,8 +137,10 @@ function gitLayer(state: GithookState | null | undefined): LayerState {
 
 const LAYER_MARK: Record<LayerState, string> = { ok: '✓', missing: 'missing', unknown: '?' };
 
-export function enforcementView(session: Pick<SessionState, 'adapter_enforcement' | 'githook_state'>): EnforcementView {
-  const beforeWrite = session.adapter_enforcement === 'enforced' ? 'enforced' : 'advisory';
+export function enforcementView(
+  session: Pick<SessionState, 'adapter_enforcement' | 'githook_state'> & Partial<Pick<SessionState, 'client_kind'>>,
+): EnforcementView {
+  const beforeWrite = beforeWriteLabel(session);
   const commit = gitLayer(session.githook_state);
   const push = commit; // one git-hook state covers the pre-commit and pre-push gates (§8.4)
   if (commit === 'missing') {

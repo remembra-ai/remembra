@@ -3,6 +3,7 @@
 // can wipe them; crewd checks at every SessionStart and heartbeat and reports
 // `githook_state`. A missing gate shows the exact command that reinstalls it.
 
+import { beforeWriteLabel } from '../../../lib/crew/selectors';
 import { CopyCommand } from '../../relay/ui';
 import { PixelGlyph } from '../zones/PixelGlyph';
 import { HOOK_FIX_COMMAND, HOOK_TEXT, type CheckoutRow } from './policyModel';
@@ -12,12 +13,15 @@ export function GitHookStatus({ rows }: { rows: CheckoutRow[] }) {
     return <p className="text-sm text-ink-3">No agents are running, so no checkout has reported its git gates.</p>;
   }
   const missing = rows.filter((r) => r.hook === 'missing').length;
+  const unknown = rows.filter((r) => r.hook === 'unknown').length;
   return (
     <div>
       <p className="text-sm text-ink-2">
         {missing
           ? `${missing} checkout${missing === 1 ? ' has' : 's have'} lost the commit gate: commits and pushes from there are not checked until it is back.`
-          : 'Every live checkout runs the commit and push gates.'}
+          : unknown
+            ? `${unknown} checkout${unknown === 1 ? ' has' : 's have'} not reported its git gates yet: commits and pushes there are checked only once the gates are installed.`
+            : 'Every live checkout runs the commit and push gates.'}
       </p>
       <div className="mt-3 overflow-x-auto">
         <table className="cz-table">
@@ -38,7 +42,7 @@ export function GitHookStatus({ rows }: { rows: CheckoutRow[] }) {
                     {r.hostId ? ` · host ${r.hostId.slice(0, 10)}` : ''}
                   </span>
                 </td>
-                <td className="font-mono">{r.sessions.map((s) => `${s.callsign} (${s.adapter_enforcement})`).join(', ')}</td>
+                <td className="font-mono">{r.sessions.map((s) => `${s.callsign} (${beforeWriteLabel(s)})`).join(', ')}</td>
                 <td>
                   <span className={`inline-flex items-center gap-1.5 font-mono ${r.hook === 'missing' ? 'text-fail' : 'text-ink'}`}>
                     <PixelGlyph name={r.hook === 'missing' ? 'breach' : r.hook === 'unknown' ? 'free' : 'held'} size={10} />

@@ -2,6 +2,7 @@
 
 import { eventSessionId } from '../../lib/crew/reducer';
 import { liveSessions } from '../../lib/crew/selectors';
+import { humanSummary } from '../../lib/crew/summary';
 import type { CrewEvent, CrewState } from '../../lib/crew/types';
 import { parseServerTime } from '../../lib/time';
 import { shortAge } from '../../components/crew/lane/model';
@@ -47,7 +48,7 @@ export function liveStatus(state: CrewState, latest: CrewEvent | null, nowMs: nu
   if (latest.type === 'crew.mode_changed' && latest.payload?.to === 'multi') lead = 'Crew assembled ·';
   return {
     lead,
-    text: latest.summary,
+    text: humanSummary(state, latest),
     age: ageS === null ? null : ageS < 5 ? 'just now' : `${shortAge(ageS)} ago`,
     fresh: ageS !== null && ageS < 60,
   };

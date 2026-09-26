@@ -16,6 +16,8 @@ import { LatestHandoff } from '../components/relay/LatestHandoff';
 import { ConnectChecklist, FirstHandoffCelebration, WeeklyRecap } from '../components/relay/HomeCards';
 import { PlanMeter } from '../components/credits/Credits';
 import { LiveCrewsStrip } from './crew/LiveCrewsStrip';
+import { useNeedsYouTotal } from '../components/crew/inbox/useInbox';
+import { inboxHref } from '../lib/crew/routes';
 
 const LAST_SEEN_KEY = 'remembra_home_last_seen';
 const LAST_ACTIVE_KEY = 'remembra_home_last_active';
@@ -125,7 +127,10 @@ export function Home({ userName }: { userName?: string }) {
   const agents = summary.data?.agents ?? [];
   const connectedCount = agents.length;
   const showConnectSide = hasHandoffs && connectedCount < 2 && !hideConnect;
-  const { forYou, pendingForAgents, agentsWaiting } = inboxCounts(inbox.data);
+  const { forYou: messagesForYou, pendingForAgents, agentsWaiting } = inboxCounts(inbox.data);
+  // what the sidebar's Inbox badge counts: agent messages for you plus the crews' Needs-you items
+  const needsYou = useNeedsYouTotal();
+  const forYou = messagesForYou + needsYou;
 
   let statusLine: string;
   if (!loaded && trail.error != null) statusLine = "Your agents' trail can't be loaded right now.";
@@ -243,11 +248,17 @@ export function Home({ userName }: { userName?: string }) {
               {inbox.data && (
                 <>
                   <p className="text-sm text-ink-2">
-                    {forYou > 0 && (
+                    {messagesForYou > 0 && (
                       <span className="font-semibold text-signal-ink">
-                        {plural(forYou, 'message')} from your agents to read.{' '}
+                        {plural(messagesForYou, 'message')} from your agents to read.{' '}
                       </span>
                     )}
+                    {needsYou > 0 && (
+                      <a href={inboxHref('needs-you')} className="font-semibold text-signal-ink underline decoration-signal underline-offset-4">
+                        {plural(needsYou, 'crew item')} {needsYou === 1 ? 'needs' : 'need'} you.
+                      </a>
+                    )}
+                    {needsYou > 0 && ' '}
                     {pendingForAgents > 0
                       ? `${plural(pendingForAgents, 'note')} waiting for ${plural(agentsWaiting, 'agent')} to pick up in ${
                           agentsWaiting === 1 ? 'its' : 'their'

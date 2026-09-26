@@ -9,7 +9,7 @@
 import clsx from 'clsx';
 import { useCopy } from '../../../hooks/useCopy';
 import { agentMeta } from '../../../lib/agents';
-import { presenceText } from '../../../lib/crew/selectors';
+import { batonTargets, presenceText } from '../../../lib/crew/selectors';
 import type { CrewState } from '../../../lib/crew/types';
 import type { ActionRequest } from './ActionDialog';
 import { DitherField } from './DitherField';
@@ -33,9 +33,11 @@ export function PickupSlot({
   const text = slotSentence(slot, nowMs);
   const claimIds = slot.claims.map((c) => c.id);
   const zonesText = slot.zones.map((z) => z.slug).join(', ');
-  const targets = Object.values(state.sessions)
-    .filter((s) => s.id !== slot.fromSessionId && !['ended', 'lost', 'quota_blocked'].includes(s.state))
-    .map((s) => ({ id: s.id, label: s.callsign, detail: `${agentMeta(s.agent_id).name} · ${presenceText(s)}` }));
+  const targets = batonTargets(state, [slot.fromSessionId]).map((s) => ({
+    id: s.id,
+    label: s.callsign,
+    detail: `${agentMeta(s.agent_id).name} · ${presenceText(s)}`,
+  }));
   const subject = slot.taskRef ? `${slot.taskRef} baton` : `${zonesText} baton`;
   const humanHint = canAct ? undefined : 'Needs a dashboard login';
 
@@ -76,7 +78,7 @@ export function PickupSlot({
           </span>
         </div>
         {slot.offeredTo.length > 0 && (
-          <p className="mt-1 font-mono text-[11px] text-ink-3">offered to {slot.offeredTo.join(', ')} in its brief</p>
+          <p className="mt-1 font-mono text-[11px] text-ink-3">offered to {slot.offeredTo.join(', ')} in {slot.offeredTo.length === 1 ? 'its brief' : 'their briefs'}</p>
         )}
         {slot.batonRef && <p className="mt-1 truncate font-mono text-[11px] text-ink-3">saved as {slot.batonRef}</p>}
         <div className="mt-3 flex flex-wrap gap-2">

@@ -211,7 +211,7 @@ export function EventFeed({ crewId, project }: { crewId: string; project: string
           </h2>
         </div>
         <div className="mt-3 max-w-3xl">
-          <LiveStrip status={crew.status} connection={crew.connection} events={feed.events} newestSeq={Math.max(feed.newestSeq, crew.state?.last_seq ?? 0)} arrivals={feed.arrivals} nowMs={nowMs} />
+          <LiveStrip state={crew.state} status={crew.status} connection={crew.connection} events={feed.events} newestSeq={Math.max(feed.newestSeq, crew.state?.last_seq ?? 0)} arrivals={feed.arrivals} nowMs={nowMs} />
         </div>
       </header>
 

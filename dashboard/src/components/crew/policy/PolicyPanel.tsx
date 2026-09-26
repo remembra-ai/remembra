@@ -197,7 +197,7 @@ export function PolicyPanel({
         />
         <div className="mt-5 overflow-x-auto">
           <table className="cz-table">
-            <caption className="pb-2 text-left font-mono text-[11px] text-ink-3">Where each kind of agent is stopped (§8.5)</caption>
+            <caption className="pb-2 text-left font-mono text-[11px] text-ink-3">Where each kind of agent is stopped</caption>
             <thead>
               <tr>
                 <th scope="col">Agent</th>
@@ -293,7 +293,7 @@ export function PolicyPanel({
         ) : !codes ? (
           <p className="text-sm text-ink-3">Loading…</p>
         ) : !codes.length ? (
-          <p className="text-sm text-ink-2">No code has been issued. There is no other way past the gate: agents cannot switch it off.</p>
+          <p className="text-sm text-ink-2">No code has been issued. Only you can open the gate: a code from this panel, or <span className="font-mono">remembra-crew bypass</span> at your own terminal when the server is unreachable. Agents cannot switch it off, and every use is recorded.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="cz-table">

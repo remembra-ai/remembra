@@ -18,6 +18,7 @@ import { NoCrewsEmpty } from '../../components/crew/empty/EmptyStates';
 import { DitherField } from '../../components/crew/lane/DitherField';
 import { agentPageHref } from '../../components/crew/lane/model';
 import { branch, buildTree, progressRail, type PhaseNode, type TreeLeaf } from './buildTree';
+import { liveSplit, liveSplitText } from '../../lib/crew/selectors';
 
 /** Cards whose trees are loaded (the rest show list data only). */
 const TREE_LIMIT = 24;
@@ -101,7 +102,7 @@ function LeafRow({ leaf, gutter, last, project }: { leaf: TreeLeaf; gutter: stri
     <li
       role="treeitem"
       aria-level={gutter ? 3 : 2}
-      aria-label={`${s.callsign}, ${leaf.status}${leaf.taskRef ? `, ${leaf.taskRef}` : ''}`}
+      aria-label={`${s.callsign}${leaf.parentCallsign ? `, sub-agent of ${leaf.parentCallsign}` : ''}, ${leaf.status}${leaf.taskRef ? `, ${leaf.taskRef}` : ''}`}
       className="flex min-w-0 flex-wrap items-baseline gap-x-2"
     >
       <span aria-hidden="true" className="whitespace-pre text-ink-3">
@@ -120,6 +121,7 @@ function LeafRow({ leaf, gutter, last, project }: { leaf: TreeLeaf; gutter: stri
       <a href={agentPageHref(s.agent_id, s.id, project)} className="font-semibold text-ink hover:underline">
         {s.callsign}
       </a>
+      {leaf.parentCallsign && <span className="text-[11px] text-ink-3">sub-agent of {leaf.parentCallsign}</span>}
       <span className="min-w-0 max-w-[22ch] truncate text-ink-2">{leaf.taskTitle ?? (leaf.taskRef ? leaf.taskRef : '—')}</span>
       <span className={clsx('ml-auto min-w-0 truncate', leaf.alarm ? 'text-signal-ink' : 'text-ink-3')}>{leaf.right || leaf.status}</span>
     </li>
@@ -179,9 +181,9 @@ function ProjectCard({ item, snapshot, now }: { item: CrewListItem; snapshot: Cr
             </a>
           </h2>
           <p className="flex items-center gap-2 font-mono text-[12px]">
-            <span className={clsx('inline-flex items-center gap-1.5', item.live > 0 ? 'text-ink' : 'text-ink-3')}>
-              <span aria-hidden="true" className={clsx('h-2 w-2', item.live > 0 ? 'rr-pulse bg-signal' : 'bg-rule')} />
-              {item.live} live
+            <span className={clsx('inline-flex items-center gap-1.5', liveSplit(item).running > 0 ? 'text-ink' : 'text-ink-3')}>
+              <span aria-hidden="true" className={clsx('h-2 w-2', liveSplit(item).running > 0 ? 'rr-pulse bg-signal' : 'bg-rule')} />
+              {liveSplitText(liveSplit(item))}
             </span>
             {item.needs_you > 0 && (
               <a
@@ -240,8 +242,8 @@ export function SiteBoard() {
     return <ErrorNotice error={list.error} what="your crews" onRetry={list.refresh} />;
   }
   if (list.items.length === 0) return <NoCrewsEmpty />;
-  const live = list.items.reduce((n, i) => n + i.live, 0);
-  const busy = list.items.filter((i) => i.live > 0).length;
+  const live = list.items.reduce((n, i) => n + liveSplit(i).running, 0);
+  const busy = list.items.filter((i) => liveSplit(i).running > 0).length;
   return (
     <div className="space-y-3">
       <header className="rr-card relative overflow-hidden rounded-[3px]">

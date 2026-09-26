@@ -7,7 +7,7 @@ import { ArrowRight } from 'lucide-react';
 import clsx from 'clsx';
 import { useCrewList } from '../../lib/crew/hooks';
 import { crewHref, crewsHref, inboxHref } from '../../lib/crew/routes';
-import { presenceText } from '../../lib/crew/selectors';
+import { liveSplit, liveSplitText, presenceText } from '../../lib/crew/selectors';
 import type { SessionView } from '../../lib/crew/types';
 
 const SHOWN = 6;
@@ -32,12 +32,17 @@ export function LiveCrewsStrip() {
   const list = useCrewList();
   if (list.status !== 'ready' || list.items.length === 0) return null;
   const items = list.items.slice(0, SHOWN);
-  const live = list.items.reduce((n, i) => n + i.live, 0);
+  const totals = list.items.map(liveSplit).reduce(
+    (a, s) => ({ running: a.running + s.running, stopped: a.stopped + s.stopped, paused: a.paused + s.paused }),
+    { running: 0, stopped: 0, paused: 0 },
+  );
+  const idle = totals.stopped + totals.paused;
   return (
     <section aria-labelledby="home-live-crews" className="rr-card rounded-[3px]">
       <div className="flex items-baseline justify-between gap-3 px-4 pt-3.5 sm:px-5">
         <h2 id="home-live-crews" className="rr-eyebrow">
-          Live crews · {live} agent{live === 1 ? '' : 's'} running
+          Live crews · {totals.running} agent{totals.running === 1 ? '' : 's'} running
+          {idle > 0 ? ` · ${idle} stopped or paused` : ''}
         </h2>
         <a
           href={crewsHref()}
@@ -68,7 +73,9 @@ export function LiveCrewsStrip() {
                 ))}
                 {sessions.length === 0 && <span className="h-2.5 w-2.5 bg-rule" />}
               </span>
-              <span className={clsx('ml-auto shrink-0', item.live > 0 ? 'text-ink-2' : 'text-ink-3')}>{item.live} live</span>
+              <span className={clsx('ml-auto shrink-0', liveSplit(item).running > 0 ? 'text-ink-2' : 'text-ink-3')}>
+                {liveSplitText(liveSplit(item))}
+              </span>
               {item.needs_you > 0 && (
                 <a href={inboxHref('needs-you', project)} className="shrink-0 font-bold text-signal-ink">
                   ⚑ {item.needs_you}

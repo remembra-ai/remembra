@@ -70,7 +70,11 @@ describe('enforcement layers', () => {
     expect(enforcementView({ adapter_enforcement: 'enforced', githook_state: 'ok' }).text).toBe(
       'before write: enforced · commit ✓ · push ✓',
     );
+    // one label everywhere (Track, Zones, Policy): an advisory adapter with hooks gets the read-only fence
     expect(enforcementView({ adapter_enforcement: 'advisory', githook_state: 'chained' }).text).toBe(
+      'before write: read-only fence · commit ✓ · push ✓',
+    );
+    expect(enforcementView({ adapter_enforcement: 'advisory', client_kind: 'mcp', githook_state: 'chained' }).text).toBe(
       'before write: advisory · commit ✓ · push ✓',
     );
     expect(enforcementView({ adapter_enforcement: 'enforced', githook_state: null }).text).toBe(

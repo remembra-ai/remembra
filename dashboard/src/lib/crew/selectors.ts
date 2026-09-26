@@ -15,9 +15,47 @@ export function liveSessions(state: CrewState): SessionState[] {
     .sort((a, b) => a.callsign.localeCompare(b.callsign, undefined, { numeric: true }));
 }
 
-/** `cc-1 · claude-code (key-verified)` */
-export function sessionLabel(session: Pick<SessionState, 'callsign' | 'agent_id' | 'agent_verified'>): string {
-  return `${session.callsign} · ${session.agent_id} (${session.agent_verified ? 'key-verified' : 'self-declared'})`;
+/** `cc-1 · claude-code (key-verified)`; a sub-agent session ends with ` · sub-agent`. */
+export function sessionLabel(
+  session: Pick<SessionState, 'callsign' | 'agent_id' | 'agent_verified'> & Partial<Pick<SessionState, 'parent_session_id'>>,
+): string {
+  const base = `${session.callsign} · ${session.agent_id} (${session.agent_verified ? 'key-verified' : 'self-declared'})`;
+  return session.parent_session_id ? `${base} · sub-agent` : base;
+}
+
+/**
+ * How an agent is stopped before a write, one label everywhere (Track, Zones, Policy): `enforced` (its
+ * hooks deny), `read-only fence` (Cursor, or an agent not verified in its own worktree: crewd makes held
+ * zones read-only) or `advisory` (MCP-only: it is told, nothing stops it).
+ */
+export type BeforeWrite = 'enforced' | 'read-only fence' | 'advisory';
+
+export function beforeWriteLabel(session: Pick<SessionState, 'adapter_enforcement'> & Partial<Pick<SessionState, 'client_kind'>>): BeforeWrite {
+  if (session.client_kind === 'mcp') return 'advisory';
+  return session.adapter_enforcement === 'enforced' ? 'enforced' : 'read-only fence';
+}
+
+/**
+ * A crew list item's live sessions split by what they are doing: `running` (joining, active, idle,
+ * quiet), `stopped` (on its credits: waiting for pickup) and `paused` (by a human). Uses the listed
+ * sessions; when the list was truncated, the sessions not listed count as running.
+ */
+export function liveSplit(item: { live: number; live_sessions: Pick<SessionState, 'state'>[] }): {
+  running: number;
+  stopped: number;
+  paused: number;
+} {
+  const stopped = item.live_sessions.filter((s) => s.state === 'quota_blocked').length;
+  const paused = item.live_sessions.filter((s) => s.state === 'paused').length;
+  return { running: Math.max(0, item.live - stopped - paused), stopped, paused };
+}
+
+/** `3 running · 1 stopped · 1 paused`, leaving out the zero parts after the first. */
+export function liveSplitText(split: { running: number; stopped: number; paused: number }): string {
+  const parts = [`${split.running} running`];
+  if (split.stopped) parts.push(`${split.stopped} stopped`);
+  if (split.paused) parts.push(`${split.paused} paused`);
+  return parts.join(' · ');
 }
 
 /** Human wording for a presence state (status never depends on colour alone, §9). */
@@ -49,6 +87,26 @@ export function taskRef(state: CrewState, taskId: string | null | undefined): st
 export function callsignOf(state: CrewState, sessionId: string | null | undefined): string | null {
   if (!sessionId) return null;
   return state.sessions[sessionId]?.callsign ?? sessionId;
+}
+
+/** A sub-agent session (joined with `parent_session_id`): it works for, and sits on the seat of, its parent. */
+export function isSubAgent(session: Pick<SessionState, 'parent_session_id'>): boolean {
+  return Boolean(session.parent_session_id);
+}
+
+/** `cc-3 (sub-agent of cc-2)` for a sub-agent, the plain callsign otherwise. */
+export function callsignWithParent(state: CrewState, session: Pick<SessionState, 'callsign' | 'parent_session_id'>): string {
+  if (!session.parent_session_id) return session.callsign;
+  return `${session.callsign} (sub-agent of ${callsignOf(state, session.parent_session_id)})`;
+}
+
+/**
+ * Sessions a baton can be handed to: live, not stopped on credits, and not sub-agents (the server
+ * offers batons to top-level sessions only; a sub-agent's parent takes it). `exclude` drops the
+ * session the baton comes from.
+ */
+export function batonTargets(state: CrewState, exclude: ReadonlyArray<string | null | undefined> = []): SessionState[] {
+  return liveSessions(state).filter((s) => !exclude.includes(s.id) && s.state !== 'quota_blocked' && !isSubAgent(s));
 }
 
 /** Zones by slug, the built-in crew-policy zone last. */
