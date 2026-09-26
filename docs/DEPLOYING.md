@@ -48,31 +48,139 @@ on the Hetzner server `178.156.226.84`, behind Cloudflare. It builds
    curl -s https://api.remembra.dev/health/ready | python3 -m json.tool                            # status ok (see below)
    ```
 
+## Working on the production database
+
+The image has **no `sqlite3` command-line tool** (`Dockerfile.cloud` installs
+only `curl` and `libssl3`), and only `scripts/maintenance/*.py` is copied into
+it, not the `.sql` files. Use the Python `sqlite3` module that the image does
+have. Every snippet below runs on the Coolify server (`ssh coolify`) against
+the running container:
+
+```bash
+CTR=$(docker ps -qf name=s8sk8kw4gg8oo | head -1); echo "$CTR"
+docker exec "$CTR" sh -c 'echo "$REMEMBRA_DATABASE_URL"'   # sqlite+aiosqlite:////data/remembra.db -> /data/remembra.db
+```
+
+**Consistent copy** (the online backup API, safe while the app is writing):
+
+```bash
+STAMP=$(date -u +%Y%m%dT%H%M%SZ)
+docker exec -i "$CTR" python - /data/remembra.db "/data/remembra-manual-$STAMP.db" <<'PY'
+# consistent copy
+import sqlite3, sys
+src_path, dst_path = sys.argv[1], sys.argv[2]
+src = sqlite3.connect(src_path)
+dst = sqlite3.connect(dst_path)
+src.backup(dst)
+dst.close()
+src.close()
+chk = sqlite3.connect(dst_path)
+print(dst_path, chk.execute("PRAGMA integrity_check").fetchone()[0],
+      "memories:", chk.execute("SELECT COUNT(*) FROM memories").fetchone()[0])
+chk.close()
+PY
+# keep one copy off the volume as well
+docker cp "$CTR:/data/remembra-manual-$STAMP.db" "/root/remembra-manual-$STAMP.db"
+```
+
+Expected: the path, `ok` and the memory count.
+
+## Automatic pre-migration backup
+
+Every new build copies the database **before** any schema migration runs, with
+the same online backup API, then checks the copy (`PRAGMA quick_check`):
+
+- **Where:** `/data/backups/remembra-predeploy-<build>-<UTC time>.db` (a
+  `backups` folder next to the database; files `0600`, folder `0700`).
+  `<build>` is the first 12 characters of the deployed commit
+  (`REMEMBRA_BUILD_SHA`, which falls back to Coolify's `SOURCE_COMMIT`).
+- **When:** once per build. A restart of the same build does not copy again,
+  and a fresh volume with no database has nothing to copy.
+- **How many:** the newest 3 are kept; older ones are deleted after a new copy
+  is written.
+- **If it fails** (not enough free space for 1.2 × the database and its WAL
+  plus 64 MB, an I/O error, a copy that fails its check): the new container
+  exits before migrating and the database is left untouched. Free space, or
+  deliberately skip the copy with `REMEMBRA_PRE_MIGRATION_BACKUP=false`, then
+  redeploy.
+- **It is on the same volume** as the database. It protects against a bad
+  migration, not against losing the volume: keep litestream on (below) and
+  copy important snapshots off the volume.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REMEMBRA_PRE_MIGRATION_BACKUP` | `true` | Take the copy before migrations run |
+| `REMEMBRA_PRE_MIGRATION_BACKUP_KEEP` | `3` | Copies to keep, newest first (1 to 50) |
+| `REMEMBRA_PRE_MIGRATION_BACKUP_DIR` | `backups` next to the database (`/data/backups`) | Where the copies go |
+
+List them, and copy one off the volume:
+
+```bash
+docker exec "$CTR" ls -la /data/backups
+docker cp "$CTR:/data/backups/remembra-predeploy-<build>-<time>.db" /root/
+```
+
+To restore one, stop the app and put it in place of the database (this loses
+every write made after that copy was taken):
+
+```bash
+VOL=$(docker inspect "$CTR" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}'); echo "$VOL"
+RUID=$(docker exec "$CTR" id -u remembra); RGID=$(docker exec "$CTR" id -g remembra)
+docker stop "$CTR"   # or stop the app in Coolify
+docker run --rm -v "$VOL":/data alpine sh -c "cp /data/backups/remembra-predeploy-<build>-<time>.db /data/remembra.db \
+  && rm -f /data/remembra.db-wal /data/remembra.db-shm && chown $RUID:$RGID /data/remembra.db && ls -la /data"
+```
+
+The copy was taken by `<build>` before it migrated, so it matches the image
+that ran before `<build>`: start that one (Coolify: the app's Deployments,
+pick the previous deployment, Rollback). Then run
+`docker exec "$(docker ps -qf name=s8sk8kw4gg8oo | head -1)" python -m remembra.storage.reconcile`
+to report SQLite and Qdrant drift (vectors written after the copy show as
+orphan vectors; the report changes nothing).
+
 ## Rolling back past the plans v2 migration
 
 The first boot of the relay-launch image rewrites paid `pro` / `team` tenants
 to `legacy_pro_49` / `legacy_team_199` (recorded in `cloud_migrations`), and new
 checkouts can write `solo`. The pre-launch image (`b034314`) cannot parse those
-plans: every store and usage call of those accounts returns 500. So:
+plans: every store and usage call of those accounts returns 500. So, to roll
+back, run the verified script against the live database, then redeploy
+`b034314`:
 
-1. **Before deploying** relay-launch, take a copy (litestream may not be on):
+First take a consistent copy (the snippet above, with a `remembra-pre-rollback`
+name). The newest file in `/data/backups` is the database as it was when the
+running build started, before its migrations; restoring it instead (above)
+loses every write since.
 
-   ```bash
-   sqlite3 /data/remembra.db ".backup /data/remembra-pre-relay-launch.db"
-   ```
+The script is not in the image, so copy it from a checkout of this repository
+into the container, then apply it:
 
-2. **To roll back**, run the verified script against the live database, then
-   redeploy `b034314`:
+```bash
+# on the Mac, from the repository
+scp scripts/maintenance/rollback_plans_v2.sql coolify:/tmp/rollback_plans_v2.sql
+```
 
-   ```bash
-   sqlite3 /data/remembra.db ".backup /data/remembra-pre-rollback.db"
-   sqlite3 /data/remembra.db < scripts/maintenance/rollback_plans_v2.sql
-   ```
+```bash
+# on the server
+docker cp /tmp/rollback_plans_v2.sql "$CTR:/tmp/rollback_plans_v2.sql"
+docker exec -i "$CTR" python - /data/remembra.db /tmp/rollback_plans_v2.sql <<'PY'
+# apply rollback
+import sqlite3, sys
+db_path, sql_path = sys.argv[1], sys.argv[2]
+conn = sqlite3.connect(db_path)
+with open(sql_path) as f:
+    conn.executescript(f.read())
+print(conn.execute("SELECT plan, COUNT(*) FROM cloud_tenants GROUP BY plan").fetchall())
+conn.close()
+PY
+```
 
-   It maps the plans back (`solo` becomes `pro`), clears the migration record,
-   and deactivates agent-bound API keys (the old image ignores `agent_id`, so
-   they would act for the whole account). Review deploy-window buyers of new
-   plans by hand; redeploying relay-launch later re-runs the migration.
+The printed plans must be only `free`, `pro`, `team` and `enterprise`.
+
+It maps the plans back (`solo` becomes `pro`), clears the migration record,
+and deactivates agent-bound API keys (the old image ignores `agent_id`, so
+they would act for the whole account). Review deploy-window buyers of new
+plans by hand; redeploying relay-launch later re-runs the migration.
 
 ## Social sign-in (GitHub, Google)
 
@@ -229,7 +337,8 @@ the entrypoint prints a warning on every boot that SQLite is not backed up.
 
 Restore drill (OPS-4, owner): on a scratch host run
 `litestream restore -o /tmp/drill.db "$LITESTREAM_REPLICA_URL"` and
-`sqlite3 /tmp/drill.db 'select count(*) from memories'`; compare with prod.
+`python3 -c "import sqlite3; print(sqlite3.connect('/tmp/drill.db').execute('SELECT COUNT(*) FROM memories').fetchone()[0])"`;
+compare with prod.
 Qdrant is not backed up — it is rebuilt from SQLite by the rebuild reindex.
 
 ## Notes
