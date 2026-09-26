@@ -45,7 +45,7 @@ keys into new places. When it finds no key it still shows (or writes) the hooks,
 and exits 1: without a key the hooks cannot load or save anything. To save one where the hooks read it:
 
 ```bash
-pipx install --force 'remembra>=0.16'   # the first release with remembra-relay
+pipx install --force 'remembra[mcp]>=0.16'   # 0.16 is the first release with remembra-relay; [mcp] adds remembra-mcp
 remembra-install --all --api-key <your key> --url <your server URL>   # writes ~/.remembra/credentials
 ```
 
@@ -62,6 +62,37 @@ Unverified adapters are dry-run only unless you pass `--include-unverified`; `co
 listing the ones it skipped and the command that writes them. For agents without hooks,
 `connect --agents-md PATH --apply` adds a short marked section to an `AGENTS.md`. Any MCP-capable agent is
 also told by the MCP server to call `session_brief` at start and `close_session` before finishing.
+
+### MCP by hand {#mcp-by-hand}
+
+`remembra-install --all` adds the `remembra` MCP server to Claude Desktop, Claude Code, Codex
+(`~/.codex/config.toml`), Cursor, Gemini CLI and Windsurf, for each one whose config directory already
+exists. Run `remembra-install --detect` to see which it found.
+
+It does not write Qwen Code or Kimi yet. Add the server to them yourself. Qwen Code reads the same
+`mcpServers` block as Gemini CLI, in `~/.qwen/settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "remembra": {
+      "command": "remembra-mcp",
+      "env": {
+        "REMEMBRA_URL": "https://api.remembra.dev",
+        "REMEMBRA_API_KEY": "<your key>",
+        "REMEMBRA_PROJECT": "default",
+        "REMEMBRA_USER_ID": "default"
+      }
+    }
+  }
+}
+```
+
+For Kimi, add a stdio MCP server named `remembra` with the same command and environment, as Kimi's own
+MCP docs describe. Both are untested with Remembra so far; tell us if either one balks.
+
+A Codex sandbox with no network cannot reach the URL directly. Use `remembra-install-codex --api-key <your key> --start-bridge`
+there instead: it points Codex at a local bridge that holds the key.
 
 ## CLI
 

@@ -92,8 +92,8 @@
 
         <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
         <div class="cmd" role="group" aria-label="Install commands">
-          <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
-          <button class="copy" type="button" data-copy="pipx install remembra&#10;remembra-install --all --api-key &lt;your-key&gt;&#10;remembra-relay connect" aria-label="Copy install commands">
+          <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install 'remembra[mcp]'</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
+          <button class="copy" type="button" data-copy="pipx install 'remembra[mcp]'&#10;remembra-install --all --api-key &lt;your-key&gt;&#10;remembra-relay connect" aria-label="Copy install commands">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
             <span class="copy-label">Copy</span>
           </button>
@@ -218,7 +218,7 @@
           <li class="leg">
             <span class="n">CONNECT</span>
             <h3>Connect</h3>
-            <p>Start free for a key, or self-host. Run the three install lines on each machine: <code>remembra-install</code> saves your key and adds Remembra to your agents, then <code>connect</code> shows exactly what it will change; add <code>--apply</code> to wire it in.</p>
+            <p>Start free for a key, or self-host. Run the three install lines on each machine: <code>remembra-install</code> saves your key and adds Remembra to the agents it finds, then <code>connect</code> shows exactly what it will change; add <code>--apply</code> to wire it in.</p>
           </li>
           <li class="leg">
             <span class="n">WORK NORMALLY</span>
@@ -246,7 +246,7 @@
         <ul class="places" aria-label="Where your agents can run">
           <li>laptop</li><li>desktop</li><li>cloud VM</li><li>server</li>
         </ul>
-        <p class="fine" id="agents-note">Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet. <code>connect</code> is a dry run until you add <code>--apply</code>, and it leaves the unverified hooks out unless you also add <code>--include-unverified</code>. Until they are tested, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent.</p>
+        <p class="fine" id="agents-note">Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet. <code>connect</code> is a dry run until you add <code>--apply</code>, and it leaves the unverified hooks out unless you also add <code>--include-unverified</code>. Until they are tested, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent. <code>remembra-install</code> sets up those tools for Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI and Windsurf. Qwen Code and Kimi you add by hand for now; the <a href="https://docs.remembra.dev/guides/relay/#mcp-by-hand">setup guide</a> has the block to paste.</p>
       </div>
       <div>
         <div class="const" id="constellation">
@@ -398,8 +398,8 @@
         <h2 id="start-title">Free to start. Every handoff stays free.</h2>
         <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
         <div class="cmd" role="group" aria-label="Install commands">
-          <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
-          <button class="copy" type="button" data-copy="pipx install remembra&#10;remembra-install --all --api-key &lt;your-key&gt;&#10;remembra-relay connect" aria-label="Copy install commands">
+          <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install 'remembra[mcp]'</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
+          <button class="copy" type="button" data-copy="pipx install 'remembra[mcp]'&#10;remembra-install --all --api-key &lt;your-key&gt;&#10;remembra-relay connect" aria-label="Copy install commands">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
             <span class="copy-label">Copy</span>
           </button>

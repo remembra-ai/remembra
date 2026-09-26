@@ -200,6 +200,7 @@ def test_install_all_agents_installs_detected(tmp_path: Path, monkeypatch: pytes
     monkeypatch.setitem(AGENT_CONFIGS, "claude-code", tmp_path / "nonexistent" / "config.json")
     monkeypatch.setitem(AGENT_CONFIGS, "gemini", tmp_path / "nonexistent" / "config.json")
     monkeypatch.setitem(AGENT_CONFIGS, "windsurf", tmp_path / "nonexistent" / "config.json")
+    monkeypatch.setitem(AGENT_CONFIGS, "codex", tmp_path / "nonexistent" / "config.toml")
 
     results = install_all_agents(
         api_key="rem_test",
@@ -228,6 +229,7 @@ def test_detect_agents_finds_installed(tmp_path: Path, monkeypatch: pytest.Monke
     monkeypatch.setitem(AGENT_CONFIGS, "gemini", tmp_path / "nonexistent" / "config.json")
     monkeypatch.setitem(AGENT_CONFIGS, "cursor", tmp_path / "nonexistent" / "config.json")
     monkeypatch.setitem(AGENT_CONFIGS, "windsurf", tmp_path / "nonexistent" / "config.json")
+    monkeypatch.setitem(AGENT_CONFIGS, "codex", tmp_path / "nonexistent" / "config.toml")
 
     detected = detect_agents()
 
@@ -242,3 +244,69 @@ def test_detect_agents_empty_when_none_installed(tmp_path: Path, monkeypatch: py
     detected = detect_agents()
 
     assert detected == []
+
+
+# ============================================================================
+# Codex (TOML config) Tests
+# ============================================================================
+
+
+def test_codex_is_one_of_the_agents_all_configures() -> None:
+    assert "codex" in AGENT_CONFIGS
+    assert AGENT_CONFIGS["codex"].name == "config.toml"
+
+
+def test_install_agent_config_writes_codex_toml(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A sandboxed shell must not flip remembra-install into bridge mode.
+    monkeypatch.setenv("CODEX_SANDBOX", "seatbelt")
+    config_path = tmp_path / ".codex" / "config.toml"
+    config_path.parent.mkdir()
+    config_path.write_text('model = "gpt-5"\n')
+
+    result = install_agent_config(
+        "codex",
+        config_path,
+        api_key="rem_test",
+        project="invoices",
+        user_id="user_123",
+        url="https://api.remembra.dev",
+    )
+
+    content = config_path.read_text()
+    assert content.startswith('model = "gpt-5"')
+    assert "[mcp_servers.remembra]" in content
+    assert 'command = "remembra-mcp"' in content
+    assert 'REMEMBRA_URL = "https://api.remembra.dev"' in content
+    assert 'REMEMBRA_API_KEY = "rem_test"' in content
+    assert 'REMEMBRA_PROJECT = "invoices"' in content
+    assert result.agent == "codex"
+    assert result.url == "https://api.remembra.dev"
+    assert result.created is False
+    assert result.updated is False
+
+    again = install_agent_config("codex", config_path, api_key="rem_new", project="invoices", user_id="user_123")
+    content = config_path.read_text()
+    assert again.updated is True
+    assert content.count("[mcp_servers.remembra]") == 1
+    assert 'REMEMBRA_API_KEY = "rem_new"' in content
+    assert "rem_test" not in content
+
+
+def test_install_agent_config_codex_requires_api_key(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="api_key"):
+        install_agent_config("codex", tmp_path / "config.toml", api_key="", project="default", user_id="u")
+
+
+def test_install_all_agents_includes_codex_when_detected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    codex_dir = tmp_path / ".codex"
+    codex_dir.mkdir()
+    for agent in AGENT_CONFIGS:
+        monkeypatch.setitem(AGENT_CONFIGS, agent, tmp_path / "nonexistent" / f"{agent}.json")
+    monkeypatch.setitem(AGENT_CONFIGS, "codex", codex_dir / "config.toml")
+
+    results = install_all_agents(api_key="rem_test", project="default", user_id="user_123")
+
+    assert [r.agent for r in results] == ["codex"]
+    assert results[0].created is True
+    assert "[mcp_servers.remembra]" in (codex_dir / "config.toml").read_text()
+    assert detect_agents() == ["codex"]

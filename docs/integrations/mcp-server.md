@@ -12,7 +12,7 @@ Use Remembra as persistent memory for AI assistants via the [Model Context Proto
 Configure all your AI tools with one command:
 
 ```bash
-pip install remembra
+pip install "remembra[mcp]"
 remembra-install --all --api-key YOUR_API_KEY
 ```
 
@@ -42,7 +42,7 @@ Step-by-step setup instructions for each AI tool:
 ## Installation
 
 ```bash
-pip install remembra
+pip install "remembra[mcp]"
 ```
 
 This installs the SDK, MCP server (`remembra-mcp`), and CLI tools (`remembra-install`, `remembra-doctor`, `remembra-bridge`).

@@ -44,7 +44,7 @@ The doctor command checks:
 |-------|---------|-----|
 | `config_not_found` | No config file exists | Run `remembra-install --agent <name>` |
 | `config_invalid` | JSON/TOML parse error | Check config syntax |
-| `command_not_found` | remembra-mcp not in PATH | Run `pip install remembra` |
+| `command_not_found` | remembra-mcp not in PATH | Run `pip install "remembra[mcp]"` |
 | `dns_failure` | Can't resolve server hostname | Check internet/DNS |
 | `sandbox_blocked` | Agent can't reach network | Use `remembra-bridge` |
 | `auth_failure` | Invalid API key | Check credentials in `~/.remembra/credentials` |

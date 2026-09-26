@@ -75,6 +75,48 @@ jobs:
           fail_ci_if_error: false
 
   # ---------------------------------------------------------------------------
+  # The install the site advertises, from the built wheel
+  # ---------------------------------------------------------------------------
+  # Every other job installs the server extras, so a server-only import in a
+  # client command would pass them. This one installs exactly what
+  # `pipx install remembra` and `pipx install 'remembra[mcp]'` get.
+  wheel-install:
+    name: Wheel install (no extras, then [mcp])
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build the wheel
+        run: |
+          pip install build
+          python -m build --wheel --outdir dist
+
+      - name: Base install runs the relay and the installers
+        run: |
+          python -m venv /tmp/base
+          /tmp/base/bin/pip install dist/*.whl
+          /tmp/base/bin/remembra-relay --help
+          /tmp/base/bin/remembra-install --help
+          /tmp/base/bin/remembra-install-codex --help
+          /tmp/base/bin/remembra-doctor --help
+
+      - name: "[mcp] install starts the MCP server"
+        run: |
+          python -m venv /tmp/mcp
+          /tmp/mcp/bin/pip install "$(ls dist/*.whl)[mcp]"
+          /tmp/mcp/bin/python -c 'import remembra.mcp.server'
+          /tmp/mcp/bin/remembra-relay --help
+          # main() gets past every import and stops at config validation.
+          out=$(REMEMBRA_URL= /tmp/mcp/bin/remembra-mcp </dev/null 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q "REMEMBRA_URL environment variable is required"
+
+  # ---------------------------------------------------------------------------
   # Docker build smoke-test
   # ---------------------------------------------------------------------------
   docker:

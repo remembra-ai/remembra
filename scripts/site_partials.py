@@ -32,6 +32,9 @@ launch label come back in one step. The regions it owns:
     <!-- @crew-robots --><!-- /@crew-robots -->          crew.html: noindex while off
     <!-- @crew-tag --><!-- /@crew-tag -->                crew.html: "Part of launch" / "Not available yet"
     <!-- @crew-note --><!-- /@crew-note -->              crew.html: the not-available notice while off
+    <!-- @crew-meta --><!-- /@crew-meta -->              crew.html: description and og:description (link previews)
+    <!-- @crew-plan-title --><!-- /@crew-plan-title -->  crew.html: "What ships at launch" / "What ships first"
+    <!-- @crew-plan-first --><!-- /@crew-plan-first -->  crew.html: "At launch" / "First release"
 
     python scripts/site_partials.py          # rewrite in place
     python scripts/site_partials.py --check  # exit 1 if any page is out of date
@@ -52,6 +55,15 @@ CREW_SECTION = Path(__file__).resolve().parent / "site-crew-section.html"
 # Crew mode is not built yet: keep this False until feat/crew is merged and live.
 CREW_LIVE = False
 CREW_URL = "https://remembra.dev/crew"
+# What a shared /crew link shows in a preview. While crew mode is off it must not say "launch".
+CREW_META_LIVE = (
+    '\n<meta name="description" content="Crew mode, part of launch: several AI agents on one project at once. Each holds the zones it is working in, checkpoints on its own and hands off the moment it stops. Four layers keep one agent out of another\'s zone.">'
+    '\n<meta property="og:description" content="Zones, automatic checkpoints and batons, four enforcement layers and a live dashboard. Part of launch.">\n'
+)
+CREW_META_OFF = (
+    '\n<meta name="description" content="Crew mode is planned and not available yet: several AI agents on one project at once. Each will hold the zones it is working in, checkpoint on its own and hand off the moment it stops. Four layers will keep one agent out of another\'s zone.">'
+    '\n<meta property="og:description" content="Planned, not available yet: zones, automatic checkpoints and batons, four enforcement layers and a live dashboard.">\n'
+)
 
 DOCS = "https://docs.remembra.dev"
 GITHUB = "https://github.com/remembra-ai/remembra"
@@ -233,7 +245,11 @@ def crew_regions(html: str) -> str:
         else '<p class="crew-status" role="note"><b>Crew mode is still being built and is not available yet.</b> '
         "This page describes how it will work when it ships.</p>"
     )
-    return fill_inline(html, "crew-note", note)
+    html = fill_inline(html, "crew-note", note)
+    html = fill_inline(html, "crew-meta", CREW_META_LIVE if CREW_LIVE else CREW_META_OFF)
+    title = "What ships at launch, and what follows." if CREW_LIVE else "What ships first, and what follows."
+    html = fill_inline(html, "crew-plan-title", title)
+    return fill_inline(html, "crew-plan-first", "At launch" if CREW_LIVE else "First release")
 
 
 def number_sections(html: str) -> str:

@@ -149,6 +149,8 @@ RELAY_GATE = (
 )
 BILLING_GATE = "<!-- requires billing: Solo, Pro, Team and Founding 100 live in Paddle and the dashboard -->"
 RELAY_GUIDE = "https://docs.remembra.dev/guides/relay/"
+# [mcp]: remembra-install points every agent at remembra-mcp, which needs the mcp package.
+INSTALL_STEP = "pipx install 'remembra[mcp]'"
 KEY_STEP = "remembra-install --all --api-key <your-key>"
 
 
@@ -169,9 +171,9 @@ def test_every_install_block_has_the_key_step_the_setup_guide_and_the_release_ga
     for gate, body, meta in blocks:
         assert gate == RELAY_GATE
         copied = html.unescape(re.search(r'data-copy="([^"]*)"', body).group(1)).split("\n")
-        assert copied == ["pipx install remembra", KEY_STEP, "remembra-relay connect"]
+        assert copied == [INSTALL_STEP, KEY_STEP, "remembra-relay connect"]
         shown = _text(re.search(r"<code>.*?</code>", body, re.S).group(0))
-        assert shown == f"$ pipx install remembra $ {KEY_STEP} $ remembra-relay connect"
+        assert shown == f"$ {INSTALL_STEP} $ {KEY_STEP} $ remembra-relay connect"
         assert f'href="{RELAY_GUIDE}"' in meta
         assert 'href="https://app.remembra.dev/signup"' in meta
 
@@ -232,6 +234,14 @@ def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
     unverified = [spec for spec in specs if not spec.verified]
     assert [spec.name for spec in specs if spec.verified] == ["claude-code"]
     assert len(unverified) == 5  # Codex, Cursor, Gemini CLI, Qwen Code and Kimi, as the note names them
+    # which agents the second install line really writes MCP config for (tools/agents.py)
+    from remembra.tools.agents import AGENT_CONFIGS
+
+    assert set(AGENT_CONFIGS) == {"claude-desktop", "claude-code", "codex", "cursor", "gemini", "windsurf"}
+    assert "remembra-install sets up those tools for Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI and Windsurf" in note
+    assert "Qwen Code and Kimi you add by hand" in note
+    assert "guides/relay/#mcp-by-hand" in (LANDING / "index.html").read_text()
+    assert "{#mcp-by-hand}" in (Path(__file__).resolve().parent.parent / "docs" / "guides" / "relay.md").read_text()
 
 
 def _plan_card(page: str, plan_id: str) -> str:
@@ -772,6 +782,27 @@ def test_crew_page_is_labelled_part_of_launch_only_by_the_switch(monkeypatch: py
     assert '<span class="tag signal">Part of launch</span>' in section
 
 
+def _crew_preview_and_plan(page: str) -> str:
+    """The strings a shared /crew link and the plan block show: meta, og and the plan section."""
+    metas = re.findall(r'<meta (?:name|property)="(?:description|og:[a-z]+|twitter:[a-z]+)" content="([^"]*)">', page)
+    plan = re.search(r'<section class="sec" aria-labelledby="plan-title">.*?</section>', page, re.S).group(0)
+    return " ".join(metas) + " " + _text(plan)
+
+
+def test_crew_link_previews_and_plan_do_not_say_launch_while_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    partials = _script("site_partials")
+    crew = (LANDING / "crew.html").read_text()
+    off = _crew_preview_and_plan(crew)
+    assert "launch" not in off.lower()
+    assert "not available yet" in off and "What ships first" in off and "First release" in off
+    assert crew.count('<meta name="description"') == 1 and crew.count('<meta property="og:description"') == 1
+    monkeypatch.setattr(partials, "CREW_LIVE", True)
+    live = partials.render(crew)
+    on = _crew_preview_and_plan(live)
+    assert "Part of launch" in on and "What ships at launch" in on and "At launch" in on
+    assert "not available" not in on.lower()
+
+
 # ---------------------------------------------------------------------------
 # Crew mode: one switch, off until it ships
 # ---------------------------------------------------------------------------
@@ -890,14 +921,18 @@ def test_every_docs_link_is_built_from_a_docs_page_and_gated_until_deployed() ->
 
 def test_predeploy_check_fails_on_a_docs_link_that_is_not_live() -> None:
     predeploy = _script("site_predeploy")
-    lines, problems = predeploy.check(online=True, fetch=lambda url: 404 if "relay" in url else 200)
+    lines, problems = predeploy.check(online=True, fetch=lambda url: 404 if "relay" in url else 200, latest=lambda: "0.16.0")
     assert problems == [
         "https://docs.remembra.dev/guides/relay/ is not live yet (HTTP 404): deploy the docs site first (index.html, crew.html)"
     ]
     assert any("Crew mode switch" in line for line in lines)
-    _, none = predeploy.check(online=True, fetch=lambda url: 200)
+    _, none = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.1")
     assert none == []
-    _, offline = predeploy.check(online=False, fetch=lambda url: 0)
+
+    def no_network() -> str:
+        raise AssertionError("offline must not ask PyPI")
+
+    _, offline = predeploy.check(online=False, fetch=lambda url: 0, latest=no_network)
     assert offline == []
     assert predeploy.source_for("https://docs.remembra.dev/guides/no-such-page/") is None
 
@@ -983,3 +1018,26 @@ def _pixel_grids() -> dict[str, list[str]]:
         for node in tree.body
         if isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name) and node.targets[0].id.startswith("PIXEL_")
     }
+
+
+def test_legal_pages_name_the_billing_provider_the_code_uses() -> None:
+    # api/v1/billing.py: Paddle is the sole billing provider, and the Merchant of Record.
+    billing = (Path(__file__).resolve().parent.parent / "src" / "remembra" / "api" / "v1" / "billing.py").read_text()
+    assert "Paddle is the sole billing provider" in billing
+    for name in ("privacy.html", "terms.html"):
+        page = _text((LANDING / name).read_text())
+        assert "Stripe" not in page, name
+        assert "Paddle" in page and "Merchant of Record" in page, name
+        assert "Last updated: March 2, 2026" not in page, name
+
+
+def test_predeploy_check_fails_while_pypi_is_behind_the_install_gate() -> None:
+    predeploy = _script("site_predeploy")
+    assert predeploy.required_release() == "0.16"  # from the <!-- requires ... remembra>=0.16 --> gates
+    lines, problems = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.13.2")
+    assert problems == ["PyPI has remembra 0.13.2; the install lines need remembra>=0.16: release it first"]
+    assert "PyPI: remembra 0.13.2 (the install lines need remembra>=0.16)" in lines
+    _, unreachable = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: None)
+    assert unreachable == ["PyPI could not be reached to confirm remembra>=0.16 is released"]
+    _, ok = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.0")
+    assert ok == []

@@ -1,4 +1,9 @@
-"""Universal agent installer for JSON-based MCP configs."""
+"""Universal agent installer: points each detected agent's MCP config at remembra-mcp.
+
+Most agents keep MCP servers in a JSON file under ``mcpServers``. Codex keeps
+them in TOML (``~/.codex/config.toml``), so it goes through the Codex
+installer in :mod:`remembra.tools.codex`.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from remembra.tools.codex import DEFAULT_CODEX_CONFIG, _is_remembra_table, install_codex_config
+
 # Default config paths for each agent
 AGENT_CONFIGS = {
     "claude-desktop": Path.home() / "Library/Application Support/Claude/claude_desktop_config.json",
@@ -17,7 +24,11 @@ AGENT_CONFIGS = {
     "gemini": Path.home() / ".gemini" / "settings.json",
     "cursor": Path.home() / ".cursor" / "mcp.json",
     "windsurf": Path.home() / ".windsurf" / "mcp_config.json",
+    "codex": DEFAULT_CODEX_CONFIG,
 }
+
+# Agents whose config is not the JSON mcpServers shape.
+TOML_AGENTS = {"codex"}
 
 # Centralized credentials
 REMEMBRA_HOME = Path.home() / ".remembra"
@@ -179,11 +190,38 @@ def install_agent_config(
     url: str = DEFAULT_REMEMBRA_URL,
     command: str = DEFAULT_REMEMBRA_COMMAND,
 ) -> AgentInstallResult:
-    """Install or update MCP config for a JSON-based agent."""
+    """Install or update the Remembra MCP config for one agent."""
     if config_path is None:
         if agent not in AGENT_CONFIGS:
             raise ValueError(f"Unknown agent: {agent}")
         config_path = AGENT_CONFIGS[agent]
+
+    if agent in TOML_AGENTS:
+        if not api_key:
+            raise ValueError("api_key is required")
+        before = config_path.read_text() if config_path.exists() else ""
+        had_remembra = any(_is_remembra_table(line) for line in before.splitlines())
+        codex = install_codex_config(
+            config_path,
+            api_key=api_key,
+            project=project,
+            user_id=user_id,
+            url=url,
+            command=command,
+            # Direct to the URL like every other agent. A Codex sandbox with no
+            # network needs the local bridge: remembra-install-codex sets that up.
+            use_bridge=False,
+        )
+        return AgentInstallResult(
+            agent=agent,
+            config_path=codex.config_path,
+            command=codex.command,
+            url=codex.url,
+            project=codex.project,
+            user_id=codex.user_id,
+            created=codex.created,
+            updated=had_remembra,
+        )
 
     # Ensure parent directory exists
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -267,6 +305,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="Install Remembra MCP for AI agents.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
+Agents: Claude Desktop, Claude Code, Codex, Cursor, Gemini CLI and Windsurf.
+--all configures each one whose config directory exists. Qwen Code and Kimi
+are not written here yet; add remembra-mcp to them by hand:
+https://docs.remembra.dev/guides/relay/#mcp-by-hand
+
 Examples:
   remembra-install --all --api-key rem_xxx
   remembra-install --agent claude-desktop --api-key rem_xxx

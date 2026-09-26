@@ -5,8 +5,8 @@ Configure all your AI agents to share memory with one command.
 ## Quick Setup (Recommended)
 
 ```bash
-# Install Remembra
-pip install remembra
+# Install Remembra with its MCP server
+pip install "remembra[mcp]"
 
 # Configure all detected agents
 remembra-install --all
@@ -244,7 +244,7 @@ The installer only configures agents it finds. If an agent isn't detected:
 ### MCP not working
 
 1. Verify `remembra-mcp` is in your PATH: `which remembra-mcp`
-2. If missing, install: `pip install remembra`
+2. If missing, install: `pip install "remembra[mcp]"`
 3. Restart the AI agent completely (not just the window)
 4. Run `remembra-doctor <agent>` for specific diagnostics
 

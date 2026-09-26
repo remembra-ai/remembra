@@ -13,12 +13,17 @@ https://docs.remembra.dev/... link on the pages:
   * offline: the link maps to a page in docs/ that mkdocs.yml builds
   * online:  the live docs site answers it with HTTP 200
 
-It exits 1 when a docs link has no source page or is not live yet, so the
-site is not deployed ahead of the docs it points to.
+Online, it also asks PyPI for the latest remembra release and holds it
+against the version the install gates name (remembra>=X).
+
+It exits 1 when a docs link has no source page or is not live yet, or when
+PyPI is behind the gate, so the site is not deployed ahead of the docs it
+points to or the package its install lines pull.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import urllib.error
@@ -38,6 +43,8 @@ import site_partials  # noqa: E402  (the pages and the crew switch live there)
 
 GATE = re.compile(r"<!--\s*(requires\b.*?)\s*-->", re.S)
 DOCS_LINK = re.compile(r'href="(https://docs\.remembra\.dev[^"#]*)')
+PYPI_JSON = "https://pypi.org/pypi/remembra/json"
+MIN_RELEASE = re.compile(r"remembra>=(\d+(?:\.\d+)*)")
 
 
 def pages() -> list[Path]:
@@ -80,6 +87,26 @@ def source_for(url: str) -> str | None:
     return None
 
 
+def required_release() -> str | None:
+    """The highest remembra>=X any install gate asks for."""
+    found = [v for text in gates() for v in MIN_RELEASE.findall(text)]
+    return max(found, key=_version_key) if found else None
+
+
+def _version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in re.findall(r"\d+", version)[:3])
+
+
+def pypi_latest() -> str | None:
+    """The latest remembra version on PyPI, or None if PyPI can't be reached."""
+    req = urllib.request.Request(PYPI_JSON, headers={"User-Agent": "remembra-site-predeploy"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return str(json.load(resp)["info"]["version"])
+    except (urllib.error.URLError, TimeoutError, ValueError, KeyError):
+        return None
+
+
 def http_status(url: str) -> int:
     req = urllib.request.Request(url, method="GET", headers={"User-Agent": "remembra-site-predeploy"})
     try:
@@ -91,7 +118,11 @@ def http_status(url: str) -> int:
         return 0
 
 
-def check(online: bool, fetch: Callable[[str], int] = http_status) -> tuple[list[str], list[str]]:
+def check(
+    online: bool,
+    fetch: Callable[[str], int] = http_status,
+    latest: Callable[[], str | None] = pypi_latest,
+) -> tuple[list[str], list[str]]:
     """(report lines, problems)."""
     lines = ["Owner actions before this site is deployed:"]
     for text, where in gates().items():
@@ -115,6 +146,15 @@ def check(online: bool, fetch: Callable[[str], int] = http_status) -> tuple[list
                 status = f"HTTP {code}" if code else "unreachable"
                 problems.append(f"{url} is not live yet ({status}): deploy the docs site first ({', '.join(where)})")
         lines.append(f"  - {url}  {state}")
+    need = required_release()
+    if online and need:
+        have = latest()
+        lines.append("")
+        lines.append(f"PyPI: remembra {have or 'unreachable'} (the install lines need remembra>={need})")
+        if have is None:
+            problems.append(f"PyPI could not be reached to confirm remembra>={need} is released")
+        elif _version_key(have) < _version_key(need):
+            problems.append(f"PyPI has remembra {have}; the install lines need remembra>={need}: release it first")
     return lines, problems
 
 
@@ -128,7 +168,7 @@ def main(argv: list[str]) -> int:
     if "--offline" in argv:
         print("\nEvery docs link has a source page. Not checked live (--offline): run without it before deploying.")
     else:
-        print("\nEvery docs link has a source page and is live.")
+        print("\nEvery docs link has a source page and is live, and PyPI has the release.")
     return 0
 
 

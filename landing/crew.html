@@ -4,9 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Remembra crew mode</title>
-<meta name="description" content="Crew mode, part of launch: several AI agents on one project at once. Each holds the zones it is working in, checkpoints on its own and hands off the moment it stops. Four layers keep one agent out of another's zone.">
 <meta property="og:title" content="Remembra crew mode: many agents, one project, nobody steps on anybody">
-<meta property="og:description" content="Zones, automatic checkpoints and batons, four enforcement layers and a live dashboard. Part of launch.">
+<!-- @crew-meta -->
+<meta name="description" content="Crew mode is planned and not available yet: several AI agents on one project at once. Each will hold the zones it is working in, checkpoint on its own and hand off the moment it stops. Four layers will keep one agent out of another's zone.">
+<meta property="og:description" content="Planned, not available yet: zones, automatic checkpoints and batons, four enforcement layers and a live dashboard.">
+<!-- /@crew-meta -->
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://remembra.dev/crew">
 <meta property="og:image" content="https://remembra.dev/social-preview.png">
@@ -247,7 +249,7 @@
         <li><span class="n">At commit and push</span><h3>Git gates</h3><p>A commit or push that touches a held zone is stopped, for every agent.</p></li>
         <li><span class="n">After the fact</span><h3>Collision alerts</h3><p>Any overlap that still gets through is flagged in the feed and the inbox, with who did it.</p></li>
       </ol>
-      <p class="limit"><b>The honest limit:</b> on your own machine these layers stop mistakes, not a deliberately hostile agent. Agents can't switch protection off (only your dashboard login can), every bypass is logged, and a GitHub-side check becomes the hard lock after launch.</p>
+      <p class="limit"><b>The honest limit:</b> on your own machine these layers stop mistakes, not a deliberately hostile agent. Agents can't switch protection off (only your dashboard login can), every bypass is logged, and a GitHub-side check becomes the hard lock in the release after.</p>
     </div>
   </section>
 
@@ -274,12 +276,12 @@
   <section class="sec" aria-labelledby="plan-title">
     <div class="wrap sec-grid">
       <div>
-        <p class="eyebrow">Launch plan</p>
-        <h2 id="plan-title">What ships at launch, and what follows.</h2>
+        <p class="eyebrow">The plan</p>
+        <h2 id="plan-title"><!-- @crew-plan-title -->What ships first, and what follows.<!-- /@crew-plan-title --></h2>
       </div>
       <div class="plan2">
         <div class="now">
-          <p class="k">At launch</p>
+          <p class="k"><!-- @crew-plan-first -->First release<!-- /@crew-plan-first --></p>
           <h3>Crew mode</h3>
           <ul>
             <li>Zones, claims and all four enforcement layers</li>
@@ -311,8 +313,8 @@
       <div>
         <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
         <div class="cmd" role="group" aria-label="Install commands">
-          <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install remembra</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
-          <button class="copy" type="button" data-copy="pipx install remembra&#10;remembra-install --all --api-key &lt;your-key&gt;&#10;remembra-relay connect" aria-label="Copy install commands">
+          <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install 'remembra[mcp]'</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
+          <button class="copy" type="button" data-copy="pipx install 'remembra[mcp]'&#10;remembra-install --all --api-key &lt;your-key&gt;&#10;remembra-relay connect" aria-label="Copy install commands">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
             <span class="copy-label">Copy</span>
           </button>
