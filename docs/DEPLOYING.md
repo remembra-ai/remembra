@@ -189,10 +189,56 @@ than booting on an empty database; set `LITESTREAM_ALLOW_EMPTY_START=1` to
 override deliberately. Without `LITESTREAM_REPLICA_URL`, litestream is inert and
 the entrypoint prints a warning on every boot that SQLite is not backed up.
 
+Retention: the entrypoint writes a litestream config whose replica keeps
+`LITESTREAM_RETENTION` of history (default `24h`), so data erased from the live
+database leaves the replica within about 48 hours. The privacy page states
+24 hours; change both together.
+
 Restore drill (OPS-4, owner): on a scratch host run
 `litestream restore -o /tmp/drill.db "$LITESTREAM_REPLICA_URL"` and
 `sqlite3 /tmp/drill.db 'select count(*) from memories'`; compare with prod.
 Qdrant is not backed up — it is rebuilt from SQLite by the rebuild reindex.
+
+## Account deletion and erasure (R-11, R-23)
+
+`DELETE /api/v1/auth/me` (password, or a code from `POST /api/v1/auth/me/deletion-code`
+for Google/GitHub accounts) first cancels every billable Paddle subscription of
+the account immediately. If Paddle cannot confirm it, the request fails with 502
+and nothing is deleted. Then the account is deactivated (sessions and API keys
+stop at once) and `users.deleted_at` is set.
+
+The `account-erasure-loop` task (every `REMEMBRA_ACCOUNT_ERASURE_INTERVAL_SECONDS`,
+default 3600) erases accounts deleted more than `REMEMBRA_ACCOUNT_ERASURE_GRACE_DAYS`
+ago (default 7, max 30; the privacy page and dashboard say 7): Qdrant points by
+`user_id` filter first, then every SQLite row the account owns in one
+transaction (`remembra.account.erasure.ERASURE_RULES`, plus any table found with
+a user-keyed column). It keeps one `account_erased` audit row holding a SHA-256
+of the account id and row counts, nothing else. To undo a deletion inside the
+grace period: `POST /api/v1/admin/users/{id}/activate?active=true` (the user
+then buys again if they had a plan; the cancelled subscription stays cancelled).
+`DELETE /api/v1/admin/users/{id}?confirm=true` does the same billing cancel and
+erases immediately.
+
+Backups are not rewritten. Pre-deploy copies (`backups/remembra-predeploy-*`)
+keep the newest `REMEMBRA_PRE_MIGRATION_BACKUP_KEEP` (3), so an erased account
+leaves them after 3 more deploys. Manual copies made by hand (for example
+`/data/remembra-pre-relay-launch.db` from the launch runbook) never age out:
+delete them once the release is confirmed.
+
+## Billing flags and Founding 100 (R-26)
+
+Every billing flag (second subscription, Founding payment past seat 100, Team
+below 3 seats, refund or chargeback) and every payment that matches no account
+or no catalog price sends an operator alert (`REMEMBRA_ALERT_EMAIL` and/or
+`REMEMBRA_ALERT_WEBHOOK_URL`; set at least one). `GET /api/v1/admin/billing-flags`
+lists flagged accounts; `DELETE /api/v1/admin/billing-flags/{user_id}` clears one
+after review. A refund of an account that used over 25% of its credits also alerts.
+
+Founding checkouts hold a seat for 2 hours before payment; seats also stay held
+14 days after a founder's subscription ends. When seat 100 is taken the Founding
+price is archived in Paddle (`PATCH /prices/{id}`; the API key needs price write
+permission) and re-activated at the next Founding checkout after a seat frees.
+`GET /api/v1/billing/founding` (public) reports seats left for the pricing page.
 
 ## Notes
 

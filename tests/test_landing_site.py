@@ -249,11 +249,13 @@ def _plan_card(page: str, plan_id: str) -> str:
 
 
 def test_pricing_shows_the_credits_the_code_grants_monthly_and_yearly() -> None:
-    """Monthly plans refill every month; yearly plans get the whole year's credits up front (plans.py, metering.py)."""
+    """Monthly plans refill every month; yearly plans bank the whole year, unlocked in full after 14 days."""
     from remembra.cloud.plans import PLANS, BillingInterval, PlanTier
     from remembra.config import Settings
 
-    assert Settings.model_fields["annual_credit_upfront_months"].default == 12  # the whole bank on day one
+    assert Settings.model_fields["annual_credit_upfront_months"].default == 12  # the whole bank once unlocked
+    assert Settings.model_fields["annual_credit_unlock_days"].default == 14  # R-27
+    assert Settings.model_fields["annual_credit_initial_months"].default == 1
     pricing = (LANDING / "pricing.html").read_text()
     free = PLANS[PlanTier.FREE]
     assert f"<b>{free.max_smart_credits_per_month:,}</b> credits every month" in _plan_card(pricing, "p-free")
@@ -268,11 +270,12 @@ def test_pricing_shows_the_credits_the_code_grants_monthly_and_yearly() -> None:
         year = plan.credit_allowance(BillingInterval.YEAR)
         assert year == 12 * month
         pooled = ", pooled" if plan.per_seat else ""
-        up_front = ", pooled" if plan.per_seat else ", up front"
+        up_front = ", pooled" if plan.per_seat else ", in one bank"
         assert f'<span class="m-only"><b>{month:,}</b> credits{per_seat} every month{pooled}</span>' in card, tier
         assert f'<span class="y-only"><b>{year:,}</b> credits{per_seat} for the year{up_front}</span>' in card, tier
     text = _text(pricing)
-    assert "Twelve months of credits land up front (26,400 on Solo)" in text
+    assert "Twelve months of credits (26,400 on Solo) go into one bank" in text
+    assert "day one" not in text and "up front" not in text
     assert PLANS[PlanTier.SOLO].credit_allowance(BillingInterval.YEAR) == 26_400
     assert "credit bank" in text and "refill" not in text.split("A yearly credit bank")[1][:40]
 

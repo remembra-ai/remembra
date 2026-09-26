@@ -59,6 +59,8 @@
 .founding .btn { border-color: var(--on-signal); color: var(--on-signal); white-space: nowrap; }
 .founding .btn:hover { background: var(--on-signal); color: var(--signal); }
 .founding :focus-visible { outline-color: var(--on-signal); }
+.founding .btn[hidden], .founding .seats[hidden] { display: none; }
+.founding .seats { font-weight: 700; }
 
 /* Plans */
 .plans { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--rule-strong); border-radius: var(--r); background: var(--panel); }
@@ -171,11 +173,11 @@
         <button type="button" data-period="yearly" aria-pressed="true">Yearly</button>
       </div>
       <div class="bank" aria-live="polite">
-        <p class="y-only"><b>Yearly: 2 months free, and the whole year's credits up front.</b> Twelve months of credits land on day one as a yearly bank you can spend in any month.</p>
-        <p class="m-only"><b>Monthly: credits refresh each month.</b> Switch to yearly for 2 months free and the whole year's credits up front.</p>
+        <p class="y-only"><b>Yearly: 2 months free, and the whole year's credits in one bank.</b> Twelve months of credits form a yearly bank you can spend in any month. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available.</p>
+        <p class="m-only"><b>Monthly: credits refresh each month.</b> Switch to yearly for 2 months free and the whole year's credits in one bank.</p>
         <div class="cells" aria-hidden="true">
           <i class="on"></i><i class="on m-dim"></i><i class="on m-dim"></i><i class="on m-dim"></i><i class="on m-dim"></i><i class="on m-dim"></i><i class="on m-dim"></i><i class="on m-dim"></i><i class="on m-dim"></i><i class="on m-dim"></i><i class="on m-dim"></i><i class="on m-dim"></i>
-          <span class="y-only">day one</span><span class="m-only">month one</span>
+          <span class="y-only">from day 15</span><span class="m-only">month one</span>
         </div>
       </div>
     </div>
@@ -187,7 +189,7 @@
       <div>
         <p class="k">Founding 100 · launch offer</p>
         <h2>Solo for $9/mo, billed $108 yearly. Locked for life.</h2>
-        <p>For the first 100 customers. Everything in Solo, including the yearly credit bank, and the price never goes up while you stay subscribed. Yearly billing only, one per account, and it can't be combined with other offers.</p>
+        <p>For the first 100 customers. Everything in Solo, including the yearly credit bank, and the price never goes up while you stay subscribed. Yearly billing only, one per account, and it can't be combined with other offers. <span class="seats" data-founding-seats hidden></span></p>
       </div>
       <a class="btn" href="https://app.remembra.dev/signup">Claim a founding seat <span aria-hidden="true">&rarr;</span></a>
     </div>
@@ -215,7 +217,7 @@
         <p class="for">One developer, several agents, every project.</p>
         <p class="price"><span class="y-only">$120<small>/yr</small></span><span class="m-only">$12<small>/mo</small></span></p>
         <p class="price-note"><span class="y-only">That's $10/mo. 2 months free.</span><span class="m-only">Billed monthly.</span></p>
-        <p class="credits"><span class="y-only"><b>26,400</b> credits for the year, up front</span><span class="m-only"><b>2,200</b> credits every month</span></p>
+        <p class="credits"><span class="y-only"><b>26,400</b> credits for the year, in one bank</span><span class="m-only"><b>2,200</b> credits every month</span></p>
         <ul>
           <li class="free-note">Handoffs, pickups, inbox and trail (fair use 25,000 a month)</li>
           <li>Unlimited agents and projects</li>
@@ -232,7 +234,7 @@
         <p class="for">Heavy use, or a product built on Remembra.</p>
         <p class="price"><span class="y-only">$290<small>/yr</small></span><span class="m-only">$29<small>/mo</small></span></p>
         <p class="price-note"><span class="y-only">About $24.17/mo. 2 months free.</span><span class="m-only">Billed monthly.</span></p>
-        <p class="credits"><span class="y-only"><b>60,000</b> credits for the year, up front</span><span class="m-only"><b>5,000</b> credits every month</span></p>
+        <p class="credits"><span class="y-only"><b>60,000</b> credits for the year, in one bank</span><span class="m-only"><b>5,000</b> credits every month</span></p>
         <ul>
           <li>Everything in Solo</li>
           <li class="free-note">Handoffs, pickups, inbox and trail (fair use 100,000 a month)</li>
@@ -307,7 +309,7 @@
     <div class="wrap sec-grid">
       <div>
         <p class="eyebrow">Why yearly</p>
-        <h2 id="yearly-title">Pay once. The whole year's credits are yours on day one.</h2>
+        <h2 id="yearly-title">Pay once. The whole year's credits in one bank.</h2>
       </div>
       <ol class="reasons">
         <li>
@@ -318,12 +320,12 @@
         <li>
           <span class="n">02</span>
           <h3>A yearly credit bank</h3>
-          <p>Twelve months of credits land up front (26,400 on Solo) and you can spend them in any month of your subscription year. A big month no longer waits for next month's refill. The bank resets when the year renews.</p>
+          <p>Twelve months of credits (26,400 on Solo) go into one bank you can spend in any month of your subscription year. A big month no longer waits for next month's refill. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available. The bank resets when the year renews.</p>
         </li>
         <li>
           <span class="n">03</span>
           <h3>Founding 100, locked for life</h3>
-          <p>The first 100 customers can take Solo at $108 a year, $9/mo, and that price never goes up while the subscription stays active.</p>
+          <p>The first 100 customers can take Solo at $108 a year, $9/mo, and that price never goes up while the subscription stays active. If it ends, the price and the seat are kept for 14 days; after that the seat goes to the next customer.</p>
         </li>
       </ol>
     </div>
@@ -338,7 +340,7 @@
       <dl class="faq">
         <div><dt>Do handoffs ever cost credits?</dt><dd>No. Handoffs, checkpoints, pickups, the inbox, the trail and search never use credits on any plan. Each plan has a fair-use soft cap on handoff events a month; going over it is reported, not rejected. A per-minute burst limit (30 a minute on Free, 60 on Solo, 120 on Pro and Team) slows a runaway script, and on Free handoffs count toward the 300 unenriched saves a day.</dd></div>
         <div><dt>What happens when my credits run out?</dt><dd>Your notes keep saving without AI enrichment until your credits renew, and they stay searchable. Running out of credits never blocks a save. A save is refused only at your plan's limits: the notes-kept cap, the note length (8,000 characters on Free, 50,000 on paid plans), the project count (3 on Free), the notes per request (10 on Free, 100 on paid plans), and on Free, 300 unenriched saves a day.</dd></div>
-        <div><dt>What changes on a yearly plan?</dt><dd>You pay for 10 months instead of 12, and you get the whole year's credits on day one to use in any month. A refund or chargeback ends the plan and its credit bank at once.</dd></div>
+        <div><dt>What changes on a yearly plan?</dt><dd>You pay for 10 months instead of 12, and the whole year's credits go into one bank to use in any month. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available. A refund or chargeback ends the plan and its credit bank at once.</dd></div>
         <div><dt>Is a card required for Free?</dt><dd>No. Free is $0 with no card. New Free accounts may start with 25 credits until the email address is verified.</dd></div>
         <div><dt>Do prices include tax?</dt><dd>No. Prices are in US dollars and exclude tax.</dd></div>
         <div><dt>Can I run it myself?</dt><dd>Yes. The core is open source (MIT). <a href="https://docs.remembra.dev/getting-started/docker/">Self-hosting guide</a>.</dd></div>
@@ -372,6 +374,30 @@
 <!-- /@footer -->
 
 <script src="site.js" defer></script>
+<script>
+  /* Founding 100: seats left, from the public API (GET /api/v1/billing/founding).
+     Without JavaScript, or if the API does not answer, the offer shows as written
+     and checkout itself refuses a sold-out seat. */
+  (function () {
+    var slot = document.querySelector("[data-founding-seats]");
+    var box = document.querySelector(".founding");
+    if (!slot || !box || !window.fetch) return;
+    fetch("https://api.remembra.dev/api/v1/billing/founding", { credentials: "omit" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) {
+        if (!s || typeof s.remaining !== "number") return;
+        if (s.remaining > 0) {
+          slot.textContent = s.remaining + " of " + s.max_redemptions + " seats left.";
+        } else {
+          slot.textContent = "All " + s.max_redemptions + " seats are taken. Solo is $12/mo or $120/yr.";
+          var cta = box.querySelector(".btn");
+          if (cta) cta.hidden = true;
+        }
+        slot.hidden = false;
+      })
+      .catch(function () { /* the offer stays as written */ });
+  })();
+</script>
 <script>
   /* Monthly / yearly toggle. Without JavaScript the yearly prices show. */
   (function () {

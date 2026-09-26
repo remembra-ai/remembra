@@ -127,3 +127,23 @@ describe('seats and prices', () => {
     expect(formatUsd(15000)).toBe('$150');
   });
 });
+
+describe('bankUnlockLabel', () => {
+  it('names the full bank and the unlock day while a new yearly bank is held', async () => {
+    const { BANK_UNLOCK_RULE, bankUnlockLabel } = await import('../credits');
+    const held = summary(
+      { plan: 'pro', interval: 'year' },
+      { bank: 'yearly', limit: 5000, full_limit: 60000, bank_unlocks_at: '2026-10-15T09:00:00+00:00' },
+    );
+    expect(bankUnlockLabel(held)).toBe(`The full yearly bank of ${(60000).toLocaleString()} credits unlocks ${new Date('2026-10-15T09:00:00Z').toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' })}.`);
+    expect(BANK_UNLOCK_RULE).toBe(
+      "A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available.",
+    );
+  });
+
+  it('is null once unlocked, and on monthly plans', async () => {
+    const { bankUnlockLabel } = await import('../credits');
+    expect(bankUnlockLabel(summary({}, { bank: 'yearly', bank_unlocks_at: null }))).toBeNull();
+    expect(bankUnlockLabel(summary({}, { bank: 'monthly', bank_unlocks_at: '2026-10-15T09:00:00+00:00' }))).toBeNull();
+  });
+});
