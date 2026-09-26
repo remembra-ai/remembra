@@ -19,7 +19,7 @@ from types import ModuleType
 ROOT = Path(__file__).resolve().parent.parent
 LANDING = ROOT / "landing"
 SCRIPTS = ROOT / "scripts"
-INSTALL_STEP = "pipx install 'remembra[mcp]'"
+INSTALL_STEP = "pipx install --force 'remembra[mcp]>=0.16'"
 
 
 def _script(name: str) -> ModuleType:
@@ -68,6 +68,25 @@ def test_package_check_fails_on_a_package_the_registry_does_not_have(tmp_path: P
     assert len(down) == 2 and all("could not confirm" in p for p in down)
 
 
+def test_package_check_holds_pinned_versions_against_pypi(tmp_path: Path) -> None:
+    """Pushing main publishes the docs: an install line pinning a release PyPI does not have fails the job."""
+    predeploy = _script("site_predeploy")
+    doc = tmp_path / "guide.md"
+    doc.write_text("pipx install --force 'remembra[mcp]>=0.16'\npip install httpx>=0.27 openai\nnpm i x>=1\n")
+    assert predeploy.version_pins([doc]) == {("remembra", "0.16"): ["guide.md"], ("httpx", "0.27"): ["guide.md"]}
+    released = {"remembra": "0.16.0", "httpx": "0.28.1"}
+    assert predeploy.release_problems(latest=released.get, sources=[doc]) == []
+    behind = predeploy.release_problems(latest={"remembra": "0.13.2", "httpx": "0.28.1"}.get, sources=[doc])
+    assert behind == ["PyPI has remembra 0.13.2; the install lines need remembra>=0.16: release it first (guide.md)"]
+    unreachable = predeploy.release_problems(latest=lambda name: None, sources=[doc])
+    assert len(unreachable) == 2 and all("could not confirm" in p for p in unreachable)
+    # The real docs pin the relay release, so the docs job runs this gate on every push.
+    assert ("remembra", "0.16") in predeploy.version_pins()
+    workflow = (ROOT / ".github" / "workflows" / "docs.yml").read_text()
+    assert "python scripts/site_predeploy.py --packages" in workflow
+    assert workflow.index("site_predeploy.py --packages") < workflow.index("deploy-pages")
+
+
 def test_docs_name_only_packages_that_were_checked_to_exist() -> None:
     # The live check runs in the docs CI job (network); here, hold the list to what was
     # verified on the registries on 2026-09-25, so a new name gets checked before it ships.
@@ -91,7 +110,7 @@ def test_docs_home_leads_with_the_relay_install() -> None:
     block = re.search(r"```bash\n(.*?)\n```", first, re.S)
     assert block is not None and block.group(1).splitlines() == [
         INSTALL_STEP,
-        "remembra-install --all --api-key <your-key>",
+        "remembra-install --all",
         "remembra-relay connect",
     ]
     assert "guides/relay.md" in first and "getting-started/agent-setup.md" in first

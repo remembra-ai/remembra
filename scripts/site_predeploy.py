@@ -25,6 +25,11 @@ README names (pip, pipx, uv, npm, yarn, pnpm) against PyPI or npm, so the
 docs never tell anyone to install a package that does not exist:
 
     python scripts/site_predeploy.py --packages   # only the package check (the docs CI job runs this)
+
+The package check also holds every minimum version an install command pins
+(``'remembra[mcp]>=0.16'``) against the latest release on PyPI, so pushing
+docs that install a release PyPI does not have yet fails the docs job instead
+of publishing install lines that cannot resolve.
 """
 
 from __future__ import annotations
@@ -127,6 +132,50 @@ def package_names(sources: list[Path] | None = None) -> dict[tuple[str, str], li
                 if rel not in files:
                     files.append(rel)
     return out
+
+
+PIN = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?>=(\d+(?:\.\d+)*)")
+
+
+def version_pins(sources: list[Path] | None = None) -> dict[tuple[str, str], list[str]]:
+    """(PyPI package, minimum version) for every ``name>=X`` an install command pins, with the files."""
+    out: dict[tuple[str, str], list[str]] = {}
+    for path in install_sources() if sources is None else sources:
+        rel = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.name
+        for m in INSTALL_CMD.finditer(path.read_text(errors="replace")):
+            if m.group(1).split()[0] in ("npm", "yarn", "pnpm"):
+                continue
+            for raw in m.group(2).split():
+                pin = PIN.match(raw.strip("'\""))
+                if pin:
+                    files = out.setdefault((pin.group(1), pin.group(2)), [])
+                    if rel not in files:
+                        files.append(rel)
+    return out
+
+
+def pypi_version(name: str) -> str | None:
+    """The latest release of ``name`` on PyPI, or None if PyPI can't be reached (or has no such package)."""
+    req = urllib.request.Request(f"https://pypi.org/pypi/{name}/json", headers={"User-Agent": "remembra-site-predeploy"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return str(json.load(resp)["info"]["version"])
+    except (urllib.error.URLError, TimeoutError, ValueError, KeyError):
+        return None
+
+
+def release_problems(latest: Callable[[str], str | None] | None = None, sources: list[Path] | None = None) -> list[str]:
+    """One line per pinned minimum version PyPI does not have yet (or could not confirm)."""
+    latest = latest or pypi_version
+    problems = []
+    for (name, need), where in sorted(version_pins(sources).items()):
+        have = latest(name)
+        if have is None:
+            problems.append(f"PyPI could not confirm {name}>={need} is released ({', '.join(where)})")
+        elif _version_key(have) < _version_key(need):
+            files = ", ".join(where)
+            problems.append(f"PyPI has {name} {have}; the install lines need {name}>={need}: release it first ({files})")
+    return problems
 
 
 def _package_of(token: str, registry: str) -> str:
@@ -247,12 +296,13 @@ def check(
 def main(argv: list[str]) -> int:
     if "--packages" in argv:
         found = package_names()
-        problems = package_problems()
-        print(f"Checked {len(found)} packages named by install commands in docs/ and README.md.")
+        pins = version_pins()
+        problems = package_problems() + release_problems()
+        print(f"Checked {len(found)} packages and {len(pins)} minimum versions named by install commands in docs/ and README.md.")
         if problems:
             print("\n".join(f"  x {p}" for p in problems))
             return 1
-        print("Every one exists on its registry.")
+        print("Every one exists on its registry, and PyPI has every pinned release.")
         return 0
     lines, problems = check(online="--offline" not in argv)
     print("\n".join(lines))

@@ -26,7 +26,9 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install mkdocs-material pymdown-extensions
-      # Every package an install command in docs/ or the README names must exist on PyPI or npm.
+      # Every package an install command in docs/ or the README names must exist on PyPI or npm, and
+      # every pinned minimum version (remembra[mcp]>=0.16) must be released on PyPI: until it is, this
+      # job fails and the docs are not published with install lines that cannot resolve.
       - run: python scripts/site_predeploy.py --packages
       - run: mkdocs build --strict
       - uses: actions/configure-pages@1f0c5cde4bc74cd7e1254d0cb4de8d49e9068c7d # v4.0.0
