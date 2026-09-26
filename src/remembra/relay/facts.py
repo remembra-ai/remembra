@@ -33,6 +33,23 @@ MAX_COMMITS = 30
 MAX_COMMANDS = 60
 MAX_TRANSCRIPT_BYTES = 64 * 1024 * 1024
 CMD_CLIP = 300
+# The most items per list that POST /session/close keeps (the server's _LIST_CAPS in
+# remembra.api.v1.relay; a test holds the two equal). The close payload is cut to them
+# here, so a repository with thousands of changed files never sends a body the server
+# refuses: event lists keep their newest entries, the others their first.
+CLOSE_LIST_CAPS = {
+    "commits": 100,
+    "files_changed": 500,
+    "uncommitted_files": 500,
+    "commands": 200,
+    "tests": 100,
+    "errors": 50,
+    "todos_open": 100,
+    "incomplete": 10,
+}
+CLOSE_KEEP_NEWEST = frozenset({"commands", "tests", "errors"})
+CLOSE_TEXT_LISTS = frozenset({"files_changed", "uncommitted_files", "errors", "todos_open", "incomplete"})
+CLOSE_ITEM_CLIP = 1000  # characters per path (or other text item), as the server keeps them
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 _TEST_RE = re.compile(
@@ -1009,4 +1026,17 @@ def merge_facts(git: dict[str, Any], transcript: TranscriptFacts | None, root: s
         facts["tests"] = transcript.tests
         facts["errors"] = transcript.errors
         facts["todos_open"] = transcript.todos_open
+    return cap_close_lists(facts)
+
+
+def cap_close_lists(facts: dict[str, Any]) -> dict[str, Any]:
+    """The facts with every list cut to what ``/session/close`` keeps (:data:`CLOSE_LIST_CAPS`)."""
+    for name, cap in CLOSE_LIST_CAPS.items():
+        value = facts.get(name)
+        if not isinstance(value, list):
+            continue
+        value = value[-cap:] if name in CLOSE_KEEP_NEWEST else value[:cap]
+        if name in CLOSE_TEXT_LISTS:
+            value = [v[:CLOSE_ITEM_CLIP] for v in value if isinstance(v, str)]
+        facts[name] = value
     return facts

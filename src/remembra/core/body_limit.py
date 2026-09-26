@@ -34,21 +34,34 @@ FORM_MAX_BODY_BYTES = 64 * 1024
 # MiB is room for the multipart framing around a file of exactly 50 MiB.
 IMPORT_FILE_MAX_BODY_BYTES = 51 * MiB
 
+# The inline import (POST /transfer/import, a JSON body) takes up to this many
+# bytes; ImportRequest.data allows IMPORT_INLINE_MAX_CHARS characters of it.
+# A larger file goes to /transfer/import/file (50 MB).
+IMPORT_INLINE_MAX_BODY_BYTES = 8 * MiB
+IMPORT_INLINE_MAX_CHARS = 8_000_000
+
 _JSON = "application/json"
 _MULTIPART = "multipart/form-data"
 _URLENCODED = "application/x-www-form-urlencoded"
 
 # (method, path) -> (content type the route accepts, cap). Each larger cap is
 # the route's own validated maximum plus JSON overhead:
-#   /memories/batch       100 items x 50,000 chars, plus optional embeddings
-#   /ingest/conversation  200 messages x 50,000 chars
-#   /ingest/changelog     500,000 chars
+#   /memories/batch, /memories/bulk  100 items x 50,000 chars, plus optional embeddings (one model)
+#   /ingest/conversation             200 messages x 50,000 chars
+#   /ingest/changelog                500,000 chars
+#   /transfer/import                 IMPORT_INLINE_MAX_CHARS of data
+#   /session/close                   the route keeps 500 paths per file list and clips the rest after
+#                                    parsing, but a 0.16.0 relay client sends every changed path: a
+#                                    repository with 12,000 changed files closes with a ~2 MB body.
 ROUTE_LIMITS: Mapping[tuple[str, str], tuple[str, int]] = {
     ("POST", "/api/v1/transfer/import/file"): (_MULTIPART, IMPORT_FILE_MAX_BODY_BYTES),
+    ("POST", "/api/v1/transfer/import"): (_JSON, IMPORT_INLINE_MAX_BODY_BYTES),
     ("POST", "/api/v1/memories/batch"): (_JSON, 8 * MiB),
+    ("POST", "/api/v1/memories/bulk"): (_JSON, 8 * MiB),
     ("POST", "/api/v1/ingest/conversation"): (_JSON, 12 * MiB),
     ("POST", "/api/v1/ingest/conversation/stream"): (_JSON, 12 * MiB),
     ("POST", "/api/v1/ingest/changelog"): (_JSON, 4 * MiB),
+    ("POST", "/api/v1/session/close"): (_JSON, 8 * MiB),
 }
 
 

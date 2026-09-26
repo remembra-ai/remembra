@@ -69,6 +69,10 @@ HintScope = Literal["all", "folders"]  # see remembra.relay.identity.HINT_SCOPES
 _BRANCH_FORBIDDEN_RE = re.compile(r"[\x00-\x20\x7f-\x9f~^:?*\[\\]|\.\.|@\{|//|/\.")
 
 
+BRANCH_MAX_CHARS = 255
+BRANCH_ERROR = "branch must be a valid git branch name (see git check-ref-format --branch)"
+
+
 def valid_branch_name(value: str) -> bool:
     """Whether ``value`` is a branch name git would accept (the relay CLI's ``(detached)`` label too)."""
     return not (
@@ -77,6 +81,22 @@ def valid_branch_name(value: str) -> bool:
         or value == "@"
         or _BRANCH_FORBIDDEN_RE.search(value)
     )
+
+
+def clip_branch(value: str, limit: int = BRANCH_MAX_CHARS) -> str | None:
+    """A valid branch name cut to ``limit`` characters, still a name git would accept.
+
+    Git takes longer names than the server keeps. The cut can end the name in
+    ``/``, ``.`` or ``.lock``, which git refuses, so those are dropped from the
+    end; only the end rules can fail, since every other rule already held for
+    the whole name. None when nothing is left.
+    """
+    if len(value) <= limit:
+        return value
+    clipped = value[:limit]
+    while clipped.endswith(("/", ".", ".lock")):
+        clipped = clipped[: -len(".lock")] if clipped.endswith(".lock") else clipped[:-1]
+    return clipped or None
 
 
 def _service(request: Request) -> RelayService:
@@ -293,7 +313,6 @@ _LIST_CAPS = {
     "incomplete": 10,
 }
 _STR_CAPS = {
-    "branch": 255,
     "head_commit": 64,
     "upstream": 255,
     "diff_stat": 300,
@@ -329,9 +348,11 @@ class FactsIn(BaseModel):
     @field_validator("branch")
     @classmethod
     def _branch(cls, v: str | None) -> str | None:
+        # The whole name is checked, then cut to what is stored (BRANCH_MAX_CHARS) so that the
+        # cut is a valid name too: a name git accepts never fails the close because it is long.
         if v and not valid_branch_name(v):
-            raise ValueError("branch must be a valid git branch name (see git check-ref-format --branch)")
-        return v
+            raise ValueError(BRANCH_ERROR)
+        return clip_branch(v) if v else v
 
     @model_validator(mode="before")
     @classmethod
@@ -782,7 +803,10 @@ async def session_brief(
     repo_name: Annotated[str | None, Query(max_length=200)] = None,
     host: Annotated[str | None, Query(max_length=255)] = None,
     hint_project: Annotated[str | None, Query(max_length=128)] = None,
-    branch: Annotated[str | None, Query(max_length=255, description="The reader's current branch")] = None,
+    branch: Annotated[
+        str | None,
+        Query(max_length=4096, description="The reader's current branch (compared as stored: its first 255 characters)"),
+    ] = None,
     head_commit: Annotated[str | None, Query(max_length=64, description="The reader's current HEAD")] = None,
     session_id: Annotated[
         str | None, Query(max_length=200, description="The reader's session id (one pickup is recorded per session)")
@@ -821,6 +845,8 @@ async def session_brief(
     where = locator.locator()
     if hint_scope == HINT_SCOPE_FOLDERS and where.is_repository(git_repo):
         configured = None  # the configured project names folders only: never list it for a repository
+    if branch:
+        branch = clip_branch(branch) if valid_branch_name(branch) else branch[:BRANCH_MAX_CHARS]
     checkout = {"branch": branch, "head_commit": head_commit} if (branch or head_commit) else None
     reader: dict[str, Any] | None = None
     if not where.is_empty() or git_repo is not None:

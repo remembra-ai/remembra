@@ -15,6 +15,7 @@ These run the real ``create_app()`` stack with auth on and no key.
 
 from __future__ import annotations
 
+import json
 import time
 import tomllib
 from collections.abc import AsyncIterator
@@ -198,6 +199,54 @@ async def test_the_bulk_json_routes_keep_their_documented_maxima() -> None:
         assert r.status_code == 413
 
 
+async def test_bulk_import_takes_the_same_body_as_batch() -> None:
+    """Review regression: /memories/bulk takes the same BatchStoreRequest as /batch (100 x 50,000 chars), but only
+    /batch had the larger cap, so a 1.2 MB bulk import that 0.16.0 stored was refused with 413."""
+    items = [{"content": "x" * 40_000} for _ in range(30)]
+    body = json.dumps({"items": items, "skip_extraction": True}).encode()
+    assert MiB < len(body) < 2 * MiB
+    async with api_client() as client:
+        for path in ("/api/v1/memories/bulk", "/api/v1/memories/batch"):
+            r = await client.post(path, content=body, headers={"Content-Type": "application/json"})
+            assert r.status_code == 401, (path, r.text)  # through the size cap to auth
+
+
+async def test_the_inline_import_takes_up_to_8_mib_and_names_the_upload_route_beyond() -> None:
+    """Review regression: POST /transfer/import (ImportRequest.data) fell under the 1 MiB default; it now has an
+    explicit 8 MiB cap, and the model says where a larger file goes."""
+    from pydantic import ValidationError
+
+    from remembra.api.v1.transfer import ImportRequest
+    from remembra.core.body_limit import IMPORT_INLINE_MAX_CHARS
+
+    async with api_client() as client:
+        body = json.dumps({"format": "plaintext", "data": "x" * (5 * MiB)}).encode()
+        r = await client.post("/api/v1/transfer/import", content=body, headers={"Content-Type": "application/json"})
+        assert r.status_code == 401, r.text
+        r = await client.post(
+            "/api/v1/transfer/import",
+            content=b"",
+            headers={"Content-Type": "application/json", "Content-Length": str(8 * MiB + 1)},
+        )
+        assert r.status_code == 413
+        assert r.json()["detail"] == "Request body too large. The limit for this request is 8 MiB."
+    assert ImportRequest(format="plaintext", data="x" * IMPORT_INLINE_MAX_CHARS).data
+    with pytest.raises(ValidationError):
+        ImportRequest(format="plaintext", data="x" * (IMPORT_INLINE_MAX_CHARS + 1))
+    assert "/api/v1/transfer/import/file" in (ImportRequest.model_fields["data"].description or "")
+
+
+async def test_a_large_relay_close_reaches_the_route() -> None:
+    """Review regression: relay clients send every changed path, and /session/close clips the lists after parsing,
+    so a repository with 12,000 changed files closes with a ~2 MB body (it got 413 and the handoff was lost)."""
+    paths = [f"services/monorepo/packages/component_{i:05d}/src/generated_module_{i:05d}.py" for i in range(12_000)]
+    body = json.dumps({"agent_id": "claude-code", "facts": {"files_changed": paths, "uncommitted_files": paths}}).encode()
+    assert len(body) > MiB
+    async with api_client() as client:
+        r = await client.post("/api/v1/session/close", content=body, headers={"Content-Type": "application/json"})
+    assert r.status_code == 401, r.text
+
+
 def test_limit_table() -> None:
     from remembra.core.body_limit import DEFAULT_MAX_BODY_BYTES, FORM_MAX_BODY_BYTES, IMPORT_FILE_MAX_BODY_BYTES, limit_for
 
@@ -216,6 +265,11 @@ def test_limit_table() -> None:
     assert limit_for(scope("/api/v1/ingest/conversation", "application/json; charset=utf-8")) == 12 * MiB
     assert limit_for(scope("/api/v1/ingest/conversation/stream", "application/json")) == 12 * MiB
     assert limit_for(scope("/api/v1/ingest/changelog", "application/json")) == 4 * MiB
+    assert limit_for(scope("/api/v1/memories/bulk", "application/json")) == 8 * MiB
+    assert limit_for(scope("/api/v1/transfer/import", "application/json")) == 8 * MiB
+    assert limit_for(scope("/api/v1/transfer/import", "multipart/form-data; boundary=a")) == MiB
+    assert limit_for(scope("/api/v1/session/close", "application/json")) == 8 * MiB
+    assert limit_for(scope("/api/v1/session/close", "application/x-www-form-urlencoded")) == FORM_MAX_BODY_BYTES
     assert limit_for(scope("/api/v1/memories", None)) == MiB
     prefixed = scope("/remembra/api/v1/transfer/import/file", "multipart/form-data; boundary=a") | {"root_path": "/remembra"}
     assert limit_for(prefixed) == IMPORT_FILE_MAX_BODY_BYTES

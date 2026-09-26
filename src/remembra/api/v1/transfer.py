@@ -15,6 +15,7 @@ from remembra.auth.middleware import (
 )
 from remembra.cloud.limits import EnrichmentGrant, gate_write, record_store_usage
 from remembra.config import Settings, get_settings
+from remembra.core.body_limit import IMPORT_INLINE_MAX_CHARS
 from remembra.core.limiter import limiter
 from remembra.io.export import export_csv, export_json, export_jsonl
 from remembra.io.importers import SUPPORTED_FORMATS, ImportedMemory
@@ -66,7 +67,13 @@ class ImportRequest(BaseModel):
     format: str = Field(
         description=f"Source format: {', '.join(SUPPORTED_FORMATS)}",
     )
-    data: str = Field(description="Raw content to import")
+    data: str = Field(
+        max_length=IMPORT_INLINE_MAX_CHARS,
+        description=(
+            f"Raw content to import, at most {IMPORT_INLINE_MAX_CHARS:,} characters (an 8 MiB request body). "
+            "Upload a larger file to POST /api/v1/transfer/import/file (up to 50 MB)."
+        ),
+    )
     project_id: str | None = Field(None, description="Target project (single-project keys default to their project)")
     split_mode: str = Field(
         "paragraph",

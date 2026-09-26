@@ -12,13 +12,16 @@ valid git branch name (no leading "-", no "..", no control characters).
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import UTC, datetime
 
 import pytest
 
+from remembra.api.v1.relay import BRANCH_MAX_CHARS, clip_branch, valid_branch_name
 from remembra.relay.handoff import redact, show_text
 from remembra.security.untrusted import strip_controls, strip_hidden
 from tests.agent_api_harness import row, seed
+from tests.relay_fixtures import git, make_remote_and_clones
 from tests.test_relay_cli_inprocess import _run, api, wired  # noqa: F401 - fixtures
 
 ESC, BEL, CSI_C1 = "\x1b", "\x07", "\x9b"
@@ -97,6 +100,70 @@ def test_close_accepts_real_branch_names(api, branch):  # noqa: F811
     body = {"agent_id": "claude-code", "session_id": "s-ok", "project_id": "esc", "facts": _facts(branch=branch)}
     res = api["http"].post("/api/v1/session/close", json=body)
     assert res.status_code == 200, (branch, res.text)
+
+
+LONG_BRANCHES = [
+    "x" * 254 + "/y",  # the review's repro: the 255-character cut ended in "/", and the whole close got 422
+    "x" * 254 + ".y",
+    "x" * 250 + ".locks/y",  # cut to "...x.lock": git refuses a name ending in .lock
+    "x" * 251 + ".lockz",
+    "a/" * 200 + "b",
+    "feat/" + "é" * 300,
+]
+
+
+def _git_accepts(name: str) -> bool:
+    return subprocess.run(["git", "check-ref-format", "--branch", name], capture_output=True).returncode == 0
+
+
+@pytest.mark.parametrize("branch", LONG_BRANCHES)
+def test_a_long_branch_git_accepts_is_stored_cut_to_a_valid_name(api, branch):  # noqa: F811
+    """Review regression: the close cut the branch to 255 characters BEFORE the CLI-07 check, so a long name git
+    accepts could be cut into one it refuses ("...xxx/"), and the close (and the handoff) was refused with 422."""
+    assert _git_accepts(branch) and len(branch) > BRANCH_MAX_CHARS
+    body = {"agent_id": "claude-code", "session_id": "s-long", "project_id": "esc", "facts": _facts(branch=branch)}
+    res = api["http"].post("/api/v1/session/close", json=body)
+    assert res.status_code == 200, res.text
+    stored = json.loads(row(api, res.json()["handoff_id"])["metadata"])["relay"]["branch"]
+    assert stored and len(stored) <= BRANCH_MAX_CHARS and branch.startswith(stored)
+    assert valid_branch_name(stored) and _git_accepts(stored)
+    # The reader on that branch (a GET with the full name) gets its brief, and it is the same checkout.
+    brief = api["http"].get(
+        "/api/v1/session/brief", params={"project_id": "esc", "agent_id": "codex", "branch": branch, "head_commit": "a" * 40}
+    )
+    assert brief.status_code == 200, brief.text
+    assert "Checkout differs" not in brief.json()["rendered"]
+
+
+def test_clip_branch_only_drops_what_git_refuses_at_the_end():
+    assert clip_branch("main") == "main"
+    assert clip_branch("x" * 254 + "/y") == "x" * 254
+    assert clip_branch("x" * 250 + ".locks/y") == "x" * 250
+    assert clip_branch("a" * 10 + "/./.lock", limit=12) == "a" * 10
+    assert clip_branch("/" * 300) is None
+    assert clip_branch("feat/x", limit=5) == "feat"
+
+
+def test_a_long_invalid_branch_is_still_refused(api):  # noqa: F811
+    for branch in ("-" + "x" * 300, "x" * 300 + "/../y", "x" * 100 + ".." + "y" * 200):
+        body = {"agent_id": "claude-code", "session_id": "s-bad-long", "project_id": "esc", "facts": _facts(branch=branch)}
+        res = api["http"].post("/api/v1/session/close", json=body)
+        assert res.status_code == 422 and "valid git branch name" in res.text, branch
+
+
+def test_the_relay_cli_on_a_long_branch_closes_and_briefs(wired, monkeypatch, capsys, tmp_path):  # noqa: F811
+    _, clones = make_remote_and_clones(tmp_path)
+    repo = clones["laptop"]
+    git(repo, "remote", "set-url", "origin", "https://github.com/acme/gadget.git")
+    branch = "x" * 254 + "/y"
+    git(repo, "switch", "-q", "-c", branch)
+    code, out, err = _run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(repo)])
+    assert code == 0 and "Remembra brief unavailable" not in out + err, err
+    (repo / "wip.txt").write_text("wip\n")
+    code, out, err = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(repo), "--next", "carry on"])
+    assert code == 0 and "Remembra handoff" in out and "close failed" not in err, err
+    code, out, err = _run(monkeypatch, capsys, ["brief", "--agent", "claude-code", "--cwd", str(repo)])
+    assert code == 0 and "carry on" in out and "Checkout differs" not in out, out
 
 
 def test_inbox_and_memory_writes_drop_control_characters(api):  # noqa: F811

@@ -196,6 +196,11 @@ redact command-line credentials from handoffs stored before this release.
   - `connect --agent gemini` wrote `~/.gemini/settings.json` into Antigravity's `~/.gemini` without `--force`;
     an agent that is not detected is written only with `--force`. An unverified adapter that `connect` skips
     anyway no longer fails the run when its config cannot be read.
+  - A close sends at most what the server keeps (500 paths per file list, 200 commands, 100 test runs, ...), so
+    a repository with thousands of changed files no longer sends a body of several megabytes.
+  - On a branch longer than 255 characters (git takes longer names) the brief failed with 422. The server
+    keeps the first 255 characters and drops a `/`, `.` or `.lock` the cut leaves at the end, so the stored
+    name is still one git accepts; a name git refuses is refused whatever its length.
   - Recorded text could close the brief's untrusted-data block in Gemini CLI and Qwen Code by writing the close
     tag as `&lt;/remembra-data&gt;`, which is what those agents turn the real tag into. The server and the relay
     now neutralize the tag in that form (and its other character-reference spellings) too.
@@ -269,8 +274,12 @@ redact command-line credentials from handoffs stored before this release.
   memory checks the memory cap, a conversation ingest that falls back to storing the raw messages counts every
   message, and a session close counts toward the Free plan's daily cap on notes without enrichment. Memory-cap
   slots are reserved atomically, so parallel writes can't go past the cap.
-- **Server.** Request bodies are capped before authentication, including under a path prefix, and the web
-  framework and form parser are upgraded (FastAPI 0.141.1, Starlette 1.7.0, python-multipart 0.0.32). `GET
+- **Server.** Request bodies are capped before authentication, including under a path prefix: 1 MiB, 64 KiB
+  for a urlencoded form, and more only where a route's own limits need it (8 MiB for a relay close, a batch or
+  bulk store and an inline import, 12 MiB for a conversation ingest, 51 MiB for a file import). An inline
+  import (`POST /api/v1/transfer/import`) takes at most 8,000,000 characters of data; a larger file goes to
+  `/transfer/import/file`. The web framework and form parser are upgraded (FastAPI 0.141.1, Starlette 1.7.0,
+  python-multipart 0.0.32). `GET
   /api/v1/admin/permissions` requires an admin, and the admin promo routes check the master key. While the
   one-time account check after a sign-in that verified the email is open, changing the password, deleting the
   account and turning 2FA off wait until it is done. Entity relationships and background entity merges stay

@@ -2,7 +2,8 @@
 
 Starlette's ``TestClient`` is an ``httpx.Client`` over ASGI, so a
 ``remembra.Memory`` whose ``_client`` is swapped for it exercises the real
-routes, the real ``MemoryService`` and a real SQLite ``Database``. Only the
+routes, the real ``MemoryService`` and a real SQLite ``Database``, behind the
+request-size caps ``create_app()`` adds (``BodySizeLimitMiddleware``). Only the
 vector store and the embedder are in-process fakes (no network).
 """
 
@@ -23,6 +24,7 @@ from remembra import __version__
 from remembra.api.router import api_router
 from remembra.client.memory import Memory
 from remembra.config import Settings
+from remembra.core.body_limit import BodySizeLimitMiddleware
 from remembra.core.limiter import limiter
 from remembra.inbox.manager import InboxManager
 from remembra.security.audit import AuditLogger
@@ -68,6 +70,7 @@ def build_api(tmp_path: Any) -> Iterator[dict[str, Any]]:
     app.state.limiter = limiter
     app.state.reported_version = __version__
     app.include_router(api_router)
+    app.add_middleware(BodySizeLimitMiddleware)  # as create_app() does: a body over its route's cap gets 413
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
