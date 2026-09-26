@@ -199,7 +199,37 @@ remembra-relay connect            # dry run; add --apply to write the hooks
   agent) no longer holds back every other queued handoff; it stays queued and goes last.
 - Printed install and connect diffs also hide secrets in `docker -e NAME=value` and
   `--header "Authorization: ..."` arguments, secret-named URL query parameters and
-  multi-line TOML arrays and strings.
+  multi-line TOML arrays and strings; also a JSON object passed as one argument
+  (`--config '{"apiKey": ...}'`), token-shaped and UUID path segments of a URL
+  (`https://actions.zapier.com/mcp/<token>/sse`), and JSON files with comments or
+  trailing commas.
+- `remembra-relay`: a queued handoff is sent only with the key of the config source
+  that queued it, and only to the server it was queued for. A handoff queued before
+  any key existed is kept for the server configured then (`REMEMBRA_URL`, else the
+  local default), not sent to whichever server is set up next. `status` says why an
+  entry is held.
+- `remembra-install` without `--url` keeps the server already set up (`REMEMBRA_URL`,
+  `~/.remembra/credentials`, an existing entry): re-running it no longer moves a
+  self-hosted setup to api.remembra.dev while keeping that server's key.
+- `remembra-install` refuses a value at the hidden prompt or on `--api-key-stdin`
+  that is not shaped like a Remembra key (`rem_...`), without showing it.
+- `remembra-install --remove` lists the `*.bak-*` backups that still hold the key;
+  `--delete-backups` deletes them. The uninstall steps name them.
+- `remembra-install` and `remembra-relay` answer `--version`.
+- Windsurf: `remembra-install` wrote `~/.windsurf/mcp_config.json`, which Windsurf
+  does not read. It now writes `~/.codeium/windsurf/mcp_config.json` (the file
+  Windsurf's docs name for the editor), only with `--agent windsurf`: the path is
+  unverified against Windsurf, so `--all` leaves it out.
+- `remembra-bridge` accepts `--url` as well as `--upstream`; the docs showed `--url`
+  and the wrong port (8766; it listens on 9819).
+- The dashboard's "Use API Key instead" link no longer sits on top of the sign-in and
+  sign-up buttons on phones: it is under the form instead of fixed to the corner.
+- Privacy and subprocessor pages: the dashboard (app.remembra.dev) loads Google Fonts
+  and Paddle.js on every page; security.html says what a release carries (PEP 740
+  attestations on PyPI, provenance and an SBOM on the Docker image).
+- Release workflow: the MCP Registry job waits for approval in the `release`
+  environment like the other publish jobs, and the build job installs build and uv
+  pinned by hash (`.github/release-requirements.txt`).
 - Entity resolution (a ~3K-token LLM call) no longer runs for atomic stores:
   handoff, checkpoint, status, `skip_extraction` and degraded writes.
 - **The credit reservation is a hard AI budget.** Every OpenAI, Anthropic and
