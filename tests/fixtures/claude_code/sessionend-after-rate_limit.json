@@ -1,0 +1,12 @@
+{
+  "captured_with": "Claude Code 2.1.168 (Claude Code)",
+  "source": "feat/crew tests/crew/fixtures/captures/claude-code-2.1.168/mock/stopfailure_ratelimit/04-SessionEnd.json (docs/crew/S0-results.md)",
+  "event": "SessionEnd",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-stopfailure_ratelimit/repo",
+    "hook_event_name": "SessionEnd",
+    "reason": "other",
+    "session_id": "5eba79cf-f4bf-45fe-a76c-c347ec8373da",
+    "transcript_path": "<S0_TMP>/mock-stopfailure_ratelimit/config/projects/-S0-TMP-mock-stopfailure-ratelimit-repo/5eba79cf-f4bf-45fe-a76c-c347ec8373da.jsonl"
+  }
+}

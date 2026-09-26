@@ -150,8 +150,9 @@ RELAY_GATE = (
 BILLING_GATE = "<!-- requires billing: Solo, Pro, Team and Founding 100 live in Paddle and the dashboard -->"
 RELAY_GUIDE = "https://docs.remembra.dev/guides/relay/"
 # [mcp]: remembra-install points every agent at remembra-mcp, which needs the mcp package.
-INSTALL_STEP = "pipx install 'remembra[mcp]'"
-KEY_STEP = "remembra-install --all --api-key <your-key>"
+INSTALL_STEP = "pipx install --force 'remembra[mcp]>=0.16'"
+# No key on the command line (shell history keeps it): remembra-install asks for it at a hidden prompt.
+KEY_STEP = "remembra-install --all"
 
 
 def _install_blocks(page_html: str) -> list[tuple[str, str, str]]:

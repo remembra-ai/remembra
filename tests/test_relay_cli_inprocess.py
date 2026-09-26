@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import io
 import json
+import time
 from pathlib import Path
 
 import httpx
 import pytest
 
-from remembra.relay import cli
+from remembra.relay import cli, outbox
 from remembra.relay.adapters import REGISTRY, get_adapter
 from remembra.relay.adapters.base import PayloadMap
 from remembra.relay.config import load_config
@@ -85,6 +86,7 @@ def test_payload_maps():
         "cwd": "/w",
         "transcript": "/t",
         "reason": "exit",
+        "event": None,
     }
     cursor = get_adapter("cursor")
     assert cursor is not None
@@ -96,6 +98,7 @@ def test_payload_maps():
         "cwd": "/p",
         "transcript": None,
         "reason": None,
+        "event": None,
     }
     assert get_adapter("nope") is None and get_adapter(None) is None
 
@@ -108,7 +111,8 @@ def test_every_adapter_plans_idempotently(tmp_path):
         _write(first.path, first.after)
         assert not adapter.plan(tmp_path, "/bin/relay").changed, name
         moved = adapter.plan(tmp_path, "/new/relay")  # relay moved: our entry is replaced, not duplicated
-        assert moved.changed and moved.after.count("/new/relay") == 2 and "/bin/relay" not in moved.after, name
+        hooks = 2 + len(adapter.spec.extra_close_events)
+        assert moved.changed and moved.after.count("/new/relay") == hooks and "/bin/relay" not in moved.after, name
 
 
 def test_json_adapter_rejects_non_object_config(tmp_path):
@@ -140,10 +144,10 @@ def wired(api, monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     http = api["http"]
 
-    def client(self: cli.Context) -> httpx.Client:
-        http.headers.update({"X-API-Key": self.config.api_key or ""})
-        if self.agent:
-            http.headers["X-Remembra-Agent-Id"] = self.agent
+    def client(self: cli.Context, config=None, agent=None, budget=None) -> httpx.Client:
+        http.headers.update({"X-API-Key": (config or self.config).api_key or ""})
+        if agent or self.agent:
+            http.headers["X-Remembra-Agent-Id"] = agent or self.agent
         return _NoClose(http)
 
     monkeypatch.setattr(cli.Context, "client", client)
@@ -262,6 +266,43 @@ def test_sessions_without_an_id_each_keep_their_own_handoff(wired, monkeypatch, 
     _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(repo), "--todo", "x"])
     _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(repo), "--todo", "y"])
     assert _trail(monkeypatch, capsys, repo)["total"] == 4
+
+
+def _brief_lines(monkeypatch, capsys, cwd) -> tuple[str, str]:
+    _, out, _ = _run(monkeypatch, capsys, ["brief", "--agent", "gemini", "--cwd", str(cwd)])
+    last = next(line for line in out.splitlines() if line.startswith("Last session:"))
+    status = next(line for line in out.splitlines() if line.startswith("- last_agent:"))
+    return last, status
+
+
+@pytest.mark.parametrize("room", [True, False], ids=["sent-first", "no-time-to-send-first"])
+def test_a_queued_close_never_takes_the_place_of_a_newer_one(wired, monkeypatch, capsys, tmp_path, room):
+    """R-6: codex's close waits in the outbox; claude-code's later close delivers it. With time to spare the
+    queued one goes first; without, it goes after, and the server still ranks it by when it ended."""
+    _, clones = make_remote_and_clones(tmp_path)
+    repo = clones["laptop"]
+    git(repo, "remote", "set-url", "origin", "https://github.com/acme/queued.git")
+    live = cli.Context.request
+
+    def down(self, *args, **kwargs):
+        raise httpx.ConnectError("the API is down")
+
+    monkeypatch.setattr(cli.Context, "request", down)
+    _, _, err = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--session-id", "A-old", "--cwd", str(repo)])
+    assert "queued" in err
+    monkeypatch.setattr(cli.Context, "request", live)
+    if not room:
+        monkeypatch.setattr(cli, "CLOSE_RESERVE_SECONDS", 1000.0)
+    time.sleep(0.05)
+
+    code, out, _ = _run(monkeypatch, capsys, ["close", "--agent", "claude-code", "--session-id", "B-new", "--cwd", str(repo)])
+    assert code == 0 and "Remembra handoff" in out
+    assert not outbox.pending(wired["home"])
+    arrival = [i["session_id"] for i in _trail(monkeypatch, capsys, repo)["items"]]
+    assert arrival == (["B-new", "A-old"] if room else ["A-old", "B-new"])  # newest first by arrival
+    last, status = _brief_lines(monkeypatch, capsys, repo)
+    assert last.startswith("Last session: claude-code (self-declared), just now")
+    assert status.startswith("- last_agent:queued: claude-code (session B-new)")
 
 
 def test_configured_project_names_an_unseen_repository(wired, monkeypatch, capsys, tmp_path):

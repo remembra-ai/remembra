@@ -158,12 +158,14 @@ Issues = "https://github.com/remembra-ai/remembra/issues"
 Changelog = "https://github.com/remembra-ai/remembra/blob/main/CHANGELOG.md"
 
 [project.scripts]
-remembra = "remembra.main:run"
-remembra-server = "remembra.main:run"
-remembra-mcp = "remembra.mcp.server:main"
+# The server and MCP commands go through remembra._launch, which names the
+# missing extra instead of failing with a ModuleNotFoundError traceback.
+remembra = "remembra._launch:server"
+remembra-server = "remembra._launch:server"
+remembra-mcp = "remembra._launch:mcp"
 remembra-bridge = "remembra.tools.bridge:main"
 remembra-install-codex = "remembra.tools.codex:main"
-remembra-install = "remembra.tools.agents:main"
+remembra-install = "remembra.tools.agents:entrypoint"
 remembra-doctor = "remembra.tools.doctor:main"
 remembra-relay = "remembra.relay.cli:entrypoint"
 

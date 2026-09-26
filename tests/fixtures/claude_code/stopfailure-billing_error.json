@@ -1,0 +1,13 @@
+{
+  "captured_with": "Claude Code 2.1.168 (Claude Code)",
+  "source": "feat/crew tests/crew/fixtures/captures/claude-code-2.1.168/mock/stopfailure_billing/04-StopFailure.json (docs/crew/S0-results.md)",
+  "event": "StopFailure",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-stopfailure_billing/repo",
+    "error": "billing_error",
+    "hook_event_name": "StopFailure",
+    "last_assistant_message": "Credit balance is too low",
+    "session_id": "36ebda65-84cb-4c9e-b329-e3ba18f97ac2",
+    "transcript_path": "<S0_TMP>/mock-stopfailure_billing/config/projects/-S0-TMP-mock-stopfailure-billing-repo/36ebda65-84cb-4c9e-b329-e3ba18f97ac2.jsonl"
+  }
+}

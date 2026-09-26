@@ -48,5 +48,14 @@ class KimiTomlAdapter(Adapter):
         summary = [] if new == text else [f"write managed [[hooks]] block ({self.spec.start_event}, {self.spec.end_event})"]
         return new, summary
 
+    def render_removal(self, before: str) -> tuple[str, list[str], bool]:
+        if BEGIN not in before or END not in before:
+            return before, [], False
+        head, rest = before.split(BEGIN, 1)
+        _, tail = rest.split(END, 1)
+        new = head.rstrip() + ("\n\n" if head.strip() and tail.strip() else "") + tail.lstrip("\n")
+        new = new if not new.strip() else new.rstrip() + "\n"
+        return new, ["remove the managed remembra-relay [[hooks]] block"], not new.strip()
+
 
 ADAPTER = KimiTomlAdapter(SPEC)

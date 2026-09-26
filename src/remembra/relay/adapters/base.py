@@ -28,6 +28,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from remembra.relay.config_view import canonical_json, config_view
+from remembra.relay.handoff import PRE_COMPACT_REASON
+
 RELAY_MARKERS = ("remembra-relay", "remembra.relay")
 
 # Output modes for `remembra-relay brief`:
@@ -39,7 +42,12 @@ OUTPUT_MODES = ("text", "json", "hook-json", "cursor-json")
 
 @dataclass(frozen=True)
 class PayloadMap:
-    """Where the agent puts session fields in the hook's stdin JSON (first match wins)."""
+    """Where the agent puts session fields in the hook's stdin JSON (first match wins).
+
+    The end reason is, in order: the API error of a failed turn (``error``,
+    else ``error_type``: Claude Code's StopFailure), ``pre-compact:<trigger>``
+    for a PreCompact event, else the ``reason`` field (SessionEnd).
+    """
 
     session_id: tuple[str, ...] = ("session_id",)
     cwd: tuple[str, ...] = ("cwd",)
@@ -47,6 +55,10 @@ class PayloadMap:
     reason: tuple[str, ...] = ("reason",)
     env_session_id: tuple[str, ...] = ()
     env_cwd: tuple[str, ...] = ()
+    event: tuple[str, ...] = ("hook_event_name",)
+    error: tuple[str, ...] = ()
+    compact_events: tuple[str, ...] = ()
+    trigger: tuple[str, ...] = ("trigger",)
 
     def extract(self, payload: dict[str, Any], environ: dict[str, str] | None = None) -> dict[str, str | None]:
         env = environ if environ is not None else dict(os.environ)
@@ -63,12 +75,34 @@ class PayloadMap:
         def first_env(keys: tuple[str, ...]) -> str | None:
             return next((env[k].strip() for k in keys if env.get(k, "").strip()), None)
 
+        event = first(self.event)
+        error = first(self.error)
+        if error:
+            reason: str | None = error
+        elif event and event in self.compact_events:
+            trigger = first(self.trigger)
+            reason = f"{PRE_COMPACT_REASON}:{trigger}" if trigger else PRE_COMPACT_REASON
+        else:
+            reason = first(self.reason)
         return {
             "session_id": first(self.session_id) or first_env(self.env_session_id),
             "cwd": first(self.cwd) or first_env(self.env_cwd),
             "transcript": first(self.transcript),
-            "reason": first(self.reason),
+            "reason": reason,
+            "event": event,
         }
+
+
+@dataclass(frozen=True)
+class CloseEvent:
+    """An extra hook event that also runs ``close`` (the session may go on afterwards).
+
+    ``matcher`` is the hook group's matcher (for StopFailure: which API
+    errors); None matches every occurrence.
+    """
+
+    event: str
+    matcher: str | None = None
 
 
 @dataclass(frozen=True)
@@ -87,6 +121,10 @@ class AdapterSpec:
     config_source: str | None = None  # prefer this config file for the API key ("claude" | "codex")
     hook_timeout: int | None = None  # seconds, only where the unit is verified
     notes: str = ""
+    # Events besides ``end_event`` that write the handoff early (Claude Code:
+    # StopFailure on a usage/billing limit, PreCompact). A later close of the
+    # same session supersedes it on the server.
+    extra_close_events: tuple[CloseEvent, ...] = ()
 
 
 @dataclass
@@ -95,15 +133,34 @@ class Change:
     before: str | None
     after: str
     summary: list[str]
+    delete: bool = False  # remove the file (nothing but our own entries was left in it)
 
     @property
     def changed(self) -> bool:
+        if self.delete:
+            return self.before is not None
         return self.before != self.after
 
-    def diff(self) -> str:
-        before = (self.before or "").splitlines(keepends=True)
-        after = self.after.splitlines(keepends=True)
-        return "".join(difflib.unified_diff(before, after, fromfile=f"{self.path} (current)", tofile=f"{self.path} (new)"))
+    def diff(self, mask: Callable[[str], str] | None = None, keys: tuple[str, ...] = ()) -> str:
+        """Unified diff for printing, with every secret hidden (see :mod:`remembra.relay.config_view`).
+
+        ``keys`` are values to mask wherever they appear; ``mask`` rewrites each
+        line after that. JSON is compared in the layout it is written in; when
+        the current file uses another layout, a last line says it is rewritten.
+        """
+
+        def lines(text: str | None) -> list[str]:
+            out = (config_view(text, self.path, keys) or "").splitlines(keepends=True)
+            return [mask(line) for line in out] if mask else out
+
+        tofile = f"{self.path} (deleted)" if self.delete else f"{self.path} (new)"
+        after = [] if self.delete else lines(self.after)
+        text = "".join(difflib.unified_diff(lines(self.before), after, fromfile=f"{self.path} (current)", tofile=tofile))
+        if text and not self.delete and self.before is not None:
+            layout = canonical_json(self.before)
+            if layout is not None and layout != self.before and self.after == canonical_json(self.after):
+                text += "(the file is rewritten with 2-space JSON indentation; the content changes only as shown)\n"
+        return text
 
 
 def relay_command() -> str:
@@ -124,21 +181,47 @@ def is_relay_command(command: Any) -> bool:
     return any(marker in command for marker in RELAY_MARKERS) or bool(_RELAY_ARGS_RE.search(command.strip()))
 
 
-def backup_and_write(change: Change, stamp: str | None = None) -> Path | None:
-    """Back up the current file (if any), then write atomically, keeping its mode."""
+def _backup(path: Path, stamp: str, label: str) -> Path:
+    """Copy ``path`` next to itself, owner-only (it may hold a key), never over an older backup."""
+    backup = path.with_name(f"{path.name}.bak-{label}-{stamp}")
+    n = 1
+    while backup.exists():
+        n += 1
+        backup = path.with_name(f"{path.name}.bak-{label}-{stamp}-{n}")
+    fd = os.open(backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "wb") as out, path.open("rb") as src:
+        shutil.copyfileobj(src, out)
+    os.chmod(backup, 0o600)
+    return backup
+
+
+def backup_and_write(change: Change, stamp: str | None = None, *, label: str = "relay", private: bool = False) -> Path | None:
+    """Back up the current file (if any), then write atomically (or delete, for ``change.delete``).
+
+    A new file is created 0600. An existing file keeps its mode, except with
+    ``private`` (the file holds an API key), where group and other access is
+    removed. Backups are always 0600. Returns the backup path, if any.
+    """
     path = change.path
     stamp = stamp or datetime.now().strftime("%Y%m%d-%H%M%S")
     backup: Path | None = None
     mode: int | None = None
     if path.exists():
-        backup = path.with_name(f"{path.name}.bak-relay-{stamp}")
-        shutil.copy2(path, backup)
+        backup = _backup(path, stamp, label)
         mode = path.stat().st_mode & 0o777
+        if private:
+            mode &= 0o700
+    if change.delete:
+        if path.exists():
+            path.unlink()
+        return backup
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(change.after)
+            fh.flush()
+            os.fsync(fh.fileno())
         os.chmod(tmp, mode if mode is not None else 0o600)
         os.replace(tmp, path)
     except BaseException:
@@ -161,6 +244,16 @@ class Adapter:
         base = f"{relay} {{verb}} --hook {self.spec.name} --agent {self.spec.name}"
         return {"start": base.format(verb="brief"), "end": base.format(verb="close")}
 
+    def hook_events(self) -> list[tuple[str, str, str | None]]:
+        """``(command key, event, matcher)`` for every hook this adapter installs."""
+        events: list[tuple[str, str, str | None]] = []
+        if self.spec.start_event:
+            events.append(("start", self.spec.start_event, None))
+        if self.spec.end_event:
+            events.append(("end", self.spec.end_event, None))
+        events.extend(("end", extra.event, extra.matcher) for extra in self.spec.extra_close_events)
+        return events
+
     def plan(self, home: Path, relay: str) -> Change:
         path = self.spec.config_path(home)
         before = path.read_text(encoding="utf-8") if path.exists() else None
@@ -168,6 +261,19 @@ class Adapter:
         return Change(path=path, before=before, after=after, summary=summary)
 
     def render(self, before: str | None, relay: str) -> tuple[str, list[str]]:
+        raise NotImplementedError
+
+    def plan_removal(self, home: Path) -> Change:
+        """The config without any relay hook (``disconnect``); unchanged when there is none."""
+        path = self.spec.config_path(home)
+        before = path.read_text(encoding="utf-8") if path.exists() else None
+        if before is None:
+            return Change(path=path, before=None, after="", summary=[], delete=True)  # nothing to remove
+        after, summary, empty = self.render_removal(before)
+        return Change(path=path, before=before, after=after, summary=summary, delete=empty and bool(summary))
+
+    def render_removal(self, before: str) -> tuple[str, list[str], bool]:
+        """``(new text, summary, nothing else left)``."""
         raise NotImplementedError
 
 
@@ -196,6 +302,10 @@ class JsonHooksAdapter(Adapter):
             hook["timeout"] = self.spec.hook_timeout
         return {"hooks": [hook]}
 
+    def _group(self, command: str, matcher: str | None) -> dict[str, Any]:
+        group = self._entry(command)
+        return {"matcher": matcher, **group} if matcher else group
+
     def render(self, before: str | None, relay: str) -> tuple[str, list[str]]:
         data = _load_json_object(before, str(self.spec.config_path))
         new = copy.deepcopy(data)
@@ -204,11 +314,10 @@ class JsonHooksAdapter(Adapter):
             raise ValueError("'hooks' in the config is not an object")
         summary: list[str] = []
         commands = self.commands(relay)
-        for key, event in (("start", self.spec.start_event), ("end", self.spec.end_event)):
-            if not event:
-                continue
+        for key, event, matcher in self.hook_events():
             groups = hooks.get(event)
             groups = list(groups) if isinstance(groups, list) else []
+            wanted = self._entry(commands[key])["hooks"][0]
             kept: list[Any] = []
             present = False
             for group in groups:
@@ -216,11 +325,12 @@ class JsonHooksAdapter(Adapter):
                 if not isinstance(inner, list):
                     kept.append(group)
                     continue
+                same_matcher = (group.get("matcher") or None) == matcher
                 remaining = []
                 for hook in inner:
                     command = hook.get("command") if isinstance(hook, dict) else None
                     if is_relay_command(command):
-                        if command == commands[key] and not present and hook == self._entry(commands[key])["hooks"][0]:
+                        if hook == wanted and same_matcher and not present:
                             present = True
                             remaining.append(hook)
                         else:
@@ -233,10 +343,49 @@ class JsonHooksAdapter(Adapter):
                 if remaining:
                     kept.append({**group, "hooks": remaining})
             if not present:
-                kept.append(self._entry(commands[key]))
-                summary.append(f"{event}: add `{commands[key]}`")
+                kept.append(self._group(commands[key], matcher))
+                on = f" (matcher `{matcher}`)" if matcher else ""
+                summary.append(f"{event}{on}: add `{commands[key]}`")
             hooks[event] = kept
         text = json.dumps(new, indent=2, ensure_ascii=False) + "\n"
         if before is not None and new == data:
             text = before  # untouched: keep the user's exact formatting
         return text, summary
+
+    def render_removal(self, before: str) -> tuple[str, list[str], bool]:
+        data = _load_json_object(before, str(self.spec.config_path))
+        hooks = data.get("hooks")
+        if not isinstance(hooks, dict):
+            return before, [], False
+        new = copy.deepcopy(data)
+        new_hooks: dict[str, Any] = new["hooks"]
+        summary: list[str] = []
+        for event, groups in hooks.items():
+            if not isinstance(groups, list):
+                continue
+            kept: list[Any] = []
+            for group in groups:
+                inner = group.get("hooks") if isinstance(group, dict) else None
+                if not isinstance(inner, list):
+                    kept.append(group)
+                    continue
+                remaining = []
+                for hook in inner:
+                    command = hook.get("command") if isinstance(hook, dict) else None
+                    if is_relay_command(command):
+                        summary.append(f"{event}: remove `{command}`")
+                    else:
+                        remaining.append(hook)
+                if remaining:
+                    kept.append({**group, "hooks": remaining})
+                elif not inner:
+                    kept.append(group)  # an empty group that was already there
+            if kept:
+                new_hooks[event] = kept
+            else:
+                del new_hooks[event]
+        if not summary:
+            return before, [], False
+        if not new_hooks:
+            del new["hooks"]
+        return json.dumps(new, indent=2, ensure_ascii=False) + "\n", summary, not new

@@ -142,6 +142,15 @@ _ROW_COLUMNS = (
     "id, user_id, project_id, content, metadata, created_at, expires_at, memory_type, superseded_by, source, trust_score"
 )
 
+# When a handoff's session ended, as a julianday: the close time the relay
+# recorded (only on rows the relay wrote, and never after the row was stored),
+# else the row's stored time (free-form handoffs have no close time).
+HANDOFF_ENDED_JD = (
+    "COALESCE(CASE WHEN source = 'agent_generated' AND json_valid(metadata) "
+    "THEN MIN(julianday(json_extract(metadata, '$.relay.closed_at')), julianday(created_at)) END, "
+    "julianday(created_at))"
+)
+
 
 class AgentSessionService:
     """Session brief, status upsert, and timeline over the metadata store.
@@ -256,15 +265,26 @@ class AgentSessionService:
         return {"memories": [serialize_memory_row(dict(r)) for r in rows], "total": total}
 
     async def latest_handoff(self, user_id: str, project_id: str | None) -> dict[str, Any] | None:
-        result = await self.timeline(
-            user_id=user_id,
-            project_id=project_id,
-            memory_types=["handoff"],
-            limit=1,
-            newest_first=True,
+        """The current handoff whose session ended last.
+
+        A relay handoff records when its session ended (``relay.closed_at``),
+        which for one sent late from a client's offline queue is well before the
+        server received it. Ordering by that time keeps a late delivery from
+        replacing a newer handoff as the "Last session". Handoffs without it
+        (free-form ones) use their stored time.
+        """
+        where, params = self._active_clause(user_id)
+        where += " AND memory_type = 'handoff'"
+        if project_id:
+            where += " AND project_id = ?"
+            params.append(project_id)
+        cursor = await self.db.conn.execute(
+            f"SELECT {_ROW_COLUMNS} FROM memories WHERE {where} "
+            f"ORDER BY {HANDOFF_ENDED_JD} DESC, julianday(created_at) DESC, id DESC LIMIT 1",
+            params,
         )
-        memories = result["memories"]
-        return memories[0] if memories else None
+        row = await cursor.fetchone()
+        return serialize_memory_row(dict(row)) if row else None
 
     async def _current_status_rows(self, user_id: str, project_id: str, key: str | None = None) -> list[dict[str, Any]]:
         where, params = self._active_clause(user_id)

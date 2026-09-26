@@ -7,11 +7,18 @@ Subcommands::
     remembra-relay trail   [--cwd DIR] [--project P] [--limit N]
     remembra-relay resolve [--cwd DIR] [--project P] [--bind]
     remembra-relay connect [--apply] [--agent NAME ...] [--include-unverified] [--agents-md PATH]
+    remembra-relay disconnect [--apply] [--agent NAME ...] [--agents-md PATH]
+    remembra-relay status  [--format text|json] [--no-check]
 
 ``brief``/``close``/``trail`` are hook-safe: they never block (≤10 s total,
 git calls and HTTP bounded), never raise, always exit 0 and report problems
 on stderr. With ``--hook NAME`` the agent's hook payload is read from stdin
 (session id, cwd, transcript path, end reason) using that adapter's mapping.
+
+A close that cannot be delivered is queued in ``~/.remembra/relay/outbox``
+and sent again by the next ``brief`` or ``close`` (see
+:mod:`remembra.relay.outbox`); the brief says when something is queued or the
+key was rejected, and ``status`` shows the queue and the last result per agent.
 
 The project is resolved from the git repository in ``--cwd`` (remote URL,
 root commit), so every checkout of the same repo — any machine, drive or
@@ -47,6 +54,7 @@ import httpx
 
 from remembra.client.project import normalize_project_id, parse_project_aliases
 from remembra.relay import facts as factlib
+from remembra.relay import outbox
 from remembra.relay.adapters import REGISTRY, Adapter, agents_md, backup_and_write, get_adapter, relay_command
 from remembra.relay.config import RelayConfig, load_config
 
@@ -57,6 +65,12 @@ STDIN_WAIT_SECONDS = 1.0
 STATE_TTL_SECONDS = 14 * 86400
 ADHOC_SESSION_MAX_AGE_SECONDS = 12 * 3600
 USER_AGENT = "remembra-relay"
+# Queued handoffs a brief/close sends before giving up for this run, and the
+# budget one resend may use (the brief itself still needs time after it).
+REPLAY_MAX_ENTRIES = 5
+REPLAY_BUDGET_SECONDS = 3.5
+# Time a close keeps for sending its own handoff when it sends queued ones first.
+CLOSE_RESERVE_SECONDS = 4.0
 
 
 def _err(message: str) -> None:
@@ -229,32 +243,48 @@ class Context:
             locator["hint_project"] = hint
         return locator
 
-    def client(self) -> httpx.Client:
+    def client(self, config: RelayConfig | None = None, agent: str | None = None, budget: float | None = None) -> httpx.Client:
+        config = config or self.config
+        agent = agent or self.agent
         headers = {"User-Agent": f"{USER_AGENT}/{_version()}", "Accept": "application/json"}
-        if self.config.api_key:
-            headers["X-API-Key"] = self.config.api_key
-        if self.agent:
-            headers["X-Remembra-Agent-Id"] = self.agent
-        timeout = max(0.5, min(HTTP_TIMEOUT_SECONDS, self.deadline.end - time.monotonic()))
-        return httpx.Client(base_url=self.config.url, headers=headers, timeout=httpx.Timeout(timeout, connect=min(4.0, timeout)))
+        if config.api_key:
+            headers["X-API-Key"] = config.api_key
+        if agent:
+            headers["X-Remembra-Agent-Id"] = agent
+        remaining = self.deadline.end - time.monotonic()
+        timeout = max(0.5, min(HTTP_TIMEOUT_SECONDS, remaining, budget if budget is not None else remaining))
+        return httpx.Client(base_url=config.url, headers=headers, timeout=httpx.Timeout(timeout, connect=min(4.0, timeout)))
 
-    def request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
-        """One HTTP call bounded by the WHOLE remaining budget.
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        config: RelayConfig | None = None,
+        agent: str | None = None,
+        budget: float | None = None,
+        **kwargs: Any,
+    ) -> httpx.Response:
+        """One HTTP call bounded by the WHOLE remaining budget (or ``budget``, if smaller).
 
         httpx timeouts apply per phase / per socket read, so a server that
         drips one byte every few seconds never trips them. The call runs in a
         daemon thread; when the budget runs out it is abandoned and
         ``TimeoutError`` is raised (the process can still exit: the thread is
-        a daemon).
+        a daemon). ``config``/``agent`` send with another key/agent id (a
+        queued close is sent as the agent that wrote it).
         """
         remaining = self.deadline.end - time.monotonic()
+        if budget is not None:
+            remaining = min(remaining, budget)
         if remaining <= 0.1:
             raise TimeoutError(f"the {TOTAL_BUDGET_SECONDS:g}s budget ran out before the request")
         box: dict[str, Any] = {}
+        url = (config or self.config).url
 
         def run() -> None:
             try:
-                with self.client() as http:
+                with self.client(config, agent, budget) as http:
                     box["response"] = http.request(method, path, **kwargs)
             except BaseException as e:  # handed to the caller's thread
                 box["error"] = e
@@ -263,7 +293,7 @@ class Context:
         worker.start()
         worker.join(remaining)
         if worker.is_alive():
-            raise TimeoutError(f"no complete response from {self.config.url} within the {TOTAL_BUDGET_SECONDS:g}s budget")
+            raise TimeoutError(f"no complete response from {url} within the {remaining:.1f}s left of the budget")
         if "error" in box:
             raise box["error"]
         response: httpx.Response = box["response"]
@@ -279,14 +309,175 @@ def _http_error(response: httpx.Response) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Outbox: send what earlier closes could not deliver
+# ---------------------------------------------------------------------------
+
+
+class Replay:
+    """What one run did with the outbox (the brief turns it into notices)."""
+
+    def __init__(self) -> None:
+        self.sent: list[str] = []
+        self.key_rejected: list[str] = []  # config sources whose key got 401
+        self.refused: list[str] = []  # HTTP 403 details
+        self.remaining: list[outbox.Entry] = []
+
+
+def _config_prefer(source: str | None) -> str | None:
+    """``load_config(prefer=…)`` for an entry's recorded config source ("claude:/path" -> "claude")."""
+    kind = (source or "").split(":", 1)[0]
+    return kind if kind in ("claude", "codex", "credentials") else None
+
+
+def _failure(response: httpx.Response | None, error: BaseException | None) -> str:
+    if response is not None:
+        return _http_error(response)
+    return f"{error.__class__.__name__}: {error}" if error else "unknown error"
+
+
+def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: float = 0.0, drop_skipped: bool = True) -> Replay:
+    """Send queued closes, oldest first, within a small budget. Never raises.
+
+    Each entry goes with the key of the config source that queued it and as
+    the agent that wrote it. Stops at the first network failure (the server is
+    still unreachable) or rejected key; a 4xx that resending cannot fix drops
+    the entry (logged). ``skip`` is the (agent, session) the caller closes
+    itself: its queued copy is never sent, and with ``drop_skipped`` it is
+    dropped (the caller's close has been delivered and supersedes it).
+    ``reserve`` is time left untouched for the caller's own request.
+    """
+    report = Replay()
+    try:
+        entries = outbox.pending(ctx.home)
+    except Exception as e:
+        outbox.log(ctx.home, f"outbox: could not read the queue ({e.__class__.__name__})")
+        return report
+    attempted = 0
+    stop = False
+    for entry in entries:
+        if skip and (entry.agent_id, entry.session_id) == skip:
+            if drop_skipped:
+                outbox.discard(ctx.home, entry.agent_id, entry.session_id)
+            continue
+        left = ctx.deadline.end - time.monotonic()
+        if stop or attempted >= REPLAY_MAX_ENTRIES or left < REPLAY_BUDGET_SECONDS + reserve:
+            report.remaining.append(entry)
+            continue
+        config = load_config(agent=entry.agent_id or None, prefer=_config_prefer(entry.data.get("config_source")))
+        if not config.api_key or (entry.url and outbox.clean_url(config.url) != entry.url):
+            report.remaining.append(entry)  # no key yet, or the key now points at another server
+            continue
+        claimed = outbox.claim(entry)
+        if claimed is None:
+            continue  # another hook is sending it right now
+        attempted += 1
+        response: httpx.Response | None = None
+        error: BaseException | None = None
+        try:
+            response = ctx.request(
+                "POST",
+                "/api/v1/session/close",
+                json=entry.payload,
+                config=config,
+                agent=entry.agent_id or None,
+                budget=REPLAY_BUDGET_SECONDS,
+            )
+        except Exception as e:
+            error = e
+        status = response.status_code if response is not None else None
+        detail = _failure(response, error)
+        if status is not None and status < 400:
+            outbox.finish(entry, claimed, sent=True)
+            outbox.record(ctx.home, agent_id=entry.agent_id, command="close (queued)", ok=True, config_source=config.source)
+            outbox.log(
+                ctx.home,
+                f"outbox: delivered {entry.agent_id} session {entry.session_id[:40]} (queued {entry.data.get('queued_at')})",
+            )
+            report.sent.append(entry.agent_id)
+            continue
+        outbox.record(
+            ctx.home,
+            agent_id=entry.agent_id,
+            command="close (queued)",
+            ok=False,
+            config_source=config.source,
+            error=detail,
+            http_status=status,
+        )
+        if status is not None and not outbox.is_retryable_status(status):
+            outbox.finish(entry, claimed, sent=True)  # resending the same body cannot succeed
+            outbox.log(ctx.home, f"outbox: dropped {entry.agent_id} session {entry.session_id[:40]}: {detail}")
+            continue
+        outbox.finish(entry, claimed, sent=False, error=detail, http_status=status)
+        report.remaining.append(entry)
+        if status == 401:
+            report.key_rejected.append(config.source)
+        elif status == 403:
+            report.refused.append(detail)
+        stop = True  # unreachable, rate-limited or a key problem: try again next time
+    return report
+
+
+def queue_notices(ctx: Context, replay: Replay, brief_status: int | None = None) -> list[str]:
+    """One-line notices for the top of the brief: queued handoffs, a rejected key."""
+    notices: list[str] = []
+    if brief_status == 401 or replay.key_rejected:
+        source = ctx.config.source if brief_status == 401 else replay.key_rejected[0]
+        notices.append(
+            f"Remembra: your API key was rejected (HTTP 401; the key came from {source}), so handoffs are not being"
+            " saved. Create a new key in the dashboard (API keys) and store it there, or run `remembra-install --all`;"
+            " `remembra-relay status` shows what is waiting."
+        )
+    elif brief_status == 403 or replay.refused:
+        notices.append(
+            "Remembra: the server refused this key (HTTP 403). Check the key's projects and agent in the dashboard;"
+            " `remembra-relay status` has details."
+        )
+    try:
+        waiting = outbox.pending(ctx.home)
+    except Exception:
+        waiting = []
+    here = outbox.clean_url(ctx.config.url)
+    elsewhere = [e for e in waiting if e.url and e.url != here]
+    waiting = [e for e in waiting if not (e.url and e.url != here)]
+    if waiting:
+        by_agent: dict[str, int] = {}
+        for entry in waiting:
+            by_agent[entry.agent_id or "unknown-agent"] = by_agent.get(entry.agent_id or "unknown-agent", 0) + 1
+        who = ", ".join(f"{n} from {agent}" for agent, n in sorted(by_agent.items()))
+        total = len(waiting)
+        notices.append(
+            f"Remembra: {total} handoff{'s' if total != 1 else ''} ({who}) could not be sent yet and"
+            f" {'are' if total != 1 else 'is'} queued on this machine; the next brief or close retries."
+            " The trail may be missing the newest session. `remembra-relay status` shows why."
+        )
+    if elsewhere:
+        servers = ", ".join(sorted({str(e.url) for e in elsewhere}))
+        notices.append(
+            f"Remembra: {len(elsewhere)} queued handoff(s) are for another server ({servers}) and are not sent to this one."
+            " `remembra-relay status` lists them."
+        )
+    if replay.sent:
+        n = len(replay.sent)
+        notices.append(f"Remembra: sent {n} queued handoff{'s' if n != 1 else ''} from {', '.join(sorted(set(replay.sent)))}.")
+    return notices
+
+
+# ---------------------------------------------------------------------------
 # brief
 # ---------------------------------------------------------------------------
 
 
-def _emit_brief(mode: str, text: str, raw: dict[str, Any] | None) -> None:
+def _emit_brief(mode: str, text: str, raw: dict[str, Any] | None, notices: list[str] | None = None) -> None:
     if mode == "json":
-        print(json.dumps(raw if raw is not None else {"error": text}, default=str))
-    elif mode == "hook-json":
+        body: dict[str, Any] = dict(raw) if raw is not None else {"error": text}
+        if notices:
+            body["notices"] = notices
+        print(json.dumps(body, default=str))
+        return
+    if notices:  # the relay's own lines, above the brief (outside its untrusted-data block)
+        text = "\n".join(notices) + ("\n" + text if text else "")
+    if mode == "hook-json":
         print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
     elif mode == "cursor-json":
         print(json.dumps({"additional_context": text}))
@@ -296,13 +487,17 @@ def _emit_brief(mode: str, text: str, raw: dict[str, Any] | None) -> None:
 
 def cmd_brief(args: argparse.Namespace) -> int:
     mode = args.format or "text"
+    ctx: Context | None = None
     try:
         ctx = Context(args)
         if not args.format and ctx.adapter:
             mode = ctx.adapter.spec.output
         if not ctx.config.api_key:
             _emit_brief(
-                mode, "Remembra brief unavailable: no API key (set REMEMBRA_API_KEY or configure the remembra MCP server).", None
+                mode,
+                "Remembra brief unavailable: no API key (set REMEMBRA_API_KEY or configure the remembra MCP server).",
+                None,
+                queue_notices(ctx, Replay()),
             )
             return 0
         session_id = ctx.hook_fields.get("session_id") or args.session_id
@@ -317,6 +512,7 @@ def cmd_brief(args: argparse.Namespace) -> int:
         elif not session_id and not os.environ.get("REMEMBRA_SESSION_ID"):
             # No session id (AGENTS.md / manual use): start a fresh ad-hoc session here.
             start_adhoc_session(ctx.home, ctx.agent or "unknown-agent", ctx.host, ctx.repo.toplevel or str(ctx.cwd), start)
+        replay = replay_outbox(ctx)  # first, so the brief below already includes what was queued
         params: dict[str, Any] = {"recent_n": args.recent}
         if ctx.agent:
             params["agent_id"] = ctx.agent
@@ -325,18 +521,36 @@ def cmd_brief(args: argparse.Namespace) -> int:
             params["branch"] = ctx.repo.branch
         if ctx.repo.head_commit:
             params["head_commit"] = ctx.repo.head_commit
-        response = ctx.request("GET", "/api/v1/session/brief", params=params)
+        try:
+            response = ctx.request("GET", "/api/v1/session/brief", params=params)
+        except Exception as e:
+            outbox.record(ctx.home, agent_id=ctx.agent, command="brief", ok=False, error=f"{e.__class__.__name__}: {e}")
+            raise
         if response.status_code >= 400:
             message = f"Remembra brief unavailable: {_http_error(response)}"
             _err(message)
-            _emit_brief(mode, message, None)
+            outbox.record(
+                ctx.home,
+                agent_id=ctx.agent,
+                command="brief",
+                ok=False,
+                config_source=ctx.config.source,
+                error=_http_error(response),
+                http_status=response.status_code,
+            )
+            _emit_brief(mode, message, None, queue_notices(ctx, replay, response.status_code))
             return 0
+        outbox.record(ctx.home, agent_id=ctx.agent, command="brief", ok=True, config_source=ctx.config.source)
         brief = response.json()
-        _emit_brief(mode, str(brief.get("rendered") or ""), brief)
+        _emit_brief(mode, str(brief.get("rendered") or ""), brief, queue_notices(ctx, replay))
     except Exception as e:  # never break the agent's session start
         _err(f"brief failed: {e.__class__.__name__}: {e}")
         try:
-            _emit_brief(mode, f"Remembra brief unavailable: {e.__class__.__name__}. Call the session_brief tool.", None)
+            notices = queue_notices(ctx, Replay()) if ctx is not None else []
+        except Exception:
+            notices = []
+        try:
+            _emit_brief(mode, f"Remembra brief unavailable: {e.__class__.__name__}. Call the session_brief tool.", None, notices)
         except Exception:
             pass
     return 0
@@ -406,7 +620,14 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
         facts.setdefault("todos_open", []).append(todo)
 
     project = ctx.project_params()
-    payload: dict[str, Any] = {"agent_id": agent, "session_id": session_id, "facts": facts}
+    # When the session ended: a close sent later from the outbox keeps this time,
+    # so the server does not rank it above handoffs written after it.
+    payload: dict[str, Any] = {
+        "agent_id": agent,
+        "session_id": session_id,
+        "facts": facts,
+        "closed_at": datetime.now(UTC).isoformat(),
+    }
     if "project_id" in project:
         payload["project_id"] = project["project_id"]
     else:
@@ -419,7 +640,27 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
     return payload
 
 
+def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status: int | None = None) -> None:
+    """Keep an undelivered close for the next brief/close, and say so on stderr."""
+    # Without a key there is no server either: send it wherever a key is configured later.
+    url = ctx.config.url if ctx.config.api_key else None
+    path = outbox.enqueue(ctx.home, payload, url=url, config_source=ctx.config.source, error=error, http_status=http_status)
+    outbox.record(
+        ctx.home,
+        agent_id=str(payload.get("agent_id") or ctx.agent or ""),
+        command="close",
+        ok=False,
+        config_source=ctx.config.source,
+        error=error,
+        http_status=http_status,
+    )
+    if path is not None:
+        _err(f"the handoff is queued in {path.parent} and will be sent by the next brief or close")
+
+
 def cmd_close(args: argparse.Namespace) -> int:
+    ctx: Context | None = None
+    payload: dict[str, Any] | None = None
     try:
         ctx = Context(args)
         payload = build_close_payload(ctx, args)
@@ -428,16 +669,47 @@ def cmd_close(args: argparse.Namespace) -> int:
             return 0
         if not ctx.config.api_key:
             _err("close skipped: no API key (set REMEMBRA_API_KEY or configure the remembra MCP server)")
+            _queue_close(ctx, payload, "no API key configured")
             return 0
-        response = ctx.request("POST", "/api/v1/session/close", json=payload)
+        own = (str(payload.get("agent_id")), str(payload.get("session_id")))
+        # Older queued handoffs go first, while that leaves this close enough time; the rest follow it.
+        replay_outbox(ctx, skip=own, reserve=CLOSE_RESERVE_SECONDS, drop_skipped=False)
+        try:
+            response = ctx.request("POST", "/api/v1/session/close", json=payload)
+        except Exception as e:
+            _err(f"close failed: {e.__class__.__name__}: {e}")
+            _queue_close(ctx, payload, f"{e.__class__.__name__}: {e}")
+            return 0
         if response.status_code >= 400:
-            _err(f"close failed: {_http_error(response)}")
+            detail = _http_error(response)
+            _err(f"close failed: {detail}")
+            if outbox.is_retryable_status(response.status_code):
+                _queue_close(ctx, payload, detail, response.status_code)
+            else:
+                outbox.record(
+                    ctx.home,
+                    agent_id=str(payload.get("agent_id")),
+                    command="close",
+                    ok=False,
+                    config_source=ctx.config.source,
+                    error=detail,
+                    http_status=response.status_code,
+                )
+                outbox.log(ctx.home, f"close: not queued, the server rejected the body ({detail})")
             return 0
         result = response.json()
+        outbox.record(ctx.home, agent_id=str(payload.get("agent_id")), command="close", ok=True, config_source=ctx.config.source)
+        # This close supersedes a queued copy of the same session; then send what is still waiting.
+        replay_outbox(ctx, skip=own)
         if not ctx.adapter:  # interactive use; hooks keep stdout clean (some require JSON-only stdout)
             print(f"Remembra handoff {result.get('handoff_id')} · project {result.get('project_id')} · {result.get('headline')}")
     except Exception as e:  # never break the agent's shutdown
         _err(f"close failed: {e.__class__.__name__}: {e}")
+        if ctx is not None and payload is not None and not getattr(args, "dry_run", False):
+            try:
+                _queue_close(ctx, payload, f"{e.__class__.__name__}: {e}")
+            except Exception:
+                pass
     return 0
 
 
@@ -521,7 +793,7 @@ def cmd_connect(args: argparse.Namespace) -> int:
         _warn_missing_key()
     exit_code = 0
     skipped_unverified: list[str] = []
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    stamp = _stamp()
     for name, adapter in REGISTRY.items():
         if wanted and name not in wanted:
             continue
@@ -584,6 +856,196 @@ def cmd_connect(args: argparse.Namespace) -> int:
     return exit_code
 
 
+def _stamp() -> str:
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def cmd_disconnect(args: argparse.Namespace) -> int:
+    """Remove the relay hooks this tool wrote (dry run unless --apply; backups kept)."""
+    home = Path(os.environ.get("HOME") or Path.home())
+    wanted = [a.lower() for a in (args.agent or [])]
+    unknown = [a for a in wanted if a not in REGISTRY]
+    if unknown:
+        _err(f"unknown agent(s): {', '.join(unknown)}; known: {', '.join(REGISTRY)}")
+        return 2
+    stamp = _stamp()
+    exit_code = 0
+    found = 0
+    for name, adapter in REGISTRY.items():
+        if wanted and name not in wanted:
+            continue
+        spec = adapter.spec
+        try:
+            change = adapter.plan_removal(home)
+        except Exception as e:
+            print(f"\n[{name}] {spec.display}: cannot read {spec.config_path(home)}: {e}")
+            exit_code = 1
+            continue
+        if not change.changed:
+            if name in wanted:
+                print(f"\n[{name}] {spec.display}: no relay hooks in {change.path}")
+            continue
+        found += 1
+        print(f"\n[{name}] {spec.display} -> {change.path}")
+        for line in change.summary:
+            print(f"  - {line}")
+        if change.delete:
+            print("  (nothing else is left in the file: it is removed)")
+        diff = change.diff()
+        if diff:
+            print("  " + diff.replace("\n", "\n  ").rstrip())
+        if args.apply:
+            backup = backup_and_write(change, stamp)
+            print(f"  {'removed' if change.delete else 'written'}{f' (backup: {backup})' if backup else ''}")
+        else:
+            print("  (dry run: re-run with --apply to write, a backup is kept)")
+    if args.agents_md:
+        md = agents_md.plan_removal(Path(args.agents_md).expanduser())
+        if md.changed:
+            found += 1
+            print(f"\n[agents-md] {md.path}")
+            print("  " + md.diff().replace("\n", "\n  ").rstrip())
+            if args.apply:
+                backup = backup_and_write(md, stamp)
+                print(f"  written{f' (backup: {backup})' if backup else ''}")
+            else:
+                print("  (dry run: re-run with --apply to write)")
+        else:
+            print(f"\n[agents-md] {md.path}: no Remembra Relay section")
+    if not found:
+        print("No relay hooks found: nothing to remove.")
+    print(
+        "\nTo remove Remembra completely:\n"
+        "  1. remembra-relay disconnect --apply     (the session hooks, above)\n"
+        "  2. remembra-install --remove --all --apply   (the MCP server entries)\n"
+        "  3. pipx uninstall remembra\n"
+        "  4. revoke the key in the dashboard (API keys) and delete ~/.remembra (saved key, queue, log)"
+    )
+    return exit_code
+
+
+def _age(ts: Any, now: float) -> str:
+    try:
+        seconds = max(0.0, now - float(ts))
+    except (TypeError, ValueError):
+        return "at an unknown time"
+    if seconds < 90:
+        return "just now"
+    if seconds < 5400:
+        return f"{round(seconds / 60)}m ago"
+    if seconds < 36 * 3600:
+        return f"{round(seconds / 3600)}h ago"
+    return f"{round(seconds / 86400)}d ago"
+
+
+def _check_key(config: RelayConfig) -> dict[str, Any]:
+    """Ask the server whether the key is accepted (a read-only call). Bounded by the hook budget."""
+    ns = argparse.Namespace(hook=None, agent=config.agent_id, cwd=None, project=None, session_id=None)
+    ctx = Context(ns, payload={})
+    try:
+        response = ctx.request("GET", "/api/v1/trail/summary", params={"days": 1}, config=config)
+    except Exception as e:
+        return {"state": "unchecked", "error": f"server unreachable ({e.__class__.__name__}: {e})"}
+    if response.status_code < 400:
+        return {"state": "accepted"}
+    if response.status_code == 401:
+        return {"state": "rejected", "http_status": 401, "error": _http_error(response)}
+    if response.status_code == 403:
+        return {"state": "refused", "http_status": 403, "error": _http_error(response)}
+    return {"state": "unchecked", "http_status": response.status_code, "error": _http_error(response)}
+
+
+def cmd_status(args: argparse.Namespace) -> int:
+    """Queue depth, last result per agent and whether the key is accepted. Exit 1 when something needs attention."""
+    home = Path(os.environ.get("HOME") or Path.home())
+    config = load_config(agent=args.agent)
+    entries = outbox.pending(home)
+    recorded = outbox.read_status(home)
+    if not config.api_key:
+        key: dict[str, Any] = {"state": "missing"}
+    elif args.no_check:
+        stored = (recorded.get("keys") or {}).get(config.source) or {}
+        key = {"state": stored.get("state") or "unchecked", "http_status": stored.get("http_status"), "at": stored.get("at")}
+    else:
+        key = _check_key(config)
+        if key["state"] in ("accepted", "rejected", "refused"):
+            outbox.record(
+                home,
+                agent_id=config.agent_id,
+                command="status",
+                ok=key["state"] == "accepted",
+                config_source=config.source,
+                error=key.get("error"),
+                http_status=key.get("http_status"),
+            )
+            recorded = outbox.read_status(home)
+    now = time.time()
+    queue = [
+        {
+            "agent_id": e.agent_id,
+            "session_id": e.session_id,
+            "queued_at": e.data.get("queued_at"),
+            "attempts": e.attempts,
+            "last_error": e.data.get("last_error"),
+            "url": e.url,
+        }
+        for e in entries
+    ]
+    agents = recorded.get("agents") or {}
+    attention = bool(entries) or key["state"] in ("missing", "rejected", "refused")
+    if args.format == "json":
+        print(
+            json.dumps(
+                {
+                    "config": config.redacted(),
+                    "key": key,
+                    "queue_depth": len(entries),
+                    "queue": queue,
+                    "agents": agents,
+                    "outbox": str(outbox.outbox_dir(home)),
+                    "log": str(outbox.log_path(home)),
+                },
+                indent=2,
+                default=str,
+            )
+        )
+        return 1 if attention else 0
+    print("Remembra relay status")
+    print(f"  server: {config.url} (key from {config.source})")
+    state = key["state"]
+    key_line = {
+        "accepted": "accepted by the server",
+        "rejected": "REJECTED by the server (HTTP 401): create a new key in the dashboard and run remembra-install --all",
+        "refused": f"refused by the server (HTTP 403): {key.get('error') or ''}".rstrip(": "),
+        "missing": "none found: set REMEMBRA_API_KEY or run remembra-install --all",
+    }.get(state, f"not checked ({key.get('error') or 'run without --no-check to ask the server'})")
+    print(f"  key: {key_line}")
+    print(f"  queue: {len(entries)} handoff(s) waiting in {outbox.outbox_dir(home)}")
+    for item in queue:
+        print(
+            f"    - {item['agent_id']} session {str(item['session_id'])[:24]}, queued {item['queued_at']}, "
+            f"{item['attempts']} attempt(s), last error: {item['last_error']}"
+        )
+    if agents:
+        print("  agents:")
+        for agent, slot in sorted(agents.items()):
+            ok, bad = slot.get("last_success"), slot.get("last_failure")
+            parts = []
+            if ok:
+                parts.append(f"last ok: {ok.get('command')} {_age(ok.get('ts'), now)}")
+            if bad:
+                code = f"HTTP {bad['http_status']}: " if bad.get("http_status") else ""
+                error = str(bad.get("error") or "")
+                if code and error.startswith(code):
+                    code = ""
+                parts.append(f"last failure: {bad.get('command')} {_age(bad.get('ts'), now)} ({code}{error[:160]})")
+            print(f"    {agent:<14} " + " · ".join(parts))
+    else:
+        print("  agents: no brief or close recorded on this machine yet")
+    print(f"  log: {outbox.log_path(home)}")
+    return 1 if attention else 0
+
+
 def _warn_missing_key() -> None:
     """Loud notice that the hooks cannot reach the server: they will do nothing."""
     red, reset = ("\033[31;1m", "\033[0m") if sys.stderr.isatty() else ("", "")
@@ -592,8 +1054,9 @@ def _warn_missing_key() -> None:
         "  Checked: REMEMBRA_API_KEY, ~/.claude.json and ~/.codex/config.toml (remembra MCP server env),"
         " ~/.remembra/credentials.\n"
         "  Fix: create a key in the Remembra dashboard (Settings > API keys), then run\n"
-        "    remembra-install --all --api-key <your key> --url <your server URL>\n"
-        "  (or export REMEMBRA_API_KEY and REMEMBRA_URL where your agents start)."
+        "    remembra-install --all --url <your server URL>\n"
+        "  which asks for the key (it is never put on the command line), or export REMEMBRA_API_KEY\n"
+        "  and REMEMBRA_URL where your agents start."
     )
 
 
@@ -650,6 +1113,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_connect.add_argument("--agents-md", help="Also add the relay section to this AGENTS.md")
     p_connect.add_argument("--relay-command", help=argparse.SUPPRESS)
     p_connect.set_defaults(func=cmd_connect)
+
+    p_disconnect = sub.add_parser("disconnect", help="Remove the relay hooks connect wrote (dry run by default)")
+    p_disconnect.add_argument("--apply", action="store_true", help="Write the changes (backups are kept)")
+    p_disconnect.add_argument("--agent", action="append", help=f"Only these agents ({hooks}); repeatable")
+    p_disconnect.add_argument("--agents-md", help="Also remove the relay section from this AGENTS.md")
+    p_disconnect.set_defaults(func=cmd_disconnect)
+
+    p_status = sub.add_parser("status", help="Queued handoffs, last result per agent, and whether the key is accepted")
+    p_status.add_argument("--agent", help="Agent id whose config to check (default: REMEMBRA_AGENT_ID)")
+    p_status.add_argument("--format", choices=["text", "json"], default="text")
+    p_status.add_argument("--no-check", action="store_true", help="Do not ask the server; show the last recorded key state")
+    p_status.set_defaults(func=cmd_status)
     return parser
 
 

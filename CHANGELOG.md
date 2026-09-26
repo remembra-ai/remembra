@@ -162,6 +162,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Behind Cloudflare the client IP comes from `CF-Connecting-IP` when the forwarded
   chain reaches a Cloudflare edge range (`REMEMBRA_TRUST_CLOUDFLARE_PROXIES`).
 
+### Added (relay launch)
+- **Claude Code handoffs at a usage limit.** `remembra-relay connect` also runs `close` on Claude Code's
+  StopFailure (`rate_limit`, `billing_error`, `account_on_hold`, `cloud_credential_error`) and PreCompact, so
+  the handoff is written when work stops, not when the user later quits. The reason is read from `error`
+  (what Claude Code 2.1.168 sends) or `error_type`; the brief says `stopped: rate_limit` and the trail
+  headline starts with it. A later close of the same session supersedes it. `connect --apply` upgrades an
+  existing SessionStart/SessionEnd install in place, with a backup.
+- **No silent loss of a handoff.** A `close` that cannot be delivered is queued in
+  `~/.remembra/relay/outbox/` (0600, atomic, bounded to 50 entries and 14 days, secrets redacted, never the
+  key) and logged to `~/.remembra/relay/relay.log`; the next `brief` or `close` sends it, oldest first
+  (a `close` sends it before its own handoff when time allows). A close carries the time its session ended
+  (`closed_at`, clamped to the server clock and 15 days); the brief's "Last session" and the `last_agent`
+  status follow that time, so a handoff delivered late never replaces a newer one, and the brief says when
+  it arrived. The brief names queued handoffs and a rejected key in its first lines. New `remembra-relay status`: queue, last result
+  per agent, and whether the server accepts the key.
+- **`remembra-relay disconnect`** (dry run unless `--apply`, backups kept) removes the relay hooks, and
+  **`remembra-install --remove`** the MCP entries. The relay guide and the dashboard (Settings → Account,
+  also in the delete-account dialog) list the uninstall steps.
+
+### Changed (relay launch)
+- **`remembra-install` is a dry run by default**: it prints each change as a diff and writes with `--apply`
+  (or a "y" on a terminal). The diff masks the Remembra key and hides every other secret in the file (other
+  MCP servers' `env`/`headers` values, token/key/password settings, `--token`-style arguments, known
+  credential formats); JSON is compared in the layout it is written in, so only the real change shows.
+  `remembra-relay connect` / `disconnect` print their diffs the same way. A run that writes nothing exits 3, so the dashboard's
+  `remembra-install ... && remembra-relay connect --apply` stops when you answer no. The key is saved to
+  `~/.remembra/credentials` even when no agent config is found. It reads the key from `REMEMBRA_API_KEY`, a hidden prompt,
+  `--api-key-stdin` or `~/.remembra/credentials`; `--api-key` still works but warns (shell history). Writes
+  are atomic, keep a backup and leave the file 0600; each agent's entry gets its own `REMEMBRA_AGENT_ID`.
+  `remembra-install-codex` no longer requires `--api-key`. `remembra-doctor` warns about a key file other
+  users can read. The landing page and dashboard install lines no longer carry a key.
+- The dashboard's install command now installs `remembra[mcp]>=0.16`, like the landing page and the guide
+  (without the extra, `remembra-mcp` could not start).
+- `remembra`, `remembra-server` and `remembra-mcp` name the missing extra and exit 1 instead of failing
+  with `ModuleNotFoundError`; `remembra-mcp --help` and `--version` answer once its imports load.
+
 ## [0.16.0] - 2026-07-16
 
 **Lossless memory + production reliability.** The theme of this release: what you

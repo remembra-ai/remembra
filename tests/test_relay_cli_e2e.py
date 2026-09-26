@@ -363,9 +363,13 @@ def test_connect_dry_run_then_apply_claude_code(home):
     assert data["hooks"]["SessionStart"] == [
         {"hooks": [{"type": "command", "command": f"{relay_cmd} brief --hook claude-code --agent claude-code", "timeout": 15}]}
     ]
-    assert data["hooks"]["SessionEnd"] == [
-        {"hooks": [{"type": "command", "command": f"{relay_cmd} close --hook claude-code --agent claude-code", "timeout": 15}]}
+    close_hook = {"type": "command", "command": f"{relay_cmd} close --hook claude-code --agent claude-code", "timeout": 15}
+    assert data["hooks"]["SessionEnd"] == [{"hooks": [close_hook]}]
+    # A usage/billing limit ends the turn, not the session: StopFailure writes the handoff then (and PreCompact).
+    assert data["hooks"]["StopFailure"] == [
+        {"matcher": "rate_limit|billing_error|account_on_hold|cloud_credential_error", "hooks": [close_hook]}
     ]
+    assert data["hooks"]["PreCompact"] == [{"hooks": [close_hook]}]
     backups = list(settings.parent.glob("settings.json.bak-relay-*"))
     assert len(backups) == 1 and backups[0].read_text() == before
     assert "REMEMBRA_API_KEY" not in settings.read_text()
@@ -412,7 +416,8 @@ def test_connect_without_a_key_warns_and_fails_but_still_writes_hooks(home):
     assert dry.returncode == 1
     assert '"api_key": "missing"' in dry.stdout
     assert dry.stderr.count("no Remembra API key found") == 2  # at the top and again at the end
-    assert "remembra-install --all --api-key <your key>" in dry.stderr
+    assert "remembra-install --all --url <your server URL>" in dry.stderr
+    assert "--api-key" not in dry.stderr  # the fix never asks for the key on the command line
     assert "\033[" not in dry.stderr  # not a terminal: no color codes
 
     applied = relay(home, "", "connect", "--agent", "claude-code", "--apply", "--relay-command", relay_cmd, env=no_key)

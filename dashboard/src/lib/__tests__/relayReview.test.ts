@@ -97,15 +97,13 @@ describe('agentState', () => {
 });
 
 describe('install commands', () => {
-  it('pins the first release with remembra-relay', () => {
-    expect(PIPX_INSTALL).toBe("pipx install --force 'remembra>=0.16'");
-    expect(INSTALL_COMMAND).toBe("pipx install --force 'remembra>=0.16' && remembra-relay connect");
+  it('pins the first release with remembra-relay, with the [mcp] extra', () => {
+    expect(PIPX_INSTALL).toBe("pipx install --force 'remembra[mcp]>=0.16'");
+    expect(INSTALL_COMMAND).toBe("pipx install --force 'remembra[mcp]>=0.16' && remembra-relay connect");
   });
 
-  it('prefills the server URL and leaves the key for the user', () => {
-    expect(saveKeyCommand('https://api.example.test')).toBe(
-      'remembra-install --all --api-key <your-key> --url https://api.example.test',
-    );
+  it('prefills the server URL and asks for the key instead of taking it on the command line', () => {
+    expect(saveKeyCommand('https://api.example.test')).toBe('remembra-install --all --url https://api.example.test');
     expect(saveKeyCommand('')).toContain('--url https://api.remembra.dev');
   });
 });

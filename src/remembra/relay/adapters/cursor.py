@@ -59,5 +59,30 @@ class CursorHooksAdapter(Adapter):
             return before, summary
         return json.dumps(new, indent=2, ensure_ascii=False) + "\n", summary
 
+    def render_removal(self, before: str) -> tuple[str, list[str], bool]:
+        data = _load_json_object(before, str(self.spec.config_path))
+        hooks = data.get("hooks")
+        if not isinstance(hooks, dict):
+            return before, [], False
+        new: dict[str, Any] = copy.deepcopy(data)
+        new_hooks: dict[str, Any] = new["hooks"]
+        summary: list[str] = []
+        for event, entries in hooks.items():
+            if not isinstance(entries, list):
+                continue
+            kept = [e for e in entries if not (isinstance(e, dict) and is_relay_command(e.get("command")))]
+            summary.extend(f"{event}: remove `{e['command']}`" for e in entries if e not in kept)
+            if kept:
+                new_hooks[event] = kept
+            else:
+                del new_hooks[event]
+        if not summary:
+            return before, [], False
+        if not new_hooks:
+            del new["hooks"]
+        # connect adds "version": 1 to a new file; alone it means nothing is left.
+        empty = not new or new == {"version": 1}
+        return json.dumps(new, indent=2, ensure_ascii=False) + "\n", summary, empty
+
 
 ADAPTER = CursorHooksAdapter(SPEC)
