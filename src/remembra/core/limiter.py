@@ -7,6 +7,7 @@ from typing import Any
 
 from slowapi import Limiter
 
+from remembra.cloud.ratelimit import storage_options_for, storage_uri_from_setting
 from remembra.config import get_settings
 
 
@@ -33,10 +34,18 @@ def get_key_func(request: Any) -> str:
 # Create the limiter instance
 # NOTE: headers_enabled=False because we use custom middleware for header injection.
 # Setting True here causes errors on endpoints without Response parameter.
+# in_memory_fallback_enabled: when a shared backend (redis://) stops answering,
+# slowapi marks it dead, keeps enforcing the same route limits in process
+# memory and re-checks the backend with backoff; swallow_errors is the last
+# resort so a limiter failure never turns a request into a 500.
 settings = get_settings()
+_storage_uri = storage_uri_from_setting(settings.rate_limit_storage)
 limiter = Limiter(
     key_func=get_key_func,
     enabled=settings.rate_limit_enabled,
-    storage_uri=settings.rate_limit_storage if settings.rate_limit_storage != "memory" else None,
+    storage_uri=_storage_uri,
+    storage_options=storage_options_for(_storage_uri),
     headers_enabled=False,
+    in_memory_fallback_enabled=True,
+    swallow_errors=True,
 )
