@@ -73,6 +73,7 @@ from remembra.relay import hosts, outbox
 from remembra.relay.adapters import REGISTRY, Adapter, Change, agents_md, backup_and_write, get_adapter, relay_command
 from remembra.relay.adapters.base import OUTPUT_MODES
 from remembra.relay.config import RelayConfig, load_config, load_config_from_source
+from remembra.security.untrusted import neutralize_encoded
 
 TOTAL_BUDGET_SECONDS = 9.5
 GIT_BUDGET_SECONDS = 4.0
@@ -624,13 +625,22 @@ def queue_notices(ctx: Context, replay: Replay, brief_status: int | None = None)
 def _emit_brief(
     mode: str, text: str, raw: dict[str, Any] | None, notices: list[str] | None = None, event: str = "SessionStart"
 ) -> None:
-    """Print the brief in ``mode``; ``event`` labels the hook-json output (the hook event that asked for it)."""
+    """Print the brief in ``mode``; ``event`` labels the hook-json output (the hook event that asked for it).
+
+    Recorded text that spells the data block's tag with HTML character
+    references (``&lt;/remembra-data&gt;``) is neutralized here too, whatever the
+    server did: Gemini CLI and Qwen Code HTML-escape the real tag into exactly
+    that string, so it would end the block early.
+    """
     if mode == "json":
         body: dict[str, Any] = dict(raw) if raw is not None else {"error": text}
+        if isinstance(body.get("rendered"), str):
+            body["rendered"] = neutralize_encoded(body["rendered"])
         if notices:
             body["notices"] = notices
         print(json.dumps(body, default=str))
         return
+    text = neutralize_encoded(text)
     if notices:  # the relay's own lines, above the brief (outside its untrusted-data block)
         text = "\n".join(notices) + ("\n" + text if text else "")
     if mode == "hook-json":
