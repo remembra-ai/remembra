@@ -203,11 +203,14 @@ export async function fetchIdentities(jwt: string): Promise<IdentitiesState> {
 /**
  * The browser URL that starts connecting `provider` to the signed-in account.
  * Only a path on the API origin is accepted, so a bad response cannot send the
- * browser anywhere else.
+ * browser anywhere else. `credentials: 'include'` stores the HttpOnly cookie
+ * that binds the ticket to this browser: the API refuses the start path in any
+ * other browser (an attacker's ticket opened by a victim).
  */
 export async function requestProviderLink(jwt: string, provider: string): Promise<string> {
   const response = await fetch(`${API_V1}/auth/oauth/${encodeURIComponent(provider)}/link`, {
     method: 'POST',
+    credentials: 'include',
     headers: { Authorization: `Bearer ${jwt}` },
   });
   if (response.status === 403) throw new ReauthRequiredError(await detailOf(response, 'Sign in again to continue.'));

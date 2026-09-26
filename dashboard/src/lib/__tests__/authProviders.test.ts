@@ -111,6 +111,17 @@ describe('login code exchange and provider linking', () => {
     expect(JSON.parse(init.body)).toEqual({ code: 'the-code', totp_code: '123456' });
   });
 
+  it('stores the ticket-binding cookie when it asks for a link ticket', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ start_path: '/api/v1/auth/oauth/google/start?link=t' })));
+    vi.stubGlobal('fetch', fetchMock);
+    await requestProviderLink('jwt', 'google');
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/v1/auth/oauth/google/link');
+    expect(init.method).toBe('POST');
+    expect(init.credentials).toBe('include');
+    expect(init.headers).toEqual({ Authorization: 'Bearer jwt' });
+  });
+
   it('only follows a start path on the API for the same provider', async () => {
     const reply = (body: unknown, status = 200) => vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status }));
     vi.stubGlobal('fetch', reply({ start_path: '/api/v1/auth/oauth/github/start?link=abc' }));

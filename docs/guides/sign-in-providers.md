@@ -169,8 +169,11 @@ Accounts created this way have no password. **Forgot password** sets one.
 **Settings → Security → Sign-in methods** lists Google and GitHub with
 **Connect** / **Disconnect**. Connect calls
 `POST /api/v1/auth/oauth/{provider}/link` with the dashboard session, which
-returns a single-use start path (2 minutes) that the browser opens; the rest is
-the normal flow, and the callback attaches the provider account to the signed-in
+returns a single-use start path (2 minutes) that the browser opens. The same
+call (made with `credentials: 'include'`) sets an HttpOnly cookie that binds the
+start path to that browser: opened anywhere else (for example a link someone
+minted for their own account and sent to you), it is refused and burned before
+the provider is reached. The rest is the normal flow, and the callback attaches the provider account to the signed-in
 account (the provider email may differ from the account email) and sends the
 browser back to Settings. It needs a session from the last 15 minutes; with an
 older one the page asks the user to sign in again. A provider account already

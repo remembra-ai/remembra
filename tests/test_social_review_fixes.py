@@ -376,6 +376,109 @@ async def test_connect_needs_a_recent_session_and_a_single_use_ticket(tmp_path, 
         assert notices == []
 
 
+@pytest.mark.parametrize("provider", ["google", "github"])
+async def test_link_ticket_minted_in_one_browser_never_links_in_another(tmp_path, providers, notices, provider) -> None:
+    """Account-link CSRF: the attacker's ticket, opened by a victim, must not attach the victim's identity."""
+    async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
+        attacker = await h.create_user("attacker@evil.example", verified=True)
+        minted = await h.client.post(f"/api/v1/auth/oauth/{provider}/link", headers=h.jwt(attacker, "attacker@evil.example"))
+        assert minted.status_code == 200
+        start_path = minted.json()["start_path"]
+        async with other_browser(h) as victim:
+            s = await victim.get(start_path)
+            # Refused before reaching the provider: no state, nothing to approve.
+            assert s.status_code == 303, s.text
+            assert dict(parse_qsl(urlsplit(s.headers["location"]).fragment)) == {
+                "error": "invalid_state",
+                "provider": provider,
+                "from": "settings",
+            }
+            assert "set-cookie" not in s.headers or f"remembra_oauth_{provider}=" not in s.headers["set-cookie"]
+            # The victim then signs in with their own Google / GitHub account normally.
+            if provider == "google":
+                await h.create_user("person@gmail.com", verified=True)
+            victim_start = await victim.get(f"/api/v1/auth/oauth/{provider}/start")
+            providers.authorize(victim_start.headers["location"], "victim-code")
+            cb = await victim.get(
+                f"/api/v1/auth/oauth/{provider}/callback",
+                params={"code": "victim-code", "state": query_of(victim_start)["state"]},
+            )
+            frag = dict(parse_qsl(urlsplit(cb.headers["location"]).fragment))
+            assert "linked" not in frag
+            body = (await victim.post("/api/v1/auth/oauth/exchange", json={"code": frag["code"]})).json()
+            assert body["user"]["id"] != attacker
+        # The ticket is burned: even the attacker's own browser cannot use it now.
+        assert (await h.client.get(start_path)).status_code == 303
+        assert await count(h, "SELECT COUNT(*) FROM user_identities WHERE user_id = ?", attacker) == 0
+        assert await count(h, "SELECT COUNT(*) FROM oauth_link_tickets") == 0
+        assert all(to != "attacker@evil.example" for to, _name, _email in notices)
+
+
+async def test_link_ticket_needs_its_own_cookie_not_any_link_cookie(tmp_path, providers, notices) -> None:
+    async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
+        attacker = await h.create_user("attacker@evil.example", verified=True)
+        victim_id = await h.create_user("victim@company.example", verified=True)
+        attacker_path = (
+            await h.client.post("/api/v1/auth/oauth/github/link", headers=h.jwt(attacker, "attacker@evil.example"))
+        ).json()["start_path"]
+        async with other_browser(h) as victim:
+            # The victim's browser holds a live link cookie of its own (they were connecting GitHub too).
+            own = await victim.post("/api/v1/auth/oauth/github/link", headers=h.jwt(victim_id, "victim@company.example"))
+            assert own.status_code == 200
+            refused = await victim.get(attacker_path)
+            assert refused.status_code == 303
+            assert "invalid_state" in refused.headers["location"]
+        assert await count(h, "SELECT COUNT(*) FROM oauth_login_states WHERE link_user_id = ?", attacker) == 0
+
+
+async def test_link_cookie_attributes_and_cleanup(tmp_path, providers, notices, monkeypatch) -> None:
+    async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
+        uid = await h.create_user("alice@company.example", verified=True)
+        r = await h.client.post("/api/v1/auth/oauth/github/link", headers=h.jwt(uid))
+        cookie = next(c for c in r.headers.get_list("set-cookie") if c.startswith("remembra_oauth_link_github="))
+        assert "HttpOnly" in cookie and "SameSite=lax" in cookie and "Max-Age=120" in cookie and "Path=/" in cookie
+        assert r.headers["cache-control"] == "no-store"
+        # Only a hash of the cookie secret is stored with the ticket.
+        secret = h.client.cookies.get("remembra_oauth_link_github")
+        assert secret and secret not in str(await (await h.db.conn.execute("SELECT * FROM oauth_link_tickets")).fetchall())
+        s = await h.client.get(r.json()["start_path"])
+        assert s.status_code == 302
+        assert any(c.startswith("remembra_oauth_link_github=") and "Max-Age=0" in c for c in s.headers.get_list("set-cookie"))
+        cursor = await h.db.conn.execute("SELECT from_page, link_user_id FROM oauth_login_states")
+        assert [tuple(row) for row in await cursor.fetchall()] == [("settings", uid)]
+
+    import tests.test_social_login as fake_module
+
+    monkeypatch.setattr(fake_module, "API", "https://api.example.test")
+    async with secure_app(tmp_path, ROUTERS, settings=oauth_settings(public_url="https://api.example.test")) as h:
+        uid = await h.create_user("bob@company.example", verified=True)
+        r = await h.client.post("/api/v1/auth/oauth/google/link", headers=h.jwt(uid, "bob@company.example"))
+        cookie = next(c for c in r.headers.get_list("set-cookie") if c.startswith("__Host-remembra_oauth_link_google="))
+        assert "Secure" in cookie and "Path=/" in cookie and "Domain" not in cookie
+
+
+async def test_link_ticket_issued_before_browser_binding_is_refused(tmp_path, providers, notices) -> None:
+    async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
+        uid = await h.create_user("alice@company.example", verified=True)
+        # A deployment that ran the previous version: the table has no browser_hash column.
+        await h.db.conn.executescript(
+            """
+            CREATE TABLE oauth_link_tickets (ticket_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL, provider TEXT NOT NULL,
+                expires_at REAL NOT NULL);
+            """
+        )
+        await h.db.conn.execute(
+            "INSERT INTO oauth_link_tickets VALUES (?, ?, 'github', ?)", (social._hash("legacy-ticket"), uid, time.time() + 60)
+        )
+        await h.db.conn.commit()
+        social._initialized.discard(h.db.conn)
+        legacy = await h.client.get("/api/v1/auth/oauth/github/start", params={"link": "legacy-ticket"})
+        assert legacy.status_code == 303 and "invalid_state" in legacy.headers["location"]
+        assert await count(h, "SELECT COUNT(*) FROM oauth_link_tickets") == 0
+        # The migrated table issues bound tickets that work.
+        assert (await connect(h, providers, "github", h.jwt(uid), "link-code-9")).get("linked") == "1"
+
+
 async def test_connect_refuses_a_provider_account_used_elsewhere(tmp_path, providers, notices) -> None:
     async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
         other = (await exchange(h, (await sign_in(h, providers, "github"))["code"])).json()["user"]["id"]
