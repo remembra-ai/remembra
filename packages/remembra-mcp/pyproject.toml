@@ -8,7 +8,7 @@ build-backend = "hatchling.build"
 # tests/test_mcp_registry_package.py; release.yml builds and publishes both.
 [project]
 name = "remembra-mcp"
-version = "0.16.0"
+version = "0.16.1"
 description = "Remembra MCP server (stdio): session handoffs between coding agents. Installs remembra[mcp]."
 readme = "README.md"
 license = "MIT"
@@ -22,7 +22,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
-dependencies = ["remembra[mcp]==0.16.0"]
+dependencies = ["remembra[mcp]==0.16.1"]
 
 [project.scripts]
 remembra-mcp = "remembra_mcp:main"

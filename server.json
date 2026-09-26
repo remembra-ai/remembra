@@ -8,13 +8,13 @@
     "source": "github"
   },
   "websiteUrl": "https://remembra.dev",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "remembra-mcp",
-      "version": "0.16.0",
+      "version": "0.16.1",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
