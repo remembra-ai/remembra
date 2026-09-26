@@ -219,7 +219,7 @@ What it checks:
 | `SERVER_UNREACHABLE` | no answer, or a 5xx |
 | `OUTBOX_QUEUED`, `OUTBOX_HELD` | handoffs waiting on this machine, by cause; one that will never be sent from here |
 | `CLOSE_FAILING` | an agent's last close failed and nothing since shows one that worked (a close, or its handoff on your trail); the background-close log shows an error. After a later brief it is only inferred |
-| `HOOKS_NOT_WRITTEN`, `UNVERIFIED_NOT_WRITTEN` | an agent here has no relay hooks (and whether `connect --apply` ever wrote there) |
+| `HOOKS_NOT_WRITTEN`, `UNVERIFIED_NOT_WRITTEN` | an agent here has no relay hooks (and whether `connect --apply` ever wrote there); an unverified adapter `connect --apply` left out is only a note |
 | `HOOKS_INCOMPLETE`, `HOOKS_STALE_COMMAND`, `CONFIG_UNREADABLE` | hooks from an older connect; hooks that call a command that is gone; a config it can't parse |
 | `CODEX_TRUST_MISSING`, `CODEX_TRUST_STALE`, `CODEX_HOOK_DISABLED`, `CODEX_TRUST_UNCHECKED` | Codex has no trust record for a hook, one for an older version of it, the hook turned off, or `config.toml` could not be read (never counted as trusted) |
 | `CODEX_AUTOMATIONS` | Codex automation runs in the last 7 days, and whether this install skips them |

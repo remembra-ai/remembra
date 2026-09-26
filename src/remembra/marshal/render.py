@@ -135,7 +135,8 @@ def hooks_word(agent: AgentSignals) -> str:
     if not agent.config_readable:
         return "config unreadable"
     if not agent.any_hooks:
-        return "hooks NOT written"
+        # connect --apply leaves an unverified adapter out unless asked: left out, not missing.
+        return "hooks NOT written" if agent.verified else "hooks left out"
     if not agent.core_written:
         return "hooks partly written"
     if agent.missing_binary:

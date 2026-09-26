@@ -556,10 +556,13 @@ def rule_hooks(sig: Signals) -> list[Finding]:
                 evidence.append(f"{agent.mcp_path}: remembra MCP server set up (remembra-install ran)")
             if agent.backup:
                 evidence.append(f"{agent.backup}: connect --apply wrote here once; the hooks were removed since")
-            elif not agent.any_hooks:
+            elif not agent.any_hooks and agent.verified:
                 evidence.append(
                     "no *.bak-relay-* backup here: connect --apply never wrote this file (dry run only, or never run)"
                 )
+            elif not agent.any_hooks:
+                # connect --apply skips an unverified adapter on purpose: no backup says nothing about a dry run.
+                evidence.append("connect --apply leaves unverified adapters out unless you add --include-unverified")
             if agent.verified:
                 out.append(
                     Finding(
@@ -577,7 +580,9 @@ def rule_hooks(sig: Signals) -> list[Finding]:
                 out.append(
                     Finding(
                         "UNVERIFIED_NOT_WRITTEN",
-                        WARN,
+                        # None written is the default connect --apply chose (setup.md asks first): a note. Some
+                        # written means they were asked for, and are incomplete: that needs you.
+                        WARN if agent.any_hooks else INFO,
                         name,
                         f"{agent.display}: hooks not written. {words.unverified_line(name)}",
                         (*evidence, f"adapter: {agent.notes}"),

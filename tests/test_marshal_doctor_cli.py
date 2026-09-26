@@ -194,6 +194,33 @@ def test_a_close_fixed_before_a_brief_is_not_reported_as_failing(server: str, tm
     assert offline.returncode == 0
 
 
+def test_an_unverified_adapter_left_out_by_connect_is_a_note(tmp_path: Path) -> None:
+    """setup.md step 7: connect --apply leaves Gemini CLI out unless asked. The doctor then notes it, never [!!]."""
+    fh = FakeHome(tmp_path)
+    fh.credentials()
+    fh.install("claude", "codex", "gemini")
+    for folder in (".claude", ".codex", ".gemini"):
+        (fh.home / folder).mkdir()
+    path = {"PATH": f"{fh.bin}:/usr/bin:/bin"}  # only the agents installed here, not this machine's own
+    applied = cli(fh, "connect", "--apply", "--relay-command", fh.relay, env=path)
+    assert applied.returncode == 0, applied.stderr
+    assert "skipped: unverified adapter" in applied.stdout
+    fh.trust_codex()  # what /hooks in Codex writes
+    out = cli(fh, "doctor", "--no-server", "--format", "json", env=path)
+    data = json.loads(out.stdout)
+    _check_json(data)
+    note = next(f for f in data["findings"] if f["id"] == "UNVERIFIED_NOT_WRITTEN")
+    assert (note["agent"], note["severity"], note["marker"]) == ("gemini", "info", "")
+    assert not any("dry run" in e for e in note["evidence"]), note["evidence"]
+    assert "connect --apply leaves unverified adapters out unless you add --include-unverified" in note["evidence"]
+    assert note["fix"]["command"] == "remembra-relay connect --apply --agent gemini --include-unverified"
+    assert (out.returncode, data["exit_code"], data["things_to_do"]) == (0, 0, 0)
+    text = cli(fh, "doctor", "--no-server", env={**path, "NO_COLOR": "1"})
+    assert text.returncode == 0 and "Nothing to do." in text.stdout and "[!!]" not in text.stdout, text.stdout
+    assert "○ gemini       hooks left out · unverified" in text.stdout
+    _check_text(text.stdout)
+
+
 def test_usage_errors_exit_2(tmp_path: Path) -> None:
     fh = FakeHome(tmp_path)
     bad = cli(fh, "doctor", "--agent", "notepad")

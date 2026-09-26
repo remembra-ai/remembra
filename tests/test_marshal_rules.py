@@ -341,13 +341,22 @@ def test_hooks_not_written_says_connect_only_ran_dry(fh: FakeHome) -> None:
 def test_unverified_adapter_not_written(fh: FakeHome) -> None:
     fh.credentials()
     (fh.home / ".cursor").mkdir()
-    f = only(run(fh, check_server=False), "UNVERIFIED_NOT_WRITTEN", "cursor")
-    assert (f.severity, f.inferred) == ("warn", False)
+    report = run(fh, check_server=False)
+    f = only(report, "UNVERIFIED_NOT_WRITTEN", "cursor")
+    # connect --apply leaves it out unless asked: the user's choice, a note (no [!!], not a to-do, exit 0).
+    assert (f.severity, f.inferred, f.marker, f.to_do) == ("info", False, "", False)
+    assert report.exit_code == 0
     assert f.fix is not None and f.fix.command == "remembra-relay connect --apply --agent cursor --include-unverified"
     assert f.what == (
         "Cursor: hooks not written. Cursor's adapter is built from its hook docs and has never been run against the real tool."
     )
+    assert "connect --apply leaves unverified adapters out unless you add --include-unverified" in f.evidence
+    assert not any("dry run" in e for e in f.evidence)
     assert f.caveat and "--agents-md" in f.caveat
+    # Some of its hooks written (it was asked for) but not the session's start: incomplete, that needs you.
+    fh.hooks("cursor", missing=("sessionStart",))
+    g = only(run(fh, check_server=False), "UNVERIFIED_NOT_WRITTEN", "cursor")
+    assert (g.severity, g.marker) == ("warn", "[!!]") and "~/.cursor/hooks.json: missing sessionStart" in g.evidence
 
 
 def test_hooks_that_call_a_missing_command(fh: FakeHome) -> None:
