@@ -536,6 +536,23 @@ full response lists only entities that are named in the returned memories
 
 ---
 
+## Marshal: read-only diagnosis tools
+
+These three never change anything and never return an API key. Each returns `rendered` (a monospace slip to
+show as it is) plus structured fields. On a remote transport (`sse`, `streamable-http`) `remembra_doctor` and
+`remembra_setup` answer `{"status": "local_only"}`: they read the machine the server runs on.
+
+| Tool | Purpose |
+|------|---------|
+| `remembra_doctor(agent?, check_server=true)` | Why briefs or handoffs aren't arriving on this machine: the key, the unsent-handoff queue, each agent's hooks, Codex hook trust, and (with `check_server`) at most four GETs of your trail. Each finding has `evidence`, `inferred`, and one `fix` with `runs_where` (`agent_ok`, `user_terminal`, `codex_ui`, `dashboard`). Same rules as `remembra-relay doctor`. |
+| `remembra_setup(agents?)` | The install and connect steps for this machine's OS and agents, each with its command (from a fixed set), where it runs, what it writes and whether it is already done. The key step is always the user's. |
+| `remembra_help(question)` | An answer quoted from the relay guide and the plans page (`answered`), the page to read for refunds, security, privacy and similar topics (`read_the_page`), or `cant_confirm`. |
+
+The `doctor` prompt (Claude Code: `/mcp__remembra__doctor`) runs `remembra_doctor` and walks the fixes one at a
+time. See [Doctor](../guides/relay.md#doctor).
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Description |

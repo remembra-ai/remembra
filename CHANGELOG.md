@@ -33,6 +33,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write-ups, a feedback transcript and the competitor scan): `mkdocs.yml` excludes them and a test keeps the
   list. The feedback transcript left the public repository.
 
+### Added
+
+- **`remembra-relay doctor`: where the baton dropped.** When a brief doesn't arrive or a handoff never reaches
+  the trail, the doctor reads this machine and your trail and prints an exchange slip: every agent as a station,
+  the last handoff, each read with its result, and for each problem the evidence, one fix and the re-check.
+  Each verdict is marked proven (`[!!]`) or inferred (`[??]`). It checks the key (and whether the server
+  accepts it, or a firewall in front of it answered instead), the unsent-handoff queue by cause, closes that
+  keep failing (with the background-close log, secrets redacted), each agent's hooks (missing, from an older
+  connect, calling a command that is gone, or never written because `connect` only ran as a dry run), Codex
+  hook trust (read from `~/.codex/config.toml` against the current hooks with the hash Codex computes; an
+  unreadable file is "unchecked", never trusted), Codex automation runs, a `REMEMBRA_PROJECT` that sends every
+  new repository to one project, and agents that picked up briefs but never handed off. It only reads: at most
+  four GET requests with your own key, never a brief, recall or write. `--agent`, `--no-server`,
+  `--format json`; exit 1 when something proven needs you.
+- **MCP tools `remembra_doctor`, `remembra_setup` and `remembra_help`** (local MCP server): the same doctor
+  inside your agent, the exact install and connect steps for this machine's OS and agents (steps already done
+  are marked), and answers quoted from the relay guide and the plans page, or "can't confirm". None of them
+  changes anything; fixes that involve your key are for your own terminal. Claude Code: `/mcp__remembra__doctor`.
+- **`remembra-relay connect` ends with "You still need to"** when something is left: saving a key, `--apply`
+  after a dry run, unverified adapters it skipped, and trusting the hooks in Codex (checked, not assumed). When
+  nothing is left it prints no list.
+
+### Changed
+
+- The brief's queued-handoff and rejected-key notices end with "Ask your agent to run remembra_doctor, or run
+  `remembra-relay doctor`."
+- The MCP `store-summary` prompt closes the session with `close_session` and facts (it used to ask for a
+  free-form `store_memory` handoff); `setup-check` also runs `remembra_doctor`.
+
 ## [0.16.0] - 2026-09-26 - Remembra Relay
 
 **Remembra Relay: one agent stops, the next one already knows.** When a session ends, `remembra-relay close`
