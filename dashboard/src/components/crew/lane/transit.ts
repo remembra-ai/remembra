@@ -1,6 +1,6 @@
 // Geometry and wording for the baton pass (BatonTransit). Pure functions.
 
-import type { BatonEntry } from '../../../lib/crew/types';
+import type { BatonEntry, CrewEvent } from '../../../lib/crew/types';
 
 export interface Point {
   x: number;
@@ -60,4 +60,37 @@ export function batonText(baton: BatonEntry, callsignOf: (sessionId: string | nu
   if (baton.restored === true) text += ' · work restored ✓';
   else if (baton.restored === false && baton.baton_ref) text += ' · saved work not restored yet';
   return text;
+}
+
+/** The newest `crew.mode_changed` → multi after `afterSeq` (the "Crew assembled" moment, §9.13), or null. */
+export function assembledEvent(events: readonly CrewEvent[], afterSeq: number): CrewEvent | null {
+  let found: CrewEvent | null = null;
+  for (const e of events) {
+    if (e.seq > afterSeq && e.type === 'crew.mode_changed' && e.payload?.to === 'multi' && (!found || e.seq > found.seq)) found = e;
+  }
+  return found;
+}
+
+/**
+ * How one baton pass plays (§9.13), given what the delight gate said:
+ * `wait` (retry shortly: a dialog is open, or another animation is running, up to `maxWaitMs`),
+ * `instant` (no travel: refused while a needs-you item is open, reduced motion, nothing to draw
+ * between, or waited too long), `animate` (the 600 ms bezier).
+ */
+export type PassPlan = 'wait' | 'instant' | 'animate';
+
+export function planPass(input: {
+  dialogOpen: boolean;
+  waitedMs: number;
+  maxWaitMs: number;
+  /** The gate's answer; null when it was not asked (a dialog is open and we still wait). */
+  grant: { ms: number } | 'busy' | 'needs_you_open' | null;
+  canDraw: boolean;
+}): PassPlan {
+  const patient = input.waitedMs < input.maxWaitMs;
+  if (input.dialogOpen && patient) return 'wait';
+  if (input.grant === 'busy') return patient ? 'wait' : 'instant';
+  if (input.grant === null || input.grant === 'needs_you_open') return 'instant';
+  if (input.grant.ms === 0 || !input.canDraw || input.dialogOpen) return 'instant';
+  return 'animate';
 }

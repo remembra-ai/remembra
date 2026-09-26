@@ -159,7 +159,7 @@ async def test_quota_stop_reaches_webhook_and_email_with_signed_copy(tmp_path):
     assert body["kind"] == "handoff" and body["crew_id"] == CREW_A and body["project_id"] == "yaadbooks"
     expected = "cc-1 stopped (billing_error, reported). Work saved; zone pos reserved for the next pickup."
     assert body["items"][0]["text"] == expected
-    assert body["items"][0]["link"].endswith(f"/#/crews/{CREW_A}/feed?seq={body['items'][0]['seq']}")
+    assert body["items"][0]["link"].endswith(f"/#/crew?project=yaadbooks&view=feed&seq={body['items'][0]['seq']}")
     assert delivery.headers["X-Remembra-Delivery"] == body["id"]
     [mail] = email.sent
     assert mail.to == "mani@example.com" and expected in mail.html and "yaadbooks" in mail.subject
@@ -400,3 +400,22 @@ async def test_lifespan_delivers_a_quota_webhook_within_five_seconds(tmp_path):
         assert body["items"][0]["text"].startswith("cc-1 stopped (billing_error, reported)")
         assert app.state.crew_notifier is not None
     assert app.state.crew_notifier is None
+
+
+def test_deep_links_use_the_dashboard_crew_route(monkeypatch):
+    """§9.12: the link opens the exact item. The format is the one ``lib/nav.ts`` parseHash and
+    ``lib/crew/routes.ts`` parseCrewRoute read (the same literals are asserted in routes.test.ts)."""
+    monkeypatch.setenv(notify.DASHBOARD_URL_ENV, "https://app.remembra.dev/")
+    assert (
+        notify.deep_link("yaadbooks", 1042, "handoff") == "https://app.remembra.dev/#/crew?project=yaadbooks&view=feed&seq=1042"
+    )
+    assert (
+        notify.deep_link("yaadbooks", 7, "zone_change") == "https://app.remembra.dev/#/crew?project=yaadbooks&view=policy&seq=7"
+    )
+    assert notify.deep_link("yaadbooks", 8, "decision") == "https://app.remembra.dev/#/crew?project=yaadbooks&view=channel&seq=8"
+    assert (
+        notify.deep_link("yaadbooks", 9, "task_done", {"report_id": "rpt_0123456789abcdef"})
+        == "https://app.remembra.dev/#/crew?project=yaadbooks&view=report&report=rpt_0123456789abcdef&seq=9"
+    )
+    assert notify.deep_link("yaadbooks", 9, "task_done", {}).endswith("#/crew?project=yaadbooks&view=feed&seq=9")
+    assert notify.deep_link("my proj/x", 3).endswith("#/crew?project=my+proj%2Fx&view=feed&seq=3")

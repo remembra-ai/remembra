@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { useCrewSocket } from '../../hooks/useCrewSocket';
 import { useNow, useResource } from '../../hooks/useResource';
 import { crewApi } from '../../lib/crew/api';
+import { useNeedsYouOpen } from '../../lib/crew/delight';
 import { flowErrorMessage } from '../../lib/crew/commands';
 import { crewHref, inboxHref, type CrewScreen } from '../../lib/crew/routes';
 import { callsignOf, liveSessions } from '../../lib/crew/selectors';
@@ -21,6 +22,7 @@ import type { CrewEvent, CrewState, DecisionView, InboxItemView } from '../../li
 import { absoluteTime, parseServerTime } from '../../lib/time';
 import { Card, ErrorNotice, TrailSkeleton } from '../../components/relay/ui';
 import { BatonTransit } from '../../components/crew/BatonTransit';
+import { CrewAssembled } from '../../components/crew/CrewAssembled';
 import { ActionDialog, type ActionRequest } from '../../components/crew/lane/ActionDialog';
 import { buildStrip } from '../../components/crew/lane/activity';
 import { CrewLane } from '../../components/crew/lane/CrewLane';
@@ -95,12 +97,13 @@ function TrackHeader({
               <span title="Project enforcement level (only a human can lower it)">{state.crew?.enforcement ?? 'enforce'}</span>
             </p>
           </div>
+          {/* Not a live region: its seq changes with every event (§9.16: one polite, one assertive region only). */}
           <span
             className="inline-flex items-center gap-2 rounded-[2px] border border-rule bg-panel px-2 py-1 font-mono text-[11px] text-ink-2"
-            role="status"
-            aria-label={`Connection: ${conn.text}`}
+            aria-live="off"
           >
             <span aria-hidden="true" className={clsx('h-2 w-2', conn.live ? 'rr-pulse bg-signal' : 'bg-ink-3')} />
+            <span className="sr-only">Connection: </span>
             {conn.text} · seq {state.last_seq}
           </span>
         </div>
@@ -298,6 +301,8 @@ export function MissionControl({ crewId, project }: { crewId: string; project: s
   }, [sessions, activity.events, nowMs]);
   const sources = useMemo(() => quotaSources(activity.events), [activity.events]);
   const callsign = useCallback((sid: string | null | undefined) => (state ? (callsignOf(state, sid) ?? 'an agent') : 'an agent'), [state]);
+  // §9.13: no delight moment while this crew has a needs-you item open (the rail shows it)
+  useNeedsYouOpen((state?.inbox_counts.project ?? 0) > 0);
 
   if (crew.status === 'not_found') return <ErrorNotice error={crew.error} what={`the ${project} crew`} />;
   if (!state) {
@@ -324,6 +329,7 @@ export function MissionControl({ crewId, project }: { crewId: string; project: s
               canAct={canAct}
               quotaSource={sources.get(s.id) ?? null}
               onRequest={setRequest}
+              presenceAt={crew.presenceAt[s.id] ?? null}
             />
           ))}
           {slots.map((slot) => (
@@ -343,6 +349,7 @@ export function MissionControl({ crewId, project }: { crewId: string; project: s
             </p>
           )}
           <BatonTransit batons={state.batons} containerRef={tracksRef} callsignOf={callsign} />
+          <CrewAssembled events={activity.events} sinceSeq={state.last_seq} agents={sessions.length} containerRef={tracksRef} />
         </div>
 
         <aside className="min-w-0 space-y-4" aria-label="Crew at a glance">

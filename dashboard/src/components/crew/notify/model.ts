@@ -1,7 +1,7 @@
 // Notifications model (spec §9.11): the in-app list behind the bell and the
 // human-set real-time targets (instant email, signed https webhook).
 
-import { crewHref } from '../../../lib/crew/routes';
+import { crewHashFromLink, crewHref } from '../../../lib/crew/routes';
 
 /** One row of `GET /notifications` (remembra.crew.notify.list_notifications). */
 export interface NotificationItem {
@@ -65,12 +65,19 @@ export function kindTitle(kind: string): string {
   return KIND_TITLE[kind] ?? kind.replace(/_/g, ' ');
 }
 
-/** Where a notification opens in this dashboard (the crew feed, or Needs-you for decisions and zone changes). */
-export function notificationHref(item: Pick<NotificationItem, 'kind' | 'project_id'>): string {
-  if (item.kind === 'decision') return crewHref(item.project_id, 'channel');
-  if (item.kind === 'zone_change') return crewHref(item.project_id, 'policy');
-  if (item.kind === 'task_done') return crewHref(item.project_id, 'board');
-  return crewHref(item.project_id, 'feed', { feed: { moments: item.kind === 'handoff' } });
+/**
+ * Where a notification opens in this dashboard: the server's deep link (the same one email and
+ * webhook carry, §9.12: the feed selecting the event, a report receipt, Policy or the Channel),
+ * else the crew screen for its kind with the event selected.
+ */
+export function notificationHref(item: Pick<NotificationItem, 'kind' | 'project_id'> & Partial<Pick<NotificationItem, 'link' | 'seq'>>): string {
+  const fromServer = crewHashFromLink(item.link);
+  if (fromServer) return fromServer;
+  const seq = item.seq ?? null;
+  if (item.kind === 'decision') return crewHref(item.project_id, 'channel', { seq });
+  if (item.kind === 'zone_change') return crewHref(item.project_id, 'policy', { seq });
+  if (item.kind === 'task_done') return crewHref(item.project_id, 'board', { seq });
+  return crewHref(item.project_id, 'feed', { seq });
 }
 
 /** Badge text: nothing for 0, the count up to 99, then "99+". */

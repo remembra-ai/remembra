@@ -73,6 +73,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any, Final
+from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -196,9 +197,26 @@ def dashboard_url() -> str:
     return (os.environ.get(DASHBOARD_URL_ENV) or DEFAULT_DASHBOARD_URL).rstrip("/")
 
 
-def deep_link(crew_id: str, seq: int) -> str:
-    """Opens the exact item on the dashboard feed (§9.12)."""
-    return f"{dashboard_url()}/#/crews/{crew_id}/feed?seq={int(seq)}"
+# Notification kinds whose item lives on a crew screen other than the feed (the in-app bell uses the same).
+DEEP_LINK_VIEWS: Final = {"decision": "channel", "zone_change": "policy"}
+
+
+def deep_link(project_id: str, seq: int, kind: str | None = None, payload: Mapping[str, Any] | None = None) -> str:
+    """Opens the exact item on the dashboard (§9.12).
+
+    The dashboard route is ``#/crew?project=<project_id>&view=<screen>&seq=<seq>`` (``lib/nav.ts``
+    ``parseHash`` + ``lib/crew/routes.ts`` ``parseCrewRoute``): the feed scrolls to and selects the
+    event with that seq; a finished task opens its report receipt; a zone change opens Policy (where
+    it is approved) and a decision the Channel (where it is confirmed).
+    """
+    params: dict[str, str] = {"project": project_id}
+    report_id = (payload or {}).get("report_id") if kind == "task_done" else None
+    if isinstance(report_id, str) and report_id:
+        params.update(view="report", report=report_id)
+    else:
+        params["view"] = DEEP_LINK_VIEWS.get(kind or "", "feed")
+    params["seq"] = str(int(seq))
+    return f"{dashboard_url()}/#/crew?{urlencode(params)}"
 
 
 class Lookup:
@@ -672,7 +690,7 @@ class NotificationDispatcher:
             "event_type": env["type"],
             "kind": kind,
             "text": text,
-            "link": deep_link(crew["id"], int(env["seq"])),
+            "link": deep_link(str(crew["project_id"]), int(env["seq"]), kind, env.get("payload")),
             "ts": env["ts"],
             "severity": env.get("severity"),
         }
@@ -890,7 +908,9 @@ async def list_notifications(
                     "event_type": env["type"],
                     "realtime": DEFAULT_RULES.get(kind, False),
                     "text": await render(env, lookup),
-                    "link": deep_link(str(env["crew_id"]), int(env["seq"])),
+                    "link": deep_link(
+                        str(crew_map[str(env["crew_id"])]["project_id"]), int(env["seq"]), kind, env.get("payload")
+                    ),
                     "ts": env["ts"],
                     "read": read,
                 }
