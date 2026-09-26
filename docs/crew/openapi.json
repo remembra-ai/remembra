@@ -5810,7 +5810,18 @@
               }
             ]
           },
-          "facts": {}
+          "facts": {},
+          "last_assistant_message": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
         },
         "required": [
           "error",

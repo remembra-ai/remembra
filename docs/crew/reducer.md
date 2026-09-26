@@ -67,7 +67,7 @@ The session an event concerns is `refs.session_id`, else `actor.id` when `actor.
 | `session.joined` | insert view with `presence: null` |
 | `session.state_changed` | `state = to`; `quiet_reason` = payload value if `to = quiet`, else null; `state_reason = reason` |
 | `session.recovered` | `state = active`, `quiet_reason = state_reason = null` |
-| `session.quota_blocked` | `state = quota_blocked`, `state_reason = error` |
+| `session.quota_blocked` | `state = quota_blocked` (an `ended` lane stays `ended`: a late StopFailure, S0), `state_reason = error` |
 | `session.limit_warning` | `limit = {level, pct, source}` |
 | `session.stuck` | `stuck` |
 | `session.paused` / `resumed` | `state = paused` / `state = to` |

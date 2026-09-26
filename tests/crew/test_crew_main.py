@@ -7,6 +7,8 @@ outbox worker, and then drives ``/api/v1/crews`` and ``/api/v1/session/close`` o
 
 from __future__ import annotations
 
+import hashlib
+
 import sys
 from contextlib import asynccontextmanager
 from typing import Any
@@ -127,7 +129,13 @@ def test_crew_mode_end_to_end_through_the_real_startup_hooks(tmp_path):
         async def world() -> str:
             crew_id = await seed.crew(state.crew_db, "default_user", "yaadbooks")
             await seed.session(
-                state.crew_db, crew_id, "cs_a", user_id="default_user", callsign="cc-1", client_session_id="sess-a"
+                state.crew_db,
+                crew_id,
+                "cs_a",
+                user_id="default_user",
+                callsign="cc-1",
+                client_session_id="sess-a",
+                token_hash=hashlib.sha256(b"rcs_tok-a").hexdigest(),
             )
             return crew_id
 
@@ -139,6 +147,7 @@ def test_crew_mode_end_to_end_through_the_real_startup_hooks(tmp_path):
         closed = http.post(
             "/api/v1/session/close",
             json={"agent_id": "claude-code", "session_id": "sess-a", "project_id": "yaadbooks", "facts": {"branch": "main"}},
+            headers={"X-Remembra-Crew-Session": "rcs_tok-a"},  # the session token proves the crew session (§11.2)
         )
         assert closed.status_code == 200, closed.text
         assert closed.json()["crew"]["session_left"] is True

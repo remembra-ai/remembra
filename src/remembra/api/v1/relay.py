@@ -50,6 +50,9 @@ _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+=-]{0,199}$")
 _RELATION_RE = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
 
 
+CREW_SESSION_HEADER = "X-Remembra-Crew-Session"  # the one crew session-token header (crew routes use the same)
+
+
 def _service(request: Request) -> RelayService:
     # Crew mode (when enabled, crew.startup sets these): brief crew block, crew trail
     # entries, and the crew side of a close. None when Crew mode is off.
@@ -495,6 +498,8 @@ async def close_session(
         agent_verified=verified,
         screen=lambda text: screen_text(request, text, apply_pii=False),
         scrub=pii_scrubber(request),
+        # Crew mode: the close ends the caller's crew session only with that session's token (§11.2)
+        crew_session_token=request.headers.get(CREW_SESSION_HEADER),
     )
     if result["changed"]:
         await record_relay_usage(request, current_user.user_id)

@@ -64,9 +64,9 @@ from remembra.crew.hosts import (
     tokens_match,
 )
 from remembra.crew.limits import SELF_HOSTED_CREW_LIMITS, CrewLimits, seat_for_join
+from remembra.crew.redact import Scrubber, outbound
 from remembra.crew.settings import load_settings
 from remembra.crew.store import CrewStore, crew_id_for, new_id
-from remembra.relay.handoff import redact
 
 log = structlog.get_logger(__name__)
 
@@ -93,12 +93,22 @@ ADOPTABLE_REASONS: Final = ("lost", "quota", "ended_dirty", "baton")
 # Reserve reasons the holder re-takes when it comes back (§5.1, §10.2).
 RETAKE_REASONS: Final = ("lost", "quota", "offline", "idle", "ended_dirty", "baton")
 QUOTA_ERRORS: Final = (*schemas.STOPFAILURE_QUOTA_ERRORS, "detected_limit")
-UNFINISHED_TASK_STATUSES: Final = ("claimed", "in_progress")
+# D14 (docs/crew/S0-results.md): how a StopFailure error is handled on the server.
+AUTH_ERRORS: Final = ("authentication_failed", "oauth_org_not_allowed")
+# ``rate_limit`` is a usage limit only when Claude Code's message starts with one of these (binary list
+# ``_Q5``); any other 429 ("Request rejected (429)", "Server is temporarily limiting requests") is transient.
+USAGE_LIMIT_PREFIXES: Final = ("You've hit your", "You're out of usage credits", "Your org is out of usage", "You've used")
+MAX_STALL_MESSAGE_CHARS: Final = 500
+# A StopFailure that lands after SessionEnd already ended the session still counts (S0: the order is
+# not stable, 3 of 8 runs had SessionEnd first). Stall and leave commute within this window (§10.2).
+LATE_STALL_WINDOW_S: Final = 120
+UNFINISHED_TASK_STATUSES: Final = ("claimed", "in_progress", "blocked")
 # Reservations a holder makes for itself while it is merely away (lease expiry, idle park).
 PARKED_REASONS: Final = ("idle", "offline")
 BATON_INBOX_KINDS: Final = ("baton_available", "baton_reserved", "baton_waiting")
 MAX_INJECT_CHARS: Final = schemas.TEXT_CAPS["pretool_context"]
 MAX_DELTA_EVENTS: Final = 20
+MAX_ACTIVITY_AGE_S: Final = 366 * 24 * 3600
 
 AGENT_CALLSIGN_PREFIX: Final[Mapping[str, str]] = {
     "claude-code": "cc",
@@ -253,11 +263,16 @@ def _facts_hash(facts: Any) -> str:
     return hashlib.sha256(schemas.canonical_json(facts)).hexdigest()
 
 
-def clean_facts(facts: Any) -> dict[str, Any]:
-    """Redact secrets in every string of client facts (§11 redaction) and cap the size (16 KB)."""
+def clean_facts(facts: Any, *, payload_type: str = "checkpoint", pii: Scrubber | None = None) -> dict[str, Any]:
+    """Client facts through the single outbound choke point (§11.2 ``crew.redact.outbound``), capped at 16 KB.
+
+    Stall and leave facts become command metadata (verb, never the raw command line), lose
+    stdout/stderr/output and raw hostnames, and have secrets, credentials, env-assignment values,
+    home directories and (with ``pii``) PII redacted before anything is stored or served.
+    """
     if not isinstance(facts, dict):
         return {}
-    cleaned = redact(dict(facts))
+    cleaned = outbound(payload_type, dict(facts), pii=pii)
     if not isinstance(cleaned, dict):
         return {}
     if schemas.json_size(cleaned) > schemas.MAX_CHECKPOINT_FACTS_BYTES:
@@ -268,6 +283,24 @@ def clean_facts(facts: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Views (closed shapes in schemas; every event payload is validated on emit)
 # ---------------------------------------------------------------------------
+
+
+def classify_stop_failure(error: str, last_assistant_message: str | None = None) -> str:
+    """D14: ``"quota"`` (out of credits / usage limit), ``"auth"`` (blocked on sign-in) or ``"checkpoint"`` (transient).
+
+    ``billing_error`` and the transcript detector's ``detected_limit`` are quota. ``rate_limit`` is
+    quota only when ``last_assistant_message`` starts with a usage-limit prefix; any other 429 is
+    transient. ``authentication_failed`` / ``oauth_org_not_allowed`` block the session with reason
+    ``auth`` (a human must sign in again), never "out of credits". Everything else is a checkpoint.
+    """
+    if error in AUTH_ERRORS:
+        return "auth"
+    if error == "rate_limit":
+        text = (last_assistant_message or "").replace("\u2019", "'").lstrip()
+        return "quota" if text.startswith(USAGE_LIMIT_PREFIXES) else "checkpoint"
+    if error in ("billing_error", "detected_limit"):
+        return "quota"
+    return "checkpoint"
 
 
 def session_view(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -603,6 +636,7 @@ class CrewSessions:
         limits_for: LimitsResolver = _self_hosted_limits,
         audit: AuditSink | None = None,
         boot_at: datetime | None = None,
+        pii: Scrubber | None = None,
     ) -> None:
         self.db = db
         self.log = event_log
@@ -611,6 +645,7 @@ class CrewSessions:
         self.limits_for = limits_for
         self.audit = audit
         self.boot_at = boot_at or clock()
+        self.pii = pii
 
     @property
     def conn(self) -> aiosqlite.Connection:
@@ -1040,13 +1075,27 @@ class CrewSessions:
         return adopted
 
     async def _zone_allows(self, conn: aiosqlite.Connection, claim: Mapping[str, Any], session: Mapping[str, Any]) -> bool:
-        """``reserve_for`` on a zone matches key-verified agents only (§5.1)."""
+        """Whether ``session`` may be offered or auto-adopt this baton at join (§5.1 zone rules).
+
+        ``reserve_for`` matches key-verified agents only; a ``protected`` zone moves only by a
+        human hand-over; a frozen zone and the built-in ``crew-policy`` zone never move.
+        """
         if not claim.get("zone_id"):
             return True
         zone = await _one(
-            conn, "SELECT reserve_for FROM crew_zones WHERE id = ? AND crew_id = ?", (claim["zone_id"], claim["crew_id"])
+            conn,
+            "SELECT reserve_for, protected, builtin, frozen_by, frozen_until FROM crew_zones WHERE id = ? AND crew_id = ?",
+            (claim["zone_id"], claim["crew_id"]),
         )
-        reserve_for = zone.get("reserve_for") if zone else None
+        if zone is None:
+            return True
+        if zone.get("builtin") or zone.get("protected"):
+            return False
+        if zone.get("frozen_by"):
+            until = parse_ts(zone["frozen_until"]) if zone.get("frozen_until") else None
+            if until is None or until > self.now():
+                return False
+        reserve_for = zone.get("reserve_for")
         if not reserve_for:
             return True
         return bool(session.get("agent_verified")) and session.get("agent_id") == reserve_for
@@ -1356,9 +1405,10 @@ class CrewSessions:
             return result
         # Leases renew only while alive; the holder re-takes its own offline/idle reservations.
         lease = format_ts(now + timedelta(seconds=int(settings["lease_ttl_s"])))
+        # a commons micro-lease (5 min, §5.2 row 12) ends on its own; heartbeats never extend it
         await tx.conn.execute(
             "UPDATE crew_claims SET lease_expires_at = ?, updated_at = ?"
-            " WHERE holder_session_id = ? AND state IN ('active','offered')",
+            " WHERE holder_session_id = ? AND state IN ('active','offered') AND source != 'micro_lease'",
             (lease, now_s, row["id"]),
         )
         retake: list[Mapping[str, Any]] = []
@@ -1588,11 +1638,12 @@ class CrewSessions:
                 raise SessionError(409, "session_ended", "this session has ended; join again")
             crew_id = row["crew_id"]
             alive = bool(item["alive"])
-            age = int(item.get("activity_age_s") or 0)
+            # a client age is clamped to the session's lifetime scale (a huge age must not overflow the clock)
+            age = min(max(int(item.get("activity_age_s") or 0), 0), MAX_ACTIVITY_AGE_S)
             activity_at = now - timedelta(seconds=age) if alive else None
             last_action = item.get("last_action")
             if isinstance(last_action, dict):
-                last_action = redact(dict(last_action))
+                last_action = outbound("heartbeat", dict(last_action), pii=self.pii)
             limit = item.get("limit") if isinstance(item.get("limit"), dict) else None
             await tx.conn.execute(
                 """UPDATE crew_sessions SET last_action = COALESCE(?, last_action), calls_since_checkpoint = ?,
@@ -1732,15 +1783,43 @@ class CrewSessions:
 
     # -- stall (StopFailure / detected limit) ----------------------------------------------------
 
-    async def stall(self, session: Mapping[str, Any], *, error: str, facts: Any, baton_ref: str | None) -> dict[str, Any]:
-        """``POST /sessions/{sid}/stall`` (§8.2 StopFailure). Quota errors block and hand the baton on."""
+    async def stall(
+        self,
+        session: Mapping[str, Any],
+        *,
+        error: str,
+        facts: Any,
+        baton_ref: str | None,
+        last_assistant_message: str | None = None,
+    ) -> dict[str, Any]:
+        """``POST /sessions/{sid}/stall`` (§8.2 StopFailure), classified per D14 (:func:`classify_stop_failure`).
+
+        Quota (credits, usage limit, detected limit) and auth failures block the session and hand
+        the baton on; anything else, a transient 429 included, records a checkpoint only.
+        ``last_assistant_message`` is used for this classification only: it is never stored,
+        served or injected (§11.2).
+
+        Stall and leave commute (S0: SessionEnd often arrives first): a quota or auth stall for a
+        session that ended within :data:`LATE_STALL_WINDOW_S` still raises ``session.quota_blocked``,
+        re-classifies the end's reservations as ``quota``, turns its partial reports into stalled
+        reports and queues the ``stalled:<error>`` handoff (:meth:`_late_stall`).
+        """
         now = self.now()
-        cleaned = clean_facts(facts)
+        cleaned = clean_facts(facts, payload_type="stall", pii=self.pii)
+        kind = classify_stop_failure(error, last_assistant_message)
         async with self.log.transaction() as tx:
             row = await get_session(tx.conn, session["id"])
-            if row is None or row["state"] == "ended":
+            if row is None:
                 raise SessionError(409, "session_ended", "this session has ended")
-            if error in QUOTA_ERRORS:
+            if row["state"] == "ended":
+                if not self._ended_within(row, now, LATE_STALL_WINDOW_S):
+                    raise SessionError(409, "session_ended", "this session has ended")
+                if kind == "checkpoint":
+                    return {"state": "ended", "already": True, "seq": await self._last_seq(tx.conn, row["crew_id"])}
+                return await self._late_stall(
+                    tx, row, error=error, auth=kind == "auth", facts=cleaned, baton_ref=baton_ref, now=now
+                )
+            if kind != "checkpoint":
                 if row["state"] == "quota_blocked":
                     return {"state": "quota_blocked", "already": True, "seq": await self._last_seq(tx.conn, row["crew_id"])}
                 effects = await self._quota_block(
@@ -1751,10 +1830,12 @@ class CrewSessions:
                     facts=cleaned,
                     baton_ref=baton_ref,
                     now=now,
+                    auth=kind == "auth",
                 )
                 return {
                     "state": "quota_blocked",
                     "already": False,
+                    "reason": "auth" if kind == "auth" else "quota",
                     "claims_reserved": effects.claims_reserved,
                     "tasks_stalled": effects.tasks_stalled,
                     "report_ids": effects.report_ids,
@@ -1762,7 +1843,7 @@ class CrewSessions:
                     "handoff_id": effects.handoff_id,
                     "seq": await self._last_seq(tx.conn, row["crew_id"]),
                 }
-            # Other StopFailure errors (overloaded, server_error, …) record a checkpoint only (§8.2).
+            # Other StopFailure errors (overloaded, server_error, a transient 429, …) record a checkpoint only (§8.2, D14).
             ckp = await self._checkpoint(
                 tx, row, trigger="turn", facts=cleaned, facts_source="relay-cli", headline=f"stop failure {error}", now=now
             )
@@ -1772,6 +1853,157 @@ class CrewSessions:
                 "checkpoint_id": ckp,
                 "seq": await self._last_seq(tx.conn, row["crew_id"]),
             }
+
+    @staticmethod
+    def _ended_within(row: Mapping[str, Any], now: datetime, window_s: int) -> bool:
+        ended = parse_ts(row["ended_at"]) if row.get("ended_at") else None
+        return ended is not None and (now - ended).total_seconds() <= window_s
+
+    async def _late_stall(
+        self,
+        tx: EventTx,
+        row: Mapping[str, Any],
+        *,
+        error: str,
+        auth: bool,
+        facts: dict[str, Any],
+        baton_ref: str | None,
+        now: datetime,
+    ) -> dict[str, Any]:
+        """A quota/auth StopFailure recorded after SessionEnd ended the session: the same outcome as the other order."""
+        if str(row.get("end_reason") or "").startswith("stalled:"):
+            return {"state": "ended", "already": True, "seq": await self._last_seq(tx.conn, row["crew_id"])}
+        source = "detected" if error == "detected_limit" else "reported"
+        if baton_ref:
+            await self._baton_ref_created(tx, row, baton_ref, facts, now)
+        facts_source = "relay-cli" if facts else "server-inferred"
+        if not facts:
+            facts = await self._inferred_facts(tx.conn, row, now)
+        effects = _Effects()
+        effects.checkpoint_id = await self._checkpoint(
+            tx,
+            row,
+            trigger="quota",
+            facts=facts,
+            facts_source=facts_source,
+            headline=f"quota: {_dirty_count(facts)} uncommitted files, {_unpushed_count(facts)} unpushed commits",
+            now=now,
+            task_id=row.get("current_task_id") if schemas.is_id("task", row.get("current_task_id")) else None,
+        )
+        effects.handoff_id = await self._queue_handoff(
+            tx, row, facts, facts_source, end_reason=f"stalled:{error}", checkpoint_id=effects.checkpoint_id, now=now
+        )
+        # the end reserved its claims as ended_dirty: they are quota batons (same pickup rules, quota wording)
+        now_s = format_ts(now)
+        for claim in await _all(
+            tx.conn,
+            "SELECT * FROM crew_claims WHERE holder_session_id = ? AND state = 'reserved' AND reserve_reason = 'ended_dirty'"
+            " ORDER BY created_at, id",
+            (row["id"],),
+        ):
+            await tx.conn.execute(
+                """UPDATE crew_claims SET reserve_reason = 'quota', baton_ref = COALESCE(?, baton_ref), version = version + 1,
+                       updated_at = ? WHERE id = ? AND state = 'reserved'""",
+                (baton_ref, now_s, claim["id"]),
+            )
+            fresh = await _one(tx.conn, "SELECT * FROM crew_claims WHERE id = ?", (claim["id"],))
+            assert fresh is not None
+            effects.claims_reserved.append(fresh["id"])
+            await tx.emit(
+                crew_id=row["crew_id"],
+                type="claim.reserved",
+                actor=Actor.system(),
+                payload={"claim": claim_view(fresh, now), "reason": "quota"},
+                summary=f"claim {fresh['id']} reserved (quota) for the next pickup",
+                refs={
+                    "claim_id": fresh["id"],
+                    "zone_id": fresh.get("zone_id"),
+                    "task_id": fresh.get("task_id"),
+                    "session_id": row["id"],
+                },
+                now=now,
+            )
+        # the end's partial reports become the stalled report the quota order writes (one current report per task)
+        for task in await _all(
+            tx.conn, "SELECT * FROM crew_tasks WHERE owner_session_id = ? AND status = 'stalled' ORDER BY number", (row["id"],)
+        ):
+            report_id = await self._write_report(
+                tx, row, task, "stalled", facts, facts_source, baton_ref, effects.handoff_id, now
+            )
+            await tx.conn.execute(
+                "UPDATE crew_tasks SET current_report_id = ?, version = version + 1, updated_at = ? WHERE id = ?",
+                (report_id, now_s, task["id"]),
+            )
+            effects.tasks_stalled.append(task["id"])
+            effects.report_ids.append(report_id)
+        reason = "auth" if auth else "quota"
+        keys = (
+            {
+                c.get("task_id") or c["id"]
+                for c in await _all(
+                    tx.conn,
+                    "SELECT id, task_id FROM crew_claims WHERE id IN (" + _marks(effects.claims_reserved) + ")",
+                    tuple(effects.claims_reserved),
+                )
+            }
+            if effects.claims_reserved
+            else set()
+        )
+        for key in sorted(keys | set(effects.tasks_stalled)):
+            await self._raise_baton_items(tx, row, key, reason, now)
+        await tx.conn.execute(
+            """UPDATE crew_sessions SET end_reason = ?, state_reason = ?,
+                   limit_level = CASE WHEN ? THEN limit_level ELSE 'exhausted' END,
+                   limit_source = CASE WHEN ? THEN limit_source ELSE ? END WHERE id = ?""",
+            (f"stalled:{error}"[:64], reason if auth else error[:64], 1 if auth else 0, 1 if auth else 0, source, row["id"]),
+        )
+        await self._emit_quota_blocked(
+            tx, row, error=error, source=source, baton_ref=baton_ref, effects=effects, auth=auth, now=now
+        )
+        return {
+            "state": "ended",
+            "already": False,
+            "reason": reason,
+            "late": True,
+            "claims_reserved": effects.claims_reserved,
+            "tasks_stalled": effects.tasks_stalled,
+            "report_ids": effects.report_ids,
+            "checkpoint_id": effects.checkpoint_id,
+            "handoff_id": effects.handoff_id,
+            "seq": await self._last_seq(tx.conn, row["crew_id"]),
+        }
+
+    async def _emit_quota_blocked(
+        self,
+        tx: EventTx,
+        row: Mapping[str, Any],
+        *,
+        error: str,
+        source: str,
+        baton_ref: str | None,
+        effects: _Effects,
+        auth: bool,
+        now: datetime,
+    ) -> None:
+        summary = (
+            f"{row['callsign']} blocked: sign-in failed ({_word(error)}, {source})"
+            if auth
+            else f"{row['callsign']} out of credits ({_word(error)}, {source})"
+        )
+        await tx.emit(
+            crew_id=row["crew_id"],
+            type="session.quota_blocked",
+            actor=session_actor(row),
+            payload={
+                "error": error[:64],
+                "source": source,
+                "baton_ref": baton_ref,
+                "claims_reserved": effects.claims_reserved[:50],
+            },
+            summary=summary,
+            refs={"session_id": row["id"]},
+            now=now,
+        )
 
     async def _last_seq(self, conn: aiosqlite.Connection, crew_id: str) -> int:
         head = await _one(conn, "SELECT last_seq FROM crews WHERE id = ?", (crew_id,))
@@ -1787,13 +2019,22 @@ class CrewSessions:
         facts: Mapping[str, Any],
         baton_ref: str | None,
         now: datetime,
+        auth: bool = False,
     ) -> _Effects:
         now_s = format_ts(now)
-        cur = await tx.conn.execute(
-            """UPDATE crew_sessions SET state = 'quota_blocked', state_reason = ?, quiet_reason = NULL,
-                   limit_level = 'exhausted', limit_source = ?, last_activity_at = ? WHERE id = ? AND state = ?""",
-            (error[:64], source, now_s, row["id"], row["state"]),
-        )
+        if auth:
+            # blocked on sign-in (D14): a human must log in again; not "out of credits", no limit meter change
+            cur = await tx.conn.execute(
+                """UPDATE crew_sessions SET state = 'quota_blocked', state_reason = 'auth', quiet_reason = NULL,
+                       last_activity_at = ? WHERE id = ? AND state = ?""",
+                (now_s, row["id"], row["state"]),
+            )
+        else:
+            cur = await tx.conn.execute(
+                """UPDATE crew_sessions SET state = 'quota_blocked', state_reason = ?, quiet_reason = NULL,
+                       limit_level = 'exhausted', limit_source = ?, last_activity_at = ? WHERE id = ? AND state = ?""",
+                (error[:64], source, now_s, row["id"], row["state"]),
+            )
         if cur.rowcount != 1:
             return _Effects()
         facts_source = "relay-cli" if facts else "server-inferred"
@@ -1814,19 +2055,8 @@ class CrewSessions:
             handoff=True,
             now=now,
         )
-        await tx.emit(
-            crew_id=row["crew_id"],
-            type="session.quota_blocked",
-            actor=session_actor(row),
-            payload={
-                "error": error[:64],
-                "source": source,
-                "baton_ref": baton_ref,
-                "claims_reserved": effects.claims_reserved[:50],
-            },
-            summary=f"{row['callsign']} out of credits ({_word(error)}, {source})",
-            refs={"session_id": row["id"]},
-            now=now,
+        await self._emit_quota_blocked(
+            tx, row, error=error, source=source, baton_ref=baton_ref, effects=effects, auth=auth, now=now
         )
         return effects
 
@@ -1967,33 +2197,8 @@ class CrewSessions:
             task_id=row.get("current_task_id") if schemas.is_id("task", row.get("current_task_id")) else None,
         )
         if handoff:
-            effects.handoff_id = await self.store.enqueue_outbox(
-                row["crew_id"],
-                "relay_handoff",
-                {
-                    "user_id": row["user_id"],
-                    "project_id": (await self._crew(row["crew_id"]))["project_id"],
-                    "agent_id": row["agent_id"],
-                    "session_id": row["session_id"],
-                    "facts": {**facts, "facts_source": facts_source},
-                    "end_reason": end_reason,
-                    "agent_verified": bool(row.get("agent_verified")),
-                },
-                dedupe_key=f"{row['id']}:{end_reason}:{effects.checkpoint_id}",
-            )
-            await tx.emit(
-                crew_id=row["crew_id"],
-                type="handoff.created",
-                actor=Actor.system(),
-                payload={
-                    "handoff_id": effects.handoff_id,
-                    "end_reason": end_reason[:80],
-                    "facts_source": facts_source,
-                    "task_id": None,
-                },
-                summary=f"handoff queued for {row['callsign']} ({_word(end_reason.split(':')[0])})",
-                refs={"session_id": row["id"]},
-                now=now,
+            effects.handoff_id = await self._queue_handoff(
+                tx, row, facts, facts_source, end_reason=end_reason, checkpoint_id=effects.checkpoint_id, now=now
             )
         reserved = await self._reserve_claims(tx, row, reserve_reason, baton_ref, settings, now)
         effects.claims_reserved = [c["id"] for c in reserved]
@@ -2012,7 +2217,56 @@ class CrewSessions:
         baton_keys = {c.get("task_id") or c["id"] for c in reserved} | set(effects.tasks_stalled)
         for key in sorted(baton_keys):
             await self._raise_baton_items(tx, row, key, reserve_reason, now)
+        await self._promote_queue(tx, row["crew_id"])
         return effects
+
+    async def _queue_handoff(
+        self,
+        tx: EventTx,
+        row: Mapping[str, Any],
+        facts: Mapping[str, Any],
+        facts_source: str,
+        *,
+        end_reason: str,
+        checkpoint_id: str | None,
+        now: datetime,
+    ) -> str:
+        """Queue the relay handoff through the crew outbox (D35) and record ``handoff.created``."""
+        handoff_id = await self.store.enqueue_outbox(
+            row["crew_id"],
+            "relay_handoff",
+            {
+                "user_id": row["user_id"],
+                "project_id": (await self._crew(row["crew_id"]))["project_id"],
+                "agent_id": row["agent_id"],
+                "session_id": row["session_id"],
+                "facts": {**facts, "facts_source": facts_source},
+                "end_reason": end_reason,
+                "agent_verified": bool(row.get("agent_verified")),
+            },
+            dedupe_key=f"{row['id']}:{end_reason}:{checkpoint_id}",
+        )
+        await tx.emit(
+            crew_id=row["crew_id"],
+            type="handoff.created",
+            actor=Actor.system(),
+            payload={
+                "handoff_id": handoff_id,
+                "end_reason": end_reason[:80],
+                "facts_source": facts_source,
+                "task_id": None,
+            },
+            summary=f"handoff queued for {row['callsign']} ({_word(end_reason.split(':')[0])})",
+            refs={"session_id": row["id"]},
+            now=now,
+        )
+        return handoff_id
+
+    async def _promote_queue(self, tx: EventTx, crew_id: str) -> list[str]:
+        """Queued claims whose blocker just ended become active, FIFO (§5.1), in this transaction."""
+        from remembra.crew import claims as crew_claims
+
+        return await crew_claims.promote_queue_in(tx, crew_id)
 
     async def _reserve_claims(
         self,
@@ -2045,6 +2299,10 @@ class CrewSessions:
                 if release_pending:
                     await self._release_claim(tx, row, claim, f"session_{reason}", now, actor=Actor.system())
                 continue
+            if claim.get("source") == "micro_lease":
+                # a commons micro-lease serializes one write for 5 min; it is never a baton (claims.reserve_session_claims)
+                await self._expire_claim(tx, row, claim, reason, now)
+                continue
             expires = self._reserve_expiry(claim, settings, now)
             cur = await tx.conn.execute(
                 """UPDATE crew_claims SET state = 'reserved', reserve_reason = ?, reserved_for = ?, reserve_expires_at = ?,
@@ -2074,6 +2332,30 @@ class CrewSessions:
                 now=now,
             )
         return reserved
+
+    async def _expire_claim(
+        self, tx: EventTx, row: Mapping[str, Any], claim: Mapping[str, Any], end_reason: str, now: datetime
+    ) -> bool:
+        now_s = format_ts(now)
+        cur = await tx.conn.execute(
+            """UPDATE crew_claims SET state = 'expired', ended_at = ?, end_reason = ?, version = version + 1, updated_at = ?
+                WHERE id = ? AND state IN ('active','offered')""",
+            (now_s, end_reason[:64], now_s, claim["id"]),
+        )
+        if cur.rowcount != 1:
+            return False
+        fresh = await _one(tx.conn, "SELECT * FROM crew_claims WHERE id = ?", (claim["id"],))
+        assert fresh is not None
+        await tx.emit(
+            crew_id=row["crew_id"],
+            type="claim.expired",
+            actor=Actor.system(),
+            payload={"claim": claim_view(fresh, now)},
+            summary=f"micro-lease {fresh['id']} ended ({_word(end_reason)})",
+            refs={"claim_id": fresh["id"], "zone_id": fresh.get("zone_id"), "session_id": row["id"]},
+            now=now,
+        )
+        return True
 
     @staticmethod
     def _reserve_expiry(claim: Mapping[str, Any], settings: Mapping[str, Any], now: datetime) -> str | None:
@@ -2126,6 +2408,40 @@ class CrewSessions:
     ) -> str:
         """Task → ``stalled`` with exactly one current report (§5.4, §5.6 invariant)."""
         now_s = format_ts(now)
+        report_id = await self._write_report(tx, row, task, report_kind, facts, facts_source, baton_ref, handoff_id, now)
+        await tx.conn.execute(
+            """UPDATE crew_tasks SET status = 'stalled', status_before_stall = ?, stalled_at = ?, current_report_id = ?,
+                   version = version + 1, updated_at = ?
+                WHERE id = ? AND status = ?""",
+            (task["status"], now_s, report_id, now_s, task["id"], task["status"]),
+        )
+        fresh = await _one(tx.conn, "SELECT * FROM crew_tasks WHERE id = ?", (task["id"],))
+        assert fresh is not None
+        await tx.emit(
+            crew_id=row["crew_id"],
+            type="task.stalled",
+            actor=Actor.system(),
+            payload={"task": await task_view(tx.conn, fresh), "reason": report_kind},
+            summary=f"T-{task['number']} stalled ({row['callsign']})",
+            refs={"task_id": task["id"], "session_id": row["id"], "report_id": report_id},
+            now=now,
+        )
+        return report_id
+
+    async def _write_report(
+        self,
+        tx: EventTx,
+        row: Mapping[str, Any],
+        task: Mapping[str, Any],
+        report_kind: str,
+        facts: Mapping[str, Any],
+        facts_source: str,
+        baton_ref: str | None,
+        handoff_id: str | None,
+        now: datetime,
+    ) -> str:
+        """Supersede the task's current report and insert a ``stalled``/``partial`` one (``report.submitted``)."""
+        now_s = format_ts(now)
         report_id = new_id("report")
         digest = _facts_hash({"kind": report_kind, "task": task["id"], "facts": dict(facts), "at": now_s})
         for prev in await _all(tx.conn, "SELECT * FROM crew_reports WHERE task_id = ? AND is_current = 1", (task["id"],)):
@@ -2176,15 +2492,8 @@ class CrewSessions:
                 now_s,
             ),
         )
-        await tx.conn.execute(
-            """UPDATE crew_tasks SET status = 'stalled', status_before_stall = ?, stalled_at = ?, current_report_id = ?,
-                   version = version + 1, updated_at = ?
-                WHERE id = ? AND status = ?""",
-            (task["status"], now_s, report_id, now_s, task["id"], task["status"]),
-        )
         stored = await _one(tx.conn, "SELECT * FROM crew_reports WHERE id = ?", (report_id,))
-        fresh = await _one(tx.conn, "SELECT * FROM crew_tasks WHERE id = ?", (task["id"],))
-        assert stored is not None and fresh is not None
+        assert stored is not None
         await tx.emit(
             crew_id=row["crew_id"],
             type="report.submitted",
@@ -2192,15 +2501,6 @@ class CrewSessions:
             payload={"report": report_view(stored)},
             summary=f"{report_kind} report for T-{task['number']} ({facts_source})",
             refs={"report_id": report_id, "task_id": task["id"], "session_id": row["id"]},
-            now=now,
-        )
-        await tx.emit(
-            crew_id=row["crew_id"],
-            type="task.stalled",
-            actor=Actor.system(),
-            payload={"task": await task_view(tx.conn, fresh), "reason": report_kind},
-            summary=f"T-{task['number']} stalled ({row['callsign']})",
-            refs={"task_id": task["id"], "session_id": row["id"], "report_id": report_id},
             now=now,
         )
         return report_id
@@ -2412,13 +2712,23 @@ class CrewSessions:
         report. The session ends.
         """
         now = self.now()
-        cleaned = clean_facts(facts)
+        cleaned = clean_facts(facts, payload_type="checkpoint", pii=self.pii)
         async with self.log.transaction() as tx:
             row = await get_session(tx.conn, session["id"])
             if row is None:
                 raise SessionError(404, "not_found", "Not found.")
             if row["state"] == "ended":
-                return {"state": "ended", "already": True, "seq": await self._last_seq(tx.conn, row["crew_id"])}
+                # another path (the relay close, a late stall) ended it first: the baton ref crewd made
+                # for this SessionEnd still belongs on the batons and reports the end left behind
+                applied = False
+                if baton_ref and self._ended_within(row, now, LATE_STALL_WINDOW_S):
+                    applied = await self._apply_late_baton_ref(tx, row, baton_ref, cleaned, now)
+                return {
+                    "state": "ended",
+                    "already": True,
+                    "baton_ref_applied": applied,
+                    "seq": await self._last_seq(tx.conn, row["crew_id"]),
+                }
             if reason in ("process_exited", "orphaned"):
                 if row["state"] != "lost":
                     await self.mark_lost(tx, row, "process_exited", now, baton_ref=baton_ref, handoff=False)
@@ -2484,7 +2794,51 @@ class CrewSessions:
         ):
             if await self._release_claim(tx, row, claim, "session_ended", now, actor=session_actor(row)):
                 effects.claims_released.append(claim["id"])
+        await self._promote_queue(tx, row["crew_id"])
         return effects
+
+    async def _apply_late_baton_ref(
+        self, tx: EventTx, row: Mapping[str, Any], baton_ref: str, facts: Mapping[str, Any], now: datetime
+    ) -> bool:
+        """Attach a SessionEnd baton ref to what an earlier end reserved (idempotent). True when it changed anything."""
+        if not re.fullmatch(schemas.BATON_REF_PATTERN, baton_ref):
+            raise SessionError(422, "invalid_baton_ref", "baton_ref must be refs/remembra/baton/<T-n|session>/<seq>")
+        now_s = format_ts(now)
+        claims = await _all(
+            tx.conn,
+            "SELECT * FROM crew_claims WHERE holder_session_id = ? AND state = 'reserved' AND baton_ref IS NULL"
+            " ORDER BY created_at, id",
+            (row["id"],),
+        )
+        if not claims:
+            return False
+        await self._baton_ref_created(tx, row, baton_ref, facts, now)
+        for claim in claims:
+            await tx.conn.execute(
+                "UPDATE crew_claims SET baton_ref = ?, version = version + 1, updated_at = ? WHERE id = ? AND state = 'reserved'",
+                (baton_ref, now_s, claim["id"]),
+            )
+            fresh = await _one(tx.conn, "SELECT * FROM crew_claims WHERE id = ?", (claim["id"],))
+            assert fresh is not None
+            reason = fresh.get("reserve_reason") if fresh.get("reserve_reason") in schemas.RESERVE_REASONS else "ended_dirty"
+            await tx.emit(
+                crew_id=row["crew_id"],
+                type="claim.reserved",
+                actor=Actor.system(),
+                payload={"claim": claim_view(fresh, now), "reason": reason},
+                summary=f"claim {fresh['id']} reserved ({reason}) with saved work",
+                refs={
+                    "claim_id": fresh["id"],
+                    "zone_id": fresh.get("zone_id"),
+                    "task_id": fresh.get("task_id"),
+                    "session_id": row["id"],
+                },
+                now=now,
+            )
+        keys = {c.get("task_id") or c["id"] for c in claims}
+        for key in sorted(keys):
+            await self._raise_baton_items(tx, row, key, "ended_dirty", now)
+        return True
 
     async def _end_session(
         self, tx: EventTx, row: Mapping[str, Any], reason: str, now: datetime, *, actor: Actor, effects: _Effects | None = None
@@ -2690,6 +3044,7 @@ class CrewSessions:
                     now=now,
                 )
             await self._resolve_baton_items(tx, row["crew_id"], released, actor, now)
+            await self._promote_queue(tx, row["crew_id"])
             seq = await self._last_seq(tx.conn, row["crew_id"])
         await self._audit(
             {

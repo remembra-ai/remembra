@@ -26,7 +26,8 @@ resolve automatically when the overlap disappears (footprint landed or gone, cla
 when an agent resolves them, or when a human dismisses them.
 
 Interface for WP-4 / WP-6 / WP-9: call :func:`record_footprints` in the heartbeat, checkpoint
-or close transaction; :func:`set_footprint_state` when commits land; and
+or close transaction (the heartbeat does it through :func:`heartbeat_sink`, registered with
+``crew.sessions.register_footprint_sink``); :func:`set_footprint_state` when commits land; and
 :func:`record_unattributed_change` / :func:`record_merge_conflict_risk` from the git gates.
 """
 
@@ -255,12 +256,16 @@ async def record_footprints(
     crew_id: str,
     session: Mapping[str, Any],
     footprints: Sequence[Mapping[str, Any]],
+    *,
+    count_touch: bool = True,
 ) -> list[dict[str, Any]]:
     """Upsert a session's footprints and open the collisions they cause (inside the caller's transaction).
 
     Each footprint is ``{path, state, attribution, claim_epoch?, last_commit?, worktree_id?}``;
     ``path`` is repo-relative. ``worktree_id`` defaults to the session's (crewd sets it when the
-    write landed in another checkout). Returns the collisions opened now.
+    write landed in another checkout). Returns the collisions opened now. ``count_touch=False``
+    when the caller already upserted the rows in this transaction (the heartbeat sink), so a
+    heartbeat counts one touch per path, not two.
     """
     if session["crew_id"] != crew_id:
         raise CrewOpError(422, "cross_crew_reference", "The session is not part of this crew.")
@@ -284,13 +289,26 @@ async def record_footprints(
         await conn.execute(
             """INSERT INTO crew_footprints (crew_id, session_id, path, zone_ids, first_at, last_at, touches, state, attribution,
                    claim_epoch, last_commit, worktree_id) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
-               ON CONFLICT(crew_id, session_id, path) DO UPDATE SET last_at = excluded.last_at, touches = touches + 1,
+               ON CONFLICT(crew_id, session_id, path) DO UPDATE SET last_at = excluded.last_at, touches = touches + ?,
                    state = excluded.state, zone_ids = excluded.zone_ids,
                    attribution = CASE WHEN crew_footprints.attribution = 'certain' THEN 'certain' ELSE excluded.attribution END,
                    claim_epoch = COALESCE(excluded.claim_epoch, crew_footprints.claim_epoch),
                    last_commit = COALESCE(excluded.last_commit, crew_footprints.last_commit),
                    worktree_id = COALESCE(excluded.worktree_id, crew_footprints.worktree_id)""",
-            (crew_id, session["id"], path, dumps(zone_ids), now, now, state, attribution, epoch, fp.get("last_commit"), wt),
+            (
+                crew_id,
+                session["id"],
+                path,
+                dumps(zone_ids),
+                now,
+                now,
+                state,
+                attribution,
+                epoch,
+                fp.get("last_commit"),
+                wt,
+                1 if count_touch else 0,
+            ),
         )
         touched.append(path)
         if state == "landed":
@@ -393,6 +411,50 @@ async def _detect(
                 evidence={"fenced": True, "epoch": int(c["epoch"])},
             )
     return out
+
+
+def heartbeat_footprints(footprints: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Heartbeat footprints in the shape :func:`record_footprints` accepts (the WP-4 upsert's defaults).
+
+    Paths that are not repo-relative are skipped (the heartbeat upsert skips them too); a missing
+    or unknown state is ``dirty`` and a missing or unknown attribution is ``probable`` (a probable
+    breach never drives a Stop block, §5.3). Epochs are kept only as integers.
+    """
+    out: list[dict[str, Any]] = []
+    for fp in footprints[:MAX_FOOTPRINTS_PER_CALL]:
+        path = normalize_rel(str(fp.get("path") or ""))
+        if not S.is_path_rel(path) or path == ".":
+            continue
+        epoch = fp.get("claim_epoch")
+        out.append(
+            {
+                "path": path,
+                "state": fp.get("state") if fp.get("state") in S.FOOTPRINT_STATES else "dirty",
+                "attribution": fp.get("attribution") if fp.get("attribution") in S.ATTRIBUTIONS else "probable",
+                "claim_epoch": epoch if isinstance(epoch, int) and not isinstance(epoch, bool) else None,
+                "last_commit": fp.get("last_commit") if isinstance(fp.get("last_commit"), str) else None,
+            }
+        )
+    return out
+
+
+async def heartbeat_sink(tx: EventTx, session: Mapping[str, Any], footprints: Sequence[Mapping[str, Any]]) -> None:
+    """The WP-4 heartbeat footprint sink: detect collisions for the footprints a heartbeat carried (§5.3).
+
+    Runs inside the heartbeat transaction after the heartbeat upserted the rows, so the collision
+    rows and their ``collision.detected`` events commit (or roll back) with the heartbeat.
+    """
+    clean = heartbeat_footprints(footprints)
+    if not clean:
+        return
+    await record_footprints(CrewOps(tx._log), tx, str(session["crew_id"]), session, clean, count_touch=False)
+
+
+def register_heartbeat_sink() -> None:
+    """Register :func:`heartbeat_sink` with ``crew.sessions`` (idempotent). Called at import and by the startup hook."""
+    from remembra.crew.sessions import register_footprint_sink
+
+    register_footprint_sink(heartbeat_sink)
 
 
 async def set_footprint_state(
@@ -596,3 +658,8 @@ async def dismiss(ops: CrewOps, collision: Mapping[str, Any], human: Principal, 
 
 def evidence(row: Mapping[str, Any]) -> dict[str, Any]:
     return dict(loads(row.get("evidence"), {}) or {})
+
+
+# Heartbeat footprints feed collision detection wherever this module is loaded (the crew routers
+# import it; the ``crew.claims`` startup hook registers it again, idempotently).
+register_heartbeat_sink()

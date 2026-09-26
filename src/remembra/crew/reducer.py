@@ -229,7 +229,9 @@ def _session_change(state: State, event: Mapping[str, Any], p: Mapping[str, Any]
         s["quiet_reason"] = None
         s["state_reason"] = None
     elif kind == "session.quota_blocked":
-        s["state"] = "quota_blocked"
+        # a StopFailure recorded after SessionEnd (S0: the order is unstable) never revives an ended lane
+        if s.get("state") != "ended":
+            s["state"] = "quota_blocked"
         s["state_reason"] = p["error"]
     elif kind == "session.limit_warning":
         s["limit"] = {"level": p["level"], "pct": p.get("pct"), "source": p["source"]}

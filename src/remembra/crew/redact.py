@@ -18,7 +18,8 @@ Rules, applied recursively to every value:
 * **No raw hostnames.** ``hostname``-style keys are dropped (``member_key``
   already carries a salted host label).
 * **Strings** go through: absolute paths under ``repo_root`` → repo-relative;
-  other paths under ``home`` → ``~/…``; env assignments whose name contains
+  other paths under ``home`` → ``~/…`` (without ``home``, as on the server, any
+  ``/Users/<name>`` or ``/home/<name>`` prefix → ``~``); env assignments whose name contains
   ``KEY|TOKEN|SECRET|PASS|PWD|DSN|URL|AUTH`` (and ``export X=<≥32 random
   chars>``) lose their value; ``Authorization``-style headers, ``-u user:pass``
   and URL credentials lose their secret part; then
@@ -98,6 +99,10 @@ def _export_sub(match: re.Match[str]) -> str:
     return match.group(0)
 
 
+# A home directory the caller could not name (the server never knows the host's $HOME).
+_GENERIC_HOME: Final = re.compile(r"(?<![A-Za-z0-9._~/-])(?:/Users|/home)/[^/\s'\"`:;]+")
+
+
 def _rewrite_paths(text: str, repo_root: str | None, home: str | None) -> str:
     if repo_root:
         root = repo_root.rstrip("/")
@@ -109,6 +114,9 @@ def _rewrite_paths(text: str, repo_root: str | None, home: str | None) -> str:
         if h:
             text = text.replace(h + "/", "~/")
             text = re.sub(re.escape(h) + r"(?![A-Za-z0-9._-])", "~", text)
+    else:
+        # server side: no host context, so any /Users/<name> or /home/<name> prefix becomes ~
+        text = _GENERIC_HOME.sub("~", text)
     return text
 
 
