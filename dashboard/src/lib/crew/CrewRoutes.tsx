@@ -13,6 +13,7 @@ import { useCrewSocket } from '../../hooks/useCrewSocket';
 import { useNow } from '../../hooks/useResource';
 import { absoluteTime, relativeTime } from '../time';
 import { Card, CardHeader, CopyCommand, ErrorNotice, Pill, PulseDot, StaleNotice, TrailSkeleton } from '../../components/relay/ui';
+import { ChannelScreen } from '../../components/crew/channel/ChannelScreen';
 import { useCrewForProject, useCrewList } from './hooks';
 import { crewHref, inboxHref, useCrewRoute } from './routes';
 import { describeHolder, liveSessions, presenceText, sessionLabel, sortedZones, taskRef } from './selectors';
@@ -269,6 +270,7 @@ function CrewScreen() {
       </Card>
     );
   }
+  if (route?.screen === 'channel') return <ChannelScreen crewId={lookup.crewId} project={project} thread={route.thread} />;
   return <CrewLive crewId={lookup.crewId} project={project} />;
 }
 
