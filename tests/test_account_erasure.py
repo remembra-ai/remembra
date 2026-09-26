@@ -91,9 +91,16 @@ def coverage_problems(schema: dict[str, list[tuple[str, str, int]]]) -> list[str
     return registry_problems(names, ERASURE_RULES, EXEMPT_TABLES, EXEMPT_PREFIXES)
 
 
+# crew.db's schema (Crew mode) lives in its own file, erased with its own rules
+# (remembra.crew.erasure; covered by tests/crew/test_crew_erasure.py).
+CREW_DB_SCHEMA = SRC / "crew" / "db.py"
+
+
 def declared_tables() -> set[str]:
     names: set[str] = set()
     for path in SRC.rglob("*.py"):
+        if path == CREW_DB_SCHEMA:
+            continue
         for name in _CREATE_TABLE.findall(path.read_text()):
             names.add(name)
     return names

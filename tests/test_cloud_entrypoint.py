@@ -48,7 +48,10 @@ def test_replication_uses_a_config_with_24h_retention(tmp_path: Path) -> None:
     result = _run(tmp_path)
     assert result.returncode == 0, result.stderr
     calls = (tmp_path / "litestream.log").read_text().splitlines()
-    assert calls == [f"replicate -config {tmp_path / 'litestream.yml'} -exec python -m remembra.main"]
+    # (a restore of crew.db, absent on this volume, may come first: see tests/crew/test_wp16_entrypoint.py)
+    assert [c for c in calls if c.startswith("replicate")] == [
+        f"replicate -config {tmp_path / 'litestream.yml'} -exec python -m remembra.main"
+    ]
     config = yaml.safe_load((tmp_path / "litestream.log.config").read_text())
     replica = config["dbs"][0]["replicas"][0]
     assert config["dbs"][0]["path"] == str(tmp_path / "remembra.db")

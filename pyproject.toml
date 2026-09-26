@@ -168,6 +168,9 @@ remembra-install-codex = "remembra.tools.codex:main"
 remembra-install = "remembra.tools.agents:entrypoint"
 remembra-doctor = "remembra.tools.doctor:main"
 remembra-relay = "remembra.relay.cli:entrypoint"
+# Crew mode (WP-0a declares these; WP-9 owns the target modules under remembra/relay/crew/).
+remembra-crew = "remembra.relay.crew.cli:entrypoint"
+remembra-crewd = "remembra.relay.crew.crewd:main"
 
 # ---------------------------------------------------------------------------
 # Hatch build config

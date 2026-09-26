@@ -30,6 +30,7 @@ from typing import Any
 import structlog
 
 from remembra.core.time import utcnow
+from remembra.inbox.manager import sender_label
 from remembra.models.memory import StoreRequest
 from remembra.relay.handoff import assess_text
 
@@ -57,6 +58,9 @@ def apply_memory_type_policy(request: StoreRequest, checkpoint_default_ttl: str)
       never lends its TTL to) a permanent memory.
     - ``handoff``: stored atomically as one unit — a session snapshot must be
       readable verbatim by the next agent, not split into facts.
+    - ``decision``: stored atomically as one unit with no default TTL — a
+      decision (crew ``D-n``, spec §3.1) is recalled word for word, never
+      fact-split, merged into another memory or re-worded by extraction.
     - ``status``: rejected here; use the status upsert endpoint.
     """
     memory_type = request.memory_type
@@ -64,7 +68,7 @@ def apply_memory_type_policy(request: StoreRequest, checkpoint_default_ttl: str)
         if not request.ttl and not request.expires_at:
             request.ttl = checkpoint_default_ttl
         request.skip_extraction = True
-    elif memory_type == "handoff":
+    elif memory_type in ("handoff", "decision"):
         request.skip_extraction = True
     elif memory_type == "status":
         raise MemoryTypePolicyError(
@@ -83,17 +87,21 @@ def normalize_status_key(key: str) -> str:
     return cleaned
 
 
-def _inbox_project_filter(project_ids: list[str] | None) -> tuple[str, list[str]]:
+def _inbox_project_filter(project_ids: list[str] | None, column: bool = False) -> tuple[str, list[str]]:
     """SQL (appended to a WHERE) keeping inbox rows tagged with one of ``project_ids``.
 
     None means no restriction. An empty list matches nothing (fail closed).
-    Rows without ``metadata.project_id`` never match a restriction.
+    The row's project is the ``project_id`` column when ``column`` (main-DB
+    migration v5 added it; the inbox API filters on the same column) and
+    ``metadata.project_id`` before that. Untagged rows never match a restriction.
     """
     if project_ids is None:
         return "", []
     if not project_ids:
         return " AND 0", []
     marks = ", ".join("?" for _ in project_ids)
+    if column:
+        return f" AND project_id IN ({marks})", list(project_ids)
     # Malformed legacy metadata reads as untagged instead of failing the query.
     return (
         f" AND (CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.project_id') END) IN ({marks})",
@@ -410,12 +418,18 @@ class AgentSessionService:
     # Inbox (read-only views for the brief)
     # ------------------------------------------------------------------
 
+    async def _inbox_columns(self) -> set[str]:
+        """Columns of ``agent_inbox`` (empty when the table does not exist)."""
+        cursor = await self.db.conn.execute("PRAGMA table_info(agent_inbox)")
+        return {r[1] for r in await cursor.fetchall()}
+
     async def _inbox_summary(
         self, user_id: str, agent_id: str, limit: int, project_ids: list[str] | None = None
     ) -> dict[str, Any]:
         now_iso = datetime.now(UTC).isoformat()
-        project_sql, project_args = _inbox_project_filter(project_ids)
         try:
+            columns = await self._inbox_columns()
+            project_sql, project_args = _inbox_project_filter(project_ids, "project_id" in columns)
             cursor = await self.db.conn.execute(
                 f"""
                 SELECT COUNT(*) FROM agent_inbox
@@ -425,11 +439,13 @@ class AgentSessionService:
                 (user_id, agent_id, now_iso, *project_args),
             )
             count_row = await cursor.fetchone()
-            cursor = await self.db.conn.execute("PRAGMA table_info(agent_inbox)")
-            trust_col = "trust_score" if "trust_score" in {r[1] for r in await cursor.fetchall()} else "NULL"
+            trust_col = "trust_score" if "trust_score" in columns else "NULL"
+            # sender provenance (main v5); an older table has no such columns
+            provenance = ", sender_kind, sender_verified" if {"sender_kind", "sender_verified"} <= columns else ""
             cursor = await self.db.conn.execute(
                 f"""
-                SELECT inbox_id, from_agent, subject, body, created_at, {trust_col} AS trust_score FROM agent_inbox
+                SELECT inbox_id, from_agent, subject, body, created_at, {trust_col} AS trust_score{provenance}
+                FROM agent_inbox
                 WHERE owner_user_id = ? AND to_agent = ? AND status = 'unread'
                   AND (expires_at IS NULL OR expires_at > ?){project_sql}
                 ORDER BY julianday(created_at) DESC, inbox_id DESC
@@ -454,6 +470,13 @@ class AgentSessionService:
                 {
                     "inbox_id": r["inbox_id"],
                     "from_agent": r["from_agent"],
+                    "sender_label": sender_label(
+                        {
+                            "from_agent": r["from_agent"],
+                            "sender_kind": r["sender_kind"] if "sender_kind" in r.keys() else "agent",  # noqa: SIM118 - sqlite Row
+                            "sender_verified": r["sender_verified"] if "sender_verified" in r.keys() else 0,  # noqa: SIM118 - sqlite Row
+                        }
+                    ),
                     "subject": r["subject"],
                     "created_at": r["created_at"],
                     "body_preview": body[:INBOX_PREVIEW_CHARS] + ("..." if len(body) > INBOX_PREVIEW_CHARS else ""),
@@ -470,8 +493,8 @@ class AgentSessionService:
     async def known_agents(self, user_id: str, project_ids: list[str] | None = None) -> list[str]:
         """Agent ids that have sent or received inbox messages for this user
         (only in messages tagged with one of ``project_ids`` when given)."""
-        project_sql, project_args = _inbox_project_filter(project_ids)
         try:
+            project_sql, project_args = _inbox_project_filter(project_ids, "project_id" in await self._inbox_columns())
             cursor = await self.db.conn.execute(
                 f"""
                 SELECT to_agent AS agent FROM agent_inbox WHERE owner_user_id = ?{project_sql}

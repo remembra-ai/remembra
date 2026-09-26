@@ -299,16 +299,19 @@ async def test_empty_allow_list_fails_closed(h):
 
 
 async def test_filter_uses_project_column_once_crew_v5_has_run(h):
-    """After the crew branch's main-DB v5 adds ``agent_inbox.project_id`` (and backfills it from
-    ``metadata.project_id``), the same manager code filters on the column."""
+    """Crew mode's main-DB v5 adds ``agent_inbox.project_id`` (backfilled from ``metadata.project_id``;
+    it runs at boot, so the harness database has it): the manager filters on the column and
+    writes both the column and the metadata tag. (The upgrade of a production database without
+    the column is proven by scripts/maintenance/verify_inbox_migration_order.py.)"""
     owner, _ = await _seed(h)
     conn = h.db.conn
-    await conn.execute("ALTER TABLE agent_inbox ADD COLUMN project_id TEXT")
-    await conn.execute(
-        "UPDATE agent_inbox SET project_id = trim(json_extract(metadata, '$.project_id'))"
-        " WHERE json_valid(metadata) AND json_type(metadata, '$.project_id') = 'text'"
+    cursor = await conn.execute("PRAGMA table_info(agent_inbox)")
+    assert "project_id" in {r[1] for r in await cursor.fetchall()}
+    cursor = await conn.execute(
+        "SELECT COUNT(*) FROM agent_inbox WHERE json_valid(metadata) AND json_type(metadata, '$.project_id') = 'text'"
+        " AND project_id IS NOT trim(json_extract(metadata, '$.project_id'))"
     )
-    await conn.commit()
+    assert (await cursor.fetchone())[0] == 0  # the column agrees with every metadata tag
     manager = InboxManager(h.db)  # a fresh process sees the column
     rows = await manager.get_for_agent(owner, "claude-code", "all", project_ids=["alpha"])
     assert [r["subject"] for r in rows] == ["alpha for claude"]

@@ -1,0 +1,20 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/real-real_stopfailure_model/repo"
+  },
+  "event": "StopFailure",
+  "payload": {
+    "cwd": "<S0_TMP>/real-real_stopfailure_model/repo",
+    "effort": {
+      "level": "high"
+    },
+    "error": "authentication_failed",
+    "hook_event_name": "StopFailure",
+    "last_assistant_message": "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+    "session_id": "19272491-dcad-4ffe-a99a-25835dd1f066",
+    "transcript_path": "<HOME>/.claude/projects/-S0-TMP-real-real-stopfailure-model-repo/19272491-dcad-4ffe-a99a-25835dd1f066.jsonl"
+  },
+  "received_at": 1790375343.4519382
+}

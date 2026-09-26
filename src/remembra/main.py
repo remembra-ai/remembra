@@ -2,6 +2,9 @@
 
 import base64
 import hashlib
+import importlib
+import importlib.util
+import os
 import re
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
@@ -57,6 +60,49 @@ log = structlog.get_logger(__name__)
 
 # Import limiter from core module to avoid circular imports
 from remembra.core.limiter import limiter  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Crew mode (spec §14: main.py registers the crew routers and calls
+# remembra.crew.startup.register(app); WP-16 flips the flag in production)
+# ---------------------------------------------------------------------------
+
+CREW_MODE_ENV = "REMEMBRA_CREW_MODE"
+# Crew routers, one module per owning work package. Each module exposes ``router``;
+# a module that is not built yet is skipped (it does not exist on disk), but an
+# import error inside an existing module fails startup. ``crews`` comes last so
+# the static ``/crews/...`` paths of the other routers register before
+# ``/crews/{crew_id}`` (contract invariant, docs/crew/rest-api.md).
+CREW_ROUTER_MODULES: tuple[str, ...] = (
+    "remembra.api.v1.crew_sessions",  # WP-4
+    "remembra.api.v1.crew_zones",  # WP-5
+    "remembra.api.v1.crew_claims",  # WP-5
+    "remembra.api.v1.crew_tasks",  # WP-6
+    "remembra.api.v1.crew_channel",  # WP-7
+    "remembra.api.v1.crew_inbox",  # WP-7
+    "remembra.api.v1.crews",  # WP-8
+)
+
+
+def crew_mode_enabled() -> bool:
+    """``REMEMBRA_CREW_MODE`` (1/true/yes/on). Off by default: no crew routes, no crew.db."""
+    return os.environ.get(CREW_MODE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def install_crew(app: FastAPI, modules: tuple[str, ...] = CREW_ROUTER_MODULES) -> list[str]:
+    """Mount the crew routers under ``/api/v1`` and register the crew startup hooks. Returns the mounted modules."""
+    from remembra.crew import startup as crew_startup
+
+    mounted: list[str] = []
+    for name in modules:
+        if importlib.util.find_spec(name) is None:
+            continue
+        module = importlib.import_module(name)
+        app.include_router(module.router, prefix="/api/v1")
+        mounted.append(name)
+    crew_startup.register(app)
+    log.info("crew_mode_enabled", routers=mounted)
+    return mounted
+
 
 # ---------------------------------------------------------------------------
 # Application State
@@ -246,6 +292,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pending_queue=app.state.pending_embeddings,
         rate_limiter=cloud_rate_limiter,
         probe_interval=settings.readiness_probe_interval_seconds,
+        app_state=app.state,  # Crew mode component (WP-16): crew_db is set by the crew hooks later
     )
 
     # Security services (Week 7)
@@ -855,6 +902,10 @@ def create_app() -> FastAPI:
     # Versioned API routes
     # -----------------------------------------------------------------------
     app.include_router(api_router)
+
+    # Crew mode routers and startup hooks (crew.db, event bus, outbox, reaper, retention)
+    if crew_mode_enabled():
+        install_crew(app)
 
     # -----------------------------------------------------------------------
     # WebSocket routes (at root level for easy access)

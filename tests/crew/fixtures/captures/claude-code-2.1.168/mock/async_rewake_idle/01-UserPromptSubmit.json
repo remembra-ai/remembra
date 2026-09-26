@@ -1,0 +1,17 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-async_rewake_idle/repo"
+  },
+  "event": "UserPromptSubmit",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-async_rewake_idle/repo",
+    "hook_event_name": "UserPromptSubmit",
+    "permission_mode": "acceptEdits",
+    "prompt": "S0 spike: say hi.",
+    "session_id": "f8ce960e-d0db-497b-a110-d781bdce2b9a",
+    "transcript_path": "<S0_TMP>/mock-async_rewake_idle/config/projects/-S0-TMP-mock-async-rewake-idle-repo/f8ce960e-d0db-497b-a110-d781bdce2b9a.jsonl"
+  },
+  "received_at": 1790375290.560933
+}

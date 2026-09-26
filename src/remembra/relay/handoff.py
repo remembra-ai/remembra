@@ -450,6 +450,8 @@ _FACTS_SOURCE_LABELS = {
     "relay-cli:git+transcript": "collected by remembra-relay from git and the session transcript",
     "relay-cli:git": "collected by remembra-relay from git",
     "agent-declared": "declared by the agent (not checked)",
+    "relay-cli": "collected by remembra-relay",
+    "server-inferred": "inferred by the server from crew checkpoints (the agent did not close its session)",
 }
 
 
@@ -983,8 +985,10 @@ def _inbox_line(item: dict[str, Any], now: datetime, allowed: tuple[str, ...]) -
     verdict = _verdict_for_item([item.get("from_agent"), item.get("subject"), item.get("body_preview")], item, allowed)
     if verdict.withheld:
         return f"- [{item.get('inbox_id')}] {sent}: {withheld_note(verdict, item.get('inbox_id'))}"
+    # the provenance label, never the bare sender name: "agent X (self-declared)" can't pass for Mani
+    sender = item.get("sender_label") or f"agent {item.get('from_agent')} (self-declared)"
     return (
-        f"- [{item.get('inbox_id')}] from {show_text(item.get('from_agent'), limit=60)}, {sent}: "
+        f"- [{item.get('inbox_id')}] from {show_text(sender, limit=90)}, {sent}: "
         f"{show_text(item.get('subject'), limit=80)} — {show_text(item.get('body_preview'), verdict, 120)}"
     )
 
@@ -1032,9 +1036,17 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
     The last handoff's server grade (R-21) is the line above the block.
     Capped at ``max_chars`` (~1500 tokens); recent memories are dropped first
     and the block is always closed.
+
+    With ``brief["crew"]`` (Crew mode, see :func:`render_crew_block`) the crew
+    block (≤1,500 chars, its own data block) follows the brief, and the brief
+    part is capped so the whole text stays within ``max_chars`` (D24).
     """
     now = now or datetime.now(UTC)
     allowed = tuple(brief.get("repo_url_prefixes") or ())
+    crew = brief.get("crew")
+    crew_text = render_crew_block(crew, allowed_urls=allowed) if isinstance(crew, dict) else ""
+    if crew_text:
+        max_chars = max(0, max_chars - len(crew_text) - 1)
     header = (
         f"# Remembra brief · project {brief.get('project_id') or '(all)'} · you are {brief.get('agent_id') or '(no agent id)'}"
     )
@@ -1076,6 +1088,263 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
         body = data_body([])
         room = max(0, len(body) - (len(text) - max_chars) - 1)
         text = assemble(body[:room].rstrip() + "…")
+    return text + "\n" + crew_text if crew_text else text
+
+
+# ---------------------------------------------------------------------------
+# Crew block (Crew mode, spec §6 "Crew block in the brief")
+# ---------------------------------------------------------------------------
+
+MAX_CREW_BLOCK_CHARS = 1500  # brief 4,500 + crew block 1,500 = MAX_BRIEF_CHARS (D24)
+MAX_BRIEF_WITH_CREW_CHARS = MAX_BRIEF_CHARS - MAX_CREW_BLOCK_CHARS - 1
+CREW_DATA_ITEM_CLIP = 140
+CREW_FOOTER = "Crew mode is automatic: claims, checkpoints and reports happen by hook."
+_SAFE_ID_RE = re.compile(r"[^A-Za-z0-9._:/@+-]+")
+_SLUG_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,47}")
+_CALLSIGN_RE = re.compile(r"[a-z][a-z0-9-]{0,31}-[1-9][0-9]{0,3}")
+_TASK_REF_RE = re.compile(r"T-[1-9][0-9]{0,6}")
+_WORD_RE = re.compile(r"[a-z][a-z0-9_]{0,39}")
+_RESOURCE_RE = re.compile(r"(?:schema|deploy|service|supabase|mcp):[A-Za-z0-9._/-]{1,64}")
+_BATON_REF_RE = re.compile(r"refs/remembra/baton/(?:T-[1-9][0-9]{0,6}|cs_[A-Za-z0-9_-]{1,64})/[0-9]{1,9}")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+_POLICY_NOTES = (COMMAND_FLAG, HIDDEN_FLAG)
+
+
+def data_line(text: Any, limit: int = CREW_DATA_ITEM_CLIP) -> str:
+    """One line of the crew data block: control characters flattened, tags neutralised, clipped (§11).
+
+    The policy's fixed notes (:data:`COMMAND_FLAG`, :data:`HIDDEN_FLAG`) that
+    :func:`_data_item` put in the text move to the end of the line and are never
+    clipped away.
+    """
+    flat = " ".join(_CONTROL_CHARS_RE.sub(" ", str(text or "")).split())
+    notes = [n for n in _POLICY_NOTES if n in flat]
+    for n in notes:
+        flat = " ".join(flat.replace(n, " ").split())
+    flat = _neutralize(flat)
+    flat = flat if len(flat) <= limit else flat[: limit - 1].rstrip() + "…"
+    return " ".join([flat, *notes]) if notes else flat
+
+
+_data_line = data_line  # the crew block's private name
+
+
+CREW_WITHHELD = "withheld (LOW TRUST {trust:.2f}, prompt-injection patterns): review it with the user"
+
+
+def police_item(
+    text: Any, *, allowed: tuple[str, ...] = (), clip_body: Callable[[str], str] | None = None, stored_trust: Any = None
+) -> str:
+    """One agent- or repo-authored value as a crew surface shows it to an agent, under the brief's trust policy (R-14).
+
+    The same verdict as every brief line (:func:`assess_text`): text below
+    :data:`BRIEF_TRUST_FLOOR` is replaced by the server's fixed withheld note
+    (:data:`CREW_WITHHELD`), command-shaped text keeps its content followed by
+    :data:`COMMAND_FLAG`, hidden characters are removed (:data:`HIDDEN_FLAG`)
+    and markdown images replaced. ``clip_body`` clips the text itself; the
+    notes are appended after it so clipping never drops them. Without the
+    server extras (client installs) there is no injection score, so nothing is
+    withheld there; commands, URLs and hidden characters are still marked.
+    """
+    verdict = assess_text(text, stored_trust=stored_trust, allowed_urls=allowed)
+    notes = [COMMAND_FLAG] if verdict.flags else []
+    if verdict.withheld:
+        return " ".join([CREW_WITHHELD.format(trust=verdict.trust), *notes])
+    visible, hidden, _ = strip_hidden(str(text or ""))
+    if hidden or verdict.hidden:
+        notes.append(HIDDEN_FLAG)
+    body = defang_markdown_images(visible)
+    return " ".join([clip_body(body) if clip_body else body, *notes])
+
+
+def _data_item(text: Any, limit: int = CREW_DATA_ITEM_CLIP, allowed: tuple[str, ...] = ()) -> str:
+    """One value of the crew block: :func:`police_item`, the text clipped as :func:`_data_line`."""
+    return police_item(text, allowed=allowed, clip_body=lambda body: _data_line(body, limit))
+
+
+def _only(value: Any, pattern: re.Pattern[str]) -> str | None:
+    """``value`` when it fully matches ``pattern`` (ids, slugs, callsigns), else None: template lines carry nothing else."""
+    return value if isinstance(value, str) and pattern.fullmatch(value) else None
+
+
+def _age(seconds: Any) -> str | None:
+    if not isinstance(seconds, int) or isinstance(seconds, bool) or seconds < 0:
+        return None
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86400}d"
+
+
+def _hhmm(value: Any) -> str | None:
+    dt = _parse_ts(value)
+    return dt.astimezone(UTC).strftime("%H:%M UTC") if dt else None
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def _baton_lines(baton: dict[str, Any], allowed: tuple[str, ...] = ()) -> tuple[list[str], list[str]]:
+    """Template lines (ids only) and data items for one baton offered to the reader (D33: only then the adopt line)."""
+    task = _only(baton.get("task"), _TASK_REF_RE)
+    zones = [z for z in (baton.get("zones") or []) if _only(z, _SLUG_RE)]
+    what = task or (f"zone {zones[0]}" if zones else "a reserved claim")
+    frm = _only(baton.get("from"), _CALLSIGN_RE)
+    why = [w for w in (_only(baton.get("from_state"), _WORD_RE), _hhmm(baton.get("stopped_at"))) if w]
+    for extra in (baton.get("error"), baton.get("source")):
+        word = _only(extra, _WORD_RE)
+        if word and word not in why:
+            why.append(word)
+    if not why and _only(baton.get("reserve_reason"), _WORD_RE):
+        why.append(baton["reserve_reason"])
+    head = f"YOUR BATON (offered to you): {what}" + (f" from {frm}" if frm else "") + (f" ({', '.join(why)})" if why else "")
+    parts = [head]
+    unpushed, dirty = baton.get("unpushed"), baton.get("dirty")
+    if isinstance(unpushed, int) and unpushed > 0:
+        parts.append(f"{_plural(unpushed, 'commit')} unpushed")
+    ref = _only(baton.get("baton_ref"), _BATON_REF_RE)
+    if isinstance(dirty, int) and dirty > 0:
+        parts.append(f"{_plural(dirty, 'dirty file')}" + (f" saved as {ref}" if ref else " (not saved)"))
+    elif ref:
+        parts.append(f"work saved as {ref}")
+    failing = [f for f in (baton.get("failing") or []) if isinstance(f, str)]
+    if failing:
+        parts.append(f"{_plural(len(failing), 'failing test')}")
+    lines = [" · ".join(parts)]
+    if task:
+        lines.append(
+            f"  To continue {task}: remembra-crew adopt {task}"
+            + ("   (restores the saved work into this checkout)" if ref else "")
+        )
+    elif zones:
+        lines.append(f'  To continue: crew_claim(action="adopt", zone="{zones[0]}")')
+    data: list[str] = []
+    if task and baton.get("task_title"):
+        item = f'{task} title: "{_data_item(baton["task_title"], 80, allowed)}"'
+        if baton.get("next"):
+            item += f" · next (unverified suggestion): {_data_item(baton['next'], 80, allowed)}"
+        data.append(item)
+    if failing:
+        data.append(f"{task or what} failing: " + ", ".join(_data_item(f, 60, allowed) for f in failing[:3]))
+    return lines, data
+
+
+def _dnt_entry(item: dict[str, Any], allowed: tuple[str, ...] = ()) -> tuple[str, str | None]:
+    """One DO NOT TOUCH entry (ids, slugs and callsigns only) and an optional data item."""
+    zone = _only(item.get("zone"), _SLUG_RE)
+    resource = _only(item.get("resource"), _RESOURCE_RE)
+    task = _only(item.get("task"), _TASK_REF_RE)
+    holder = _only(item.get("holder"), _CALLSIGN_RE)
+    if zone:
+        target = f"zone {zone}"
+    elif resource:
+        target = resource
+    else:
+        target = "a path claim"
+    data = None
+    if not zone and not resource and item.get("path_glob"):
+        data = f"{holder or 'a session'} holds a path claim: {_data_item(item['path_glob'], 100, allowed)}"
+    elif task and item.get("task_title"):
+        data = f'{task} title: "{_data_item(item["task_title"], 100, allowed)}"'
+    if item.get("state") == "reserved":
+        why = _only(item.get("reserve_reason"), _WORD_RE)
+        who = ", ".join(w for w in (holder, why) if w)
+        pickup = f"for the next pickup of {task}" if task else "for pickup"
+        return f"{target} → RESERVED {pickup}" + (f" ({who})" if who else ""), data
+    if item.get("holder_kind") == "human":
+        return f"{target} → held by a human", data
+    state = _only(item.get("holder_state"), _WORD_RE)
+    age = _age(item.get("holder_active_age_s"))
+    status = " ".join(w for w in (state, age) if w)
+    text = f"{target} → {holder or 'another session'}" + (f" {task}" if task else "") + (f" ({status})" if status else "")
+    return text, data
+
+
+def render_crew_block(crew: dict[str, Any], max_chars: int = MAX_CREW_BLOCK_CHARS, *, allowed_urls: tuple[str, ...] = ()) -> str:
+    """The crew block of the brief (≤1,500 chars, most important first).
+
+    Server-template lines carry facts only: ids, slugs, callsigns, counts and
+    times. Everything agent- or repo-authored (task titles, next steps, test
+    names, path claims, frozen notes, decision titles) sits inside ONE
+    ``<remembra-data untrusted="true">`` block with :data:`DATA_PREAMBLE`,
+    one line per item, clipped to 140 chars, and each value passes the brief's
+    trust policy (:func:`_data_item`: low-trust text withheld, commands and URLs
+    outside ``allowed_urls`` flagged). The adopt command appears only
+    for batons recorded as offered to the reader (D33). When the text is too
+    long, data items go first, then DO NOT TOUCH entries beyond the first.
+    """
+    project = _SAFE_ID_RE.sub("_", str(crew.get("project_id") or "project"))[:64]
+    mode = "multi" if crew.get("mode") == "multi" else "solo"
+    live = int(crew.get("live") or 0)
+    when = _hhmm(crew.get("as_of"))
+    header = f"CREW {project} ({mode} · {live} live)" + (f" as of {when}" if when else "")
+
+    baton_lines: list[str] = []
+    data: list[str] = []
+    for baton in (crew.get("batons") or [])[:2]:
+        lines, items = _baton_lines(baton, allowed_urls)
+        baton_lines.extend(lines)
+        data.extend(items)
+
+    dnt: list[str] = []
+    for item in crew.get("do_not_touch") or []:
+        text, extra = _dnt_entry(item, allowed_urls)
+        dnt.append(text)
+        if extra:
+            data.append(extra)
+    for frozen in crew.get("frozen") or []:
+        zone = _only(frozen.get("zone"), _SLUG_RE)
+        if zone:
+            dnt.append(f"zone {zone} FROZEN by a human")
+            if frozen.get("note"):
+                data.append(f"zone {zone} frozen: {_data_item(frozen['note'], 100, allowed_urls)}")
+
+    for_you = crew.get("for_you") or {}
+    you = [
+        _plural(int(n), word.replace("_", " "))
+        for word, n in sorted(for_you.items())
+        if _only(word, _WORD_RE) and isinstance(n, int) and n > 0
+    ]
+    decisions = [
+        f"{d['ref']} {_data_item(d.get('title'), 100, allowed_urls)}"
+        for d in crew.get("decisions") or []
+        if _only(d.get("ref"), re.compile(r"D-[1-9][0-9]{0,6}"))
+    ]
+    if decisions:
+        data.append("Decisions in force (confirmed by a human): " + " · ".join(decisions))
+    data = list(dict.fromkeys(_data_line(d) for d in data if d))
+
+    def assemble(dnt_items: list[str], data_items: list[str]) -> str:
+        lines = [header, *baton_lines]
+        if dnt_items:
+            more = len(dnt) - len(dnt_items)
+            lines.append("DO NOT TOUCH: " + " · ".join(dnt_items) + (f" · (+{more} more)" if more > 0 else ""))
+        if you:
+            lines.append("FOR YOU: " + " · ".join(you))
+        if crew.get("temporary_zones"):
+            lines.append("TEMPORARY ZONES: auto-derived from folders (a human can edit them)")
+        if data_items:
+            lines.extend([DATA_OPEN, DATA_PREAMBLE, *data_items, DATA_CLOSE])
+        lines.append(CREW_FOOTER)
+        return "\n".join(lines)
+
+    dnt_items = list(dnt)
+    data_items = list(data)
+    text = assemble(dnt_items, data_items)
+    while len(text) > max_chars and data_items:
+        data_items.pop()
+        text = assemble(dnt_items, data_items)
+    while len(text) > max_chars and len(dnt_items) > 1:
+        dnt_items.pop()
+        text = assemble(dnt_items, data_items)
+    if len(text) > max_chars:  # pathological: keep the header and the safety lines, drop the rest
+        text = "\n".join([header, *baton_lines[:2], CREW_FOOTER])[:max_chars]
     return text
 
 
@@ -1157,3 +1426,56 @@ def police_brief(brief: dict[str, Any]) -> None:
             mem = {**mem, "content": withheld_note(verdict, mem.get("id")), "metadata": {}}
         recent.append({**_strip_hidden_deep(mem), **verdict.as_dict()})
     brief["recent"] = recent
+    crew = brief.get("crew")
+    if isinstance(crew, dict):
+        brief["crew"] = police_crew(crew, allowed)
+
+
+# Agent- or repo-authored text fields of the crew block's structured input
+# (``CrewCore.brief_input``): everything else in it is ids, slugs, counts and times.
+_CREW_TEXT_FIELDS: dict[str, tuple[str, ...]] = {
+    "batons": ("task_title", "next", "failing"),
+    "do_not_touch": ("path_glob", "task_title"),
+    "frozen": ("note",),
+    "decisions": ("title",),
+}
+
+
+def _police_crew_value(value: Any, allowed: tuple[str, ...]) -> Any:
+    if isinstance(value, list):
+        return [_police_crew_value(v, allowed) for v in value]
+    if not isinstance(value, str):
+        return value
+    verdict = assess_text(value, allowed_urls=allowed)
+    if verdict.withheld:
+        return CREW_WITHHELD.format(trust=verdict.trust)
+    return value
+
+
+def police_crew(crew: dict[str, Any], allowed: tuple[str, ...] = ()) -> dict[str, Any]:
+    """The crew block's structured input under the brief policy (the JSON twin of :func:`render_crew_block`).
+
+    Every agent-authored text field (task titles, next steps, failing test
+    names, path claims, frozen notes, decision titles) is replaced by the fixed
+    withheld note when the policy withholds it; hidden characters and images are
+    removed from every string. Items gain ``flags`` listing the policy's
+    reasons (command or URL) found in their text.
+    """
+    out: dict[str, Any] = dict(_strip_hidden_deep(crew))
+    for section, fields in _CREW_TEXT_FIELDS.items():
+        items = []
+        for item in crew.get(section) or []:
+            if not isinstance(item, dict):
+                continue
+            policed = dict(_strip_hidden_deep(item))
+            flags: list[str] = []
+            for name in fields:
+                if name in item:
+                    policed[name] = _strip_hidden_deep(_police_crew_value(item[name], allowed))
+                    raw = item[name] if isinstance(item[name], list) else [item[name]]
+                    flags.extend(assess_text(*[r for r in raw if isinstance(r, str)], allowed_urls=allowed).flags)
+            policed["flags"] = list(dict.fromkeys(flags))
+            items.append(policed)
+        if section in crew:
+            out[section] = items
+    return out

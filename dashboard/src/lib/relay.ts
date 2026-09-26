@@ -191,6 +191,10 @@ export interface InboxMessage {
   ack_note: string | null;
   ack_result: string | null;
   expires_at: string | null;
+  /** The trust policy's score of the text when it was sent (R-16; null on older rows). */
+  trust_score?: number | null;
+  /** Server-set provenance: "agent X (key-verified)", "agent X (self-declared)", "human" or "system". */
+  sender_label?: string | null;
 }
 
 export interface InboxList {

@@ -18,9 +18,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from remembra.auth.middleware import AuthenticatedUser, CurrentUser
-from remembra.auth.rbac import ROLE_LEVEL, SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
+from remembra.auth.rbac import ROLE_LEVEL, ROLE_PERMISSIONS, SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
 from remembra.auth.scopes import RequireAdmin, RequireAuditExport
-from remembra.auth.superadmin import RequireSuperadmin, is_superadmin
+from remembra.auth.superadmin import RequireSuperadmin, RequireSuperadminSession, is_superadmin
 from remembra.auth.users import UserManager
 from remembra.cloud.metering import UsageMeter
 from remembra.cloud.plans import PlanTier, get_plan
@@ -448,26 +448,9 @@ async def list_permissions(request: Request) -> dict[str, Any]:
     """List all available permissions and default role mappings."""
     return {
         "permissions": [p.value for p in Permission],
-        "roles": {
-            role.value: [p.value for p in perms]
-            for role, perms in {
-                Role.ADMIN: set(Permission),
-                Role.EDITOR: {
-                    Permission.MEMORY_STORE,
-                    Permission.MEMORY_RECALL,
-                    Permission.MEMORY_DELETE,
-                    Permission.KEY_LIST,
-                    Permission.ENTITY_READ,
-                    Permission.WEBHOOK_MANAGE,
-                    Permission.CONFLICT_MANAGE,
-                },
-                Role.VIEWER: {
-                    Permission.MEMORY_RECALL,
-                    Permission.KEY_LIST,
-                    Permission.ENTITY_READ,
-                },
-            }.items()
-        },
+        # The enforced mapping (single source of truth): ADMIN excludes the human-only
+        # crew permissions, which no API-key role carries.
+        "roles": {role.value: sorted(p.value for p in perms) for role, perms in ROLE_PERMISSIONS.items()},
     }
 
 
@@ -939,16 +922,18 @@ async def admin_reset_password(
     db: DatabaseDep,
     user_manager: UserManagerDep,
     current_user: CurrentUser,
-    _superadmin: RequireSuperadmin,
+    _superadmin: RequireSuperadminSession,
 ) -> AdminResetPasswordResponse:
     """
     Reset a user's password to a temporary random password.
 
     The temporary password is returned in the response and should
     be communicated to the user securely. They should change it
-    immediately upon login.
+    immediately upon login. Every session the user had is invalidated.
 
-    **Superadmin only** - requires owner_emails access.
+    **Superadmin only, from a dashboard login.** An API key (even an admin
+    one) cannot call this: it would turn a key into a password and so into
+    a human login.
     """
     user_data = await db.get_user_by_id(user_id)
     if not user_data:
@@ -963,6 +948,11 @@ async def admin_reset_password(
     # Hash and update
     password_hash = user_manager.hash_password(temp_password)
     await db.update_user_password(user_id, password_hash)
+    # Whoever held the old password's sessions loses them, as on a normal password change.
+    from remembra.security import state as security_state
+
+    await security_state.invalidate_user_sessions(db, user_id)
+    log.warning("admin_password_reset", actor_user_id=current_user.user_id, target_user_id=user_id)
 
     return AdminResetPasswordResponse(
         temporary_password=temp_password,

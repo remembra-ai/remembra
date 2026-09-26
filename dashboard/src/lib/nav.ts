@@ -7,6 +7,8 @@ import { useMemo, useSyncExternalStore } from 'react';
 
 export type TabType =
   | 'home'
+  | 'crews'
+  | 'crew'
   | 'trail'
   | 'agents'
   | 'inbox'
@@ -26,7 +28,7 @@ export type TabType =
   | 'projects'
   | 'admin';
 
-export type SectionId = 'home' | 'trail' | 'agents' | 'inbox' | 'memory' | 'graph' | 'settings' | 'admin';
+export type SectionId = 'home' | 'crews' | 'trail' | 'agents' | 'inbox' | 'memory' | 'graph' | 'settings' | 'admin';
 
 export interface TabMeta {
   label: string;
@@ -36,9 +38,11 @@ export interface TabMeta {
 
 export const TABS: Record<TabType, TabMeta> = {
   home: { label: 'Home', title: 'Mission control', subtitle: 'What your agents did, what they left open, and what is next.' },
+  crews: { label: 'Crews', title: 'Crews', subtitle: 'Every project with agents on it: who is live, what is held, what needs you.' },
+  crew: { label: 'Crew', title: 'Crews', subtitle: 'One project live: lanes, zones, tasks, channel and feed.' },
   trail: { label: 'Trail', title: 'Trail', subtitle: 'git log for your agents: every handoff, newest first.' },
   agents: { label: 'Agents', title: 'Agents', subtitle: 'Every agent identity that has left a trail.' },
-  inbox: { label: 'Inbox', title: 'Inbox', subtitle: 'Notes between agents. Write one and it leads their next brief.' },
+  inbox: { label: 'Inbox', title: 'Inbox', subtitle: 'What needs you, work any agent can pick up, and notes between agents.' },
   memories: { label: 'Memories', title: 'Memory', subtitle: 'Everything your agents and you have stored.' },
   timeline: { label: 'Timeline', title: 'Memory', subtitle: 'Memory creation and change over time.' },
   analytics: { label: 'Analytics', title: 'Memory', subtitle: 'Recall traffic, storage growth and usage.' },
@@ -56,8 +60,16 @@ export const TABS: Record<TabType, TabMeta> = {
   admin: { label: 'Admin', title: 'Admin', subtitle: 'Operate the service.' },
 };
 
-export const SECTIONS: { id: SectionId; label: string; tabs: TabType[]; adminOnly?: boolean }[] = [
+export const SECTIONS: {
+  id: SectionId;
+  label: string;
+  tabs: TabType[];
+  adminOnly?: boolean;
+  /** false: the section's tabs are not a sub-navigation bar (a crew page has its own view tabs). */
+  subnav?: boolean;
+}[] = [
   { id: 'home', label: 'Home', tabs: ['home'] },
+  { id: 'crews', label: 'Crews', tabs: ['crews', 'crew'], subnav: false },
   { id: 'trail', label: 'Trail', tabs: ['trail'] },
   { id: 'agents', label: 'Agents', tabs: ['agents'] },
   { id: 'inbox', label: 'Inbox', tabs: ['inbox'] },

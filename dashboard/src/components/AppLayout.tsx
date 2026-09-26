@@ -5,6 +5,7 @@ import { MobileNav, Sidebar } from './Sidebar';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { SettingsPanel } from './SettingsPanel';
 import { BrandMark } from '../brand/Brand';
+import { NotificationBell } from './crew/notify/NotificationBell';
 import { TABS, hrefFor, sectionOf, type TabType } from '../lib/nav';
 
 interface AppLayoutProps {
@@ -35,7 +36,7 @@ export function AppLayout({
   const [connectionOpen, setConnectionOpen] = useState(false);
   const section = sectionOf(activeTab);
   const meta = TABS[activeTab];
-  const subTabs = section.tabs.length > 1 ? section.tabs : [];
+  const subTabs = section.tabs.length > 1 && section.subnav !== false ? section.tabs : [];
   // The Constellation has its own project filter; Entities and Brain use the memory project.
   const usesMemoryProject = section.id === 'memory' || (section.id === 'graph' && activeTab !== 'graph');
   const wide = activeTab === 'graph';
@@ -81,6 +82,7 @@ export function AppLayout({
               <ProjectSwitcher />
             </div>
           )}
+          <NotificationBell />
           <button
             type="button"
             onClick={onSearch}

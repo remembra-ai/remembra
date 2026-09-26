@@ -1,0 +1,185 @@
+/* Crew lanes: the track, pixel packets, settled lanes, pickup slots and the
+   baton transit. Motion is stepped (pixel-snapped), never smooth-scrolled,
+   and every animation stops under prefers-reduced-motion. */
+
+/* The dashed trail a lane runs along. */
+.crew-track {
+  background: repeating-linear-gradient(90deg, var(--rule) 0 6px, transparent 6px 12px);
+  height: 2px;
+}
+.dark .crew-track {
+  background: repeating-linear-gradient(90deg, #45494e 0 6px, transparent 6px 12px);
+}
+
+/* An orange pixel packet travelling along the track toward "now". */
+.crew-packet {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  background: var(--signal);
+  box-shadow:
+    -8px 0 0 rgb(255 91 20 / 0.45),
+    -16px 0 0 rgb(255 91 20 / 0.18);
+  animation: crew-packet var(--packet-dur, 3.2s) steps(var(--packet-steps, 40)) infinite;
+  animation-delay: var(--packet-delay, 0s);
+}
+@keyframes crew-packet {
+  from {
+    left: 0;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  92% {
+    opacity: 1;
+  }
+  to {
+    left: calc(100% - 6px);
+    opacity: 0;
+  }
+}
+
+/* Presence pulse shapes (the label always carries the state too). */
+.crew-pulse {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex: none;
+}
+.crew-pulse[data-kind='ring'] {
+  background: var(--signal);
+  animation: rr-pulse 2s ease-out infinite;
+}
+.crew-pulse[data-kind='joining'] {
+  background: var(--signal);
+  opacity: 0.55;
+}
+.crew-pulse[data-kind='solid'] {
+  background: var(--ink-2);
+}
+.crew-pulse[data-kind='hollow'] {
+  border: 2px solid var(--ink-3);
+}
+.crew-pulse[data-kind='dashed'] {
+  border: 2px dashed var(--ink-3);
+}
+.crew-pulse[data-kind='paused'] {
+  background: linear-gradient(90deg, var(--ink-2) 0 35%, transparent 35% 65%, var(--ink-2) 65%);
+}
+.crew-pulse[data-kind='dropped'] {
+  /* the dropped baton: a tipped capsule */
+  width: 12px;
+  height: 5px;
+  margin-top: 4px;
+  border-radius: 999px;
+  background: var(--signal);
+  transform: rotate(-24deg);
+}
+.crew-pulse[data-kind='ended'] {
+  background: var(--rule);
+}
+
+/* A settled lane (credits out, lost, ended): dashed outline, no motion. */
+.crew-lane[data-settled='true'] {
+  border-style: dashed;
+  border-color: var(--rule-strong);
+  box-shadow: none;
+}
+
+/* Zone chips: solid exclusive, striped shared, outline watch. */
+.crew-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  padding: 2px 6px;
+  font-family: var(--f-mono);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.crew-chip[data-style='solid'] {
+  background: var(--ink);
+  color: var(--paper);
+}
+.crew-chip[data-style='striped'] {
+  background: repeating-linear-gradient(135deg, var(--paper-2) 0 3px, transparent 3px 6px);
+  color: var(--ink);
+}
+.crew-chip[data-style='outline'] {
+  background: transparent;
+  color: var(--ink-2);
+  border-color: var(--ink-3);
+}
+.crew-chip[data-waiting='true'] {
+  border-style: dashed;
+  background: transparent;
+  color: var(--ink-2);
+}
+.crew-chip[data-reserved='true'] {
+  border-style: dashed;
+  border-color: var(--signal);
+  background: transparent;
+  color: var(--ink);
+}
+.crew-chip[data-alarm='true'] {
+  border-color: var(--signal);
+  box-shadow: inset 0 0 0 1px var(--signal);
+}
+
+/* A pickup slot: the dashed empty lane, marching slowly (stepped). */
+.crew-slot {
+  position: relative;
+  border-radius: 3px;
+  background:
+    linear-gradient(90deg, var(--signal) 50%, transparent 0) top left / 12px 2px repeat-x,
+    linear-gradient(90deg, var(--signal) 50%, transparent 0) bottom left / 12px 2px repeat-x,
+    linear-gradient(0deg, var(--signal) 50%, transparent 0) top left / 2px 12px repeat-y,
+    linear-gradient(0deg, var(--signal) 50%, transparent 0) top right / 2px 12px repeat-y,
+    var(--panel);
+  animation: crew-march 1.6s steps(6) infinite;
+}
+.crew-slot[data-idle='true'] {
+  background:
+    linear-gradient(90deg, var(--ink-3) 50%, transparent 0) top left / 12px 2px repeat-x,
+    linear-gradient(90deg, var(--ink-3) 50%, transparent 0) bottom left / 12px 2px repeat-x,
+    linear-gradient(0deg, var(--ink-3) 50%, transparent 0) top left / 2px 12px repeat-y,
+    linear-gradient(0deg, var(--ink-3) 50%, transparent 0) top right / 2px 12px repeat-y,
+    var(--panel);
+  animation: none;
+}
+@keyframes crew-march {
+  to {
+    background-position:
+      12px 0,
+      -12px 100%,
+      0 -12px,
+      100% 12px,
+      0 0;
+  }
+}
+
+/* The baton waiting in a slot: a signal capsule with a halo. */
+.crew-baton-glyph {
+  display: inline-block;
+  width: 22px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-wash);
+  transform: rotate(-18deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crew-packet {
+    display: none;
+  }
+  .crew-slot {
+    animation: none;
+  }
+}

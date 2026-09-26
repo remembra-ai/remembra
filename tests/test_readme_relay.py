@@ -101,7 +101,7 @@ def test_readme_names_every_mcp_tool_and_the_real_count() -> None:
                 re.match(r"\s*(?:async\s+)?def\s+(\w+)", ln) for ln in lines[i : i + 60] if re.match(r"\s*(?:async\s+)?def\s", ln)
             )
             registered.append(name.group(1))
-    assert len(registered) == 21
+    assert len(registered) == 28  # 21 memory/relay tools + 7 Crew mode tools
     assert f"**Available tools ({len(registered)}):**" in README
     for tool in registered:
         assert f"`{tool}`" in README, tool

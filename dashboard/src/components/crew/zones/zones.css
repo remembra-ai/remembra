@@ -1,0 +1,413 @@
+/* Zone Map and Policy (WP-13b). Baton-trail tokens from index.css, plus the
+   dither tones for the pixel clouds (stone dust with ember flecks). Orange is
+   kept for what moves or needs a person: batons, contested zones, pending
+   policy, the live dot, packets on the trail. */
+
+.cz-root {
+  --cz-d1: #e0e1da;
+  --cz-d2: #d2d4cc;
+  --cz-d3: #c1c4bb;
+  --cz-ember: #ff8a52;
+  --cz-trail: #b7bab2;
+  --cz-row-hover: rgb(21 23 26 / 0.035);
+  --cz-row-selected: rgb(255 91 20 / 0.08);
+}
+.dark .cz-root {
+  --cz-d1: #191f1c;
+  --cz-d2: #222b27;
+  --cz-d3: #2e3833;
+  --cz-ember: #9a4119;
+  --cz-trail: #3a403d;
+  --cz-row-hover: rgb(236 237 231 / 0.035);
+  --cz-row-selected: rgb(255 107 43 / 0.1);
+}
+
+/* -------------------------------------------------------------- header band */
+
+.cz-band {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  background: var(--panel);
+}
+.cz-band canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  image-rendering: pixelated;
+  z-index: -1;
+}
+@media (max-width: 639px) {
+  /* the copy runs the full width on a phone: keep the clouds a texture, not a pattern behind words */
+  .cz-band canvas {
+    opacity: 0.45;
+  }
+}
+.cz-title {
+  font-family: var(--f-display);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 0.98;
+}
+
+/* The live status strip, set like a terminal status line. */
+.cz-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 100%;
+  font-family: var(--f-mono);
+  font-size: 12px;
+  color: var(--ink-2);
+  background: var(--panel);
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  padding: 6px 10px;
+  box-shadow: var(--shadow);
+}
+.cz-strip i {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  background: var(--ink-3);
+}
+.cz-strip i[data-live='true'] {
+  background: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-wash);
+  animation: cz-blink 2.4s steps(2, jump-none) infinite;
+}
+.cz-strip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@keyframes cz-blink {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  61%,
+  100% {
+    opacity: 0.35;
+  }
+}
+
+.cz-tabs {
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  padding: 2px 10px;
+}
+.cz-tabs a {
+  font-family: var(--f-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+  padding: 4px 0;
+  border-bottom: 2px solid transparent;
+}
+.cz-tabs a:hover {
+  color: var(--ink);
+}
+.cz-tabs a[aria-current='page'] {
+  color: var(--ink);
+  border-bottom-color: var(--signal);
+}
+
+/* -------------------------------------------------------------- the tree */
+
+.cz-tree {
+  font-family: var(--f-mono);
+  font-size: 12.5px;
+}
+.cz-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0 10px;
+  padding: 5px 12px 5px 8px;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  outline: none;
+}
+.cz-row:hover {
+  background: var(--cz-row-hover);
+}
+.cz-row[aria-selected='true'] {
+  background: var(--cz-row-selected);
+  border-left-color: var(--signal);
+}
+.cz-row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--signal);
+}
+.cz-row[data-dim='true'] .cz-name {
+  color: var(--ink-3);
+}
+/* Box-drawing guides: set in the mono face, drawn by hand, not an icon set. */
+.cz-guide {
+  color: var(--cz-trail);
+  white-space: pre;
+  user-select: none;
+  line-height: 1.55;
+}
+.cz-name {
+  color: var(--ink);
+  font-weight: 600;
+}
+.cz-flash {
+  animation: cz-flash 1.2s steps(6, jump-none) 1;
+}
+@keyframes cz-flash {
+  0% {
+    background: var(--signal-wash);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+/* Zone marks: exclusive solid, shared striped, watch outline, reserved baton. */
+.cz-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  padding: 1px 6px;
+  font-family: var(--f-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.cz-chip[data-mode='exclusive'] {
+  background: var(--ink);
+  color: var(--paper);
+}
+.cz-chip[data-mode='shared'] {
+  background: repeating-linear-gradient(135deg, var(--rule) 0 3px, transparent 3px 6px);
+  color: var(--ink);
+}
+.cz-chip[data-mode='watch'] {
+  background: transparent;
+  color: var(--ink-2);
+  border-style: dashed;
+}
+.cz-chip[data-inherited='true'] {
+  background: transparent;
+  color: var(--ink-3);
+  border-color: var(--rule);
+}
+.cz-chip[data-state='reserved'],
+.cz-chip[data-state='contested'] {
+  border-color: var(--signal);
+  box-shadow: 2px 2px 0 var(--signal);
+}
+.cz-chip[data-state='breach'] {
+  border-color: var(--fail);
+  box-shadow: 2px 2px 0 var(--fail);
+}
+
+.cz-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+}
+.cz-state[data-tone='signal'] {
+  color: var(--signal-ink);
+}
+.cz-state[data-tone='fail'] {
+  color: var(--fail);
+}
+.cz-state[data-tone='ink'] {
+  color: var(--ink);
+}
+
+/* -------------------------------------------------------------- drawer */
+
+.cz-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(13 14 15 / 0.45);
+}
+.cz-scrim[data-top='true'] {
+  z-index: 69;
+}
+.cz-drawer {
+  position: fixed;
+  z-index: 61;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(460px, 100vw);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border-left: 1px solid var(--rule-strong);
+  box-shadow: var(--shadow);
+}
+@media (max-width: 639px) {
+  .cz-drawer {
+    top: auto;
+    left: 0;
+    width: 100vw;
+    max-height: 88vh;
+    border-left: 0;
+    border-top: 1px solid var(--rule-strong);
+    border-radius: 6px 6px 0 0;
+  }
+}
+.cz-sect + .cz-sect {
+  border-top: 1px dashed var(--rule);
+}
+.cz-kv {
+  display: grid;
+  grid-template-columns: 7.5rem minmax(0, 1fr);
+  gap: 4px 12px;
+  font-size: 12.5px;
+}
+.cz-kv dt {
+  font-family: var(--f-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  padding-top: 1px;
+}
+.cz-kv dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+.cz-glob {
+  font-family: var(--f-mono);
+  font-size: 12px;
+  background: var(--paper-2);
+  border-radius: 2px;
+  padding: 0 4px;
+}
+
+/* A dashed trail between history rows. */
+.cz-trail {
+  position: relative;
+  padding-left: 16px;
+}
+.cz-trail::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: repeating-linear-gradient(180deg, var(--cz-trail) 0 3px, transparent 3px 6px);
+}
+.cz-trail li {
+  position: relative;
+}
+.cz-trail li::before {
+  content: '';
+  position: absolute;
+  left: -15px;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  background: var(--panel);
+  border: 1px solid var(--ink-3);
+}
+.cz-trail li[data-tone='signal']::before {
+  background: var(--signal);
+  border-color: var(--signal);
+}
+.cz-trail li[data-tone='fail']::before {
+  background: var(--fail);
+  border-color: var(--fail);
+}
+
+/* -------------------------------------------------------------- dialogs */
+
+.cz-dialog {
+  position: fixed;
+  z-index: 70;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  box-shadow: 6px 6px 0 var(--signal), var(--shadow);
+}
+.cz-code {
+  font-family: var(--f-mono);
+  font-size: 22px;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+}
+
+/* A segmented control drawn as three stamped plates. */
+.cz-seg {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.cz-seg button {
+  padding: 10px 8px;
+  font-family: var(--f-mono);
+  font-size: 12px;
+  text-align: left;
+  color: var(--ink-2);
+  background: transparent;
+}
+.cz-seg button + button {
+  border-left: 1px solid var(--rule);
+}
+.cz-seg button[aria-pressed='true'] {
+  background: var(--ink);
+  color: var(--paper);
+}
+.cz-seg button:disabled {
+  cursor: not-allowed;
+}
+
+.cz-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.cz-table th {
+  text-align: left;
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-3);
+  font-weight: 500;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--rule);
+}
+.cz-table td {
+  padding: 7px 8px;
+  border-bottom: 1px dashed var(--rule);
+  vertical-align: top;
+  color: var(--ink-2);
+}
+.cz-table tr[data-live='true'] td:first-child {
+  box-shadow: inset 3px 0 0 var(--signal);
+  color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cz-strip i[data-live='true'],
+  .cz-flash {
+    animation: none;
+  }
+}

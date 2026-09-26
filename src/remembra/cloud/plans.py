@@ -21,6 +21,10 @@ an enriched store costs ``max(ceil(chars / 8000), actual LLM $ / 0.0025)``.
 Relay events (handoff / checkpoint / status / inbox), pickup briefs, trail
 reads and recalls never consume credits. When credits run out, stores degrade
 to atomic (no extraction, no entity resolution) instead of being rejected.
+
+Crew mode limits (live sessions, zones, soft event cap, promotions, retention,
+teammates) are per crew and never seat-scaled; they add no price. How they are
+applied lives in ``remembra.crew.limits``.
 """
 
 from __future__ import annotations
@@ -132,6 +136,22 @@ class PlanLimits:
     per_seat: bool = False
     min_seats: int = 1
 
+    # Crew mode (spec §12). Per crew, never seat-scaled; the defaults are the Free
+    # values so a tier that forgets them gets the most conservative caps.
+    # Live sessions per crew; joins beyond it are observe-only (never refused).
+    max_crew_sessions_live: int = 3
+    # Zones per crew (the built-in crew-policy zone is not counted).
+    max_zones: int = 10
+    # Crew events per crew per UTC day. Soft: over it activity bursts coalesce,
+    # nothing else is ever dropped.
+    crew_events_per_day_soft: int = 5_000
+    # Raw crew event retention (moments and human actions are never deleted).
+    crew_event_retention_days: int = 14
+    # Teammates' sessions in a crew (L1 feature flag).
+    crew_teammates: bool = False
+    # Checkpoint to memory promotions per crew per UTC day (every promotion counts).
+    crew_memory_promotions_per_day: int = 50
+
     # List prices in USD cents (None = not sold / custom)
     price_monthly_cents: int | None = None
     price_annual_cents: int | None = None
@@ -235,6 +255,13 @@ PLANS: dict[PlanTier, PlanLimits] = {
         enrichment_concurrency=2,
         price_monthly_cents=0,
         price_annual_cents=0,
+        # Crew mode (spec §12)
+        max_crew_sessions_live=3,
+        max_zones=10,
+        crew_events_per_day_soft=5_000,
+        crew_event_retention_days=14,
+        crew_teammates=False,
+        crew_memory_promotions_per_day=50,
     ),
     PlanTier.SOLO: PlanLimits(
         tier=PlanTier.SOLO,
@@ -256,6 +283,13 @@ PLANS: dict[PlanTier, PlanLimits] = {
         price_monthly_cents=1_200,
         price_annual_cents=12_000,
         has_webhooks=True,
+        # Crew mode: Solo sits between Free and Pro (spec §12 predates Solo; owner sign-off)
+        max_crew_sessions_live=5,
+        max_zones=25,
+        crew_events_per_day_soft=20_000,
+        crew_event_retention_days=90,
+        crew_teammates=False,
+        crew_memory_promotions_per_day=100,
     ),
     PlanTier.PRO: PlanLimits(
         tier=PlanTier.PRO,
@@ -279,6 +313,13 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_webhooks=True,
         has_observability=True,
         has_priority_support=True,
+        # Crew mode (spec §12)
+        max_crew_sessions_live=8,
+        max_zones=50,
+        crew_events_per_day_soft=50_000,
+        crew_event_retention_days=180,
+        crew_teammates=False,
+        crew_memory_promotions_per_day=200,
     ),
     PlanTier.TEAM: PlanLimits(
         tier=PlanTier.TEAM,
@@ -305,6 +346,13 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_webhooks=True,
         has_observability=True,
         has_priority_support=True,
+        # Crew mode (spec §12)
+        max_crew_sessions_live=20,
+        max_zones=200,
+        crew_events_per_day_soft=250_000,
+        crew_event_retention_days=365,
+        crew_teammates=True,
+        crew_memory_promotions_per_day=1_000,
     ),
     PlanTier.ENTERPRISE: PlanLimits(
         tier=PlanTier.ENTERPRISE,
@@ -329,6 +377,13 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_sso=True,
         has_observability=True,
         has_priority_support=True,
+        # Crew mode: contract defaults (spec §12 "custom"); contracts override per account
+        max_crew_sessions_live=50,
+        max_zones=1_000,
+        crew_events_per_day_soft=1_000_000,
+        crew_event_retention_days=730,
+        crew_teammates=True,
+        crew_memory_promotions_per_day=5_000,
     ),
     PlanTier.LEGACY_PRO: PlanLimits(
         tier=PlanTier.LEGACY_PRO,
@@ -351,6 +406,13 @@ PLANS: dict[PlanTier, PlanLimits] = {
         price_monthly_cents=4_900,
         has_webhooks=True,
         has_observability=True,
+        # Crew mode: same as Pro
+        max_crew_sessions_live=8,
+        max_zones=50,
+        crew_events_per_day_soft=50_000,
+        crew_event_retention_days=180,
+        crew_teammates=False,
+        crew_memory_promotions_per_day=200,
     ),
     PlanTier.LEGACY_TEAM: PlanLimits(
         tier=PlanTier.LEGACY_TEAM,
@@ -374,6 +436,13 @@ PLANS: dict[PlanTier, PlanLimits] = {
         has_webhooks=True,
         has_observability=True,
         has_priority_support=True,
+        # Crew mode: same as Team
+        max_crew_sessions_live=20,
+        max_zones=200,
+        crew_events_per_day_soft=250_000,
+        crew_event_retention_days=365,
+        crew_teammates=True,
+        crew_memory_promotions_per_day=1_000,
     ),
 }
 

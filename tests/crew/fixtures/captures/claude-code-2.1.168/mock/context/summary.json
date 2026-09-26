@@ -1,0 +1,209 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "SessionStart",
+      "hook_id": "67682d6e-63a2-478f-8b9b-8f1790596e0f",
+      "hook_name": "SessionStart:startup",
+      "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "4da8e531-6b18-4af8-8acc-c72ab9db88eb"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "SessionStart",
+      "hook_id": "67682d6e-63a2-478f-8b9b-8f1790596e0f",
+      "hook_name": "SessionStart:startup",
+      "outcome": "success",
+      "output": "{\"hookSpecificOutput\": {\"hookEventName\": \"SessionStart\", \"additionalContext\": \"S0-SESSIONSTART-CTX-7574289d\"}}\n",
+      "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+      "stderr": "",
+      "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"SessionStart\", \"additionalContext\": \"S0-SESSIONSTART-CTX-7574289d\"}}\n",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "edcd64e9-9fcc-4b17-ad9d-a88541efe7cb"
+    },
+    {
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "515086f8-555c-457c-a295-95580c83892d",
+      "hook_name": "UserPromptSubmit",
+      "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "f18f52bd-53a6-44fc-a656-a294b60564b6"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "515086f8-555c-457c-a295-95580c83892d",
+      "hook_name": "UserPromptSubmit",
+      "outcome": "success",
+      "output": "{\"hookSpecificOutput\": {\"hookEventName\": \"UserPromptSubmit\", \"additionalContext\": \"S0-PROMPT-CTX-7574289d\"}}\n",
+      "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+      "stderr": "",
+      "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"UserPromptSubmit\", \"additionalContext\": \"S0-PROMPT-CTX-7574289d\"}}\n",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "a874bf02-f152-477b-9b10-537a376c8ba3"
+    },
+    {
+      "hook_event": "PreToolUse",
+      "hook_id": "49f9588d-49b6-4651-9c94-d9602e575c73",
+      "hook_name": "PreToolUse:Write",
+      "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "eb8835e5-746f-4bb2-8afd-a22c1d8bb4e8"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "PreToolUse",
+      "hook_id": "49f9588d-49b6-4651-9c94-d9602e575c73",
+      "hook_name": "PreToolUse:Write",
+      "outcome": "success",
+      "output": "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"additionalContext\": \"S0-PRETOOL-CTX-7574289d\"}}\n",
+      "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+      "stderr": "",
+      "stdout": "{\"hookSpecificOutput\": {\"hookEventName\": \"PreToolUse\", \"additionalContext\": \"S0-PRETOOL-CTX-7574289d\"}}\n",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "a8debbb8-72c8-4a2c-8cb4-49bfc20f4bc6"
+    },
+    {
+      "hook_event": "PostToolUse",
+      "hook_id": "de4f7b7a-6914-4f03-8cde-f56d69629669",
+      "hook_name": "PostToolUse:Write",
+      "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "ccce5402-13b0-4888-b056-90efc96736c8"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "PostToolUse",
+      "hook_id": "de4f7b7a-6914-4f03-8cde-f56d69629669",
+      "hook_name": "PostToolUse:Write",
+      "outcome": "success",
+      "output": "",
+      "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "ae55c2ab-ebe1-43c4-bb8a-d1067d105502"
+    },
+    {
+      "hook_event": "Stop",
+      "hook_id": "4ba7b510-bc4e-4ff3-b675-21dab797c79a",
+      "hook_name": "Stop",
+      "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "a99590a8-1e22-4ef2-a49a-e2bbb2b26bce"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "Stop",
+      "hook_id": "4ba7b510-bc4e-4ff3-b675-21dab797c79a",
+      "hook_name": "Stop",
+      "outcome": "success",
+      "output": "",
+      "session_id": "e1159370-3902-493b-92bd-33e8e543e6f8",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "a6fc1130-a879-4611-94f5-c2cf9c62be3c"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "text": "<system-reminder>\nSessionStart hook additional context: S0-SESSIONSTART-CTX-7574289d\n</system-reminder>",
+            "type": "text"
+          },
+          {
+            "_elided_chars": 4634,
+            "type": "text"
+          },
+          {
+            "text": "<system-reminder>\nUserPromptSubmit hook additional context: S0-PROMPT-CTX-7574289d\n</system-reminder>\n",
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 166,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    },
+    {
+      "i": 1,
+      "last_message": {
+        "content": [
+          {
+            "content": "File created successfully at: <S0_TMP>/mock-context/repo/pos/cart.txt (file state is current in your context \u2014 no need to Read it back)",
+            "tool_use_id": "toolu_s0_5da6255bd1ef",
+            "type": "tool_result"
+          },
+          {
+            "cache_control": {
+              "type": "ephemeral"
+            },
+            "text": "<system-reminder>\nPreToolUse:Write hook additional context: S0-PRETOOL-CTX-7574289d\n</system-reminder>",
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 3,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "S0 ack",
+  "scenario": "context",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [
+    {
+      "content": "File created successfully at: <S0_TMP>/mock-context/repo/pos/cart.txt (file state is current in your context \u2014 no need to Read it back)",
+      "tool_use_id": "toolu_s0_5da6255bd1ef",
+      "type": "tool_result"
+    }
+  ],
+  "verdict": {
+    "duration_s": 1.1,
+    "events": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "PreToolUse",
+      "PostToolUse",
+      "Stop",
+      "SessionEnd"
+    ],
+    "file_written": true,
+    "ok": true,
+    "pretool_ctx_in_later_request": true,
+    "prompt_ctx_in_first_request": true,
+    "request_gaps_s": [
+      0.14
+    ],
+    "returncode": 0,
+    "sessionend_fired": true,
+    "sessionstart_ctx_in_first_request": true
+  }
+}

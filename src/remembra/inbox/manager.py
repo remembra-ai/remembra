@@ -8,7 +8,7 @@ and acknowledges with `ack_inbox` after acting.
 Stores inbox rows in SQLite, scoped per owner_user_id so a single tenant
 can partition its agents freely without cross-tenant concerns.
 
-Scoping inside a tenant (the same rules as the crew branch, so its merge is clean):
+Scoping inside a tenant:
 
 * **project scoping**: every read and ack takes ``project_ids`` (the caller's
   allow-list): ``None`` means unrestricted, a list keeps only rows tagged with
@@ -19,6 +19,13 @@ Scoping inside a tenant (the same rules as the crew branch, so its merge is clea
 * **agent scoping**: ``recipient`` limits reads and acks to rows addressed to
   that agent (an agent-scoped key or agent-bound connector grant reads only its
   own inbox).
+* **server-set sender provenance** (Crew mode, spec §3.1, §5.8, §11.2; main-DB
+  migration v5 also adds ``crew_id``, ``kind``, ``sender_kind`` and
+  ``sender_verified``): ``sender_kind`` is agent|human|system. The sender names
+  ``mani``, ``human``, ``system`` and ``remembra`` and the kinds ``override`` and
+  ``pause`` are reserved: an ``agent`` sender using them raises
+  :class:`ReservedSenderError` (the API maps it to 422). Only the server
+  (``sender_kind`` ``human`` or ``system``) may use them.
 
 Content protection (R-16): every message's subject, body and metadata strings
 pass secret redaction before they are stored, and the row keeps the trust
@@ -30,6 +37,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
@@ -47,6 +55,73 @@ logger = logging.getLogger(__name__)
 VALID_INBOX_STATUSES: set[str] = {"unread", "read", "done", "blocked", "rejected"}
 TERMINAL_STATUSES: set[str] = {"done", "blocked", "rejected"}
 SCOPES: frozenset[str] = frozenset({"all", "project", "unscoped"})
+RESERVED_SENDER_NAMES: frozenset[str] = frozenset({"mani", "human", "system", "remembra"})
+RESERVED_KINDS: frozenset[str] = frozenset({"override", "pause"})
+SENDER_KINDS: frozenset[str] = frozenset({"agent", "human", "system"})
+KIND_RE = re.compile(r"[a-z][a-z0-9_]{0,31}")
+
+
+class ReservedSenderError(ValueError):
+    """An agent tried to send as a reserved sender name or with a server-only kind."""
+
+
+# Latin look-alikes of the letters in the reserved names (Cyrillic, Greek, Armenian, Cherokee, Latin
+# small caps …): a confusables skeleton for exactly what the check needs, applied after NFKC.
+_CONFUSABLES: dict[str, str] = {
+    **dict.fromkeys("аɑαа", "a"),
+    **dict.fromkeys("еєеёεҽ", "e"),
+    **dict.fromkeys("іıɩιӏ¡", "i"),
+    **dict.fromkeys("ⅼӀ", "l"),
+    **dict.fromkeys("мʍ", "m"),
+    **dict.fromkeys("пոɴη", "n"),
+    **dict.fromkeys("оοσօ", "o"),
+    **dict.fromkeys("ѕʂ", "s"),
+    **dict.fromkeys("тτ", "t"),
+    **dict.fromkeys("уүγ", "y"),
+    **dict.fromkeys("һհ", "h"),
+    **dict.fromkeys("υս", "u"),
+    **dict.fromkeys("гꭇ", "r"),
+    **dict.fromkeys("ьЬ", "b"),
+}
+_NAME_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def sender_skeleton(name: str) -> str:
+    """``name`` reduced for comparison: NFKC, case-folded, format characters (zero-width) removed and
+    look-alike letters mapped to Latin. Separators and punctuation are kept (for tokenizing)."""
+    import unicodedata
+
+    text = unicodedata.normalize("NFKC", str(name)).casefold()
+    text = "".join(ch for ch in text if unicodedata.category(ch) not in ("Cf", "Mn", "Me", "Cc"))
+    return "".join(_CONFUSABLES.get(ch, ch) for ch in text)
+
+
+def is_reserved_sender(name: str | None) -> bool:
+    """Whether ``name`` is, or passes for, a server-set sender (``mani``, ``human``, ``system``, ``remembra``).
+
+    Caught: case, whitespace, zero-width and other format characters, fullwidth and other NFKC forms,
+    Cyrillic/Greek look-alikes, punctuation around the name (``mani.``, ``Mani (owner)``, ``@mani``),
+    and a reserved name as any word of the sender (``system-bot``, ``mani_owner``).
+    """
+    if not name:
+        return False
+    skeleton = sender_skeleton(name)
+    if not skeleton.strip():
+        return False
+    squashed = _NAME_SPLIT_RE.sub("", skeleton)
+    if squashed in RESERVED_SENDER_NAMES:
+        return True
+    return any(token in RESERVED_SENDER_NAMES for token in _NAME_SPLIT_RE.split(skeleton) if token)
+
+
+def sender_label(row: dict[str, Any]) -> str:
+    """How a sender is shown (§5.8): "agent X (key-verified)", "agent X (self-declared)", "human", "system"."""
+    kind = row.get("sender_kind") or "agent"
+    if kind in ("human", "system"):
+        return str(kind)
+    verified = "key-verified" if row.get("sender_verified") else "self-declared"
+    return f"agent {row.get('from_agent')} ({verified})"
+
 
 # The row's project before migration v5 adds the column: a text
 # ``metadata.project_id`` (what v5's backfill copies into the column). Malformed
@@ -55,6 +130,10 @@ _META_PROJECT = (
     "(CASE WHEN json_valid(metadata) THEN"
     " CASE WHEN json_type(metadata, '$.project_id') = 'text' THEN json_extract(metadata, '$.project_id') END END)"
 )
+
+
+# Columns main-DB migration v5 (crew_agent_inbox_scoping) adds to agent_inbox.
+_V5_COLUMNS: frozenset[str] = frozenset({"project_id", "crew_id", "kind", "sender_kind", "sender_verified"})
 
 
 def project_filter(project_ids: list[str] | None, project_id: str | None = None, scope: str = "all") -> tuple[str, list[Any]]:
@@ -170,19 +249,32 @@ class InboxManager:
         expires_at: datetime | None = None,
         *,
         project_id: str | None = None,
+        crew_id: str | None = None,
+        kind: str = "directive",
+        sender_kind: str = "agent",
+        sender_verified: bool = False,
+        inbox_id: str | None = None,
     ) -> dict[str, Any]:
         """Write a new inbox row addressed to `to_agent`.
 
         ``project_id`` tags the row: it is written to ``metadata.project_id``
-        (replacing any value there) and, once migration v5 has run, to the
-        ``project_id`` column. Without it, the metadata is stored as given.
+        (replacing any value there, so the session brief's filter agrees with
+        the column) and, once migration v5 has run, to the ``project_id``
+        column. Without it, the metadata is stored as given.
 
-        Returns the created inbox row.
+        ``sender_kind`` must be set by the server from the credential (an API
+        key is ``agent``; a dashboard login is ``human``; crew internals are
+        ``system``). An ``agent`` sender may not use a reserved sender name or a
+        reserved kind (:class:`ReservedSenderError`). ``inbox_id`` makes a
+        retried send idempotent.
+
+        Returns the created (or already existing) inbox row.
         """
         from_agent = (from_agent or "").strip()
         to_agent = (to_agent or "").strip()
         subject = (subject or "").strip()
         body = body or ""
+        kind = (kind or "directive").strip().lower()
         project_id = (project_id or "").strip() or None
 
         if not from_agent:
@@ -193,6 +285,15 @@ class InboxManager:
             raise ValueError("subject must not be empty")
         if not body.strip():
             raise ValueError("body must not be empty")
+        if sender_kind not in SENDER_KINDS:
+            raise ValueError(f"sender_kind must be one of {sorted(SENDER_KINDS)}")
+        if not KIND_RE.fullmatch(kind):
+            raise ValueError("kind must be a short lowercase word")
+        if sender_kind == "agent":
+            if is_reserved_sender(from_agent):
+                raise ReservedSenderError(f"sender name '{from_agent}' is reserved for the server")
+            if kind in RESERVED_KINDS:
+                raise ReservedSenderError(f"kind '{kind}' is reserved for the server")
 
         # Secrets never reach the table; the stored score is the brief's trust
         # policy applied to everything the sender wrote.
@@ -201,7 +302,7 @@ class InboxManager:
         meta = _scrub_deep(dict(metadata or {}))
         trust_score = assess_text(from_agent, subject, body).trust
 
-        inbox_id = _new_inbox_id()
+        inbox_id = inbox_id or _new_inbox_id()
         now = datetime.now(UTC).isoformat()
         if project_id:
             meta["project_id"] = project_id
@@ -221,17 +322,30 @@ class InboxManager:
             "created_at": now,
             "expires_at": expires_iso,
         }
-        if "project_id" in columns:  # main-DB migration v5 (crew); before it the project is metadata.project_id
-            values["project_id"] = project_id
+        if await self._scoped_columns():  # main-DB migration v5 (crew); before it the project is metadata.project_id
+            values.update(
+                {
+                    "project_id": project_id,
+                    "crew_id": crew_id,
+                    "kind": kind,
+                    "sender_kind": sender_kind,
+                    "sender_verified": 1 if sender_verified else 0,
+                }
+            )
         if "trust_score" in columns:  # main-DB migration v6
             values["trust_score"] = trust_score
         names = ", ".join(values)
         marks = ", ".join("?" for _ in values)
-        await self._db.conn.execute(
-            f"INSERT INTO agent_inbox ({names}) VALUES ({marks})",  # noqa: S608 - fixed column names; values are bound
+        cursor = await self._db.conn.execute(
+            f"INSERT OR IGNORE INTO agent_inbox ({names}) VALUES ({marks})",  # noqa: S608 - fixed column names; values are bound
             tuple(values.values()),
         )
         await self._db.conn.commit()
+        if (cursor.rowcount or 0) == 0:
+            existing = await self.get_one(owner_user_id, inbox_id)
+            if existing is None:
+                raise ValueError("inbox id collision")
+            return existing
 
         logger.info(
             "inbox_sent owner=%s from=%s to=%s id=%s",
@@ -256,6 +370,10 @@ class InboxManager:
             "ack_note": None,
             "ack_result": None,
             "project_id": project_id,
+            "crew_id": crew_id,
+            "kind": kind,
+            "sender_kind": sender_kind,
+            "sender_verified": 1 if sender_verified else 0,
             "trust_score": trust_score,
         }
 
@@ -271,12 +389,13 @@ class InboxManager:
         return self._columns
 
     async def _scoped_columns(self) -> bool:
-        """True when ``agent_inbox`` has the ``project_id`` column (main-DB migration v5, crew).
+        """True when ``agent_inbox`` has the v5 scoping columns (always, once main-DB v5 ran).
 
-        Before v5 the row's project is ``metadata.project_id``; project
-        restrictions then filter on that instead of the column.
+        A bare ``init_schema()`` on a database that never ran the main migrations
+        (unit fixtures) creates the pre-v5 table; there rows are written without
+        the scoping columns and project restrictions use ``metadata.project_id``.
         """
-        return "project_id" in await self._table_columns()
+        return await self._table_columns() >= _V5_COLUMNS
 
     async def _scope_sql(
         self, project_ids: list[str] | None, project_id: str | None = None, scope: str = "all"

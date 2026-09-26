@@ -1,0 +1,100 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "SessionStart",
+      "hook_id": "872fa84d-8794-436f-9a45-a459eae12135",
+      "hook_name": "SessionStart:startup",
+      "session_id": "be51e339-9ec4-4e3f-a996-58717d5700db",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "04478cd2-d621-4e5d-a225-437f3a923bd5"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "SessionStart",
+      "hook_id": "872fa84d-8794-436f-9a45-a459eae12135",
+      "hook_name": "SessionStart:startup",
+      "outcome": "success",
+      "output": "",
+      "session_id": "be51e339-9ec4-4e3f-a996-58717d5700db",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "eeaae36b-fdbe-4ea9-a589-f3e191ef6e0b"
+    },
+    {
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "b6590b5b-a0e1-4ffa-80d9-9c811c356d45",
+      "hook_name": "UserPromptSubmit",
+      "session_id": "be51e339-9ec4-4e3f-a996-58717d5700db",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "83121e89-8a62-4f75-9102-2578e0dc8f1a"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "b6590b5b-a0e1-4ffa-80d9-9c811c356d45",
+      "hook_name": "UserPromptSubmit",
+      "outcome": "success",
+      "output": "",
+      "session_id": "be51e339-9ec4-4e3f-a996-58717d5700db",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "d950c046-ba45-468e-a356-d0747ac2ced6"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 85,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment. If it persists, check your inference gateway (127.0.0.1:56550).",
+  "scenario": "stopfailure_overloaded",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [],
+  "verdict": {
+    "duration_s": 0.43,
+    "error": "server_error",
+    "error_details": null,
+    "events": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "StopFailure",
+      "SessionEnd"
+    ],
+    "last_assistant_message": "API Error: 529 Overloaded. This is a server-side issue, usually temporary \u2014 try again in a moment. If it persists, check your inference gateway (127.0.0.1:56550).",
+    "ok": true,
+    "request_gaps_s": [],
+    "returncode": 1,
+    "sessionend_fired": true,
+    "stop_fired": false,
+    "stopfailure_fired": true
+  }
+}

@@ -23,6 +23,9 @@ discard someone else's work.
 * Ownership is tracked with a ``ContextVar``: nested ``transaction()`` calls
   join the outer one, and tasks spawned inside inherit ownership (no
   self-deadlock on ``gather``/``wait_for``).
+* :meth:`TxCoordinator.after_commit` registers work (e.g. publishing events)
+  that must happen only once the *outermost* transaction has committed; it is
+  dropped on rollback and runs after the lock is released.
 
 Rules for callers: keep transaction bodies to SQLite statements. Never await
 network I/O (Qdrant, embeddings, HTTP) while holding a transaction — every
@@ -47,11 +50,15 @@ class TransactionRollbackOnly(RuntimeError):
     """Raised when a transaction body called ``rollback()`` and then returned normally."""
 
 
+AfterCommit = Callable[[], Awaitable[None]]
+
+
 class _TxToken:
-    __slots__ = ("rollback_only",)
+    __slots__ = ("rollback_only", "after_commit")
 
     def __init__(self) -> None:
         self.rollback_only = False
+        self.after_commit: list[AfterCommit] = []
 
 
 _active_tx: ContextVar[_TxToken | None] = ContextVar("remembra_sqlite_tx", default=None)
@@ -83,6 +90,19 @@ class TxCoordinator:
     def in_transaction(self) -> bool:
         return self._current is not None
 
+    def after_commit(self, callback: AfterCommit) -> bool:
+        """Run ``callback`` after the transaction the caller owns commits (outermost COMMIT).
+
+        Returns False (and registers nothing) when the caller owns no transaction. Callbacks run in
+        registration order once the lock is released; a rollback drops them. A failing callback is
+        logged and does not undo the commit or stop the others.
+        """
+        token = _active_tx.get()
+        if token is None or token is not self._current:
+            return False
+        token.after_commit.append(callback)
+        return True
+
     async def run(self, factory: Callable[[], Awaitable[Any]]) -> Any:
         """Run one statement: directly if we own the transaction, else under the lock."""
         if self.owns():
@@ -97,6 +117,7 @@ class TxCoordinator:
             yield
             return
 
+        committed: list[AfterCommit] = []
         async with self.lock:
             token = _TxToken()
             self._current = token
@@ -120,9 +141,15 @@ class TxCoordinator:
                 except BaseException:
                     await _safe_rollback(raw)
                     raise
+                committed = token.after_commit
             finally:
                 self._current = None
                 _active_tx.reset(ctx_token)
+        for callback in committed:
+            try:
+                await callback()
+            except Exception as e:  # the data is committed; one listener must not fail the caller
+                log.error("sqlite_after_commit_failed", error_type=type(e).__name__, error=str(e))
 
 
 async def _safe_rollback(raw: aiosqlite.Connection) -> None:

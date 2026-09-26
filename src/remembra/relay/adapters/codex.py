@@ -40,6 +40,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from remembra.relay.adapters.base import AdapterSpec, JsonHooksAdapter, PayloadMap
+from remembra.relay.adapters.crew_hooks import CrewHook, CrewSpec
 
 TESTED_VERSIONS = ("0.155.0-alpha.16.4",)
 
@@ -77,3 +78,29 @@ SPEC = AdapterSpec(
 )
 
 ADAPTER = JsonHooksAdapter(SPEC)
+
+
+# ---------------------------------------------------------------------------
+# Crew mode (§8.3): UNVERIFIED, observe only until `remembra-crew verify` passes
+# ---------------------------------------------------------------------------
+
+# Research-grade: Claude-compatible events in ~/.codex/hooks.json. PreToolUse is reported to fire for the
+# shell tool only (apply_patch is likely not intercepted), so Codex relies on the read-only fence (§8.3).
+# No matchers and no timeouts: the gate filters tools itself and the timeout unit is unverified.
+CREW = CrewSpec(
+    adapter="codex",
+    verified=False,
+    style="json-hooks",
+    hooks=(
+        CrewHook("SessionStart", "start", "cli"),
+        CrewHook("UserPromptSubmit", "turn", "gate"),
+        CrewHook("PreToolUse", "pretool", "gate"),
+        CrewHook("PostToolUse", "posttool", "gate"),
+        CrewHook("Stop", "stop", "gate"),
+        CrewHook("SessionEnd", "end", "cli"),
+    ),
+    output="text",
+    pretool_events=("PreToolUse",),
+    file_gate=False,
+    notes="Unverified: Codex hook events and payloads are from research; apply_patch is likely not gated (fence instead).",
+)

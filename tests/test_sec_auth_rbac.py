@@ -482,3 +482,41 @@ async def test_password_confirming_endpoints_are_rate_limited(tmp_path):
     finally:
         limiter.reset()
         limiter.enabled = False
+
+
+# ---------------------------------------------------------------------------
+# Crew D27: an admin API key must not mint a human (JWT) login through reset-password
+# ---------------------------------------------------------------------------
+
+
+async def test_admin_api_key_cannot_reset_a_password_and_log_in_as_the_owner(tmp_path):
+    from remembra.crew.access import is_human, login_is_fresh
+
+    async with secure_app(tmp_path, ROUTERS) as h:
+        owner = await h.create_user("owner@example.com", password="Str0ng!Passw0rd", verified=True)
+        admin_key, _ = await h.api_key(owner, "admin")
+        key_hdr = {"X-API-Key": admin_key}
+        # the key is superadmin for reads (unchanged), but it cannot create a credential
+        assert (await h.client.get("/api/v1/admin/users", headers=key_hdr)).status_code == 200
+        for target in (owner, await h.create_user("staff@example.com")):
+            r = await h.client.post(f"/api/v1/admin/users/{target}/reset-password", headers=key_hdr)
+            assert r.status_code == 403, r.text
+            assert "temporary_password" not in r.text
+        # the owner's password still works and nothing else does: no JWT was obtainable
+        r = await h.client.post("/api/v1/auth/login", json={"email": "owner@example.com", "password": "Str0ng!Passw0rd"})
+        assert r.status_code == 200
+        # a real dashboard session can still reset (and the reset is a fresh human login for the target)
+        staff = await h.create_user("staff2@example.com", password="Str0ng!Passw0rd")
+        stolen = h.jwt(staff, "staff2@example.com")
+        r = await h.client.post(f"/api/v1/admin/users/{staff}/reset-password", headers=h.jwt(owner, "owner@example.com"))
+        assert r.status_code == 200, r.text
+        temp = r.json()["temporary_password"]
+        # every session the target had before the reset is invalidated
+        assert (await h.client.get("/api/v1/auth/me", headers=stolen)).status_code == 401
+        r = await h.client.post("/api/v1/auth/login", json={"email": "staff2@example.com", "password": temp})
+        assert r.status_code == 200, r.text
+        # sanity for the crew check this protects: a JWT is human and fresh, a key is not
+        from remembra.auth.middleware import AuthenticatedUser
+
+        key_user = AuthenticatedUser(user_id=owner, api_key_id="k1", rate_limit_tier="free", role="admin")
+        assert not is_human(key_user) and not login_is_fresh(key_user, int(time.time() * 1000))

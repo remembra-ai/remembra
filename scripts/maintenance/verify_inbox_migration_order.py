@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
-"""Check that the crew branch's main-DB migration v5 still applies after this branch.
+"""Check the agent inbox across the production -> Crew mode upgrade, and back.
 
-Production runs the Phase 0 inbox fix first (no schema change: a row's project
-is its ``metadata.project_id`` tag) and the crew branch later (v5 adds
-``agent_inbox.project_id`` and backfills it). This replays that order on one
-throw-away SQLite file, each step with its own code tree taken from git:
+Production (``--prod``, ce067fd) is at main-DB schema 9 (versions 1-4 and 6-9):
+a row's project is its ``metadata.project_id`` tag, and rows carry the trust
+policy's ``trust_score`` (v6). This release (``--this``) adds Crew mode's
+version 5: ``agent_inbox.project_id``, ``crew_id``, ``kind``, ``sender_kind``
+and ``sender_verified``, with the project backfilled once. This replays the
+order on one throw-away SQLite file, each step with its own code tree from git:
 
-1. ``--prod`` (the deployed commit) creates the schema and writes inbox rows;
-2. ``--this`` (this branch) migrates, writes project-tagged rows, reads as a
-   project-restricted caller;
-3. ``--crew`` migrates (v5 must apply, not be skipped) and reads;
-4. ``--this`` runs again on the migrated file (the column path).
+1. ``--prod`` creates the schema and writes inbox rows (tagged through
+   metadata, tagged through its ``project_id`` argument, untagged);
+2. ``--this`` migrates (only v5 applies), reads as a project-restricted caller
+   and as an agent-scoped caller, and writes a row with sender provenance;
+3. ``--prod`` again (the rollback image) reads and writes through the column;
+4. ``--this`` again: nothing to migrate, and the rollback's row is scoped.
 
-    python scripts/maintenance/verify_inbox_migration_order.py \\
-        --prod b034314 --this HEAD --crew feat/crew
+    python scripts/maintenance/verify_inbox_migration_order.py --prod ce067fd --this HEAD
 
 Exits non-zero if any invariant fails. Writes only to a temporary directory.
 """
@@ -31,7 +33,14 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-TAGGED = {"prod tagged alpha": "alpha", "prod tagged beta": "beta", "this tagged alpha": "alpha", "this post-v5": "beta"}
+TAGGED = {
+    "prod tagged alpha": "alpha",
+    "prod argument beta": "beta",
+    "prod tagged beta": "beta",
+    "this post-v5": "beta",
+    "prod after rollback": "alpha",
+}
+PROD_VERSIONS = [1, 2, 3, 4, 6, 7, 8, 9]
 
 
 async def _stage(stage: str, db_path: str) -> dict[str, Any]:
@@ -46,28 +55,36 @@ async def _stage(stage: str, db_path: str) -> dict[str, Any]:
     out: dict[str, Any] = {"stage": stage}
     if stage == "prod":
         await inbox.send("u1", "codex", "claude-code", "prod tagged alpha", "b", {"project_id": "alpha"})
+        await inbox.send("u1", "codex", "claude-code", "prod argument beta", "b", {}, project_id="beta")
         await inbox.send("u1", "codex", "claude-code", "prod untagged", "b", {})
         await inbox.send("u1", "claude-code", "codex", "prod tagged beta", "b", {"project_id": "beta"})
     elif stage == "this":
-        await inbox.send("u1", "claude-code", "codex", "this tagged alpha", "b", {}, project_id="alpha")
-        await inbox.send("u1", "claude-code", "codex", "this untagged", "b", {})
         rows = await inbox.get_for_agent("u1", "claude-code", "all", project_ids=["alpha"])
         out["alpha_view"] = sorted(r["subject"] for r in rows)
-    elif stage == "crew":
-        rows = await inbox.get_for_agent("u1", "claude-code", "all", project_ids=["alpha"])
-        out["alpha_view"] = sorted(r["subject"] for r in rows)
-    elif stage == "this_after_crew":
-        await inbox.send("u1", "claude-code", "codex", "this post-v5", "b", {}, project_id="beta")
+        listed = await inbox.list_messages("u1", status="all", recipient="codex")
+        out["codex_only_view"] = sorted(r["subject"] for r in listed["items"])
+        row = await inbox.send("u1", "claude-code", "codex", "this post-v5", "b", {}, project_id="beta", sender_verified=True)
+        out["post_v5_row"] = {k: row.get(k) for k in ("project_id", "sender_kind", "sender_verified", "kind", "trust_score")}
+    elif stage == "prod_rollback":
         rows = await inbox.get_for_agent("u1", "codex", "all", project_ids=["beta"])
         out["beta_view"] = sorted(r["subject"] for r in rows)
+        await inbox.send("u1", "codex", "claude-code", "prod after rollback", "b", {}, project_id="alpha")
+    elif stage == "this_again":
+        rows = await inbox.get_for_agent("u1", "claude-code", "all", project_ids=["alpha"])
+        out["alpha_view"] = sorted(r["subject"] for r in rows)
     cursor = await db.conn.execute("SELECT version, name FROM schema_version ORDER BY version")
     out["schema_version"] = [list(r) for r in await cursor.fetchall()]
     cursor = await db.conn.execute("PRAGMA table_info(agent_inbox)")
     cols = [r[1] for r in await cursor.fetchall()]
-    out["has_project_column"] = "project_id" in cols
+    out["columns"] = cols
     if "project_id" in cols:
-        cursor = await db.conn.execute("SELECT subject, project_id FROM agent_inbox ORDER BY subject")
-        out["rows"] = {r[0]: r[1] for r in await cursor.fetchall()}
+        cursor = await db.conn.execute(
+            "SELECT subject, project_id, sender_kind, sender_verified, trust_score FROM agent_inbox ORDER BY subject"
+        )
+        out["rows"] = {
+            r[0]: {"project_id": r[1], "sender_kind": r[2], "sender_verified": r[3], "trust_score": r[4]}
+            for r in await cursor.fetchall()
+        }
     await db.close()
     return out
 
@@ -94,9 +111,8 @@ def _run(tree: Path, stage: str, db_path: Path) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--prod", default="main")
+    parser.add_argument("--prod", default="ce067fd")
     parser.add_argument("--this", default="HEAD")
-    parser.add_argument("--crew", default="feat/crew")
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parents[2]))
     parser.add_argument("--stage", help=argparse.SUPPRESS)
     parser.add_argument("--db", help=argparse.SUPPRESS)
@@ -108,33 +124,44 @@ def main() -> int:
     repo = Path(args.repo)
     with tempfile.TemporaryDirectory() as tmp:
         base = Path(tmp)
-        shas = {
-            name: _export(repo, ref, base / name) for name, ref in (("prod", args.prod), ("this", args.this), ("crew", args.crew))
-        }
+        shas = {name: _export(repo, ref, base / name) for name, ref in (("prod", args.prod), ("this", args.this))}
         db = base / "copy.db"
         results = [
             _run(base / "prod", "prod", db),
             _run(base / "this", "this", db),
-            _run(base / "crew", "crew", db),
-            _run(base / "this", "this_after_crew", db),
+            _run(base / "prod", "prod_rollback", db),
+            _run(base / "this", "this_again", db),
         ]
     print(json.dumps({"refs": shas, "results": results}, indent=2))
 
     failures: list[str] = []
-    prod, this, crew, again = results
-    if this["has_project_column"]:
-        failures.append("this branch added agent_inbox.project_id (it must leave the schema to crew v5)")
+    prod, this, rollback, again = results
+    if [v for v, _ in prod["schema_version"]] != PROD_VERSIONS or "project_id" in prod["columns"]:
+        failures.append(f"prod is not at production's schema: {prod['schema_version']}")
+    applied = {v: n for v, n in this["schema_version"]}
+    if sorted(applied) != list(range(1, 10)) or applied.get(5) != "crew_agent_inbox_scoping":
+        failures.append(f"v5 did not apply after 6-9: {this['schema_version']}")
     if this.get("alpha_view") != ["prod tagged alpha"]:
-        failures.append(f"restricted view before v5 is {this.get('alpha_view')}")
-    applied = {v: n for v, n in crew["schema_version"]}
-    if applied.get(5) != "crew_agent_inbox_scoping" or not crew["has_project_column"]:
-        failures.append(f"crew v5 did not apply: {crew['schema_version']}")
+        failures.append(f"restricted view after v5 is {this.get('alpha_view')}")
+    if this.get("codex_only_view") != ["prod tagged beta"]:
+        failures.append(f"agent-scoped view after v5 is {this.get('codex_only_view')}")
+    post = this.get("post_v5_row") or {}
+    if post.get("sender_kind") != "agent" or post.get("sender_verified") != 1 or post.get("trust_score") is None:
+        failures.append(f"post-v5 row lost provenance or trust score: {post}")
+    if rollback["schema_version"] != this["schema_version"]:
+        failures.append(f"the rollback image changed the schema: {rollback['schema_version']}")
+    if rollback.get("beta_view") != ["prod tagged beta", "this post-v5"]:
+        failures.append(f"rollback image's restricted view is {rollback.get('beta_view')}")
+    if again["schema_version"] != this["schema_version"]:
+        failures.append("this release changed the schema on its second boot")
+    if again.get("alpha_view") != ["prod after rollback", "prod tagged alpha"]:
+        failures.append(f"restricted view after the rollback is {again.get('alpha_view')}")
     rows = again.get("rows") or {}
     for subject, project in TAGGED.items():
-        if rows.get(subject) != project:
+        if (rows.get(subject) or {}).get("project_id") != project:
             failures.append(f"{subject!r}: project column {rows.get(subject)!r}, expected {project!r}")
-    if "this post-v5" not in (again.get("beta_view") or []):
-        failures.append("this branch cannot read its own post-v5 row through the column")
+    if (rows.get("prod untagged") or {}).get("project_id") is not None:
+        failures.append(f"'prod untagged' was given a project: {rows.get('prod untagged')}")
     for failure in failures:
         print(f"FAIL: {failure}", file=sys.stderr)
     print("OK" if not failures else f"{len(failures)} failure(s)", file=sys.stderr)

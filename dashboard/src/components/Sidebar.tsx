@@ -4,7 +4,10 @@
 import { useEffect, useRef, useState, type ElementType } from 'react';
 import clsx from 'clsx';
 import {
+  Activity,
   Bot,
+  Flag,
+  HardHat,
   Database,
   Ellipsis,
   GitCommitVertical,
@@ -22,11 +25,14 @@ import {
 } from 'lucide-react';
 import { SECTIONS, hrefFor, sectionOf, type SectionId, type TabType } from '../lib/nav';
 import { BrandLockup, BrandMark } from '../brand/Brand';
+import { useCheckIn } from './crew/checkin/useCheckIn';
+import type { CheckInId } from './crew/checkin/checkin';
 
 export type { TabType } from '../lib/nav';
 
 const ICONS: Record<SectionId, ElementType> = {
   home: House,
+  crews: HardHat,
   trail: GitCommitVertical,
   agents: Bot,
   inbox: Inbox,
@@ -185,7 +191,14 @@ export function Sidebar({
   );
 }
 
-/** Phone navigation: four primary destinations and a "More" sheet. */
+const CHECKIN_ICONS: Record<CheckInId, ElementType> = {
+  crews: HardHat,
+  'needs-you': Flag,
+  feed: Activity,
+  inbox: Inbox,
+};
+
+/** Phone navigation, the crew check-in (§9.12): Crews · Needs you · Feed · Inbox, and a "More" sheet. */
 export function MobileNav({
   activeTab,
   isAdmin,
@@ -212,8 +225,8 @@ export function MobileNav({
   }
   const sheetRef = useRef<HTMLDivElement>(null);
   const active = sectionOf(activeTab).id;
-  const primary = SECTIONS.filter((s) => ['home', 'trail', 'agents', 'inbox'].includes(s.id));
-  const secondary = visibleSections(isAdmin).filter((s) => !['home', 'trail', 'agents', 'inbox'].includes(s.id));
+  const checkIn = useCheckIn(inboxUnread, isAdmin);
+  const secondary = visibleSections(isAdmin).filter((s) => checkIn.more.includes(s.id));
   const moreActive = secondary.some((s) => s.id === active);
 
   useEffect(() => {
@@ -234,24 +247,23 @@ export function MobileNav({
         className="fixed inset-x-0 bottom-0 z-40 border-t border-rule bg-panel/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
       >
         <ul className="flex h-16 items-stretch">
-          {primary.map((section) => {
-            const Icon = ICONS[section.id];
-            const isActive = active === section.id;
-            const badge = section.id === 'inbox' ? inboxUnread : 0;
+          {checkIn.items.map((entry) => {
+            const Icon = CHECKIN_ICONS[entry.id];
             return (
-              <li key={section.id} className="flex flex-1">
+              <li key={entry.id} className="flex flex-1">
                 <a
-                  href={hrefFor(section.tabs[0])}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={clsx(item, 'relative', isActive ? 'text-ink' : 'text-ink-3')}
+                  href={entry.href}
+                  aria-current={entry.active ? 'page' : undefined}
+                  data-checkin={entry.id}
+                  className={clsx(item, 'relative', entry.active ? 'text-ink' : 'text-ink-3')}
                 >
-                  {isActive && <span aria-hidden="true" className="absolute inset-x-5 top-0 h-[3px] rounded-b-full bg-signal" />}
+                  {entry.active && <span aria-hidden="true" className="absolute inset-x-5 top-0 h-[3px] rounded-b-full bg-signal" />}
                   <span className="relative">
                     <Icon className="h-5 w-5" aria-hidden="true" />
-                    {badge > 0 && <Badge count={badge} className="absolute -right-3 -top-1.5" />}
+                    {entry.badge > 0 && <Badge count={entry.badge} className="absolute -right-3 -top-1.5" />}
                   </span>
-                  {section.label}
-                  {badge > 0 && <span className="sr-only">, {badge} unread for you</span>}
+                  {entry.label}
+                  {entry.badgeText && <span className="sr-only">, {entry.badgeText}</span>}
                 </a>
               </li>
             );

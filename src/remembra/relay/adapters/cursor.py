@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any
 
 from remembra.relay.adapters.base import Adapter, AdapterSpec, PayloadMap, _load_json_object, is_relay_command
+from remembra.relay.adapters.crew_hooks import CrewHook, CrewSpec, ToolFields
 
 SPEC = AdapterSpec(
     name="cursor",
@@ -117,3 +118,30 @@ class CursorHooksAdapter(Adapter):
 
 
 ADAPTER = CursorHooksAdapter(SPEC)
+
+
+# ---------------------------------------------------------------------------
+# Crew mode (§8.3): UNVERIFIED, observe only until `remembra-crew verify` passes
+# ---------------------------------------------------------------------------
+
+# Research-grade Cursor events. Cursor has no pre-write hook on its file tools (only shell and MCP), so its
+# file writes are covered by the read-only fence, the git gates and post-hoc detection (§8.3, §8.5).
+CREW = CrewSpec(
+    adapter="cursor",
+    verified=False,
+    style="cursor",
+    hooks=(
+        CrewHook("sessionStart", "start", "cli"),
+        CrewHook("beforeSubmitPrompt", "turn", "gate"),
+        CrewHook("beforeShellExecution", "pretool", "gate"),
+        CrewHook("beforeMCPExecution", "pretool", "gate"),
+        CrewHook("afterFileEdit", "posttool", "gate"),
+        CrewHook("stop", "stop", "gate"),
+        CrewHook("sessionEnd", "end", "cli"),
+    ),
+    output="cursor-json",
+    pretool_events=("beforeShellExecution", "beforeMCPExecution"),
+    file_gate=False,
+    tools=ToolFields(tool_name=("tool_name",), tool_input=("tool_input",), file_path=("file_path", "path"), command=("command",)),
+    notes="Unverified: Cursor hook events are from research; file edits are not pre-gated (read-only fence instead).",
+)

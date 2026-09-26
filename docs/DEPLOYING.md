@@ -447,24 +447,123 @@ set in the Coolify app's environment:
 
 ```
 LITESTREAM_REPLICA_URL=s3://<bucket>/remembra   # plus the bucket's credentials env vars
+# optional; the default is a sibling of the main replica: s3://<bucket>/remembra-crew
+LITESTREAM_CREW_REPLICA_URL=s3://<bucket>/remembra-crew
 ```
 
-On boot with an empty volume, the entrypoint restores the database from the
-replica automatically. **If that restore fails, the container exits** rather
-than booting on an empty database; set `LITESTREAM_ALLOW_EMPTY_START=1` to
-override deliberately. Without `LITESTREAM_REPLICA_URL`, litestream is inert and
-the entrypoint prints a warning on every boot that SQLite is not backed up.
+The entrypoint writes a litestream config covering **both** SQLite files: the
+main database and `crew.db` (Crew mode's database, next to it in `/data`).
+`crew.db` is replicated whenever it exists; with `REMEMBRA_CREW_MODE` on, the
+entrypoint creates it (empty, WAL) before litestream starts, so the first crew
+write is already replicated.
 
-Retention: the entrypoint writes a litestream config whose replica keeps
-`LITESTREAM_RETENTION` of history (default `24h`), so data erased from the live
-database leaves the replica within about 48 hours. The privacy page states
+On boot with an empty volume, the entrypoint restores each database from its
+replica automatically. **If a restore fails, the container exits** rather
+than booting on an empty database; set `LITESTREAM_ALLOW_EMPTY_START=1` to
+override deliberately. For `crew.db` this applies when Crew mode is on; with
+Crew mode off a failed `crew.db` restore only warns, and `crew.db` is left out
+of replication for that boot so the crew replica is never overwritten by an
+empty file. Without `LITESTREAM_REPLICA_URL`, litestream is inert and the
+entrypoint prints a warning on every boot that SQLite is not backed up.
+
+Retention: the entrypoint writes a litestream config whose replicas (the main
+database and, when present, `crew.db`) keep `LITESTREAM_RETENTION` of history
+(default `24h`), so data erased from a live database leaves its replica within
+about 48 hours. The privacy page states
 24 hours; change both together.
 
 Restore drill (OPS-4, owner): on a scratch host run
-`litestream restore -o /tmp/drill.db "$LITESTREAM_REPLICA_URL"` and
-`python3 -c "import sqlite3; print(sqlite3.connect('/tmp/drill.db').execute('SELECT COUNT(*) FROM memories').fetchone()[0])"`;
-compare with prod.
-Qdrant is not backed up — it is rebuilt from SQLite by the rebuild reindex.
+
+```bash
+litestream restore -o /tmp/drill.db "$LITESTREAM_REPLICA_URL"
+python3 -c "import sqlite3; print(sqlite3.connect('/tmp/drill.db').execute('SELECT COUNT(*) FROM memories').fetchone()[0])"
+litestream restore -o /tmp/drill-crew.db "${LITESTREAM_CREW_REPLICA_URL:-${LITESTREAM_REPLICA_URL%/}-crew}"
+python3 -c "import sqlite3; c = sqlite3.connect('/tmp/drill-crew.db'); print([c.execute(q).fetchone()[0] for q in ('SELECT MAX(version) FROM schema_version', 'SELECT COUNT(*) FROM crews', 'SELECT COUNT(*) FROM crew_events')])"
+```
+
+and compare with prod. Qdrant is not backed up — it is rebuilt from SQLite by
+the rebuild reindex.
+
+**Point-in-time snapshots.** Independently of litestream, take a consistent,
+checksummed copy of both files (safe while the server runs) before any risky
+change:
+
+```bash
+docker exec "$CTR" \
+  python -m remembra.storage.snapshot create --out /data/backups
+```
+
+`verify <dir>` re-checks one; `restore <dir> [--force]` puts one back (server
+stopped; existing files are kept as `*.pre-restore-<stamp>`). See
+[Crew mode: Backups](relay/crew.md#backups).
+
+## Crew mode
+
+Crew mode ships **dark**: `Dockerfile.cloud` sets `REMEMBRA_CREW_MODE=false`,
+and nothing crew-related runs until the Coolify env overrides it. The server
+reads the flag once at startup. What it switches is described in
+[Crew mode: the feature flag](relay/crew.md#the-feature-flag).
+
+Deploying the Crew mode code changes one thing even with the flag off: the
+main database gets migration **v5** (additive columns on `agent_inbox`,
+backfilled once). Production is at schema 9 (versions 1-4 and 6-9, released
+before Crew mode), so the first boot of this release applies only v5, after
+the pre-migration backup. Releases from before Crew mode run on the resulting
+database unchanged.
+
+### Turning it on
+
+1. Deploy the release with the flag still off and verify live as above.
+2. Confirm backups: `LITESTREAM_REPLICA_URL` is set (the crew replica is
+   derived from it unless `LITESTREAM_CREW_REPLICA_URL` is set).
+3. Take a snapshot: `python -m remembra.storage.snapshot create --out /data/backups`
+   inside the container.
+4. Set `REMEMBRA_CREW_MODE=true` in the Coolify env and redeploy (a restart
+   is enough; no rebuild is needed).
+5. Verify live:
+
+   ```bash
+   # boot log: "litestream: replicating the main db and crew.db"
+   curl -s https://api.remembra.dev/health/ready | python3 -m json.tool
+   #   components.crew: status "ok", schema_version == latest_version
+   curl -s -o /dev/null -w "%{http_code}\n" -H "X-API-Key: $KEY" https://api.remembra.dev/api/v1/crews
+   #   200 (404 means the flag is off)
+   docker exec "$CTR" ls -l /data/crew.db
+   ```
+
+   then run the crew E2E against the live URL with the dedicated test account.
+
+Crew mode assumes one server process (production runs a single uvicorn
+worker). More than one process needs `REMEMBRA_CREW_DB_TAILER=1`.
+
+### Rollback plan
+
+Crew tables are additive and live in their own file, so no step below needs a
+data migration. Stop at the first step that fixes the problem.
+
+1. **Flag off.** Set `REMEMBRA_CREW_MODE=false` and redeploy. Crew routes
+   return 404, briefs lose the crew block, MCP crew tools answer
+   "unavailable"; memory, Relay and the dashboard are unaffected. `crew.db` is
+   not opened, so it stays exactly as it was and keeps being replicated;
+   switching the flag on again brings every crew back. `/health/ready` shows
+   `components.crew.status: "disabled"`. Agents that joined before the switch
+   keep their last local view until they end, so restart them; new sessions
+   get the plain Relay brief.
+2. **Local side.** On each machine: exit the agents, then run
+   `remembra-crew connect --uninstall --apply`, and `remembra-relay connect --apply`
+   to get the plain Relay hooks back.
+3. **Previous image.** If shared code is at fault, redeploy the last pre-crew
+   commit (ce067fd) through Coolify. It runs on the v5 main database (checked by booting
+   the pre-crew code against a v5 database: the schema is accepted and the
+   agent inbox reads and writes work) and never opens `crew.db`. Inbox
+   messages sent while rolled back keep their project (that release writes
+   the `project_id` column when it exists) but carry no crew id, and their
+   sender is recorded as an unverified agent (the column defaults).
+4. **Data restore** (only if data is wrong): stop the container, then restore
+   the snapshot taken before the flip. Litestream holds the *latest* state,
+   bad data included, so a litestream restore needs a point in time from
+   before the problem: `litestream restore -timestamp <RFC3339> -o <file> <replica>`
+   for the affected file, moved into place while the container is stopped.
 
 ## Account deletion and erasure (R-11, R-23)
 

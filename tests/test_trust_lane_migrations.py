@@ -1,4 +1,4 @@
-"""Main-DB migrations 6 (agent_inbox.trust_score, R-16) and 7 (relay_pickups, R-18).
+"""Main-DB migrations 6 (agent_inbox.trust_score, R-16) and 7 (relay_pickups, R-18), and Crew mode's 5.
 
 Both are additive and must apply to a production-shaped database: one at
 schema 4 (feat/relay-launch before this lane) holding inbox rows, one where
@@ -92,10 +92,76 @@ async def test_applies_after_crew_version_5(tmp_path, monkeypatch):
         conn.close()
 
 
-def test_versions_are_unique_and_leave_5_to_crew():
+def test_versions_are_unique_and_5_is_crews():
     versions = [v for v, _, _ in VERSIONED_MIGRATIONS]
-    assert len(versions) == len(set(versions)) and 5 not in versions and {6, 7} <= set(versions)
-    # w2/account's migration was renumbered from 6 to 8 when the wave-2 lanes merged.
+    assert versions == sorted(set(versions)) == [1, 2, 3, 4, 5, 6, 7, 8, 9]
+    # Crew mode's 5 merged after the release shipped 6-9; w2/account's migration was renumbered
+    # from 6 to 8 when the wave-2 lanes merged. Names and statements of shipped versions never change.
     names = {v: n for v, n, _ in VERSIONED_MIGRATIONS}
-    assert (names[6], names[7], names[8]) == ("agent_inbox_trust_score", "relay_pickups", "account_erasure_and_founding_holds")
-    assert versions == sorted(versions)
+    assert names[5] == "crew_agent_inbox_scoping"
+    assert (names[6], names[7], names[8], names[9]) == (
+        "agent_inbox_trust_score",
+        "relay_pickups",
+        "account_erasure_and_founding_holds",
+        "memories_user_type_index",
+    )
+
+
+async def _at_production_schema_9(path: Path, monkeypatch) -> None:
+    """A database as production has it: versions 1-4 and 6-9 (released before Crew mode's 5)."""
+    with monkeypatch.context() as m:
+        m.setattr(database, "VERSIONED_MIGRATIONS", [mig for mig in VERSIONED_MIGRATIONS if mig[0] != 5])
+        db = Database(f"sqlite+aiosqlite:///{path}")
+        await db.connect()
+        try:
+            await db.init_schema()
+            rows = [
+                ("inbox_tagged", "codex", "claude-code", '{"project_id": "alpha"}'),
+                ("inbox_untagged", "gemini", "qwen", "{}"),
+                ("inbox_bad_meta", "gemini", "qwen", "{not json"),
+                ("inbox_number_tag", "gemini", "qwen", '{"project_id": 7}'),
+            ]
+            for inbox_id, frm, to, meta in rows:
+                await db.conn.execute(
+                    "INSERT INTO agent_inbox (inbox_id, owner_user_id, from_agent, to_agent, subject, body, metadata,"
+                    " created_at, trust_score) VALUES (?, 'u1', ?, ?, ?, 'b', ?, '2026-09-01T00:00:00+00:00', 0.9)",
+                    (inbox_id, frm, to, inbox_id, meta),
+                )
+            await db.conn.commit()
+        finally:
+            await db.close()
+
+
+async def test_production_schema_9_applies_only_crew_version_5(tmp_path, monkeypatch):
+    path = tmp_path / "prod9.db"
+    await _at_production_schema_9(path, monkeypatch)
+    before = sqlite3.connect(path)
+    try:
+        assert sorted(r[0] for r in before.execute("SELECT version FROM schema_version")) == [1, 2, 3, 4, 6, 7, 8, 9]
+        assert "project_id" not in _columns(before, "agent_inbox")
+        stamps = dict(before.execute("SELECT version, applied_at FROM schema_version"))
+    finally:
+        before.close()
+    conn = await _migrate(path)
+    try:
+        applied = dict(conn.execute("SELECT version, applied_at FROM schema_version"))
+        assert sorted(applied) == list(range(1, 10))
+        assert {v: applied[v] for v in stamps} == stamps  # 1-4 and 6-9 were not re-applied
+        assert {"project_id", "crew_id", "kind", "sender_kind", "sender_verified", "trust_score"} <= _columns(conn, "agent_inbox")
+        got = {
+            r[0]: r[1:]
+            for r in conn.execute("SELECT inbox_id, project_id, sender_kind, sender_verified, kind, trust_score FROM agent_inbox")
+        }
+        assert got == {
+            "inbox_tagged": ("alpha", "agent", 0, "directive", 0.9),
+            "inbox_untagged": (None, "agent", 0, "directive", 0.9),
+            "inbox_bad_meta": (None, "agent", 0, "directive", 0.9),
+            "inbox_number_tag": (None, "agent", 0, "directive", 0.9),
+        }
+    finally:
+        conn.close()
+    again = await _migrate(path)  # idempotent: a second boot applies nothing
+    try:
+        assert dict(again.execute("SELECT version, applied_at FROM schema_version")) == applied
+    finally:
+        again.close()

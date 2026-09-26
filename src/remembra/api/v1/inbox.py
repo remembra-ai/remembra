@@ -20,6 +20,12 @@ Scoping (every route):
   reads and acks only its own inbox: rows addressed to its agent. Asking for
   another agent's inbox, or acking a row addressed to another agent, is a 404,
   so ids cannot be probed.
+* **Reserved senders** (Crew mode, spec §5.8, §6, §11.2). ``mani``, ``human``,
+  ``system``, ``remembra`` and the kinds ``override`` / ``pause`` are
+  server-set: an API key using them gets 422. A dashboard login sends as
+  ``human`` (``sender_kind='human'``). Rows carry
+  ``sender_kind``/``sender_verified``; an agent-scoped key is key-verified, any
+  other key is self-declared.
 
 Unrestricted keys and dashboard logins keep the full owner view.
 """
@@ -34,7 +40,15 @@ from pydantic import BaseModel, Field, field_validator
 from remembra.auth.middleware import AuthenticatedUser, get_current_user, require_memory_recall, require_memory_store
 from remembra.cloud.limits import record_relay_usage, relay_guard
 from remembra.core.limiter import limiter
-from remembra.inbox.manager import TERMINAL_STATUSES, InboxManager
+from remembra.crew.access import is_human
+from remembra.inbox.manager import (
+    RESERVED_KINDS,
+    TERMINAL_STATUSES,
+    InboxManager,
+    ReservedSenderError,
+    is_reserved_sender,
+    sender_label,
+)
 
 log = logging.getLogger(__name__)
 
@@ -67,6 +81,13 @@ ProjectQuery = Annotated[str | None, Query(max_length=128, description="Only row
 def _allowed_projects(user: AuthenticatedUser) -> list[str] | None:
     """The caller's project allow-list (None = unrestricted)."""
     return list(user.project_ids) if user.project_ids else None
+
+
+def _reserved_422(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={"error": "reserved_sender", "message": message},
+    )
 
 
 def _send_project(user: AuthenticatedUser, requested: str | None) -> str | None:
@@ -140,6 +161,11 @@ class SendInboxRequest(BaseModel):
             "Project the message belongs to (required for keys limited to several projects). Defaults to metadata.project_id."
         ),
     )
+    kind: str = Field(
+        default="directive",
+        pattern=r"^[a-z][a-z0-9_]{0,31}$",
+        description="Message kind. 'override' and 'pause' are server-set only.",
+    )
 
     @field_validator("to_agent", "subject", "from_agent")
     @classmethod
@@ -166,10 +192,21 @@ class InboxRow(BaseModel):
         default=None,
         description="Trust policy score of the message text when it was sent (1.0 = no injection pattern; null on older rows)",
     )
+    project_id: str | None = None
+    crew_id: str | None = None
+    kind: str = "directive"
+    sender_kind: str = "agent"
+    sender_verified: bool = False
+    sender_label: str | None = None
 
 
 def _inbox_row(row: dict[str, Any]) -> InboxRow:
-    return InboxRow(**{k: v for k, v in row.items() if k in InboxRow.model_fields})
+    data = {k: v for k, v in row.items() if k in InboxRow.model_fields}
+    data["kind"] = row.get("kind") or "directive"
+    data["sender_kind"] = row.get("sender_kind") or "agent"
+    data["sender_verified"] = bool(row.get("sender_verified"))
+    data["sender_label"] = sender_label(row)
+    return InboxRow(**data)
 
 
 class SendInboxResponse(BaseModel):
@@ -177,6 +214,8 @@ class SendInboxResponse(BaseModel):
     status: str
     created_at: str
     project_id: str | None = None
+    sender_kind: str = "agent"
+    sender_verified: bool = False
 
 
 class AckInboxRequest(BaseModel):
@@ -224,21 +263,39 @@ async def send_to_inbox(
     An inbox message is a relay event: free on every plan (never uses smart
     credits), subject only to the plan's relay burst limit.
     """
+    human = is_human(current_user)
+    if human:
+        # A dashboard login is the human principal: server-set sender provenance.
+        from_agent = payload.from_agent or "human"
+        sender_kind = "human"
+    else:
+        # An agent-scoped key sends as its own agent, whatever the payload claims.
+        from_agent = getattr(current_user, "agent_id", None) or payload.from_agent or "unknown"
+        sender_kind = "agent"
+        if is_reserved_sender(from_agent):
+            raise _reserved_422(f"sender name '{from_agent}' is reserved for the server")
+        if payload.kind in RESERVED_KINDS:
+            raise _reserved_422(f"kind '{payload.kind}' is reserved for the server")
     project_id = _send_project(current_user, _requested_project(payload))
     metadata = {k: v for k, v in payload.metadata.items() if k != "project_id"}
     await relay_guard(request, response, current_user.user_id)
     try:
         row = await inbox.send(
             owner_user_id=current_user.user_id,
-            # An agent-scoped key sends as its own agent, whatever the payload claims.
-            from_agent=getattr(current_user, "agent_id", None) or payload.from_agent or "unknown",
+            from_agent=from_agent,
             to_agent=payload.to_agent,
             subject=payload.subject,
             body=payload.body,
             metadata=metadata,
             expires_at=payload.expires_at,
             project_id=project_id,
+            kind=payload.kind,
+            sender_kind=sender_kind,
+            # Key-verified only for an agent-scoped key (its agent id comes from the key).
+            sender_verified=human or bool(getattr(current_user, "agent_id", None)),
         )
+    except ReservedSenderError as e:
+        raise _reserved_422(str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
@@ -254,6 +311,8 @@ async def send_to_inbox(
         status=row["status"],
         created_at=row["created_at"],
         project_id=row.get("project_id"),
+        sender_kind=row.get("sender_kind") or sender_kind,
+        sender_verified=bool(row.get("sender_verified")),
     )
 
 

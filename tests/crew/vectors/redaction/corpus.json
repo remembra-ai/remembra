@@ -1,0 +1,358 @@
+{
+ "description": "Redaction corpus (§11) for crew.redact.outbound(payload_type, payload, repo_root=, home=). Every string in must_not_contain must be absent from the JSON of the output; every string in must_contain must be present.",
+ "context": {
+  "repo_root": "/Users/mani/code/yaadbooks",
+  "home": "/Users/mani"
+ },
+ "payload_types": [
+  "event",
+  "presence",
+  "heartbeat",
+  "snapshot",
+  "checkpoint",
+  "report",
+  "stall",
+  "promotion"
+ ],
+ "cases": [
+  {
+   "id": "r01",
+   "payload_type": "event",
+   "payload": {
+    "type": "gate.error",
+    "payload": {
+     "stage": "pretool",
+     "error_class": "HTTPError Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJGGXTXRfPm4ZRgVjuHgYL8XRK.ZUaLdB8o9eVcfZcEuABfrpQ8JxYFu3"
+    }
+   },
+   "must_not_contain": [
+    "eyJhbGciOiJIUzI1NiJ9.eyJGGXTXRfPm4ZRgVjuHgYL8XRK.ZUaLdB8o9eVcfZcEuABfrpQ8JxYFu3"
+   ],
+   "must_contain": [
+    "pretool"
+   ]
+  },
+  {
+   "id": "r02",
+   "payload_type": "event",
+   "payload": {
+    "type": "activity.commit",
+    "payload": {
+     "sha": "a1b2c3d4e5f6",
+     "files": [
+      "/Users/mani/code/yaadbooks/src/app/pos/cart.ts"
+     ]
+    }
+   },
+   "must_not_contain": [
+    "/Users/mani"
+   ],
+   "must_contain": [
+    "a1b2c3d4e5f6",
+    "src/app/pos/cart.ts"
+   ]
+  },
+  {
+   "id": "r03",
+   "payload_type": "presence",
+   "payload": {
+    "last_action": {
+     "tool": "Bash",
+     "command": "curl -H 'Authorization: Bearer sk-proj-M2kVvumKAA5y9VEEySJ2AoLmrdZxyP8MM2kVvumK' https://api.openai.com/v1/models"
+    }
+   },
+   "must_not_contain": [
+    "sk-proj-M2kVvumKAA5y9VEEySJ2AoLmrdZxyP8MM2kVvumK",
+    "curl -H"
+   ],
+   "must_contain": [
+    "Bash"
+   ]
+  },
+  {
+   "id": "r04",
+   "payload_type": "presence",
+   "payload": {
+    "last_action": {
+     "tool": "Edit",
+     "path": "/Users/mani/code/yaadbooks/src/app/pos/Receipt.tsx"
+    }
+   },
+   "must_not_contain": [
+    "/Users/mani"
+   ],
+   "must_contain": [
+    "src/app/pos/Receipt.tsx"
+   ]
+  },
+  {
+   "id": "r05",
+   "payload_type": "heartbeat",
+   "payload": {
+    "last_action": {
+     "tool": "Bash",
+     "command": "export ANTHROPIC_API_KEY=sk-ant-api03-eQh3RYSWR3VTuNZbyBNXXYbMuQKCBq22eQh3RYSW && claude -p hi"
+    }
+   },
+   "must_not_contain": [
+    "sk-ant-api03-eQh3RYSWR3VTuNZbyBNXXYbMuQKCBq22eQh3RYSW"
+   ],
+   "must_contain": [
+    "Bash"
+   ]
+  },
+  {
+   "id": "r06",
+   "payload_type": "heartbeat",
+   "payload": {
+    "footprints": [
+     {
+      "path": "/Users/mani/code/yaadbooks/supabase/migrations/0042.sql"
+     }
+    ],
+    "note": "DATABASE_URL=postgres://app:PUdUmKHYVuQv6pZNgb@db.internal:5432/prod"
+   },
+   "must_not_contain": [
+    "PUdUmKHYVuQv6pZNgb",
+    "/Users/mani"
+   ],
+   "must_contain": [
+    "supabase/migrations/0042.sql"
+   ]
+  },
+  {
+   "id": "r07",
+   "payload_type": "snapshot",
+   "payload": {
+    "checkouts_remote": [
+     {
+      "toplevel": "/Users/mani/code/yaadbooks",
+      "remote": "https://mani:ghp_XFSukA4gcDNBVjTbSgR8e3rMrTCAjmgXXFSu@github.com/mani87-nq/yaadbooks.git"
+     }
+    ]
+   },
+   "must_not_contain": [
+    "ghp_XFSukA4gcDNBVjTbSgR8e3rMrTCAjmgXXFSu"
+   ],
+   "must_contain": [
+    "github.com/mani87-nq/yaadbooks"
+   ]
+  },
+  {
+   "id": "r08",
+   "payload_type": "checkpoint",
+   "payload": {
+    "facts": {
+     "last_error": "curl -u admin:PUdUmKHYVuQv6pZNgb https://staging.yaadbooks.com",
+     "tests": [
+      {
+       "command": "npm test -- pos",
+       "passed": 41,
+       "failed": 0
+      }
+     ]
+    }
+   },
+   "must_not_contain": [
+    "PUdUmKHYVuQv6pZNgb"
+   ],
+   "must_contain": [
+    "npm test -- pos",
+    "41"
+   ]
+  },
+  {
+   "id": "r09",
+   "payload_type": "checkpoint",
+   "payload": {
+    "facts": {
+     "dotenv": "OPENAI_API_KEY=sk-proj-M2kVvumKAA5y9VEEySJ2AoLmrdZxyP8MM2kVvumK\nSTRIPE_SECRET_KEY=sk_live_uKi3KETAN9YV9BCb78iHF4Lz\nNODE_ENV=production\n"
+    }
+   },
+   "must_not_contain": [
+    "sk-proj-M2kVvumKAA5y9VEEySJ2AoLmrdZxyP8MM2kVvumK",
+    "sk_live_uKi3KETAN9YV9BCb78iHF4Lz"
+   ],
+   "must_contain": [
+    "NODE_ENV"
+   ]
+  },
+  {
+   "id": "r10",
+   "payload_type": "checkpoint",
+   "payload": {
+    "facts": {
+     "dirty": [
+      "/Users/mani/code/yaadbooks/src/app/pos/split.ts",
+      "/Users/mani/.ssh/config"
+     ]
+    }
+   },
+   "must_not_contain": [
+    "/Users/mani"
+   ],
+   "must_contain": [
+    "src/app/pos/split.ts"
+   ]
+  },
+  {
+   "id": "r11",
+   "payload_type": "report",
+   "payload": {
+    "summary": "Deployed with token rem_kcpdSPhvF4t9EPeF5o6rbV3Zb9ZjXAgk; aws key AKIAMXHRTGGHDMQJ3MAW",
+    "commits": [
+     "a1b2c3d4"
+    ]
+   },
+   "must_not_contain": [
+    "rem_kcpdSPhvF4t9EPeF5o6rbV3Zb9ZjXAgk",
+    "AKIAMXHRTGGHDMQJ3MAW"
+   ],
+   "must_contain": [
+    "a1b2c3d4"
+   ]
+  },
+  {
+   "id": "r12",
+   "payload_type": "report",
+   "payload": {
+    "sections": {
+     "done": [
+      "Set SECRET_KEY=xxcyc3hLb6UQz2LgDcBcjGhPCkSFL2Hixxcyc3hLb6UQ in Vercel"
+     ],
+     "not_done": [
+      "pdf margin"
+     ]
+    }
+   },
+   "must_not_contain": [
+    "xxcyc3hLb6UQz2LgDcBcjGhPCkSFL2Hixxcyc3hLb6UQ"
+   ],
+   "must_contain": [
+    "pdf margin"
+   ]
+  },
+  {
+   "id": "r13",
+   "payload_type": "stall",
+   "payload": {
+    "error": "billing_error",
+    "error_details": "Credit balance too low. request-id req_1 key sk-ant-api03-eQh3RYSWR3VTuNZbyBNXXYbMuQKCBq22eQh3RYSW",
+    "facts": {}
+   },
+   "must_not_contain": [
+    "sk-ant-api03-eQh3RYSWR3VTuNZbyBNXXYbMuQKCBq22eQh3RYSW"
+   ],
+   "must_contain": [
+    "billing_error"
+   ]
+  },
+  {
+   "id": "r14",
+   "payload_type": "stall",
+   "payload": {
+    "error": "rate_limit",
+    "last_assistant_message": "I ran `export GITHUB_TOKEN=ghp_XFSukA4gcDNBVjTbSgR8e3rMrTCAjmgXXFSu` then pushed"
+   },
+   "must_not_contain": [
+    "ghp_XFSukA4gcDNBVjTbSgR8e3rMrTCAjmgXXFSu"
+   ],
+   "must_contain": [
+    "rate_limit"
+   ]
+  },
+  {
+   "id": "r15",
+   "payload_type": "promotion",
+   "payload": {
+    "content": "Checkpoint: fixed rounding. Header was --header 'Authorization: Basic ZNLWV2RLLWcawHUVrjhWaE3Z4L8D'",
+    "project_id": "yaadbooks"
+   },
+   "must_not_contain": [
+    "ZNLWV2RLLWcawHUVrjhWaE3Z4L8D"
+   ],
+   "must_contain": [
+    "fixed rounding"
+   ]
+  },
+  {
+   "id": "r16",
+   "payload_type": "promotion",
+   "payload": {
+    "content": "PAYMENT_WEBHOOK_SECRET=whsec_ZsnGoWLjtz92GoUGSpKBRrsMHEaPjGbW set in /Users/mani/code/yaadbooks/.env.local"
+   },
+   "must_not_contain": [
+    "whsec_ZsnGoWLjtz92GoUGSpKBRrsMHEaPjGbW",
+    "/Users/mani"
+   ],
+   "must_contain": [
+    ".env.local"
+   ]
+  },
+  {
+   "id": "r17",
+   "payload_type": "event",
+   "payload": {
+    "type": "activity.test_verdict_changed",
+    "payload": {
+     "fingerprint": "API_TOKEN=cECHXDdV7BLrjaYeDkgUs4gbezTBbyfscECH npm test -- pos"
+    }
+   },
+   "must_not_contain": [
+    "cECHXDdV7BLrjaYeDkgUs4gbezTBbyfscECH"
+   ],
+   "must_contain": [
+    "npm test -- pos"
+   ]
+  },
+  {
+   "id": "r18",
+   "payload_type": "heartbeat",
+   "payload": {
+    "last_action": {
+     "tool": "Bash",
+     "command": "cat .env",
+     "stdout": "DB_PASSWORD=PUdUmKHYVuQv6pZNgb\nAPI_KEY=sk-proj-M2kVvumKAA5y9VEEySJ2AoLmrdZxyP8MM2kVvumK"
+    }
+   },
+   "must_not_contain": [
+    "PUdUmKHYVuQv6pZNgb",
+    "sk-proj-M2kVvumKAA5y9VEEySJ2AoLmrdZxyP8MM2kVvumK"
+   ],
+   "must_contain": [
+    "Bash"
+   ]
+  },
+  {
+   "id": "r19",
+   "payload_type": "report",
+   "payload": {
+    "summary": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAAH2C5ihxvohC3NmJMdKvb2wmZY6Cc5HkjH2C5ihxvohC3NmJMdKvb2wmZY6Cc\n-----END OPENSSH PRIVATE KEY-----"
+   },
+   "must_not_contain": [
+    "H2C5ihxvohC3NmJMdKvb2wmZY6Cc5HkjH2C5ihxvohC3NmJMdKvb2wmZY6Cc"
+   ],
+   "must_contain": []
+  },
+  {
+   "id": "r20",
+   "payload_type": "snapshot",
+   "payload": {
+    "sessions": [
+     {
+      "member_key": "claude-code:mbp:a1b2c3d4",
+      "hostname": "Manis-MacBook-Pro.local",
+      "home": "/Users/mani"
+     }
+    ]
+   },
+   "must_not_contain": [
+    "Manis-MacBook-Pro",
+    "/Users/mani"
+   ],
+   "must_contain": [
+    "claude-code:mbp:a1b2c3d4"
+   ]
+  }
+ ]
+}

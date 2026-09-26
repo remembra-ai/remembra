@@ -1,0 +1,17 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-stopfailure_network/repo"
+  },
+  "event": "UserPromptSubmit",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-stopfailure_network/repo",
+    "hook_event_name": "UserPromptSubmit",
+    "permission_mode": "acceptEdits",
+    "prompt": "S0 spike: say hi.",
+    "session_id": "20b06609-39fd-4a97-956b-7db893415274",
+    "transcript_path": "<S0_TMP>/mock-stopfailure_network/config/projects/-S0-TMP-mock-stopfailure-network-repo/20b06609-39fd-4a97-956b-7db893415274.jsonl"
+  },
+  "received_at": 1790375309.6594439
+}

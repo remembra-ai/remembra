@@ -1,0 +1,17 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/interactive-interactive_deny_rewake/repo"
+  },
+  "event": "UserPromptSubmit",
+  "payload": {
+    "cwd": "<S0_TMP>/interactive-interactive_deny_rewake/repo",
+    "hook_event_name": "UserPromptSubmit",
+    "permission_mode": "acceptEdits",
+    "prompt": "<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command \"Stop\": S0-REWAKE-ef3ab9d7: claim on zone pos granted to you\n\n</system-reminder>",
+    "session_id": "8162cd02-1a29-4c4a-815a-120cf786776e",
+    "transcript_path": "<S0_TMP>/interactive-interactive_deny_rewake/config/projects/-S0-TMP-interactive-interactive-deny-rewake-repo/8162cd02-1a29-4c4a-815a-120cf786776e.jsonl"
+  },
+  "received_at": 1790375314.22207
+}

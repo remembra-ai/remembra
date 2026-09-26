@@ -16,6 +16,9 @@ instance actually store and recall right now?":
 * **pending_embeddings** — queue depth / dead letters.
 * **rate_limit** — whether the shared rate-limit backend (``redis://``)
   answers; while it does not, limits fall back to per-process memory.
+* **crew**       — Crew mode (``REMEMBRA_CREW_MODE``): ``disabled`` when the flag
+  is off (not a degradation); when on, ``crew.db`` answers ``SELECT 1`` and its
+  schema is at the latest ``CREW_MIGRATIONS`` version.
 
 Always returns HTTP 200: ``status`` is ``ok`` or ``degraded``. Returning 5xx
 from a readiness endpoint that an orchestrator also uses for restarts turns
@@ -50,6 +53,7 @@ class ReadinessChecker:
         pending_queue: Any = None,
         reranker: Any = None,
         rate_limiter: Any = None,
+        app_state: Any = None,
         probe_interval: float = 300.0,
         probe_timeout: float = 15.0,
         clock: Callable[[], float] = time.monotonic,
@@ -64,6 +68,9 @@ class ReadinessChecker:
         self.reranker = reranker
         # The plan-aware CloudRateLimiter (same storage URI as slowapi's).
         self.rate_limiter = rate_limiter
+        # The app state (``app.state``): Crew mode's hooks set ``crew_registered`` and
+        # ``crew_db`` there after this checker is built, so they are read at check time.
+        self.app_state = app_state
         self.probe_interval = probe_interval
         self.probe_timeout = probe_timeout
         self._clock = clock
@@ -81,6 +88,7 @@ class ReadinessChecker:
             "reranker": self._check_reranker(),
             "pending_embeddings": await self._check_pending(),
             "rate_limit": await self._check_rate_limit(),
+            "crew": await self._check_crew(),
         }
         degraded = [name for name, c in components.items() if c.get("status") == DEGRADED]
         return {
@@ -101,6 +109,27 @@ class ReadinessChecker:
             return {"status": OK, "schema_version": version}
         except Exception as e:
             return {"status": DEGRADED, "reason": "unreachable", "error_type": type(e).__name__}
+
+    async def _check_crew(self) -> dict[str, Any]:
+        state = self.app_state
+        if state is None or not getattr(state, "crew_registered", False):
+            return {"status": "disabled", "enabled": False}
+        crew_db = getattr(state, "crew_db", None)
+        if crew_db is None:
+            return {"status": DEGRADED, "enabled": True, "reason": "not_initialized"}
+        try:
+            from remembra.crew.db import CREW_MIGRATION_RUNNER
+
+            cursor = await asyncio.wait_for(crew_db.conn.execute("SELECT 1"), timeout=2.0)
+            await cursor.fetchone()
+            version = await asyncio.wait_for(crew_db.get_schema_version(), timeout=2.0)
+        except Exception as e:
+            return {"status": DEGRADED, "enabled": True, "reason": "unreachable", "error_type": type(e).__name__}
+        latest = CREW_MIGRATION_RUNNER.latest_version
+        result: dict[str, Any] = {"status": OK, "enabled": True, "schema_version": version, "latest_version": latest}
+        if version != latest:
+            result.update(status=DEGRADED, reason="schema_mismatch")
+        return result
 
     async def _check_qdrant(self) -> dict[str, Any]:
         if self.qdrant is None:

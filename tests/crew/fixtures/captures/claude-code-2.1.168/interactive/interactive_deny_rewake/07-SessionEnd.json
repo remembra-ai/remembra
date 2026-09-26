@@ -1,0 +1,16 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/interactive-interactive_deny_rewake/repo"
+  },
+  "event": "SessionEnd",
+  "payload": {
+    "cwd": "<S0_TMP>/interactive-interactive_deny_rewake/repo",
+    "hook_event_name": "SessionEnd",
+    "reason": "prompt_input_exit",
+    "session_id": "8162cd02-1a29-4c4a-815a-120cf786776e",
+    "transcript_path": "<S0_TMP>/interactive-interactive_deny_rewake/config/projects/-S0-TMP-interactive-interactive-deny-rewake-repo/8162cd02-1a29-4c4a-815a-120cf786776e.jsonl"
+  },
+  "received_at": 1790375326.379837
+}

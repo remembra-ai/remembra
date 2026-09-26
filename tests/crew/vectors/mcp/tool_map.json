@@ -1,0 +1,542 @@
+{
+ "description": "Built-in MCP tool map (§8.2) + zones.yml mcp_tools. zone_rules = [[zone_slug, {tool, service}], ...].",
+ "cases": [
+  {
+   "tool": "mcp__remembra__recall_memories",
+   "input": {
+    "query": "pos"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "read",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__remembra__list_memories",
+   "input": {},
+   "zone_rules": [],
+   "expect": {
+    "kind": "read",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__supabase__list_tables",
+   "input": {
+    "project_id": "p"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "read",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__supabase__list_migrations",
+   "input": {},
+   "zone_rules": [],
+   "expect": {
+    "kind": "read",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__vercel__list_deployments",
+   "input": {},
+   "zone_rules": [],
+   "expect": {
+    "kind": "read",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__vercel__get_deployment",
+   "input": {
+    "id": "d"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "read",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__github__search_code",
+   "input": {
+    "q": "x"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "read",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__filesystem__read_file",
+   "input": {
+    "path": "/w/a/x.ts"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "read",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__docs__getPage",
+   "input": {
+    "id": "1"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "read",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__supabase__apply_migration",
+   "input": {
+    "project_id": "p",
+    "name": "n",
+    "query": "create table t();"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "services",
+    "paths": [],
+    "services": [
+     "supabase:migrations",
+     "schema:main"
+    ],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__supabase__execute_sql",
+   "input": {
+    "project_id": "p",
+    "query": "ALTER TABLE t ADD c int"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "services",
+    "paths": [],
+    "services": [
+     "schema:main"
+    ],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__supabase__execute_sql",
+   "input": {
+    "project_id": "p",
+    "query": "select * from t"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "other",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__postgres__execute_sql",
+   "input": {
+    "sql": "drop table t"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "services",
+    "paths": [],
+    "services": [
+     "schema:main"
+    ],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__vercel__create_deployment",
+   "input": {
+    "project": "p"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "services",
+    "paths": [],
+    "services": [
+     "deploy:vercel"
+    ],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__vercel__promote_deployment",
+   "input": {},
+   "zone_rules": [],
+   "expect": {
+    "kind": "services",
+    "paths": [],
+    "services": [
+     "deploy:vercel"
+    ],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__vercel__request_rollback",
+   "input": {},
+   "zone_rules": [],
+   "expect": {
+    "kind": "services",
+    "paths": [],
+    "services": [
+     "deploy:vercel"
+    ],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__fly__deploy",
+   "input": {},
+   "zone_rules": [],
+   "expect": {
+    "kind": "services",
+    "paths": [],
+    "services": [
+     "deploy:fly"
+    ],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "deploy_app",
+   "input": {},
+   "zone_rules": [],
+   "expect": {
+    "kind": "services",
+    "paths": [],
+    "services": [
+     "deploy:default"
+    ],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__filesystem__write_file",
+   "input": {
+    "path": "/w/c/src/app/pos/cart.ts",
+    "content": "x"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "paths",
+    "paths": [
+     "/w/c/src/app/pos/cart.ts"
+    ],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__filesystem__edit_file",
+   "input": {
+    "path": "src/a.ts",
+    "edits": []
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "paths",
+    "paths": [
+     "src/a.ts"
+    ],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__filesystem__create_directory",
+   "input": {
+    "path": "src/new"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "paths",
+    "paths": [
+     "src/new"
+    ],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__filesystem__move_file",
+   "input": {
+    "source": "src/a.ts",
+    "destination": "src/b.ts"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "paths",
+    "paths": [
+     "src/a.ts",
+     "src/b.ts"
+    ],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__github__create_or_update_file",
+   "input": {
+    "owner": "mani87-nq",
+    "repo": "yaadbooks",
+    "path": "src/app/pos/cart.ts",
+    "content": "x",
+    "message": "m"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "paths",
+    "paths": [
+     "src/app/pos/cart.ts"
+    ],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": "mani87-nq/yaadbooks"
+   }
+  },
+  {
+   "tool": "mcp__github__push_files",
+   "input": {
+    "owner": "o",
+    "repo": "r",
+    "files": [
+     {
+      "path": "a.ts",
+      "content": ""
+     },
+     {
+      "path": "b/c.ts",
+      "content": ""
+     }
+    ]
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "paths",
+    "paths": [
+     "a.ts",
+     "b/c.ts"
+    ],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": "o/r"
+   }
+  },
+  {
+   "tool": "mcp__notebook__update_cell",
+   "input": {
+    "notebook_path": "nb.ipynb",
+    "cell": 1
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "paths",
+    "paths": [
+     "nb.ipynb"
+    ],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__custom__render",
+   "input": {
+    "output_path": "out/x.png"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "paths",
+    "paths": [
+     "out/x.png"
+    ],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__custom__bulk",
+   "input": {
+    "paths": [
+     "a.ts",
+     "b.ts"
+    ]
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "paths",
+    "paths": [
+     "a.ts",
+     "b.ts"
+    ],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__remembra__store_memory",
+   "input": {
+    "content": "x"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "other",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__slack__send_message",
+   "input": {
+    "channel": "c",
+    "text": "t"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "other",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__stripe__create_invoice",
+   "input": {
+    "customer": "c"
+   },
+   "zone_rules": [
+    [
+     "billing",
+     {
+      "tool": "mcp__stripe__*",
+      "service": null
+     }
+    ]
+   ],
+   "expect": {
+    "kind": "zone",
+    "paths": [],
+    "services": [],
+    "zone_slug": "billing",
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__stripe__list_customers",
+   "input": {},
+   "zone_rules": [
+    [
+     "billing",
+     {
+      "tool": "mcp__stripe__*",
+      "service": null
+     }
+    ]
+   ],
+   "expect": {
+    "kind": "read",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "mcp__supabase__apply_migration",
+   "input": {
+    "query": "create table x();"
+   },
+   "zone_rules": [
+    [
+     "billingdb",
+     {
+      "tool": "mcp__supabase__apply_*",
+      "service": "schema:billing"
+     }
+    ]
+   ],
+   "expect": {
+    "kind": "services",
+    "paths": [],
+    "services": [
+     "schema:billing"
+    ],
+    "zone_slug": "billingdb",
+    "github_repo": null
+   }
+  },
+  {
+   "tool": "Read",
+   "input": {
+    "file_path": "x"
+   },
+   "zone_rules": [],
+   "expect": {
+    "kind": "read",
+    "paths": [],
+    "services": [],
+    "zone_slug": null,
+    "github_repo": null
+   }
+  }
+ ]
+}

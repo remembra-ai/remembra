@@ -1,0 +1,30 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/mock-envfile/repo"
+  },
+  "event": "PostToolUse",
+  "payload": {
+    "cwd": "<S0_TMP>/mock-envfile/repo",
+    "duration_ms": 99,
+    "hook_event_name": "PostToolUse",
+    "permission_mode": "acceptEdits",
+    "session_id": "a8bf48a9-e194-41cd-86e9-0abcf0bd4c55",
+    "tool_input": {
+      "command": "printenv S0_CREW_ENV",
+      "description": "Print S0 env"
+    },
+    "tool_name": "Bash",
+    "tool_response": {
+      "interrupted": false,
+      "isImage": false,
+      "noOutputExpected": false,
+      "stderr": "",
+      "stdout": "<HOME>/.zshenv:.:1: no such file or directory: <HOME>/.cargo/env\ns0env7574289d"
+    },
+    "tool_use_id": "toolu_s0_fa8c105bcdd1",
+    "transcript_path": "<S0_TMP>/mock-envfile/config/projects/-S0-TMP-mock-envfile-repo/a8bf48a9-e194-41cd-86e9-0abcf0bd4c55.jsonl"
+  },
+  "received_at": 1790375252.986134
+}

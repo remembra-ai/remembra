@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 from remembra.relay.adapters.base import Adapter, AdapterSpec, PayloadMap
+from remembra.relay.adapters.crew_hooks import CrewHook, CrewSpec
 
 BEGIN = "# >>> remembra-relay (managed block) >>>"
 END = "# <<< remembra-relay (managed block) <<<"
@@ -59,3 +60,28 @@ class KimiTomlAdapter(Adapter):
 
 
 ADAPTER = KimiTomlAdapter(SPEC)
+
+
+# ---------------------------------------------------------------------------
+# Crew mode (§8.3): UNVERIFIED, observe only until `remembra-crew verify` passes
+# ---------------------------------------------------------------------------
+
+# Research-grade: [[hooks]] tables in ~/.kimi/config.toml with Claude-compatible event names, written as a
+# marked block that replaces the relay block.
+CREW = CrewSpec(
+    adapter="kimi",
+    verified=False,
+    style="kimi-toml",
+    hooks=(
+        CrewHook("SessionStart", "start", "cli"),
+        CrewHook("UserPromptSubmit", "turn", "gate"),
+        CrewHook("PreToolUse", "pretool", "gate"),
+        CrewHook("PostToolUse", "posttool", "gate"),
+        CrewHook("Stop", "stop", "gate"),
+        CrewHook("SessionEnd", "end", "cli"),
+    ),
+    output="text",
+    pretool_events=("PreToolUse",),
+    file_gate=True,
+    notes="Unverified: Kimi CLI hook events are from research; kimi is not installed here.",
+)

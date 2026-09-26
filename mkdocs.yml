@@ -103,6 +103,7 @@ nav:
   - Guides:
     - Multi-Agent Shared Memory: guides/multi-agent-shared-memory.md
     - Remembra Relay: guides/relay.md
+    - Crew Mode (Multi-Agent Coordination): relay/crew.md
     - Conversation Ingestion: guides/conversation-ingestion.md
     - Sleep-Time Compute: guides/sleep-time-compute.md
     - Entity Resolution: guides/entity-resolution.md

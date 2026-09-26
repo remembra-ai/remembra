@@ -1,0 +1,128 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "PostToolUse",
+      "hook_id": "37c4339f-cd4b-42f9-9a0a-9c2a3d21e272",
+      "hook_name": "PostToolUse:Write",
+      "session_id": "418940c5-c2dc-4267-a42c-160f79e0e318",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "5194c5de-0fd5-43a3-8260-c37440111395"
+    },
+    {
+      "hook_event": "Stop",
+      "hook_id": "8cbdfad5-8880-490b-b126-b1d4d3cefb8f",
+      "hook_name": "Stop",
+      "session_id": "418940c5-c2dc-4267-a42c-160f79e0e318",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "edf47af8-3183-4be9-bba7-6a0506de836a"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "Stop",
+      "hook_id": "8cbdfad5-8880-490b-b126-b1d4d3cefb8f",
+      "hook_name": "Stop",
+      "outcome": "success",
+      "output": "",
+      "session_id": "418940c5-c2dc-4267-a42c-160f79e0e318",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "b5ce342d-4664-411c-a746-89466eea8464"
+    },
+    {
+      "exit_code": 1,
+      "hook_event": "PostToolUse",
+      "hook_id": "37c4339f-cd4b-42f9-9a0a-9c2a3d21e272",
+      "hook_name": "PostToolUse:Write",
+      "outcome": "cancelled",
+      "output": "",
+      "session_id": "418940c5-c2dc-4267-a42c-160f79e0e318",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "c2260d78-c24c-4990-8080-385595d5c462"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 166,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    },
+    {
+      "i": 1,
+      "last_message": {
+        "content": [
+          {
+            "cache_control": {
+              "type": "ephemeral"
+            },
+            "content": "File created successfully at: <S0_TMP>/mock-async_post/repo/pos/cart.txt (file state is current in your context \u2014 no need to Read it back)",
+            "tool_use_id": "toolu_s0_bf333ac5fc52",
+            "type": "tool_result"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 3,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "S0 ack",
+  "scenario": "async_post",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [
+    {
+      "cache_control": {
+        "type": "ephemeral"
+      },
+      "content": "File created successfully at: <S0_TMP>/mock-async_post/repo/pos/cart.txt (file state is current in your context \u2014 no need to Read it back)",
+      "tool_use_id": "toolu_s0_bf333ac5fc52",
+      "type": "tool_result"
+    }
+  ],
+  "verdict": {
+    "async_ctx_reached_model": false,
+    "duration_s": 0.44,
+    "events": [
+      "PostToolUse",
+      "Stop"
+    ],
+    "file_written": true,
+    "marker_after_wait": false,
+    "marker_at_exit": false,
+    "ok": true,
+    "request_gaps_s": [
+      0.04
+    ],
+    "returncode": 0,
+    "run_shorter_than_hook_sleep": true,
+    "sessionend_fired": false
+  }
+}

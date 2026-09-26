@@ -678,6 +678,12 @@ async def revoke_api_key(
     # Clean up role assignment
     await role_manager.remove_role(key_id)
 
+    # Close live WebSocket connections that authenticated with this key now,
+    # rather than at their next 60 s re-validation (crew spec §4.4).
+    from remembra.api.v1.websocket import connection_manager
+
+    await connection_manager.revoke(api_key_id=key_id, reason="API key revoked")
+
     # Audit log
     await audit_logger.log_event(
         user_id=current_user.user_id,

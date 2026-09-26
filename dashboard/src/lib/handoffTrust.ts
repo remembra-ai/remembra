@@ -79,6 +79,26 @@ export function trustNotice(trust: TrustVerdict | null | undefined): { tone: 'fa
   return null;
 }
 
+/** The brief's floor (remembra.relay.handoff.BRIEF_TRUST_FLOOR): any lower score is withheld from briefs. */
+export const BRIEF_TRUST_FLOOR = 1.0;
+
+/**
+ * The notice an inbox message shows when the agent's brief withholds it: the
+ * server stored the trust policy's score when the message was sent (R-16), and
+ * the recipient's session brief leaves out anything below the floor. Null for a
+ * message the brief shows (or an older row without a score).
+ */
+export function inboxTrustNotice(message: { trust_score?: number | null }): { tone: 'fail'; text: string } | null {
+  const score = message.trust_score;
+  if (typeof score !== 'number' || !Number.isFinite(score) || score >= BRIEF_TRUST_FLOOR) return null;
+  return {
+    tone: 'fail',
+    text:
+      `Withheld from the recipient's brief (low trust ${score.toFixed(2)}): the text matched prompt-injection ` +
+      'patterns. Review it before asking an agent to act on it.',
+  };
+}
+
 /** A trail entry's sections with images removed, for surfaces that hand text on (the Home card, prompts). */
 export function defangDetail(detail: TrailDetail): TrailDetail {
   if (!detail.structured) return { ...detail, content: defangImages(detail.content) };

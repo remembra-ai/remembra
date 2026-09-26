@@ -409,6 +409,25 @@ class AccountEraser:
             if not isinstance(extra, ExtraDatabase):
                 raise TypeError("extra_databases takes ExtraDatabase entries (a database plus its erasure rules)")
 
+    def attach(self, extra: ExtraDatabase) -> None:
+        """Cover one more database from now on (replacing one of the same name).
+
+        Crew mode opens ``crew.db`` after the main lifespan built this eraser, so
+        its startup hook attaches it here, and detaches it on shutdown.
+        """
+        if not isinstance(extra, ExtraDatabase):
+            raise TypeError("attach takes an ExtraDatabase (a database plus its erasure rules)")
+        self._extra = [d for d in self._extra if d.name != extra.name] + [extra]
+
+    def detach(self, name: str) -> None:
+        """Stop covering the database attached as ``name`` (no-op when it is not attached)."""
+        self._extra = [d for d in self._extra if d.name != name]
+
+    @property
+    def databases(self) -> list[str]:
+        """Names of the extra databases covered, in erase order."""
+        return [d.name for d in self._extra]
+
     async def _reindex_collections(self) -> set[str]:
         """Collections recorded by reindex jobs (rollback copies may have been renamed by config since)."""
         try:

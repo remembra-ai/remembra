@@ -1,0 +1,100 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "SessionStart",
+      "hook_id": "a76be92c-e11c-4a71-a137-6b92bb442a68",
+      "hook_name": "SessionStart:startup",
+      "session_id": "8f94e3ab-5d99-43be-91da-7a30b49c3fde",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "68a227ac-7373-499b-88e2-acc95f9a2798"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "SessionStart",
+      "hook_id": "a76be92c-e11c-4a71-a137-6b92bb442a68",
+      "hook_name": "SessionStart:startup",
+      "outcome": "success",
+      "output": "",
+      "session_id": "8f94e3ab-5d99-43be-91da-7a30b49c3fde",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "eb4cf6eb-4859-457e-8ec0-be99f3dad956"
+    },
+    {
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "83870d01-0a2a-41d5-9252-d79abc56ad27",
+      "hook_name": "UserPromptSubmit",
+      "session_id": "8f94e3ab-5d99-43be-91da-7a30b49c3fde",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "fbf04da1-edab-4818-bb1f-5bffc574d13c"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "83870d01-0a2a-41d5-9252-d79abc56ad27",
+      "hook_name": "UserPromptSubmit",
+      "outcome": "success",
+      "output": "",
+      "session_id": "8f94e3ab-5d99-43be-91da-7a30b49c3fde",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "1bc7e235-53c1-4648-aa36-7fbb066504f9"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 85,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "Invalid API key \u00b7 Fix external API key",
+  "scenario": "stopfailure_auth",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [],
+  "verdict": {
+    "duration_s": 0.4,
+    "error": "authentication_failed",
+    "error_details": null,
+    "events": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "StopFailure",
+      "SessionEnd"
+    ],
+    "last_assistant_message": "Invalid API key \u00b7 Fix external API key",
+    "ok": true,
+    "request_gaps_s": [],
+    "returncode": 1,
+    "sessionend_fired": true,
+    "stop_fired": false,
+    "stopfailure_fired": true
+  }
+}

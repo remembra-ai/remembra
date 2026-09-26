@@ -1,0 +1,125 @@
+{
+  "claude_code_version": "2.1.168 (Claude Code)",
+  "hook_events_in_stream": [
+    {
+      "hook_event": "SessionStart",
+      "hook_id": "52744228-e916-4564-a944-49883609016e",
+      "hook_name": "SessionStart:startup",
+      "session_id": "76160f36-a0f4-410c-b112-b68066d4c3b1",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "8fe40769-ef1e-49b6-8d6c-78f72d9c8e59"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "SessionStart",
+      "hook_id": "52744228-e916-4564-a944-49883609016e",
+      "hook_name": "SessionStart:startup",
+      "outcome": "success",
+      "output": "",
+      "session_id": "76160f36-a0f4-410c-b112-b68066d4c3b1",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "e4c82c7e-2ae7-40a5-840c-e2290982787b"
+    },
+    {
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "afd6c7dc-231e-4ab2-a14e-88a19cbf96ff",
+      "hook_name": "UserPromptSubmit",
+      "session_id": "76160f36-a0f4-410c-b112-b68066d4c3b1",
+      "subtype": "hook_started",
+      "type": "system",
+      "uuid": "c84808ba-d414-423c-8e45-8a7df35edf7c"
+    },
+    {
+      "exit_code": 0,
+      "hook_event": "UserPromptSubmit",
+      "hook_id": "afd6c7dc-231e-4ab2-a14e-88a19cbf96ff",
+      "hook_name": "UserPromptSubmit",
+      "outcome": "success",
+      "output": "",
+      "session_id": "76160f36-a0f4-410c-b112-b68066d4c3b1",
+      "stderr": "",
+      "stdout": "",
+      "subtype": "hook_response",
+      "type": "system",
+      "uuid": "c7501cb4-3798-470d-869c-61869013136a"
+    }
+  ],
+  "messages_requests": [
+    {
+      "i": 0,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 85,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    },
+    {
+      "i": 1,
+      "last_message": {
+        "content": [
+          {
+            "_elided_chars": 4636,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 342,
+            "type": "text"
+          },
+          {
+            "_elided_chars": 85,
+            "type": "text"
+          }
+        ],
+        "role": "user"
+      },
+      "model": "claude-sonnet-4-5",
+      "n_messages": 1,
+      "system_has_nonce": false
+    }
+  ],
+  "mode": "mock",
+  "nonce": "7574289d",
+  "result_text": "There's an issue with the selected model (claude-sonnet-4-5). It may not exist or you may not have access to it. Run --model to pick a different model.",
+  "scenario": "stopfailure_model",
+  "stderr_tail": "",
+  "tool_results_seen_by_model": [],
+  "verdict": {
+    "duration_s": 0.41,
+    "error": "model_not_found",
+    "error_details": null,
+    "events": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "StopFailure",
+      "SessionEnd"
+    ],
+    "last_assistant_message": "There's an issue with the selected model (claude-sonnet-4-5). It may not exist or you may not have access to it. Run --model to pick a different model.",
+    "ok": true,
+    "request_gaps_s": [
+      0.01
+    ],
+    "returncode": 1,
+    "sessionend_fired": true,
+    "stop_fired": false,
+    "stopfailure_fired": true
+  }
+}

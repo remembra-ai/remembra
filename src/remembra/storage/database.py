@@ -4,10 +4,10 @@ import asyncio
 import json
 import re
 import uuid
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeAlias
 
 import aiosqlite
 import structlog
@@ -16,7 +16,7 @@ from remembra.config import Settings
 from remembra.core.time import utcnow
 from remembra.models.memory import Entity, EntityRef, Relationship
 from remembra.storage.backup import pre_migration_backup
-from remembra.storage.sqlite_tx import GuardedConnection, TxCoordinator
+from remembra.storage.sqlite_tx import AfterCommit, GuardedConnection, TxCoordinator
 
 log = structlog.get_logger(__name__)
 
@@ -24,8 +24,110 @@ log = structlog.get_logger(__name__)
 # (litestream checkpoints, CLI tools) before raising "database is locked".
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
-# agent_inbox as InboxManager.init_schema() creates it (inbox/manager.py; a test
-# keeps the two identical). Migrations that alter the table run this first.
+# One step of a versioned migration: a SQL statement, or an async callable that
+# receives the (guarded) connection and runs inside the migration transaction
+# (data backfills that need Python). ``ALTER TABLE … ADD COLUMN`` statements
+# that hit "duplicate column name" are skipped, so a column added earlier by
+# another path (an older idempotent ALTER list) never fails boot.
+MigrationStep: TypeAlias = str | Callable[[Any], Awaitable[Any]]
+Migration: TypeAlias = tuple[int, str, list[MigrationStep]]
+
+_ADD_COLUMN_RE = re.compile(r"^\s*ALTER\s+TABLE\s+\S+\s+ADD\s+COLUMN\b", re.IGNORECASE)
+_SQL_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _is_duplicate_column_error(exc: Exception) -> bool:
+    return "duplicate column name" in str(exc).lower()
+
+
+class MigrationRunner:
+    """Applies one append-only list of versioned migrations to one SQLite file.
+
+    The main database (:data:`VERSIONED_MIGRATIONS`) and ``crew.db``
+    (``remembra.crew.db.CREW_MIGRATIONS``) each get their own runner over their
+    own connection (spec D35, §3). Every version runs once, inside one
+    ``BEGIN IMMEDIATE`` transaction supplied by the caller, and is recorded in
+    the version table in that same transaction, so a crash mid-migration leaves
+    the version unapplied and the schema untouched (SQLite DDL is transactional).
+    The applied check is repeated inside the write lock, so two processes
+    booting against one file cannot both apply a version.
+    """
+
+    def __init__(self, migrations: Sequence[Migration], *, label: str, table: str = "schema_version") -> None:
+        versions = [m[0] for m in migrations]
+        if any(v < 1 for v in versions) or versions != sorted(set(versions)):
+            raise ValueError(f"{label}: migration versions must be unique, >= 1 and ascending: {versions}")
+        if not _SQL_IDENT_RE.fullmatch(table):
+            raise ValueError(f"{label}: invalid version table name {table!r}")
+        self.migrations: tuple[Migration, ...] = tuple(migrations)
+        self.label = label
+        self.table = table
+
+    @property
+    def latest_version(self) -> int:
+        return self.migrations[-1][0] if self.migrations else 0
+
+    async def ensure_table(self, conn: Any) -> None:
+        await conn.execute(
+            f"""
+            CREATE TABLE IF NOT EXISTS {self.table} (
+                version INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                applied_at TEXT NOT NULL
+            )
+            """
+        )
+        await conn.commit()
+
+    async def applied_versions(self, conn: Any) -> set[int]:
+        cursor = await conn.execute(f"SELECT version FROM {self.table}")
+        return {int(row[0]) for row in await cursor.fetchall()}
+
+    async def current_version(self, conn: Any) -> int:
+        """Highest applied version (0 if none)."""
+        cursor = await conn.execute(f"SELECT COALESCE(MAX(version), 0) FROM {self.table}")
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
+
+    async def apply(self, conn: Any, transaction: Callable[[], AbstractAsyncContextManager[None]]) -> list[int]:
+        """Apply every version not yet recorded; return the versions applied now."""
+        await self.ensure_table(conn)
+        applied = await self.applied_versions(conn)
+        newly: list[int] = []
+        for version, name, steps in self.migrations:
+            if version in applied:
+                continue
+            async with transaction():
+                cursor = await conn.execute(f"SELECT 1 FROM {self.table} WHERE version = ?", (version,))
+                if await cursor.fetchone() is not None:
+                    continue  # applied by another process while we waited for the lock
+                for step in steps:
+                    await self._run_step(conn, step)
+                await conn.execute(
+                    f"INSERT INTO {self.table} (version, name, applied_at) VALUES (?, ?, ?)",
+                    (version, name, utcnow().isoformat()),
+                )
+            newly.append(version)
+            log.info("schema_migration_applied", db=self.label, version=version, name=name)
+        return newly
+
+    @staticmethod
+    async def _run_step(conn: Any, step: MigrationStep) -> None:
+        if not isinstance(step, str):
+            await step(conn)
+            return
+        try:
+            await conn.execute(step)
+        except Exception as e:
+            if _ADD_COLUMN_RE.match(step) and _is_duplicate_column_error(e):
+                return
+            raise
+
+
+# agent_inbox exactly as InboxManager.init_schema() creates it (inbox/manager.py;
+# a test keeps the two identical). InboxManager.init_schema() runs AFTER
+# Database.init_schema() at startup, so on a fresh database a migration that
+# alters agent_inbox (v5 crew scoping, v6 trust score) runs this DDL first.
 AGENT_INBOX_BASE_DDL = """
             CREATE TABLE IF NOT EXISTS agent_inbox (
                 inbox_id    TEXT PRIMARY KEY,
@@ -58,10 +160,96 @@ CREATE TABLE IF NOT EXISTS founding_holds (
 )
 """
 
+
+async def _table_exists(conn: Any, name: str) -> bool:
+    cursor = await conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,))
+    return await cursor.fetchone() is not None
+
+
+async def backfill_agent_inbox_projects(conn: Any) -> int:
+    """Give unscoped ``agent_inbox`` rows a ``project_id`` where it is unambiguous (v5).
+
+    1. A row whose ``metadata.project_id`` is a non-empty string keeps that
+       project: the session brief already scoped inbox rows by it, so those rows
+       stay visible to exactly the keys that saw them before.
+    2. Otherwise the row's ``to_agent`` and ``from_agent`` are mapped to the
+       projects each agent is known to work in for that owner: relay memories
+       (``metadata.agent_id``) and agent-bound API keys restricted to projects.
+       Only when the union of both agents' projects is exactly one project is it
+       assigned.
+
+    Everything else stays NULL, which (§11) makes it visible only to unrestricted
+    keys and dashboard logins. Returns the number of rows given a project.
+    """
+    cursor = await conn.execute(
+        """
+        UPDATE agent_inbox
+           SET project_id = trim(json_extract(metadata, '$.project_id'))
+         WHERE project_id IS NULL
+           AND json_valid(metadata)
+           AND json_type(metadata, '$.project_id') = 'text'
+           AND trim(json_extract(metadata, '$.project_id')) != ''
+        """
+    )
+    updated = max(cursor.rowcount or 0, 0)
+
+    cursor = await conn.execute("SELECT DISTINCT owner_user_id, to_agent, from_agent FROM agent_inbox WHERE project_id IS NULL")
+    combos = [(row[0], row[1], row[2]) for row in await cursor.fetchall()]
+    if not combos:
+        return updated
+    owners = sorted({c[0] for c in combos})
+
+    known: dict[tuple[str, str], set[str]] = {}
+    marks = ", ".join("?" for _ in owners)
+    cursor = await conn.execute(
+        f"""
+        SELECT DISTINCT user_id, trim(json_extract(metadata, '$.agent_id')) AS agent, project_id
+          FROM memories
+         WHERE user_id IN ({marks})
+           AND json_valid(metadata)
+           AND json_type(metadata, '$.agent_id') = 'text'
+           AND project_id IS NOT NULL AND project_id != ''
+        """,
+        owners,
+    )
+    for user_id, agent, project_id in await cursor.fetchall():
+        if agent:
+            known.setdefault((user_id, agent), set()).add(project_id)
+
+    if await _table_exists(conn, "api_key_roles"):
+        cursor = await conn.execute(
+            f"""
+            SELECT k.user_id, trim(k.agent_id), r.project_ids
+              FROM api_keys k JOIN api_key_roles r ON r.api_key_id = k.id
+             WHERE k.user_id IN ({marks}) AND k.agent_id IS NOT NULL AND trim(k.agent_id) != ''
+            """,
+            owners,
+        )
+        for user_id, agent, project_ids in await cursor.fetchall():
+            projects = {p.strip() for p in (project_ids or "").split(",") if p.strip()}
+            if projects:  # an unrestricted key says nothing about the agent's project
+                known.setdefault((user_id, agent), set()).update(projects)
+
+    for owner, to_agent, from_agent in combos:
+        projects = known.get((owner, (to_agent or "").strip()), set()) | known.get((owner, (from_agent or "").strip()), set())
+        if len(projects) != 1:
+            continue
+        cursor = await conn.execute(
+            """
+            UPDATE agent_inbox SET project_id = ?
+             WHERE project_id IS NULL AND owner_user_id = ? AND to_agent = ? AND from_agent = ?
+            """,
+            (next(iter(projects)), owner, to_agent, from_agent),
+        )
+        updated += max(cursor.rowcount or 0, 0)
+    log.info("agent_inbox_project_backfill", rows=updated)
+    return updated
+
+
 # Versioned migrations (REL-15). Each entry runs once, inside a transaction,
 # and is recorded in schema_version. Append only — never edit an applied entry.
 # Version 1 marks the legacy idempotent ALTER list in _run_migrations().
-VERSIONED_MIGRATIONS: list[tuple[int, str, list[str]]] = [
+VERSIONED_MIGRATIONS: list[Migration] = [
     (1, "legacy_idempotent_columns", []),
     (
         2,
@@ -140,10 +328,27 @@ VERSIONED_MIGRATIONS: list[tuple[int, str, list[str]]] = [
             "ALTER TABLE api_keys ADD COLUMN agent_id TEXT",
         ],
     ),
-    # Version 5 is taken by feat/crew ("crew_agent_inbox_scoping": project_id,
-    # crew_id, kind, sender_kind, sender_verified on agent_inbox). The entries
-    # below come after it so the branches merge in either order: they touch
-    # other columns and tables, and create agent_inbox from the same DDL first.
+    (
+        5,
+        "crew_agent_inbox_scoping",
+        [
+            # Crew mode (spec §3.1, D20): project/crew scoping and server-set
+            # sender provenance on the agent inbox. The table is created first
+            # (see AGENT_INBOX_BASE_DDL). Existing rows get sender_kind='agent'
+            # and sender_verified=0: nothing old is promoted to human or verified.
+            AGENT_INBOX_BASE_DDL,
+            "ALTER TABLE agent_inbox ADD COLUMN project_id TEXT",
+            "ALTER TABLE agent_inbox ADD COLUMN crew_id TEXT",
+            "ALTER TABLE agent_inbox ADD COLUMN kind TEXT DEFAULT 'directive'",
+            "ALTER TABLE agent_inbox ADD COLUMN sender_kind TEXT DEFAULT 'agent'",
+            "ALTER TABLE agent_inbox ADD COLUMN sender_verified INTEGER DEFAULT 0",
+            "CREATE INDEX IF NOT EXISTS idx_agent_inbox_project ON agent_inbox(owner_user_id, project_id, to_agent, status)",
+            backfill_agent_inbox_projects,
+        ],
+    ),
+    # Versions 6-9 shipped in the release before crew's 5 merged, so production
+    # databases record 1-4 and 6-9; the runner applies the missing 5 on its own
+    # next boot. Their statements are unchanged (append only).
     (
         6,
         "agent_inbox_trust_score",
@@ -219,8 +424,9 @@ VERSIONED_MIGRATIONS: list[tuple[int, str, list[str]]] = [
 ]
 
 
-def _is_duplicate_column_error(exc: Exception) -> bool:
-    return "duplicate column name" in str(exc).lower()
+def main_migrations() -> MigrationRunner:
+    """The runner over :data:`VERSIONED_MIGRATIONS` (read at call time, so tests can extend the list)."""
+    return MigrationRunner(VERSIONED_MIGRATIONS, label="main")
 
 
 # English function words removed from keyword queries (RET-11). Deliberately
@@ -961,35 +1167,11 @@ class Database:
 
     async def _apply_versioned_migrations(self) -> None:
         """Apply VERSIONED_MIGRATIONS not yet recorded in schema_version."""
-        await self.conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS schema_version (
-                version INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                applied_at TEXT NOT NULL
-            )
-            """
-        )
-        await self.conn.commit()
-        cursor = await self.conn.execute("SELECT version FROM schema_version")
-        applied = {row[0] for row in await cursor.fetchall()}
-        for version, name, statements in VERSIONED_MIGRATIONS:
-            if version in applied:
-                continue
-            async with self.transaction():
-                for statement in statements:
-                    await self.conn.execute(statement)
-                await self.conn.execute(
-                    "INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)",
-                    (version, name, utcnow().isoformat()),
-                )
-            log.info("schema_migration_applied", version=version, name=name)
+        await main_migrations().apply(self.conn, self.transaction)
 
     async def get_schema_version(self) -> int:
         """Highest applied versioned migration (0 if none)."""
-        cursor = await self.conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version")
-        row = await cursor.fetchone()
-        return int(row[0]) if row else 0
+        return await main_migrations().current_version(self.conn)
 
     @property
     def conn(self) -> aiosqlite.Connection:
@@ -1033,6 +1215,10 @@ class Database:
     def in_transaction(self) -> bool:
         """True while some task holds an explicit transaction open."""
         return self._coordinator.in_transaction
+
+    def after_commit(self, callback: AfterCommit) -> bool:
+        """Run ``callback`` after the transaction the caller owns commits (``TxCoordinator.after_commit``)."""
+        return self._coordinator.after_commit(callback)
 
     # -----------------------------------------------------------------------
     # Memory operations

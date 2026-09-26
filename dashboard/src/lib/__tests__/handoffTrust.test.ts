@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { continuePrompt } from '../handoffText';
-import { COMMAND_FLAG, defangImages, trustNotice } from '../handoffTrust';
+import { BRIEF_TRUST_FLOOR, COMMAND_FLAG, defangImages, inboxTrustNotice, trustNotice } from '../handoffTrust';
 import type { TrailItem } from '../relay';
 
 function item(overrides: Partial<TrailItem> = {}): TrailItem {
@@ -107,5 +107,26 @@ describe('defangDetail', () => {
     expect(detail.structured && detail.done[0]).toBe('[image removed: x.example]');
     const free = defangDetail({ structured: false, content: '<img src="https://e.example/i.png">' });
     expect(!free.structured && free.content).toBe('[image removed: e.example]');
+  });
+});
+
+describe('inboxTrustNotice', () => {
+  it('flags a message below the brief floor, the way the brief withholds it', () => {
+    const notice = inboxTrustNotice({ trust_score: 0.35 });
+    expect(notice?.tone).toBe('fail');
+    expect(notice?.text).toContain('low trust 0.35');
+    expect(notice?.text).toContain("recipient's brief");
+  });
+
+  it('says nothing for a clean message or an older row without a score', () => {
+    expect(inboxTrustNotice({ trust_score: 1 })).toBeNull();
+    expect(inboxTrustNotice({ trust_score: null })).toBeNull();
+    expect(inboxTrustNotice({})).toBeNull();
+    expect(inboxTrustNotice({ trust_score: Number.NaN })).toBeNull();
+  });
+
+  it('uses the server floor', () => {
+    expect(BRIEF_TRUST_FLOOR).toBe(1);
+    expect(inboxTrustNotice({ trust_score: 0.99 })).not.toBeNull();
   });
 });
