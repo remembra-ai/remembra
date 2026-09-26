@@ -14,7 +14,10 @@ import {
   type PlansResponse,
   type UsageSummaryResponse,
 } from '../lib/api';
-import { checkoutRoute, planRowAction } from '../lib/checkout';
+import { checkoutRoute, foundingSeatNote, planRowAction } from '../lib/checkout';
+import { absoluteTime } from '../lib/time';
+import { planIntentNote } from '../lib/planIntent';
+import { useRoute } from '../lib/nav';
 import {
   BANK_UNLOCK_RULE,
   bankUnlockLabel,
@@ -404,7 +407,9 @@ function PlansSection({
   onError: (message: string | null) => void;
 }) {
   const titleId = useId();
-  const [cycle, setCycle] = useState<BillingCycle>('monthly');
+  const route = useRoute();
+  // A pick from the pricing page: Founding is yearly only, and the yearly prices are what that page shows.
+  const [cycle, setCycle] = useState<BillingCycle>(() => (route.params.get('plan') ? 'yearly' : 'monthly'));
   const [busy, setBusy] = useState<string | null>(null);
 
   const buy = async (planId: string, perSeat: boolean, seats: number | undefined, forceCycle?: BillingCycle) => {
@@ -420,6 +425,7 @@ function PlansSection({
   };
 
   const founding = plans.founding;
+  const intentNote = planIntentNote(route.params.get('plan'), founding.available && !subscribed);
   return (
     <Card labelledBy={titleId}>
       <CardHeader
@@ -454,12 +460,24 @@ function PlansSection({
             You already have a subscription. Switch plans or cancel from Manage subscription, so you are never billed for two.
           </p>
         )}
+        {intentNote && (
+          <p role="status" className="mt-3 border-l-[3px] border-signal bg-signal-wash px-3 py-2 text-sm text-ink">
+            {intentNote}
+          </p>
+        )}
         {founding.available && !subscribed && (
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border border-dashed border-signal px-4 py-3">
+          <div
+            className={clsx(
+              'mt-4 flex flex-wrap items-center justify-between gap-3 border border-dashed border-signal px-4 py-3',
+              route.params.get('plan') === 'founding' && 'border-solid shadow-[0_0_0_2px_var(--signal-wash)]',
+            )}
+          >
             <p className="text-sm text-ink-2">
               <span className="font-semibold text-ink">Founding 100:</span> Solo for {formatUsd(founding.price_yearly)}/yr, price locked for
               life, billed yearly.
-              {founding.remaining !== null && <span className="font-mono text-xs text-ink-3"> {founding.remaining} left</span>}
+              {foundingSeatNote(founding, absoluteTime) && (
+                <span className="font-mono text-xs text-ink-3"> {foundingSeatNote(founding, absoluteTime)}</span>
+              )}
             </p>
             <button
               type="button"

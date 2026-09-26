@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkoutRoute, planRowAction } from '../checkout';
+import { checkoutRoute, foundingSeatNote, planRowAction } from '../checkout';
 import type { BillingClientConfigResponse } from '../api';
 
 const config = (extra: Partial<BillingClientConfigResponse> = {}): BillingClientConfigResponse => ({
@@ -46,5 +46,22 @@ describe('planRowAction', () => {
     expect(planRowAction('team', 'legacy_team_199', true)).toBe('manage');
     expect(planRowAction('pro', 'free', false)).toBe('buy');
     expect(planRowAction('solo', 'pro', false)).toBe('buy'); // promo trial: no subscription yet
+  });
+});
+
+describe('foundingSeatNote', () => {
+  const offer = { plan: 'solo', price_yearly: 10800, max_redemptions: 100, remaining: 0, available: true };
+  const day = (iso: string) => iso.slice(0, 10);
+  it('tells a lapsed founder their seat is kept, even with 0 left for everyone else', () => {
+    expect(foundingSeatNote({ ...offer, held_kind: 'lapsed', held_until: '2026-10-15T12:00:00+00:00' }, day)).toBe(
+      'Your Founding price and seat are kept until 2026-10-15.',
+    );
+  });
+  it('names an open checkout hold, else the seats left', () => {
+    expect(foundingSeatNote({ ...offer, held_kind: 'pending', held_until: '2026-10-01T14:00:00+00:00' }, day)).toContain(
+      'held for your open checkout',
+    );
+    expect(foundingSeatNote({ ...offer, remaining: 12 }, day)).toBe('12 left');
+    expect(foundingSeatNote({ ...offer, remaining: null }, day)).toBeNull();
   });
 });

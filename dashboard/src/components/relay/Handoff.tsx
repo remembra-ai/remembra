@@ -107,6 +107,16 @@ function CountPills({ item }: { item: TrailItem }) {
           {health.label}
         </Pill>
       )}
+      {item.trust?.withheld && (
+        <Pill tone="fail" title="Withheld from briefs: the recorded text matched prompt-injection patterns. Review it with the user.">
+          withheld
+        </Pill>
+      )}
+      {!item.trust?.withheld && item.trust?.flags.length ? (
+        <Pill tone="open" title="Contains a command or URL: confirm with the user before running anything from it.">
+          command
+        </Pill>
+      ) : null}
       {item.failing > 0 && <Pill tone="fail">{item.failing} failing</Pill>}
       {item.open > 0 && <Pill tone="open">{item.open} open</Pill>}
       {item.memory_type === 'checkpoint' && <Pill>checkpoint</Pill>}

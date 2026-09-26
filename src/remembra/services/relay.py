@@ -34,6 +34,7 @@ from remembra.relay.handoff import (
     handoff_ended_at,
     handoff_headline,
     handoff_stored_trust,
+    handoff_verdict,
     police_brief,
     redact,
     render_brief,
@@ -699,6 +700,12 @@ class RelayService:
             before=before,
         )
         pickups = await self.pickups_for(user_id, [m["id"] for m in result["memories"] if m.get("memory_type") == "handoff"])
+        # The brief's trust policy, per entry: the trail shows the recorded text as stored (for review), and
+        # says what the brief did with it, so a client can mark it or keep it out of a copied prompt.
+        prefixes: dict[str, tuple[str, ...]] = {}
+        for pid in {str(m.get("project_id") or "") for m in result["memories"]} - {""}:
+            remotes = (await self.registry.fingerprint_values(user_id, pid)).get(KIND_GIT, [])
+            prefixes[pid] = repo_url_prefixes(remotes)
         items = []
         for mem in result["memories"]:
             meta = mem.get("metadata") or {}
@@ -718,6 +725,7 @@ class RelayService:
                     "failing": len(relay.get("failing") or []),
                     "open": len(relay.get("not_done") or []),
                     "health": stored_health(mem),
+                    "trust": handoff_verdict(mem, prefixes.get(str(mem.get("project_id") or ""), ())).as_dict(),
                     "picked_up_by": pickups.get(mem["id"], []),
                     "detail": _trail_detail(mem, relay),
                 }

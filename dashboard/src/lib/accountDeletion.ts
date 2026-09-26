@@ -28,3 +28,57 @@ export function deletionConfirm(
   if (method === 'password') return password ? { password } : null;
   return isDeletionCode(code) ? { code: code.trim() } : null;
 }
+
+/** Shown in the delete dialog: deleting refunds nothing by itself (refunds page, "Renewals and cancelling"). */
+export const REFUND_BEFORE_DELETE =
+  'Deleting does not refund anything by itself. If your first payment was less than 14 days ago, ask ' +
+  'support@remembra.dev for the refund before you delete the account.';
+
+/** A team this account owns that has other members (DELETE /auth/me refuses with 409 TEAM_OWNER until confirmed). */
+export interface OwnedTeam {
+  id: string;
+  name: string;
+  members: number;
+}
+
+/** The teams named by a TEAM_OWNER refusal, or null when the error is something else. */
+export function teamOwnerRefusal(error: unknown): { message: string; teams: OwnedTeam[] } | null {
+  if (!error || typeof error !== 'object') return null;
+  const { code, data, message } = error as { code?: string; data?: Record<string, unknown>; message?: string };
+  if (code !== 'TEAM_OWNER') return null;
+  const raw = Array.isArray(data?.teams) ? (data?.teams as unknown[]) : [];
+  const teams = raw.filter(
+    (t): t is OwnedTeam => !!t && typeof t === 'object' && typeof (t as OwnedTeam).name === 'string',
+  );
+  return { message: message || 'You own a team with other members.', teams };
+}
+
+const NOTICE_KEY = 'remembra.account_deleted_notice';
+
+/** Keep the server's "your account is deleted" message for the sign-in screen after the sign-out. */
+export function rememberDeletionNotice(message: string, store: Pick<Storage, 'setItem'> | null = safeSession()): void {
+  try {
+    store?.setItem(NOTICE_KEY, message);
+  } catch {
+    /* private mode or blocked storage: the sign-in screen simply shows no notice */
+  }
+}
+
+/** The kept message, once (it is removed as it is read). */
+export function takeDeletionNotice(store: Pick<Storage, 'getItem' | 'removeItem'> | null = safeSession()): string | null {
+  try {
+    const message = store?.getItem(NOTICE_KEY) ?? null;
+    if (message) store?.removeItem(NOTICE_KEY);
+    return message;
+  } catch {
+    return null;
+  }
+}
+
+function safeSession(): Storage | null {
+  try {
+    return typeof window !== 'undefined' ? window.sessionStorage : null;
+  } catch {
+    return null;
+  }
+}

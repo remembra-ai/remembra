@@ -325,12 +325,35 @@ remembra-relay connect            # dry run; add --apply to write the hooks
   carries an API key.
 
 ### Changed (wave 2)
-- Session handoffs never count toward the notes-kept cap (R-17).
+- Session handoffs never count toward the notes-kept cap (R-17), and neither do the `last_agent:` and `branch:`
+  status values a close writes; a project that holds only handoffs does not use a Free project slot.
 - Social sign-in's callback is `/api/v1/auth/oauth/{provider}/callback` on the API host; an unchanged
   `/session/status` re-send is not charged; decay cleanup never archives relay handoffs or pinned rows; CI
   builds `Dockerfile.cloud` and boots it.
 - Main-DB migration version 5 is left free for Crew mode (`crew_agent_inbox_scoping`); 6 to 9 apply before or
   after it (9 adds the `idx_memories_user_type` index the cap count uses).
+
+### Fixed (launch review)
+- Brief trust policy: pipe-to-shell through `sudo`/`env` or a shell's full path, download-then-run commands,
+  hosts a download command names without a scheme, and links that leave the repository through `..`, `%2e`,
+  a backslash or user info are flagged; reference-style and HTML images are removed from the brief text and
+  every JSON field; injection text written with look-alike or fullwidth letters is withheld; the close
+  response, trail and brief agree on the grade; the health line says when its facts were only reported by the
+  agent. The trail carries the brief's verdict per entry, and the dashboard's Last handoff card shows the
+  grade, pickups and a withheld or command notice; "Copy as a prompt" follows the same policy.
+- MCP: `forget_memories` dry runs and `list_spaces` return their JSON in the untrusted data block; the stdio
+  server logs to stderr, so a failed tool call no longer writes a log line into the JSON-RPC stream.
+- Erasure keeps the rows an erased admin acted on in someone else's space or team (credited to the owner), and
+  skips an account made active again. A payment that arrives for a deleted account is cancelled, not applied.
+  Deletion releases a held Founding seat, says which subscription was cancelled when a later cancel fails,
+  asks a team owner to confirm that the team ends, emails the erase date and undo address, and a sign-in to
+  the deleted account says the same. The superadmin hard delete answers 503 (account kept deactivated and due)
+  when the erasure fails.
+- Founding 100: checkout needs a verified email, and one account gets one two-hour hold a day; a lapsed founder
+  sees the offer and the date the seat is kept until even when the rest are taken. Pricing links carry the
+  plan to the dashboard, and the seat counter treats `available: false` as closed.
+- `remembra-relay close` queues a close the server has no route for (an API rolled back to an older build).
+- The delete-account dialog opens over the whole page at any width.
 
 ## Remembra Cloud - 2026-07-16 (server release; the package carries it from 0.16.0)
 

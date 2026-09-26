@@ -4,6 +4,7 @@ import { API_V1 } from '../config';
 import { BrandLockup } from '../brand/Brand';
 import { SocialSignIn } from '../components/auth/SocialSignIn';
 import { useAuthConfig } from '../hooks/useAuthConfig';
+import { takeDeletionNotice } from '../lib/accountDeletion';
 
 interface LoginProps {
   onLogin: (token: string, user: { id: string; email: string; name?: string; is_admin?: boolean }) => void;
@@ -19,6 +20,8 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword, footer }: L
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // After a self-serve deletion: the server's message (erase date, how to undo), shown once.
+  const [deletedNotice] = useState<string | null>(() => takeDeletionNotice());
   const { config } = useAuthConfig();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -69,6 +72,13 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword, footer }: L
             Sign in to your Remembra account
           </p>
         </div>
+
+        {deletedNotice && (
+          <div role="status" className="mb-4 border border-rule border-l-[3px] border-l-signal bg-panel px-4 py-3 text-sm leading-snug text-ink">
+            <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">Account deleted</p>
+            <p className="mt-1">{deletedNotice}</p>
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="bg-[hsl(var(--card))] rounded-xl shadow-sm border border-[hsl(var(--border))] p-6">
           <div className="space-y-4">

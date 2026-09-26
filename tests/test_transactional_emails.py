@@ -153,6 +153,8 @@ def test_email_verification_and_reset_links() -> None:
     reset = SAMPLES["password_reset"]
     assert f"{DASH}/reset-password?token=t&email=a%40example.com" in reset.text
     assert "24 hours" in reset.text and "never verified" in reset.text
+    # What reset_credentials_for_new_owner does: webhooks are paused (active = 0), not removed.
+    assert "pauses the webhooks until you turn them back on" in reset.text and "removes the API keys" not in reset.text
     verified = tpl.password_reset(
         dashboard=DASH, reset_url=f"{DASH}/reset-password?token=x", expires_hours=24, email_verified=True
     )

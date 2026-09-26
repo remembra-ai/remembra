@@ -2,6 +2,7 @@
 // the agent inbox. Thin typed wrappers over the authenticated API client.
 
 import { api, ApiError } from './api';
+import type { TrustVerdict } from './handoffTrust';
 
 export interface TrailCommit {
   sha: string | null;
@@ -69,6 +70,8 @@ export interface TrailItem {
   health?: HandoffHealth | null;
   /** Agents that picked this handoff up, first pickup first. */
   picked_up_by?: Pickup[];
+  /** The brief's trust verdict for this entry (absent on older servers). */
+  trust?: TrustVerdict | null;
 }
 
 type PillTone = 'neutral' | 'fail' | 'open' | 'ok' | 'signal';

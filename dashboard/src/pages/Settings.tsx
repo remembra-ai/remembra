@@ -1,12 +1,19 @@
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { User, Lock, AlertTriangle, Loader2, Shield, Smartphone, CheckCircle, XCircle, Key, Database, Globe, FolderOpen, Activity, Gauge, FileText, Clock, Download, Sliders, Search, Zap, GitBranch } from 'lucide-react';
 import clsx from 'clsx';
 import { api } from '../lib/api';
 import { API_V1 } from '../config';
 import type { UserResponse } from '../lib/api';
 import { useRoute } from '../lib/nav';
-import { DELETION_COPY, deletionConfirm } from '../lib/accountDeletion';
-import type { DeletionMethod } from '../lib/accountDeletion';
+import {
+  DELETION_COPY,
+  REFUND_BEFORE_DELETE,
+  deletionConfirm,
+  rememberDeletionNotice,
+  teamOwnerRefusal,
+} from '../lib/accountDeletion';
+import type { DeletionMethod, OwnedTeam } from '../lib/accountDeletion';
 import { SignInMethods } from '../components/auth/SignInMethods';
 import { EmailVerificationStatus } from '../components/auth/EmailVerificationStatus';
 import { UNINSTALL_STEPS } from '../lib/agents';
@@ -609,8 +616,12 @@ function AccountSettings({ user, onLogout }: { user: UserResponse; onLogout: () 
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // A TEAM_OWNER refusal: the teams that end with the account, and whether the user agreed.
+  const [ownedTeams, setOwnedTeams] = useState<{ message: string; teams: OwnedTeam[] } | null>(null);
+  const [endTeams, setEndTeams] = useState(false);
 
   const confirm = deletionConfirm(method, confirmText, password, code);
+  const blockedByTeams = ownedTeams !== null && !endTeams;
 
   const reset = () => {
     setShowDeleteModal(false);
@@ -620,7 +631,18 @@ function AccountSettings({ user, onLogout }: { user: UserResponse; onLogout: () 
     setCodeSentTo(null);
     setConfirmText('');
     setError(null);
+    setOwnedTeams(null);
+    setEndTeams(false);
   };
+
+  useEffect(() => {
+    if (!showDeleteModal) return undefined;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !loading) reset();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showDeleteModal, loading]);
 
   const sendCode = async () => {
     setSending(true);
@@ -640,195 +662,218 @@ function AccountSettings({ user, onLogout }: { user: UserResponse; onLogout: () 
       setError(method === 'password' ? 'Type DELETE and enter your password' : 'Type DELETE and enter the 6-digit code');
       return;
     }
+    if (blockedByTeams) {
+      setError('Confirm that your team ends, or cancel and ask support to move its ownership first.');
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
-      await api.deleteAccount(confirm);
+      const result = await api.deleteAccount(endTeams ? { ...confirm, end_teams: true } : confirm);
+      // The sign-in screen shows the server's message: when the data is erased and how to undo.
+      rememberDeletionNotice(result.message);
       onLogout();
     } catch (err) {
-      // Nothing was deleted (e.g. the subscription could not be cancelled): the server says why.
-      setError(err instanceof Error ? err.message : 'Failed to delete account');
+      const teams = teamOwnerRefusal(err);
+      if (teams) {
+        setOwnedTeams(teams);
+      } else {
+        // Nothing was deleted (e.g. the subscription could not be cancelled): the server says why.
+        setError(err instanceof Error ? err.message : 'Failed to delete account');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const inputClass =
-    'w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent';
+  const labelClass = 'mb-1.5 block font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3';
+  const inputClass = 'rr-input w-full px-3 py-2.5 text-sm';
+  const linkClass = 'mt-2 text-sm text-ink-2 underline decoration-fail decoration-2 underline-offset-4 hover:text-ink';
 
   return (
     <>
       <UninstallCard />
-      <div className="bg-white dark:bg-gray-800 rounded-xl border border-red-200 dark:border-red-800 p-6">
-        <div className="flex items-start gap-4">
-          <div className="p-3 rounded-lg bg-red-100 dark:bg-red-900/20">
-            <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
-          </div>
-          <div className="flex-1">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
-              Delete Account
-            </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{DELETION_COPY}</p>
-            <button
-              onClick={() => setShowDeleteModal(true)}
-              className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium transition-colors"
-            >
-              Delete Account
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Delete Confirmation Modal */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="delete-account-title"
-            className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-800 rounded-xl shadow-2xl"
+      <section aria-labelledby="delete-account-heading" className="rr-card overflow-hidden rounded-[3px] border-l-[3px] border-l-fail">
+        <header className="flex items-center gap-2 bg-head px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.08em] text-head-ink sm:px-5">
+          <AlertTriangle className="h-3.5 w-3.5 text-fail" aria-hidden="true" />
+          <span id="delete-account-heading">delete account</span>
+        </header>
+        <div className="px-4 py-4 sm:px-5">
+          <p className="text-sm leading-relaxed text-ink-2">{DELETION_COPY}</p>
+          <button
+            type="button"
+            onClick={() => setShowDeleteModal(true)}
+            className="mt-4 rounded-[3px] border border-fail bg-fail-wash px-4 py-2 text-sm font-semibold text-fail transition-colors hover:bg-fail hover:text-paper"
           >
-            {/* Header */}
-            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-              <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
-                <AlertTriangle className="w-5 h-5" />
-                <h2 id="delete-account-title" className="text-lg font-semibold">Delete Account</h2>
-              </div>
-            </div>
-
-            {/* Content */}
-            <div className="p-4 space-y-4">
-              <p className="text-sm text-gray-600 dark:text-gray-300">{DELETION_COPY}</p>
-
-              <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Remove Remembra from your machines too. Deleting the account does not touch them:
-                </p>
-                <UninstallSteps compact />
-              </div>
-
-              {/* Confirmation */}
-              <div>
-                <label htmlFor="delete-confirm-text" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Type <span className="font-mono text-red-600">DELETE</span> to confirm
-                </label>
-                <input
-                  id="delete-confirm-text"
-                  type="text"
-                  value={confirmText}
-                  onChange={(e) => setConfirmText(e.target.value)}
-                  placeholder="Type DELETE"
-                  className={inputClass}
-                />
-              </div>
-
-              {method === 'password' ? (
-                <div>
-                  <label htmlFor="delete-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                    Enter your password
-                  </label>
-                  <input
-                    id="delete-password"
-                    type="password"
-                    autoComplete="current-password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Password"
-                    className={inputClass}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMethod('code');
-                      setError(null);
-                    }}
-                    className="mt-2 text-sm text-red-600 dark:text-red-400 underline"
-                  >
-                    Signed in with Google or GitHub? Confirm with an emailed code
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
-                    {codeSentTo
-                      ? `We emailed a 6-digit code to ${codeSentTo}. It expires in 15 minutes.`
-                      : `We will email a 6-digit code to ${user.email}.`}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={sendCode}
-                    disabled={sending}
-                    className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium"
-                  >
-                    {sending ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : null}
-                    {codeSentTo ? 'Send a new code' : 'Email me a code'}
-                  </button>
-                  <label htmlFor="delete-code" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mt-3 mb-2">
-                    Code from the email
-                  </label>
-                  <input
-                    id="delete-code"
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    value={code}
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                    placeholder="123456"
-                    className={clsx(inputClass, 'font-mono tracking-widest')}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setMethod('password');
-                      setError(null);
-                    }}
-                    className="mt-2 text-sm text-red-600 dark:text-red-400 underline"
-                  >
-                    Use my password instead
-                  </button>
-                </div>
-              )}
-
-              {/* Error */}
-              {error && (
-                <div role="alert" className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm">
-                  {error}
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  onClick={reset}
-                  className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium"
-                  disabled={loading}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleDelete}
-                  disabled={loading || !confirm}
-                  className={clsx(
-                    'px-4 py-2 rounded-lg font-medium transition-colors',
-                    'bg-red-600 hover:bg-red-700 text-white',
-                    (loading || !confirm) && 'opacity-50 cursor-not-allowed'
-                  )}
-                >
-                  {loading ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin inline mr-2" />
-                      Deleting...
-                    </>
-                  ) : (
-                    'Delete Account'
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
+            Delete account
+          </button>
         </div>
-      )}
+      </section>
+
+      {showDeleteModal &&
+        // Portalled to <body>: a page-transition filter on an ancestor turns `position: fixed` into
+        // positioning against that ancestor, which put the dialog above the viewport on phones.
+        createPortal(
+          <div
+            className="fixed inset-0 z-[9999] flex items-start justify-center overflow-y-auto bg-black/60 p-4 sm:items-center"
+            onClick={(event) => {
+              if (event.target === event.currentTarget && !loading) reset();
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-account-title"
+              className="rr-card my-auto w-full max-w-md overflow-hidden rounded-[3px] border-l-[3px] border-l-fail"
+            >
+              <header className="flex items-center gap-2 bg-head px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.08em] text-head-ink">
+                <AlertTriangle className="h-3.5 w-3.5 text-fail" aria-hidden="true" />
+                <h2 id="delete-account-title" className="font-mono text-[11px] font-normal">
+                  delete account · {user.email}
+                </h2>
+              </header>
+
+              <div className="max-h-[calc(100dvh-7rem)] space-y-4 overflow-y-auto px-4 py-4">
+                <p className="text-sm leading-relaxed text-ink-2">{DELETION_COPY}</p>
+                <p className="border-l-[3px] border-signal bg-signal-wash px-3 py-2 text-sm leading-snug text-ink">
+                  {REFUND_BEFORE_DELETE}
+                </p>
+
+                <div className="border border-rule p-3">
+                  <p className="mb-2 text-sm font-medium text-ink">
+                    Remove Remembra from your machines too. Deleting the account does not touch them:
+                  </p>
+                  <UninstallSteps compact />
+                </div>
+
+                {ownedTeams && (
+                  <div role="alert" className="border border-fail/40 border-l-[3px] border-l-fail bg-fail-wash px-3 py-3 text-sm text-ink">
+                    <p className="leading-snug">{ownedTeams.message}</p>
+                    <label className="mt-2 flex items-start gap-2 text-sm font-medium">
+                      <input
+                        type="checkbox"
+                        checked={endTeams}
+                        onChange={(event) => setEndTeams(event.target.checked)}
+                        className="mt-0.5 h-4 w-4 accent-[var(--fail)]"
+                      />
+                      <span>
+                        End {ownedTeams.teams.length === 1 ? 'the team' : 'these teams'} for every member:{' '}
+                        {ownedTeams.teams.map((t) => t.name).join(', ')}
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                <div>
+                  <label htmlFor="delete-confirm-text" className={labelClass}>
+                    Type <span className="text-fail">DELETE</span> to confirm
+                  </label>
+                  <input
+                    id="delete-confirm-text"
+                    type="text"
+                    value={confirmText}
+                    onChange={(e) => setConfirmText(e.target.value)}
+                    placeholder="DELETE"
+                    className={clsx(inputClass, 'font-mono')}
+                  />
+                </div>
+
+                {method === 'password' ? (
+                  <div>
+                    <label htmlFor="delete-password" className={labelClass}>
+                      Your password
+                    </label>
+                    <input
+                      id="delete-password"
+                      type="password"
+                      autoComplete="current-password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder="Password"
+                      className={inputClass}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMethod('code');
+                        setError(null);
+                      }}
+                      className={linkClass}
+                    >
+                      Signed in with Google or GitHub? Confirm with an emailed code
+                    </button>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="mb-2 text-sm text-ink-2">
+                      {codeSentTo
+                        ? `We emailed a 6-digit code to ${codeSentTo}. It expires in 15 minutes.`
+                        : `We will email a 6-digit code to ${user.email}.`}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={sendCode}
+                      disabled={sending}
+                      className="rr-btn-ghost inline-flex items-center gap-1.5 px-3 py-2 text-sm"
+                    >
+                      {sending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
+                      {codeSentTo ? 'Send a new code' : 'Email me a code'}
+                    </button>
+                    <label htmlFor="delete-code" className={clsx(labelClass, 'mt-3')}>
+                      Code from the email
+                    </label>
+                    <input
+                      id="delete-code"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      maxLength={6}
+                      value={code}
+                      onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                      placeholder="123456"
+                      className={clsx(inputClass, 'font-mono tracking-widest')}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMethod('password');
+                        setError(null);
+                      }}
+                      className={linkClass}
+                    >
+                      Use my password instead
+                    </button>
+                  </div>
+                )}
+
+                {error && (
+                  <div role="alert" className="border border-fail/40 bg-fail-wash px-3 py-2 text-sm text-fail">
+                    {error}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap justify-end gap-2 pt-1">
+                  <button type="button" onClick={reset} className="rr-btn-ghost px-4 py-2 text-sm" disabled={loading}>
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDelete}
+                    disabled={loading || !confirm || blockedByTeams}
+                    className={clsx(
+                      'inline-flex items-center gap-1.5 rounded-[3px] border border-fail bg-fail px-4 py-2 text-sm font-semibold text-paper transition-[filter]',
+                      loading || !confirm || blockedByTeams ? 'cursor-not-allowed opacity-50' : 'hover:brightness-110',
+                    )}
+                  >
+                    {loading && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                    {loading ? 'Deleting…' : 'Delete account'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

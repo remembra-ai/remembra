@@ -6,7 +6,8 @@ import { useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, ClipboardCopy, ShieldCheck } from 'lucide-react';
 import clsx from 'clsx';
-import type { TrailItem } from '../../lib/relay';
+import { healthBadge, pickupLine, type TrailItem } from '../../lib/relay';
+import { trustNotice } from '../../lib/handoffTrust';
 import { agentMeta } from '../../lib/agents';
 import { absoluteTime, relativeTime, where } from '../../lib/time';
 import { continueCommand, continuePrompt } from '../../lib/handoffText';
@@ -46,6 +47,10 @@ export function LatestHandoff({
   const meta = agentMeta(latest.agent_id);
   const project = latest.project_id && latest.project_id !== 'default' ? latest.project_id : null;
   const verified = latest.detail?.structured ? latest.detail.agent_verified : false;
+  const health = healthBadge(latest.health);
+  const pickup = pickupLine(latest.picked_up_by, (id) => agentMeta(id).name);
+  const notice = trustNotice(latest.trust);
+  const withheld = Boolean(latest.trust?.withheld);
 
   return (
     <article
@@ -143,16 +148,37 @@ export function LatestHandoff({
                 </p>
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                   <BranchLabel branch={latest.branch} sha={latest.head_commit} />
+                  {health && (
+                    <Pill tone={health.tone} title={health.title}>
+                      {health.label}
+                    </Pill>
+                  )}
+                  {withheld && <Pill tone="fail">withheld</Pill>}
                   {latest.failing > 0 && <Pill tone="fail">{latest.failing} failing</Pill>}
                   {latest.open > 0 && <Pill tone="open">{latest.open} open</Pill>}
                 </p>
-                <p className="mt-2 text-[15px] leading-snug text-ink [overflow-wrap:anywhere]">{latest.headline}</p>
+                {!withheld && (
+                  <p className="mt-2 text-[15px] leading-snug text-ink [overflow-wrap:anywhere]">{latest.headline}</p>
+                )}
+                {pickup && <p className="mt-1 font-mono text-[11px] text-ink-3">{pickup}</p>}
               </div>
             </div>
           </div>
         </div>
 
-        {latest.detail && (
+        {notice && (
+          <p
+            role="note"
+            className={clsx(
+              'mt-4 border border-l-[3px] px-3 py-2 text-sm leading-snug sm:px-4',
+              notice.tone === 'fail' ? 'border-fail/40 border-l-fail bg-fail-wash text-fail' : 'border-signal/40 border-l-signal bg-signal-wash text-signal-ink',
+            )}
+          >
+            {notice.text}
+          </p>
+        )}
+
+        {latest.detail && !withheld && (
           <div className="mt-4 border border-rule border-l-[3px] border-l-signal bg-paper px-3 py-3 sm:px-4">
             <HandoffSections detail={latest.detail} max={3} />
           </div>

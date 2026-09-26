@@ -191,7 +191,7 @@
         <h2>Solo for $9/mo, billed $108 yearly. Locked for life.</h2>
         <p>For the first 100 customers. Everything in Solo, including the yearly credit bank, and the price never goes up while you stay subscribed. Yearly billing only, one per account, and it can't be combined with other offers. <span class="seats" data-founding-seats hidden></span></p>
       </div>
-      <a class="btn" href="https://app.remembra.dev/signup">Claim a founding seat <span aria-hidden="true">&rarr;</span></a>
+      <a class="btn" href="https://app.remembra.dev/signup?plan=founding">Claim a founding seat <span aria-hidden="true">&rarr;</span></a>
     </div>
 
     <div class="plans">
@@ -226,7 +226,7 @@
           <li>Notes up to 50,000 characters</li>
           <li>Webhooks</li>
         </ul>
-        <div class="cta"><a class="btn signal" href="https://app.remembra.dev/signup">Start with Solo</a></div>
+        <div class="cta"><a class="btn signal" href="https://app.remembra.dev/signup?plan=solo">Start with Solo</a></div>
       </article>
 
       <article class="plan" aria-labelledby="p-pro">
@@ -243,7 +243,7 @@
           <li>Faster background enrichment</li>
           <li>Priority support</li>
         </ul>
-        <div class="cta"><a class="btn" href="https://app.remembra.dev/signup">Start with Pro</a></div>
+        <div class="cta"><a class="btn" href="https://app.remembra.dev/signup?plan=pro">Start with Pro</a></div>
       </article>
 
       <article class="plan" aria-labelledby="p-team">
@@ -259,7 +259,7 @@
           <li>Roles: owner, admin, member, viewer</li>
           <li>Share notes between teammates</li>
         </ul>
-        <div class="cta"><a class="btn" href="https://app.remembra.dev/signup">Start a team</a></div>
+        <div class="cta"><a class="btn" href="https://app.remembra.dev/signup?plan=team">Start a team</a></div>
       </article>
     </div>
 
@@ -391,11 +391,14 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (s) {
         if (!s || typeof s.remaining !== "number") return;
-        if (s.remaining > 0) {
+        var cta = box.querySelector(".btn");
+        if (s.remaining > 0 && s.available !== false) {
           slot.textContent = s.remaining + " of " + s.max_redemptions + " seats left.";
         } else {
-          slot.textContent = "All " + s.max_redemptions + " seats are taken. Solo is $12/mo or $120/yr.";
-          var cta = box.querySelector(".btn");
+          /* available is false when every seat is taken, and also when checkout for the offer is not set up. */
+          slot.textContent = s.remaining > 0
+            ? "The Founding offer is not open for checkout right now. Solo is $12/mo or $120/yr."
+            : "All " + s.max_redemptions + " seats are taken. Solo is $12/mo or $120/yr.";
           if (cta) cta.hidden = true;
         }
         slot.hidden = false;

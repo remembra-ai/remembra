@@ -402,8 +402,9 @@ def password_reset(*, dashboard: str | None, reset_url: str, expires_hours: int,
     if not email_verified:
         blocks.append(
             Small(
-                "This address was never verified, so a reset also treats you as the account's new owner: it removes "
-                "the API keys, two-factor setup, app connections, webhooks and sign-in links made before."
+                "This address was never verified, so a reset also treats you as the account's new owner: it revokes "
+                "the API keys, turns off two-factor sign-in and removes the app connections and sign-in links made "
+                "before, and pauses the webhooks until you turn them back on."
             )
         )
     blocks.append(Small("If you did not ask for this, ignore this email. Your password stays the same."))

@@ -20,11 +20,17 @@ export function getApiBaseUrl(): string {
  */
 export class ApiError extends Error {
   readonly status: number;
+  /** A machine-readable code when the server sent one (``detail.code``, e.g. TEAM_OWNER). */
+  readonly code?: string;
+  /** The structured ``detail`` object, when the server sent one. */
+  readonly data?: Record<string, unknown>;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, code?: string, data?: Record<string, unknown>) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
+    this.data = data;
   }
 }
 
@@ -356,15 +362,22 @@ class ApiClient {
       const error = await response.json().catch(() => ({}));
       // Handle both string errors and Pydantic validation arrays
       let message = `API error: ${response.status}`;
+      let code: string | undefined;
+      let data: Record<string, unknown> | undefined;
       if (typeof error.detail === 'string') {
         message = error.detail;
       } else if (Array.isArray(error.detail) && error.detail.length > 0) {
         // Pydantic validation errors are arrays of objects with 'msg' field
         message = error.detail.map((e: { msg?: string }) => e.msg || 'Validation error').join(', ');
+      } else if (error.detail && typeof error.detail === 'object' && typeof error.detail.message === 'string') {
+        // A structured refusal: {code, message, ...}.
+        message = error.detail.message;
+        code = typeof error.detail.code === 'string' ? error.detail.code : undefined;
+        data = error.detail as Record<string, unknown>;
       } else if (error.message) {
         message = error.message;
       }
-      throw new ApiError(message, response.status);
+      throw new ApiError(message, response.status, code, data);
     }
 
     const contentType = response.headers.get('content-type') || '';
@@ -714,7 +727,9 @@ class ApiClient {
   }
 
   /** Delete the account, confirmed by the password or by the emailed code (Google/GitHub sign-in). */
-  async deleteAccount(confirm: { password: string } | { code: string }): Promise<DeleteAccountResponse> {
+  async deleteAccount(
+    confirm: ({ password: string } | { code: string }) & { end_teams?: boolean },
+  ): Promise<DeleteAccountResponse> {
     return this.fetchApi<DeleteAccountResponse>('/auth/me', {
       method: 'DELETE',
       body: JSON.stringify(confirm),
@@ -1014,9 +1029,22 @@ export interface PlanCatalogEntry {
   limits: Record<string, number>;
 }
 
+export interface FoundingOffer {
+  plan: string;
+  price_yearly: number;
+  max_redemptions: number;
+  remaining: number | null;
+  /** Checkout can open; true for a signed-in account that still holds its seat even when the rest are taken. */
+  available: boolean;
+  /** Signed-in account only: when the seat (and price) it still holds is released. */
+  held_until?: string | null;
+  /** 'lapsed' (a founder inside the 14-day grace) or 'pending' (an open checkout). */
+  held_kind?: string | null;
+}
+
 export interface PlansResponse {
   plans: PlanCatalogEntry[];
-  founding: { plan: string; price_yearly: number; max_redemptions: number; remaining: number | null; available: boolean };
+  founding: FoundingOffer;
   provider: string;
 }
 

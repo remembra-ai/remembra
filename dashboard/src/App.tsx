@@ -13,6 +13,7 @@ import { useRelayData } from './hooks/relayData';
 import { inboxCounts } from './lib/relay';
 import { useShortcuts } from './hooks/useShortcuts';
 import { navigate, useRoute, type TabType } from './lib/nav';
+import { parsePlanIntent, rememberPlanIntent, takePlanIntent } from './lib/planIntent';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { ForgotPassword } from './pages/ForgotPassword';
@@ -97,6 +98,15 @@ function App() {
       // Storage unavailable: the choice lasts for this visit.
     }
   }, [darkMode, themeChosen]);
+
+  // A plan picked on the pricing page arrives as ?plan= on /signup (or any page): keep it for
+  // after sign-in; an account already signed in goes straight to Billing on it.
+  useEffect(() => {
+    const intent = parsePlanIntent(window.location.search);
+    if (!intent) return;
+    if (localStorage.getItem('remembra_jwt_token')) navigate('billing', { plan: intent }, true);
+    else rememberPlanIntent(intent);
+  }, []);
 
   // Verify JWT token on mount
   useEffect(() => {
@@ -186,24 +196,15 @@ function App() {
       localStorage.removeItem('pending_invite_token');
     }
     
-    // Check if user had a plan intent (signed up via pricing page with plan=pro/team)
-    const planIntent = localStorage.getItem('remembra_plan_intent');
-    if (planIntent && (planIntent === 'pro' || planIntent === 'team')) {
-      localStorage.removeItem('remembra_plan_intent');
-      // Redirect to billing tab after login
-      setActiveTab('billing');
-    }
+    // A plan picked on the pricing page (?plan=founding|solo|pro|team): open Billing on it.
+    const planIntent = takePlanIntent();
+    if (planIntent) navigate('billing', { plan: planIntent });
   };
 
   const handleSignup = (user: { id: string; email: string; name?: string }) => {
     // After signup, switch to login
     // Check if user signed up with a paid plan intent (plan param in URL)
-    const urlParams = new URLSearchParams(window.location.search);
-    const planIntent = urlParams.get('plan');
-    if (planIntent && (planIntent === 'pro' || planIntent === 'team')) {
-      // Store plan intent for after login - user will be prompted to upgrade
-      localStorage.setItem('remembra_plan_intent', planIntent);
-    }
+    rememberPlanIntent(parsePlanIntent(window.location.search));
     setCurrentUser(user);
     setAuthMode('login');
     toast.success('Account created. Sign in to continue.');

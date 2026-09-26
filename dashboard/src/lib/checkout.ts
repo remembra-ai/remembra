@@ -7,7 +7,7 @@
 // used. An account that already holds a subscription changes plans in the
 // Paddle portal: a second subscription would bill twice.
 
-import type { BillingClientConfigResponse, BillingCycle } from './api';
+import type { BillingClientConfigResponse, BillingCycle, FoundingOffer } from './api';
 
 export type CheckoutRoute =
   | { kind: 'portal' }
@@ -35,4 +35,19 @@ export function checkoutRoute(
 export function planRowAction(planId: string, currentPlan: string, subscribed: boolean): 'current' | 'manage' | 'buy' {
   if (planId === currentPlan) return 'current';
   return subscribed ? 'manage' : 'buy';
+}
+
+/**
+ * The Founding 100 line in Billing: the seats left, or, for a founder whose
+ * subscription ended, that their price and seat are still theirs until a date
+ * (the 14-day promise, which holds even when the other seats are all taken).
+ */
+export function foundingSeatNote(founding: FoundingOffer, formatDate: (iso: string) => string): string | null {
+  if (founding.held_kind === 'lapsed' && founding.held_until) {
+    return `Your Founding price and seat are kept until ${formatDate(founding.held_until)}.`;
+  }
+  if (founding.held_kind === 'pending' && founding.held_until) {
+    return `A seat is held for your open checkout until ${formatDate(founding.held_until)}.`;
+  }
+  return founding.remaining !== null ? `${founding.remaining} left` : null;
 }
