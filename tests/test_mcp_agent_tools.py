@@ -22,7 +22,7 @@ from remembra import __version__
 from remembra.client.memory import Memory
 from remembra.client.types import EntityItem, MemoryItem, RecallResult
 from remembra.models.memory import EntityRef, UpdateResponse
-from remembra.security.untrusted import unwrap_untrusted
+from remembra.security.untrusted import DATA_OPEN, TOOL_PREAMBLE, unwrap_untrusted
 from tests.agent_api_harness import build_api, row, seed
 
 
@@ -231,7 +231,10 @@ def test_forget_all_is_project_scoped_dry_run_then_confirmed(mcp_env):
     no_project = _j(server.forget_memories(all_memories=True))
     assert no_project["status"] == "error" and "project_id" in no_project["error"]
 
-    preview = _j(server.forget_memories(all_memories=True, project_id="alpha"))
+    raw_preview = server.forget_memories(all_memories=True, project_id="alpha")
+    # The preview's sample quotes stored memories, so it is framed as untrusted data.
+    assert raw_preview.startswith(TOOL_PREAMBLE + "\n" + DATA_OPEN)
+    preview = _j(raw_preview)
     assert preview["status"] == "dry_run"
     assert preview["would_delete"] == 2
     assert preview["confirm_phrase"] == "DELETE ALL MEMORIES IN alpha"
@@ -297,7 +300,10 @@ def test_get_inbox_summary_mode(mcp_env):
 def test_spaces_list_create_and_share(mcp_env):
     created = _j(server.create_space("fleet", description="all agents"))
     assert created["status"] == "created"
-    listed = _j(server.list_spaces())
+    raw_listed = server.list_spaces()
+    # Space names and descriptions can come from other accounts: untrusted data.
+    assert raw_listed.startswith(TOOL_PREAMBLE + "\n" + DATA_OPEN)
+    listed = _j(raw_listed)
     assert [s["id"] for s in listed["spaces"]] == [created["id"]]
     stored = _j(server.store_memory("shared decision"))
     shared = _j(server.share_memory(memory_id=stored["id"], space_id=created["id"]))

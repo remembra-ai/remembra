@@ -297,11 +297,15 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
   for low trust), followed by what is missing. Git probes that did not finish are named only when
   they are the collector's own (`log`, `status`, `diff`, `upstream`); any other name is shown as
   *other*. `POST /session/close` returns the same `health`, the trail shows it as a badge, and
-  `remembra-relay close` prints it when run by hand.
+  `remembra-relay close` prints it when run by hand. The server never runs git itself: the line ends
+  *Graded by the server from the recorded facts* only when remembra-relay collected the facts under a
+  key scoped to that agent (*key-verified*); otherwise it ends *Graded by the server from facts the
+  agent reported, not verified*.
 - **Low trust.** One policy covers every recorded line: the handoff, inbox messages, status values,
   linked headlines and recent memories. When the text matches prompt-injection patterns (the
   sanitizer of `POST /memories`, plus requests to keep something from the user and hidden Unicode
-  tag or bidirectional characters), it is withheld: the brief shows `withheld (LOW TRUST <score>, id
+  tag or bidirectional characters; text is also matched with fullwidth forms and Cyrillic or Greek
+  look-alike letters folded to Latin), it is withheld: the brief shows `withheld (LOW TRUST <score>, id
   <id>)` to review with the user. Rows stored before a pattern existed are scored again when shown.
   The brief's JSON fields carry the same verdicts (`trust_score`, `withheld`, `flags`); a withheld
   status value loses its key too, and `handoff_health` of a withheld handoff reads *Blocked* with its
@@ -312,10 +316,14 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
   recorded text as stored, so you can review a withheld handoff (MCP tools return it inside the
   untrusted block).
 - **Commands.** Command-shaped text keeps its content and gets *[contains a command or URL: confirm
-  with the user before running]*: pipe-to-shell, `base64 -d | sh`, `rm -rf`, `git push --force`,
+  with the user before running]*: pipe-to-shell (also `| sudo -E bash`, `| env bash`, `| /bin/sh`),
+  download-then-run (`curl -o x … && bash x`), `base64 -d | sh`, `rm -rf`, `git push --force`,
   `--no-verify`, `core.hooksPath`, `--dangerously-skip-permissions`, `--yolo`, reads of `~/.ssh`,
-  `.env` or `~/.claude.json`, and URLs outside the project's own repository. Markdown images are
-  replaced by `[image removed: <host>]`.
+  `.env` or `~/.claude.json`, and URLs outside the project's own repository (a host a download
+  command names without a scheme counts; a URL with `..` segments, encoded or not, a backslash or
+  user info never counts as inside the repository). Images (inline or reference-style markdown, HTML
+  `<img>` and similar tags) are replaced by `[image removed: <host>]`, in the rendered brief and in
+  every string of its JSON.
 - **Pickups.** A brief that serves a handoff written by a different agent records one pickup (ids and
   times, never content), per reader session. The trail shows *picked up by …* on that handoff.
 - **Stale.** `brief` sends your current branch and HEAD. When the handoff was recorded on another

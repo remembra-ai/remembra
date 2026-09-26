@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 import structlog
 
+from remembra.security.untrusted import fold_confusables
+
 log = structlog.get_logger(__name__)
 
 # ============================================================================
@@ -310,9 +312,13 @@ class ContentSanitizer:
         trust_score = 1.0
         flagged_patterns: list[str] = []
 
-        # Check each suspicious pattern
+        # Check each suspicious pattern, on the text as written and with
+        # fullwidth forms and Cyrillic/Greek look-alike letters folded to Latin
+        # ("Ignоre all previous instructions" with a Cyrillic "о").
+        folded = fold_confusables(content)
+        variants = (content,) if folded == content else (content, folded)
         for pattern, weight, pattern_name in self._compiled_patterns:
-            if pattern.search(content):
+            if any(pattern.search(variant) for variant in variants):
                 trust_score -= weight
                 if pattern_name not in flagged_patterns:
                     flagged_patterns.append(pattern_name)

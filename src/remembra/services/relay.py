@@ -28,6 +28,7 @@ from remembra.models.memory import StoreRequest
 from remembra.relay.handoff import (
     HANDOFF_FORMAT_VERSION,
     assess_handoff,
+    assess_text,
     build_sections,
     check_summary_grounding,
     handoff_ended_at,
@@ -489,8 +490,15 @@ class RelayService:
         trust_score, checksum = 1.0, None
         if screen is not None:
             text, trust_score, checksum = screen(text)
+        # The grade uses the same trust the brief will apply to this handoff
+        # (handoff_verdict): the sanitizer's score of the stored text, lowered by
+        # hidden tag/bidi characters, and the upstream name, which the text only
+        # carries when commits are unpushed but the relay block always keeps.
+        # Otherwise the close response and the trail could say Ready while the
+        # brief withholds the same handoff as Blocked.
+        policy_trust = assess_text(text, facts.get("upstream"), stored_trust=trust_score).trust
 
-        health = assess_handoff(facts, grounding, trust=float(trust_score))
+        health = assess_handoff(facts, grounding, trust=policy_trust)
         key = relay_key(agent_id, session_id)
         facts_source = facts.get("facts_source")
         relay_meta: dict[str, Any] = {
@@ -505,7 +513,7 @@ class RelayService:
             "incomplete": list(facts.get("incomplete") or []),
             # Sanitizer verdict on the rendered text, which carries every free-text
             # field shown in the brief (commit subjects, todos, errors, next, notes).
-            "trust_score": round(float(trust_score), 2),
+            "trust_score": round(float(policy_trust), 2),
             "branch": facts.get("branch"),
             "head_commit": facts.get("head_commit"),
             "upstream": facts.get("upstream"),

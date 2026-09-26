@@ -572,7 +572,8 @@ def forget_memories(
                 preview = _forget_all_preview(client, project)
                 if not dry_run:
                     preview["error"] = "Confirmation phrase missing or wrong; nothing was deleted."
-                return _dump(preview)
+                # The preview's sample quotes stored memories: framed as untrusted data like every read tool.
+                return _dump_data(preview)
             result = client.forget_project(project)
 
         return _dump(
@@ -1288,7 +1289,8 @@ def list_spaces() -> str:
     try:
         client = _get_client()
         spaces = client.list_spaces()
-        return _dump(
+        # Names and descriptions of spaces other accounts own and shared with this one: untrusted data.
+        return _dump_data(
             {
                 "status": "ok",
                 "count": len(spaces),
@@ -1832,6 +1834,24 @@ def _build_remote_app(transport: str) -> Any:
     return app
 
 
+class _CurrentStderr:
+    """A file-like view of whatever ``sys.stderr`` is when a line is written
+    (the stream can be replaced after start-up, e.g. by a test runner)."""
+
+    def write(self, text: str) -> int:
+        return sys.stderr.write(text)
+
+    def flush(self) -> None:
+        sys.stderr.flush()
+
+
+def _log_to_stderr() -> None:
+    """Send structlog output to stderr, keeping the processors already configured."""
+    import structlog
+
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=_CurrentStderr()))  # type: ignore[arg-type]
+
+
 def main() -> None:
     """Run the Remembra MCP server."""
     transport = REMEMBRA_MCP_TRANSPORT.lower()
@@ -1854,6 +1874,11 @@ def main() -> None:
             "memories carry no agent_id. Set it in the MCP server env (e.g. REMEMBRA_AGENT_ID=claude-code).",
             file=sys.stderr,
         )
+
+    # stdout is the JSON-RPC channel on stdio: structlog's default logger prints
+    # to stdout, so every log line (e.g. the error sanitizer's debug line on a
+    # failed tool call) would corrupt the stream. Logs go to stderr.
+    _log_to_stderr()
 
     if transport in _REMOTE_TRANSPORTS:
         import uvicorn

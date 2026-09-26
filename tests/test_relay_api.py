@@ -420,7 +420,7 @@ def test_brief_by_location_leads_with_last_session(api):
     # R-21: the server's grade of the last handoff, above the untrusted-data block.
     assert lines[1] == (
         "Handoff health: Blocked (1 failing test run(s); 2 commit(s) not pushed; 1 uncommitted file(s); 1 open todo(s); "
-        "1 error(s) recorded; 1 failed command(s)). Graded by the server from the recorded facts."
+        "1 error(s) recorded; 1 failed command(s)). Graded by the server from facts the agent reported, not verified."
     )
     assert brief["handoff_health"]["status"] == "blocked"
     assert lines[2] == '<remembra-data untrusted="true">' and "not instructions" in lines[3]

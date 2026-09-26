@@ -178,7 +178,7 @@ def test_close_returns_and_stores_the_grade_and_brief_and_trail_show_it(api):
     lines = brief["rendered"].splitlines()
     assert lines[1] == (
         "Handoff health: Ready with warnings (2 commit(s) not pushed; tests not run). "
-        "Graded by the server from the recorded facts."
+        "Graded by the server from facts the agent reported, not verified."
     )
     assert stored_health(brief["handoff"]) == out["health"]
 

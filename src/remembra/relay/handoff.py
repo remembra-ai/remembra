@@ -677,6 +677,8 @@ def handoff_verdict(handoff: dict[str, Any], allowed: tuple[str, ...] = ()) -> L
     relay = _relay_meta(handoff)
     return assess_text(
         handoff.get("content"),
+        # The upstream name is in the relay block (and the brief JSON) even when the text does not quote it.
+        (relay or {}).get("upstream"),
         stored_trust=_stored_trust(handoff.get("trust_score"), (relay or {}).get("trust_score")),
         allowed_urls=allowed,
     )
@@ -873,7 +875,27 @@ def health_line(handoff: dict[str, Any] | None, verdict: LineVerdict | None) -> 
     if health is None:
         return "Handoff health: not graded (this handoff was not recorded by the relay's close-out)."
     detail = f" ({'; '.join(health['missing'][:6])})" if health["missing"] else ""
-    return f"Handoff health: {health['label']}{detail}. Graded by the server from the recorded facts."
+    return f"Handoff health: {health['label']}{detail}. {grade_basis(_relay_meta(handoff))}"
+
+
+GRADE_BASIS_VERIFIED = "Graded by the server from the recorded facts."
+GRADE_BASIS_REPORTED = "Graded by the server from facts the agent reported, not verified."
+
+
+def grade_basis(relay: dict[str, Any] | None) -> str:
+    """How far the grade's facts can be trusted (server text for the trusted health line).
+
+    The server never runs git itself: every fact comes from the closing client.
+    Only a close sent with an agent-scoped key (``agent_verified``) whose facts
+    remembra-relay collected from git counts as recorded; a self-declared agent
+    or facts it typed itself (``agent-declared``) could claim passing tests and
+    a pushed branch, and the line says so.
+    """
+    relay = relay or {}
+    source = str(relay.get("facts_source") or "")
+    if relay.get("agent_verified") is True and source.startswith("relay-cli:"):
+        return GRADE_BASIS_VERIFIED
+    return GRADE_BASIS_REPORTED
 
 
 # ---------------------------------------------------------------------------
@@ -1063,8 +1085,10 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
 
 
 def _strip_hidden_deep(value: Any) -> Any:
+    """Every string with hidden characters removed and images replaced (:func:`defang_markdown_images`):
+    an agent that echoes a JSON field into rendered chat must not fetch an image URL either."""
     if isinstance(value, str):
-        return strip_hidden(value)[0]
+        return defang_markdown_images(strip_hidden(value)[0])
     if isinstance(value, dict):
         return {k: _strip_hidden_deep(v) for k, v in value.items()}
     if isinstance(value, list):
@@ -1077,8 +1101,8 @@ def police_brief(brief: dict[str, Any]) -> None:
 
     The same verdicts as :func:`render_brief`: a withheld item keeps its ids and
     times but loses its text (replaced by the withheld note), every item gains
-    ``trust_score`` / ``withheld`` / ``flags``, hidden characters are removed
-    everywhere, and ``handoff_health`` follows the handoff's verdict
+    ``trust_score`` / ``withheld`` / ``flags``, hidden characters and images
+    are removed from every string, and ``handoff_health`` follows the handoff's verdict
     (:func:`police_health`). Call it after rendering.
     """
     allowed = tuple(brief.get("repo_url_prefixes") or ())

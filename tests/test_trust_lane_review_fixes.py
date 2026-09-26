@@ -112,7 +112,7 @@ def test_honest_commit_subjects_and_todos_close_ready_and_render_in_the_brief(ap
     assert brief["handoff_health"]["status"] == "ready_with_warnings"
     rendered = brief["rendered"]
     assert rendered.splitlines()[1] == f"Handoff health: Ready with warnings ({len(HONEST) - 10} open todo(s)). " + (
-        "Graded by the server from the recorded facts."
+        "Graded by the server from facts the agent reported, not verified."
     )
     assert "LOW TRUST" not in rendered and "Blocked" not in rendered
     # The first commit subjects (done) and open todos (NOT done) are listed, verbatim.
@@ -132,7 +132,10 @@ def test_each_honest_commit_subject_alone_is_not_blocked(api, subject):
     assert close["health"]["status"] == "ready", (subject, close["health"])
     brief = _ok(http.get("/api/v1/session/brief", params={"project_id": "hon", "agent_id": "codex"}))
     assert brief["handoff"]["withheld"] is False, subject
-    assert brief["rendered"].splitlines()[1] == "Handoff health: Ready. Graded by the server from the recorded facts."
+    assert (
+        brief["rendered"].splitlines()[1]
+        == "Handoff health: Ready. Graded by the server from facts the agent reported, not verified."
+    )
     assert subject in brief["rendered"]
 
 
@@ -215,7 +218,8 @@ def test_non_probe_incomplete_names_show_only_as_other(api):
     lines = brief["rendered"].splitlines()
     top = lines[: lines.index(DATA_OPEN)]
     assert top[1] == (
-        "Handoff health: Incomplete (git facts incomplete (other did not finish)). Graded by the server from the recorded facts."
+        "Handoff health: Incomplete (git facts incomplete (other did not finish)). "
+        "Graded by the server from facts the agent reported, not verified."
     )
     payload = json.dumps({"health": brief["handoff_health"], "top": top})
     for name in FORGED_PROBES:
