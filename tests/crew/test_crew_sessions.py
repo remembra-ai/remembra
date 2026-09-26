@@ -784,7 +784,8 @@ async def test_stall_supersedes_an_earlier_current_report(mk):
     env = await mk()
     a, _, task, _ = await _holder_with_task(env)
     await env.conn.execute(
-        """INSERT INTO crew_reports (id, crew_id, task_id, session_id, kind, verdict, facts_source, facts_hash, is_current, created_at)
+        """INSERT INTO crew_reports (id, crew_id, task_id, session_id, kind, verdict, facts_source, facts_hash,
+               is_current, created_at)
            VALUES ('rpt_earlier', ?, ?, ?, 'partial', 'partial', 'agent-declared', 'h0', 1, '2026-09-25T19:00:00.000Z')""",
         (CREW, task, a.session["id"]),
     )
