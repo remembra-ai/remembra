@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -317,12 +318,17 @@ class AgentSessionService:
         source: str = "user_input",
         trust_score: float = 1.0,
         checksum: str | None = None,
+        before_write: Callable[[], Awaitable[Any]] | None = None,
     ) -> dict[str, Any]:
         """Set the current value for ``key``; supersede any previous value.
 
         The prior memory is kept (marked superseded, excluded from recall) so
         the history of the status stays queryable. Writing the value that is
         already current is a no-op (``changed: False``) — no new memory.
+
+        ``before_write`` runs only when a new value will be stored, after the
+        unchanged check and under the same lock (the plan gate: an unchanged
+        re-send is never charged). If it raises, nothing is written.
         """
         if self.memory_service is None:
             raise RuntimeError("upsert_status requires a memory service")
@@ -343,6 +349,9 @@ class AgentSessionService:
                         "changed": False,
                         "superseded": [],
                     }
+
+            if before_write is not None:
+                await before_write()
 
             store_metadata = dict(metadata or {})
             store_metadata[STATUS_KEY_FIELD] = key
