@@ -8,14 +8,21 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from remembra.cloud.plans import PlanTier
+from types import SimpleNamespace
+
+from remembra.cloud.plans import PlanTier, get_plan
 from remembra.crew import retention
 from remembra.crew.events import Actor, CrewEventLog, crew_head, fetch_events, format_ts, verify_crew_chain
+from remembra.crew.limits import crew_limits_for_tier
 from remembra.crew.retention import (
     ENTERPRISE_POLICY,
     FREE_POLICY,
     PRO_POLICY,
+    SELF_HOSTED_POLICY,
+    TEAM_POLICY,
+    RetentionPolicy,
     policy_for_tier,
+    policy_from_retention,
     prune_crew_events,
     run_retention,
     seconds_until_next_run,
@@ -195,16 +202,28 @@ async def test_pro_plan_keeps_longer_and_broken_chain_is_reported(crewdb):
 
 
 async def test_policy_resolution():
-    assert policy_for_tier("free") == FREE_POLICY and policy_for_tier("solo") == PRO_POLICY
+    # §4.5 windows (raw events, bursts, checkpoint facts, ended sessions, baton brief text).
+    assert RetentionPolicy(14, 7, 14, 90, 30) == FREE_POLICY
+    assert RetentionPolicy(180, 30, 90, 365, 180) == PRO_POLICY
+    assert RetentionPolicy(365, 60, 180, 365, 365) == TEAM_POLICY
+    # One source of truth: every tier's windows are WP-14's crew limits for that plan.
+    for tier in PlanTier:
+        assert policy_for_tier(tier.value) == policy_from_retention(crew_limits_for_tier(tier).retention)
+    solo = policy_for_tier("solo")
+    assert FREE_POLICY.raw_event_days < solo.raw_event_days < PRO_POLICY.raw_event_days
     assert policy_for_tier("legacy_team_199").raw_event_days == 365 and policy_for_tier("bogus") == FREE_POLICY
+    assert policy_for_tier(None) == FREE_POLICY
 
     class Meter:
-        async def get_tenant_plan(self, user_id):
-            return PlanTier.PRO if user_id == "payer" else PlanTier.FREE
+        async def get_account(self, user_id):
+            # get_account returns seat-scaled limits; crew windows never scale with seats.
+            tier = PlanTier.PRO if user_id == "payer" else PlanTier.FREE
+            return SimpleNamespace(limits=get_plan(tier).scaled(5))
 
     resolve = usage_meter_resolver(Meter())
     assert await resolve("payer") == PRO_POLICY and await resolve("freeloader") == FREE_POLICY
-    assert await usage_meter_resolver(None)("anyone") == ENTERPRISE_POLICY
+    # Self-hosted (no meter) gets the same defaults WP-14 gives its limits: Enterprise's.
+    assert await usage_meter_resolver(None)("anyone") == SELF_HOSTED_POLICY == ENTERPRISE_POLICY
 
 
 async def test_nightly_schedule_runs_and_survives_failures(crewdb):

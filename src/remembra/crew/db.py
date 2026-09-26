@@ -234,11 +234,16 @@ _V1_INBOX_BYPASS = [
 ]
 
 _V1_EVENTS = [
+    # actor / refs (JSON) are beyond the §3.2 DDL: the hash chain covers the full
+    # envelope (callsign, agent_id, verified flag, every ref), which the scalar
+    # columns cannot rebuild for replay or chain verification. remembra.crew.events
+    # stores both and check_schema() refuses to start without them.
     """CREATE TABLE crew_events (crew_id TEXT NOT NULL, seq INTEGER NOT NULL, id TEXT NOT NULL, owner_user_id TEXT NOT NULL,
       project_id TEXT NOT NULL, ts TEXT NOT NULL, type TEXT NOT NULL, v INTEGER NOT NULL DEFAULT 1,
       actor_kind TEXT, actor_id TEXT, session_id TEXT, task_id TEXT, zone_id TEXT, ref_id TEXT,
       severity TEXT NOT NULL DEFAULT 'info', moment INTEGER NOT NULL DEFAULT 0, summary TEXT NOT NULL,
       payload TEXT NOT NULL, idem_key TEXT, origin TEXT NOT NULL DEFAULT 'server', prev_hash TEXT, hash TEXT,
+      actor TEXT NOT NULL DEFAULT '{}', refs TEXT NOT NULL DEFAULT '{}',
       UNIQUE(crew_id, seq))""",
     "CREATE UNIQUE INDEX uq_events_idem ON crew_events(crew_id, idem_key) WHERE idem_key IS NOT NULL",
     "CREATE INDEX idx_events_moment ON crew_events(crew_id, moment, seq)",

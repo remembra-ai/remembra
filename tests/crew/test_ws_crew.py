@@ -12,7 +12,6 @@ from starlette.websockets import WebSocketDisconnect
 
 from remembra.api.v1 import keys as keys_api
 from remembra.api.v1 import websocket
-from remembra.auth import middleware
 from remembra.crew import schemas
 from remembra.crew.bus import CrewBus, db_loader
 from remembra.crew.events import Actor, CrewEventLog, crew_head
@@ -228,7 +227,6 @@ async def test_query_string_credentials_are_refused_for_crew_but_work_for_memory
 
 
 async def test_jwt_dashboard_login_can_subscribe(tmp_path, monkeypatch):
-    monkeypatch.setitem(middleware.ROLE_PERMISSIONS, "editor", middleware.ROLE_PERMISSIONS["editor"] | {"crew:read"})
     async with crew_app(tmp_path, monkeypatch) as (h, crewdb, log):
         user_id = await h.create_user("mani@example.com")
         async with crewdb.transaction():

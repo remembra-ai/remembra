@@ -43,7 +43,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from remembra.auth.middleware import (
@@ -56,7 +56,8 @@ from remembra.auth.middleware import (
 from remembra.config import get_settings
 from remembra.core.time import utcnow
 from remembra.crew import schemas as crew_schemas
-from remembra.crew.bus import CrewBus, CrewRef, crew_for_reader, presence_sessions, readable_crews, summary_items
+from remembra.crew.access import key_permissions, load_crew
+from remembra.crew.bus import CrewBus, CrewRef, presence_sessions, readable_crews, summary_items
 from remembra.crew.events import CrewDatabase, crew_head, fetch_events
 
 log = structlog.get_logger(__name__)
@@ -70,6 +71,21 @@ CLOSE_FORBIDDEN = 4003
 
 CREW_READ = "crew:read"
 CREW_WRITE = "crew:write"
+
+
+def _has_crew_permission(user: AuthenticatedUser, perm: str) -> bool:
+    """Crew permissions come from the RBAC roles (WP-14, ``crew.access.key_permissions``), not the legacy middleware table."""
+    return perm in key_permissions(user)
+
+
+async def _load_crew_ref(conn: Any, crew_id: str, user: AuthenticatedUser, perm: str) -> CrewRef | None:
+    """WP-14's ``load_crew`` (the same ACL as the REST routes); any refusal reads as None (``not_found``)."""
+    try:
+        access = await load_crew(conn, crew_id, user, perm)
+    except HTTPException:
+        return None
+    return CrewRef(access.crew.id, access.crew.project_id, access.crew.owner_user_id)
+
 
 REVALIDATE_INTERVAL_S = 60.0
 CREW_QUEUE_MAX = 1000
@@ -587,7 +603,7 @@ async def _handle_crew_subscribe(conn: _Connection, msg: dict[str, Any]) -> None
     if conn.credential.source == "query":
         await conn.crew_error(crew_id, "query_credentials", "crew subscriptions require header or first-message credentials")
         return
-    if not has_permission(conn.user, CREW_READ):
+    if not _has_crew_permission(conn.user, CREW_READ):
         await conn.crew_error(crew_id, "forbidden", "crew:read permission required")
         return
     db = _crew_db(conn.websocket)
@@ -624,7 +640,7 @@ async def _subscribe_summary(conn: _Connection, db: CrewDatabase) -> None:
 
 async def _subscribe_crew(conn: _Connection, db: CrewDatabase, crew_id: str, since_seq: int | None) -> None:
     user = conn.user
-    crew = await crew_for_reader(db.conn, crew_id, user.user_id, user.project_ids or None)
+    crew = await _load_crew_ref(db.conn, crew_id, user, CREW_READ)
     if crew is None:
         await conn.crew_error(crew_id, "not_found", "crew not found")
         return
@@ -676,7 +692,7 @@ async def _handle_presence(conn: _Connection, msg: dict[str, Any]) -> None:
     if conn.credential.source == "query":
         await conn.crew_error(crew_id, "query_credentials", "presence requires header or first-message credentials")
         return
-    if not has_permission(conn.user, CREW_WRITE):
+    if not _has_crew_permission(conn.user, CREW_WRITE):
         await conn.crew_error(crew_id, "forbidden", "crew:write permission required")
         return
     db = _crew_db(conn.websocket)
@@ -684,7 +700,7 @@ async def _handle_presence(conn: _Connection, msg: dict[str, Any]) -> None:
         await conn.crew_error(crew_id, "unavailable", "crew mode is not enabled")
         return
     user = conn.user
-    crew = await crew_for_reader(db.conn, str(crew_id), user.user_id, user.project_ids or None)
+    crew = await _load_crew_ref(db.conn, str(crew_id), user, CREW_WRITE)
     if crew is None:
         await conn.crew_error(crew_id, "not_found", "crew not found")
         return
@@ -721,13 +737,13 @@ async def _revalidate(conn: _Connection) -> str | None:
             return "memory access revoked"
         sub.allowed_projects = tuple(user.project_ids) if user.project_ids else None
     if conn.subs or conn.summary is not None:
-        if not has_permission(user, CREW_READ):
+        if not _has_crew_permission(user, CREW_READ):
             return "crew access revoked"
         db = _crew_db(conn.websocket)
         if db is None:
             return "crew mode disabled"
         for crew_id in list(conn.subs):
-            if await crew_for_reader(db.conn, crew_id, user.user_id, user.project_ids or None) is None:
+            if await _load_crew_ref(db.conn, crew_id, user, CREW_READ) is None:
                 return "crew access revoked"
         if conn.summary is not None:
             await conn.summary.refresh()
@@ -798,7 +814,7 @@ async def websocket_endpoint(
         await websocket.close(code=CLOSE_UNAUTHORIZED, reason="Authentication required")
         return
     can_memory = has_permission(user, "memory:recall")
-    if not can_memory and not has_permission(user, CREW_READ):
+    if not can_memory and not _has_crew_permission(user, CREW_READ):
         await websocket.close(code=CLOSE_FORBIDDEN, reason="memory:recall permission required")
         return
     if not _project_allowed(user, project_id):

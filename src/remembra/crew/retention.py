@@ -32,7 +32,9 @@ from typing import Any, Final
 import aiosqlite
 import structlog
 
+from remembra.cloud.plans import PlanTier
 from remembra.crew.events import CrewDatabase, format_ts, utc_now, verify_crew_chain
+from remembra.crew.limits import SELF_HOSTED_CREW_LIMITS, CrewRetention, crew_limits_for_owner, crew_limits_for_tier
 
 log = structlog.get_logger(__name__)
 
@@ -51,21 +53,28 @@ class RetentionPolicy:
     footprint_days_after_end: int = 7
 
 
-FREE_POLICY: Final = RetentionPolicy(14, 7, 14, 90, 30)
-PRO_POLICY: Final = RetentionPolicy(180, 30, 90, 365, 180)
-TEAM_POLICY: Final = RetentionPolicy(365, 60, 180, 365, 365)
-# "custom" in §4.5: Enterprise and self-hosted default to the Team windows until configured.
-ENTERPRISE_POLICY: Final = TEAM_POLICY
+def policy_from_retention(retention: CrewRetention) -> RetentionPolicy:
+    """The job's view of a plan's §4.5 windows (the numbers live in ``crew.limits`` / ``cloud.plans``, WP-14)."""
+    return RetentionPolicy(
+        raw_event_days=retention.events_days,
+        burst_days=retention.activity_burst_days,
+        checkpoint_facts_days=retention.checkpoint_facts_days,
+        ended_session_days=retention.ended_sessions_days,
+        baton_brief_days=retention.brief_text_days,
+        footprint_days_after_end=retention.footprints_after_end_days,
+    )
 
-POLICY_BY_TIER: Final[dict[str, RetentionPolicy]] = {
-    "free": FREE_POLICY,
-    "solo": PRO_POLICY,
-    "pro": PRO_POLICY,
-    "legacy_pro_49": PRO_POLICY,
-    "team": TEAM_POLICY,
-    "legacy_team_199": TEAM_POLICY,
-    "enterprise": ENTERPRISE_POLICY,
-}
+
+def _tier_policy(tier: PlanTier) -> RetentionPolicy:
+    return policy_from_retention(crew_limits_for_tier(tier).retention)
+
+
+FREE_POLICY: Final = _tier_policy(PlanTier.FREE)
+PRO_POLICY: Final = _tier_policy(PlanTier.PRO)
+TEAM_POLICY: Final = _tier_policy(PlanTier.TEAM)
+ENTERPRISE_POLICY: Final = _tier_policy(PlanTier.ENTERPRISE)
+# Self-hosted servers (no metering) use the same defaults WP-14 applies to their limits.
+SELF_HOSTED_POLICY: Final = policy_from_retention(SELF_HOSTED_CREW_LIMITS.retention)
 
 IDEMPOTENCY_RETENTION: Final = timedelta(hours=72)
 
@@ -88,21 +97,26 @@ PolicyResolver = Callable[[str], Awaitable[RetentionPolicy]]
 
 
 def policy_for_tier(tier: str | None) -> RetentionPolicy:
-    return POLICY_BY_TIER.get(str(tier or "free").lower(), FREE_POLICY)
+    """Windows for a plan tier; an unknown tier gets the Free windows."""
+    try:
+        return policy_from_retention(crew_limits_for_tier(str(tier or "free").lower()).retention)
+    except (KeyError, ValueError):
+        return FREE_POLICY
 
 
 def usage_meter_resolver(usage_meter: Any | None) -> PolicyResolver:
-    """Resolve a crew owner's plan through ``UsageMeter.get_tenant_plan`` (cloud).
+    """Resolve a crew owner's windows from their plan, exactly as ``crew.limits`` does for caps.
 
-    Without a usage meter (self-hosted, cloud disabled) every crew gets the
-    Enterprise/"custom" default.
+    Uses :func:`remembra.crew.limits.crew_limits_for_owner` (``UsageMeter.get_account``,
+    so a team member's pooled plan counts). Without a usage meter (self-hosted, cloud
+    disabled) every crew gets :data:`SELF_HOSTED_POLICY`.
     """
 
     async def resolve(owner_user_id: str) -> RetentionPolicy:
         if usage_meter is None:
-            return ENTERPRISE_POLICY
-        tier = await usage_meter.get_tenant_plan(owner_user_id)
-        return policy_for_tier(getattr(tier, "value", tier))
+            return SELF_HOSTED_POLICY
+        limits = await crew_limits_for_owner(usage_meter, owner_user_id)
+        return policy_from_retention(limits.retention)
 
     return resolve
 

@@ -176,32 +176,6 @@ def _project_allowed(project_ids: Sequence[str] | None, project_id: str) -> bool
     return not project_ids or project_id in project_ids
 
 
-async def crew_for_reader(
-    conn: aiosqlite.Connection,
-    crew_id: str,
-    user_id: str,
-    project_ids: Sequence[str] | None,
-) -> CrewRef | None:
-    """The crew if ``user_id`` is its owner or a member and the key's project allow-list admits it.
-
-    Returns None for "does not exist" and "no access" alike (callers answer 404/not_found).
-    Mirrors the membership rule of ``load_crew`` (WP-14, ``crew/access.py``); the
-    permission check (``crew:read``) is done by the caller.
-    """
-    async with conn.execute(
-        """
-        SELECT c.id, c.project_id, c.owner_user_id FROM crews c
-        WHERE c.id = ? AND (c.owner_user_id = ? OR EXISTS (
-            SELECT 1 FROM crew_members m WHERE m.crew_id = c.id AND m.user_id = ?))
-        """,
-        (crew_id, user_id, user_id),
-    ) as cur:
-        row = await cur.fetchone()
-    if row is None or not _project_allowed(project_ids, row[1]):
-        return None
-    return CrewRef(row[0], row[1], row[2])
-
-
 async def readable_crews(conn: aiosqlite.Connection, user_id: str, project_ids: Sequence[str] | None) -> list[CrewRef]:
     async with conn.execute(
         """

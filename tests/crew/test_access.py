@@ -38,8 +38,8 @@ from remembra.crew.access import (
     login_is_fresh,
     require_same_crew,
 )
+from remembra.crew.db import CrewDatabase
 from remembra.crew.schemas import ID_PREFIXES, ROUTES
-from tests.crew.crew_ddl import CREW_DB_V1_DDL
 from tests.security_harness import JWT_SECRET, make_settings, secure_app
 
 NOW = "2026-09-25T20:00:00Z"
@@ -55,10 +55,10 @@ CREW_B = "crw_bbbbbbbbbbbbbbbb"
 
 
 async def open_crew_db() -> aiosqlite.Connection:
-    conn = await aiosqlite.connect(":memory:")
-    await conn.executescript(CREW_DB_V1_DDL)
-    await conn.commit()
-    return conn
+    """An in-memory crew.db migrated by WP-1's real ``CREW_MIGRATIONS``."""
+    db = CrewDatabase(":memory:")
+    await db.init_schema()
+    return db.conn
 
 
 async def add_crew(conn: aiosqlite.Connection, crew_id: str, owner: str, project: str) -> None:
@@ -337,7 +337,7 @@ async def test_unknown_permission_is_a_programming_error():
 # ---------------------------------------------------------------------------
 
 
-async def test_entity_tables_exist_in_the_spec_ddl():
+async def test_entity_tables_exist_in_the_crew_migrations():
     conn = await open_crew_db()
     try:
         for kind, table in ENTITY_TABLES.items():

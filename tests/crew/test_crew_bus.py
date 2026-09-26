@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from remembra.crew.bus import CrewBus, CrewEventTailer, crew_for_reader, readable_crews, summary_items, db_loader
+from remembra.api.v1.websocket import _load_crew_ref
+from remembra.auth.middleware import AuthenticatedUser
+from remembra.crew.bus import CrewBus, CrewEventTailer, readable_crews, summary_items, db_loader
 from remembra.crew.events import Actor, CrewEventLog, format_ts, utc_now
 from remembra.storage.database import Database
 from tests.crew.crewdb import CREW_A, CREW_B, open_crew_db, seed_crew, seed_member, seed_session, state_changed
@@ -93,13 +95,24 @@ async def test_tailer_delivers_events_written_by_another_connection_once(crewdb,
         await reader_db.close()
 
 
+def _user(user_id: str, *, projects: list[str] | None = None, role: str = "editor") -> AuthenticatedUser:
+    return AuthenticatedUser(user_id=user_id, api_key_id="key_1", rate_limit_tier="standard", role=role, project_ids=projects)
+
+
 async def test_membership_read_model(crewdb):
     await seed_member(crewdb, CREW_B, "owner-1", "member")
-    assert (await crew_for_reader(crewdb.conn, CREW_A, "owner-1", None)).project_id == "yaadbooks"
-    assert (await crew_for_reader(crewdb.conn, CREW_B, "owner-1", None)).crew_id == CREW_B
-    assert await crew_for_reader(crewdb.conn, CREW_A, "stranger", None) is None
-    assert await crew_for_reader(crewdb.conn, CREW_A, "owner-1", ["other"]) is None  # restricted key
-    assert await crew_for_reader(crewdb.conn, "crw_missing00000000", "owner-1", None) is None
+    await seed_member(crewdb, CREW_A, "watcher", "viewer")
+    # The WebSocket resolves crews through WP-14's load_crew (same ACL as REST).
+    assert (await _load_crew_ref(crewdb.conn, CREW_A, _user("owner-1"), "crew:read")).project_id == "yaadbooks"
+    assert (await _load_crew_ref(crewdb.conn, CREW_B, _user("owner-1"), "crew:read")).crew_id == CREW_B
+    assert await _load_crew_ref(crewdb.conn, CREW_A, _user("stranger"), "crew:read") is None
+    assert await _load_crew_ref(crewdb.conn, CREW_A, _user("owner-1", projects=["other"]), "crew:read") is None  # restricted key
+    assert await _load_crew_ref(crewdb.conn, "crw_missing00000000", _user("owner-1"), "crew:read") is None
+    # A viewer-role member can read but can never push presence (crew:write).
+    assert await _load_crew_ref(crewdb.conn, CREW_A, _user("watcher"), "crew:read") is not None
+    assert await _load_crew_ref(crewdb.conn, CREW_A, _user("watcher"), "crew:write") is None
+    # A viewer API key has no crew:write either, even as the crew owner.
+    assert await _load_crew_ref(crewdb.conn, CREW_A, _user("owner-1", role="viewer"), "crew:write") is None
     assert [c.crew_id for c in await readable_crews(crewdb.conn, "owner-1", None)] == [CREW_A, CREW_B]
     assert [c.crew_id for c in await readable_crews(crewdb.conn, "owner-1", ["other"])] == [CREW_B]
     assert await readable_crews(crewdb.conn, "stranger", None) == []

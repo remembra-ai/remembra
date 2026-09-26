@@ -11,7 +11,6 @@ from starlette.testclient import TestClient
 
 import remembra.config as config_module
 from remembra.api.v1 import websocket
-from remembra.auth import middleware
 from remembra.core.tasks import TaskRegistry
 from remembra.crew import startup
 from remembra.crew.events import Actor, CrewEventLog
@@ -26,7 +25,6 @@ def isolated(monkeypatch):
     monkeypatch.setattr(websocket, "connection_manager", websocket.ConnectionManager())
     monkeypatch.setattr(startup, "_HOOKS", dict(startup._HOOKS))
     monkeypatch.setattr(config_module, "_settings", make_settings(auth_enabled=False))
-    monkeypatch.setitem(middleware.ROLE_PERMISSIONS, "editor", middleware.ROLE_PERMISSIONS["editor"] | {"crew:read"})
     monkeypatch.delenv(startup.TAILER_ENV, raising=False)
 
 
