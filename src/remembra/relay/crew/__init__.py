@@ -10,6 +10,9 @@
   :mod:`~remembra.relay.crew.fence`, :mod:`~remembra.relay.crew.detector`,
   :mod:`~remembra.relay.crew.zonescompile`: the local arbiter, baton refs, the read-only fence,
   the transcript limit detector and the zones.yml compiler.
+* Installers (WP-10, spec §8.2–§8.4): :mod:`~remembra.relay.crew.install` (``remembra-crew
+  connect``), :mod:`~remembra.relay.crew.verify` (the adapter round trip) and
+  :mod:`~remembra.relay.crew.githooks` (git gates with Husky/lefthook chaining).
 
 This package ``__init__`` imports nothing, so the vendored gate loads only what it needs.
 """

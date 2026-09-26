@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from remembra.relay.adapters.base import AdapterSpec, JsonHooksAdapter, PayloadMap
+from remembra.relay.adapters.crew_hooks import CrewHook, CrewSpec
 
 SPEC = AdapterSpec(
     name="gemini",
@@ -33,3 +34,29 @@ SPEC = AdapterSpec(
 )
 
 ADAPTER = JsonHooksAdapter(SPEC)
+
+
+# ---------------------------------------------------------------------------
+# Crew mode (§8.3): UNVERIFIED, observe only until `remembra-crew verify` passes
+# ---------------------------------------------------------------------------
+
+# Research-grade Gemini CLI event names (BeforeAgent = per turn, BeforeTool/AfterTool, AfterAgent = turn end,
+# PreCompress). No matchers and no timeouts (Gemini's timeout unit is unverified); the gate filters tools.
+CREW = CrewSpec(
+    adapter="gemini",
+    verified=False,
+    style="json-hooks",
+    hooks=(
+        CrewHook("SessionStart", "start", "cli"),
+        CrewHook("BeforeAgent", "turn", "gate"),
+        CrewHook("BeforeTool", "pretool", "gate"),
+        CrewHook("AfterTool", "posttool", "gate"),
+        CrewHook("AfterAgent", "stop", "gate"),
+        CrewHook("PreCompress", "precompact", "gate"),
+        CrewHook("SessionEnd", "end", "cli"),
+    ),
+    output="hook-json",
+    pretool_events=("BeforeTool",),
+    file_gate=True,
+    notes="Unverified: Gemini CLI hook events and payload fields are from research, not the installed tool.",
+)
