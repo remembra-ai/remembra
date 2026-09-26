@@ -246,6 +246,8 @@ def rule_keys(sig: Signals) -> list[Finding]:
                     then=cmd.doctor(),
                 )
             )
+        elif key.state == "wrong_url":
+            out.append(_wrong_url(key, seen))
         elif key.state == "unchecked" and key.error and "read budget" not in key.error and key.url == NOT_A_URL:
             seen.append(key.error)
             out.append(
@@ -284,6 +286,44 @@ def rule_keys(sig: Signals) -> list[Finding]:
                 )
             )
     return out
+
+
+def _wrong_url(key: KeyCheck, seen: list[str]) -> Finding:
+    """The server URL answers, but not as Remembra's API: a redirect, or a web page. The key was never checked."""
+    host = _host(key.url)
+    status = key.http_status
+    redirect = status is not None and 300 <= status < 400
+    if redirect:
+        what = (
+            f"{host} answered HTTP {status} (a redirect) instead of Remembra's API: the hooks don't follow redirects,"
+            " so every call fails."
+        )
+        seen.append(f"it redirects to {key.redirect}" if key.redirect else "it redirects, without saying where")
+    else:
+        what = f"{host} answered HTTP {status} with a page, not Remembra's API: every hook call fails against it."
+        seen.append(key.error or "the answer was not Remembra's JSON")
+    seen.append("the key was never checked")
+    target = key.redirect_base
+    fix: Fix
+    if target and key.source == "env":
+        fix = Fix(kind="none", text=f"Set REMEMBRA_URL to {target} where your agents start.", runs_where="none")
+    elif target:
+        fix = Fix(
+            kind="command",
+            text=f"Save the server it redirects to, {target}, with your key (it asks for the key at a hidden prompt):",
+            command=cmd.save_key_command(target),
+            runs_where="user_terminal",
+            writes=("~/.remembra/credentials", "the remembra MCP entry of each agent it finds"),
+            backup=True,
+        )
+    else:
+        where = "REMEMBRA_URL" if key.source == "env" else f"the server URL in {key.source}"
+        fix = Fix(
+            kind="none",
+            text=f"Set {where} to the address of Remembra's API itself ({cmd.CLOUD_URL} for Remembra Cloud).",
+            runs_where="none",
+        )
+    return Finding("SERVER_WRONG_URL", BLOCKER, None, what, tuple(seen), fix=fix, then=cmd.doctor(), doc=DOC_SETUP)
 
 
 # ---------------------------------------------------------------------------
@@ -1050,6 +1090,7 @@ RULE_IDS: tuple[str, ...] = (
     "KEY_REJECTED",
     "KEY_REFUSED",
     "KEY_FIREWALL",
+    "SERVER_WRONG_URL",
     "SERVER_UNREACHABLE",
     "OUTBOX_QUEUED",
     "OUTBOX_HELD",

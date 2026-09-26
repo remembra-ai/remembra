@@ -173,6 +173,41 @@ def test_a_cloudflare_403_is_the_firewall_not_the_key(fh: FakeHome) -> None:
     assert key_read.result.startswith("blocked by api.remembra.test's firewall (HTTP 403, not Remembra)")
 
 
+def test_a_redirect_is_not_an_accepted_key(fh: FakeHome) -> None:
+    """The hooks don't follow redirects: an http:// URL in front of an https-only proxy fails every call."""
+    fh.credentials(url="http://api.remembra.test")
+    fh.hooks("claude-code")
+    moved = FakeTrail(
+        key_status=301, key_text="", key_headers={"location": "https://api.remembra.test/api/v1/trail/summary?days=7"}
+    )
+    report = run(fh, moved)
+    assert "HOOKS_NOT_FIRING" not in ids(report) and "NOTHING_WAITING" not in ids(report)
+    f = only(report, "SERVER_WRONG_URL")
+    assert (f.severity, f.inferred, f.marker) == ("blocker", False, "[!!]")
+    assert f.what == (
+        "api.remembra.test answered HTTP 301 (a redirect) instead of Remembra's API:"
+        " the hooks don't follow redirects, so every call fails."
+    )
+    assert "it redirects to https://api.remembra.test/api/v1/trail/summary" in f.evidence
+    assert f.fix is not None and f.fix.command == "remembra-install --all --url https://api.remembra.test"
+    assert f.fix.runs_where == "user_terminal"
+    key_read = next(r for r in report.signals.reads if r.what == "key")
+    assert key_read.ok is False and "accepted" not in key_read.result
+    assert report.exit_code == 1
+    # A redirect somewhere else (a login page): named, but no server URL is guessed from it.
+    moved.key_headers = {"location": "/login?next=%2Fapi"}
+    g = only(run(fh, moved), "SERVER_WRONG_URL")
+    assert g.fix is not None and g.fix.command is None and "it redirects to http://api.remembra.test/login" in g.evidence
+    # A 200 that is a web page, not the API's JSON: not accepted either.
+    page = FakeTrail(key_status=200, key_text="<!doctype html><title>Remembra</title>", key_headers={"content-type": "text/html"})
+    h = only(run(fh, page), "SERVER_WRONG_URL")
+    assert h.what.startswith("api.remembra.test answered HTTP 200 with a page, not Remembra's API")
+    assert h.fix is not None and h.fix.command is None
+    # Set in the environment, remembra-install can't change it: the fix says where.
+    env = run(fh, moved, REMEMBRA_URL="http://api.remembra.test", REMEMBRA_API_KEY=KEY)
+    assert "REMEMBRA_URL" in only(env, "SERVER_WRONG_URL").fix.text
+
+
 def test_server_unreachable_is_a_warning_with_the_url(fh: FakeHome) -> None:
     fh.credentials()
     fh.hooks("claude-code")

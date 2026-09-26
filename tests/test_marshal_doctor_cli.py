@@ -248,6 +248,33 @@ def firewalled() -> Iterator[str]:
     yield from _stub(403, CLOUDFLARE_PAGE, "text/html", {"Server": "cloudflare", "CF-RAY": "8c1f2e3d4a5b6c7d-IAD"})
 
 
+@pytest.fixture()
+def redirecting() -> Iterator[str]:
+    """http:// in front of an https-only proxy: every path answers 301 to the same path over https."""
+    yield from _stub(301, "", "text/plain", {"Location": "https://api.remembra.test/api/v1/trail/summary?days=7"})
+
+
+def test_a_redirect_over_http_is_a_wrong_url_not_a_working_key(redirecting: str, tmp_path: Path) -> None:
+    fh = FakeHome(tmp_path)
+    fh.credentials(url=redirecting)
+    fh.hooks("claude-code")
+    # The hooks themselves don't follow the redirect: the brief gets no answer it can read.
+    brief = cli(fh, "brief", "--agent", "claude-code", "--cwd", str(fh.root))
+    assert "brief failed" in brief.stderr, brief.stderr
+    out = cli(fh, "doctor", "--format", "json")
+    data = json.loads(out.stdout)
+    _check_json(data)
+    reads = {r["what"]: r for r in data["reads"]}
+    assert reads["key"]["ok"] is False and "accepted" not in reads["key"]["result"]
+    finding = next(f for f in data["findings"] if f["id"] == "SERVER_WRONG_URL")
+    assert finding["marker"] == "[!!]" and "the hooks don't follow redirects" in finding["what"]
+    assert finding["fix"]["command"] == "remembra-install --all --url https://api.remembra.test"
+    assert finding["fix"]["runs_where"] == "user_terminal"
+    assert not [f for f in data["findings"] if f["id"] in ("HOOKS_NOT_FIRING", "NOTHING_WAITING")]
+    assert out.returncode == 1 and KEY not in out.stdout
+    _check_text(cli(fh, "doctor", env={"NO_COLOR": "1"}).stdout)
+
+
 def test_a_rejected_key_over_http(rejecting: str, tmp_path: Path) -> None:
     fh = FakeHome(tmp_path)
     fh.credentials(url=rejecting)

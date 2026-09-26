@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -203,13 +203,15 @@ class Read:
 class KeyCheck:
     source: str  # shown with ~ for the home directory
     url: str
-    state: str  # missing | accepted | rejected | refused | firewall | unchecked | skipped
+    state: str  # missing | accepted | rejected | refused | firewall | wrong_url | unchecked | skipped
     agents: tuple[str, ...]
     http_status: int | None = None
     error: str | None = None
     ray_id: str | None = None
     recorded: Mapping[str, Any] | None = None  # status.json keys[source]: what the hooks last got
     primary: bool = False
+    redirect: str | None = None  # wrong_url after a redirect: where it pointed (shown as display_url shows URLs)
+    redirect_base: str | None = None  # the server URL that redirect implies, when it kept the API path
 
 
 @dataclass(frozen=True)
@@ -842,12 +844,21 @@ def _detail(answer: _Answer) -> str:
 
 
 def _key_state(answer: _Answer) -> tuple[str, str | None, str | None]:
-    """``(state, error, ray id)`` for the key check answer."""
+    """``(state, error, ray id)`` for the key check answer.
+
+    Only Remembra's own answer accepts a key: a 2xx whose body is a JSON object. A redirect is not one
+    (the hooks don't follow redirects, so every hook call fails against it), and neither is a web page.
+    """
     if answer.error is not None:
         return "unchecked", f"server unreachable ({answer.error})", None
     assert answer.status is not None
-    if answer.status < 400:
+    if 200 <= answer.status < 300 and isinstance(answer.body, dict):
         return "accepted", None, None
+    if 300 <= answer.status < 400:
+        return "wrong_url", f"HTTP {answer.status}: a redirect, not an answer", None
+    if answer.status < 300:
+        kind = clean_text(_header(answer.headers, "content-type") or "no content type", 40)
+        return "wrong_url", f"HTTP {answer.status} with a page ({kind}), not Remembra's JSON", None
     blocked, ray = is_firewall_block(answer.status, answer.text, answer.headers)
     if blocked:
         return "firewall", "HTTP 403 from the server's firewall, not from Remembra", ray
@@ -856,6 +867,30 @@ def _key_state(answer: _Answer) -> tuple[str, str | None, str | None]:
     if answer.status == 403:
         return "refused", f"HTTP 403: {_detail(answer)}", None
     return "unchecked", f"HTTP {answer.status}: {_detail(answer)}", None
+
+
+def _header(headers: Mapping[str, str], name: str) -> str | None:
+    return next((v for k, v in headers.items() if k.lower() == name), None)
+
+
+def _redirect(requested: str, answer: _Answer, path: str) -> tuple[str | None, str | None]:
+    """``(where it points, the server URL it implies)`` for a redirect; both shown as :func:`display_url` shows URLs.
+
+    The server URL is only implied when the redirect kept the API path (``http://`` to ``https://``, or to
+    another host): anything else (a login page) is named, never guessed from.
+    """
+    location = _header(answer.headers, "location")
+    if not location:
+        return None, None
+    try:
+        target = outbox.clean_url(urljoin(requested, location.strip()))
+    except ValueError:
+        return None, None
+    shown = display_url(target)
+    if shown == NOT_A_URL or target is None:
+        return None, None
+    base = display_url(target[: -len(path)]) if target.endswith(path) else NOT_A_URL
+    return shown, (base if base != NOT_A_URL else None)
 
 
 def _count(value: Any) -> int:
@@ -1045,8 +1080,14 @@ def collect(
             )
             continue
         reader = ServerReader(config.url, config.api_key, budget, transport)
-        answer = reader.get("/api/v1/trail/summary", {"days": 7 if index == 0 else 1})
+        summary_path = "/api/v1/trail/summary"
+        answer = reader.get(summary_path, {"days": 7 if index == 0 else 1})
         state, error, ray = _key_state(answer)
+        redirect, redirect_base = (
+            _redirect(config.url.rstrip("/") + summary_path, answer, summary_path)
+            if state == "wrong_url" and answer.status is not None and 300 <= answer.status < 400
+            else (None, None)
+        )
         keys.append(
             KeyCheck(
                 source=source,
@@ -1058,6 +1099,8 @@ def collect(
                 ray_id=ray,
                 recorded=recorded,
                 primary=index == 0,
+                redirect=redirect,
+                redirect_base=redirect_base,
             )
         )
         shown_host = host.split("://", 1)[-1]
@@ -1066,6 +1109,7 @@ def collect(
             "rejected": f"REJECTED by {shown_host} (HTTP 401)",
             "refused": f"refused by {shown_host} (HTTP 403)",
             "firewall": f"blocked by {shown_host}'s firewall (HTTP 403, not Remembra)",
+            "wrong_url": f"not checked: {shown_host} is not answering as Remembra's API ({error})",
         }.get(state, f"not checked: {error}")
         reads.append(Read("key", f"{verdict} · from {source}", answer.ms, ok=state == "accepted"))
         if index == 0 and state == "accepted":

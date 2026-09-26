@@ -209,6 +209,8 @@ class FakeTrail:
         items: list[dict[str, Any]] | None = None,
         key_status: int = 200,
         key_body: Any = None,
+        key_text: str | None = None,
+        key_headers: dict[str, str] | None = None,
         html_403: bool = False,
         trail_status: int = 200,
         agent_items: dict[str, list[dict[str, Any]]] | None = None,
@@ -218,6 +220,8 @@ class FakeTrail:
         self.items = items or []
         self.key_status = key_status
         self.key_body = key_body
+        self.key_text = key_text  # a raw (non-JSON) answer to the key check, with key_headers
+        self.key_headers = key_headers
         self.html_403 = html_403
         self.trail_status = trail_status
         self.agent_items = agent_items or {}
@@ -233,6 +237,8 @@ class FakeTrail:
             if self.html_403:
                 headers = {"content-type": "text/html", "server": "cloudflare", "cf-ray": "8c1f2e3d4a5b6c7d-IAD"}
                 return httpx.Response(403, text=CLOUDFLARE_PAGE, headers=headers)
+            if self.key_text is not None:
+                return httpx.Response(self.key_status, text=self.key_text, headers=self.key_headers or {})
             if self.key_status != 200:
                 return httpx.Response(self.key_status, json=self.key_body or {"detail": "Invalid API key"})
             agents = [

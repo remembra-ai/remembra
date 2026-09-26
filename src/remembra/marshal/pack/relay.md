@@ -216,7 +216,8 @@ What it checks:
 |---------|------|
 | `KEY_MISSING`, `KEY_REJECTED`, `KEY_REFUSED` | no key; the server answered 401 or 403 to it |
 | `KEY_FIREWALL` | a 403 came from the server's firewall (an HTML page), not from Remembra |
-| `SERVER_UNREACHABLE` | no answer, or a 5xx |
+| `SERVER_WRONG_URL` | the server URL answers with a redirect (the hooks don't follow one) or a web page, not Remembra's API |
+| `SERVER_UNREACHABLE` | no answer, or a 5xx; or the server URL is not a URL at all (a key in its place, for one) |
 | `OUTBOX_QUEUED`, `OUTBOX_HELD` | handoffs waiting on this machine, by cause; one that will never be sent from here |
 | `CLOSE_FAILING` | an agent's last close failed and nothing since shows one that worked (a close, or its handoff on your trail); the background-close log shows an error. After a later brief it is only inferred |
 | `HOOKS_NOT_WRITTEN`, `UNVERIFIED_NOT_WRITTEN` | an agent here has no relay hooks (and whether `connect --apply` ever wrote there); an unverified adapter `connect --apply` left out is only a note |
