@@ -1,8 +1,10 @@
 # Remembra Relay: session continuity across agents
 
-Every agent leaves a trail when it stops: who it was, what it did, what it did
-not finish, what is failing, and where it left off. The next agent, whatever the
-tool, machine, or checkout location, picks that up at session start.
+A connected agent leaves a trail when it stops: who it was, what it did, what it
+did not finish, what is failing, and where it left off. The next agent, in another
+tool, on another machine or in another checkout, picks that up at session start:
+through the session hooks where they are verified (see the table under [Setup](#setup)), and
+through the `session_brief` and `close_session` MCP tools in any other MCP agent.
 
 ## How it works
 

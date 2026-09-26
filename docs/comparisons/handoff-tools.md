@@ -11,21 +11,21 @@ one of the others is the better choice.
 ## What Remembra Relay does
 
 When an agent's session ends, `remembra-relay close` reads facts from git (branch, commits, changed and
-uncommitted files, unpushed commits) and, for Claude Code, from the local session transcript (commands, test
-runs, open items), and saves one handoff to your Remembra server. The agent's own summary is optional and is
-checked against those facts: the brief shows it as unverified, or as contradicted when git disagrees. The next
-agent, in another tool or on another machine, gets a short brief at session start. Every handoff stays on the
-trail. See the [Relay guide](../guides/relay.md).
+uncommitted files, unpushed commits) and, for Claude Code and Codex, from the local session transcript (commands,
+test runs, open items; for Codex, its rollout file), and saves one handoff to your Remembra server. The agent's
+own summary is optional and is checked against those facts: the brief shows it as unverified, or as contradicted
+when git disagrees. The next agent, in another tool or on another machine, gets a short brief at session start.
+Every handoff stays on the trail. See the [Relay guide](../guides/relay.md).
 
-Today only Claude Code's hooks are verified. The Codex, Cursor, Gemini CLI, Qwen Code and Kimi hooks follow each
-tool's docs but have not been run against it yet; any MCP agent can call `session_brief` and `close_session`
-directly.
+Today Claude Code's and Codex's hooks are verified: Codex on codex-cli 0.155.0-alpha.16.4, a prerelease, and no
+other Codex version has been run. The Cursor, Gemini CLI, Qwen Code and Kimi hooks follow each tool's docs but have
+not been run against it yet; any MCP agent can call `session_brief` and `close_session` directly.
 
 ## At a glance
 
 | | Where it keeps state | Across machines | Where handoff facts come from | Summary checked against facts | Durable trail | License |
 |---|---|---|---|---|---|---|
-| **Remembra Relay** | Your Remembra server (hosted or self-hosted) | Yes, by git remote | git, plus the Claude Code transcript | Yes | Yes | MIT |
+| **Remembra Relay** | Your Remembra server (hosted or self-hosted) | Yes, by git remote | git, plus the Claude Code transcript or Codex rollout | Yes | Yes | MIT |
 | [claude-mem](https://github.com/thedotmack/claude-mem) | A plugin in your agent | Not checked | LLM-compressed session memory | No | Not checked | Apache-2.0 |
 | [agentmemory](https://github.com/rohitg00/agentmemory) | Local, with peer-to-peer sync | Via P2P sync | Memory with commit lookup | No | Partly | Apache-2.0 |
 | [continues](https://github.com/yigitkonur/cli-continues) | Local files | No | The session transcript | No | No | MIT |

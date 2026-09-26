@@ -5,8 +5,8 @@
 ## Remembra Relay
 
 When an agent's session ends, Remembra Relay saves a **handoff**: what was done, what is not done, what is
-failing and the next step, read from git and (for Claude Code) the session's test runs, not written by an LLM.
-When the next session starts, in any tool, on any machine, that agent gets a **brief**: a short summary of
+failing and the next step, read from git and (for Claude Code and Codex) the session's test runs, not written by an
+LLM. When the next session starts, in another tool or on another machine, that agent gets a **brief**: a short summary of
 where the work stands, led by the last handoff. Every handoff stays on the **trail**.
 
 First get a free key at [app.remembra.dev](https://app.remembra.dev/signup), then run:

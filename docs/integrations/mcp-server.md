@@ -9,7 +9,7 @@ Use Remembra as persistent memory for AI assistants via the [Model Context Proto
 
 ## Quick Setup (v0.10.1)
 
-Configure all your AI tools with one command:
+Configure the AI tools it supports with one command:
 
 ```bash
 pip install "remembra[mcp]"

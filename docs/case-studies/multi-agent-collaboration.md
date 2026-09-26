@@ -169,7 +169,7 @@ See [Multi-Agent Setup Guide](../guides/multi-agent-shared-memory.md) for detail
 
 Result: A complete product redesign with working code, roadmap, and sprint plan.
 
-This is what Remembra enables: seamless collaboration across any AI tool, with zero context loss.
+This is what Remembra enables: agents from different vendors working from one shared memory.
 
 ---
 

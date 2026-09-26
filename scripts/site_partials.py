@@ -202,7 +202,7 @@ def footer(page: str) -> str:
   <div class="ground"><div class="wrap foot">
     <div class="foot-brand">
       <a class="brand" href="/" aria-label="Remembra home">{lockup()}</a>
-      <p>One cloud memory for all your AI agents. The core is open source under the MIT license.</p>
+      <p>One cloud memory for your AI agents. The core is open source under the MIT license.</p>
       <p>&copy; 2026 DolphyTech</p>
     </div>
     <nav aria-label="Footer">
