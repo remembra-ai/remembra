@@ -1140,6 +1140,46 @@ def test_every_email_address_on_the_site_has_its_mail_provider_named() -> None:
     assert "Everyone who handles your data is on the subprocessors page" in _text((LANDING / "security.html").read_text())
 
 
+def _md_inline(text: str) -> str:
+    """Markdown inline text as plain words: drop **, `code` ticks, and [label](url) -> label."""
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    return " ".join(text.replace("**", "").replace("`", "").split())
+
+
+def test_security_md_on_github_says_what_the_security_page_says() -> None:
+    # Buyers read the GitHub Security tab and remembra.dev/security side by side.
+    md = (Path(__file__).resolve().parent.parent / "SECURITY.md").read_text()
+    page = (LANDING / "security.html").read_text()
+    assert "https://remembra.dev/security" in md
+
+    page_rows = [
+        tuple(_text(c) for c in re.findall(r"<td>(.*?)</td>", row))
+        for row in re.findall(r"<tr>(.*?)</tr>", re.search(r'<h2 id="roadmap">.*?</table>', page, re.S).group(0))
+    ]
+    md_table = md[md.index("## Roadmap") :].split("\n\n")[1]
+    md_rows = [tuple(c.strip() for c in line.strip("|").split("|")) for line in md_table.splitlines()[2:]]
+    assert md_rows == [r for r in page_rows if r], md_rows
+
+    def tight(text: str) -> str:  # "(see retention )." from stripped tags reads as "(see retention)."
+        return re.sub(r"\s+([).,;])", r"\1", text)
+
+    not_yet = re.search(r'<h2 id="not-yet">.*?</ul>', page, re.S).group(0)
+    page_not_yet = [tight(_text(li)) for li in re.findall(r"<li>(.*?)</li>", not_yet, re.S)]
+    md_section = md[md.index("## What We Don't Do Yet") : md.index("## Roadmap")]
+    md_not_yet = [tight(_md_inline(line[2:])) for line in md_section.splitlines() if line.startswith("- ")]
+    assert md_not_yet == page_not_yet
+
+    page_harbor = _text(re.search(r"<h3>Safe harbor</h3>\s*<p>(.*?)</p>", page, re.S).group(1))
+    md_harbor = _md_inline(re.search(r"\*\*Safe harbor\.\*\* (.*)", md).group(1))
+    assert md_harbor == page_harbor.replace("follow this page", "follow this policy")
+    for scope in ("remembra.dev, app.remembra.dev, api.remembra.dev and docs.remembra.dev", "Denial of service, load testing"):
+        assert scope in md and scope in _text(page)
+
+    # The withdrawn certification dates must not come back.
+    for stale in ("Q3 2026", "SOC 2 Type I |", "HIPAA BAA |", "ISO 27001 | 2027", "Penetration testing (annual)"):
+        assert stale not in md, stale
+
+
 def _sentences(page: str) -> list[str]:
     return re.split(r"(?<=[.!?])\s+", _text((LANDING / page).read_text()))
 

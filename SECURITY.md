@@ -2,15 +2,28 @@
 
 Remembra is built with security as a first-class citizen. AI memory systems handle sensitive context and must be trustworthy by default.
 
+<!-- requires owner: approve the roadmap quarters and the SOC 2 wording here and on landing/security.html together; tests/test_landing_site.py holds the two to the same text -->
+
+The security page at [remembra.dev/security](https://remembra.dev/security) is the source of truth for what Remembra Cloud does and doesn't do yet, the roadmap, and how to report a vulnerability. This file describes the code and matches that page.
+
 ## Reporting Vulnerabilities
 
-If you discover a security vulnerability, please report it responsibly:
-
-- **Email:** [security@dolphytech.com](mailto:security@dolphytech.com)
-- **Response time:** Within 48 hours
-- **Disclosure:** We follow coordinated disclosure practices
+Report security issues privately to [security@dolphytech.com](mailto:security@dolphytech.com). We aim to reply within 48 hours, keep you updated while we fix it, and credit you when it is fixed if you want. The same contact is in [security.txt](https://remembra.dev/.well-known/security.txt).
 
 Please do **not** open public GitHub issues for security vulnerabilities.
+
+**In scope:**
+
+- remembra.dev, app.remembra.dev, api.remembra.dev and docs.remembra.dev
+- The open-source code in this repository, including `remembra-relay`, the MCP server and the installers
+
+**Out of scope:**
+
+- Denial of service, load testing, spam and social engineering
+- Services we use but don't run, such as Paddle, Cloudflare and GitHub: report those to them
+- Findings with no security impact, such as missing headers on pages without sensitive content
+
+**Safe harbor.** If you make a good-faith effort to follow this policy, we will not take legal action against you or ask anyone else to, and we will treat your research as authorized. In return: use only accounts you own or have permission to test, look at no more of anyone else's data than you need to show the problem, and delete it afterwards; don't degrade the service; and give us 90 days to fix an issue before you publish it, or tell us if you need to publish sooner. We don't run a paid bug bounty.
 
 ---
 
@@ -199,9 +212,9 @@ The content sanitizer detects 26 prompt injection patterns across 6 attack categ
 
 Each memory receives a **trust score** (0.0-1.0). Content below the threshold (default: 0.5) is flagged as suspicious. A SHA-256 checksum is stored for integrity verification.
 
-### OWASP ASI06 Compliance
+### OWASP ASI06 (Memory and Context Poisoning)
 
-Remembra addresses the OWASP AI Security Initiative guideline ASI06 (Memory Poisoning):
+ASI06 in the OWASP Top 10 for Agentic Applications is partly covered, not solved: a key with write access can still store a false note. The full mapping is on [remembra.dev/security](https://remembra.dev/security#owasp). What the code does:
 
 - PII detection prevents sensitive data exfiltration via memory
 - Anomaly detection identifies injection/poisoning attempts
@@ -328,11 +341,13 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains  (production)
 
 ---
 
-## GDPR Compliance
+## Deletion and Export
 
-### Right to Be Forgotten
+### Deleting Data
 
-Complete user data deletion via API:
+On Remembra Cloud, deleting an account in the dashboard deactivates it and revokes its keys; erasing the stored data is done by us on request, within 30 days: email [admin@dolphytech.com](mailto:admin@dolphytech.com) from the account's address. On a self-hosted server, an administrator can do it through the API.
+
+Delete all of a user's memories:
 
 ```
 DELETE /api/v1/memories?all_memories=true
@@ -358,40 +373,29 @@ Export all memories in JSON, CSV, or JSONL format via the admin API.
 
 ---
 
-## Compliance Roadmap
+## What We Don't Do Yet
 
-### Current (v0.8.0)
+Most security questionnaires ask about these. The honest answers, the same as on [remembra.dev/security](https://remembra.dev/security#not-yet):
 
-- [x] PII detection and redaction (13 patterns, 3 modes)
-- [x] RBAC with 3 roles and 12 granular permissions
-- [x] Full audit logging (11 event types)
-- [x] Anomaly detection (3 check types)
-- [x] Content sanitization (26 injection patterns)
-- [~] Encryption at rest — partial: AES-256-GCM on Qdrant content/metadata payloads and TOTP secrets; SQLite memory text is plaintext (use volume encryption)
-- [x] Encryption in transit (TLS 1.2+)
-- [x] GDPR-compliant deletion
-- [x] OWASP ASI06 (Memory Poisoning) compliance
-- [x] Security headers (HSTS, CSP, X-Frame-Options)
-- [x] Rate limiting per endpoint
-- [x] 2FA/TOTP support
+- **No SOC 2 report, and no outside penetration test.** Remembra has had internal security reviews only. Cloudflare and Paddle have their own audits; Hetzner's ISO 27001 certificate covers its European data centers, not the US site Remembra runs in. Remembra itself is not audited.
+- **No EU data region.** Remembra Cloud is hosted in the United States only.
+- **The metadata database is not field-encrypted.** Encryption at rest covers the vector store; the database that holds account records and a second copy of your notes does not have field-level encryption yet. One encryption key protects the vector store, and it is not rotated yet.
+- **API keys don't expire.** You revoke them yourself. An agent-scoped key fixes who a handoff is from, but it can read everything the account can; limit reads with project-scoped keys.
+- **No SSO or SAML** for the dashboard.
+- **Account erasure is manual.** Deleting an account in the dashboard deactivates it and revokes its keys; erasing the stored data is done by us on request, within 30 days (see [retention](https://remembra.dev/security#retention)).
 
-### Planned (2026)
+Earlier versions of this file gave target dates for SOC 2 Type I and Type II, a HIPAA BAA and ISO 27001. Those dates are withdrawn. Remembra has no certification and does not offer a HIPAA BAA today.
 
-| Certification | Target | Status |
-|--------------|--------|--------|
-| SOC 2 Type I | Q3 2026 | Preparing controls documentation |
-| SOC 2 Type II | Q4 2026 | Audit period begins after Type I |
-| HIPAA BAA | Q4 2026 | Available for healthcare customers |
-| ISO 27001 | 2027 | Scoping phase |
+## Roadmap
 
-### In Progress
-
-- [ ] SOC 2 readiness assessment
-- [ ] Formal security policy documentation
-- [ ] Penetration testing (annual)
-- [ ] Bug bounty program
-- [ ] SBOM (Software Bill of Materials) generation
-- [ ] Dependency vulnerability scanning (CI/CD)
+| What | When |
+|------|------|
+| Automated, complete account erasure, including backups | Q4 2026 |
+| Key expiry, key rotation, and read limits for agent-scoped keys | Q1 2027 |
+| Field-level encryption for the metadata database, with key rotation | Q1 2027 |
+| SSO (SAML and OIDC) for Team plans | Q2 2027 |
+| An outside penetration test, with a summary published here | Q2 2027 |
+| EU data region; SOC 2 | When customers need them; no date yet |
 
 ---
 
@@ -447,5 +451,6 @@ Content trust scores are stored alongside memories (not used as a gate) because:
 ## Contact
 
 - **Security reports:** [security@dolphytech.com](mailto:security@dolphytech.com)
-- **General questions:** [support@dolphytech.com](mailto:support@dolphytech.com)
-- **Documentation:** [remembra.dev/docs](https://remembra.dev/docs)
+- **General questions:** [support@remembra.dev](mailto:support@remembra.dev)
+- **Security page:** [remembra.dev/security](https://remembra.dev/security)
+- **Documentation:** [docs.remembra.dev](https://docs.remembra.dev)
