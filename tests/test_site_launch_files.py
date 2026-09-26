@@ -28,3 +28,16 @@ def test_docs_image_builds_the_site_from_docs_only():
     for pinned in ("mkdocs==", "mkdocs-material==", "pymdown-extensions=="):
         assert pinned in text
     assert "COPY --from=build /out /usr/share/nginx/html" in text
+
+
+def test_docs_image_has_its_own_build_context():
+    # .dockerignore drops docs/ and *.md for the API image; the docs image needs
+    # both, so BuildKit's per-Dockerfile ignore file must let them through.
+    root_ignore = (ROOT / ".dockerignore").read_text().splitlines()
+    assert "docs" in root_ignore and "*.md" in root_ignore
+    lines = [
+        line.strip()
+        for line in (ROOT / "docs.Dockerfile.dockerignore").read_text().splitlines()
+        if line.strip() and not line.startswith("#")
+    ]
+    assert lines == ["*", "!mkdocs.yml", "!docs/"]
