@@ -1,5 +1,6 @@
 """FastAPI application factory and entry point."""
 
+import asyncio
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -155,12 +156,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     set_enrichment_queue(app.state.enrichment_queue)
 
+    cloud_rate_limiter = None
     if settings.rate_limit_enabled:
         # Fail fast on a bad REMEMBRA_RATE_LIMIT_STORAGE (e.g. redis:// without
-        # the redis package) instead of on the first signup or recall.
+        # the redis package) instead of on the first signup or recall. An
+        # unreachable backend is not fatal: limits fall back to process memory
+        # and /health/ready reports the rate_limit component as degraded.
         from remembra.cloud.ratelimit import get_cloud_rate_limiter
 
-        get_cloud_rate_limiter()
+        cloud_rate_limiter = get_cloud_rate_limiter()
+        if cloud_rate_limiter.backend != "memory":
+            await asyncio.to_thread(cloud_rate_limiter.check_backend)
 
     # SQLite metadata database (first: it holds the active vector collection)
     app.state.db = Database(settings.database_url)
@@ -227,6 +233,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         qdrant=app.state.qdrant,
         embeddings=app.state.embeddings,
         pending_queue=app.state.pending_embeddings,
+        rate_limiter=cloud_rate_limiter,
         probe_interval=settings.readiness_probe_interval_seconds,
     )
 

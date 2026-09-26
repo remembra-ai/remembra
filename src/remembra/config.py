@@ -1,10 +1,27 @@
 """Application settings resolved from environment variables."""
 
+import json
 import warnings
 from datetime import datetime
+from typing import Annotated, Any
 
-from pydantic import AliasChoices, Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field, ValidationInfo, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+
+# A list setting read from the environment. pydantic-settings would JSON-decode
+# it (and crash the boot on "a.com,b.com"); NoDecode hands the raw string to
+# Settings.parse_env_list, which accepts a JSON array or a comma-separated list.
+EnvList = Annotated[list[str], NoDecode]
+
+LIST_SETTINGS = (
+    "cors_origins",
+    "owner_emails",
+    "signup_domain_limit_exempt",
+    "trusted_proxies",
+    "superadmin_user_ids",
+    "connector_redirect_uris",
+    "pii_exclusions",
+)
 
 
 class Settings(BaseSettings):
@@ -35,7 +52,7 @@ class Settings(BaseSettings):
     static_dir: str | None = Field(None, description="Directory for static files (dashboard UI). Set to enable serving.")
 
     # CORS
-    cors_origins: list[str] = Field(
+    cors_origins: EnvList = Field(
         default_factory=lambda: [
             "http://localhost:3000",
             "http://localhost:8787",
@@ -353,7 +370,7 @@ class Settings(BaseSettings):
         False,
         description="Enable cloud features (billing, usage metering, plan enforcement)",
     )
-    owner_emails: list[str] = Field(
+    owner_emails: EnvList = Field(
         default_factory=list,
         description="Email addresses that get automatic Enterprise access (owner bypass)",
     )
@@ -446,7 +463,7 @@ class Settings(BaseSettings):
         description="Signup ATTEMPTS per client /24 before Turnstile runs (bounds siteverify calls; only with Turnstile on)",
     )
     signup_domain_rate_limit: str = Field("20/day", description="Signups allowed per email domain")
-    signup_domain_limit_exempt: list[str] = Field(
+    signup_domain_limit_exempt: EnvList = Field(
         default_factory=lambda: [
             "gmail.com",
             "googlemail.com",
@@ -538,7 +555,7 @@ class Settings(BaseSettings):
     # Rate Limiting
     rate_limit_enabled: bool = Field(True, description="Enable rate limiting")
     rate_limit_storage: str = Field("memory", description="Rate limit storage backend: 'memory' or 'redis://...'")
-    trusted_proxies: list[str] = Field(
+    trusted_proxies: EnvList = Field(
         default_factory=lambda: ["127.0.0.0/8", "::1/128", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7"],
         description=(
             "CIDRs of reverse proxies whose X-Forwarded-For / X-Real-IP headers are trusted. "
@@ -553,7 +570,7 @@ class Settings(BaseSettings):
             "peer is already a trusted proxy."
         ),
     )
-    superadmin_user_ids: list[str] = Field(
+    superadmin_user_ids: EnvList = Field(
         default_factory=list,
         description="User IDs with platform superadmin access (in addition to verified owner_emails).",
     )
@@ -580,7 +597,7 @@ class Settings(BaseSettings):
             "Never derived from request headers."
         ),
     )
-    connector_redirect_uris: list[str] = Field(
+    connector_redirect_uris: EnvList = Field(
         default_factory=list,
         description="Extra exact redirect URIs dynamic client registration accepts, on top of the built-in Claude/ChatGPT ones.",
     )
@@ -619,7 +636,7 @@ class Settings(BaseSettings):
         "redact",
         description="PII handling mode: 'detect' | 'redact' | 'block'",
     )
-    pii_exclusions: list[str] = Field(
+    pii_exclusions: EnvList = Field(
         default_factory=list,
         description="PII pattern types to exclude from detection",
     )
@@ -726,6 +743,36 @@ class Settings(BaseSettings):
     metrics_token: str | None = Field(
         None, description="Bearer token required for GET /metrics. When unset, /metrics is disabled (404)."
     )
+
+    @field_validator(*LIST_SETTINGS, mode="before")
+    @classmethod
+    def parse_env_list(cls, value: Any, info: ValidationInfo) -> Any:
+        """Accept a JSON array, a comma-separated list or a bare value.
+
+        An empty (or whitespace-only) value means "unset" and keeps the default:
+        a Coolify variable left present but blank must neither crash the boot
+        nor silently empty a list such as trusted_proxies.
+        """
+        if not isinstance(value, str):
+            return value
+        raw = value.strip()
+        if not raw:
+            assert info.field_name is not None
+            return cls.model_fields[info.field_name].get_default(call_default_factory=True)
+        if raw.startswith("["):
+            try:
+                return json.loads(raw)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"{info.field_name}: invalid JSON array ({e.msg})") from e
+        return [item.strip() for item in raw.split(",") if item.strip()]
+
+    @field_validator("public_url", "memory_cap_notice_effective_at", "unverified_credit_cap_effective_at", mode="before")
+    @classmethod
+    def blank_is_unset(cls, value: Any) -> Any:
+        """A variable present but empty (REMEMBRA_PUBLIC_URL=) means unset, not an invalid value."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @model_validator(mode="after")
     def fill_build_sha(self) -> "Settings":

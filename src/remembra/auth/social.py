@@ -42,6 +42,12 @@ Flow (the API is the OAuth client; the dashboard never sees provider tokens):
    A TOTP code is required there when the account has 2FA on. The dashboard
    and the API must therefore be same-site (``app.`` / ``api.`` of one
    registrable domain), or the browser will not send the cookie.
+5. Connecting a provider from Settings (``POST /auth/oauth/{provider}/link``,
+   ``credentials: 'include'``) returns a single-use ticket AND sets an
+   HttpOnly cookie that binds the ticket to the signed-in browser. ``/start``
+   refuses (and burns) a ticket opened without that cookie, so an attacker
+   cannot mint a ticket for their own account and have a victim's browser
+   attach the victim's Google / GitHub identity to it (account-link CSRF).
 
 Provider access tokens, codes, states, verifiers and nonces are never logged
 and never stored in plaintext beyond the few minutes a flow is open.
@@ -225,6 +231,11 @@ def cookie_secure() -> bool:
     return (get_settings().public_url or "").startswith("https://")
 
 
+def link_cookie_name(provider: str) -> str:
+    """Cookie that binds a Settings link ticket to the signed-in browser that asked for it."""
+    return f"{'__Host-' if cookie_secure() else ''}remembra_oauth_link_{provider}"
+
+
 def login_cookie_name() -> str:
     """Cookie that binds an issued login code to the browser the callback ran in."""
     return f"{'__Host-' if cookie_secure() else ''}remembra_oauth_login"
@@ -273,7 +284,8 @@ CREATE TABLE IF NOT EXISTS oauth_link_tickets (
     ticket_hash TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     provider TEXT NOT NULL,
-    expires_at REAL NOT NULL
+    expires_at REAL NOT NULL,
+    browser_hash TEXT
 );
 """
 
@@ -281,6 +293,7 @@ CREATE TABLE IF NOT EXISTS oauth_link_tickets (
 _ADDED_COLUMNS = (
     ("oauth_login_states", "link_user_id", "TEXT"),
     ("oauth_login_codes", "browser_hash", "TEXT"),
+    ("oauth_link_tickets", "browser_hash", "TEXT"),
 )
 
 _initialized: weakref.WeakSet[Any] = weakref.WeakSet()
@@ -461,34 +474,42 @@ async def unlink_identity(db: Any, user_id: str, provider: str) -> bool:
     return removed
 
 
-async def create_link_ticket(db: Any, user_id: str, provider: str) -> str:
+async def create_link_ticket(db: Any, user_id: str, provider: str) -> tuple[str, str]:
     """Single-use, short-lived ticket that lets ``/start`` begin a connect flow for ``user_id``.
 
-    Issued only to a signed-in session (``POST /auth/oauth/{provider}/link``).
-    ``/start`` consumes it at once in the same browser, which is then bound
-    to the flow by the state cookie, so a ticket seen later (browser history)
-    is already spent.
+    Returns ``(ticket, browser_secret)``: the ticket goes in the start path,
+    the secret in an HttpOnly cookie on the signed-in browser. Issued only to
+    a signed-in session (``POST /auth/oauth/{provider}/link``). ``/start``
+    needs both, consumes the ticket at once, and the flow is then bound to
+    that browser by the state cookie, so a ticket seen later (browser
+    history) is already spent and a ticket carried to another browser (an
+    attacker's link opened by a victim) is refused.
     """
     await ensure_schema(db)
     ticket = secrets.token_urlsafe(32)
+    browser_secret = secrets.token_urlsafe(32)
     now = time.time()
     await db.conn.execute("DELETE FROM oauth_link_tickets WHERE expires_at < ?", (now,))
     await db.conn.execute(
-        "INSERT INTO oauth_link_tickets (ticket_hash, user_id, provider, expires_at) VALUES (?, ?, ?, ?)",
-        (_hash(ticket), user_id, provider, now + LINK_TICKET_TTL_SECONDS),
+        "INSERT INTO oauth_link_tickets (ticket_hash, user_id, provider, expires_at, browser_hash) VALUES (?, ?, ?, ?, ?)",
+        (_hash(ticket), user_id, provider, now + LINK_TICKET_TTL_SECONDS, _hash(browser_secret)),
     )
     await db.conn.commit()
-    return ticket
+    return ticket, browser_secret
 
 
-async def consume_link_ticket(db: Any, provider: str, ticket: str | None) -> str | None:
-    """The user id the ticket was issued to, or None. Single use: deleted either way."""
+async def consume_link_ticket(db: Any, provider: str, ticket: str | None, browser_secret: str | None) -> str | None:
+    """The user id the ticket was issued to, or None. Single use: deleted either way.
+
+    None as well when the browser does not present the cookie set with the
+    ticket (or the ticket predates browser binding): the ticket is burned.
+    """
     if not ticket or len(ticket) > 512:
         return None
     await ensure_schema(db)
     key = _hash(ticket)
     cursor = await db.conn.execute(
-        "SELECT user_id, provider, expires_at FROM oauth_link_tickets WHERE ticket_hash = ?",
+        "SELECT user_id, provider, expires_at, browser_hash FROM oauth_link_tickets WHERE ticket_hash = ?",
         (key,),
     )
     row = await cursor.fetchone()
@@ -497,6 +518,11 @@ async def consume_link_ticket(db: Any, provider: str, ticket: str | None) -> str
     deleted = await db.conn.execute("DELETE FROM oauth_link_tickets WHERE ticket_hash = ?", (key,))
     await db.conn.commit()
     if (deleted.rowcount or 0) != 1 or row[1] != provider or float(row[2]) < time.time():
+        return None
+    expected = row[3]
+    if not expected or not browser_secret or len(browser_secret) > 512:
+        return None
+    if not secrets.compare_digest(str(expected), _hash(browser_secret)):
         return None
     return str(row[0])
 

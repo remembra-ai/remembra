@@ -95,6 +95,12 @@ def _require_provider(provider: str) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
 
 
+def _delete_link_cookie(response: Response, provider: str) -> None:
+    response.delete_cookie(
+        social.link_cookie_name(provider), path="/", secure=social.cookie_secure(), httponly=True, samesite="lax"
+    )
+
+
 def _db(request: Request) -> Any:
     db = getattr(request.app.state, "db", None)
     if db is None:
@@ -131,14 +137,24 @@ async def oauth_start(request: Request, provider: str) -> RedirectResponse:
         from_page = "login"
     db = _db(request)
     link_user_id: str | None = None
-    if "link" in request.query_params:
-        link_user_id = await social.consume_link_ticket(db, provider, request.query_params.get("link"))
+    linking = "link" in request.query_params
+    if linking:
+        link_user_id = await social.consume_link_ticket(
+            db, provider, request.query_params.get("link"), request.cookies.get(social.link_cookie_name(provider))
+        )
         if link_user_id is None:
+            # Unknown, spent, expired, or opened in a browser other than the
+            # signed-in one that asked for it (account-link CSRF).
+            log.warning("oauth_link_ticket_refused", provider=provider)
             target = social.dashboard_url("/oauth/callback", {"error": "invalid_state", "provider": provider, "from": "settings"})
-            return RedirectResponse(target, status_code=303, headers=_NO_STORE)
+            refused = RedirectResponse(target, status_code=303, headers=_NO_STORE)
+            _delete_link_cookie(refused, provider)
+            return refused
         from_page = "settings"
     state, browser_secret, verifier, nonce = await social.create_login_state(db, provider, from_page, link_user_id=link_user_id)
     response = RedirectResponse(social.authorize_url(provider, state, verifier, nonce), status_code=302, headers=_NO_STORE)
+    if linking:
+        _delete_link_cookie(response, provider)
     response.set_cookie(
         social.cookie_name(provider),
         browser_secret,
@@ -282,11 +298,13 @@ async def oauth_exchange(
     summary="Start connecting GitHub / Google to the signed-in account",
 )
 @limiter.limit("10/minute")
-async def oauth_link_start(request: Request, provider: str, current_user: CurrentUser) -> LinkStartResponse:
+async def oauth_link_start(request: Request, response: Response, provider: str, current_user: CurrentUser) -> LinkStartResponse:
     """Returns a single-use ``start_path`` (2 minutes). Needs a session from the last 15 minutes.
 
     This is the only way to add GitHub to an account that already exists:
     GitHub sign-in never links by email (see :mod:`remembra.auth.social`).
+    Call it with ``credentials: 'include'``: the HttpOnly cookie it sets binds
+    the ticket to this browser, and ``/start`` refuses the ticket anywhere else.
     """
     _require_provider(provider)
     user_manager = await get_user_manager(request)
@@ -297,7 +315,17 @@ async def oauth_link_start(request: Request, provider: str, current_user: Curren
             status_code=status.HTTP_403_FORBIDDEN,
             detail="For your security, sign in again to connect a sign-in method.",
         )
-    ticket = await social.create_link_ticket(user_manager.db, current_user["id"], provider)
+    ticket, browser_secret = await social.create_link_ticket(user_manager.db, current_user["id"], provider)
+    response.headers.update(_NO_STORE)
+    response.set_cookie(
+        social.link_cookie_name(provider),
+        browser_secret,
+        max_age=social.LINK_TICKET_TTL_SECONDS,
+        path="/",
+        secure=social.cookie_secure(),
+        httponly=True,
+        samesite="lax",  # sent on the top-level navigation to /start on the API origin
+    )
     return LinkStartResponse(start_path=f"/api/v1/auth/oauth/{provider}/start?link={ticket}")
 
 

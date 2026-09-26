@@ -48,6 +48,32 @@ on the Hetzner server `178.156.226.84`, behind Cloudflare. It builds
    curl -s https://api.remembra.dev/health/ready | python3 -m json.tool                            # status ok (see below)
    ```
 
+## Rolling back past the plans v2 migration
+
+The first boot of the relay-launch image rewrites paid `pro` / `team` tenants
+to `legacy_pro_49` / `legacy_team_199` (recorded in `cloud_migrations`), and new
+checkouts can write `solo`. The pre-launch image (`b034314`) cannot parse those
+plans: every store and usage call of those accounts returns 500. So:
+
+1. **Before deploying** relay-launch, take a copy (litestream may not be on):
+
+   ```bash
+   sqlite3 /data/remembra.db ".backup /data/remembra-pre-relay-launch.db"
+   ```
+
+2. **To roll back**, run the verified script against the live database, then
+   redeploy `b034314`:
+
+   ```bash
+   sqlite3 /data/remembra.db ".backup /data/remembra-pre-rollback.db"
+   sqlite3 /data/remembra.db < scripts/maintenance/rollback_plans_v2.sql
+   ```
+
+   It maps the plans back (`solo` becomes `pro`), clears the migration record,
+   and deactivates agent-bound API keys (the old image ignores `agent_id`, so
+   they would act for the whole account). Review deploy-window buyers of new
+   plans by hand; redeploying relay-launch later re-runs the migration.
+
 ## Health, readiness, metrics
 
 | Endpoint | Purpose | Status codes |

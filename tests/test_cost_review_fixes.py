@@ -20,6 +20,7 @@ import httpx
 import pytest
 
 import remembra.cloud.metering as metering
+from remembra.cloud.billing_paddle import checkout_binding
 from remembra.cloud.plans import CREDIT_USD, RESERVE_CREDITS_PER_CHUNK, BillingInterval, PlanTier
 from remembra.core import ai_spend
 from remembra.core.tasks import TaskRegistry, get_task_registry, set_task_registry
@@ -245,7 +246,7 @@ async def test_team_purchase_of_one_seat_grants_one_seat_and_flags_it(tmp_path) 
                 "id": "txn_team_1",
                 "subscription_id": "sub_team_1",
                 "items": [{"price": {"id": "pri_team_m"}, "quantity": 1}],
-                "custom_data": {"remembra_user_id": uid, "plan": "team"},
+                "custom_data": {"remembra_user_id": uid, "remembra_binding": checkout_binding(uid), "plan": "team"},
             },
         }
         assert (await _webhook(c, event))["applied"] == "applied"
@@ -314,7 +315,7 @@ async def test_founding_webhook_past_the_cap_grants_plain_solo_annual_and_flags_
                 "id": "txn_f_101",
                 "subscription_id": "sub_f_101",
                 "items": [{"price": {"id": "pri_founding"}, "quantity": 1}],
-                "custom_data": {"remembra_user_id": uid},
+                "custom_data": {"remembra_user_id": uid, "remembra_binding": checkout_binding(uid)},
             },
         }
         assert (await _webhook(c, event))["applied"] == "applied"
@@ -327,7 +328,8 @@ async def test_founding_webhook_past_the_cap_grants_plain_solo_annual_and_flags_
         holder = await c.h.create_user("holder@example.com")
         await c.h.db.conn.execute("DELETE FROM cloud_tenants WHERE user_id = 'f0'")
         await c.h.db.conn.commit()
-        event["data"].update(id="txn_f_holder", subscription_id="sub_holder", custom_data={"remembra_user_id": holder})
+        holder_custom = {"remembra_user_id": holder, "remembra_binding": checkout_binding(holder)}
+        event["data"].update(id="txn_f_holder", subscription_id="sub_holder", custom_data=holder_custom)
         await _webhook(c, event)
         assert (await c.meter.get_account(holder)).founding is True
         await _webhook(c, {**event, "data": {**event["data"], "id": "txn_f_holder_renewal"}})
@@ -674,7 +676,7 @@ async def test_refund_and_chargeback_end_the_plan_and_reduce_revenue(tmp_path, m
                 "currency_code": "USD",
                 "details": {"totals": {"earnings": "10500"}},
                 "items": [{"price": {"id": "pri_solo_y"}, "quantity": 1}],
-                "custom_data": {"remembra_user_id": uid},
+                "custom_data": {"remembra_user_id": uid, "remembra_binding": checkout_binding(uid)},
             },
         }
         await _webhook(c, purchase)

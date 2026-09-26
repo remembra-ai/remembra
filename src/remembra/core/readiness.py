@@ -14,6 +14,8 @@ instance actually store and recall right now?":
 * **llm**        — passive state of the extraction/consolidation breaker.
 * **reranker**   — whether the configured reranker can load.
 * **pending_embeddings** — queue depth / dead letters.
+* **rate_limit** — whether the shared rate-limit backend (``redis://``)
+  answers; while it does not, limits fall back to per-process memory.
 
 Always returns HTTP 200: ``status`` is ``ok`` or ``degraded``. Returning 5xx
 from a readiness endpoint that an orchestrator also uses for restarts turns
@@ -47,6 +49,7 @@ class ReadinessChecker:
         embeddings: Any = None,
         pending_queue: Any = None,
         reranker: Any = None,
+        rate_limiter: Any = None,
         probe_interval: float = 300.0,
         probe_timeout: float = 15.0,
         clock: Callable[[], float] = time.monotonic,
@@ -59,6 +62,8 @@ class ReadinessChecker:
         # The recall service's CrossEncoderReranker (RET-4): reports whether the
         # model actually loaded, not just whether the package is importable.
         self.reranker = reranker
+        # The plan-aware CloudRateLimiter (same storage URI as slowapi's).
+        self.rate_limiter = rate_limiter
         self.probe_interval = probe_interval
         self.probe_timeout = probe_timeout
         self._clock = clock
@@ -75,6 +80,7 @@ class ReadinessChecker:
             "llm": self._check_llm(),
             "reranker": self._check_reranker(),
             "pending_embeddings": await self._check_pending(),
+            "rate_limit": await self._check_rate_limit(),
         }
         degraded = [name for name, c in components.items() if c.get("status") == DEGRADED]
         return {
@@ -246,3 +252,23 @@ class ReadinessChecker:
             return {"status": WARN, "error_type": type(e).__name__}
         status = WARN if stats.get("failed") else OK
         return {"status": status, **stats}
+
+    async def _check_rate_limit(self) -> dict[str, Any]:
+        # The app passes its limiter whenever rate limiting is on (main.lifespan).
+        if self.rate_limiter is None or getattr(self.settings, "rate_limit_enabled", False) is not True:
+            return {"status": OK, "enabled": False}
+        result: dict[str, Any] = {"enabled": True, "backend": self.rate_limiter.backend}
+        try:
+            # limits storages are synchronous; keep the ping off the event loop.
+            await asyncio.wait_for(asyncio.to_thread(self.rate_limiter.check_backend), timeout=3.0)
+        except TimeoutError:
+            self.rate_limiter._mark_down(TimeoutError())
+        state = self.rate_limiter.status()
+        result.update(reachable=state["reachable"], fallback=state["fallback"])
+        if not state["reachable"]:
+            result["status"] = DEGRADED
+            result["reason"] = "unreachable (limits enforced per process from memory)"
+            result["error_type"] = state["last_error"]
+            return result
+        result["status"] = OK
+        return result

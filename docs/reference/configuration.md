@@ -214,6 +214,18 @@ ignored and logged (`paddle_event_unknown_price`), never read from
 `POST /api/v1/billing/checkout` (the client config lists single-quantity
 plans only).
 
+A webhook credits a **new** purchase to an account only when its
+`custom_data.remembra_user_id` carries the server's signature
+(`custom_data.remembra_binding`, set by server checkout or handed to the
+signed-in account by `GET /api/v1/billing/client-config`), or when the Paddle
+customer is the one recorded for that account. Renewals and changes of a
+subscription the account already holds need neither. Events only change the
+subscription the account holds: a cancel or update for another subscription
+changes nothing, and a payment for a second subscription while one is active is
+not applied (the account gets `billing_flag = second_subscription_review` and
+the operator alert fires). Checkout returns 409 for an account that already
+holds an active subscription; plan changes go through the Paddle portal.
+
 ## Signup protection
 
 | Variable | Default | Description |

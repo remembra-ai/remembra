@@ -14,6 +14,7 @@ import {
   type PlansResponse,
   type UsageSummaryResponse,
 } from '../lib/api';
+import { checkoutRoute, planRowAction } from '../lib/checkout';
 import { clampSeats, creditsView, formatUsd, parseSeatDraft, planLine, resetLabel } from '../lib/credits';
 import { useResource } from '../hooks/useResource';
 import { Card, CardHeader, ErrorNotice, Pill, Skeleton } from './relay/ui';
@@ -40,26 +41,37 @@ function userEmail(): string | undefined {
 }
 
 /**
- * Open Paddle checkout. Single-quantity plans can use a client price; per-seat
- * Team and Founding 100 always go through a server transaction, where the seat
- * minimum and the redemption cap are enforced.
+ * Open Paddle checkout. Single-quantity plans can use a client price (with the
+ * server's signature over the account id in customData); per-seat Team and
+ * Founding 100 always go through a server transaction, where the seat minimum
+ * and the redemption cap are enforced. A subscribed account is sent to the
+ * billing portal instead of a second subscription.
  */
-async function startCheckout(plan: string, cycle: BillingCycle, seats: number | undefined, perSeat: boolean): Promise<void> {
+async function startCheckout(
+  plan: string,
+  cycle: BillingCycle,
+  seats: number | undefined,
+  perSeat: boolean,
+  onPortal: () => void,
+): Promise<void> {
   const config = await api.getBillingClientConfig().catch(() => null);
   const P = paddle();
   if (P && config?.client_token && !P.Initialized) {
     P.Initialize({ token: config.client_token });
     P.Initialized = true;
   }
-  const priceKey = cycle === 'yearly' ? `${plan}_annual` : plan;
-  const clientPrice = !perSeat && plan !== 'founding' ? config?.prices?.[priceKey] : undefined;
-  if (P && config?.provider === 'paddle' && clientPrice) {
+  const route = checkoutRoute(config, plan, cycle, perSeat, api.getUserId());
+  if (route.kind === 'portal') {
+    onPortal();
+    return;
+  }
+  if (P && route.kind === 'overlay') {
     const email = userEmail();
     P.Checkout.open({
-      items: [{ priceId: clientPrice, quantity: 1 }],
+      items: [{ priceId: route.priceId, quantity: 1 }],
       ...(email ? { customer: { email } } : {}),
-      customData: { remembra_user_id: api.getUserId(), plan },
-      settings: { successUrl: config.success_url || 'https://remembra.dev/dashboard?checkout=success' },
+      customData: route.customData,
+      settings: { successUrl: config?.success_url || 'https://remembra.dev/dashboard?checkout=success' },
     });
     return;
   }
@@ -282,16 +294,19 @@ function priceFor(plan: PlanCatalogEntry, cycle: BillingCycle): number | null {
 function PlanRow({
   plan,
   cycle,
-  current,
+  action,
   busy,
   onBuy,
+  onManage,
 }: {
   plan: PlanCatalogEntry;
   cycle: BillingCycle;
-  current: boolean;
+  action: 'current' | 'manage' | 'buy';
   busy: boolean;
   onBuy: (plan: PlanCatalogEntry, seats: number | undefined) => void;
+  onManage: () => void;
 }) {
+  const current = action === 'current';
   const minSeats = Math.max(plan.min_seats, 1);
   const [seatDraft, setSeatDraft] = useState(String(minSeats));
   // null while the seat field holds something that is not a valid count yet.
@@ -332,8 +347,14 @@ function PlanRow({
         ))}
       </ul>
       <div className="flex flex-col items-start gap-2 md:items-end">
-        {plan.per_seat && !current && <SeatStepper draft={seatDraft} min={minSeats} onDraft={setSeatDraft} planName={plan.name} />}
-        {!current && (
+        {plan.per_seat && action === 'buy' && <SeatStepper draft={seatDraft} min={minSeats} onDraft={setSeatDraft} planName={plan.name} />}
+        {action === 'manage' && (
+          <button type="button" onClick={onManage} className="rr-btn-ghost inline-flex items-center gap-1.5 px-3.5 py-2 text-sm">
+            <CreditCard className="h-4 w-4" aria-hidden="true" />
+            Switch in Manage subscription
+          </button>
+        )}
+        {action === 'buy' && (
           <button
             type="button"
             onClick={() => {
@@ -347,7 +368,7 @@ function PlanRow({
             {plan.per_seat ? (seats !== null ? `Start Team with ${seats} seats` : 'Start Team') : `Choose ${plan.name}`}
           </button>
         )}
-        {!current && !available && (
+        {action === 'buy' && !available && (
           <p className="max-w-[26ch] text-xs text-ink-3 md:text-right">Checkout for {cycle} billing is not set up on this server yet.</p>
         )}
       </div>
@@ -358,10 +379,15 @@ function PlanRow({
 function PlansSection({
   plans,
   currentPlan,
+  subscribed,
+  onPortal,
   onError,
 }: {
   plans: PlansResponse;
   currentPlan: string;
+  /** Holds an active subscription (legacy $49 / $199 included): plan changes go through the portal. */
+  subscribed: boolean;
+  onPortal: () => void;
   onError: (message: string | null) => void;
 }) {
   const titleId = useId();
@@ -372,7 +398,7 @@ function PlansSection({
     setBusy(planId);
     onError(null);
     try {
-      await startCheckout(planId, forceCycle ?? cycle, seats, perSeat);
+      await startCheckout(planId, forceCycle ?? cycle, seats, perSeat, onPortal);
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Checkout could not start.');
     } finally {
@@ -410,7 +436,12 @@ function PlansSection({
             Self-serve checkout is not configured on this server. Prices are shown for reference.
           </p>
         )}
-        {founding.available && (
+        {subscribed && (
+          <p className="mt-3 border-l-[3px] border-signal px-3 py-2 text-sm text-ink-2">
+            You already have a subscription. Switch plans or cancel from Manage subscription, so you are never billed for two.
+          </p>
+        )}
+        {founding.available && !subscribed && (
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3 border border-dashed border-signal px-4 py-3">
             <p className="text-sm text-ink-2">
               <span className="font-semibold text-ink">Founding 100:</span> Solo for {formatUsd(founding.price_yearly)}/yr, price locked for
@@ -434,9 +465,10 @@ function PlansSection({
               key={plan.id}
               plan={plan}
               cycle={cycle}
-              current={plan.id === currentPlan}
+              action={planRowAction(plan.id, currentPlan, subscribed)}
               busy={busy === plan.id}
               onBuy={(p, seats) => buy(p.id, p.per_seat, seats)}
+              onManage={onPortal}
             />
           ))}
           <li className="grid gap-3 py-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
@@ -560,7 +592,15 @@ export function Billing() {
         </p>
       )}
       <HowCreditsWork />
-      {plans.data && <PlansSection plans={plans.data} currentPlan={currentPlan} onError={setError} />}
+      {plans.data && (
+        <PlansSection
+          plans={plans.data}
+          currentPlan={currentPlan}
+          subscribed={summary.data?.subscription_active === true}
+          onPortal={openPortal}
+          onError={setError}
+        />
+      )}
       {!plans.data && plans.error != null && (
         <div className="rr-card rounded-[3px]">
           <ErrorNotice error={plans.error} what="the plans" onRetry={plans.refresh} />

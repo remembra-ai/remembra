@@ -35,6 +35,31 @@ logger = logging.getLogger(__name__)
 PADDLE_API_BASE = "https://api.paddle.com"
 PADDLE_SANDBOX_API_BASE = "https://sandbox-api.paddle.com"
 
+# custom_data key carrying the server's signature over remembra_user_id.
+CHECKOUT_BINDING_KEY = "remembra_binding"
+
+
+def checkout_binding(user_id: str) -> str:
+    """Server signature binding a checkout's ``custom_data.remembra_user_id`` to that account.
+
+    ``custom_data`` is written by the browser in a Paddle.js overlay checkout,
+    so a bare user id proves nothing: anyone holding the public client token
+    could buy (and later cancel) a subscription "for" another account. The
+    server hands this value only to the signed-in account itself (client
+    config) or puts it in server-created transactions; webhooks accept a new
+    purchase for an account only when it verifies.
+    """
+    from remembra.config import get_settings
+
+    key = get_settings().jwt_secret.encode()
+    return hmac.new(key, f"paddle-checkout:v1:{user_id}".encode(), hashlib.sha256).hexdigest()
+
+
+def checkout_binding_valid(user_id: str | None, binding: Any) -> bool:
+    if not user_id or not isinstance(binding, str) or len(binding) > 128:
+        return False
+    return hmac.compare_digest(checkout_binding(user_id), binding)
+
 
 class PaddleBillingManager:
     """Manages Paddle billing for Remembra Cloud.
@@ -189,6 +214,7 @@ class PaddleBillingManager:
             "items": [{"price_id": price_id, "quantity": quantity}],
             "custom_data": {
                 "remembra_user_id": user_id,
+                CHECKOUT_BINDING_KEY: checkout_binding(user_id),
                 "plan": plan.value,
                 "interval": interval.value,
                 "founding": founding,
@@ -591,7 +617,14 @@ class PaddleBillingManager:
         event_type = event.get("event_type", "")
         data = event.get("data", {}) or {}
         custom_data = data.get("custom_data") or {}
+        if not isinstance(custom_data, dict):
+            custom_data = {}
         user_id = custom_data.get("remembra_user_id")
+        if not isinstance(user_id, str) or not user_id:
+            user_id = None
+        # True only when the server signed this user id (server checkout or the
+        # account's own client config). A bare id is browser-controlled.
+        verified = checkout_binding_valid(user_id, custom_data.get(CHECKOUT_BINDING_KEY))
 
         if event_type == "transaction.completed":
             customer = data.get("customer") or {}
@@ -610,6 +643,7 @@ class PaddleBillingManager:
                 paddle_customer_id=data.get("customer_id"),
                 customer_email=customer.get("email"),
                 customer_name=customer.get("name"),
+                user_verified=verified,
             )
             result.transaction_id = data.get("id")
             result.revenue_usd = self._net_revenue_usd(data)
@@ -617,22 +651,39 @@ class PaddleBillingManager:
 
         if event_type == "subscription.activated":
             return self._subscription_result(
-                "activate_subscription", data, user_id, data.get("id"), paddle_customer_id=data.get("customer_id")
+                "activate_subscription",
+                data,
+                user_id,
+                data.get("id"),
+                paddle_customer_id=data.get("customer_id"),
+                user_verified=verified,
             )
 
         if event_type == "subscription.updated":
             status = data.get("status")
             if status == "active":
-                return self._subscription_result("update_subscription", data, user_id, data.get("id"))
+                return self._subscription_result(
+                    "update_subscription",
+                    data,
+                    user_id,
+                    data.get("id"),
+                    paddle_customer_id=data.get("customer_id"),
+                    user_verified=verified,
+                )
             if status == "past_due":
                 return WebhookResult(action="payment_issue", user_id=user_id)
 
         if event_type == "subscription.canceled":
-            logger.info("Subscription cancelled for user %s", user_id)
+            # The subscription id is what the cancel applies to: the account
+            # drops to Free only when this is the subscription it holds.
+            logger.info("Subscription %s cancelled (custom_data user %s)", data.get("id"), user_id)
             return WebhookResult(
                 action="cancel_subscription",
                 user_id=user_id,
                 plan=PlanTier.FREE,
+                paddle_customer_id=data.get("customer_id"),
+                paddle_subscription_id=data.get("id"),
+                user_verified=verified,
             )
 
         if event_type in ("adjustment.created", "adjustment.updated"):
@@ -670,6 +721,7 @@ class WebhookResult:
         transaction_id: str | None = None,
         revenue_usd: float | None = None,
         seats_below_minimum: bool = False,
+        user_verified: bool = False,
     ) -> None:
         self.action = action
         self.user_id = user_id
@@ -687,6 +739,8 @@ class WebhookResult:
         self.transaction_id = transaction_id
         self.revenue_usd = revenue_usd
         self.seats_below_minimum = seats_below_minimum
+        # custom_data.remembra_user_id carried a valid server signature.
+        self.user_verified = user_verified
         self.refunded_transaction_id: str | None = None
         self.adjustment_action: str | None = None
 
