@@ -15,9 +15,10 @@ current config text into the new text, idempotently:
 
 Commands have two runners (the interface to WP-9's runtime):
 
-* ``gate``: ``<python> -I <home>/.remembra/crew/bin/crew-gate.py <verb> --hook <adapter> # remembra-crew``
-  (verbs ``turn``, ``pretool``, ``posttool``, ``stop``, ``precompact`` and, per
-  S0, ``rewake`` for the asyncRewake waiter);
+* ``gate``: ``test ! -f G || exec <python> -I G <verb> --hook <adapter> # remembra-crew`` with
+  ``G = <home>/.remembra/crew/bin/crew-gate.py``, so a missing gate exits 0, never 2 (verbs
+  ``turn``, ``pretool``, ``posttool``, ``stop``, ``precompact`` and, per S0, ``rewake`` for the
+  asyncRewake waiter);
 * ``cli``: ``<remembra-crew> <verb> --hook <adapter> --agent <adapter> # remembra-crew``
   (verbs ``start``, ``stall``, ``end``).
 
@@ -123,10 +124,24 @@ class CrewCommands:
 
     def command(self, adapter: str, hook: CrewHook) -> str:
         if hook.runner == "gate":
-            base = f"{shlex.quote(self.python)} -I {shlex.quote(self.gate)} {hook.verb} --hook {adapter}"
+            base = gate_hook_command(self.python, self.gate, hook.verb, adapter)
         else:
             base = f"{self.crew} {hook.verb} --hook {adapter} --agent {adapter}"
         return f"{base} {CREW_MARKER}"
+
+
+def gate_hook_command(python: str, gate: str, verb: str, adapter: str) -> str:
+    """``test ! -f G || exec PY -I G verb --hook A``: a missing gate file allows (exit 0).
+
+    ``python -I missing.py`` exits 2, and exit 2 is a *blocking* error for Claude Code hooks
+    (PreToolUse denies every tool, UserPromptSubmit erases the prompt, Stop refuses to stop).
+    The hooks are global, so a deleted or half-uninstalled gate would brick every session on the
+    machine (§8.2 "exit code 2 is never used", §10.3 "a buggy hook must not brick the agent").
+    The git hooks guard the same case (``githooks.hook_script``). No double quotes: the
+    tamper matcher (``gatecore.marker_entries``) reads the command out of JSON text.
+    """
+    g = shlex.quote(gate)
+    return f"test ! -f {g} || exec {shlex.quote(python)} -I {g} {verb} --hook {adapter}"
 
 
 def is_crew_command(command: Any) -> bool:

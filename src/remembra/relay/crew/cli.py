@@ -46,12 +46,18 @@ from remembra.relay.crew.gate import (
     read_stdin,
     respawn_crewd,
     rpc,
+    rpc_ex,
     rpc_send,
     session_key,
 )
 
 CREWD_START_WAIT_S: Final = 3.0
 START_BUDGET_S: Final = 9.0
+# One deadline for the whole SessionStart hook (§10.4: 10 s hard; the hook's own timeout is 15 s). Every
+# step gets what is left, so a black-holed server can never push start past it.
+START_DEADLINE_S: Final = 8.0
+CREW_EXISTS_TIMEOUT_S: Final = 5.0
+MIN_STEP_S: Final = 0.3
 HOOK_OUTPUT: Final[Mapping[str, str]] = {
     "claude-code": "hook-json",
     "gemini": "hook-json",
@@ -102,10 +108,23 @@ def ensure_crewd(layout: Layout, *, wait: float = CREWD_START_WAIT_S) -> bool:
     return False
 
 
+# Ops that are safe to send twice. Anything else (adopt, claim, release, stall, end, report, bypass…)
+# is resent only when the first request never reached crewd: a lost reply may mean it already ran.
+RETRY_SAFE_OPS: Final = frozenset({"ping", "status", "whoami", "crew_exists", "events_page", "doctor", "brief"})
+
+
 def _call(layout: Layout, op: str, args: Mapping[str, Any] | None = None, *, timeout: float = 20.0) -> dict[str, Any]:
-    res = rpc(layout, op, args, timeout=timeout)
-    if res is None and ensure_crewd(layout):
-        res = rpc(layout, op, args, timeout=timeout)
+    res, sent = rpc_ex(layout, op, args, timeout=timeout)
+    if res is None and (not sent or op in RETRY_SAFE_OPS) and ensure_crewd(layout):
+        res, sent_again = rpc_ex(layout, op, args, timeout=timeout)
+        sent = sent or sent_again
+    if res is None and sent and op not in RETRY_SAFE_OPS:
+        return {
+            "ok": False,
+            "error": "no_reply",
+            "message": f"crewd took the {op} request but did not answer; it may have run."
+            " Check `remembra-crew status` before trying again",
+        }
     if res is None:
         return {"ok": False, "error": "crewd_unreachable", "message": "crewd is not running (remembra-crew doctor)"}
     return res
@@ -186,21 +205,23 @@ def crew_enabled_locally(layout: Layout, toplevel: str) -> bool:
     return any(isinstance(r, str) and os.path.realpath(os.path.expanduser(r)) == real for r in repos)
 
 
-def relay_brief_passthrough(adapter: str, agent: str, payload: Mapping[str, Any]) -> None:
+def relay_brief_passthrough(adapter: str, agent: str, payload: Mapping[str, Any], *, timeout: float = START_BUDGET_S) -> None:
     """Not a crew checkout: the plain relay brief (the SessionStart hook replaces ``remembra-relay brief``, §8.2)."""
     fmt = {"hook-json": "hook-json", "cursor-json": "cursor-json"}.get(HOOK_OUTPUT.get(adapter, "text"), "text")
-    try:
-        res = subprocess.run(  # noqa: S603
-            [sys.executable, "-m", "remembra.relay.cli", "brief", "--hook", adapter, "--agent", agent, "--format", fmt],
-            input=json.dumps(dict(payload)),
-            capture_output=True,
-            text=True,
-            timeout=START_BUDGET_S,
-            check=False,
-        )
-        out = res.stdout
-    except (OSError, subprocess.SubprocessError):
-        out = ""
+    out = ""
+    if timeout >= MIN_STEP_S:
+        try:
+            res = subprocess.run(  # noqa: S603
+                [sys.executable, "-m", "remembra.relay.cli", "brief", "--hook", adapter, "--agent", agent, "--format", fmt],
+                input=json.dumps(dict(payload)),
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                check=False,
+            )
+            out = res.stdout
+        except (OSError, subprocess.SubprocessError):
+            out = ""
     if out.strip():
         sys.stdout.write(out if out.endswith("\n") else out + "\n")
     else:
@@ -212,6 +233,11 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
 
     adapter = args.hook or "claude-code"
     started = time.monotonic()
+    deadline = started + START_DEADLINE_S
+
+    def left(reserve: float = 0.0) -> float:
+        return max(0.0, deadline - time.monotonic() - reserve)
+
     try:
         payload = _hook_payload(args)
         sid = payload.get("session_id") or args.session_id
@@ -220,25 +246,28 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
             _emit_start(adapter, "Remembra crew: no session id in the hook payload; crew rules are not active for this session.")
             return 0
         agent_pid = args.agent_pid or find_agent_pid(os.getpid(), adapter) or os.getppid()
+        plain = payload or {"session_id": sid, "cwd": str(cwd)}
         top = _toplevel(str(cwd))
         if top is None:
-            relay_brief_passthrough(adapter, args.agent or adapter, payload or {"session_id": sid, "cwd": str(cwd)})
+            relay_brief_passthrough(adapter, args.agent or adapter, plain, timeout=left())
             return 0
         enabled = bool(args.crew) or crew_enabled_locally(layout, top)
         if not enabled:
-            # a crew may already exist for this project (created elsewhere): join it; otherwise the plain brief
-            exists = rpc(
-                layout, "crew_exists", {"cwd": str(cwd), "adapter": adapter, "agent_id": args.agent or adapter}, timeout=5.0
-            )
-            if exists is None and ensure_crewd(layout):
-                exists = rpc(
-                    layout, "crew_exists", {"cwd": str(cwd), "adapter": adapter, "agent_id": args.agent or adapter}, timeout=5.0
-                )
+            # a crew may already exist for this project (created elsewhere): join it; otherwise the plain brief.
+            # The brief keeps at least half the budget; crew_exists is asked again only when crewd was not
+            # running (never after a timeout: a black-holed server would just time out twice).
+            ask = {"cwd": str(cwd), "adapter": adapter, "agent_id": args.agent or adapter}
+            budget = min(CREW_EXISTS_TIMEOUT_S, left() / 2)
+            exists, sent = rpc_ex(layout, "crew_exists", ask, timeout=budget) if budget >= MIN_STEP_S else (None, True)
+            if exists is None and not sent and ensure_crewd(layout, wait=min(CREWD_START_WAIT_S, left() / 4)):
+                budget = min(CREW_EXISTS_TIMEOUT_S, left() / 2)
+                if budget >= MIN_STEP_S:
+                    exists = rpc(layout, "crew_exists", ask, timeout=budget)
             enabled = bool(exists and exists.get("exists"))
         if not enabled:
-            relay_brief_passthrough(adapter, args.agent or adapter, payload or {"session_id": sid, "cwd": str(cwd)})
+            relay_brief_passthrough(adapter, args.agent or adapter, plain, timeout=left())
             return 0
-        if not ensure_crewd(layout):
+        if not ensure_crewd(layout, wait=min(CREWD_START_WAIT_S, left())):
             _emit_start(
                 adapter, "Remembra crew unavailable: crewd did not start (run remembra-crew doctor). Crew rules are not active."
             )
@@ -257,7 +286,7 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
                 "transcript_path": payload.get("transcript_path"),
                 "project_id": args.project,
             },
-            timeout=max(1.0, START_BUDGET_S - (time.monotonic() - started)),
+            timeout=max(MIN_STEP_S, left(reserve=0.5)),
         )
         if not join or not join.get("ok"):
             reason = (join or {}).get("message") or (join or {}).get("error") or "no answer from crewd"
@@ -267,7 +296,8 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
             )
             return 0
         _env_file(join)
-        brief = rpc(layout, "brief", {"key": join["key"]}, timeout=max(1.0, START_BUDGET_S - (time.monotonic() - started))) or {}
+        brief = rpc(layout, "brief", {"key": join["key"]}, timeout=left()) if left() >= MIN_STEP_S else None
+        brief = brief or {}
         text = str(brief.get("rendered") or "").strip()
         extra: list[str] = []
         if not text:
@@ -640,6 +670,16 @@ def cmd_adopt(args: argparse.Namespace, layout: Layout) -> int:
             print(
                 "Saved work NOT restored: this checkout has uncommitted changes. "
                 f"Commit or move them, then run: {restore.get('next_command')}"
+            )
+        elif restore.get("reason") == "restore_failed":
+            state = (
+                "Your checkout was put back as it was."
+                if restore.get("rolled_back")
+                else "Check `git status`: the checkout could not be fully put back."
+            )
+            print(
+                f"Saved work NOT restored: {S.clip_item(str(restore.get('error') or 'git failed'), 200)}. {state}"
+                f" Fix the cause, then run: {restore.get('next_command')}"
             )
         else:
             print(f"Saved work not restored ({restore.get('reason')}).")

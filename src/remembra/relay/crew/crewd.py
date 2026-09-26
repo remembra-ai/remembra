@@ -88,6 +88,11 @@ LIVENESS_S: Final = 30.0
 INTEGRITY_S: Final = 30.0
 DETECTOR_S: Final = 30.0
 PRESENCE_S: Final = 5.0
+# crew_exists (SessionStart in a repo with no .remembra/): bounded well inside the CLI's 5 s wait
+CREW_EXISTS_REPO_S: Final = 1.5
+CREW_EXISTS_REQUEST_S: Final = 3.0
+CREW_EXISTS_NEGATIVE_TTL_S: Final = 300.0
+CREW_EXISTS_UNREACHABLE_TTL_S: Final = 60.0
 ZONES_S: Final = 30.0
 TREE_EVERY_S: Final = 86400.0
 BATON_SWEEP_S: Final = 3600.0
@@ -561,6 +566,7 @@ class Crewd:
         self.server_reachable = True
         self.server_outage = False
         self.unreachable_since: float | None = None
+        self.crew_exists_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self.detector_states: dict[str, D.TailState] = {}
         self.pending_footprints: dict[str, dict[str, dict[str, Any]]] = {}
         self.tool_windows: dict[str, list[list[float]]] = {}
@@ -805,6 +811,8 @@ class Crewd:
         if peer.pid is not None and agent_pid not in chain:
             raise CrewdError("agent_pid_not_ancestor", "agent_pid must be an ancestor of the calling process")
         cwd = str(args.get("cwd") or "")
+        # a join may create this project's crew: forget "no crew" answers so the next session here joins it
+        self.crew_exists_cache.clear()
         facts = B.repo_facts(cwd) if cwd else None
         if facts is None:
             raise CrewdError("not_a_repo", "crew mode needs a git checkout")
@@ -948,7 +956,17 @@ class Crewd:
         cfg = self.config_loader(str(args.get("agent_id") or adapter), ADAPTER_CONFIG_SOURCE.get(adapter))
         if not cfg.api_key:
             return {"ok": True, "exists": False, "error": "no_api_key"}
-        info = await asyncio.to_thread(factlib.repo_info, Path(cwd), factlib.Deadline(3.0))
+        # SessionStart asks this in every git repo on the machine (global install): answer from a short
+        # cache when the server said "no crew" or could not be reached, so an unrelated repo never waits
+        # on the network twice (§10.4 SessionStart 10 s hard).
+        now = self.clock()
+        cache_key = f"{cfg.url}\0{os.path.realpath(cwd)}"
+        unreachable_key = f"{cfg.url}\0<unreachable>"
+        for k in (cache_key, unreachable_key):
+            hit = self.crew_exists_cache.get(k)
+            if hit is not None and hit[0] > now:
+                return dict(hit[1])
+        info = await asyncio.to_thread(factlib.repo_info, Path(cwd), factlib.Deadline(CREW_EXISTS_REPO_S))
         if not info.is_git:
             return {"ok": True, "exists": False}
         locator = info.locator(Path(cwd), self.hostname)
@@ -959,10 +977,12 @@ class Crewd:
                 "POST",
                 "/crews/resolve",
                 json_body=locator,
-                timeout=4.0,
+                timeout=CREW_EXISTS_REQUEST_S,
             )
         except Unreachable:
-            return {"ok": False, "exists": False, "error": "unreachable"}
+            result = {"ok": False, "exists": False, "error": "unreachable"}
+            self.crew_exists_cache[unreachable_key] = (now + CREW_EXISTS_UNREACHABLE_TTL_S, result)
+            return result
         if resp.ok and isinstance(resp.body, dict):
             return {
                 "ok": True,
@@ -970,7 +990,12 @@ class Crewd:
                 "crew_id": (resp.body.get("crew") or {}).get("id"),
                 "project_id": resp.body.get("project_id"),
             }
-        return {"ok": True, "exists": False}
+        result = {"ok": True, "exists": False}
+        if resp.status == 404:
+            if len(self.crew_exists_cache) > 1000:
+                self.crew_exists_cache = {k: v for k, v in self.crew_exists_cache.items() if v[0] > now}
+            self.crew_exists_cache[cache_key] = (now + CREW_EXISTS_NEGATIVE_TTL_S, result)
+        return result
 
     async def brief(self, peer: Peer, args: Mapping[str, Any]) -> dict[str, Any]:
         sess = self.require(peer, args.get("key"))
@@ -1105,7 +1130,10 @@ class Crewd:
             top = str(sess["toplevel"])
             others_here = [s for s in self.crew_sessions(crew_id) if s is not sess and s.get("toplevel") == top]
             if others_here:
-                continue  # only in the advisory session's own worktree
+                # only in the advisory session's own worktree: once another session works here, lift any
+                # fence applied before, or that session's granted writes would hit EACCES
+                self.lift_fence(top, why=f"{sess.get('callsign')}: checkout shared")
+                continue
             zones = zones_to_fence(snap, str(sess["session_id"]))
             try:
                 res = self.fence.apply(top, zones, case_insensitive=bool(sess.get("case_insensitive")))
@@ -1114,6 +1142,18 @@ class Crewd:
                 continue
             if res.fenced or res.restored:
                 log.info("fence %s: +%d -%d", sess.get("callsign"), len(res.fenced), len(res.restored))
+
+    def lift_fence(self, toplevel: str, *, why: str) -> None:
+        """Restore every fenced mode of one checkout (no-op when nothing is fenced there)."""
+        if not self.fence.fenced(toplevel):
+            return
+        try:
+            res = self.fence.restore(toplevel)
+        except OSError as e:
+            log.warning("fence restore failed in %s (%s): %s", toplevel, why, e.__class__.__name__)
+            return
+        if res.restored or res.errors:
+            log.info("fence lifted (%s): -%d, %d error(s)", why, len(res.restored), len(res.errors))
 
     def save_batons(self) -> None:
         write_json(self.layout.run / "batons.json", {"refs": self.batons})
@@ -2080,10 +2120,21 @@ class Crewd:
         return hits
 
     # -- gate integrity, git hooks, zones, tree ------------------------------------------------------
+    def gate_expected(self) -> bool:
+        """``remembra-crew connect`` recorded agent hooks that run the gate (``install.json``).
+
+        A deleted gate is then restored like a modified one: the agent hooks still point at it. After a
+        full uninstall the manifest has no agents and a missing gate stays missing.
+        """
+        data = read_json(self.layout.root / "install.json") or {}
+        agents = data.get("agents")
+        return isinstance(agents, dict) and any(agents.values())
+
     def check_gate(self) -> dict[str, Any]:
         check = verify_gate(self.layout)
         restored = False
-        if check.installed and not check.ok and self.restore_gate:
+        tampered = (check.installed and not check.ok) or (not check.installed and self.gate_expected())
+        if tampered and self.restore_gate:
             argv = (read_json(self.layout.crewd_cmd) or {}).get("argv")
             vendor_gate(self.layout, crewd_argv=argv if isinstance(argv, list) else None)
             restored = True
@@ -2336,13 +2387,16 @@ class Crewd:
             restore: dict[str, Any] | None = None
             if baton_ref:
                 label = f"T-{task.get('number')}"
-                result = await asyncio.to_thread(
-                    B.restore_baton,
-                    str(sess["toplevel"]),
-                    str(baton_ref),
-                    remote=sess.get("remote"),
-                    retry_command=f"remembra-crew adopt {label} --restore-only",
-                )
+                retry = f"remembra-crew adopt {label} --restore-only"
+                # The adopter now holds the task's zones: lift this checkout's read-only fence before the
+                # restore writes into them (the next snapshot sync re-fences whatever still applies).
+                self.lift_fence(str(sess["toplevel"]), why=f"{sess.get('callsign')} adopted {label}")
+                try:
+                    result = await asyncio.to_thread(
+                        B.restore_baton, str(sess["toplevel"]), str(baton_ref), remote=sess.get("remote"), retry_command=retry
+                    )
+                except B.GitError as e:  # git itself failed before anything was changed (a timeout, git missing)
+                    result = B.RestoreResult(False, "restore_failed", str(baton_ref), next_command=retry, error=str(e)[:300])
                 restore = result.as_dict()
                 if result.restored:
                     rec = self.batons.setdefault(str(baton_ref), {"crew_id": sess["crew_id"], "toplevel": str(sess["toplevel"])})
@@ -2667,6 +2721,12 @@ class Crewd:
             return {"ok": False, "error": e.code, "message": e.message, **e.extra}
         except Unreachable as e:
             return {"ok": False, "error": "unreachable", "message": str(e)}
+        except B.GitError as e:
+            log.warning("%s: git failed: %s", op, e)
+            return {"ok": False, "error": "git_failed", "message": str(e)[:300]}
+        except Exception as e:  # always answer: a caller with no reply cannot tell whether the op ran
+            log.exception("%s failed: %s", op, e)
+            return {"ok": False, "error": "internal_error", "message": f"crewd {op} failed ({e.__class__.__name__})"}
 
     # -- socket server -------------------------------------------------------------------------------
     async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
