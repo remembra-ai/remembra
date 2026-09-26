@@ -3,11 +3,13 @@
 Docs: https://developers.openai.com/codex/hooks (also served at
 https://learn.chatgpt.com/docs/hooks), accessed 2026-09-25.
 
-Verified by a live round trip with codex-cli 0.155.0-alpha.16.4 (the binary
-bundled in ChatGPT.app) in a temp repository with a temp ``CODEX_HOME``, a local
-stand-in for the model API and a local Remembra server; no credentials were
-used. See tests/test_relay_codex_live.py; the payloads and rollout it recorded
-are in tests/fixtures/relay/codex/. Only that version has been run.
+Verified by a round trip with codex-cli 0.155.0-alpha.16.4, a prerelease (the
+binary bundled in ChatGPT.app), run through ``codex exec`` in a temp repository
+with a temp ``CODEX_HOME``, a local stand-in for the model API and a local
+Remembra server; no credentials were used. The Claude Code close before it was
+replayed through that adapter's hook path, not a live Claude Code session. See
+tests/test_relay_codex_live.py; the payloads and rollout it recorded are in
+tests/fixtures/relay/codex/. Only that version has been run.
 
 What the run showed (and the docs say):
 
@@ -41,6 +43,12 @@ from remembra.relay.adapters.base import AdapterSpec, JsonHooksAdapter, PayloadM
 
 TESTED_VERSIONS = ("0.155.0-alpha.16.4",)
 
+
+def _tested(version: str) -> str:
+    """A tested version as the notes print it; a semver prerelease (``-alpha``...) is labelled as one."""
+    return f"{version} (prerelease)" if "-" in version else version
+
+
 SPEC = AdapterSpec(
     name="codex",
     display="OpenAI Codex CLI",
@@ -62,7 +70,10 @@ SPEC = AdapterSpec(
         "Open Codex and run /hooks to trust the three remembra-relay hooks (SessionStart, UserPromptSubmit, SessionEnd); "
         "they will not run until you do. Codex asks again whenever a hook's command changes."
     ),
-    notes=f"Verified with codex-cli {', '.join(TESTED_VERSIONS)} (live round trip); other versions have not been run.",
+    notes=(
+        f"Verified with codex-cli {', '.join(_tested(v) for v in TESTED_VERSIONS)}, "
+        "run through codex exec with a local stand-in for the model; other versions have not been run."
+    ),
 )
 
 ADAPTER = JsonHooksAdapter(SPEC)

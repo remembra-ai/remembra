@@ -52,16 +52,19 @@ remembra-install --all --api-key <your key> --url <your server URL>   # writes ~
 | Agent | Hooks | Status |
 |-------|-------|--------|
 | Claude Code | `~/.claude/settings.json` SessionStart → `brief`, SessionEnd → `close` (transcript parsed) | verified |
-| Codex CLI | `~/.codex/hooks.json` SessionStart → `brief`, UserPromptSubmit → `brief --once`, SessionEnd → `close` (rollout parsed) | verified (codex-cli 0.155.0-alpha.16.4) |
+| Codex CLI | `~/.codex/hooks.json` SessionStart → `brief`, UserPromptSubmit → `brief --once`, SessionEnd → `close` (rollout parsed) | verified (codex-cli 0.155.0-alpha.16.4, a prerelease) |
 | Cursor IDE | `~/.cursor/hooks.json` sessionStart / sessionEnd (`additional_context` output) | unverified |
 | Gemini CLI | `~/.gemini/settings.json` SessionStart / SessionEnd (JSON-only stdout, timeouts in ms) | unverified |
 | Qwen Code | `~/.qwen/settings.json` SessionStart / SessionEnd (timeouts in seconds) | unverified |
 | Kimi Code | `~/.kimi/config.toml` `[[hooks]]` | unverified |
 
 "Verified" means the hooks were run against the real tool: Claude Code against its hook docs and real
-transcripts; Codex in a live round trip (a Claude Code close, then a real `codex exec` that got the brief,
-ran commands and left its own handoff), recorded under `tests/fixtures/relay/codex/`. Only the Codex version
-in the table has been run. Cursor, Gemini CLI and Qwen Code are built from their hook docs and tested
+transcripts; Codex in a round trip recorded under `tests/fixtures/relay/codex/`: a Claude Code close replayed
+through its verified hook path (not a live Claude Code session), then a real `codex exec` that got the brief,
+ran commands and left its own handoff. That run used a local stand-in for the model, and recorded hook trust
+the way `/hooks` records it (the hash Codex's app server reports), not through the `/hooks` screen. Only the
+Codex version in the table has been run; it is a prerelease (the build bundled in ChatGPT.app), and no stable
+Codex release has been run yet. Cursor, Gemini CLI and Qwen Code are built from their hook docs and tested
 against payloads written from those docs, not against the tools.
 
 Unverified adapters are dry-run only unless you pass `--include-unverified`; `connect --apply` ends by

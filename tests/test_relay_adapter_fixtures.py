@@ -76,6 +76,19 @@ def test_codex_fixtures_are_a_recorded_run():
     assert start["transcript_path"] == end["transcript_path"]
 
 
+def test_codex_notes_label_the_recorded_build_a_prerelease():
+    """The only run build is an alpha; the note must not read as a stable release."""
+    from remembra.relay.adapters import codex
+
+    recorded = json.loads((CODEX / "RECORDED.json").read_text())["codex_cli"]
+    assert recorded in codex.TESTED_VERSIONS
+    assert f"{recorded} (prerelease)" in codex.SPEC.notes
+    assert "local stand-in for the model" in codex.SPEC.notes and "live round trip" not in codex.SPEC.notes
+    assert codex._tested("0.155.0-alpha.16.4") == "0.155.0-alpha.16.4 (prerelease)"
+    assert codex._tested("0.158.0-rc.1") == "0.158.0-rc.1 (prerelease)"
+    assert codex._tested("0.157.1") == "0.157.1"  # a stable release is named plainly
+
+
 @pytest.mark.parametrize(
     ("name", "event", "reason"),
     [

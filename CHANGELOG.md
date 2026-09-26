@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Codex hooks verified.** `remembra-relay connect` now writes Codex's SessionStart, UserPromptSubmit and
-  SessionEnd hooks by default, after a live round trip with codex-cli 0.155.0-alpha.16.4 (a Claude Code
-  close, then a real `codex exec` that received the brief and left its own handoff; recorded under
-  `tests/fixtures/relay/codex/`). `connect` tells you to trust the hooks in Codex's `/hooks`, since Codex
+  SessionEnd hooks by default, after a round trip with codex-cli 0.155.0-alpha.16.4, the prerelease bundled
+  in ChatGPT.app: a Claude Code close replayed through its verified hook path (not a live Claude Code
+  session), then a real `codex exec`, run against a local stand-in for the model, that received the brief,
+  ran commands and left its own handoff; recorded under `tests/fixtures/relay/codex/`. No stable Codex
+  release has been run, and hook trust was recorded as `/hooks` records it rather than through that screen. `connect` tells you to trust the hooks in Codex's `/hooks`, since Codex
   skips untrusted hooks without a message. Codex rollouts are parsed for commands, exit codes, test runs,
   edited files and plan steps. A session whose last turn stopped on Codex's usage limit is handed off as
   `ended: usage_limit`, with Codex's message first under the errors.

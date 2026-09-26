@@ -449,6 +449,11 @@ def test_connect_codex_writes_three_hooks_and_says_they_need_trust(home):
     assert out.returncode == 0, out.stderr
     assert "OpenAI Codex CLI (verified)" in out.stdout and "Not written" not in out.stdout
     assert trust in out.stdout and "they will not run until you do" in out.stdout
+    # the note says which build was run and how, not just "verified"
+    assert (
+        "note: Verified with codex-cli 0.155.0-alpha.16.4 (prerelease), run through codex exec "
+        "with a local stand-in for the model; other versions have not been run." in out.stdout
+    )
     hooks = json.loads((home / ".codex" / "hooks.json").read_text())["hooks"]
     assert {e: [h["hooks"][0] for h in hooks[e]] for e in hooks} == {
         "SessionStart": [{"type": "command", "command": f"{relay_cmd} brief --hook codex --agent codex", "timeout": 15}],
