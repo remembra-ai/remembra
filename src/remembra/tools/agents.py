@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from remembra.relay.adapters.base import Change, backup_and_write
+from remembra.relay.config_view import loads_jsonc
 from remembra.tools.codex import (
     DEFAULT_CODEX_CONFIG,
     _is_remembra_table,
@@ -211,15 +212,28 @@ def build_mcp_server_config(
 
 
 def _json_object(text: str | None, path: Path) -> dict[str, Any]:
-    if not text or not text.strip():
+    """``text`` as a JSON object ({} when empty). A byte order mark, comments and trailing commas are
+    accepted: Cursor, Gemini CLI and Qwen Code read their files that way (see :func:`loads_jsonc`)."""
+    if not text or not text.removeprefix("\ufeff").strip():
         return {}
     try:
-        data = json.loads(text)
+        data, _ = loads_jsonc(text)
     except json.JSONDecodeError as exc:
         raise ValueError(f"{path} is not valid JSON ({exc.msg} at line {exc.lineno}); fix or move it, then re-run") from exc
     if not isinstance(data, dict):
         raise ValueError(f"{path} is not a JSON object")
     return data
+
+
+def _comments_note(before: str | None, path: Path) -> list[str]:
+    """The summary line for rewriting a file whose comments the rewrite drops (none otherwise)."""
+    if not before:
+        return []
+    try:
+        _, with_comments = loads_jsonc(before)
+    except ValueError:
+        return []
+    return [f"comments in {path.name} are not kept; the backup keeps them"] if with_comments else []
 
 
 def plan_json_config(config_path: Path, server_config: dict[str, Any], *, first: bool = False) -> Change:
@@ -241,7 +255,7 @@ def plan_json_config(config_path: Path, server_config: dict[str, Any], *, first:
     new = {"mcpServers": merged, **data} if first and servers is None else {**data, "mcpServers": merged}
     after = json.dumps(new, indent=2, ensure_ascii=False) + "\n"
     summary = ["update the remembra MCP server" if existing is not None else "add the remembra MCP server"]
-    return Change(path=config_path, before=before, after=after, summary=summary)
+    return Change(path=config_path, before=before, after=after, summary=summary + _comments_note(before, config_path))
 
 
 def plan_json_removal(config_path: Path, *, keep_file: bool = False) -> Change:
@@ -263,9 +277,9 @@ def plan_json_removal(config_path: Path, *, keep_file: bool = False) -> Change:
     else:
         del new["mcpServers"]
     after = json.dumps(new, indent=2, ensure_ascii=False) + "\n"
-    return Change(
-        path=config_path, before=before, after=after, summary=["remove the remembra MCP server"], delete=not new and not keep_file
-    )
+    delete = not new and not keep_file
+    summary = ["remove the remembra MCP server", *([] if delete else _comments_note(before, config_path))]
+    return Change(path=config_path, before=before, after=after, summary=summary, delete=delete)
 
 
 def plan_claude_code_old_entry() -> Change | None:
@@ -448,7 +462,7 @@ def _entry_url(agent: str, config_path: Path) -> str | None:
         if agent in TOML_AGENTS:
             server = (tomllib.loads(text).get("mcp_servers") or {}).get("remembra") or {}
         else:
-            data = json.loads(text)
+            data, _ = loads_jsonc(text)
             server = (data.get("mcpServers") or {}).get("remembra") or {} if isinstance(data, dict) else {}
     except (ValueError, AttributeError):
         return None

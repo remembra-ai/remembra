@@ -234,10 +234,18 @@ def test_a_later_session_end_supersedes_the_stop_handoff_in_either_order(server,
     assert len(trail) == 1 and trail[0]["detail"]["end_reason"] == "other"
     assert len(_handoffs(server, "limit-order")) == 1  # one current row; the stop handoff is superseded
 
-    # StopFailure is fire-and-forget: it can land after SessionEnd. Still one current handoff.
+    # The same StopFailure delivered again is a repeat of a close that already ran: dropped (C2).
     assert relay(home, server, *args, stdin=stop).returncode == 0
     trail = _trail(server, "limit-order")
-    assert len(trail) == 1 and trail[0]["detail"]["end_reason"] == "rate_limit"
+    assert len(trail) == 1 and trail[0]["detail"]["end_reason"] == "other"
+
+    # StopFailure is fire-and-forget: it can land after SessionEnd. Still one current handoff, the later one.
+    late = {**common, "session_id": "sess-order-2"}
+    assert relay(home, server, *args, stdin=_fixture("sessionend-after-rate_limit.json", **late)).returncode == 0
+    assert relay(home, server, *args, stdin=_fixture("stopfailure-rate_limit.json", **late)).returncode == 0
+    newest = [i for i in _trail(server, "limit-order") if i["session_id"] == "sess-order-2"]
+    assert len(newest) == 1 and newest[0]["detail"]["end_reason"] == "rate_limit"
+    assert len(_handoffs(server, "limit-order")) == 2  # one current row per session
 
 
 def test_billing_error_and_pre_compact_are_named_in_the_brief(server, home, tmp_path):
@@ -851,7 +859,9 @@ def test_disconnect_restores_each_agent_to_its_pre_connect_settings(home, name):
     if before is not None:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(before)
-    connect = relay(home, "http://x", "connect", "--agent", name, "--apply", "--include-unverified", "--relay-command", RELAY_CMD)
+    # --force: an agent with no config before connect may not be detected here (no binary on PATH).
+    args = ("connect", "--agent", name, "--apply", "--include-unverified", "--force", "--relay-command", RELAY_CMD)
+    connect = relay(home, "http://x", *args)
     assert connect.returncode == 0, connect.stderr
     connected = path.read_text()
     assert RELAY_CMD in connected
@@ -864,12 +874,17 @@ def test_disconnect_restores_each_agent_to_its_pre_connect_settings(home, name):
     applied = relay(home, "http://x", "disconnect", "--agent", name, "--apply")
     assert applied.returncode == 0, applied.stderr
     if before is None:
-        assert not path.exists()  # the file only ever held our hooks
+        # The file only ever held our hooks, in a directory connect created: both are gone, backups too.
+        assert not path.exists() and not path.parent.exists()
+        assert (
+            f"Removed the directories connect had created (only the relay's backups were left in them): {path.parent}"
+            in applied.stdout
+        )
     else:
         assert _parsed(name, path.read_text()) == _parsed(name, before)
-    backups = list(path.parent.glob(f"{path.name}.bak-relay-*"))
-    assert any(b.read_text() == connected for b in backups)
-    assert all(_mode(b) == 0o600 for b in backups)
+        backups = list(path.parent.glob(f"{path.name}.bak-relay-*"))
+        assert any(b.read_text() == connected for b in backups)
+        assert all(_mode(b) == 0o600 for b in backups)
     again = relay(home, "http://x", "disconnect", "--agent", name, "--apply")
     assert "no relay hooks" in again.stdout
 
@@ -888,6 +903,7 @@ def test_disconnect_without_apply_touches_no_file(home, tmp_path):
         *agents,
         "--apply",
         "--include-unverified",
+        "--force",  # an empty ~/.gemini is not Gemini CLI being installed (Antigravity uses it too)
         "--agents-md",
         str(md),
         "--relay-command",

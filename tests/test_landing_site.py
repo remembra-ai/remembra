@@ -267,14 +267,20 @@ def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
 
     specs = [adapter.spec for adapter in REGISTRY.values()]
     unverified = [spec for spec in specs if not spec.verified]
-    assert [spec.name for spec in specs if spec.verified] == ["claude-code", "codex"]
+    assert [spec.name for spec in specs if spec.verified] == ["claude-code", "codex", "gemini", "qwen", "kimi"]
     assert "codex-cli 0.155" in note and REGISTRY["codex"].spec.notes.startswith("Verified with codex-cli 0.155.")
     # only a prerelease was run, through codex exec against a local model stand-in (codex.TESTED_VERSIONS)
     assert "Codex with a prerelease of codex-cli 0.155 (" in note and "codex exec" in note
     assert "with a local stand-in for the model)" in note
     assert "other Codex versions have not been run" in note and "live round trip" not in note
-    assert len(unverified) == 4  # Cursor, Gemini CLI, Qwen Code and Kimi, as the note names them
-    assert "hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified" in note
+    # Gemini CLI, Qwen Code and Kimi Code: the one version each that was run (their TESTED_VERSIONS)
+    from remembra.relay.adapters import gemini, kimi, qwen
+
+    run = f"(Gemini CLI {gemini.TESTED_VERSIONS[0]}, Qwen Code {qwen.TESTED_VERSIONS[0]}, Kimi Code {kimi.TESTED_VERSIONS[0]})"
+    assert "The Gemini CLI, Qwen Code and Kimi Code hooks are verified too" in note and run in note
+    assert "Gemini CLI runs them only in folders you trust" in note  # gemini.SPEC.setup_note
+    assert [spec.name for spec in unverified] == ["cursor"]
+    assert "The Cursor hooks are unverified" in note and "Cursor reads the brief" in note
     # which agents the second install line really writes MCP config for (tools/agents.py)
     from remembra.tools.agents import AGENT_CONFIGS
 
@@ -569,7 +575,7 @@ def test_play_after_a_tap_finishes_that_trail_then_returns_to_the_first_tab() ->
 TEST_RESULT = re.compile(r"\btests? passed\b|\bfailing\b")  # a verdict, not a to-do about tests
 
 
-HOOKED = {"Claude Code", "OpenAI Codex"}  # the verified adapters (relay/adapters: verified=True)
+HOOKED = {"Claude Code", "OpenAI Codex"}  # the agents the demo shows closing through session hooks
 
 
 def _check_agent_facts(s: dict[str, Any]) -> None:

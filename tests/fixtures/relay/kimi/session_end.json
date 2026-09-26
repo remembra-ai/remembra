@@ -1,0 +1,8 @@
+{
+  "hook_event_name": "SessionEnd",
+  "session_id": "session_4b07bc0e-a92f-44ae-8275-0463725a7c31",
+  "cwd": "/home/dev/work/widget",
+  "client_type": "kimi_code_cli",
+  "reason": "exit",
+  "session_title": "First prompt."
+}

@@ -1,0 +1,12 @@
+{
+  "session_id": "6f6fec00-68df-42cd-b9ed-910758c12465",
+  "transcript_path": "/home/dev/.qwen/projects/-home-dev-work-widget/chats/6f6fec00-68df-42cd-b9ed-910758c12465.jsonl",
+  "cwd": "/home/dev/work/widget",
+  "hook_event_name": "StopFailure",
+  "timestamp": "2026-09-26T17:43:16.684Z",
+  "permission_mode": "auto",
+  "prompt_id": "6f6fec00-68df-42cd-b9ed-910758c12465########1",
+  "error": "billing_error",
+  "error_details": "402 You exceeded your current quota, please check your plan and billing details.",
+  "last_assistant_message": "[API Error: 402 You exceeded your current quota, please check your plan and billing details.]"
+}

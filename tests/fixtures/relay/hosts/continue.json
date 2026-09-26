@@ -1,0 +1,25 @@
+{
+  "host": "continue",
+  "how": "built from the source, not recorded: continuedev/continue extensions/cli/src/hooks (fireHook.ts getCommonFields: transcript_path is always \"\"; hookRunner.ts sets CLAUDE_PROJECT_DIR and CONTINUE_PROJECT_DIR; types.ts event fields).",
+  "hook_cwd": "/home/dev/work/widget",
+  "env": {
+    "CLAUDE_PROJECT_DIR": "/home/dev/work/widget",
+    "CONTINUE_PROJECT_DIR": "/home/dev/work/widget"
+  },
+  "payloads": {
+    "start": {
+      "session_id": "5c9e2b7a-1f3d-4e8a-b6c4-2d7f9a0e1b3c",
+      "transcript_path": "",
+      "cwd": "/home/dev/work/widget",
+      "hook_event_name": "SessionStart",
+      "source": "startup"
+    },
+    "end": {
+      "session_id": "5c9e2b7a-1f3d-4e8a-b6c4-2d7f9a0e1b3c",
+      "transcript_path": "",
+      "cwd": "/home/dev/work/widget",
+      "hook_event_name": "SessionEnd",
+      "reason": "prompt_input_exit"
+    }
+  }
+}

@@ -57,6 +57,8 @@ SPEC = AdapterSpec(
     start_event="SessionStart",
     end_event="SessionEnd",
     prompt_event="UserPromptSubmit",
+    # A resumed thread replays its developer messages, the brief among them: resume does not refetch it.
+    resume_keeps_brief_from=("SessionStart", "UserPromptSubmit"),
     payload=PayloadMap(session_id=("session_id",), cwd=("cwd",), transcript=("transcript_path",), reason=("reason",)),
     output="text",
     transcript_format="codex-rollout-jsonl",
@@ -66,6 +68,7 @@ SPEC = AdapterSpec(
     hook_timeouts={"start": 15, "prompt": 15, "end": 3},
     timeout_unit="s",
     detach_close=True,
+    home_env="CODEX_HOME",
     setup_note=(
         "Open Codex and run /hooks to trust the three remembra-relay hooks (SessionStart, UserPromptSubmit, SessionEnd); "
         "they will not run until you do. Codex asks again whenever a hook's command changes."

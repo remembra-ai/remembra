@@ -19,9 +19,9 @@ const KNOWN: Record<string, Omit<AgentMeta, 'id'>> = {
   'claude-code': { name: 'Claude Code', monogram: 'CC', lane: '#9a5530', adapter: 'claude-code', verified: true },
   codex: { name: 'Codex', monogram: 'CX', lane: '#356b5d', adapter: 'codex', verified: true },
   cursor: { name: 'Cursor', monogram: 'CU', lane: '#4a6096', adapter: 'cursor' },
-  gemini: { name: 'Gemini CLI', monogram: 'GE', lane: '#3d74a6', adapter: 'gemini' },
-  qwen: { name: 'Qwen Code', monogram: 'QW', lane: '#7a55a0', adapter: 'qwen' },
-  kimi: { name: 'Kimi CLI', monogram: 'KI', lane: '#96465e', adapter: 'kimi' },
+  gemini: { name: 'Gemini CLI', monogram: 'GE', lane: '#3d74a6', adapter: 'gemini', verified: true },
+  qwen: { name: 'Qwen Code', monogram: 'QW', lane: '#7a55a0', adapter: 'qwen', verified: true },
+  kimi: { name: 'Kimi Code', monogram: 'KI', lane: '#96465e', adapter: 'kimi', verified: true },
   dashboard: { name: 'You (dashboard)', monogram: 'YOU', lane: '#5f656b' },
 };
 
@@ -78,6 +78,7 @@ const ALIASES: Record<string, string> = {
   'gemini-cli': 'gemini',
   'qwen-code': 'qwen',
   'kimi-cli': 'kimi',
+  'kimi-code': 'kimi',
 };
 
 function hash(text: string): number {
@@ -92,6 +93,12 @@ function titleCase(id: string): string {
     .filter(Boolean)
     .map((part) => part[0].toUpperCase() + part.slice(1))
     .join(' ');
+}
+
+/** Names as a sentence lists them: "A", "A and B", "A, B and C". */
+export function joinNames(names: string[]): string {
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
 /** Canonical id for known agents ("Claude" -> "claude-code"); others unchanged. */

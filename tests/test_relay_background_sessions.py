@@ -501,6 +501,90 @@ def test_a_sub_agent_sharing_its_parent_session_id_leaves_the_parent_alone(relay
     assert all(PARENT_SESSION not in line or sub_line in line for line in _log(relay_env["home"]))
 
 
+def test_an_automation_running_claude_codes_copied_hooks_is_skipped_after_routing(relay_env, monkeypatch, capsys):
+    """Codex can run Claude Code's hooks (its importer copies them): the close is routed to codex, then skipped.
+
+    The skip runs before the routing on the hook's own adapter (Claude Code's
+    transcripts are not Codex rollouts, so nothing is skipped there), and again
+    on the agent the routing names: an automation thread of that agent leaves no
+    handoff either, and no detached close is started for it. A thread someone
+    started, run the same way, is filed as codex and handed to the detached child.
+    """
+    sessions = relay_env["home"] / ".codex" / "sessions" / "2026" / "09" / "26"
+    sessions.mkdir(parents=True)
+    auto_id, user_id = _session_id("automation"), _session_id("user")
+    automation, user = sessions / "rollout-automation.jsonl", sessions / "rollout-user.jsonl"
+    automation.write_text((THREADS / "automation.jsonl").read_text())
+    user.write_text((THREADS / "user.jsonl").read_text())
+    claude_close = ["close", "--hook", "claude-code", "--agent", "claude-code", "--next", "carry on"]
+
+    for argv in (claude_close, [*claude_close, "--foreground"]):  # the hook, and the detached child's path
+        assert _main(monkeypatch, capsys, argv, _payload(relay_env, automation, "SessionEnd", auto_id)) == (0, "", "")
+    assert relay_env["spawned"] == [] and relay_env["http"].requests == []
+    assert outbox.pending(relay_env["home"]) == []
+    assert (
+        _log(relay_env["home"])
+        == [
+            "close --hook claude-code: run by codex, filed as codex",
+            f"skipped close: codex automation session {auto_id}",
+        ]
+        * 2
+    )
+    code, out, err = _main(
+        monkeypatch, capsys, [*claude_close, "--dry-run"], _payload(relay_env, automation, "SessionEnd", auto_id)
+    )
+    assert (code, out) == (0, "") and "close skipped: a codex automation session leaves no handoff" in err
+
+    assert _main(monkeypatch, capsys, claude_close, _payload(relay_env, user, "SessionEnd", user_id))[0] == 0
+    assert [p["session_id"] for p in relay_env["spawned"]] == [user_id]
+    code, out, err = _main(monkeypatch, capsys, [*claude_close, "--foreground"], _payload(relay_env, user, "SessionEnd", user_id))
+    assert code == 0 and out == "", err
+    assert relay_env["http"].calls() == [("POST", "/api/v1/session/close")]
+    close = relay_env["http"].requests[0][2]
+    assert close["session_id"] == user_id and close["agent_id"] == "codex"
+
+
+def test_close_checks_run_in_order_skip_route_dedupe_then_empty(relay_env, monkeypatch, capsys, tmp_path):
+    """``close --hook``: the automation skip, the host routing, the repeat check, then the empty-session check.
+
+    - A skipped automation claims nothing: its repeats are skipped again, never
+      "dropped as a repeat".
+    - The repeat check comes before the empty check: a repeat of an empty close
+      is dropped as a repeat, and the empty check does not run for it.
+    - The empty check needs the git facts and the transcript, so for an agent that
+      detaches (Codex kills its end hook after at most 3 s) it runs in the detached
+      child: the parent hands an empty session to the child, which sends nothing.
+    """
+    auto_id = _session_id("automation")
+    automation_end = _payload(relay_env, THREADS / "automation.jsonl", "SessionEnd", auto_id)
+    empty_close = ["close", "--hook", "codex", "--agent", "codex"]  # no --next: the session recorded nothing
+    for _ in range(2):
+        assert _main(monkeypatch, capsys, empty_close, automation_end) == (0, "", "")
+    assert _log(relay_env["home"]) == [_skip_line("close", "automation", "automation")] * 2
+    assert relay_env["spawned"] == []
+
+    # A Claude Code session that recorded nothing (Claude Code does not detach: one process does it all).
+    transcript = tmp_path / "claude.jsonl"
+    transcript.write_text("")
+    end = json.dumps(
+        {"session_id": "idle-claude", "transcript_path": str(transcript), "cwd": str(relay_env["work"]), "reason": "exit"}
+    )
+    claude_close = ["close", "--hook", "claude-code", "--agent", "claude-code"]
+    for _ in range(2):
+        assert _main(monkeypatch, capsys, claude_close, end)[0] == 0
+    lines = _log(relay_env["home"])[2:]
+    assert len(lines) == 2 and lines[0].startswith("close: nothing to hand off for claude-code session idle-claude")
+    assert lines[1].startswith("close: dropped a repeat") and "claude-code session idle-claude" in lines[1]
+
+    # Codex detaches: the parent claims the close and hands it on; the child finds it empty and sends nothing.
+    idle = _payload(relay_env, THREADS / "user.jsonl", "SessionEnd", "idle-codex")
+    assert _main(monkeypatch, capsys, empty_close, idle) == (0, "", "")
+    assert [p["session_id"] for p in relay_env["spawned"]] == ["idle-codex"]
+    assert _main(monkeypatch, capsys, [*empty_close, "--foreground"], idle)[0] == 0
+    assert _log(relay_env["home"])[-1].startswith("close: nothing to hand off for codex session idle-codex")
+    assert relay_env["http"].requests == [] and outbox.pending(relay_env["home"]) == []
+
+
 def test_manual_close_without_a_hook_is_unaffected(relay_env, monkeypatch, capsys):
     """``remembra-relay close`` typed by hand (no --hook) sends, even given an automation's rollout."""
     work = str(relay_env["work"])

@@ -7,7 +7,7 @@ import { PixelHandoff } from '../../brand/PixelHandoff';
 import { ArrowRight, Check, Copy, KeyRound, Loader2, X } from 'lucide-react';
 import type { ActivitySummary, AgentActivity, TrailItem } from '../../lib/relay';
 import { api } from '../../lib/api';
-import { CONNECTABLE_AGENTS, agentMeta, canonicalAgentId, oneLineInstall } from '../../lib/agents';
+import { CONNECTABLE_AGENTS, agentMeta, canonicalAgentId, joinNames, oneLineInstall } from '../../lib/agents';
 import { hrefFor } from '../../lib/nav';
 import { relativeTime } from '../../lib/time';
 import { useCopy } from '../../hooks/useCopy';
@@ -150,9 +150,9 @@ export function ConnectChecklist({
             />
             <p className="mt-1.5 text-xs text-ink-3">
               Want to see every change first? Run <code className="font-mono">remembra-relay connect</code> without{' '}
-              <code className="font-mono">--apply</code>: it is a dry run. It writes hooks for {verifiedNames.join(' and ')}, the verified
+              <code className="font-mono">--apply</code>: it is a dry run. It writes hooks for {joinNames(verifiedNames)}, the verified
               adapters today (Codex runs them only after you trust them: run <code className="font-mono">/hooks</code> in Codex once);
-              for {unverifiedNames.join(', ')}, copy that agent’s command below (it adds{' '}
+              for {joinNames(unverifiedNames)}, copy that agent’s command below (it adds{' '}
               <code className="font-mono">--include-unverified</code>).
             </p>
           </li>

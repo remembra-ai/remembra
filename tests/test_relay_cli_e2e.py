@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -195,8 +196,11 @@ def test_agent_a_closes_agent_b_picks_up_on_another_clone(server, home, tmp_path
     assert SECRET not in json.dumps(handoffs)
     assert "[REDACTED:" in json.dumps(handoffs["memories"][0]["metadata"]) or "make deploy" in content
 
-    # Re-closing the same session updates the handoff instead of adding one.
+    # The session is resumed, goes on and ends again: that close updates the handoff instead of adding
+    # one. (The same end hook run twice with nothing new in between is a repeat and is dropped.)
     (laptop / "NOTES.md").unlink()
+    t.bash("rm NOTES.md", 0, "")
+    t.write(transcript)
     again = relay(home, server, "close", "--hook", "claude-code", "--agent", "claude-code", stdin=hook_end)
     assert again.returncode == 0, again.stderr
     handoffs = _api(server, "GET", "/timeline", params={"project_id": "widget", "memory_type": "handoff"})
@@ -382,66 +386,107 @@ def test_connect_dry_run_then_apply_claude_code(home):
 
 def test_connect_unverified_adapters_need_explicit_opt_in(home):
     relay_cmd = "/opt/bin/remembra-relay"
-    skipped = relay(home, "http://x", "connect", "--agent", "gemini", "--apply", "--relay-command", relay_cmd)
+    (home / ".cursor").mkdir()  # Cursor's own directory: installed here
+    skipped = relay(home, "http://x", "connect", "--agent", "cursor", "--apply", "--relay-command", relay_cmd)
     assert "UNVERIFIED" in skipped.stdout and "skipped: unverified adapter" in skipped.stdout
-    assert not (home / ".gemini" / "settings.json").exists()
+    assert not (home / ".cursor" / "hooks.json").exists()
 
-    written = relay(
-        home,
-        "http://x",
-        "connect",
-        "--agent",
-        "gemini",
-        "--agent",
-        "kimi",
-        "--apply",
-        "--include-unverified",
-        "--relay-command",
-        relay_cmd,
-    )
+    args = ("connect", "--agent", "cursor", "--apply", "--include-unverified", "--relay-command", relay_cmd)
+    written = relay(home, "http://x", *args)
     assert written.returncode == 0, written.stderr
-    gem = json.loads((home / ".gemini" / "settings.json").read_text())
-    assert gem["hooks"]["SessionEnd"][0]["hooks"][0]["command"] == f"{relay_cmd} close --hook gemini --agent gemini"
-    kimi = (home / ".kimi" / "config.toml").read_text()
-    assert kimi.count("[[hooks]]") == 2
-    rerun = relay(home, "http://x", "connect", "--agent", "kimi", "--apply", "--include-unverified", "--relay-command", relay_cmd)
+    hooks = json.loads((home / ".cursor" / "hooks.json").read_text())["hooks"]
+    assert hooks["sessionEnd"] == [{"command": f"{relay_cmd} close --hook cursor --agent cursor", "timeout": 15}]
+    text = (home / ".cursor" / "hooks.json").read_text()
+    rerun = relay(home, "http://x", *args)
     assert "already connected" in rerun.stdout
-    assert (home / ".kimi" / "config.toml").read_text() == kimi
+    assert (home / ".cursor" / "hooks.json").read_text() == text
 
 
-def test_connect_without_a_key_warns_and_fails_but_still_writes_hooks(home):
+def test_connect_writes_the_verified_gemini_qwen_and_kimi_hooks_without_opt_in(home):
+    """Gemini CLI 0.61.0, Qwen Code 0.24.6 and Kimi Code 2.1.1 ran these hooks (tests/test_relay_*_live.py)."""
+    relay_cmd = "/opt/bin/remembra-relay"
+    (home / ".gemini").mkdir()
+    (home / ".gemini" / "settings.json").write_text("{}\n")  # Gemini CLI's own file (Antigravity shares ~/.gemini)
+    (home / ".qwen").mkdir()
+    (home / ".kimi-code").mkdir()
+    agents = ("--agent", "gemini", "--agent", "qwen", "--agent", "kimi")
+    written = relay(home, "http://x", "connect", *agents, "--apply", "--relay-command", relay_cmd, env=NO_AGENT_BINS)
+    assert written.returncode == 0, written.stdout + written.stderr
+    assert "UNVERIFIED" not in written.stdout and "Not written" not in written.stdout
+    gem = json.loads((home / ".gemini" / "settings.json").read_text())["hooks"]
+    assert [gem[e][0]["hooks"][0]["command"] for e in ("SessionStart", "BeforeAgent", "SessionEnd")] == [
+        f"{relay_cmd} brief --hook gemini --agent gemini",
+        f"{relay_cmd} brief --hook gemini --agent gemini --once",
+        f"{relay_cmd} close --hook gemini --agent gemini",
+    ]
+    qwen = json.loads((home / ".qwen" / "settings.json").read_text())["hooks"]
+    assert list(qwen) == ["SessionStart", "SessionEnd", "StopFailure", "PreCompact"]
+    kimi = (home / ".kimi-code" / "config.toml").read_text()
+    assert [(h["event"], h["command"]) for h in tomllib.loads(kimi)["hooks"]] == [
+        ("UserPromptSubmit", f"{relay_cmd} brief --hook kimi --agent kimi --once"),
+        ("SessionEnd", f"{relay_cmd} close --hook kimi --agent kimi"),
+    ]
+    rerun = relay(home, "http://x", "connect", "--agent", "kimi", "--apply", "--relay-command", relay_cmd, env=NO_AGENT_BINS)
+    assert "already connected" in rerun.stdout
+    assert (home / ".kimi-code" / "config.toml").read_text() == kimi
+    assert not (home / ".kimi").exists()  # the archived kimi-cli's directory is never created
+
+
+def test_connect_without_a_key_warns_once_and_still_writes_hooks(home):
+    """C11: a missing key is warned about once, at the end; the writes succeeded, so the exit is 0."""
     settings = _claude_settings(home)
     relay_cmd = "/opt/bin/remembra-relay"
     no_key = {"REMEMBRA_API_KEY": "", "REMEMBRA_URL": ""}
     dry = relay(home, "", "connect", "--agent", "claude-code", "--relay-command", relay_cmd, env=no_key)
-    assert dry.returncode == 1
-    assert '"api_key": "missing"' in dry.stdout
-    assert dry.stderr.count("no Remembra API key found") == 2  # at the top and again at the end
+    assert dry.returncode == 0, dry.stderr
+    # Nothing configured: not the local default URL, which a cloud user never set up.
+    assert "Remembra server: not configured (run remembra-install)" in dry.stdout
+    assert "localhost:8787" not in dry.stdout
+    assert dry.stderr.count("no Remembra API key found") == 1
+    assert dry.stdout.index("Relay command:") < dry.stdout.index("[agents-md]")  # the warning is on stderr, at the end
     assert "remembra-install --all --url <your server URL>" in dry.stderr
     assert "--api-key" not in dry.stderr  # the fix never asks for the key on the command line
     assert "\033[" not in dry.stderr  # not a terminal: no color codes
 
     applied = relay(home, "", "connect", "--agent", "claude-code", "--apply", "--relay-command", relay_cmd, env=no_key)
-    assert applied.returncode == 1 and "no Remembra API key found" in applied.stderr
+    assert applied.returncode == 0 and applied.stderr.count("no Remembra API key found") == 1
     assert "written" in applied.stdout  # the hooks read the key at run time, so they are still installed
     assert json.loads(settings.read_text())["hooks"]["SessionEnd"][0]["hooks"][0]["command"].startswith(relay_cmd)
+    status = relay(home, "", "status", "--no-check", env=no_key)
+    assert status.returncode == 1  # status is where a missing key is a problem to fix
+    assert "server: not configured (run remembra-install)" in status.stdout and "key: none found" in status.stdout
 
-    # With the credentials file remembra-install writes, the same command is clean.
+    # A server set without a key is named; with the credentials file remembra-install writes, no warning at all.
+    url_only = relay(
+        home,
+        "",
+        "connect",
+        "--agent",
+        "claude-code",
+        "--relay-command",
+        relay_cmd,
+        env={**no_key, "REMEMBRA_URL": "https://self.example"},
+    )
+    assert "Remembra server: https://self.example (no API key yet)" in url_only.stdout
     creds = home / ".remembra" / "credentials"
     creds.parent.mkdir(parents=True, exist_ok=True)
     creds.write_text(json.dumps({"api_key": "rem_from_credentials", "url": "http://x"}))
     ok = relay(home, "", "connect", "--agent", "claude-code", "--relay-command", relay_cmd, env=no_key)
     assert ok.returncode == 0 and ok.stderr == "", ok.stderr
-    assert '"api_key": "set"' in ok.stdout and "rem_from_credentials" not in ok.stdout
+    assert f"Remembra server: http://x (key from credentials:{creds})" in ok.stdout
+    assert "rem_from_credentials" not in ok.stdout
 
 
 def test_connect_apply_lists_the_unverified_adapters_it_skipped(home):
     relay_cmd = "/opt/bin/remembra-relay"
-    out = relay(home, "http://x", "connect", "--agent", "qwen", "--agent", "gemini", "--apply", "--relay-command", relay_cmd)
+    for installed in (".cursor", ".qwen"):
+        (home / installed).mkdir()
+    out = relay(home, "http://x", "connect", "--agent", "qwen", "--agent", "cursor", "--apply", "--relay-command", relay_cmd)
     assert out.returncode == 0, out.stderr
-    assert "Not written (unverified adapters): gemini, qwen." in out.stdout
-    assert "remembra-relay connect --apply --include-unverified --agent gemini --agent qwen" in out.stdout
-    dry = relay(home, "http://x", "connect", "--agent", "qwen", "--relay-command", relay_cmd)
+    assert "Not written (unverified adapters): cursor." in out.stdout
+    assert "remembra-relay connect --apply --include-unverified --agent cursor" in out.stdout
+    assert (home / ".qwen" / "settings.json").exists()  # verified: written
+    dry = relay(home, "http://x", "connect", "--agent", "cursor", "--relay-command", relay_cmd)
     assert "Not written (unverified adapters)" not in dry.stdout  # a dry run writes nothing anyway
 
 
@@ -483,3 +528,277 @@ def test_connect_agents_md_block_is_idempotent(home, tmp_path):
     assert f"`{relay_cmd} close --agent <your-agent-id>`" in text
     relay(home, "http://x", "connect", "--agent", "cursor", "--agents-md", str(md), "--apply", "--relay-command", relay_cmd)
     assert md.read_text() == text
+
+
+# ---------------------------------------------------------------------------
+# C10: which agents connect writes, and what disconnect takes away again
+# ---------------------------------------------------------------------------
+
+
+# git only: no agent binary is found on PATH (this machine may have `cursor` or `codex` installed).
+NO_AGENT_BINS = {"PATH": "/usr/bin:/bin"}
+
+
+def _created(home: Path) -> list[str]:
+    path = home / ".remembra" / "relay" / "created.json"
+    return json.loads(path.read_text())["dirs"] if path.exists() else []
+
+
+def test_connect_refuses_an_agent_that_is_not_installed_unless_forced(home):
+    """Writing hooks for an absent agent created its directory, which every detector then took for an install."""
+    relay_cmd = "/opt/bin/remembra-relay"
+    cursor = home / ".cursor"
+    dry = relay(home, "http://x", "connect", "--agent", "cursor", "--relay-command", relay_cmd, env=NO_AGENT_BINS)
+    assert dry.returncode == 0, dry.stderr
+    assert f"not detected on this machine: --apply writes it only with --force (it would create {cursor})" in dry.stdout
+    assert not cursor.exists()
+
+    refused = relay(
+        home,
+        "http://x",
+        "connect",
+        "--agent",
+        "cursor",
+        "--apply",
+        "--include-unverified",
+        "--relay-command",
+        relay_cmd,
+        env=NO_AGENT_BINS,
+    )
+    assert refused.returncode == 1
+    assert (
+        f"not written: Cursor (IDE + cursor-agent) is not detected on this machine and {cursor} does not exist" in refused.stdout
+    )
+    assert "Not written (not detected on this machine): cursor. If one is installed where this" in refused.stdout
+    assert not cursor.exists() and _created(home) == []
+
+    forced = relay(
+        home,
+        "http://x",
+        "connect",
+        "--agent",
+        "cursor",
+        "--apply",
+        "--include-unverified",
+        "--force",
+        "--relay-command",
+        relay_cmd,
+    )
+    assert forced.returncode == 0, forced.stdout + forced.stderr
+    assert (cursor / "hooks.json").exists() and _created(home) == [str(cursor)]
+    again = relay(
+        home,
+        "http://x",
+        "connect",
+        "--agent",
+        "cursor",
+        "--apply",
+        "--include-unverified",
+        "--relay-command",
+        relay_cmd,
+        env=NO_AGENT_BINS,
+    )
+    assert again.returncode == 0 and "already connected, no change" in again.stdout  # its directory exists now
+
+    gone = relay(home, "http://x", "disconnect", "--agent", "cursor", "--apply", env=NO_AGENT_BINS)
+    assert gone.returncode == 0, gone.stderr
+    assert not cursor.exists() and _created(home) == []
+    assert f"Removed the directories connect had created (only the relay's backups were left in them): {cursor}" in gone.stdout
+
+
+def test_disconnect_keeps_a_created_directory_that_holds_something_else(home):
+    relay_cmd = "/opt/bin/remembra-relay"
+    args = ("connect", "--agent", "qwen", "--apply", "--include-unverified", "--force", "--relay-command", relay_cmd)
+    assert relay(home, "http://x", *args, env=NO_AGENT_BINS).returncode == 0
+    qwen = home / ".qwen"
+    (qwen / "installation_id").write_text("qwen was installed since\n")  # the agent's own file
+    gone = relay(home, "http://x", "disconnect", "--apply", env=NO_AGENT_BINS)
+    assert gone.returncode == 0 and "Removed the directories" not in gone.stdout
+    assert qwen.is_dir() and not (qwen / "settings.json").exists()
+    assert _created(home) == [str(qwen)]  # still ours to clean once only our backups are left
+    (qwen / "installation_id").unlink()
+    later = relay(home, "http://x", "disconnect", "--apply", env=NO_AGENT_BINS)
+    assert not qwen.exists() and _created(home) == [] and "Removed the directories" in later.stdout
+
+
+def test_nested_directories_connect_created_are_removed_innermost_first(home, tmp_path):
+    relay_cmd = "/opt/bin/remembra-relay"
+    moved = tmp_path / "configs" / "agents" / "qwen"  # QWEN_HOME in directories that do not exist yet
+    env = {**NO_AGENT_BINS, "QWEN_HOME": str(moved)}
+    args = ("connect", "--agent", "qwen", "--apply", "--include-unverified", "--force", "--relay-command", relay_cmd)
+    out = relay(home, "http://x", *args, env=env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert (moved / "settings.json").exists()
+    assert sorted(_created(home)) == sorted(str(p) for p in (tmp_path / "configs", moved.parent, moved))
+    dry = relay(home, "http://x", "disconnect", env=env)
+    assert (moved / "settings.json").exists() and "Removed the directories" not in dry.stdout
+    gone = relay(home, "http://x", "disconnect", "--apply", env=env)
+    assert gone.returncode == 0 and not (tmp_path / "configs").exists() and _created(home) == []
+
+
+def test_connect_keeps_unverified_hooks_it_wrote_earlier_current(home):
+    """The one-line install runs `connect --apply` without --include-unverified. Hooks an earlier
+    --include-unverified run wrote are still rewritten when the relay's path changes, instead of
+    being left on a stale path (hooks fail silently)."""
+    old, new = "/old/venv/bin/remembra-relay", "/new/pipx/bin/remembra-relay"
+    (home / ".cursor").mkdir()
+    (home / ".qwen").mkdir()
+    for agent in ("cursor", "qwen"):
+        out = relay(home, "http://x", "connect", "--agent", agent, "--apply", "--include-unverified", "--relay-command", old)
+        assert out.returncode == 0, out.stderr
+
+    oneliner = relay(home, "http://x", "connect", "--apply", "--relay-command", new, env=NO_AGENT_BINS)
+    assert oneliner.returncode == 0, oneliner.stdout + oneliner.stderr
+    # Cursor is unverified: its hooks are refreshed because they are already there. Qwen is verified.
+    assert oneliner.stdout.count("updating the relay hooks already in this file (written earlier with --include-unverified)") == 1
+    for path in (home / ".cursor" / "hooks.json", home / ".qwen" / "settings.json"):
+        text = path.read_text()
+        assert new in text and old not in text
+    assert "Not written (unverified adapters)" not in oneliner.stdout
+
+
+def test_an_installed_unverified_agent_never_connected_stays_skipped(home):
+    (home / ".cursor").mkdir()
+    oneliner = relay(home, "http://x", "connect", "--apply", "--relay-command", "/r", env=NO_AGENT_BINS)
+    assert oneliner.returncode == 0, oneliner.stdout + oneliner.stderr
+    assert not (home / ".cursor" / "hooks.json").exists()
+    assert "Not written (unverified adapters): cursor." in oneliner.stdout
+
+
+def test_gemini_hooks_on_disk_count_as_installed_without_its_binary(home):
+    """Gemini is detected by its binary or its settings file; a hook's shell may not have the binary on
+    PATH. Hooks already in its settings are kept current."""
+    (home / ".gemini" / "antigravity").mkdir(parents=True)  # ~/.gemini alone is Antigravity's too
+    args = ("connect", "--agent", "gemini", "--apply", "--relay-command", "/a")
+    refused = relay(home, "http://x", *args, env=NO_AGENT_BINS)
+    assert refused.returncode == 1 and not (home / ".gemini" / "settings.json").exists()
+    assert "not written: Gemini CLI is not detected on this machine. Install it first, or add --force" in refused.stdout
+    first = relay(home, "http://x", *args, "--force", env=NO_AGENT_BINS)
+    assert first.returncode == 0, first.stdout + first.stderr
+    out = relay(home, "http://x", "connect", "--apply", "--relay-command", "/b", env=NO_AGENT_BINS)
+    assert "[gemini] Gemini CLI: not detected" not in out.stdout
+    assert "/b close --hook gemini" in (home / ".gemini" / "settings.json").read_text()
+
+
+def test_a_failed_write_is_reported_and_fails_the_exit_code(home):
+    settings = _claude_settings(home)
+    os.chmod(settings.parent, 0o500)  # no new files there: the backup cannot be written
+    try:
+        out = relay(home, "http://x", "connect", "--agent", "claude-code", "--apply", "--relay-command", "/r")
+    finally:
+        os.chmod(settings.parent, 0o700)
+    assert out.returncode == 1
+    assert "NOT written: PermissionError" in out.stdout
+    assert "/r brief" not in settings.read_text()
+
+
+def test_an_unverified_agent_connect_skips_anyway_does_not_fail_the_run_when_its_config_is_unreadable(home):
+    """`connect --apply` exited 1 over a truncated ~/.cursor/hooks.json although Cursor (unverified, never
+    connected, not asked for) would not have been written, and every write it made succeeded."""
+    (home / ".claude").mkdir()
+    (home / ".cursor").mkdir()
+    hooks = home / ".cursor" / "hooks.json"
+    hooks.write_text('{ "version": 1, "hooks": { "sessionStart": [ {"command": "x"} ')  # truncated
+    out = relay(home, "http://x", "connect", "--apply", "--relay-command", "/r", env=NO_AGENT_BINS)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert f"[cursor] Cursor (IDE + cursor-agent) (UNVERIFIED): cannot read {hooks}" in out.stdout
+    assert "skipped: unverified adapter, so connect would not write it; this does not fail the run" in out.stdout
+    assert "/r brief --hook claude-code" in (home / ".claude" / "settings.json").read_text()
+    assert hooks.read_text().endswith('{"command": "x"} ')  # untouched
+    named = relay(home, "http://x", "connect", "--agent", "cursor", "--apply", "--relay-command", "/r", env=NO_AGENT_BINS)
+    assert named.returncode == 1 and f"cannot read {hooks}" in named.stdout  # asked for by name: a failure
+    opted = relay(home, "http://x", "connect", "--apply", "--include-unverified", "--relay-command", "/r", env=NO_AGENT_BINS)
+    assert opted.returncode == 1  # --include-unverified: connect would write it
+
+
+def test_connect_writes_through_a_symlinked_config_and_disconnect_keeps_the_link(home, tmp_path):
+    """Replacing ~/.qwen/settings.json, a link into a dotfiles repository, with a regular file cut it from the
+    repository: the hooks never reached it, and later edits there no longer reached the agent."""
+    dotfiles = tmp_path / "dotfiles"
+    dotfiles.mkdir()
+    target = dotfiles / "qwen.json"
+    target.write_text('{"model": {"name": "qwen3-coder"}}\n')
+    (home / ".qwen").mkdir()
+    link = home / ".qwen" / "settings.json"
+    link.symlink_to(target)
+    out = relay(home, "http://x", "connect", "--agent", "qwen", "--apply", "--relay-command", "/r", env=NO_AGENT_BINS)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert link.is_symlink() and link.resolve() == target.resolve()
+    data = json.loads(target.read_text())
+    assert data["model"] == {"name": "qwen3-coder"} and "/r brief --hook qwen" in json.dumps(data["hooks"])
+    backups = list((home / ".qwen").glob("settings.json.bak-relay-*"))
+    assert len(backups) == 1 and not backups[0].is_symlink()  # next to the link, with the old content
+    assert json.loads(backups[0].read_text()) == {"model": {"name": "qwen3-coder"}}
+    assert list(dotfiles.iterdir()) == [target]  # nothing else written into the repository
+
+    gone = relay(home, "http://x", "disconnect", "--apply", env=NO_AGENT_BINS)
+    assert gone.returncode == 0, gone.stdout + gone.stderr
+    assert link.is_symlink() and json.loads(target.read_text()) == {"model": {"name": "qwen3-coder"}}
+
+    # A linked file that held nothing but the relay's hooks is emptied, never unlinked.
+    only = dotfiles / "only-relay.json"
+    only.write_text("{}\n")
+    link.unlink()
+    link.symlink_to(only)
+    assert relay(home, "http://x", "connect", "--agent", "qwen", "--apply", "--relay-command", "/r").returncode == 0
+    dry = relay(home, "http://x", "disconnect", "--agent", "qwen")
+    assert "nothing else is left in the file: it is removed" not in dry.stdout
+    assert relay(home, "http://x", "disconnect", "--agent", "qwen", "--apply").returncode == 0
+    assert link.is_symlink() and json.loads(only.read_text()) == {}
+
+
+def test_connect_refuses_a_symlink_to_a_missing_file(home, tmp_path):
+    (home / ".qwen").mkdir()
+    link = home / ".qwen" / "settings.json"
+    link.symlink_to(tmp_path / "dotfiles" / "gone.json")
+    out = relay(home, "http://x", "connect", "--agent", "qwen", "--apply", "--relay-command", "/r", env=NO_AGENT_BINS)
+    assert out.returncode == 1
+    assert f"NOT written: OSError: {link} is a symbolic link to a file that does not exist" in out.stdout
+    assert link.is_symlink() and not (tmp_path / "dotfiles").exists()
+
+
+def test_backup_and_write_keeps_a_link_for_every_caller(tmp_path):
+    """remembra-install writes MCP entries with the same function: a delete through a link empties the file."""
+    from remembra.relay.adapters.base import Change, backup_and_write
+
+    target = tmp_path / "real.json"
+    target.write_text('{"mcpServers": {"remembra": {}}}\n')
+    os.chmod(target, 0o644)
+    link = tmp_path / "config.json"
+    link.symlink_to(target)
+    backup = backup_and_write(Change(path=link, before=target.read_text(), after="{}\n", summary=["x"], delete=True))
+    assert link.is_symlink() and target.read_text() == "{}\n" and (target.stat().st_mode & 0o777) == 0o644
+    assert backup is not None and backup.parent == tmp_path and "remembra" in backup.read_text()
+    backup_and_write(Change(path=link, before="{}\n", after='{"a": 1}\n', summary=["x"]), private=True)
+    assert link.is_symlink() and json.loads(target.read_text()) == {"a": 1} and (target.stat().st_mode & 0o777) == 0o600
+
+
+def test_hooks_an_earlier_release_wrote_where_claude_config_dir_now_points_away_are_found(home):
+    """With CLAUDE_CONFIG_DIR set, an earlier release still wrote ~/.claude/settings.json. disconnect used to
+    look only in $CLAUDE_CONFIG_DIR ("No relay hooks found") and left all four running there."""
+    moved = home / ".claude-work"
+    moved.mkdir()
+    settings = _claude_settings(home)  # the user's own settings, in the default place
+    old = relay(home, "http://x", "connect", "--agent", "claude-code", "--apply", "--relay-command", "/old/relay")
+    assert old.returncode == 0 and "/old/relay close" in settings.read_text()
+    env = {"CLAUDE_CONFIG_DIR": str(moved)}
+
+    dry = relay(home, "http://x", "connect", "--agent", "claude-code", "--relay-command", "/new/relay", env=env)
+    assert f"-> {moved / 'settings.json'}" in dry.stdout
+    assert f"also {settings} (relay hooks an earlier connect wrote here, kept current" in dry.stdout
+    out = relay(home, "http://x", "connect", "--agent", "claude-code", "--apply", "--relay-command", "/new/relay", env=env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    for path in (moved / "settings.json", settings):  # both current: the old file runs without the variable
+        text = path.read_text()
+        assert "/new/relay close --hook claude-code" in text and "/old/relay" not in text
+    assert json.loads(settings.read_text())["model"] == "opus"
+
+    gone = relay(home, "http://x", "disconnect", "--apply", env=env)
+    assert gone.returncode == 0, gone.stdout + gone.stderr
+    assert "No relay hooks found" not in gone.stdout
+    assert f"[claude-code] Claude Code -> {settings}" in gone.stdout
+    assert "remembra-relay" not in settings.read_text() and "/new/relay" not in settings.read_text()
+    assert json.loads(settings.read_text())["model"] == "opus"  # the user's settings stay
+    assert not (moved / "settings.json").exists()  # it held nothing but the relay's hooks
+    again = relay(home, "http://x", "disconnect", "--apply", env=env)
+    assert "No relay hooks found: nothing to remove." in again.stdout

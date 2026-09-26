@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { CONNECTABLE_AGENTS, PIPX_INSTALL, UNINSTALL_STEPS, agentMeta, oneLineInstall, saveKeyCommand } from '../agents';
+import {
+  CONNECTABLE_AGENTS,
+  PIPX_INSTALL,
+  UNINSTALL_STEPS,
+  agentMeta,
+  canonicalAgentId,
+  joinNames,
+  oneLineInstall,
+  saveKeyCommand,
+} from '../agents';
 
 describe('oneLineInstall', () => {
   it('chains install, key save and connect --apply, with the key asked for at a prompt', () => {
@@ -36,9 +45,22 @@ describe('uninstall steps', () => {
 });
 
 describe('verified adapters', () => {
-  it('match the relay: Claude Code and Codex are verified (relay/adapters verified=True), the rest are not', () => {
+  it('match the relay: every adapter but Cursor is verified (relay/adapters verified=True)', () => {
     // tests/test_install_commands.py checks the same list against the Python adapters.
-    expect(CONNECTABLE_AGENTS.filter((id) => agentMeta(id).verified)).toEqual(['claude-code', 'codex']);
-    expect(CONNECTABLE_AGENTS.filter((id) => !agentMeta(id).verified)).toEqual(['cursor', 'gemini', 'qwen', 'kimi']);
+    expect(CONNECTABLE_AGENTS.filter((id) => agentMeta(id).verified)).toEqual(['claude-code', 'codex', 'gemini', 'qwen', 'kimi']);
+    expect(CONNECTABLE_AGENTS.filter((id) => !agentMeta(id).verified)).toEqual(['cursor']);
+  });
+
+  it('names Kimi Code by its product name, under its old and new ids', () => {
+    expect(agentMeta('kimi').name).toBe('Kimi Code');
+    expect(canonicalAgentId('kimi-code')).toBe('kimi');
+    expect(canonicalAgentId('kimi-cli')).toBe('kimi');
+  });
+
+  it('lists names the way a sentence does', () => {
+    expect(joinNames([])).toBe('');
+    expect(joinNames(['Cursor'])).toBe('Cursor');
+    expect(joinNames(['Claude Code', 'Codex'])).toBe('Claude Code and Codex');
+    expect(joinNames(['Claude Code', 'Codex', 'Gemini CLI'])).toBe('Claude Code, Codex and Gemini CLI');
   });
 });

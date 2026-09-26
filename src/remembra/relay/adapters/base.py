@@ -28,16 +28,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from remembra.relay.config_view import canonical_json, config_view
+from remembra.relay.config_view import canonical_json, config_view, loads_jsonc
 from remembra.relay.handoff import PRE_COMPACT_REASON
 
 RELAY_MARKERS = ("remembra-relay", "remembra.relay")
 
 # Output modes for `remembra-relay brief`:
-#   text         plain text on stdout (agent adds stdout to the context)
-#   hook-json    {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ...}}
-#   cursor-json  {"additional_context": ...}
-OUTPUT_MODES = ("text", "json", "hook-json", "cursor-json")
+#   text                     plain text on stdout (agent adds stdout to the context)
+#   hook-json                {"hookSpecificOutput": {"hookEventName": <the payload's event>, "additionalContext": ...}}
+#   cursor-json              {"additional_context": ...}; `close` prints {} (Cursor logs empty stdout as a failed hook)
+#   additional-context-json  {"additionalContext": ...} (GitHub Copilot CLI)
+OUTPUT_MODES = ("text", "json", "hook-json", "cursor-json", "additional-context-json")
 
 
 @dataclass(frozen=True)
@@ -118,6 +119,9 @@ class AdapterSpec:
     transcript_format: str | None = None  # "claude-jsonl" | "codex-rollout-jsonl" (facts.TRANSCRIPT_FORMATS); None: not parsed
     detect_bins: tuple[str, ...] = ()
     detect_dirs: tuple[str, ...] = ()  # relative to home
+    # Files that mean "installed" (relative to home), where a directory alone would not: Gemini
+    # CLI's ~/.gemini is also Antigravity's, but only Gemini CLI writes ~/.gemini/settings.json.
+    detect_files: tuple[str, ...] = ()
     config_source: str | None = None  # prefer this config file for the API key ("claude" | "codex")
     # Per-hook timeouts in SECONDS, keyed "start" / "prompt" / "end"; written in the agent's
     # own unit (``timeout_unit``). Only set where the agent documents the field and unit.
@@ -126,6 +130,19 @@ class AdapterSpec:
     # A third event that runs `brief --once`: delivers the brief when the start event did
     # not fire (Codex does not fire SessionStart when it auto-restores a thread).
     prompt_event: str | None = None
+    # Start ``source`` values whose output the agent throws away (Gemini CLI's /clear):
+    # `brief` does nothing then, so the prompt event's `brief --once` delivers it.
+    start_sources_without_context: tuple[str, ...] = ()
+    # Hook events whose brief a resumed session's restored history still holds. A start with
+    # source ``resume`` prints nothing when this session's brief came from one of them (Codex,
+    # Kimi Code), and prints it again when it came from another (Gemini CLI keeps what
+    # BeforeAgent added to a prompt, but not its SessionStart context; Claude Code: none).
+    resume_keeps_brief_from: tuple[str, ...] = ()
+    # False when the agent may send the first prompt, and run the prompt hook, before its start
+    # hook has finished (Gemini CLI's interactive UI runs SessionStart in the background, and
+    # ``gemini -i`` runs the first prompt's BeforeAgent alongside it). The start hook then skips a
+    # session whose brief was printed already, and of two hooks printing at once only the first does.
+    start_awaited: bool = True
     # `close` hands the work to a detached process and exits at once: for agents that
     # do not wait for the end hook or kill it after a short timeout.
     detach_close: bool = False
@@ -136,12 +153,76 @@ class AdapterSpec:
     # StopFailure on a usage/billing limit, PreCompact). A later close of the
     # same session supersedes it on the server.
     extra_close_events: tuple[CloseEvent, ...] = ()
+    # Environment variable that moves the agent's own directory (the first part of
+    # ``config_path`` under home, e.g. ``~/.qwen``); see :meth:`config_file`.
+    home_env: str | None = None
+    # ``$home_env`` names a replacement HOME that holds the agent's directory, not the directory
+    # itself (Gemini CLI reads ``$GEMINI_CLI_HOME/.gemini/settings.json``).
+    home_env_is_home: bool = False
+    # Payload keys that mean "not a session of its own" (a subagent's end): the hook does nothing.
+    skip_payload_keys: tuple[str, ...] = ()
+    # A second close of the same session, event and end reason within this many seconds is
+    # dropped (Gemini CLI fires SessionEnd 2-3 times on exit; a session can run several
+    # agents' copies of one hook). 0 turns it off. A close with no transcript to measure is
+    # dropped only within a few seconds (see ``remembra.relay.cli.claim_close``).
+    dedupe_close_seconds: int = 60
+    # A close hook with empty stdin does nothing: the agent also runs an orphaned copy of the
+    # end hook without its payload (Gemini CLI's third SessionEnd on /quit).
+    drop_empty_payload_close: bool = False
 
     def timeout_value(self, key: str) -> int | None:
         seconds = self.hook_timeouts.get(key)
         if not seconds:
             return None
         return seconds * 1000 if self.timeout_unit == "ms" else seconds
+
+    def moved_home(self, home: Path) -> Path | None:
+        """``$home_env`` when it is set, else None.
+
+        Read only for the real home (``Path.home()``): an adapter asked about any
+        other home (a test's temporary one) never follows the user's own setting.
+        """
+        if not self.home_env or Path(home) != Path.home():
+            return None
+        value = os.environ.get(self.home_env, "").strip()
+        return self.dir_from_env(value) if value else None
+
+    def dir_from_env(self, value: str) -> Path:
+        """The agent's own directory when ``$home_env`` is ``value`` (see ``home_env_is_home``)."""
+        path = Path(value).expanduser()
+        if not self.home_env_is_home:
+            return path
+        try:
+            return path / self.config_path(path).relative_to(path).parts[0]
+        except (ValueError, IndexError):
+            return path
+
+    def config_file(self, home: Path) -> Path:
+        """The config file the agent reads: ``config_path(home)``, inside ``$home_env`` when that is set."""
+        default = self.config_path(Path(home))
+        moved = self.moved_home(home)
+        if moved is None:
+            return default
+        try:
+            inside = default.relative_to(home).parts[1:]
+        except ValueError:
+            return default
+        return moved.joinpath(*inside)
+
+    def config_home(self, home: Path) -> Path:
+        """The agent's own directory (``~/.claude``, ``~/.codex``, ..., or ``$home_env``)."""
+        moved = self.moved_home(home)
+        if moved is not None:
+            return moved
+        default = self.config_path(Path(home))
+        try:
+            return Path(home) / default.relative_to(home).parts[0]
+        except (ValueError, IndexError):
+            return default.parent
+
+
+class RefusedEdit(ValueError):
+    """The edit would change more of the user's config than the relay's own entries: nothing is written."""
 
 
 @dataclass
@@ -212,35 +293,60 @@ def _backup(path: Path, stamp: str, label: str) -> Path:
     return backup
 
 
+def write_target(path: Path) -> Path:
+    """The file a write to ``path`` replaces: ``path``, or for a symbolic link the file it points to.
+
+    Replacing the link itself with a regular file would cut it from its target
+    (a dotfiles repository, say): the target would never get the change, and
+    edits made there later would no longer reach the agent. A link to a file
+    that does not exist (or a loop of links) raises ``OSError``: there is no
+    file to update, and creating one somewhere the link names is not ours to do.
+    """
+    if not path.is_symlink():
+        return path
+    try:
+        return Path(os.path.realpath(path, strict=True))
+    except OSError as e:
+        raise OSError(
+            f"{path} is a symbolic link to a file that does not exist ({e.__class__.__name__}); fix or remove the link"
+        ) from e
+
+
 def backup_and_write(change: Change, stamp: str | None = None, *, label: str = "relay", private: bool = False) -> Path | None:
     """Back up the current file (if any), then write atomically (or delete, for ``change.delete``).
 
     A new file is created 0600. An existing file keeps its mode, except with
     ``private`` (the file holds an API key), where group and other access is
     removed. Backups are always 0600. Returns the backup path, if any.
+
+    A symbolic link is written through (:func:`write_target`): the file it
+    points to is replaced and the link stays. It is never deleted either: for
+    ``change.delete`` the file it points to gets ``change.after`` (what is left).
+    The backup is kept next to the link.
     """
     path = change.path
+    target = write_target(path)
     stamp = stamp or datetime.now().strftime("%Y%m%d-%H%M%S")
     backup: Path | None = None
     mode: int | None = None
-    if path.exists():
+    if target.exists():
         backup = _backup(path, stamp, label)
-        mode = path.stat().st_mode & 0o777
+        mode = target.stat().st_mode & 0o777
         if private:
             mode &= 0o700
-    if change.delete:
+    if change.delete and target == path:
         if path.exists():
             path.unlink()
         return backup
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{target.name}.", dir=str(target.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(change.after)
             fh.flush()
             os.fsync(fh.fileno())
         os.chmod(tmp, mode if mode is not None else 0o600)
-        os.replace(tmp, path)
+        os.replace(tmp, target)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -255,7 +361,13 @@ class Adapter:
         self.spec = spec
 
     def detect(self, home: Path, which: Callable[[str], str | None] = shutil.which) -> bool:
-        return any(which(b) for b in self.spec.detect_bins) or any((home / d).is_dir() for d in self.spec.detect_dirs)
+        spec = self.spec
+        if any(which(b) for b in spec.detect_bins) or any((home / d).is_dir() for d in spec.detect_dirs):
+            return True
+        if any((home / f).is_file() for f in spec.detect_files):
+            return True
+        moved = spec.moved_home(home)
+        return moved is not None and moved.is_dir()
 
     def commands(self, relay: str) -> dict[str, str]:
         base = f"{relay} {{verb}} --hook {self.spec.name} --agent {self.spec.name}"
@@ -280,32 +392,89 @@ class Adapter:
         return [(key, event) for key, event, _ in self.hook_events()]
 
     def plan(self, home: Path, relay: str) -> Change:
-        path = self.spec.config_path(home)
+        """The agent's config (:meth:`AdapterSpec.config_file`) with the relay hooks written in."""
+        return self.plan_file(self.spec.config_file(home), relay)
+
+    def plan_file(self, path: Path, relay: str) -> Change:
         before = path.read_text(encoding="utf-8") if path.exists() else None
         after, summary = self.render(before, relay)
-        return Change(path=path, before=before, after=after, summary=summary)
+        return _note_dropped_comments(Change(path=path, before=before, after=after, summary=summary))
 
     def render(self, before: str | None, relay: str) -> tuple[str, list[str]]:
         raise NotImplementedError
 
     def plan_removal(self, home: Path) -> Change:
         """The config without any relay hook (``disconnect``); unchanged when there is none."""
-        path = self.spec.config_path(home)
+        return self.plan_file_removal(self.spec.config_file(home))
+
+    def plan_file_removal(self, path: Path) -> Change:
         before = path.read_text(encoding="utf-8") if path.exists() else None
         if before is None:
             return Change(path=path, before=None, after="", summary=[], delete=True)  # nothing to remove
         after, summary, empty = self.render_removal(before)
-        return Change(path=path, before=before, after=after, summary=summary, delete=empty and bool(summary))
+        # A symbolic link is never removed (backup_and_write writes through it): what is left is written.
+        delete = empty and bool(summary) and not path.is_symlink()
+        return _note_dropped_comments(Change(path=path, before=before, after=after, summary=summary, delete=delete))
 
     def render_removal(self, before: str) -> tuple[str, list[str], bool]:
         """``(new text, summary, nothing else left)``."""
         raise NotImplementedError
 
+    def earlier_files(self, home: Path) -> list[Path]:
+        """Files besides :meth:`AdapterSpec.config_file` where an earlier ``connect`` may have written relay hooks.
+
+        The default path when ``$home_env`` moves the agent's directory: earlier
+        releases wrote there whatever the variable said, and the agent still reads
+        it in a session started without the variable. ``connect`` keeps relay
+        hooks found there current; ``disconnect`` removes them.
+        """
+        default = self.spec.config_path(Path(home))
+        return [default] if default != self.spec.config_file(home) else []
+
+    def retired_files(self, home: Path) -> list[Path]:
+        """Files an earlier release wrote relay hooks to that the agent no longer reads: ``connect`` and
+        ``disconnect`` both remove the relay hooks from them (none by default)."""
+        return []
+
+    def hook_files(self, home: Path) -> list[Path]:
+        """Every file that may hold this adapter's relay hooks: the config file, then
+        :meth:`earlier_files` and :meth:`retired_files`."""
+        return list(dict.fromkeys([self.spec.config_file(home), *self.earlier_files(home), *self.retired_files(home)]))
+
+    def connected(self, home: Path) -> bool:
+        """True when a file the agent reads (the config file, :meth:`earlier_files`) already holds relay hooks.
+
+        ``connect --apply`` keeps those current. A retired file does not count:
+        its hooks say nothing about the agent being installed. A file that cannot
+        be read counts as holding none (``connect`` reports it).
+        """
+        for path in dict.fromkeys([self.spec.config_file(home), *self.earlier_files(home)]):
+            try:
+                if self.plan_file_removal(path).changed:
+                    return True
+            except (OSError, ValueError):  # UnicodeDecodeError and the JSON / TOML errors are ValueErrors
+                continue
+        return False
+
+
+def _note_dropped_comments(change: Change) -> Change:
+    """Add a summary line when writing ``change`` drops the comments of a JSON-with-comments file."""
+    if not change.changed or change.delete or change.before is None or change.path.suffix.lower() != ".json":
+        return change
+    try:
+        _, with_comments = loads_jsonc(change.before)
+    except ValueError:
+        return change
+    if with_comments:
+        change.summary.append(f"comments in {change.path.name} are not kept; the backup keeps them")
+    return change
+
 
 def _load_json_object(text: str | None, path_hint: str) -> dict[str, Any]:
-    if not text or not text.strip():
+    """``text`` as a JSON object ({} when empty); a BOM, comments and trailing commas are accepted."""
+    if not text or not text.removeprefix("\ufeff").strip():
         return {}
-    data = json.loads(text)
+    data, _ = loads_jsonc(text)
     if not isinstance(data, dict):
         raise ValueError(f"{path_hint} is not a JSON object")
     return data
@@ -333,7 +502,7 @@ class JsonHooksAdapter(Adapter):
         return {"matcher": matcher, **group} if matcher else group
 
     def render(self, before: str | None, relay: str) -> tuple[str, list[str]]:
-        data = _load_json_object(before, str(self.spec.config_path))
+        data = _load_json_object(before, f"the {self.spec.display} config")
         new = copy.deepcopy(data)
         hooks = new.setdefault("hooks", {})
         if not isinstance(hooks, dict):
@@ -379,7 +548,7 @@ class JsonHooksAdapter(Adapter):
         return text, summary
 
     def render_removal(self, before: str) -> tuple[str, list[str], bool]:
-        data = _load_json_object(before, str(self.spec.config_path))
+        data = _load_json_object(before, f"the {self.spec.display} config")
         hooks = data.get("hooks")
         if not isinstance(hooks, dict):
             return before, [], False

@@ -1,10 +1,10 @@
 {
-  "session_id": "b8e4f0a2-19c3-4d6e-a7f5-2c9b1d3e4f60",
-  "transcript_path": "/home/dev/.qwen/tmp/9f86d081884c7d65/chats/session-b8e4f0a2.json",
+  "session_id": "ad49a63b-afa9-424e-941d-43bf7c4b34e5",
+  "transcript_path": "/home/dev/.qwen/projects/-home-dev-work-widget/chats/ad49a63b-afa9-424e-941d-43bf7c4b34e5.jsonl",
   "cwd": "/home/dev/work/widget",
   "hook_event_name": "SessionStart",
-  "timestamp": "2026-09-25T15:10:03.004Z",
-  "permission_mode": "default",
+  "timestamp": "2026-09-26T17:43:05.991Z",
+  "permission_mode": "auto",
   "source": "startup",
-  "model": "qwen3-coder-plus"
+  "model": "stand-in"
 }

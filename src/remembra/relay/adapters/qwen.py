@@ -1,39 +1,54 @@
-"""Qwen Code (UNVERIFIED, a Gemini CLI fork): ``~/.qwen/settings.json`` SessionStart / SessionEnd.
+"""Qwen Code (verified, a Gemini CLI fork): ``~/.qwen/settings.json`` session hooks.
 
 Docs: https://qwenlm.github.io/qwen-code-docs/en/users/features/hooks/
-(accessed 2026-09-25). Not run: qwen is not installed on the machine this was
-written on. The payload fixtures in tests/fixtures/relay/qwen/ are built from
-the docs, not recorded.
+(accessed 2026-09-25). Verified with Qwen Code 0.24.6 (npm
+@qwen-code/qwen-code), interactive in a pseudo-terminal and headless, with a
+temp HOME and a local stand-in for the model (an ``openai`` provider); no
+credentials were used. See tests/test_relay_qwen_live.py; the payloads it
+recorded are in tests/fixtures/relay/qwen/. Only that version has been run.
 
-From the docs:
+What the run showed (and the v0.24.6 source says):
 
-- Same nesting as Gemini CLI, but ``timeout`` is in SECONDS (default 60); for
-  command hooks a value of 1000 or more is still read as milliseconds. We
-  write 15.
-- stdin JSON: ``session_id``, ``transcript_path``, ``cwd``,
-  ``hook_event_name``, ``timestamp``, ``permission_mode``; SessionStart adds
-  ``source``, SessionEnd ``reason``.
-- A JSON object on stdout is read as hook output
-  (``hookSpecificOutput.additionalContext``); plain text is also added to the
-  context on SessionStart. We emit the JSON form.
-- Hooks get ``QWEN_PROJECT_DIR`` (and the ``GEMINI_PROJECT_DIR`` /
-  ``CLAUDE_PROJECT_DIR`` aliases).
-- User-level hooks load regardless of folder trust; project hooks load only
-  in a trusted folder. ``connect`` writes the user file.
-- SessionEnd is informational and the CLI does not wait, so ``close``
-  detaches.
+- Same nesting as Gemini CLI, but ``timeout`` is in SECONDS (for command
+  hooks a value of 1000 or more is read as milliseconds). We write 15.
+  Settings files may hold comments and a byte order mark. ``$QWEN_HOME``
+  moves ``~/.qwen``.
+- stdin JSON: ``session_id``, ``transcript_path``
+  (``~/.qwen/projects/<cwd>/chats/<session_id>.jsonl``, Gemini-style records,
+  not parsed: close-outs use git facts), ``cwd``, ``hook_event_name``,
+  ``timestamp``, ``permission_mode``; SessionStart adds ``source`` (startup /
+  resume / clear / ...) and ``model``, SessionEnd ``reason``. Hooks get
+  ``QWEN_PROJECT_DIR`` (the cwd) and ``QWEN_CODE_SESSION_ID``;
+  ``QWEN_CODE_PROJECT_DIR`` is Qwen's storage directory, not the cwd.
+- SessionStart's ``hookSpecificOutput.additionalContext`` reaches the model
+  (as ``<qwen:session-start-context>``).
+- SessionEnd fires only when an interactive session ends: ``/quit``,
+  ``/clear`` (reason clear, then a new session), SIGTERM and SIGHUP. The CLI
+  gives the end hooks about 2 s, so ``close`` detaches. One-shot ``qwen -p``
+  and positional-prompt runs never fire SessionEnd: they write no handoff.
+- A turn that stops on a rate limit or billing error fires StopFailure with
+  ``error`` (rate_limit / billing_error / ...), and ``/compress`` fires
+  PreCompact with ``trigger`` (manual / auto). Both also run ``close``, so the
+  handoff is written when the work stops; a later close of the session
+  supersedes it.
+- User-level hooks run without a folder trust step.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from remembra.relay.adapters.base import AdapterSpec, JsonHooksAdapter, PayloadMap
+from remembra.relay.adapters.base import AdapterSpec, CloseEvent, JsonHooksAdapter, PayloadMap
+
+TESTED_VERSIONS = ("0.24.6",)
+
+# StopFailure errors that stop the work until the user acts (the ones a user switches agents over).
+LIMIT_ERRORS = ("rate_limit", "billing_error")
 
 SPEC = AdapterSpec(
     name="qwen",
     display="Qwen Code",
-    verified=False,
+    verified=True,
     config_path=lambda home: Path(home) / ".qwen" / "settings.json",
     start_event="SessionStart",
     end_event="SessionEnd",
@@ -42,7 +57,10 @@ SPEC = AdapterSpec(
         cwd=("cwd",),
         transcript=("transcript_path",),
         reason=("reason",),
+        env_session_id=("QWEN_CODE_SESSION_ID",),
         env_cwd=("QWEN_PROJECT_DIR",),
+        error=("error",),
+        compact_events=("PreCompact",),
     ),
     output="hook-json",
     detect_bins=("qwen",),
@@ -50,7 +68,13 @@ SPEC = AdapterSpec(
     hook_timeouts={"start": 15, "end": 15},
     timeout_unit="s",
     detach_close=True,
-    notes="Unverified: built from the Qwen Code hook docs and doc-derived payloads; not yet run against qwen.",
+    home_env="QWEN_HOME",
+    extra_close_events=(CloseEvent("StopFailure", "|".join(LIMIT_ERRORS)), CloseEvent("PreCompact")),
+    notes=(
+        f"Verified with Qwen Code {', '.join(TESTED_VERSIONS)}, interactive and headless, with a local stand-in for"
+        " the model; other versions have not been run. A handoff is written when an interactive session ends, on a"
+        " rate-limit or billing stop, and before /compress; one-shot `qwen -p` runs write none."
+    ),
 )
 
 ADAPTER = JsonHooksAdapter(SPEC)

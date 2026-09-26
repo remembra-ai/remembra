@@ -1,0 +1,9 @@
+{
+  "kimi_code": "2.1.1",
+  "recorded_by": "tests/test_relay_kimi_live.py",
+  "model": "local OpenAI-compatible stand-in ([providers] type openai in config.toml)",
+  "hook_env": [
+    "KIMI_CODE_NO_AUTO_UPDATE",
+    "KIMI_DISABLE_TELEMETRY"
+  ]
+}
