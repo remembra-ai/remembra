@@ -49,7 +49,7 @@ import hashlib
 import json
 import re
 import secrets
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -71,7 +71,9 @@ class CrewDatabase(Protocol):
     """What the event log needs from ``crew.db`` (WP-1 ``crew/db.py``).
 
     ``conn`` is the crew connection; ``transaction()`` opens ``BEGIN IMMEDIATE`` …
-    ``COMMIT`` (``ROLLBACK`` on error) under the crew DB's own lock (D35).
+    ``COMMIT`` (``ROLLBACK`` on error) under the crew DB's own lock (D35), and
+    ``after_commit()`` runs a callback once the outermost transaction the caller
+    owns has committed (dropped on rollback).
     ``remembra.storage.database.Database`` satisfies it structurally.
     """
 
@@ -79,6 +81,8 @@ class CrewDatabase(Protocol):
     def conn(self) -> aiosqlite.Connection: ...
 
     def transaction(self) -> AbstractAsyncContextManager[None]: ...
+
+    def after_commit(self, callback: Callable[[], Awaitable[None]]) -> bool: ...
 
 
 class CrewEventError(Exception):
@@ -488,8 +492,12 @@ class CrewEventLog:
     async def transaction(self) -> AsyncIterator[EventTx]:
         """``BEGIN IMMEDIATE`` … ``COMMIT``; publish emitted events to the bus after COMMIT.
 
-        Nested calls join the outer transaction (its events publish when the outermost commits).
-        On any exception nothing is published.
+        Nested calls join the outer transaction, whether the outer block is another
+        ``log.transaction()`` or a plain ``crew_db.transaction()`` (how services write
+        state, ``store.py``): the events are handed to ``crew_db.after_commit`` and publish
+        only when the **outermost** transaction commits. On any exception or rollback
+        nothing is published (and the seq a rolled-back event took is reused by the next
+        real event, which then reaches subscribers).
         """
         outer = _current_tx.get()
         if outer is not None and outer._log is self:
@@ -499,9 +507,13 @@ class CrewEventLog:
         token = _current_tx.set(tx)
         try:
             async with self.db.transaction():
+                if not self.db.after_commit(lambda: self._publish(tx)):
+                    raise CrewEventError("crew.db transaction is not owned by this task")  # pragma: no cover
                 yield tx
         finally:
             _current_tx.reset(token)
+
+    async def _publish(self, tx: EventTx) -> None:
         if self.bus is not None and tx.emitted:
             await self.bus.publish(tx.emitted)
 

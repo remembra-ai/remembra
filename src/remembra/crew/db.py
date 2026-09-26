@@ -32,7 +32,7 @@ import aiosqlite
 import structlog
 
 from remembra.storage.database import Migration, MigrationRunner
-from remembra.storage.sqlite_tx import GuardedConnection, TxCoordinator
+from remembra.storage.sqlite_tx import AfterCommit, GuardedConnection, TxCoordinator
 
 log = structlog.get_logger(__name__)
 
@@ -429,6 +429,10 @@ class CrewDatabase:
     @property
     def in_transaction(self) -> bool:
         return self._tx.in_transaction
+
+    def after_commit(self, callback: AfterCommit) -> bool:
+        """Run ``callback`` after the crew transaction the caller owns commits (see ``TxCoordinator.after_commit``)."""
+        return self._tx.after_commit(callback)
 
     async def fetchone(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> dict[str, Any] | None:
         cursor = await self.conn.execute(sql, params)

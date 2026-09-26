@@ -14,7 +14,7 @@ import structlog
 from remembra.config import Settings
 from remembra.core.time import utcnow
 from remembra.models.memory import Entity, EntityRef, Relationship
-from remembra.storage.sqlite_tx import GuardedConnection, TxCoordinator
+from remembra.storage.sqlite_tx import AfterCommit, GuardedConnection, TxCoordinator
 
 log = structlog.get_logger(__name__)
 
@@ -1080,6 +1080,10 @@ class Database:
     def in_transaction(self) -> bool:
         """True while some task holds an explicit transaction open."""
         return self._coordinator.in_transaction
+
+    def after_commit(self, callback: AfterCommit) -> bool:
+        """Run ``callback`` after the transaction the caller owns commits (``TxCoordinator.after_commit``)."""
+        return self._coordinator.after_commit(callback)
 
     # -----------------------------------------------------------------------
     # Memory operations

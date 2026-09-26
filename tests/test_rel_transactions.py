@@ -145,6 +145,43 @@ async def test_rollback_inside_transaction_marks_rollback_only(db: Database) -> 
     assert await _observer_count(db.db_path, "SELECT COUNT(*) FROM schema_version WHERE version=4001") == 0
 
 
+async def test_after_commit_runs_once_after_the_outermost_commit(db: Database) -> None:
+    calls: list[str] = []
+
+    async def note(tag: str) -> None:
+        # runs after the lock is released: another statement does not deadlock
+        await db.conn.execute("SELECT 1")
+        calls.append(tag)
+
+    assert db.after_commit(lambda: note("outside")) is False  # no transaction owned
+    async with db.transaction():
+        assert db.after_commit(lambda: note("outer"))
+        async with db.transaction():
+            assert db.after_commit(lambda: note("inner"))
+        assert calls == []
+    assert calls == ["outer", "inner"]
+    with pytest.raises(RuntimeError):
+        async with db.transaction():
+            db.after_commit(lambda: note("rolled back"))
+            raise RuntimeError("boom")
+    assert calls == ["outer", "inner"]
+
+
+async def test_after_commit_failure_is_logged_not_raised(db: Database) -> None:
+    ran: list[int] = []
+
+    async def bad() -> None:
+        raise ValueError("listener")
+
+    async def good() -> None:
+        ran.append(1)
+
+    async with db.transaction():
+        db.after_commit(bad)
+        db.after_commit(good)
+    assert ran == [1]
+
+
 async def test_executescript_inside_transaction_is_refused(db: Database) -> None:
     with pytest.raises(RuntimeError, match="executescript"):
         async with db.transaction():

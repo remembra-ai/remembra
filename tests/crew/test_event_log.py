@@ -203,6 +203,45 @@ async def test_rollback_writes_nothing_and_publishes_nothing(crewdb):
     assert [e["seq"] for e in seen] == [1, 2]
 
 
+async def test_events_inside_a_plain_crew_db_transaction_publish_after_the_outer_commit(crewdb):
+    """store.py tells services to write state in `async with crew_db.transaction():` and emit inside it."""
+    bus = CrewBus(loader=db_loader(crewdb))
+    seen = []
+    bus.subscribe(seen.append)
+    log = CrewEventLog(crewdb, bus)
+    # rollback: the event that took seq 1 must never reach subscribers
+    with pytest.raises(RuntimeError):
+        async with crewdb.transaction():
+            await crewdb.conn.execute("UPDATE crews SET name = 'x' WHERE id = ?", (CREW_A,))
+            phantom = await log.emit(**_emit_kwargs(summary="rolled back"))
+            assert phantom.seq == 1 and seen == []  # not published before COMMIT
+            raise RuntimeError("state change failed")
+    assert seen == [] and (await crew_head(crewdb.conn, CREW_A)).last_seq == 0
+    # the next real event reuses seq 1 and is delivered (the bus did not see a phantom seq 1)
+    real = await log.emit(**_emit_kwargs(summary="real"))
+    assert real.seq == 1 and [e["id"] for e in seen] == [real.envelope["id"]] and bus.duplicates == 0
+    # commit: two emits and a nested log.transaction publish together, after the outermost COMMIT
+    async with crewdb.transaction():
+        await log.emit(**_emit_kwargs(summary="second"))
+        async with log.transaction() as tx:
+            await tx.emit(**_emit_kwargs(summary="third"))
+        assert [e["seq"] for e in seen] == [1]
+    assert [e["seq"] for e in seen] == [1, 2, 3]
+    assert [e["summary"] for e in seen] == ["real", "second", "third"]
+
+
+async def test_a_failing_subscriber_does_not_fail_the_committed_write(crewdb):
+    bus = CrewBus()
+
+    def boom(env):
+        raise RuntimeError("listener crashed")
+
+    bus.subscribe(boom)
+    log = CrewEventLog(crewdb, bus)
+    result = await log.emit(**_emit_kwargs())
+    assert result.seq == 1 and (await crew_head(crewdb.conn, CREW_A)).last_seq == 1
+
+
 async def test_concurrent_writers_get_gap_free_seq_and_ordered_delivery(crewdb):
     bus = CrewBus(loader=db_loader(crewdb))
     seen = []
