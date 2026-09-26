@@ -88,6 +88,7 @@ async def test_lifespan_starts_hooks_wires_bus_to_websocket_and_stops_cleanly(tm
             "crew.retention",
             "crew.outbox",
             "crew.reaper",
+            "crew.claims",
         ]
         assert rt.tailer is None and "crew-retention" in app.state.tasks.names()
         assert "crew-reaper" in app.state.tasks.names()  # WP-4 reaper, registered through HOOK_MODULES
