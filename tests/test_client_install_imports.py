@@ -34,6 +34,7 @@ BASE_ALLOWED = {
     "certifi",
     "bcrypt",
     "slowapi",
+    "yaml",  # PyYAML: remembra-crewd / remembra-crew read .remembra/zones.yml
     "limits",
     "deprecated",
     "wrapt",
@@ -117,6 +118,45 @@ def test_base_install_runs_the_relay_and_the_installers() -> None:
     )
     assert result.returncode == 0, result.stderr
     assert "loaded: []" in result.stdout
+
+
+def test_base_install_runs_the_crew_client_and_daemon() -> None:
+    """`pipx install remembra && remembra-crew connect` (the dashboard's command): the LaunchAgent runs
+    `python -m remembra.relay.crew.crewd`, which must import on the base dependencies alone."""
+    result = _run(
+        """
+        import contextlib, io, sys
+        import remembra.relay.crew.crewd as crewd
+        import remembra.relay.crew.cli as crew_cli
+        import remembra.relay.crew.githooks, remembra.relay.crew.zonescompile
+        from remembra.crew import policy
+        assert policy.check_glob("src/**") is None
+
+        for name, entry in (("remembra-crewd", crewd.main), ("remembra-crew", crew_cli.main)):
+            sys.argv = [name, "--help"]
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                try:
+                    entry()
+                except SystemExit as exc:
+                    assert exc.code in (0, None), (name, exc.code)
+            assert "usage" in out.getvalue().lower(), name
+        print("ok")
+        """,
+        allowed=BASE_ALLOWED,
+        blocked=set(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("ok")
+
+
+def test_every_base_import_root_that_is_a_distribution_is_declared() -> None:
+    """A module the base install is allowed above must come from a declared base dependency (or one of theirs)."""
+    import tomllib
+
+    deps = tomllib.loads((SRC.parent / "pyproject.toml").read_text())["project"]["dependencies"]
+    names = {d.split(";")[0].split("[")[0].split(">")[0].split("<")[0].split("=")[0].strip().lower() for d in deps}
+    assert {"pyyaml", "httpx", "bcrypt", "slowapi"} <= names
 
 
 def test_security_package_names_still_load_on_first_use() -> None:

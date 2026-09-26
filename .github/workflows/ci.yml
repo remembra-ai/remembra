@@ -104,6 +104,10 @@ jobs:
           /tmp/base/bin/remembra-install --help
           /tmp/base/bin/remembra-install-codex --help
           /tmp/base/bin/remembra-doctor --help
+          # Crew mode's client side (the dashboard's `pipx install remembra && remembra-crew connect`)
+          /tmp/base/bin/remembra-crew --help
+          /tmp/base/bin/remembra-crewd --help
+          /tmp/base/bin/python -c 'import remembra.relay.crew.crewd'
 
       - name: "[mcp] install starts the MCP server"
         run: |
@@ -111,6 +115,9 @@ jobs:
           /tmp/mcp/bin/pip install "$(ls dist/*.whl)[mcp]"
           /tmp/mcp/bin/python -c 'import remembra.mcp.server'
           /tmp/mcp/bin/remembra-relay --help
+          /tmp/mcp/bin/remembra-crew --help
+          /tmp/mcp/bin/remembra-crewd --help
+          /tmp/mcp/bin/python -c 'import remembra.relay.crew.crewd'
           # main() gets past every import and stops at config validation.
           out=$(REMEMBRA_URL= /tmp/mcp/bin/remembra-mcp </dev/null 2>&1 || true)
           echo "$out"

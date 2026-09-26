@@ -3905,6 +3905,7 @@ source = { editable = "." }
 dependencies = [
     { name = "bcrypt" },
     { name = "httpx" },
+    { name = "pyyaml" },
     { name = "slowapi" },
 ]
 
@@ -4038,6 +4039,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=6.0.0" },
     { name = "python-multipart", marker = "extra == 'server'", specifier = ">=0.0.9" },
     { name = "python-ulid", marker = "extra == 'server'", specifier = ">=3.0.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "qdrant-client", marker = "extra == 'server'", specifier = ">=1.12.0,<2.0.0" },
     { name = "qrcode", extras = ["pil"], marker = "extra == 'server'", specifier = ">=7.4.0" },
     { name = "redis", marker = "extra == 'cloud'", specifier = ">=5.0.0" },
