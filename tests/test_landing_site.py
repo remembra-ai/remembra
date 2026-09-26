@@ -27,7 +27,8 @@ from urllib.parse import urlsplit
 
 import pytest
 
-LANDING = Path(__file__).resolve().parent.parent / "landing"
+ROOT_DIR = Path(__file__).resolve().parent.parent
+LANDING = ROOT_DIR / "landing"
 
 
 class _Collector(HTMLParser):
@@ -399,6 +400,22 @@ def test_focus_rings_clear_3_to_1_in_both_themes() -> None:
     for bg in cmd_bgs:
         assert _contrast(copy_ring, bg) >= 3, ("copy", bg)  # the copy button sits inside .cmd in both themes
     assert _contrast(band_cmd_ring, band_cmd_bg) >= 3
+
+
+def test_install_block_never_hides_a_command_under_the_copy_button() -> None:
+    """Measured in a browser at 320, 375 and 414 px: the first line ran under the copy button and '$' wrapped
+    onto its own row, and JetBrains Mono drew >= as one glyph. These rules are what fixed it."""
+    css = (LANDING / "site.css").read_text()
+    code = re.search(r"^\.cmd code \{([^}]*)\}", css, re.M).group(1)
+    assert "overflow-x: auto" in code  # a long line scrolls inside the box, never under the button
+    assert re.search(r"^\.cmd code \.ln \{[^}]*flex-wrap: nowrap", css, re.M)  # '$' stays with its command
+    phone = css.split("@media (max-width: 520px)", 1)[1].split("@media", 1)[0]
+    assert ".cmd { flex-direction: column; }" in phone  # the copy button goes under the lines on a phone
+    mono = re.search(r"^code, kbd, pre, samp \{([^}]*)\}", css, re.M).group(1)
+    assert "font-variant-ligatures: none" in mono and '"calt" 0' in mono
+    dashboard = (ROOT_DIR / "dashboard" / "src" / "index.css").read_text()
+    rule = re.search(r"code,\s*kbd,\s*pre,\s*samp,\s*\.font-mono \{([^}]*)\}", dashboard).group(1)
+    assert "font-variant-ligatures: none" in rule and '"calt" 0' in rule
 
 
 def test_contrast_check_rejects_the_old_orange_ring_on_light_paper() -> None:

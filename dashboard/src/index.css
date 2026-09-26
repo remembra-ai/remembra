@@ -698,3 +698,14 @@ body {
     animation: none;
   }
 }
+
+/* JetBrains Mono draws >= and -> as single glyphs: a command someone retypes from the
+   screen must show the characters they have to type. */
+code,
+kbd,
+pre,
+samp,
+.font-mono {
+  font-variant-ligatures: none;
+  font-feature-settings: "calt" 0, "liga" 0;
+}
