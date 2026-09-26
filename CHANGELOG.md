@@ -39,18 +39,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the trail, the doctor reads this machine and your trail and prints an exchange slip: every agent as a station,
   the last handoff, each read with its result, and for each problem the evidence, one fix and the re-check.
   Each verdict is marked proven (`[!!]`) or inferred (`[??]`). It checks the key (and whether the server
-  accepts it, or a firewall in front of it answered instead), the unsent-handoff queue by cause, closes that
-  keep failing (with the background-close log, secrets redacted), each agent's hooks (missing, from an older
-  connect, calling a command that is gone, or never written because `connect` only ran as a dry run), Codex
+  accepts it, a firewall in front of it answered instead, or the URL redirects or serves a page instead of the
+  API), the unsent-handoff queue by cause, closes that keep failing (a close counts as working again once its
+  handoff is on your trail; the background-close log is shown with secrets redacted), each agent's hooks
+  (missing, from an older connect, calling a command that is gone, or never written because `connect` only
+  ran as a dry run; an unverified adapter `connect --apply` left out is only a note), Codex
   hook trust (read from `~/.codex/config.toml` against the current hooks with the hash Codex computes; an
   unreadable file is "unchecked", never trusted), Codex automation runs, a `REMEMBRA_PROJECT` that sends every
-  new repository to one project, and agents that picked up briefs but never handed off. It only reads: at most
-  four GET requests with your own key, never a brief, recall or write. `--agent`, `--no-server`,
-  `--format json`; exit 1 when something proven needs you.
+  new repository to one project, and agents that picked up briefs but never handed off at all. It only reads:
+  at most four GET requests with your own key, never a brief, recall or write, and it never prints a key, even
+  one pasted into the server URL field or a hook command. `--agent`, `--no-server`, `--format json`; exit 1
+  when something proven needs you.
 - **MCP tools `remembra_doctor`, `remembra_setup` and `remembra_help`** (local MCP server): the same doctor
   inside your agent, the exact install and connect steps for this machine's OS and agents (steps already done
-  are marked), and answers quoted from the relay guide and the plans page, or "can't confirm". None of them
-  changes anything; fixes that involve your key are for your own terminal. Claude Code: `/mcp__remembra__doctor`.
+  are marked), and answers quoted from the relay guide and the plans page, or "can't confirm". Questions about
+  privacy, security, hosting, retention, deleting account data, training or money get the page that governs
+  them, never a quote. None of them changes anything; fixes that involve your key are for your own terminal.
+  Claude Code: `/mcp__remembra__doctor`.
 - **`remembra-relay connect` ends with "You still need to"** when something is left: saving a key, `--apply`
   after a dry run, unverified adapters it skipped, and trusting the hooks in Codex (checked, not assumed). When
   nothing is left it prints no list.
@@ -59,17 +64,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   GET only), the call marked proven or inferred, the one fix, and the doctor lines to copy for that agent's
   machine. Where it reaches a fault the doctor also sees, it uses the doctor's rule id, sentence and guide page
   (`KEY_MISSING`, `PICKS_UP_NEVER_CLOSES`, `CODEX_TRUST_MISSING`, `NOTHING_WAITING`, `HOOKS_NOT_FIRING`,
-  `STALE_CHECKPOINT`). Codex's row asks for the hook trust step until a Codex brief or close arrives.
+  `STALE_CHECKPOINT`). Until a Codex brief or close arrives, Codex's row carries a dim reminder of the hook
+  trust step (the dashboard can't see Codex, so it never says Codex needs you).
 - **remembra.dev for your agent.** The hero's install block has `terminal | your agent` tabs; the agent tab
   copies a prompt that points the agent at `remembra.dev/setup.md`, a step-by-step runbook that stops for the
-  key and asks before each write. `remembra.dev/llms.txt` and `llms-full.txt` (generated from the pages) are
+  key and asks before each write, and runs `pipx ensurepath` even when pipx is already installed.
+  `remembra.dev/llms.txt` and `llms-full.txt` (generated from the pages) are
   served too. setup.md, `remembra_setup` and the dashboard give the same commands in the same order, and a test
   holds them to it.
 
 ### Changed
 
 - The brief's queued-handoff and rejected-key notices end with "Ask your agent to run remembra_doctor, or run
-  `remembra-relay doctor`."
+  `remembra-relay doctor`." `connect`'s no-key warning leads with the same key command as its to-do list.
 - The dashboard's install line without a known server is `remembra-install --all`, which keeps the server the
   machine already uses (Remembra Cloud on a first install); with one, as on every dashboard page, it passes
   `--url` as before.
