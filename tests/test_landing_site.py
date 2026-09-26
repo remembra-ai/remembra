@@ -1,8 +1,9 @@
-"""Checks for the marketing site in ``landing/`` (deployed by Vercel).
+"""Checks for the marketing site in ``landing/`` (served by nginx, landing/nginx.conf).
 
 The site is plain HTML, so these tests guard what can silently break it:
-internal links and #anchors must resolve under the ``vercel.json`` rules
-(cleanUrls plus redirects), and the rebuilt home and pricing pages may only
+internal links and #anchors must resolve under the rules in
+``landing/nginx.conf`` (clean URLs plus redirects, applied by
+``scripts/site_nginx.py``), and the rebuilt home and pricing pages may only
 load external assets from Google Fonts.
 
 They also hold the pages to what the product does today: the claims in the
@@ -22,7 +23,7 @@ import sys
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -52,27 +53,33 @@ def _parse(path: Path) -> _Collector:
     return c
 
 
-def _redirect_patterns() -> list[re.Pattern[str]]:
-    cfg = json.loads((LANDING / "vercel.json").read_text())
-    out = []
-    for r in cfg.get("redirects", []):
-        src = re.sub(r":[a-z]+\*", ".*", r["source"])
-        src = re.sub(r":[a-z]+", "[^/]+", src)
-        out.append(re.compile("^" + src + "$"))
-    return out
+def _nginx() -> Any:
+    return _script("site_nginx")
 
 
-def _resolve(url_path: str, redirects: list[re.Pattern[str]]) -> Path | str | None:
-    """Map a site path to the file Vercel serves (cleanUrls), 'redirect', or None."""
-    if any(p.match(url_path) for p in redirects):
-        return "redirect"
-    rel = unquote(url_path).lstrip("/")
-    candidates = [LANDING / "index.html"] if rel == "" else [LANDING / rel, LANDING / f"{rel}.html", LANDING / rel / "index.html"]
-    return next((c for c in candidates if c.is_file()), None)
+def _resolve(url: str, nginx: Any, locations: Any) -> tuple[Path | str | None, str]:
+    """(what nginx ends up sending for a site URL, the #anchor a redirect added).
+
+    The first item is the file served, 'redirect' when a redirect leaves the
+    site, or None on a 404. Redirects that stay on the site are followed.
+    """
+    added = ""
+    res = nginx.resolve(url, locations, LANDING)
+    for _ in range(5):
+        if res.status not in (301, 302, 307, 308) or not res.location:
+            break
+        if not res.location.startswith("/"):
+            return "redirect", added
+        added = urlsplit(res.location).fragment or added
+        res = nginx.resolve(res.location, locations, LANDING)
+    if res.status == 200 and res.file is not None:
+        return Path(res.file), added
+    return None, added
 
 
 def _internal_link_problems() -> list[str]:
-    redirects = _redirect_patterns()
+    nginx = _nginx()
+    locations = nginx.load(LANDING / "nginx.conf")
     ids_cache: dict[Path, set[str]] = {}
     problems: list[str] = []
     for page in sorted(LANDING.rglob("*.html")):
@@ -92,8 +99,14 @@ def _internal_link_problems() -> list[str]:
                 else:
                     base = "/" if page.parent == LANDING else "/" + page.parent.relative_to(LANDING).as_posix() + "/"
                     path = base + parts.path
-                target = _resolve(path, redirects) if parts.path else page
-                frag = parts.fragment
+                added = ""
+                if not parts.path:
+                    target = page
+                else:
+                    query = f"?{parts.query}" if parts.query else ""
+                    # A redirect may add its own #anchor (/cookies -> /privacy#cookies); check it too.
+                    target, added = _resolve(path + query, nginx, locations)
+                frag = parts.fragment or added
                 if target is None:
                     problems.append(f"{rel_page}: {attr}={url} does not resolve")
                     continue
@@ -110,15 +123,26 @@ def test_every_internal_link_resolves() -> None:
 
 
 def test_link_checker_catches_a_broken_link(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """The checker itself must fail on a missing page and a missing anchor."""
-    (tmp_path / "vercel.json").write_text(json.dumps({"cleanUrls": True, "redirects": []}))
-    (tmp_path / "index.html").write_text('<a href="/pricing">p</a><a href="/#nope">x</a><a href="/ok#here">y</a>')
+    """The checker itself must fail on a missing page and a missing anchor, and follow redirects."""
+    (tmp_path / "nginx.conf").write_text(
+        "server {\n"
+        "  location = /old { return 301 /ok; }\n"
+        "  location = /gone { return 301 /missing; }\n"
+        "  location = /away { return 301 https://docs.remembra.dev/; }\n"
+        "  location / { try_files $uri $uri.html $uri/index.html =404; }\n"
+        "}\n"
+    )
+    (tmp_path / "index.html").write_text(
+        '<a href="/pricing">p</a><a href="/#nope">x</a><a href="/ok#here">y</a>'
+        '<a href="/old#here">r</a><a href="/gone">g</a><a href="/away">a</a>'
+    )
     (tmp_path / "ok.html").write_text('<h2 id="here">ok</h2>')
     monkeypatch.setattr(sys.modules[__name__], "LANDING", tmp_path)
     problems = _internal_link_problems()
     assert problems == [
         "index.html: href=/pricing does not resolve",
         "index.html: href=/#nope has no #nope target",
+        "index.html: href=/gone does not resolve",
     ]
 
 
@@ -816,6 +840,7 @@ def _script(name: str) -> Any:
     spec = importlib.util.spec_from_file_location(name, SCRIPTS / f"{name}.py")
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # dataclasses in the script look their module up here
     sys.path.insert(0, str(SCRIPTS))
     try:
         spec.loader.exec_module(module)
@@ -915,7 +940,8 @@ def test_every_docs_link_is_built_from_a_docs_page_and_gated_until_deployed() ->
     for url in links:
         src = predeploy.source_for(url)
         assert src is not None, f"{url} has no page in docs/ that mkdocs.yml builds"
-        if src not in ("index.md", "getting-started/docker.md"):  # already live before this site
+        # Pages the docs site had long before this relaunch; the online predeploy run still fetches them.
+        if src not in ("index.md", "getting-started/docker.md", "getting-started/agent-setup.md", "integrations/mcp-server.md"):
             assert f"docs.remembra.dev deployed with {src}" in gates, url
 
 
@@ -923,7 +949,8 @@ def test_predeploy_check_fails_on_a_docs_link_that_is_not_live() -> None:
     predeploy = _script("site_predeploy")
     lines, problems = predeploy.check(online=True, fetch=lambda url: 404 if "relay" in url else 200, latest=lambda: "0.16.0")
     assert problems == [
-        "https://docs.remembra.dev/guides/relay/ is not live yet (HTTP 404): deploy the docs site first (index.html, crew.html)"
+        "https://docs.remembra.dev/guides/relay/ is not live yet (HTTP 404): "
+        "deploy the docs site first (index.html, crew.html, changelog.html)"
     ]
     assert any("Crew mode switch" in line for line in lines)
     _, none = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.1")
@@ -1041,3 +1068,84 @@ def test_predeploy_check_fails_while_pypi_is_behind_the_install_gate() -> None:
     assert unreachable == ["PyPI could not be reached to confirm remembra>=0.16 is released"]
     _, ok = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.0")
     assert ok == []
+
+
+# ---------------------------------------------------------------------------
+# Prices, refunds and the legal pages
+# ---------------------------------------------------------------------------
+
+
+def _site_text_files() -> list[Path]:
+    return [p for p in LANDING.rglob("*") if p.is_file() and p.suffix in (".html", ".js", ".css", ".txt", ".xml", ".json")]
+
+
+def test_no_retired_price_anywhere_on_the_site() -> None:
+    # $49 Pro and $199 Team were the old plans; they must not surface next to the new ones.
+    hits = [
+        f"{p.relative_to(LANDING)}: {m.group(0)}"
+        for p in _site_text_files()
+        for m in re.finditer(r"\$(49|199)\b", p.read_text(errors="replace"))
+    ]
+    assert hits == []
+
+
+def test_retired_price_check_catches_an_old_price(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "old.html").write_text("<td>$49/mo flat</td>")
+    monkeypatch.setattr(sys.modules[__name__], "LANDING", tmp_path)
+    with pytest.raises(AssertionError):
+        test_no_retired_price_anywhere_on_the_site()
+
+
+def test_terms_pricing_and_refunds_state_the_same_refund_policy() -> None:
+    refunds = _text((LANDING / "refunds.html").read_text())
+    terms = _text(re.search(r'<h2 id="payment">.*?<h2', (LANDING / "terms.html").read_text(), re.S).group(0))
+    faq = _text(re.search(r"<dt>Can I get a refund\?</dt>.*?</dd>", (LANDING / "pricing.html").read_text(), re.S).group(0))
+    for text in (refunds, terms, faq):
+        assert "14-day money-back guarantee" in text
+        assert "first payment" in text
+        assert re.search(r"renewals", text, re.I)
+    assert "generally don't offer refunds" not in terms
+    assert 'href="/refunds"' in (LANDING / "terms.html").read_text()
+    assert 'href="/refunds"' in (LANDING / "pricing.html").read_text()
+
+
+def _sentences(page: str) -> list[str]:
+    return re.split(r"(?<=[.!?])\s+", _text((LANDING / page).read_text()))
+
+
+def test_legal_and_security_pages_claim_no_audit_or_protocol_we_do_not_have() -> None:
+    for page in ("privacy.html", "security.html", "terms.html", "subprocessors.html", "dpa.html"):
+        text = _text((LANDING / page).read_text())
+        assert "TLS 1.3" not in text, page
+        assert "Stripe" not in text, page
+        for sentence in _sentences(page):
+            if re.search(r"SOC 2|penetration test", sentence):
+                # Only ever said to say we don't have it, or when we plan it.
+                assert re.search(r"\b(no|not|has not|hasn't|don't)\b|Q[1-4] 20\d\d|no date", sentence), (page, sentence)
+
+
+def test_privacy_names_where_memory_goes_and_links_the_lists() -> None:
+    privacy = (LANDING / "privacy.html").read_text()
+    text = _text(privacy)
+    for must in ("OpenAI", "United States", "Hetzner", "Paddle", "not use API data to train"):
+        assert must in text, must
+    assert 'href="/subprocessors"' in privacy and 'href="/dpa"' in privacy
+    assert "Analytics cookies" not in text
+
+
+def test_subprocessors_page_names_every_service_the_code_sends_data_to() -> None:
+    subs = _text((LANDING / "subprocessors.html").read_text())
+    config = (Path(__file__).resolve().parent.parent / "src" / "remembra" / "config.py").read_text()
+    # Each service the cloud config can send data to, and the name the page must use for it.
+    wired = {
+        "openai_api_key": "OpenAI",
+        "resend_api_key": "Resend",
+        "turnstile": "Cloudflare",
+        "typesafe_api_key": "TypeSafe",
+        "anthropic_api_key": "Anthropic",
+    }
+    for setting, name in wired.items():
+        assert setting in config, setting  # the check still describes the code
+        assert name in subs, name
+    for name in ("Hetzner", "Paddle", "Formsubmit", "Google Fonts"):
+        assert name in subs, name

@@ -48,7 +48,26 @@ from collections.abc import Callable
 from pathlib import Path
 
 LANDING = Path(__file__).resolve().parents[1] / "landing"
-PAGES = ["index.html", "pricing.html", "crew.html", "about.html", "contact.html", "security.html", "privacy.html", "terms.html"]
+PAGES = [
+    "index.html",
+    "pricing.html",
+    "crew.html",
+    "about.html",
+    "contact.html",
+    "security.html",
+    "privacy.html",
+    "terms.html",
+    "refunds.html",
+    "subprocessors.html",
+    "dpa.html",
+    "changelog.html",
+    "404.html",
+    "blog/index.html",
+    "blog/remembra-vs-mem0-vs-zep.html",
+    "blog/why-your-ai-forgets-everything.html",
+    "blog/multi-agent-orchestration-patterns.html",
+    "blog/building-remembra-with-ai-agents.html",
+]
 SITEMAP = "sitemap.xml"
 CREW_SECTION = Path(__file__).resolve().parent / "site-crew-section.html"
 
@@ -83,7 +102,7 @@ HEAD = """<script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="site.css">"""
+<link rel="stylesheet" href="/site.css">"""
 
 SUN = (
     '<svg class="sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">'
@@ -128,6 +147,10 @@ FOOT = [
     ("security", "Security", "/security"),
     ("privacy", "Privacy", "/privacy"),
     ("terms", "Terms", "/terms"),
+    ("refunds", "Refunds", "/refunds"),
+    ("subprocessors", "Subprocessors", "/subprocessors"),
+    ("dpa", "DPA", "/dpa"),
+    ("changelog", "Changelog", "/changelog"),
     ("contact", "Contact", "/contact"),
 ]
 

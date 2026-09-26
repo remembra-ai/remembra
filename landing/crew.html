@@ -34,7 +34,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="site.css">
+<link rel="stylesheet" href="/site.css">
 <!-- /@head -->
 <style>
   /* shown while Crew mode is not live (CREW_LIVE in scripts/site_partials.py) */
@@ -159,6 +159,7 @@
     <h1 id="crew-title">Many agents, one project. <mark>Nobody steps on anybody.</mark></h1>
     <!-- @crew-note --><p class="crew-status" role="note"><b>Crew mode is still being built and is not available yet.</b> This page describes how it will work when it ships.</p><!-- /@crew-note -->
     <p class="lede"><strong>Crew mode lets several AI agents work the same project at the same time.</strong> Each one holds the zones it is working in, checkpoints on its own, and hands off automatically the moment it stops. Every handoff and checkpoint names the agent that wrote it, and you watch it all live.</p>
+    <p class="fine" style="margin-top:14px">Claude Code's <a class="link" href="https://code.claude.com/docs/en/agent-teams">agent teams</a> run several Claude sessions together, and their docs note that two teammates editing the same file overwrite each other. Crew mode is being built for mixed crews, Claude Code, Codex, Cursor and others, and will keep each agent out of the files another holds.</p>
 
     <figure class="track3" id="track3" aria-labelledby="track3-cap">
       <div class="th" aria-hidden="true"><b>crew track</b><span>yaadbooks · three agents, one repo, one afternoon · example</span></div>
@@ -323,7 +324,7 @@
         <p class="cmd-meta">
           <a href="https://app.remembra.dev/signup"><b>Free to start</b></a><span class="sep" aria-hidden="true"></span>
           <a href="/pricing">Pricing</a><span class="sep" aria-hidden="true"></span>
-          <a href="https://docs.remembra.dev/guides/relay/">Relay guide</a>
+          <a href="https://docs.remembra.dev/guides/relay/">Remembra Relay guide</a>
         </p>
       </div>
     </div>
@@ -347,6 +348,10 @@
         <li><a href="/security">Security</a></li>
         <li><a href="/privacy">Privacy</a></li>
         <li><a href="/terms">Terms</a></li>
+        <li><a href="/refunds">Refunds</a></li>
+        <li><a href="/subprocessors">Subprocessors</a></li>
+        <li><a href="/dpa">DPA</a></li>
+        <li><a href="/changelog">Changelog</a></li>
         <li><a href="/contact">Contact</a></li>
       </ul>
     </nav>
@@ -354,7 +359,7 @@
 </footer>
 <!-- /@footer -->
 
-<script src="site.js" defer></script>
+<script src="/site.js" defer></script>
 <script>
   /* The baton drops from claude-code's lane to cursor's. Measured, so it
      lands on the lane at any width; a still frame without motion. */

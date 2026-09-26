@@ -21,7 +21,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="site.css">
+<link rel="stylesheet" href="/site.css">
 <!-- /@head -->
 </head>
 <body class="site" data-page="terms">
@@ -57,6 +57,7 @@
     <h1 id="doc-title">Terms of service</h1>
     <p class="lede">Last updated: September 25, 2026</p>
     <!-- requires counsel review of the Paddle (Merchant of Record) wording before paid plans go live -->
+    <!-- requires owner: the registered legal name of DolphyTech, exactly as registered with Paddle, in Terms, Privacy, Refunds and the DPA -->
   </section>
   <div class="wrap doc-grid">
     <aside aria-label="On this page">
@@ -99,7 +100,7 @@
 <li><strong>Open Source Software:</strong> The Remembra codebase, available under the MIT license</li>
 <li><strong>Cloud Services:</strong> Hosted Remembra infrastructure (Remembra Cloud)</li>
 <li><strong>Documentation:</strong> Technical docs, guides, and tutorials</li>
-<li><strong>MCP Server:</strong> Integration with Claude Code, Cursor, and other AI tools</li>
+<li><strong>Remembra Relay and the MCP server:</strong> handoffs and briefs between Claude Code, Codex, Cursor and other AI tools</li>
 </ul>
 <h2 id="open-source">3. Open Source License</h2>
 <p>The Remembra software is licensed under the <strong>MIT License</strong>. This means you can:</p>
@@ -158,7 +159,7 @@
 <li><strong>Payment processing:</strong> Handled by Paddle. Your card details go to Paddle, never to us</li>
 <li><strong>Auto-renewal:</strong> Subscriptions renew automatically unless you cancel</li>
 <li><strong>Cancellation:</strong> You can cancel anytime from your account settings. Access continues until the end of your billing period</li>
-<li><strong>Refunds:</strong> We generally don't offer refunds for partial billing periods, but contact us if you have concerns. Approved refunds are paid back by Paddle</li>
+<li><strong>Refunds:</strong> The first payment on any paid plan has a 14-day money-back guarantee. After that, payments, including renewals, are not refunded, and part periods are not refunded. Refunds are paid by Paddle. The <a href="/refunds">refund policy</a> has the details</li>
 <li><strong>Price changes:</strong> We'll give at least 30 days notice before changing prices for existing customers</li>
 <li><strong>Taxes:</strong> Paddle works out sales tax or VAT where it applies and shows it at checkout</li>
 </ul>
@@ -169,7 +170,7 @@
 <h3>7.1 Data Export</h3>
 <p>You can export your data at any time in standard formats (JSON, CSV). We support data portability—your data shouldn't be locked in.</p>
 <h3>7.2 Data Deletion</h3>
-<p>When you delete your account, we'll delete your data within 30 days, except where we're legally required to retain it.</p>
+<p>Deleting your account from the dashboard deactivates it and revokes its keys. To have your stored data erased, email us from the account's address and we will erase it within 30 days, except what we are legally required to keep. The <a href="/privacy#retention">privacy policy</a> explains what we keep and for how long.</p>
 <h2 id="8-intellectual-property">8. Intellectual Property</h2>
 <ul>
 <li>The Remembra name, logo, and branding are trademarks of DolphyTech</li>
@@ -212,7 +213,7 @@
 <p>We may update these Terms from time to time. For significant changes, we'll provide notice (email, website banner, etc.) at least 30 days before they take effect. Your continued use after changes means you accept the new Terms.</p>
 <h2 id="15-miscellaneous">15. Miscellaneous</h2>
 <ul>
-<li><strong>Entire Agreement:</strong> These Terms (plus Privacy Policy and any plan-specific terms) are the complete agreement between us</li>
+<li><strong>Entire Agreement:</strong> These Terms, the <a href="/privacy">Privacy Policy</a>, the <a href="/refunds">Refund Policy</a> and any plan-specific terms or signed data processing agreement are the complete agreement between us</li>
 <li><strong>Severability:</strong> If any provision is unenforceable, the rest remains in effect</li>
 <li><strong>No Waiver:</strong> Our failure to enforce a right doesn't waive it</li>
 <li><strong>Assignment:</strong> You can't transfer your account without our consent. We can assign our rights in a merger/acquisition</li>
@@ -246,6 +247,10 @@
         <li><a href="/security">Security</a></li>
         <li><a href="/privacy">Privacy</a></li>
         <li><a href="/terms" aria-current="page">Terms</a></li>
+        <li><a href="/refunds">Refunds</a></li>
+        <li><a href="/subprocessors">Subprocessors</a></li>
+        <li><a href="/dpa">DPA</a></li>
+        <li><a href="/changelog">Changelog</a></li>
         <li><a href="/contact">Contact</a></li>
       </ul>
     </nav>
@@ -253,6 +258,6 @@
 </footer>
 <!-- /@footer -->
 
-<script src="site.js" defer></script>
+<script src="/site.js" defer></script>
 </body>
 </html>

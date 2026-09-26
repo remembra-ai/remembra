@@ -2,7 +2,8 @@
 
 **Production truth (as of 2026-07-16):** `api.remembra.dev` runs as the Coolify
 application **`remembra-api`** (project `remembra`, uuid `s8sk8kw4gg8oo044808og8kg`)
-on the Hetzner server `178.156.226.84`, behind Cloudflare. It builds
+on a Hetzner server in the US, behind Cloudflare (the origin address and the Coolify URL are kept in the
+private operations notes, not in this public repo). It builds
 **`Dockerfile.cloud`** from `remembra-ai/remembra` branch `main`.
 
 > The `fly.toml` in this repo is a portable config for a possible future
@@ -12,7 +13,7 @@ on the Hetzner server `178.156.226.84`, behind Cloudflare. It builds
 
 1. Commit and push to `main` (CI must be green).
 2. Trigger the Coolify rebuild — either:
-   - **UI:** Coolify (`http://178.156.226.84:8000`) → project *remembra* →
+   - **UI:** Coolify (its URL is in the private operations notes) → project *remembra* →
      *remembra-api* → **Redeploy**, or
    - **Hands-off (SSH):**
 
@@ -47,6 +48,37 @@ on the Hetzner server `178.156.226.84`, behind Cloudflare. It builds
    curl -s -o /dev/null -D - https://api.remembra.dev/health | grep -i x-request-id                 # present
    curl -s https://api.remembra.dev/health/ready | python3 -m json.tool                            # status ok (see below)
    ```
+
+## The website (remembra.dev)
+
+`remembra.dev` is the static site in `landing/`, served by nginx with the config in `landing/nginx.conf`
+and `landing/remembra-headers.conf`: clean URLs, the redirects for old paths (`/signup`, `/dashboard`,
+`/docs/*`, retired `/changelog/<version>` pages), the security headers and CSP, `/.well-known/security.txt`
+and the 404 page. `vercel.json` is not used and has been removed.
+
+**One-time Coolify change** (owner or operator; the static build pack ignores `landing/nginx.conf`):
+
+1. Coolify → the application that serves `remembra.dev` → **General**.
+2. **Build Pack:** `Dockerfile` (instead of Static / Nixpacks).
+3. **Base Directory:** `/landing`. **Dockerfile Location:** `/Dockerfile`.
+4. **Ports Exposes:** `8080` (the container runs nginx as the unprivileged `nginx` user, so it cannot use 80).
+5. Keep the domain `https://remembra.dev` (and `https://www.remembra.dev` if it is set). Save, then **Redeploy**.
+
+Before deploying, run `python scripts/site_predeploy.py` (all gates cleared, docs live, PyPI has the release).
+
+**Verify live** after the redeploy:
+
+```bash
+curl -sI https://remembra.dev/ | grep -iE 'strict-transport|content-security|x-frame|x-content-type|referrer-policy|permissions-policy'
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' 'https://remembra.dev/dashboard?checkout=success'  # 301 https://app.remembra.dev/?checkout=success
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://remembra.dev/signup                        # 301 https://app.remembra.dev/signup
+curl -s -o /dev/null -w '%{http_code}\n' https://remembra.dev/refunds                                      # 200
+curl -s https://remembra.dev/.well-known/security.txt | grep Expires
+curl -s -o /dev/null -w '%{http_code}\n' https://remembra.dev/no-such-page                                 # 404
+```
+
+Then load the home, pricing and contact pages with the browser console open: a CSP violation there means an
+inline script changed without `python scripts/site_csp.py` being run.
 
 ## Health, readiness, metrics
 
