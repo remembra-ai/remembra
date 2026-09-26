@@ -5,6 +5,7 @@ import { MobileNav, Sidebar } from './Sidebar';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { SettingsPanel } from './SettingsPanel';
 import { BrandMark } from './relay/ui';
+import { NotificationBell } from './crew/notify/NotificationBell';
 import { TABS, hrefFor, sectionOf, type TabType } from '../lib/nav';
 
 interface AppLayoutProps {
@@ -80,6 +81,7 @@ export function AppLayout({
               <ProjectSwitcher />
             </div>
           )}
+          <NotificationBell />
           <button
             type="button"
             onClick={onSearch}
