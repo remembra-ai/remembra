@@ -278,16 +278,10 @@ async def signup(
 
     key_manager = request.app.state.api_key_manager
 
-    # Initialize email service for welcome email
-    email_service = None
-    try:
-        from remembra.cloud.email import EmailProvider, EmailService
+    # Email service for the welcome and verification emails (None when email is not configured)
+    from remembra.cloud.email import email_service_or_none
 
-        email_service = EmailService.create(provider=EmailProvider.RESEND)
-    except Exception as e:
-        import logging
-
-        logging.getLogger(__name__).warning("Email service not available, skipping welcome email: %s", str(e))
+    email_service = email_service_or_none()
 
     provisioner = TenantProvisioner(
         meter=meter,

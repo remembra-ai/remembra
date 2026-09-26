@@ -89,18 +89,21 @@ async def _send_usage_warning_email(
         return  # Already warned this session
 
     try:
-        from remembra.cloud.email import EmailProvider, EmailService
+        from remembra.cloud.email import email_service_or_none
 
-        email_service = EmailService.create(provider=EmailProvider.RESEND)
-        await email_service.send_usage_warning_email(
+        email_service = email_service_or_none()
+        if email_service is None:
+            return
+        result = await email_service.send_usage_warning_email(
             to=user_email,
             usage_percent=int(usage_percent),
             current_usage=current_usage,
             limit=limit,
             plan=plan,
         )
-        _warned_users_80.add(user_id)
-        logger.info("usage_warning_email_sent", user_id=user_id, percent=usage_percent)
+        if result.success:
+            _warned_users_80.add(user_id)
+            logger.info("usage_warning_email_sent", user_id=user_id, percent=usage_percent)
     except Exception as e:
         logger.warning("usage_warning_email_failed", user_id=user_id, error=str(e))
 
@@ -117,17 +120,20 @@ async def _send_limit_exceeded_email(
         return  # Already notified this session
 
     try:
-        from remembra.cloud.email import EmailProvider, EmailService
+        from remembra.cloud.email import email_service_or_none
 
-        email_service = EmailService.create(provider=EmailProvider.RESEND)
-        await email_service.send_limit_exceeded_email(
+        email_service = email_service_or_none()
+        if email_service is None:
+            return
+        result = await email_service.send_limit_exceeded_email(
             to=user_email,
             current_usage=current_usage,
             limit=limit,
             plan=plan,
         )
-        _warned_users_limit.add(user_id)
-        logger.info("limit_exceeded_email_sent", user_id=user_id)
+        if result.success:
+            _warned_users_limit.add(user_id)
+            logger.info("limit_exceeded_email_sent", user_id=user_id)
     except Exception as e:
         logger.warning("limit_exceeded_email_failed", user_id=user_id, error=str(e))
 

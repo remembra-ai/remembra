@@ -164,3 +164,33 @@ jobs:
           tags: remembra:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # The production image (Dockerfile.cloud): build it, boot it against Qdrant
+  # ---------------------------------------------------------------------------
+  # Coolify builds Dockerfile.cloud on every deploy; the `docker` job above
+  # only builds the self-host Dockerfile. This builds the production image
+  # (dashboard, locked deps, baked reranker, litestream), never pushes it, then
+  # scripts/ci/cloud_image_smoke.sh boots it next to a digest-pinned Qdrant and
+  # checks /health, /health/ready, the dashboard, /oauth/callback and the
+  # pre-migration backup. Plain docker CLI: no third-party actions.
+  docker-cloud:
+    name: Production image (Dockerfile.cloud) build + /health
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Build Dockerfile.cloud (not pushed)
+        run: |
+          docker buildx build \
+            --file Dockerfile.cloud \
+            --build-arg REMEMBRA_BUILD_SHA="${GITHUB_SHA}" \
+            --tag remembra-cloud:ci \
+            --load \
+            .
+
+      - name: Boot it against Qdrant and check /health
+        run: bash scripts/ci/cloud_image_smoke.sh remembra-cloud:ci "${GITHUB_SHA}"

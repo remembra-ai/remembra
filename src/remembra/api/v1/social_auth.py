@@ -27,6 +27,7 @@ from remembra.api.v1.auth import CurrentUser, get_user_manager
 from remembra.auth import social
 from remembra.auth.middleware import get_client_ip
 from remembra.auth.superadmin import account_is_owner
+from remembra.cloud import notify
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
 from remembra.security import state as security_state
@@ -192,6 +193,8 @@ async def oauth_callback(request: Request, provider: str) -> RedirectResponse:
         else:
             user_id, created = await social.resolve_account(db, identity, get_client_ip(request))
             code, browser_binding = await social.issue_login_code(db, user_id, provider, new_account=created)
+            if created:
+                notify.notify_welcome(request.app.state, user_id)
             target = social.dashboard_url("/oauth/callback", {"code": code, "provider": provider})
     except social.SocialLoginError as e:
         log.info("oauth_login_failed", provider=provider, reason=e.code)

@@ -701,9 +701,19 @@ class PaddleBillingManager:
 
         if event_type == "subscription.past_due":
             logger.warning("Subscription past due for user %s", user_id)
+            # The price being collected, from the event's own items (the
+            # payment-failed email quotes it). Unknown price: plan_from_price
+            # stays False and the email names no Founding price.
+            mapping, _quantity = self._resolve_purchase(data)
             return WebhookResult(
                 action="payment_failed",
                 user_id=user_id,
+                plan=mapping.tier if mapping else None,
+                interval=mapping.interval if mapping else None,
+                founding=bool(mapping and mapping.founding),
+                plan_from_price=mapping is not None,
+                paddle_customer_id=data.get("customer_id"),
+                paddle_subscription_id=data.get("id"),
             )
 
         # Unhandled event type

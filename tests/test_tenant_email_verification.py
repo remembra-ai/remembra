@@ -36,8 +36,11 @@ class FakeEmail:
     verification_urls: list[tuple[str, str]] = field(default_factory=list)
     fail: bool = False
 
-    async def send_welcome_email(self, **_: Any) -> _Result:
-        return _Result()
+    async def send_welcome_email(self, to: str, *, verify_url: str | None = None, **_: Any) -> _Result:
+        # Dashboard signups get the verification link inside the welcome (one email).
+        if verify_url:
+            self.verification_urls.append((to, verify_url))
+        return _Result(success=not self.fail)
 
     async def send_email_verification_email(self, to: str, verify_url: str) -> _Result:
         self.verification_urls.append((to, verify_url))

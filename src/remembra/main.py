@@ -1,5 +1,8 @@
 """FastAPI application factory and entry point."""
 
+import base64
+import hashlib
+import re
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -867,9 +870,27 @@ def create_app() -> FastAPI:
             app.mount("/static", StaticFiles(directory=static_path), name="static")
             static_root = static_path.resolve()
 
+            # The dashboard page gets its own Content-Security-Policy: the
+            # API-wide default-src 'none' (SecurityHeadersMiddleware, which
+            # keeps a policy a response already set) would block every script
+            # and leave a blank page.
+            index_path = static_path / "index.html"
+            index_csp = dashboard_csp(index_path.read_text(encoding="utf-8")) if index_path.is_file() else None
+
+            def spa_index() -> Response:
+                assert index_csp is not None
+                return FileResponse(index_path, headers={"Content-Security-Policy": index_csp, "Cache-Control": "no-cache"})
+
             # Serve index.html for SPA routes
             @app.get("/{full_path:path}", include_in_schema=False)
             async def serve_spa(full_path: str) -> Response:
+                # Dashboard pages that live under a reserved prefix. Social
+                # sign-in ends on <public_dashboard_url>/oauth/callback#code=…;
+                # when the dashboard is this host (the image serves it), that
+                # page must be the SPA, not the JSON 404 below. The connector's
+                # own /oauth/* routes are registered before this catch-all.
+                if index_csp is not None and full_path.rstrip("/") in SPA_PAGES_UNDER_RESERVED_PREFIXES:
+                    return spa_index()
                 # Don't intercept API routes, metrics, or WebSocket — these must
                 # 404 as JSON rather than fall through to the SPA index.html.
                 api_paths = (
@@ -893,18 +914,65 @@ def create_app() -> FastAPI:
                 # symlinks pointing outside it; REL-20).
                 file_path = _safe_static_file(static_root, full_path)
                 if file_path is not None:
+                    if index_csp is not None and file_path == index_path.resolve():
+                        return spa_index()
                     return FileResponse(file_path)
 
                 # Fall back to index.html for SPA routing
-                index_path = static_path / "index.html"
-                if index_path.exists():
-                    return FileResponse(index_path)
+                if index_csp is not None:
+                    return spa_index()
 
                 return JSONResponse({"detail": "Not found"}, status_code=404)
 
             log.info("static_files_enabled", path=str(static_path))
 
     return app
+
+
+# Dashboard (SPA) routes whose path starts with a prefix the SPA fallback
+# otherwise reserves for the API (dashboard/src/App.tsx `landing`).
+SPA_PAGES_UNDER_RESERVED_PREFIXES: frozenset[str] = frozenset({"oauth/callback"})
+
+_INLINE_SCRIPT = re.compile(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", re.S | re.I)
+_INLINE_HANDLER = re.compile(r"""\son[a-z]+=(?:"([^"]*)"|'([^']*)')""", re.I)
+
+
+def _csp_hash(source: str) -> str:
+    digest = hashlib.sha256(source.encode("utf-8")).digest()
+    return f"'sha256-{base64.b64encode(digest).decode()}'"
+
+
+def dashboard_csp(index_html: str) -> str:
+    """Content-Security-Policy for the dashboard's index.html when this process serves it.
+
+    Scripts: the dashboard's own bundle, the exact inline scripts and handlers
+    of this index.html (by hash), Paddle.js (billing) and Cloudflare Turnstile
+    (signup). Styles and fonts: its own, Google Fonts, Paddle. Connections: this
+    origin (the bundle calls the API relatively) and Paddle. No framing.
+    """
+    scripts = [_csp_hash(body) for body in _INLINE_SCRIPT.findall(index_html) if body.strip()]
+    handlers = [_csp_hash(a or b) for a, b in _INLINE_HANDLER.findall(index_html)]
+    script_src = ["'self'", *scripts]
+    if handlers:
+        script_src += ["'unsafe-hashes'", *handlers]
+    script_src += ["https://cdn.paddle.com", "https://challenges.cloudflare.com"]
+    return "; ".join(
+        [
+            "default-src 'self'",
+            "script-src " + " ".join(dict.fromkeys(script_src)),
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.paddle.com",
+            "font-src 'self' data: https://fonts.gstatic.com",
+            "img-src 'self' data: blob: https:",
+            "connect-src 'self' https://*.paddle.com",
+            "frame-src https://*.paddle.com https://challenges.cloudflare.com",
+            "worker-src 'self' blob:",
+            "manifest-src 'self'",
+            "object-src 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+            "frame-ancestors 'none'",
+        ]
+    )
 
 
 def _safe_static_file(static_root: Path, requested: str) -> Path | None:

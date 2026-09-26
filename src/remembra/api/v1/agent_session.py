@@ -102,13 +102,15 @@ async def upsert_status(
     (user, project, key). Re-sending the current value is a no-op.
 
     A status write is a relay event: stored atomically, never enriched, never
-    billed in smart credits (plan relay burst limit and memory cap apply)."""
+    billed in smart credits (plan relay burst limit and memory cap apply).
+    The plan gate runs only when the value changes: re-sending the current
+    value counts against no cap, burst or daily limit."""
     _require(current_user, "memory:store")
     project = resolve_project_access(current_user, body.project_id) or "default"
-    value = body.value
-    await gate_write(request, response, current_user.user_id, [value], atomic=[True], project_ids=[project], relay=True)
-
     value, trust_score, checksum = screen_text(request, body.value)
+
+    async def charge() -> None:
+        await gate_write(request, response, current_user.user_id, [body.value], atomic=[True], project_ids=[project], relay=True)
 
     try:
         result = await _service(request).upsert_status(
@@ -120,6 +122,7 @@ async def upsert_status(
             ttl=body.ttl,
             trust_score=trust_score,
             checksum=checksum,
+            before_write=charge,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e

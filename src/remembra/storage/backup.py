@@ -55,6 +55,19 @@ def _source_bytes(src: Path) -> int:
     return total
 
 
+def _has_tables(src: Path) -> bool:
+    """False for a database with no tables yet (a fresh volume: connect() creates the file first)."""
+    try:
+        conn = sqlite3.connect(f"file:{src}?mode=ro", uri=True)
+        try:
+            row = conn.execute("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table'").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        return True  # unreadable: let the copy below report it rather than skip silently
+    return bool(row and row[0])
+
+
 def _prune(target_dir: Path, keep: int) -> list[Path]:
     backups = sorted(target_dir.glob(f"{BACKUP_PREFIX}*.db"), key=lambda p: p.stat().st_mtime, reverse=True)
     removed = []
@@ -77,8 +90,8 @@ def pre_migration_backup(
     """Copy the database at ``db_path`` before schema changes run.
 
     Returns the new backup's path, or ``None`` when there is nothing to protect
-    (in-memory database, no file yet, empty file) or this build already has a
-    backup. Raises :class:`BackupError` when a backup is needed but cannot be
+    (in-memory database, no file yet, empty file, a file with no tables yet) or
+    this build already has a backup. Raises :class:`BackupError` when a backup is needed but cannot be
     written; nothing partial is left behind.
     """
     if keep < 1:
@@ -86,7 +99,7 @@ def pre_migration_backup(
     if _is_in_memory(db_path):
         return None
     src = Path(db_path)
-    if not src.is_file() or src.stat().st_size == 0:
+    if not src.is_file() or src.stat().st_size == 0 or not _has_tables(src):
         return None
 
     target_dir = Path(backup_dir) if backup_dir else src.parent / "backups"

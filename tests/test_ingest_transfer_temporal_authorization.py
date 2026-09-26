@@ -53,7 +53,8 @@ async def auth_api(in_memory_db, monkeypatch):
             id TEXT, content TEXT, user_id TEXT, project_id TEXT,
             extracted_facts TEXT, metadata TEXT, created_at TEXT, updated_at TEXT,
             expires_at TEXT, source TEXT, trust_score REAL,
-            access_count INTEGER, last_accessed TEXT
+            access_count INTEGER, last_accessed TEXT,
+            memory_type TEXT, pinned INTEGER
         )"""
     )
     records = {}

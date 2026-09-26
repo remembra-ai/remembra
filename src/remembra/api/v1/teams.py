@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from remembra.auth.middleware import CurrentUser
-from remembra.cloud.email import EmailProvider, EmailService
+from remembra.cloud.email import EmailService, email_service_or_none
+from remembra.config import get_settings
 from remembra.core.limiter import limiter
 from remembra.teams.manager import TeamManager
 
@@ -40,12 +41,7 @@ TeamManagerDep = Annotated[TeamManager, Depends(get_team_manager)]
 
 def get_email_service() -> EmailService | None:
     """Get email service if Resend is configured."""
-    if os.getenv("RESEND_API_KEY"):
-        try:
-            return EmailService.create(provider=EmailProvider.RESEND)
-        except Exception:
-            return None
-    return None
+    return email_service_or_none()
 
 
 EmailServiceDep = Annotated[EmailService | None, Depends(get_email_service)]
@@ -466,8 +462,10 @@ async def invite_member(
             invited_by=user.user_id,
         )
 
-        # Build invite URL
-        base_url = os.getenv("REMEMBRA_BASE_URL", "https://app.remembra.dev")
+        # Build invite URL (the dashboard's /invite/<token> page)
+        base_url = (get_settings().public_dashboard_url or os.getenv("REMEMBRA_BASE_URL") or "https://app.remembra.dev").rstrip(
+            "/"
+        )
         invite_url = f"{base_url}/invite/{invite['token']}"
 
         # Send invite email

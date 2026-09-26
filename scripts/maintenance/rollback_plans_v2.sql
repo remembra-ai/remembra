@@ -6,9 +6,10 @@
 -- PlanTier(tenant["plan"]) raises, so every store and usage call of those
 -- accounts returns 500 until this runs.
 --
--- Run it BEFORE redeploying b034314, against a backup-taken database:
---   sqlite3 /data/remembra.db ".backup /data/remembra-pre-rollback.db"
---   sqlite3 /data/remembra.db < scripts/maintenance/rollback_plans_v2.sql
+-- Run it BEFORE redeploying b034314, after taking a consistent copy. The image
+-- has no sqlite3 CLI and does not contain this file: docs/DEPLOYING.md
+-- ("Rolling back past the plans v2 migration") copies it into the container
+-- and applies it with Python's sqlite3 module.
 --
 -- Afterwards, by hand: review accounts that bought a new-catalog plan during
 -- the deploy window (a $12 Solo is shown as the old $49 Pro under b034314).

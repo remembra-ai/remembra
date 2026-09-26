@@ -105,6 +105,42 @@ def test_missing_or_empty_file_is_skipped(tmp_path):
     assert not (tmp_path / "backups").exists()
 
 
+def test_database_without_tables_is_skipped(tmp_path):
+    """A fresh volume: Database.connect() creates the file (WAL header) before init_schema runs."""
+    fresh = tmp_path / "remembra.db"
+    conn = sqlite3.connect(fresh)
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.commit()
+    assert fresh.stat().st_size > 0
+    assert pre_migration_backup(str(fresh), label="x") is None
+    assert not (tmp_path / "backups").exists()
+    # Once it holds a table, it is protected.
+    conn.execute("CREATE TABLE notes (id INTEGER PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+    assert pre_migration_backup(str(fresh), label="x") is not None
+
+
+async def test_first_boot_on_a_fresh_volume_writes_no_backup(tmp_path):
+    path = tmp_path / "remembra.db"
+    db = Database(f"sqlite+aiosqlite:///{path}", backup_before_migrate=True, backup_label="fresh1")
+    await db.connect()
+    try:
+        await db.init_schema()
+        assert await db.get_schema_version() == LATEST_VERSION
+    finally:
+        await db.close()
+    assert _backups(tmp_path / "backups") == []
+    # The next boot (a later build) has data to protect.
+    db = Database(f"sqlite+aiosqlite:///{path}", backup_before_migrate=True, backup_label="fresh2")
+    await db.connect()
+    try:
+        await db.init_schema()
+    finally:
+        await db.close()
+    assert [c.name.split("-")[2] for c in _backups(tmp_path / "backups")] == ["fresh2"]
+
+
 def test_custom_backup_dir(tmp_path):
     db = tmp_path / "remembra.db"
     _make_db(db)
@@ -142,12 +178,10 @@ def test_copy_failure_raises_and_removes_the_partial_file(tmp_path, monkeypatch)
         def close(self):
             self._conn.close()
 
-    calls = {"n": 0}
-
     def connect(path, *args, **kwargs):
         conn = real_connect(path, *args, **kwargs)
-        calls["n"] += 1
-        return Exploding(conn) if calls["n"] == 1 else conn
+        # The copy's source connection (the read-only table probe opens a file: URI).
+        return Exploding(conn) if str(path) == str(db) else conn
 
     monkeypatch.setattr(backup_mod.sqlite3, "connect", connect)
     with pytest.raises(BackupError, match="disk I/O error"):

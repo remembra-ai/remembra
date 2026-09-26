@@ -2044,15 +2044,20 @@ class Database:
         """
         Get all memories with decay/access metadata.
 
-        Returns memories with access_count and last_accessed for decay calculation.
+        Returns memories with access_count and last_accessed for decay
+        calculation, plus the protections decay pruning honours: ``pinned``
+        and ``relay_record`` (1 for a relay-structured handoff/checkpoint,
+        :data:`RELAY_RECORD_SQL`; never pruned, like the TTL path).
         """
-        query = """
+        query = f"""
             SELECT id, content, created_at, updated_at, expires_at,
-                   access_count, last_accessed
+                   access_count, last_accessed, memory_type,
+                   COALESCE(pinned, 0) AS pinned,
+                   {RELAY_RECORD_SQL} AS relay_record
             FROM memories
             WHERE user_id = ?
               AND (expires_at IS NULL OR expires_at > ?)
-        """
+        """  # noqa: S608 - constant fragment; values are bound
         params: list[Any] = [user_id, utcnow().isoformat()]
 
         if project_id:

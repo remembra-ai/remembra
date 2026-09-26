@@ -270,8 +270,9 @@ class TemporalCleanupJob:
             # Calculate decay and find candidates for pruning
             prune_candidates: list[dict[str, Any]] = []
             for memory in memories:
-                # Pinned memories are protected from decay pruning entirely.
-                if memory.get("pinned"):
+                # Pinned memories and relay handoffs/checkpoints (the continuity
+                # record, exempt from TTL cleanup too) are never decay-pruned.
+                if memory.get("pinned") or memory.get("relay_record"):
                     continue
                 decay_info = calculate_memory_decay_info(memory, self.config)
                 # Use our adaptive threshold instead of the static should_prune
