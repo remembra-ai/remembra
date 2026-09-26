@@ -35,6 +35,9 @@ class AuditAction(StrEnum):
     AUTH_FAILED = "auth_failed"
     AUTH_RATE_LIMITED = "auth_rate_limited"
 
+    # Account lifecycle (receipt rows keep no account content)
+    ACCOUNT_ERASED = "account_erased"
+
 
 @dataclass
 class AuditEvent:

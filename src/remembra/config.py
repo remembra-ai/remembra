@@ -730,6 +730,18 @@ class Settings(BaseSettings):
         ),
     )
     temporal_cleanup_interval_seconds: int = Field(3600, description="Seconds between TTL cleanup runs")
+    account_erasure_grace_days: int = Field(
+        7,
+        ge=0,
+        le=30,
+        description=(
+            "Days between a self-serve account deletion and the permanent erasure of every row and vector the "
+            "account owns (a window to undo a mistaken or hostile deletion). Keep the privacy page in step."
+        ),
+    )
+    account_erasure_interval_seconds: int = Field(
+        3600, ge=60, description="Seconds between runs of the job that erases accounts past their grace period"
+    )
     pre_migration_backup: bool = Field(
         True,
         description=(

@@ -15,6 +15,8 @@ from remembra.storage.database import VERSIONED_MIGRATIONS, Database
 from remembra.storage.qdrant import QdrantStore
 
 LATEST_VERSION = max(v for v, _, _ in VERSIONED_MIGRATIONS)
+# The version before the newest entry (numbers may skip: 5 belongs to feat/crew).
+PREVIOUS_VERSION = max(v for v, _, _ in VERSIONED_MIGRATIONS[:-1])
 
 
 def _make_db(path: Path, rows: int = 25) -> None:
@@ -182,7 +184,7 @@ async def _legacy_database(path: Path, monkeypatch) -> None:
                 "INSERT INTO users (id, email, password_hash, created_at) VALUES ('u-1', 'a@example.com', 'x', '2026-01-01')"
             )
             await db.conn.commit()
-            assert await db.get_schema_version() == LATEST_VERSION - 1
+            assert await db.get_schema_version() == PREVIOUS_VERSION
         finally:
             await db.close()
 
@@ -224,7 +226,7 @@ async def test_init_schema_refuses_to_migrate_when_backup_fails(tmp_path, monkey
     try:
         with pytest.raises(BackupError):
             await db.init_schema()
-        assert await db.get_schema_version() == LATEST_VERSION - 1  # untouched
+        assert await db.get_schema_version() == PREVIOUS_VERSION  # untouched
     finally:
         await db.close()
 

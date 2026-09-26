@@ -41,6 +41,7 @@ def _run_entrypoint(tmp_path: Path, env: dict[str, str], restore_exit: int = 0, 
     full_env = {
         "PATH": f"{bindir}:/usr/bin:/bin",
         "REMEMBRA_DB_PATH": str(tmp_path / "data" / "remembra.db"),
+        "LITESTREAM_CONFIG": str(tmp_path / "litestream.yml"),
         **env,
     }
     (tmp_path / "data").mkdir(exist_ok=True)
@@ -74,7 +75,7 @@ def test_entrypoint_restores_then_replicates(tmp_path) -> None:
     assert proc.returncode == 0, proc.stderr
     assert "restore complete" in proc.stdout
     assert "litestream restore -if-replica-exists" in calls
-    assert "litestream replicate -exec python -m remembra.main" in calls
+    assert f"litestream replicate -config {tmp_path / 'litestream.yml'} -exec python -m remembra.main" in calls
 
 
 def test_entrypoint_existing_db_skips_restore(tmp_path) -> None:

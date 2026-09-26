@@ -483,6 +483,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         app.state.cleanup_job = None
 
+    # Account erasure (R-23): accounts deleted more than account_erasure_grace_days
+    # ago lose every row and vector they own; only a content-free receipt stays.
+    from remembra.account.erasure import AccountEraser, run_erasure_loop
+
+    app.state.account_eraser = AccountEraser(app.state.db, app.state.qdrant)
+    app.state.tasks.spawn(
+        run_erasure_loop(
+            app.state.account_eraser,
+            grace_days=settings.account_erasure_grace_days,
+            interval_seconds=settings.account_erasure_interval_seconds,
+        ),
+        name="account-erasure-loop",
+        loop_task=True,
+    )
+    log.info("account_erasure_loop_started", grace_days=settings.account_erasure_grace_days)
+
     # Report-only drift scan (REL-10): feeds remembra_reconcile_drift in /metrics.
     # Repair is an explicit operator action: python -m remembra.storage.reconcile --repair
     if settings.reconcile_interval_hours > 0:

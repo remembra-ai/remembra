@@ -37,9 +37,31 @@ if [ -n "$LITESTREAM_REPLICA_URL" ]; then
         fi
     fi
 
+    # Retention (R-23): the replica keeps this much history, so data erased from
+    # the live database leaves the backup within about twice this window. The
+    # privacy page states 24 hours; keep them in step. The CLI form cannot set
+    # retention, so the replica is described in a generated config file.
+    RETENTION="${LITESTREAM_RETENTION:-24h}"
+    case "$RETENTION" in
+        *[!0-9hms]*|"") echo "litestream: LITESTREAM_RETENTION must look like 24h, 90m or 3600s" >&2; exit 1 ;;
+    esac
+    case "$LITESTREAM_REPLICA_URL$DB_PATH" in
+        *\"*|*\\*) echo "litestream: replica URL and database path must not contain quotes or backslashes" >&2; exit 1 ;;
+    esac
+    LITESTREAM_CONFIG="${LITESTREAM_CONFIG:-/tmp/litestream.yml}"
+    cat > "$LITESTREAM_CONFIG" <<YAML
+dbs:
+  - path: "$DB_PATH"
+    replicas:
+      - url: "$LITESTREAM_REPLICA_URL"
+        retention: $RETENTION
+        retention-check-interval: 1h
+YAML
+    echo "litestream: replica retention $RETENTION"
+
     exec litestream replicate \
-        -exec "python -m remembra.main" \
-        "$DB_PATH" "$LITESTREAM_REPLICA_URL"
+        -config "$LITESTREAM_CONFIG" \
+        -exec "python -m remembra.main"
 fi
 
 echo "litestream: replication DISABLED (LITESTREAM_REPLICA_URL unset) — SQLite is NOT being backed up" >&2
