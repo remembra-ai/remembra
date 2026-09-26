@@ -238,7 +238,11 @@ async def redeem_bypass_code(request: Request, user: AuthenticatedUser = Depends
     conn = access_conn(request)
     async with crew_errors():
         session = await C.authenticate_session(
-            conn, request.headers.get(C.SESSION_HEADER), user_id=user.user_id, session_id=body["session_id"]
+            conn,
+            request.headers.get(C.SESSION_HEADER),
+            user_id=user.user_id,
+            session_id=body["session_id"],
+            agent_id=user.agent_id,
         )
     await load_crew(conn, session["crew_id"], user, PC)
     enforce_rate_limit("claims", user_id=user.user_id, session_token=request.headers.get(C.SESSION_HEADER))

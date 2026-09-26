@@ -183,7 +183,7 @@ async def test_pending_change_approval_and_bypass_codes_over_http(tmp_path):
         await c.put(
             f"{base}/zones/file",
             json={"yaml": "zones:\n  pos: {include: [p/**], protected: true}\n", "sha": "a", "branch": "main"},
-            headers=ctx["a"],
+            headers=ctx["jwt"],  # a human protects pos; an agent upload would hold it for approval
         )
         res = await c.put(
             f"{base}/zones/file", json={"yaml": "zones:\n  pos: [p/**]\n", "sha": "b", "branch": "main"}, headers=ctx["a"]

@@ -89,9 +89,13 @@ async def test_compatibility_matrix_hierarchy_overlap_globs_and_resources(env):
     assert (await _claim(ops, a, db, "pos")).status == "granted"
     parent = await _claim(ops, c, db, "app", task_id="tsk_1")
     assert parent.status == "denied" and await zone_id(db, "pos") in {b_["zone_id"] for b_ in parent.blockers}
-    # a path glob inside a held zone conflicts; outside it does not
-    assert (await C.request_claim(ops, CREW, c, path_glob="src/app/pos/cart.ts")).status == "denied"
+    # a path glob inside a zone is refused (claim the zone); outside every zone it is a file claim
+    with pytest.raises(Z.CrewOpError) as err:
+        await C.request_claim(ops, CREW, c, path_glob="src/app/pos/cart.ts")
+    assert err.value.error == "zone_path"
     assert (await C.request_claim(ops, CREW, c, path_glob="src/other/x.ts")).status == "granted"
+    # a human's glob still conflicts with a held zone it overlaps
+    assert (await C.request_claim(ops, CREW, HUMAN, path_glob="src/app/pos/cart.ts")).status == "denied"
     # a resource named in a held zone's services conflicts with that zone's exclusive holder
     assert (await _claim(ops, b, db, "billing")).status == "granted"
     assert (await C.request_claim(ops, CREW, c, resource="deploy:vercel")).status == "denied"

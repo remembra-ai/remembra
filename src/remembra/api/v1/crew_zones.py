@@ -72,7 +72,11 @@ async def principal_for(request: Request, access: CrewAccess) -> Z.Principal:
         return Z.Principal.human(access.user.user_id, api_key_id=access.user.api_key_id)
     async with crew_errors():
         session = await authenticate_session(
-            access_conn(request), request.headers.get(SESSION_HEADER), user_id=access.user.user_id, crew_id=access.crew_id
+            access_conn(request),
+            request.headers.get(SESSION_HEADER),
+            user_id=access.user.user_id,
+            crew_id=access.crew_id,
+            agent_id=access.user.agent_id,  # an agent-scoped key acts only as its own agent's sessions (§11.2)
         )
     return Z.Principal.for_session(session, api_key_id=access.user.api_key_id)
 
