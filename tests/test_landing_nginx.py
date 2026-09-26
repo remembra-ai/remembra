@@ -365,6 +365,9 @@ def test_changelog_leads_with_v0_16_0() -> None:
 # Headers
 # ---------------------------------------------------------------------------
 
+# Report-only for launch (docs/DEPLOYING.md): a wrong allowlist is reported, never enforced.
+CSP_HEADER = "Content-Security-Policy-Report-Only"
+
 REQUIRED_HEADERS = {
     "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
     "X-Content-Type-Options": "nosniff",
@@ -385,9 +388,21 @@ def test_every_security_header_is_set_on_every_response() -> None:
     for name, value in REQUIRED_HEADERS.items():
         assert headers.get(name) == value, name
     assert "camera=()" in headers["Permissions-Policy"] and "microphone=()" in headers["Permissions-Policy"]
-    assert "frame-ancestors 'none'" in headers["Content-Security-Policy"]
+    assert "frame-ancestors 'none'" in headers[CSP_HEADER]
     # Every add_header line uses "always", so 3xx and 4xx responses carry them too.
     assert all(line.rstrip().endswith("always;") for line in HEADERS.read_text().splitlines() if line.startswith("add_header"))
+
+
+def test_csp_is_report_only_for_launch_and_the_other_headers_are_enforced() -> None:
+    headers = _headers()
+    assert csp.CSP_HEADER == CSP_HEADER
+    assert "Content-Security-Policy" not in headers  # nothing enforced until a week of reports is clean
+    assert headers[CSP_HEADER].endswith("; report-uri https://api.remembra.dev/api/v1/csp-report")
+    for name in (*REQUIRED_HEADERS, "Permissions-Policy", "Cross-Origin-Opener-Policy"):
+        assert name in headers and not name.endswith("-Report-Only"), name
+    # Switching to enforcing is the header name alone: the same policy comes out.
+    enforced = csp.render(HEADERS.read_text()).replace(f"add_header {CSP_HEADER} ", "add_header Content-Security-Policy ")
+    assert f'add_header Content-Security-Policy "{csp.policy()}" always;' in enforced
 
 
 def test_every_location_that_adds_a_header_includes_the_shared_set() -> None:
@@ -402,7 +417,7 @@ def test_every_location_that_adds_a_header_includes_the_shared_set() -> None:
 def test_csp_is_up_to_date_and_the_pages_need_nothing_it_forbids() -> None:
     assert csp.policy_problems() == []
     assert csp.render(HEADERS.read_text()) == HEADERS.read_text(), "run python scripts/site_csp.py"
-    policy = _headers()["Content-Security-Policy"]
+    policy = _headers()[CSP_HEADER]
     script_src = re.search(r"script-src ([^;]+)", policy)
     assert script_src is not None
     assert "'unsafe-inline'" not in script_src.group(1) and "'unsafe-eval'" not in script_src.group(1)
@@ -437,9 +452,9 @@ def test_csp_check_rejects_what_a_hash_cannot_allow(tmp_path: Path, monkeypatch:
 
 
 def test_every_outside_host_in_the_csp_is_a_named_subprocessor() -> None:
-    policy = _headers()["Content-Security-Policy"]
+    policy = _headers()[CSP_HEADER]
     subs = (LANDING / "subprocessors.html").read_text()
-    hosts = set(re.findall(r"https://([a-z0-9.-]+)", policy))
+    hosts = set(re.findall(r"https://([a-z0-9.-]+)", policy)) - {"api.remembra.dev"}  # our API: the report-uri
     assert hosts == {"fonts.googleapis.com", "fonts.gstatic.com", "formsubmit.co"}
     assert "Google Fonts" in subs and "formsubmit.co" in subs
     form = re.search(r'<form[^>]+action="https://([^/"]+)/', (LANDING / "contact.html").read_text())

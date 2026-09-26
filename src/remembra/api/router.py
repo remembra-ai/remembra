@@ -11,6 +11,7 @@ from remembra.api.v1 import (
     brain,
     cloud,
     conflicts,
+    csp_report,
     debug,
     embeddings,
     entities,
@@ -58,3 +59,4 @@ api_router.include_router(inbox.router, prefix="/v1")
 api_router.include_router(agent_session.router, prefix="/v1")
 api_router.include_router(relay.router, prefix="/v1")
 api_router.include_router(brain.router, prefix="/v1")
+api_router.include_router(csp_report.router, prefix="/v1")

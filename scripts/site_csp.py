@@ -8,6 +8,13 @@ inline script is allowed by its SHA-256 hash, and nothing else inline runs.
     python scripts/site_csp.py          # rewrite the CSP line in landing/remembra-headers.conf
     python scripts/site_csp.py --check  # exit 1 if it is out of date, or a page breaks the policy
 
+At launch the policy ships as Content-Security-Policy-Report-Only (CSP_HEADER):
+browsers apply nothing, and send each violation to the API's /csp-report,
+which logs it. docs/DEPLOYING.md says how to switch to enforcing (set
+CSP_HEADER to "Content-Security-Policy" and rerun this script) after a clean
+week of reports. frame-ancestors is ignored in report-only mode; the enforced
+X-Frame-Options: DENY keeps the site out of frames meanwhile.
+
 A page breaks the policy when it has an inline event handler (onclick=...), a
 javascript: URL, or a <script src> on another host: none of those can be
 allowed by a hash, and the site has no need for them.
@@ -33,6 +40,11 @@ JS_TYPES = {"", "text/javascript", "application/javascript", "module"}
 FONT_CSS = "https://fonts.googleapis.com"
 FONT_FILES = "https://fonts.gstatic.com"
 FORM_POST = "https://formsubmit.co"  # contact.html posts its form here
+
+# Report-only for launch; "Content-Security-Policy" once a week of reports is clean.
+CSP_HEADER = "Content-Security-Policy-Report-Only"
+# Where browsers send violation reports (remembra.api.v1.csp_report logs them).
+REPORT_URI = "https://api.remembra.dev/api/v1/csp-report"
 
 
 class _Scripts(HTMLParser):
@@ -117,6 +129,7 @@ def policy() -> str:
         "base-uri 'self'",
         "object-src 'none'",
         "upgrade-insecure-requests",
+        f"report-uri {REPORT_URI}",
     ]
     return "; ".join(directives)
 
@@ -124,7 +137,7 @@ def policy() -> str:
 def render(conf: str) -> str:
     if not CSP_BLOCK.search(conf):
         raise SystemExit(f"{HEADERS.name}: missing the # @csp ... # /@csp block")
-    line = f'add_header Content-Security-Policy "{policy()}" always;\n'
+    line = f'add_header {CSP_HEADER} "{policy()}" always;\n'
     return CSP_BLOCK.sub(lambda m: m.group(1) + line + m.group(2), conf, count=1)
 
 

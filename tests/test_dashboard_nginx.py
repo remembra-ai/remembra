@@ -41,9 +41,14 @@ def _headers() -> dict[str, str]:
     }
 
 
+# Report-only for launch: the Paddle hosts are not verified against a live checkout
+# (docs/DEPLOYING.md, "Content-Security-Policy: report-only at launch").
+CSP_HEADER = "Content-Security-Policy-Report-Only"
+
+
 def _csp() -> dict[str, list[str]]:
     out = {}
-    for part in _headers()["Content-Security-Policy"].split(";"):
+    for part in _headers()[CSP_HEADER].split(";"):
         words = part.split()
         if words:
             out[words[0]] = words[1:]
@@ -72,6 +77,23 @@ def test_security_headers_are_set_on_every_response() -> None:
     csp = _csp()
     assert csp["frame-ancestors"] == ["'none'"] and csp["object-src"] == ["'none'"]
     assert "'unsafe-inline'" not in csp["script-src"] and "'unsafe-eval'" not in csp["script-src"]
+
+
+def test_csp_is_report_only_for_launch_and_the_other_headers_are_enforced() -> None:
+    headers = _headers()
+    assert "Content-Security-Policy" not in headers
+    assert _csp()["report-uri"] == ["https://api.remembra.dev/api/v1/csp-report"]
+    for name in (
+        "Strict-Transport-Security",
+        "X-Content-Type-Options",
+        "X-Frame-Options",
+        "Referrer-Policy",
+        "Permissions-Policy",
+    ):
+        assert name in headers, name
+    # Paddle.js from cdn.paddle.com only, as Paddle's docs say; the conf cites them.
+    assert "https://cdn.paddle.com" in _csp()["script-src"]
+    assert "https://developer.paddle.com/paddlejs/include-paddlejs" in HEADERS.read_text()
 
 
 def test_every_location_that_adds_a_header_includes_the_shared_set() -> None:

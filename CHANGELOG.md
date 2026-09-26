@@ -34,6 +34,10 @@ remembra-relay connect          # dry run; add --apply to write the hooks
   (`https://app.remembra.dev/?checkout=success`), and Paddle's payment link is the dashboard's `/pay` page.
 - remembra.dev is now served by nginx from `landing/` with its own config (security headers, a hashed-script
   CSP, `/.well-known/security.txt`, redirects for old paths); new refund, subprocessor and DPA pages.
+- The CSPs of remembra.dev and app.remembra.dev ship as `Content-Security-Policy-Report-Only` for launch,
+  because the Paddle checkout hosts could not be verified against a live checkout; the other security headers
+  are enforced. Browsers report violations to the new `POST /api/v1/csp-report`, which logs them
+  (`csp_violation`, no query strings). docs/DEPLOYING.md says how to switch to enforcing.
 
 ### Added
 - **Codex hooks verified.** `remembra-relay connect` now writes Codex's SessionStart, UserPromptSubmit and

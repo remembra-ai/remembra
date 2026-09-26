@@ -107,6 +107,57 @@ curl -s -o /dev/null -w '%{http_code}\n' https://remembra.dev/no-such-page      
 Then load the home, pricing and contact pages with the browser console open: a CSP violation there means an
 inline script changed without `python scripts/site_csp.py` being run.
 
+## Content-Security-Policy: report-only at launch
+
+Both sites send their CSP as `Content-Security-Policy-Report-Only`: remembra.dev
+(`landing/remembra-headers.conf`, written by `scripts/site_csp.py`) and app.remembra.dev
+(`dashboard/security-headers.conf`). The browser blocks nothing; it reports each thing the policy would have
+blocked to `https://api.remembra.dev/api/v1/csp-report`, and the API logs one `csp_violation` line per
+report (page origin and path, directive, blocked origin or keyword, never a query string). HSTS, `nosniff`,
+`X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy` and COOP stay enforced; `X-Frame-Options`
+covers `frame-ancestors`, which browsers ignore in report-only mode. The API's own JSON CSP
+(`default-src 'none'`, in `main.py`) is unchanged and enforced.
+
+Why: the dashboard's Paddle hosts could not be checked against a live checkout, and Paddle publishes no CSP
+list. Its docs only say to load Paddle.js from `https://cdn.paddle.com/`
+([Include Paddle.js](https://developer.paddle.com/paddlejs/include-paddlejs)), which `script-src` allows.
+The checkout frame hosts (`buy.paddle.com`, `sandbox-buy.paddle.com`) and `connect-src https://*.paddle.com`
+are our best reading. An enforced policy with a wrong host would break checkout.
+
+**Deploy order.** Deploy the API first (it serves `/api/v1/csp-report`); a site deployed earlier only gets
+404s for its reports. If `REMEMBRA_CORS_ORIGINS` is set on the API, it must include `https://remembra.dev`
+and `https://app.remembra.dev`, or browsers drop the reports at the CORS check.
+
+**Check that it is live:**
+
+```bash
+curl -sI https://remembra.dev/ | grep -i '^content-security-policy'      # content-security-policy-report-only: ... report-uri ...
+curl -sI https://app.remembra.dev/ | grep -i '^content-security-policy'  # the same header name
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/csp-report' \
+  --data '{"csp-report":{"document-uri":"https://remembra.dev/","effective-directive":"script-src-elem","blocked-uri":"inline"}}' \
+  https://api.remembra.dev/api/v1/csp-report                               # 204, and one csp_violation line in the API log
+```
+
+**Read the reports** in the API container's log (Coolify → remembra-api → Logs, or `docker logs`), filtered
+on `csp_violation`. During the week, run a sandbox Solo checkout (overlay) and open a `/pay?_ptxn=` link so
+the Paddle paths are exercised. Reports whose `blocked` is `chrome-extension`, `moz-extension` or
+`safari-web-extension` come from visitors' browser extensions and can be ignored. Anything else is either a
+host to add to the policy (for example a Paddle host on `/pay` or during checkout) or a page to fix.
+
+**Switch to enforcing** after seven days with no reports other than extension noise, including at least one
+completed sandbox checkout and one `/pay` link in that window:
+
+1. remembra.dev: in `scripts/site_csp.py` set `CSP_HEADER = "Content-Security-Policy"`, run
+   `python scripts/site_csp.py`, and set `CSP_HEADER` the same in `tests/test_landing_nginx.py`.
+2. app.remembra.dev: in `dashboard/security-headers.conf` rename the header to `Content-Security-Policy` and
+   update the comment; set `CSP_HEADER` the same in `tests/test_dashboard_nginx.py`.
+3. Keep `report-uri`: enforced violations are still reported.
+4. Run the checks (pytest, `python scripts/site_csp.py --check`), redeploy the dashboard and the landing, rerun
+   the curl checks above (the header is now `content-security-policy`), then do one more sandbox checkout with
+   the browser console open.
+
+To go back, set the header name to `Content-Security-Policy-Report-Only` again and redeploy; nothing else changes.
+
 ## Health, readiness, metrics
 
 | Endpoint | Purpose | Status codes |
