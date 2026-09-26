@@ -66,13 +66,16 @@ describe('oauth callback fragment', () => {
 
   it('maps codes to fixed copy and never echoes unknown input', () => {
     expect(oauthErrorMessage('email_unverified', 'github')).toContain('verified primary email');
-    const unverified = oauthErrorMessage('account_exists_unverified', 'google');
-    expect(unverified).toContain('Forgot password');
-    expect(unverified).toContain('verification link');
-    // Signing in with the password does not verify the email, so never suggest it.
-    expect(unverified).not.toMatch(/sign in with your password/i);
+    // Forgot password is never offered as a way to verify an email.
+    for (const code of ['account_exists_unverified', 'account_exists_link_required', 'email_in_use', 'email_unverified']) {
+      for (const provider of ['google', 'github']) {
+        const copy = oauthErrorMessage(code, provider);
+        expect(copy).not.toMatch(/forgot password|verification link/i);
+        expect(copy.length).toBeLessThan(140);
+      }
+    }
     expect(oauthErrorMessage('account_exists_link_required', 'github')).toContain('connect GitHub in Settings');
-    expect(oauthErrorMessage('email_in_use', 'google')).toContain('already verified on another Remembra account');
+    expect(oauthErrorMessage('email_in_use', 'google')).toContain('already used by another Remembra account');
     expect(oauthErrorMessage('identity_in_use', 'github')).toContain('different Remembra account');
     expect(oauthErrorMessage('access_denied', 'google')).toBe('Sign-in with Google was cancelled.');
     const unknown = oauthErrorMessage('<script>alert(1)</script>', '<img>');

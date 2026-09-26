@@ -22,6 +22,17 @@ import { OAuthCallback } from './pages/OAuthCallback';
 import { VerifyEmail } from './pages/VerifyEmail';
 import { Pay } from './pages/Pay';
 import { confirmDashboardEmail, takePendingVerifyToken } from './lib/verifyEmail';
+import { AccountReview } from './components/auth/AccountReview';
+import {
+  NO_REVIEW,
+  clearDeferred,
+  deferReview,
+  fetchReview,
+  isDeferred,
+  rememberDeferred,
+  shouldShowReview,
+  type AccountReview as AccountReviewState,
+} from './lib/accountReview';
 import { toast } from 'sonner';
 import { api } from './lib/api';
 import { API_V1 } from './config';
@@ -86,6 +97,19 @@ function App() {
     return saved ? JSON.parse(saved) : null;
   });
 
+  // One-time check of what was set up before the email was confirmed (see lib/accountReview).
+  const [review, setReview] = useState<AccountReviewState>(NO_REVIEW);
+  const [reviewDeferred, setReviewDeferred] = useState(false);
+  const loadReview = useCallback(async (token: string, userId: string) => {
+    try {
+      setReview(await fetchReview(token));
+      setReviewDeferred(isDeferred(userId));
+    } catch {
+      // Unreachable or refused: never block the dashboard on it.
+      setReview(NO_REVIEW);
+    }
+  }, []);
+
   const { tab: activeTab } = useRoute();
   const setActiveTab = useCallback((tab: TabType) => navigate(tab), []);
 
@@ -136,6 +160,7 @@ function App() {
           // Set user ID in API client for API calls
           api.setUserId(user.id);
           api.setJwtToken(token);
+          await loadReview(token, user.id);
           setIsAuthenticated(true);
         }
       } catch {
@@ -144,7 +169,7 @@ function App() {
     };
 
     verifyToken();
-  }, []);
+  }, [loadReview]);
 
   const handleToggleDarkMode = () => {
     setThemeChosen(true);
@@ -158,6 +183,9 @@ function App() {
     api.setUserId(user.id);
     api.setJwtToken(token);
     setCurrentUser({ ...user, is_admin: user.is_admin ?? false });
+    // A new sign-in asks again even if the check was put off earlier in this browser session.
+    clearDeferred();
+    await loadReview(token, user.id);
     setIsAuthenticated(true);
 
     // Finish an email verification that was opened while signed out.
@@ -235,6 +263,7 @@ function App() {
     localStorage.removeItem('remembra_jwt_token');
     localStorage.removeItem('remembra_user');
     api.clearAll();
+    setReview(NO_REVIEW);
     setCurrentUser(null);
     setIsAuthenticated(false);
     setAuthMode('login');
@@ -374,6 +403,42 @@ function App() {
           }}
           onSwitchToLogin={() => {}}
           onSwitchToSignup={() => {}}
+        />
+      </div>
+    );
+  }
+
+  // First sign-in that proved the email: check what was set up before (blocking, one screen).
+  const reviewToken = localStorage.getItem('remembra_jwt_token');
+  if (reviewToken && currentUser && shouldShowReview(review, reviewDeferred)) {
+    return (
+      <div className={darkMode ? 'dark' : ''}>
+        <AccountReview
+          jwt={reviewToken}
+          email={currentUser.email}
+          review={review}
+          onToken={(token) => {
+            localStorage.setItem('remembra_jwt_token', token);
+            api.setJwtToken(token);
+          }}
+          onDone={() => {
+            setReview(NO_REVIEW);
+            // Finishing the check can change what the account may open (an owner address).
+            const token = localStorage.getItem('remembra_jwt_token');
+            if (!token) return;
+            fetch(`${API_V1}/auth/me`, { headers: { Authorization: `Bearer ${token}` } })
+              .then((r) => (r.ok ? r.json() : null))
+              .then((me) => {
+                if (me) setCurrentUser((prev) => (prev ? { ...prev, is_admin: me.is_admin === true } : prev));
+              })
+              .catch(() => undefined);
+            toast.success('Done. We emailed you what you kept.');
+          }}
+          onLater={() => {
+            rememberDeferred(currentUser.id);
+            void deferReview(reviewToken);
+            setReviewDeferred(true);
+          }}
         />
       </div>
     );

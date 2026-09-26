@@ -125,11 +125,11 @@ export function oauthErrorMessage(code: string | null, provider: string | null):
     case 'email_not_authoritative':
       return 'Google cannot confirm who owns this email address. Use a Gmail or Google Workspace account, or sign up with email and password.';
     case 'account_exists_unverified':
-      return `An account with this email exists, but its email address is not verified yet. Use "Forgot password" (or the verification link we emailed) to verify it, then try ${name} again.`;
+      return `An account with this email already exists. Sign in with your password, then connect ${name} in Settings → Security.`;
     case 'account_exists_link_required':
-      return `An account with this email already exists. Sign in with your password or Google, then connect ${name} in Settings → Security.`;
+      return `You already have an account with this email. Sign in with Google or your password, then connect ${name} in Settings → Security.`;
     case 'email_in_use':
-      return 'This email address is already verified on another Remembra account (an API signup). Use that account, or sign up with a different email address.';
+      return 'This email is already used by another Remembra account. Sign in to that one, or use a different email.';
     case 'identity_conflict':
       return `This Remembra account is already linked to a different ${name} account. Sign in with that ${name} account or with your password.`;
     case 'identity_in_use':
