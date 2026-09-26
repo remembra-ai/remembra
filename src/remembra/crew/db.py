@@ -250,6 +250,11 @@ _V1_EVENTS = [
     "CREATE INDEX idx_events_task ON crew_events(task_id, seq)",
     "CREATE INDEX idx_events_sess ON crew_events(session_id, seq)",
     "CREATE TABLE crew_digests (crew_id TEXT, day TEXT, counts TEXT, moments TEXT, PRIMARY KEY(crew_id, day))",
+    # Beyond the §3.2 DDL: every run of seqs retention deleted, with the hash-chain links on both
+    # sides (prev_hash of the first pruned event, hash of the last). verify_crew_chain accepts a gap
+    # only when it matches one of these ranges exactly, so a deleted event is detectable (§4.1).
+    """CREATE TABLE crew_pruned_ranges (crew_id TEXT NOT NULL, first_seq INTEGER NOT NULL, last_seq INTEGER NOT NULL,
+      prev_hash TEXT NOT NULL, last_hash TEXT NOT NULL, pruned_at TEXT NOT NULL, PRIMARY KEY(crew_id, first_seq))""",
 ]
 
 _V1_OUTBOX_IDEMPOTENCY_NOTIFY = [
@@ -321,6 +326,7 @@ CREW_TABLES: tuple[str, ...] = (
     "crew_bypass_codes",
     "crew_events",
     "crew_digests",
+    "crew_pruned_ranges",
     "crew_outbox",
     "crew_idempotency",
     "crew_notification_rules",

@@ -5,7 +5,10 @@ A nightly job, per crew:
 1. verifies the hash chain (``verify_crew_chain``) **before** anything is pruned;
 2. rolls prunable events into ``crew_digests`` and deletes them **in the same
    transaction**, in batches of at most 500 rows, so a crash can never lose an
-   event without its digest (and re-running is a no-op);
+   event without its digest (and re-running is a no-op). The same transaction
+   records each deleted run of seqs in ``crew_pruned_ranges`` with the chain
+   links on both sides, so the verifier can tell a pruned gap from a deleted
+   event (adjacent runs are merged into one range);
 3. applies the per-table rules of the §4.5 table (checkpoint facts, footprints of
    ended sessions, ended session rows, baton brief text) and the 72 h
    ``crew_idempotency`` window.
@@ -170,6 +173,43 @@ async def _merge_digest(conn: aiosqlite.Connection, crew_id: str, day: str, coun
     return True
 
 
+async def _record_pruned_runs(conn: aiosqlite.Connection, crew_id: str, runs: list[tuple[int, int, str, str]]) -> None:
+    """Record deleted runs ``(first_seq, last_seq, prev_hash, last_hash)``, merging with adjacent recorded ranges."""
+    stamp = format_ts(utc_now())
+    for first, last, prev_hash, last_hash in runs:
+        async with conn.execute(
+            "SELECT first_seq, prev_hash FROM crew_pruned_ranges WHERE crew_id = ? AND last_seq = ?", (crew_id, first - 1)
+        ) as cur:
+            before = await cur.fetchone()
+        async with conn.execute(
+            "SELECT last_seq, last_hash FROM crew_pruned_ranges WHERE crew_id = ? AND first_seq = ?", (crew_id, last + 1)
+        ) as cur:
+            after = await cur.fetchone()
+        if before is not None:
+            first, prev_hash = int(before[0]), str(before[1])
+            await conn.execute("DELETE FROM crew_pruned_ranges WHERE crew_id = ? AND first_seq = ?", (crew_id, first))
+        if after is not None:
+            await conn.execute("DELETE FROM crew_pruned_ranges WHERE crew_id = ? AND first_seq = ?", (crew_id, last + 1))
+            last, last_hash = int(after[0]), str(after[1])
+        await conn.execute(
+            "INSERT INTO crew_pruned_ranges (crew_id, first_seq, last_seq, prev_hash, last_hash, pruned_at) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (crew_id, first, last, prev_hash, last_hash, stamp),
+        )
+
+
+def _runs(doomed: list[tuple[int, str, str]]) -> list[tuple[int, int, str, str]]:
+    """Consecutive seqs among ``(seq, prev_hash, hash)`` (in seq order) → ``(first, last, prev_hash, last_hash)``."""
+    out: list[tuple[int, int, str, str]] = []
+    for seq, prev_hash, digest in doomed:
+        if out and out[-1][1] == seq - 1:
+            first, _last, first_prev, _h = out[-1]
+            out[-1] = (first, seq, first_prev, digest)
+        else:
+            out.append((seq, seq, prev_hash, digest))
+    return out
+
+
 async def prune_crew_events(
     db: CrewDatabase,
     crew_id: str,
@@ -194,28 +234,31 @@ async def prune_crew_events(
         async with db.transaction():
             conn = db.conn
             async with conn.execute(
-                "SELECT seq, ts, type, moment, actor_kind FROM crew_events WHERE crew_id = ? AND seq > ? ORDER BY seq LIMIT ?",
+                "SELECT seq, ts, type, moment, actor_kind, prev_hash, hash FROM crew_events "
+                "WHERE crew_id = ? AND seq > ? ORDER BY seq LIMIT ?",
                 (crew_id, cursor, batch),
             ) as cur:
                 rows = list(await cur.fetchall())
             if not rows:
                 break
             cursor = int(rows[-1][0])
-            doomed: list[int] = []
+            doomed: list[tuple[int, str, str]] = []
             per_day: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-            for seq, ts, etype, moment, actor_kind in rows:
+            for seq, ts, etype, moment, actor_kind, prev_hash, digest in rows:
                 if _is_kept(etype, moment, actor_kind):
                     continue
                 cut = burst_cut if etype == "activity.burst" else raw_cut
                 if cut is not None and ts < cut:
-                    doomed.append(int(seq))
+                    doomed.append((int(seq), str(prev_hash or ""), str(digest or "")))
                     per_day[ts[:10]][etype] += 1
             if doomed:
                 for day, counts in sorted(per_day.items()):
                     if await _merge_digest(conn, crew_id, day, dict(counts)):
                         report.digests_written += 1
-                marks = ",".join("?" * len(doomed))
-                await conn.execute(f"DELETE FROM crew_events WHERE crew_id = ? AND seq IN ({marks})", (crew_id, *doomed))
+                seqs = [d[0] for d in doomed]
+                marks = ",".join("?" * len(seqs))
+                await conn.execute(f"DELETE FROM crew_events WHERE crew_id = ? AND seq IN ({marks})", (crew_id, *seqs))
+                await _record_pruned_runs(conn, crew_id, _runs(doomed))
                 pruned += len(doomed)
             done = len(rows) < batch or rows[-1][1] >= stop_ts
         if done:

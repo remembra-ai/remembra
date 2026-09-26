@@ -249,3 +249,112 @@ async def test_nightly_schedule_runs_and_survives_failures(crewdb):
         await retention.retention_loop(crewdb, flaky_policy, clock=lambda: NOW, sleep=fake_sleep)
     assert len(sleeps) == 3 and calls["n"] == 2
     assert await fetch_events(crewdb.conn, CREW_A, after_seq=0) == []  # second night pruned it
+
+
+# ---------------------------------------------------------------------------
+# Chain verification with pruned ranges (§4.1, §4.5): a deleted event is detectable
+# ---------------------------------------------------------------------------
+
+
+async def _six_events(db):
+    log = CrewEventLog(db)
+    return [await _emit(log, 1) for _ in range(6)]
+
+
+async def _rehash(db, seq, payload):
+    """A file-level edit of one event's payload with its hash recomputed (what a careful attacker does)."""
+    from remembra.crew import schemas
+
+    async with db.conn.execute("SELECT prev_hash FROM crew_events WHERE crew_id = ? AND seq = ?", (CREW_A, seq)) as cur:
+        prev = (await cur.fetchone())[0]
+    env = next(e for e in await fetch_events(db.conn, CREW_A, after_seq=seq - 1, upto_seq=seq))
+    env = {**env, "payload": payload}
+    async with db.transaction():
+        await db.conn.execute(
+            "UPDATE crew_events SET payload = ?, hash = ? WHERE crew_id = ? AND seq = ?",
+            (json.dumps(payload, sort_keys=True, separators=(",", ":")), schemas.event_hash(prev, env), CREW_A, seq),
+        )
+
+
+async def _delete(db, *seqs):
+    async with db.transaction():
+        for seq in seqs:
+            await db.conn.execute("DELETE FROM crew_events WHERE crew_id = ? AND seq = ?", (CREW_A, seq))
+
+
+async def test_deleting_any_event_breaks_the_chain(crewdb):
+    await _six_events(crewdb)
+    assert (await verify_crew_chain(crewdb.conn, CREW_A)).ok
+    await _delete(crewdb, 3)
+    report = await verify_crew_chain(crewdb.conn, CREW_A)
+    assert not report.ok and "seq 3..3: events missing and not recorded as pruned" in report.errors
+
+
+async def test_an_edit_hidden_by_deleting_the_tail_is_detected(crewdb):
+    await _six_events(crewdb)
+    await _rehash(crewdb, 5, {**state_changed(), "reason": "forged"})
+    await _delete(crewdb, 6)
+    report = await verify_crew_chain(crewdb.conn, CREW_A)
+    assert "seq 6..6: events missing and not recorded as pruned" in report.errors
+    assert "crews.last_hash does not match the last event" in report.errors
+
+
+async def test_an_edit_with_the_next_event_intact_is_detected(crewdb):
+    await _six_events(crewdb)
+    await _rehash(crewdb, 4, {**state_changed(), "reason": "forged"})
+    report = await verify_crew_chain(crewdb.conn, CREW_A)
+    assert report.errors == ["seq 5: prev_hash does not link to seq 4"]
+
+
+async def test_retention_gaps_verify_and_adjacent_batches_merge_into_one_range(crewdb):
+    log = CrewEventLog(crewdb)
+    for _ in range(5):
+        await _emit(log, 40)  # seqs 1-5: prunable
+    await _emit(log, 40, type="host.unreachable", payload={"host_id": "hst_1", "silent_s": 1, "session_ids": []})  # 6 moment
+    for _ in range(3):
+        await _emit(log, 40)  # 7-9: prunable
+    await _emit(log, 1)  # 10: kept
+    await prune_crew_events(crewdb, CREW_A, FREE_POLICY, now=NOW, batch=2)
+    async with crewdb.conn.execute(
+        "SELECT first_seq, last_seq FROM crew_pruned_ranges WHERE crew_id = ? ORDER BY first_seq", (CREW_A,)
+    ) as cur:
+        assert [tuple(r) for r in await cur.fetchall()] == [(1, 5), (7, 9)]
+    report = await verify_crew_chain(crewdb.conn, CREW_A)
+    assert report.ok and report.pruned_gaps == 2 and report.checked == 2
+    # a whole pruned tail is accounted for too
+    async with crewdb.transaction():
+        await crewdb.conn.execute(
+            "UPDATE crew_events SET ts = ? WHERE crew_id = ? AND seq = 10", (format_ts(NOW - timedelta(days=40)), CREW_A)
+        )
+    await prune_crew_events(crewdb, CREW_A, FREE_POLICY, now=NOW)
+    report = await verify_crew_chain(crewdb.conn, CREW_A)
+    assert report.ok and report.pruned_gaps == 2  # 7..10 merged with the new tail
+
+
+async def test_pruned_ranges_must_link_and_match_a_gap(crewdb):
+    log = CrewEventLog(crewdb)
+    for _ in range(3):
+        await _emit(log, 40)
+    await _emit(log, 1)
+    await prune_crew_events(crewdb, CREW_A, FREE_POLICY, now=NOW)
+    assert (await verify_crew_chain(crewdb.conn, CREW_A)).ok
+    async with crewdb.transaction():
+        await crewdb.conn.execute("UPDATE crew_pruned_ranges SET last_hash = 'x' WHERE crew_id = ?", (CREW_A,))
+        await crewdb.conn.execute("INSERT INTO crew_pruned_ranges VALUES (?, 50, 60, 'a', 'b', ?)", (CREW_A, format_ts(NOW)))
+    errors = (await verify_crew_chain(crewdb.conn, CREW_A)).errors
+    assert "seq 4: prev_hash does not link to seq 3" in errors
+    assert "pruned seq 50..60: recorded range matches no gap" in errors
+
+
+async def test_a_deleted_moment_is_caught_by_its_digest_even_with_a_forged_range(crewdb):
+    await _seed_timeline(crewdb)
+    await run_retention(crewdb, resolve_policy=_free, now=NOW)  # digests list moment seq 2
+    async with crewdb.conn.execute("SELECT prev_hash, hash FROM crew_events WHERE crew_id = ? AND seq = 2", (CREW_A,)) as cur:
+        prev, digest = await cur.fetchone()
+    await _delete(crewdb, 2)
+    async with crewdb.transaction():  # the forger merges seq 2 into the pruned range 1..1
+        await crewdb.conn.execute(
+            "UPDATE crew_pruned_ranges SET last_seq = 2, last_hash = ? WHERE crew_id = ? AND first_seq = 1", (digest, CREW_A)
+        )
+    report = await verify_crew_chain(crewdb.conn, CREW_A)
+    assert any("seq 2: moment listed in the" in e for e in report.errors), report.errors

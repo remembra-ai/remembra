@@ -602,16 +602,70 @@ class ChainReport:
         return not self.errors
 
 
-async def verify_crew_chain(conn: aiosqlite.Connection, crew_id: str, *, batch: int = 1000) -> ChainReport:
-    """Nightly verify (§4.1): every stored event's hash, every adjacent link and the crew head.
+async def _pruned_ranges(conn: aiosqlite.Connection, crew_id: str) -> dict[int, tuple[int, str, str]]:
+    """``first_seq → (last_seq, prev_hash, last_hash)`` of the runs retention deleted."""
+    async with conn.execute(
+        "SELECT first_seq, last_seq, prev_hash, last_hash FROM crew_pruned_ranges WHERE crew_id = ?", (crew_id,)
+    ) as cur:
+        return {int(r[0]): (int(r[1]), str(r[2]), str(r[3])) for r in await cur.fetchall()}
 
-    Retention removes non-moment events, so the chain has pruned gaps; a gap is
-    counted, and the linkage is checked wherever two consecutive seqs are present.
-    Each event's own hash is always checked against its stored ``prev_hash``.
+
+async def _digest_moments_present(conn: aiosqlite.Connection, crew_id: str, report: ChainReport) -> None:
+    """Moments are never deleted (§4.5): every moment a digest listed must still be stored, unchanged in type."""
+    async with conn.execute("SELECT day, moments FROM crew_digests WHERE crew_id = ? ORDER BY day", (crew_id,)) as cur:
+        digests = [(str(r[0]), r[1]) for r in await cur.fetchall()]
+    for day, raw in digests:
+        try:
+            listed = json.loads(raw or "[]")
+        except ValueError:
+            report.errors.append(f"digest {day}: moments list is not JSON")
+            continue
+        for item in listed if isinstance(listed, list) else ():
+            seq = item.get("seq") if isinstance(item, dict) else None
+            if not isinstance(seq, int):
+                continue
+            async with conn.execute("SELECT type FROM crew_events WHERE crew_id = ? AND seq = ?", (crew_id, seq)) as cur:
+                row = await cur.fetchone()
+            if row is None:
+                report.errors.append(f"seq {seq}: moment listed in the {day} digest is missing")
+            elif row[0] != item.get("type"):
+                report.errors.append(f"seq {seq}: moment type changed since the {day} digest")
+
+
+async def verify_crew_chain(conn: aiosqlite.Connection, crew_id: str, *, batch: int = 1000) -> ChainReport:
+    """Nightly verify (§4.1): every stored event's hash, every link, every gap and the crew head.
+
+    Retention removes non-moment events and records each deleted run in
+    ``crew_pruned_ranges`` with the chain links on both sides. A gap in the
+    stored seqs (including one at the tail, below ``crews.last_seq``) is
+    accepted only when it matches a recorded range exactly and the range links
+    to the events around it; any other gap is a deleted event. Each event's own
+    hash is checked against its stored ``prev_hash``, every range that matches
+    no gap is reported, and every moment a digest listed must still exist.
+
+    Limit: the chain is a plain SHA-256 chain (the §4.1 contract), so someone
+    who can rewrite the whole file can also recompute every hash and range;
+    this detects partial edits and deletions, not a full re-forge.
     """
     report = ChainReport(crew_id)
-    prev_seq: int | None = None
-    prev_hash: str | None = None
+    ranges = await _pruned_ranges(conn, crew_id)
+    used: set[int] = set()
+    expected = 1  # the next seq the chain needs
+    link = schemas.GENESIS_HASH  # the hash that seq must name as prev_hash
+
+    def bridge(first: int, upto: int) -> None:
+        """Seqs ``first..upto`` are absent: they must be one recorded pruned range that links to ``link``."""
+        nonlocal link
+        rng = ranges.get(first)
+        if rng is None or rng[0] != upto:
+            report.errors.append(f"seq {first}..{upto}: events missing and not recorded as pruned")
+            return
+        used.add(first)
+        report.pruned_gaps += 1
+        if rng[1] != link:
+            report.errors.append(f"pruned seq {first}..{upto}: does not link to seq {first - 1}")
+        link = rng[2]
+
     cursor = 0
     while True:
         async with conn.execute(
@@ -623,29 +677,34 @@ async def verify_crew_chain(conn: aiosqlite.Connection, crew_id: str, *, batch: 
             break
         for row in rows:
             ev = row_to_stored(row)
-            seq = ev.envelope["seq"]
+            seq = int(ev.envelope["seq"])
             report.checked += 1
             stored_prev = ev.prev_hash or ""
-            if seq == 1 and stored_prev != schemas.GENESIS_HASH:
-                report.errors.append("seq 1: prev_hash is not the genesis hash")
+            if seq > expected:
+                bridge(expected, seq - 1)
+            if stored_prev != link:
+                report.errors.append(
+                    "seq 1: prev_hash is not the genesis hash"
+                    if seq == 1
+                    else f"seq {seq}: prev_hash does not link to seq {seq - 1}"
+                )
             if schemas.event_hash(stored_prev, ev.envelope) != ev.hash:
                 report.errors.append(f"seq {seq}: hash mismatch")
-            if prev_seq is not None:
-                if seq == prev_seq + 1:
-                    if stored_prev != prev_hash:
-                        report.errors.append(f"seq {seq}: prev_hash does not link to seq {prev_seq}")
-                else:
-                    report.pruned_gaps += 1
-            elif seq != 1:
-                report.pruned_gaps += 1
-            prev_seq, prev_hash = seq, ev.hash
+            link = ev.hash or ""
+            expected = seq + 1
             cursor = seq
     head = await crew_head(conn, crew_id)
-    if head is not None and prev_seq is not None:
-        if prev_seq > head.last_seq:
-            report.errors.append(f"event seq {prev_seq} beyond crews.last_seq {head.last_seq}")
-        elif prev_seq == head.last_seq and head.last_hash != prev_hash:
-            report.errors.append("crews.last_hash does not match the last event")
+    if head is not None:
+        if expected - 1 > head.last_seq:
+            report.errors.append(f"event seq {expected - 1} beyond crews.last_seq {head.last_seq}")
+        else:
+            if head.last_seq >= expected:
+                bridge(expected, head.last_seq)  # a missing tail must be a recorded pruned range too
+            if head.last_seq > 0 and head.last_hash != link:
+                report.errors.append("crews.last_hash does not match the last event")
+    for first in sorted(set(ranges) - used):
+        report.errors.append(f"pruned seq {first}..{ranges[first][0]}: recorded range matches no gap")
+    await _digest_moments_present(conn, crew_id, report)
     return report
 
 

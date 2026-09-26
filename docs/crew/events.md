@@ -176,6 +176,15 @@ crew uses `prev_hash = GENESIS_HASH` (64 zeros). `canonical_json` = sorted keys,
 UTF-8, NaN rejected. `verify_chain(events)` checks seq continuity, `prev_hash` links and each hash
 (the nightly verify job).
 
+Retention deletes old non-moment events, so the stored chain has gaps. Every deleted run is
+recorded in `crew_pruned_ranges` (`first_seq, last_seq, prev_hash` of the first deleted event,
+`last_hash` of the last one) in the same transaction as the delete, adjacent runs merged. The server
+verifier (`remembra.crew.events.verify_crew_chain`) accepts a gap, including one at the tail below
+`crews.last_seq`, only when it equals a recorded range that links to the events on both sides; it
+also reports ranges that match no gap and moments listed in `crew_digests` that are missing. The
+chain is plain SHA-256, so it detects partial edits and deletions of the SQLite file, not a full
+re-forge by someone who rewrites every hash.
+
 ## Moment rules
 
 Always: `task.done`, `baton.passed`, `session.lost`, `session.recovered`,
