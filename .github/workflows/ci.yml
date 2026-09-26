@@ -81,7 +81,7 @@ jobs:
   # client command would pass them. This one installs exactly what
   # `pipx install remembra` and `pipx install 'remembra[mcp]'` get.
   wheel-install:
-    name: Wheel install (no extras, then [mcp])
+    name: Wheel install (no extras, then [mcp], then the dashboard's command)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -115,6 +115,25 @@ jobs:
           out=$(REMEMBRA_URL= /tmp/mcp/bin/remembra-mcp </dev/null 2>&1 || true)
           echo "$out"
           echo "$out" | grep -q "REMEMBRA_URL environment variable is required"
+          # The server command on an [mcp]-only install names the missing extra instead of a traceback.
+          out=$(/tmp/mcp/bin/remembra 2>&1 || true)
+          echo "$out"
+          echo "$out" | grep -q "needs the 'server' extra"
+
+      - name: "The dashboard's exact install command gives a remembra-mcp that starts"
+        run: |
+          python -m pip install pipx
+          # The package spec the dashboard one-liner copies (dashboard/src/lib/agents.ts), satisfied by
+          # this build's wheel (--find-links) so it runs before the release is on PyPI.
+          spec=$(sed -n "s/^export const PIPX_INSTALL = \"pipx install --force '\\(.*\\)'\";\$/\\1/p" dashboard/src/lib/agents.ts)
+          test -n "$spec"
+          echo "spec: $spec"
+          export PIPX_HOME=/tmp/pipx PIPX_BIN_DIR=/tmp/pipx/bin
+          python -m pipx install --force --pip-args="--find-links dist" "$spec"
+          /tmp/pipx/bin/remembra-mcp --help
+          /tmp/pipx/bin/remembra-mcp --version
+          /tmp/pipx/bin/remembra-relay --help
+          /tmp/pipx/bin/remembra-install --help
 
   # ---------------------------------------------------------------------------
   # Docker build smoke-test

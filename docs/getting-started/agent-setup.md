@@ -63,10 +63,15 @@ remembra-install --detect
 
 ### First-Time Setup (With API Key)
 ```bash
-remembra-install --all --api-key rem_your_key_here
+remembra-install --all            # asks for the key at a hidden prompt
+remembra-install --all --apply    # or: write without asking (key from REMEMBRA_API_KEY or ~/.remembra/credentials)
 ```
 
-After first setup, the API key is saved to `~/.remembra/credentials` and auto-loaded for future commands.
+The key is never needed on the command line, where shell history would keep it: the installer reads
+`REMEMBRA_API_KEY`, asks at a hidden prompt, or takes it piped with `--api-key-stdin`. After first
+setup it is saved to `~/.remembra/credentials` (owner-only) and used by later runs. Without `--apply`
+(or a "y" at its question) the installer only shows what it would change. `--remove` takes the
+Remembra entries out again.
 
 ### With Custom Project
 ```bash
@@ -131,7 +136,7 @@ remembra-install --all --url http://localhost:8787
 Or with a custom API key:
 
 ```bash
-remembra-install --all --url http://localhost:8787 --api-key your-key
+remembra-install --all --url http://localhost:8787
 ```
 
 ## Sandboxed Agents (Codex, Claude Code)

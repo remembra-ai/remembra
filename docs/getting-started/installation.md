@@ -58,8 +58,8 @@ This includes:
 After installing, set up all your AI tools:
 
 ```bash
-# Auto-detect and configure all agents
-remembra-install --all --api-key YOUR_API_KEY
+# Auto-detect and configure all agents (asks for the key, shows the changes, writes after a "y")
+remembra-install --all
 
 # Verify setup
 remembra-doctor all

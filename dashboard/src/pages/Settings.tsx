@@ -7,6 +7,8 @@ import type { UserResponse } from '../lib/api';
 import { useRoute } from '../lib/nav';
 import { SignInMethods } from '../components/auth/SignInMethods';
 import { EmailVerificationStatus } from '../components/auth/EmailVerificationStatus';
+import { UNINSTALL_STEPS } from '../lib/agents';
+import { hrefFor } from '../lib/nav';
 
 const SETTINGS_TABS: readonly SettingsTab[] = ['profile', 'password', 'security', 'workspace', 'retrieval', 'diagnostics', 'account'];
 
@@ -556,6 +558,44 @@ function PasswordSettings() {
   );
 }
 
+/** The commands that take Remembra off a machine; shown on its own and again before deleting the account. */
+function UninstallSteps({ compact = false }: { compact?: boolean }) {
+  return (
+    <ol className={clsx('space-y-2', compact ? 'text-xs' : 'text-sm')}>
+      {UNINSTALL_STEPS.map((step, i) => (
+        <li key={step.command} className="text-gray-600 dark:text-gray-400">
+          <span className="mr-1 text-gray-500">{i + 1}.</span>
+          <code className="px-1.5 py-0.5 bg-gray-100 dark:bg-gray-900 rounded font-mono text-gray-800 dark:text-gray-200 break-all">
+            {step.command}
+          </code>{' '}
+          {step.what}
+        </li>
+      ))}
+      <li className="text-gray-600 dark:text-gray-400">
+        <span className="mr-1 text-gray-500">{UNINSTALL_STEPS.length + 1}.</span>
+        Revoke that machine&rsquo;s key under{' '}
+        <a href={hrefFor('keys')} className="underline">
+          API keys
+        </a>
+        .
+      </li>
+    </ol>
+  );
+}
+
+function UninstallCard() {
+  return (
+    <div className="mb-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6">
+      <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Remove Remembra from a machine</h2>
+      <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+        Uninstalling the package alone leaves hooks in your agents&rsquo; settings that call a command which is no longer there. Run
+        these on each machine, in order. The first two are dry runs without <code className="font-mono">--apply</code>.
+      </p>
+      <UninstallSteps />
+    </div>
+  );
+}
+
 // Account Settings Component (Delete Account)
 function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => void }) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -591,6 +631,7 @@ function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => voi
 
   return (
     <>
+      <UninstallCard />
       <div className="bg-white dark:bg-gray-800 rounded-xl border border-red-200 dark:border-red-800 p-6">
         <div className="flex items-start gap-4">
           <div className="p-3 rounded-lg bg-red-100 dark:bg-red-900/20">
@@ -630,6 +671,13 @@ function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => voi
               <p className="text-gray-600 dark:text-gray-300">
                 This will permanently delete your account and all memories. This action cannot be undone.
               </p>
+
+              <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Remove Remembra from your machines too. Deleting the account does not touch them:
+                </p>
+                <UninstallSteps compact />
+              </div>
 
               {/* Confirmation */}
               <div>

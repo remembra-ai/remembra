@@ -30,32 +30,42 @@ const EXTRA_LANES = ['#5f6c33', '#855b19', '#3f6f8f', '#8b5a4a', '#5f6b7a', '#7a
 /**
  * The first release with `remembra-relay`. Pinning it makes an older PyPI
  * release fail loudly at install time instead of "command not found" later;
- * --force also upgrades an existing older pipx install.
+ * --force also upgrades an existing older pipx install. The [mcp] extra brings
+ * remembra-mcp's dependencies: without it every agent that remembra-install
+ * wires up would start a server that cannot import `mcp`. The landing page and
+ * docs/guides/relay.md use the same package spec (a Python test checks).
  */
-export const PIPX_INSTALL = "pipx install --force 'remembra>=0.16'";
+export const PIPX_INSTALL = "pipx install --force 'remembra[mcp]>=0.16'";
 
 /** Install, then a dry run of connect (which warns when no API key is set). */
 export const INSTALL_COMMAND = `${PIPX_INSTALL} && remembra-relay connect`;
 
 /**
  * Saves the key where the relay hooks read it (~/.remembra/credentials) and
- * adds the Remembra MCP server to the agents it finds. `<your-key>` is left
- * for the user to replace: pasted as is, the shell stops on it.
+ * adds the Remembra MCP server to the agents it finds. The key is never part
+ * of the command (shell history keeps commands): remembra-install asks for it
+ * at a hidden prompt, shows each change and writes after a "y".
  */
 export function saveKeyCommand(serverUrl: string): string {
-  return `remembra-install --all --api-key <your-key> --url ${serverUrl || 'https://api.remembra.dev'}`;
+  return `remembra-install --all --url ${serverUrl || 'https://api.remembra.dev'}`;
 }
 
 /**
- * The whole first run on one line: install, save the key where the relay
- * reads it (and add the MCP server to the agents it finds), then write the
- * hooks. Without a key it keeps the `<your-key>` placeholder, which the shell
- * rejects if pasted unedited.
+ * The whole first run on one line: install, save the key (asked for at a
+ * hidden prompt, never on the command line) and add the MCP server to the
+ * agents it finds, then write the hooks.
  */
-export function oneLineInstall(serverUrl: string, apiKey?: string | null): string {
-  const key = apiKey && /^[A-Za-z0-9_\-.]+$/.test(apiKey) ? apiKey : '<your-key>';
-  return `${PIPX_INSTALL} && remembra-install --all --api-key ${key} --url ${serverUrl || 'https://api.remembra.dev'} && remembra-relay connect --apply`;
+export function oneLineInstall(serverUrl: string): string {
+  return `${PIPX_INSTALL} && ${saveKeyCommand(serverUrl)} && remembra-relay connect --apply`;
 }
+
+/** Taking Remembra off a machine, in order (docs/guides/relay.md#uninstall says the same). */
+export const UNINSTALL_STEPS: { command: string; what: string }[] = [
+  { command: 'remembra-relay disconnect --apply', what: 'removes the session hooks from every agent (a backup of each file is kept)' },
+  { command: 'remembra-install --remove --all --apply', what: 'removes the Remembra MCP server from every agent' },
+  { command: 'pipx uninstall remembra', what: 'removes the commands' },
+  { command: 'rm -r ~/.remembra', what: 'deletes the saved key, the unsent-handoff queue and the log' },
+];
 
 /** The agents `remembra-relay connect` can wire up, in checklist order. */
 export const CONNECTABLE_AGENTS = ['claude-code', 'codex', 'cursor', 'gemini', 'qwen', 'kimi'];

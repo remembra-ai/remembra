@@ -46,12 +46,22 @@ and exits 1: without a key the hooks cannot load or save anything. To save one w
 
 ```bash
 pipx install --force 'remembra[mcp]>=0.16'   # 0.16 is the first release with remembra-relay; [mcp] adds remembra-mcp
-remembra-install --all --api-key <your key> --url <your server URL>   # writes ~/.remembra/credentials
+remembra-install --all --url <your server URL>   # asks for the key, shows the changes, writes after a "y"
 ```
+
+`remembra-install` never needs the key on the command line, where shell history and the process list
+would keep it. It reads `REMEMBRA_API_KEY`, asks at a hidden prompt on a terminal (Enter keeps the key
+already saved), takes it piped with `--api-key-stdin`, or uses `~/.remembra/credentials`. `--api-key`
+still works for old scripts but prints a warning. Without `--apply` (or a "y" at its question) it is a
+dry run: it prints each change as a diff with keys masked and writes nothing. When it writes, it keeps a
+backup of every file it changes (`*.bak-remembra-<time>`, owner-only), writes atomically and leaves each
+file owner-only (0600), because every one of them now holds your key. Each agent's entry gets its own
+`REMEMBRA_AGENT_ID` (`claude-code`, `codex`, `cursor`, ...). `remembra-doctor all` warns about any agent
+config or credentials file with a key that other users on the machine can read.
 
 | Agent | Hooks | Status |
 |-------|-------|--------|
-| Claude Code | `~/.claude/settings.json` SessionStart → `brief`, SessionEnd → `close` (transcript parsed) | verified |
+| Claude Code | `~/.claude/settings.json` SessionStart → `brief`; SessionEnd, StopFailure (usage or billing limit) and PreCompact → `close` (transcript parsed) | verified |
 | Codex CLI | `~/.codex/hooks.json` SessionStart / SessionEnd | unverified |
 | Cursor | `~/.cursor/hooks.json` sessionStart / sessionEnd | unverified |
 | Gemini CLI | `~/.gemini/settings.json` SessionStart / SessionEnd (JSON-only stdout) | unverified |
@@ -91,8 +101,35 @@ It does not write Qwen Code or Kimi yet. Add the server to them yourself. Qwen C
 For Kimi, add a stdio MCP server named `remembra` with the same command and environment, as Kimi's own
 MCP docs describe. Both are untested with Remembra so far; tell us if either one balks.
 
-A Codex sandbox with no network cannot reach the URL directly. Use `remembra-install-codex --api-key <your key> --start-bridge`
-there instead: it points Codex at a local bridge that holds the key.
+A Codex sandbox with no network cannot reach the URL directly. Use `remembra-install-codex --start-bridge`
+there instead (it asks for the key like `remembra-install`): it points Codex at a local bridge that holds the key.
+
+### When Claude Code hits a limit
+
+When a turn fails on a usage or billing limit, Claude Code keeps the session open, so SessionEnd would
+only fire when you quit. `connect` therefore also runs `close` on **StopFailure** (matched on
+`rate_limit`, `billing_error`, `account_on_hold` and `cloud_credential_error`) and on **PreCompact**.
+The handoff is written the moment work stops, from git and the transcript as usual, and the next agent's
+brief says so: `Last session: claude-code (self-declared), just now, stopped: rate_limit, on main@…`.
+A later close of the same session (you come back and quit, or StopFailure lands after SessionEnd)
+replaces it, so the trail keeps one current handoff per session. Transient API errors
+(`server_error`, `overloaded`) do not write a handoff. Running `connect --apply` again upgrades an
+install that only has SessionStart and SessionEnd, with a backup of `settings.json`.
+
+### If the server cannot be reached
+
+A `close` that cannot be delivered (no network, server down or slow, HTTP 429 or 5xx, a rejected key,
+no key yet) is not lost. It is queued in `~/.remembra/relay/outbox/` (one file per agent and session,
+owner-only, written atomically, after the same secret redaction the server applies; never the key) and
+logged to `~/.remembra/relay/relay.log`. The next `brief` or `close` on that machine sends it before
+anything else; the server keeps one handoff per agent and session, so a resend never duplicates one.
+The queue keeps at most 50 entries for at most 14 days; anything dropped is logged.
+
+While something is queued, or when the server rejects your key, the brief starts with one line that says
+so (`Remembra: 1 handoff (1 from claude-code) could not be sent yet …`, or `your API key was rejected`).
+`remembra-relay status` shows the queue, the last success and failure per agent and whether the server
+accepts the key (it asks the server; `--no-check` shows the last recorded answer). It exits 1 when
+something needs attention.
 
 ## CLI
 
@@ -103,6 +140,8 @@ remembra-relay close   [--agent X] [--session-id S] [--cwd DIR] [--transcript PA
 remembra-relay trail   [--cwd DIR] [--project P] [--limit N] [--format text|json]
 remembra-relay resolve [--cwd DIR] [--project P] [--bind]
 remembra-relay connect [--apply] [--agent NAME]... [--include-unverified] [--agents-md PATH]
+remembra-relay disconnect [--apply] [--agent NAME]... [--agents-md PATH]
+remembra-relay status  [--format text|json] [--no-check]
 ```
 
 `brief`, `close` and `trail` are safe to run as hooks. They finish within 10 seconds, always exit 0, and
@@ -121,6 +160,24 @@ in time)* instead of reporting a clean tree.
 Without a session id (the AGENTS.md fallback, manual runs), `brief` starts a new ad-hoc session and a
 `close` in the same place within 12 hours updates it. A `close` with no preceding `brief` gets its own
 id, so separate sessions never overwrite each other.
+
+## Uninstall {#uninstall}
+
+The hooks and MCP entries point at the installed `remembra-relay` and `remembra-mcp`. Uninstalling
+the package alone leaves hooks that call a missing command at every session start. On each machine,
+in this order:
+
+```bash
+remembra-relay disconnect --apply            # removes the relay hooks from every agent (backups kept)
+remembra-install --remove --all --apply      # removes the remembra MCP server from every agent (backups kept)
+pipx uninstall remembra
+rm -r ~/.remembra                            # the saved key, the unsent-handoff queue and the log
+```
+
+Run the first two without `--apply` to see exactly what they will change. `disconnect` removes only the
+entries the relay wrote (commands that run `remembra-relay`); your other hooks stay. Pass
+`--agents-md PATH` to remove the section `connect --agents-md` added. Then revoke the machine's key in
+the dashboard (API keys). Deleting your account does not reach your machines, so do this first.
 
 ## Which project a repository uses
 

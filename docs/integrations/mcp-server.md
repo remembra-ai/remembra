@@ -13,7 +13,7 @@ Configure all your AI tools with one command:
 
 ```bash
 pip install "remembra[mcp]"
-remembra-install --all --api-key YOUR_API_KEY
+remembra-install --all   # asks for your API key at a hidden prompt, shows the changes, writes after a "y"
 ```
 
 This auto-detects and configures: Claude Desktop, Claude Code, Codex, Cursor, Gemini, and Windsurf.

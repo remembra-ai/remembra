@@ -19,10 +19,15 @@ function agentConnectCommand(agentId: string): string {
   return `remembra-relay connect --apply --agent ${meta.adapter} --include-unverified`;
 }
 
-/** Create an editor key for the relay right here; it is shown once and dropped into the one-liner. */
+/**
+ * Create an editor key for the relay right here. It is shown once, with its
+ * own copy button: the install command asks for it at a hidden prompt, so it
+ * never lands in shell history.
+ */
 function RelayKeyStep({ newKey, onKey }: { newKey: string | null; onKey: (key: string) => void }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copy, copied] = useCopy();
   const create = async () => {
     setBusy(true);
     setError(null);
@@ -38,12 +43,26 @@ function RelayKeyStep({ newKey, onKey }: { newKey: string | null; onKey: (key: s
   };
   if (newKey) {
     return (
-      <p className="mt-2 flex items-start gap-2 border-l-[3px] border-ok bg-ok-wash px-3 py-2 text-sm text-ink">
-        <Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden="true" />
-        <span>
-          Key created and placed in the command below. It is shown only on this page: run the command now, or copy it somewhere safe.
-        </span>
-      </p>
+      <div className="mt-2 border-l-[3px] border-ok bg-ok-wash px-3 py-2 text-sm text-ink">
+        <p className="flex items-start gap-2">
+          <Check className="mt-0.5 h-4 w-4 shrink-0 text-ok" aria-hidden="true" />
+          <span>
+            Key created. It is shown only on this page: copy it now and paste it when the command below asks for it.
+          </span>
+        </p>
+        <div role="group" aria-label="Your new relay key" className="mt-2 flex items-stretch rounded-[3px] border border-rule bg-panel">
+          <code className="min-w-0 flex-1 overflow-x-auto px-3 py-2 font-mono text-[13px] [overflow-wrap:anywhere]">{newKey}</code>
+          <button
+            type="button"
+            onClick={() => copy(newKey, 'Key copied')}
+            aria-label="Copy the new relay key"
+            className="flex shrink-0 items-center gap-1.5 border-l border-rule px-3 font-mono text-xs text-ink-2 hover:bg-paper-2"
+          >
+            {copied ? <Check className="h-3.5 w-3.5 text-ok" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+            <span>{copied ? 'Copied' : 'Copy key'}</span>
+          </button>
+        </div>
+      </div>
     );
   }
   return (
@@ -118,21 +137,16 @@ export function ConnectChecklist({
           </li>
           <li>
             <p className="text-sm text-ink-2">
-              <span className="font-semibold text-ink">2. One line in your terminal.</span> Installs Remembra, saves the key in{' '}
-              <code className="font-mono text-[13px]">~/.remembra/credentials</code>, adds the MCP server to the agents it finds and
-              writes the relay hooks.
-              {!newKey && (
-                <>
-                  {' '}
-                  Replace <code className="font-mono text-[13px]">&lt;your-key&gt;</code> first.
-                </>
-              )}
+              <span className="font-semibold text-ink">2. One line in your terminal.</span> Installs Remembra, asks for the key at a
+              hidden prompt (it never goes on the command line or into your shell history), shows what it will change in each agent and
+              writes after you say yes: the key in <code className="font-mono text-[13px]">~/.remembra/credentials</code>, the MCP server
+              in the agents it finds (owner-only files, a backup of each), then the relay hooks.
             </p>
             <CopyCommand
               className="mt-2"
-              command={oneLineInstall(api.getApiBaseUrl(), newKey)}
+              command={oneLineInstall(api.getApiBaseUrl())}
               label="One-line install and connect"
-              toastText={newKey ? 'Command copied, with your new key' : 'Command copied: replace <your-key> before running it'}
+              toastText="Command copied: it asks for your key when you run it"
             />
             <p className="mt-1.5 text-xs text-ink-3">
               Want to see every change first? Run <code className="font-mono">remembra-relay connect</code> without{' '}
