@@ -1,5 +1,6 @@
 """SQLite metadata database for entities, relationships, and memory metadata."""
 
+import asyncio
 import json
 import re
 import uuid
@@ -14,6 +15,7 @@ import structlog
 from remembra.config import Settings
 from remembra.core.time import utcnow
 from remembra.models.memory import Entity, EntityRef, Relationship
+from remembra.storage.backup import pre_migration_backup
 from remembra.storage.sqlite_tx import GuardedConnection, TxCoordinator
 
 log = structlog.get_logger(__name__)
@@ -657,7 +659,15 @@ class Database:
     - Memory-entity associations
     """
 
-    def __init__(self, db_path: str = "remembra.db") -> None:
+    def __init__(
+        self,
+        db_path: str = "remembra.db",
+        *,
+        backup_before_migrate: bool = False,
+        backup_label: str = "unknown",
+        backup_keep: int = 3,
+        backup_dir: str | None = None,
+    ) -> None:
         # Extract path from connection string if needed
         if db_path.startswith("sqlite"):
             db_path = db_path.split("///")[-1]
@@ -665,6 +675,11 @@ class Database:
         self._connection: aiosqlite.Connection | None = None
         self._tx = TxCoordinator()
         self._guarded: GuardedConnection | None = None
+        # Pre-migration backup (the app turns this on; library callers and tests don't).
+        self._backup_before_migrate = backup_before_migrate
+        self._backup_label = backup_label
+        self._backup_keep = backup_keep
+        self._backup_dir = backup_dir
 
     async def connect(self) -> None:
         """Open database connection with optimized settings."""
@@ -693,6 +708,16 @@ class Database:
         """Create tables if they don't exist."""
         if not self._connection:
             await self.connect()
+
+        if self._backup_before_migrate:
+            # Before any DDL: a failed copy raises BackupError and stops startup.
+            await asyncio.to_thread(
+                pre_migration_backup,
+                self.db_path,
+                label=self._backup_label,
+                keep=self._backup_keep,
+                backup_dir=self._backup_dir,
+            )
 
         await self.conn.executescript(SCHEMA_SQL)
         await self.conn.commit()

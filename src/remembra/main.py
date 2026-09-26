@@ -35,6 +35,7 @@ from remembra.security.pii_detector import PIIDetector
 from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.memory import MemoryService
 from remembra.spaces.manager import SpaceManager
+from remembra.storage.backup import backup_label
 from remembra.storage.database import Database
 from remembra.storage.embeddings import EmbeddingService
 from remembra.storage.qdrant import QdrantStore
@@ -170,7 +171,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await asyncio.to_thread(cloud_rate_limiter.check_backend)
 
     # SQLite metadata database (first: it holds the active vector collection)
-    app.state.db = Database(settings.database_url)
+    app.state.db = Database(
+        settings.database_url,
+        backup_before_migrate=settings.pre_migration_backup,
+        backup_label=backup_label(settings.build_sha, __version__),
+        backup_keep=settings.pre_migration_backup_keep,
+        backup_dir=settings.pre_migration_backup_dir,
+    )
     await app.state.db.connect()
     await app.state.db.init_schema()
 
