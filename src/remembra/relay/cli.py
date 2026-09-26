@@ -369,9 +369,13 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
 
     Each entry goes with the key of the config source that queued it and as
     the agent that wrote it. Stops at the first network failure (the server is
-    still unreachable) or rejected key; a 4xx that resending cannot fix drops
-    the entry (logged). ``skip`` is the (agent, session) the caller closes
-    itself: its queued copy is never sent, and with ``drop_skipped`` it is
+    still unreachable), 5xx, 429 or rejected key (401); a 4xx that resending
+    cannot fix drops the entry (logged). A refusal (403: the key may not write
+    as that agent or to that project) holds back only that entry and the
+    entries with the same key, agent and project; it stays queued (shown by
+    ``status``, dropped after ``MAX_AGE_SECONDS``) and goes after the others
+    on later runs, so it never blocks the rest of the queue. ``skip`` is the
+    (agent, session) the caller closes itself: its queued copy is never sent, and with ``drop_skipped`` it is
     dropped (the caller's close has been delivered and supersedes it).
     ``reserve`` is time left untouched for the caller's own request.
     """
@@ -381,8 +385,11 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
     except Exception as e:
         outbox.log(ctx.home, f"outbox: could not read the queue ({e.__class__.__name__})")
         return report
+    # Entries the server refused before go last (stable sort: oldest first within each group).
+    entries.sort(key=lambda e: e.data.get("last_status") == 403)
     attempted = 0
     stop = False
+    refused_scopes: set[tuple[str | None, str, str]] = set()
     for entry in entries:
         if skip and (entry.agent_id, entry.session_id) == skip:
             if drop_skipped:
@@ -395,6 +402,10 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
         config = load_config(agent=entry.agent_id or None, prefer=_config_prefer(entry.data.get("config_source")))
         if not config.api_key or (entry.url and outbox.clean_url(config.url) != entry.url):
             report.remaining.append(entry)  # no key yet, or the key now points at another server
+            continue
+        scope = (config.source, entry.agent_id, str(entry.payload.get("project_id") or ""))
+        if scope in refused_scopes:
+            report.remaining.append(entry)  # this key was just refused for the same agent and project
             continue
         claimed = outbox.claim(entry)
         if claimed is None:
@@ -439,11 +450,15 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
             continue
         outbox.finish(entry, claimed, sent=False, error=detail, http_status=status)
         report.remaining.append(entry)
+        if status == 403:
+            # Refused for this agent or project only: the rest of the queue may use it.
+            report.refused.append(detail)
+            refused_scopes.add(scope)
+            outbox.log(ctx.home, f"outbox: refused {entry.agent_id} session {entry.session_id[:40]} (kept): {detail}")
+            continue
         if status == 401:
             report.key_rejected.append(config.source)
-        elif status == 403:
-            report.refused.append(detail)
-        stop = True  # unreachable, rate-limited or a key problem: try again next time
+        stop = True  # unreachable, rate-limited or a rejected key: try again next time
     return report
 
 

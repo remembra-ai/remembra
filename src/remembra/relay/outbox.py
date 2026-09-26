@@ -49,7 +49,9 @@ ENTRY_VERSION = 1
 CLAIM_MARK = ".sending-"
 
 # HTTP answers worth retrying later; anything else (400, 404, 413, 422) will
-# not get better by sending the same body again.
+# not get better by sending the same body again. A 403 is kept (the owner can
+# widen the key's scope) but only holds back its own entry: see
+# ``remembra.relay.cli.replay_outbox``.
 RETRY_STATUS = frozenset({401, 403, 408, 409, 425, 429})
 
 

@@ -516,6 +516,72 @@ def test_a_body_the_server_rejects_is_not_queued_forever(tmp_path, home):
     assert "not queued, the server rejected the body" in (home / ".remembra" / "relay" / "relay.log").read_text()
 
 
+class _ScopedKey(http.server.BaseHTTPRequestHandler):
+    """A key scoped to claude-code: closes written as codex are refused (403), the rest accepted."""
+
+    posts: list[str] = []
+
+    def _send(self, status: int, body: dict[str, Any]) -> None:
+        data = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_POST(self) -> None:
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        agent = str(body.get("agent_id"))
+        self.posts.append(f"{agent}:{body.get('session_id')}")
+        if agent == "codex":
+            self._send(403, {"detail": "This key cannot write as agent codex"})
+        else:
+            self._send(200, {"ok": True, "memory_id": "m1"})
+
+    def do_GET(self) -> None:
+        self._send(200, {"rendered": "Remembra brief"})
+
+    def log_message(self, *args: Any) -> None:
+        pass
+
+
+def test_a_refused_queued_handoff_does_not_hold_back_the_rest(home):
+    """A 403 for one entry (a key that may not write as codex) keeps that entry queued but the newer
+    entries behind it are still delivered, and it goes last on the next run."""
+    handler = type("Handler", (_ScopedKey,), {"posts": []})
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        for agent, session in (("codex", "C-old"), ("codex", "C-old2"), ("claude-code", "A-new"), ("gemini", "G-new")):
+            assert outbox.enqueue(home, _payload(agent, session), url=url, config_source="env", error="timeout")
+            time.sleep(0.02)
+        first = relay(home, url, "brief", "--agent", "claude-code", "--cwd", str(home))
+        assert first.returncode == 0, first.stderr
+        # The oldest codex entry is refused; the second codex entry (same key, agent, project) is not tried
+        # in the same run; the newer claude-code and gemini entries are delivered.
+        assert handler.posts == ["codex:C-old", "claude-code:A-new", "gemini:G-new"]
+        assert sorted(e.session_id for e in outbox.pending(home)) == ["C-old", "C-old2"]
+        assert "refused this key (HTTP 403)" in first.stdout
+        assert "outbox: refused codex session C-old (kept)" in outbox.log_path(home).read_text()
+        [refused] = [e for e in outbox.pending(home) if e.session_id == "C-old"]
+        assert refused.data["last_status"] == 403 and "cannot write as agent codex" in refused.data["last_error"]
+
+        # Next run: the refused C-old goes after everything else; the newer entry is still delivered and
+        # the key is asked once per (agent, project), not once per queued codex entry.
+        assert outbox.enqueue(home, _payload("claude-code", "A-later"), url=url, config_source="env", error="timeout")
+        handler.posts.clear()
+        second = relay(home, url, "brief", "--agent", "claude-code", "--cwd", str(home))
+        assert second.returncode == 0, second.stderr
+        assert handler.posts == ["codex:C-old2", "claude-code:A-later"]
+        third = relay(home, url, "brief", "--agent", "claude-code", "--cwd", str(home))
+        assert third.returncode == 0 and handler.posts[2:] == ["codex:C-old"]  # both refused: oldest first again
+        status = relay(home, url, "status", "--no-check")
+        assert "queue: 2 handoff(s) waiting" in status.stdout and "HTTP 403" in status.stdout
+    finally:
+        srv.shutdown()
+
+
 def test_close_without_a_key_is_queued_and_sent_once_a_key_exists(tmp_path, home, server):
     laptop, _ = _repo(tmp_path, "keyless")
     no_key = {"REMEMBRA_API_KEY": "", "REMEMBRA_URL": ""}
