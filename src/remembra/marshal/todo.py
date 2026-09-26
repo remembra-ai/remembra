@@ -94,6 +94,26 @@ def codex_trust_step(home: Path, outcome: Outcome) -> str | None:
     return ("After --apply: " + step) if planned else step
 
 
+# How a self-hosted user names their server when none is set up yet (a placeholder, never a template command).
+OWN_SERVER_HINT = "\n  On your own server instead of Remembra Cloud:\n    remembra-install --all --url <your server URL>"
+
+
+def key_step_here() -> str:
+    """The key step for the server this machine's relay uses: the command the to-do list and the doctor give.
+
+    ``remembra-relay connect``'s own no-key warning leads with it too, so connect gives one key command.
+    """
+    try:
+        return cmd.key_step(load_config().url)
+    except Exception:  # never let a warning fail: the step every page shows
+        return cmd.INSTALL_KEEP_SERVER
+
+
+def own_server_hint() -> str:
+    """The self-hosted variant, labelled, for a machine with no server set up; empty when one is."""
+    return "" if "--url" in key_step_here() else OWN_SERVER_HINT
+
+
 def connect_todo(
     home: Path,
     results: Sequence[Outcome],

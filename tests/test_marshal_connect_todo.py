@@ -115,6 +115,14 @@ def test_missing_key_and_unverified_agents(tmp_path: Path) -> None:
         " it asks for the key at a hidden prompt."
     ]
     assert KEY not in out.stdout + self_hosted.stdout
+    # The no-key warning leads with the same key step as the list; the placeholder is only the labelled
+    # self-hosted variant, and only while no server is set up.
+    for run, step in ((out, "remembra-install --all"), (self_hosted, "remembra-install --all --url https://memory.example.org")):
+        warning = run.stderr.split("no Remembra API key found", 1)[1]
+        fix = warning.split("then run\n", 1)[1].splitlines()[0]
+        assert fix == f"    {step}", run.stderr
+    assert "On your own server instead of Remembra Cloud:\n    remembra-install --all --url <your server URL>" in out.stderr
+    assert "<your server URL>" not in self_hosted.stderr
 
 
 def test_dry_run_with_unverified_agents(tmp_path: Path) -> None:

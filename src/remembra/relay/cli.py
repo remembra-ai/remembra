@@ -1249,14 +1249,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 def _warn_missing_key() -> None:
     """Loud notice that the hooks cannot reach the server: they will do nothing."""
     red, reset = ("\033[31;1m", "\033[0m") if sys.stderr.isatty() else ("", "")
+    from remembra.marshal.todo import key_step_here, own_server_hint  # connect's to-do list and the doctor's step
+
     _err(
         f"{red}no Remembra API key found{reset}: the hooks will not load or save handoffs until one is set.\n"
         "  Checked: REMEMBRA_API_KEY, ~/.claude.json and ~/.codex/config.toml (remembra MCP server env),"
         " ~/.remembra/credentials.\n"
         "  Fix: create a key in the Remembra dashboard (Settings > API keys), then run\n"
-        "    remembra-install --all --url <your server URL>\n"
+        f"    {key_step_here()}\n"
         "  which asks for the key (it is never put on the command line), or export REMEMBRA_API_KEY\n"
-        "  and REMEMBRA_URL where your agents start."
+        "  and REMEMBRA_URL where your agents start." + own_server_hint()
     )
 
 
