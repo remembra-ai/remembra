@@ -22,15 +22,6 @@ log = structlog.get_logger(__name__)
 # (litestream checkpoints, CLI tools) before raising "database is locked".
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
-# Relay-structured handoffs and checkpoints (a server-written ``relay`` object
-# in metadata; see ``remembra.services.memory.is_relay_record``) are the
-# continuity record: TTL cleanup never deletes or archives them. Always 0 or 1
-# (never NULL), so ``AND NOT`` keeps every other row, malformed metadata included.
-RELAY_RECORD_SQL = (
-    "(CASE WHEN memory_type IN ('handoff', 'checkpoint') AND json_valid(metadata)"
-    " THEN COALESCE(json_type(metadata, '$.relay'), '') = 'object' ELSE 0 END)"
-)
-
 # Versioned migrations (REL-15). Each entry runs once, inside a transaction,
 # and is recorded in schema_version. Append only — never edit an applied entry.
 # Version 1 marks the legacy idempotent ALTER list in _run_migrations().
@@ -304,6 +295,15 @@ def _safe_json_loads(data: str | None, default: Any = None) -> Any:
         # Don't log - this is expected for bulk-imported data without entities
         return default if default is not None else []
 
+
+# Relay-structured handoffs and checkpoints (a server-written ``relay`` object
+# in metadata; see ``remembra.services.memory.is_relay_record``) are the
+# continuity record: TTL cleanup never deletes or archives them. Always 0 or 1
+# (never NULL), so ``AND NOT`` keeps every other row, malformed metadata included.
+RELAY_RECORD_SQL = (
+    "(CASE WHEN memory_type IN ('handoff', 'checkpoint') AND json_valid(metadata)"
+    " THEN COALESCE(json_type(metadata, '$.relay'), '') = 'object' ELSE 0 END)"
+)
 
 # SQL schemas
 SCHEMA_SQL = """
