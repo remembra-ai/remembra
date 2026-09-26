@@ -411,38 +411,6 @@ class UserManager:
 
         return True, None
 
-    async def delete_account(
-        self,
-        user_id: str,
-        password: str,
-    ) -> tuple[bool, str | None]:
-        """
-        Deactivate user account (soft delete).
-
-        Requires password confirmation for security.
-        Returns (True, None) on success, (False, error_message) on failure.
-        """
-        user_data = await self.db.get_user_by_id(user_id)
-        if not user_data:
-            return False, "User not found"
-
-        # Verify password
-        if not self.verify_password(password, user_data["password_hash"]):
-            log.warning("account_deletion_failed_wrong_password", user_id=user_id)
-            return False, "Password is incorrect"
-
-        # Deactivate account
-        success = await self.db.deactivate_user(user_id)
-        if not success:
-            return False, "Failed to deactivate account"
-
-        # Cut off API access too: revoke keys and invalidate every session.
-        await revoke_user_access(self.db, user_id)
-
-        log.info("account_deactivated", user_id=user_id)
-
-        return True, None
-
     # -----------------------------------------------------------------------
     # Two-Factor Authentication (2FA) Methods
     # -----------------------------------------------------------------------

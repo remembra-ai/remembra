@@ -762,55 +762,147 @@ async def change_password(
 
 
 class DeleteAccountRequest(BaseModel):
-    """Request body for account deletion."""
+    """Request body for account deletion: the password, or the code from POST /auth/me/deletion-code."""
 
-    password: str = Field(description="Password for confirmation")
+    password: str | None = Field(None, max_length=1024, description="Account password (password sign-in)")
+    code: str | None = Field(
+        None, max_length=12, description="Six-digit code emailed by POST /auth/me/deletion-code (Google/GitHub sign-in)"
+    )
 
 
 class DeleteAccountResponse(BaseModel):
-    """Response for successful account deletion."""
+    """What happened, and when the data goes."""
 
-    message: str = "Account has been deactivated"
+    message: str
+    deleted_at: str
+    erasure_after: str = Field(description="Every row and vector of the account is erased at the first job run after this")
+    subscriptions_cancelled: int = Field(0, description="Paddle subscriptions cancelled (immediately, no further charges)")
+
+
+class DeletionCodeResponse(BaseModel):
+    message: str
+    expires_in_minutes: int
+
+
+@router.post(
+    "/me/deletion-code",
+    response_model=DeletionCodeResponse,
+    responses={401: {"model": ErrorResponse}, 503: {"model": ErrorResponse}},
+)
+@limiter.limit("3/minute")
+async def request_deletion_code(request: Request, current_user: CurrentUser) -> DeletionCodeResponse:
+    """Email a six-digit code (valid 15 minutes) that confirms ``DELETE /auth/me``.
+
+    For accounts that sign in with Google or GitHub and so have no password;
+    any account may use it. The code goes only to the account's own address.
+    """
+    from remembra.account.deletion import DELETION_CODE_TTL, create_deletion_code
+
+    user_manager = await get_user_manager(request)
+    user_row = await user_manager.db.get_user_by_id(current_user["id"])
+    if not user_row:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if not EMAIL_AVAILABLE or not get_settings().resend_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Email delivery is not configured; confirm with your password or contact support.",
+        )
+    code = await create_deletion_code(user_manager.db, user_row["id"])
+    try:
+        email_service = EmailService.create(provider=EmailProvider.RESEND)
+        result = await email_service.send_account_deletion_code_email(to=user_row["email"], code=code)
+    except Exception as e:
+        log.error("deletion_code_email_error", error_type=type(e).__name__)
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not send the code") from e
+    if not result.success:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Could not send the code")
+    minutes = int(DELETION_CODE_TTL.total_seconds() // 60)
+    return DeletionCodeResponse(message=f"We emailed a code to {user_row['email']}.", expires_in_minutes=minutes)
 
 
 @router.delete(
     "/me",
     response_model=DeleteAccountResponse,
-    responses={400: {"model": ErrorResponse}, 401: {"model": ErrorResponse}},
+    responses={
+        400: {"model": ErrorResponse},
+        401: {"model": ErrorResponse},
+        502: {"model": ErrorResponse},
+    },
 )
-@limiter.limit("5/minute")  # password / TOTP guessing with a stolen session
+@limiter.limit("5/minute")  # password / code guessing with a stolen session
 async def delete_account(
     request: Request,
     body: DeleteAccountRequest,
     current_user: CurrentUser,
 ) -> DeleteAccountResponse:
     """
-    Deactivate current user's account.
+    Delete the current account.
 
-    - **password**: Password for security confirmation
+    Confirm with ``password``, or with ``code`` (from ``POST /auth/me/deletion-code``)
+    when the account signs in with Google or GitHub.
 
-    This is a soft delete - the account is deactivated but data is retained.
-    Contact support if you need complete data deletion.
-
-    Requires a valid Bearer token in the Authorization header.
+    1. Every Paddle subscription that can still bill is cancelled immediately.
+       If the billing provider cannot confirm that, nothing is deleted (502).
+    2. The account is deactivated: sessions and API keys stop working now.
+    3. After the grace period (``account_erasure_grace_days``, 7 by default) the
+       erasure job removes every row and vector the account owns and keeps only
+       a content-free receipt. Until then support can undo a mistaken deletion.
     """
+    from datetime import timedelta
+
+    from remembra.account.deletion import BillingCancelError, cancel_billing, consume_deletion_code, mark_deleted
+
     user_manager = await get_user_manager(request)
+    user_id = current_user["id"]
+    user_data = await user_manager.db.get_user_by_id(user_id)
+    if not user_data:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
 
-    success, error = await user_manager.delete_account(
-        user_id=current_user["id"],
-        password=body.password,
-    )
-
-    if not success:
+    if body.password:
+        if not user_manager.verify_password(body.password, user_data["password_hash"]):
+            log.warning("account_deletion_failed_wrong_password", user_id=user_id)
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Password is incorrect")
+    elif body.code:
+        if not await consume_deletion_code(user_manager.db, user_id, body.code):
+            log.warning("account_deletion_failed_bad_code", user_id=user_id)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="The code is wrong or expired. Request a new one."
+            )
+    else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=error or "Failed to deactivate account",
+            detail="Confirm with your password, or request an emailed code if you sign in with Google or GitHub.",
         )
 
-    # Invalidate current token
-    await user_manager.invalidate_token(current_user["id"], current_user["token"])
+    meter = getattr(request.app.state, "usage_meter", None)
+    try:
+        cancelled = await cancel_billing(meter, user_id)
+    except BillingCancelError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
 
-    return DeleteAccountResponse()
+    deleted_at = await mark_deleted(user_manager.db, meter, user_id)
+    await user_manager.invalidate_token(user_id, current_user["token"])
+
+    settings = get_settings()
+    erase_after = deleted_at + timedelta(days=settings.account_erasure_grace_days)
+    if settings.account_erasure_grace_days == 0:
+        from remembra.account.erasure import eraser_for
+
+        try:
+            await eraser_for(request.app.state).erase(user_id)
+        except Exception as e:  # the erasure job retries on its next run
+            log.error("account_erasure_immediate_failed", error_type=type(e).__name__)
+    log.info("account_deletion_requested", user_id=user_id, subscriptions_cancelled=len(cancelled))
+    return DeleteAccountResponse(
+        message=(
+            "Your account is deleted and you are signed out everywhere. "
+            + ("Your subscription is cancelled and will not charge again. " if cancelled else "")
+            + f"All your data is erased permanently after {erase_after.date().isoformat()}."
+        ),
+        deleted_at=deleted_at.isoformat(),
+        erasure_after=erase_after.isoformat(),
+        subscriptions_cancelled=len(cancelled),
+    )
 
 
 # ---------------------------------------------------------------------------

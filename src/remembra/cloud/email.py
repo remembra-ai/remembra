@@ -532,6 +532,25 @@ class EmailService:
         )
         return await self.backend.send(message)
 
+    async def send_account_deletion_code_email(self, to: str, code: str) -> EmailResult:
+        """Send the six-digit code that confirms an account deletion (inline HTML; no template file)."""
+        import html as _html
+
+        safe_code = _html.escape(code)
+        message = EmailMessage(
+            to=to,
+            subject="Remembra: your account deletion code",
+            html=(
+                "<p>Someone signed in to your Remembra account asked to delete it.</p>"
+                f'<p style="font-size:24px;font-weight:700;letter-spacing:4px">{safe_code}</p>'
+                "<p>Enter this code in Settings to confirm. It expires in 15 minutes. Deleting cancels any "
+                "subscription immediately and erases all your data after the grace period.</p>"
+                "<p>If this was not you, do not share the code: sign in and change your password.</p>"
+            ),
+            tags={"template": "account_deletion_code"},
+        )
+        return await self.backend.send(message)
+
     async def send_team_invite_email(
         self,
         to: str,

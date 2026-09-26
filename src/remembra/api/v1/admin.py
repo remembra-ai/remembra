@@ -833,18 +833,19 @@ async def delete_user(
     confirm: bool = Query(False, description="Must be true to confirm deletion"),
 ) -> dict[str, Any]:
     """
-    Permanently delete a user and ALL their data.
+    Permanently delete a user and ALL their data, now.
 
-    This is a destructive operation that removes:
-    - User account
-    - All memories
-    - All API keys
-    - All entities and relationships
-    - All usage records
+    Cancels every Paddle subscription of the account that can still bill
+    (502 and nothing deleted if the billing provider cannot confirm it), then
+    erases every row the account owns in every table and its Qdrant vectors,
+    and writes a content-free ``account_erased`` audit receipt.
 
     **Superadmin only** - requires owner_emails access.
     **Requires confirm=true** to execute.
     """
+    from remembra.account.deletion import BillingCancelError, cancel_billing
+    from remembra.account.erasure import eraser_for
+
     if not confirm:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -859,52 +860,21 @@ async def delete_user(
         )
 
     email = user_data["email"]
+    try:
+        cancelled = await cancel_billing(getattr(request.app.state, "usage_meter", None), user_id)
+    except BillingCancelError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
 
-    # Delete in order to handle foreign keys
-    # 1. Delete memories and related data
-    await db.conn.execute(
-        "DELETE FROM memory_entities WHERE memory_id IN (SELECT id FROM memories WHERE user_id = ?)",
-        (user_id,),
-    )
-    await db.conn.execute("DELETE FROM memories_fts WHERE user_id = ?", (user_id,))
-    await db.conn.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))
-
-    # 2. Delete entities and relationships
-    await db.conn.execute(
-        "DELETE FROM relationships WHERE from_entity_id IN (SELECT id FROM entities WHERE user_id = ?)",
-        (user_id,),
-    )
-    await db.conn.execute(
-        "DELETE FROM relationships WHERE to_entity_id IN (SELECT id FROM entities WHERE user_id = ?)",
-        (user_id,),
-    )
-    await db.conn.execute("DELETE FROM entities WHERE user_id = ?", (user_id,))
-
-    # 3. Delete API keys
-    await db.conn.execute("DELETE FROM api_keys WHERE user_id = ?", (user_id,))
-
-    # 4. Delete audit logs for user
-    await db.conn.execute("DELETE FROM audit_log WHERE user_id = ?", (user_id,))
-
-    # 5. Delete cloud tenant record
-    await db.conn.execute("DELETE FROM cloud_tenants WHERE user_id = ?", (user_id,))
-    await db.conn.execute("DELETE FROM cloud_usage_daily WHERE user_id = ?", (user_id,))
-
-    # 6. Delete password reset tokens
-    await db.conn.execute("DELETE FROM password_reset_tokens WHERE user_id = ?", (user_id,))
-
-    # 7. Delete token blacklist entries
-    await db.conn.execute("DELETE FROM token_blacklist WHERE user_id = ?", (user_id,))
-
-    # 8. Finally delete user
-    await db.conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-
-    await db.conn.commit()
+    receipt = await eraser_for(request.app.state).erase(user_id)
 
     return {
         "status": "deleted",
         "user_id": user_id,
         "email": email,
+        "subscriptions_cancelled": len(cancelled),
+        "rows_deleted": receipt.total_rows,
+        "vectors_deleted": receipt.vectors,
+        "receipt": f"sha256:{receipt.digest}",
         "message": "User and all associated data permanently deleted",
     }
 
@@ -979,10 +949,17 @@ async def toggle_user_active(
             detail=f"User {user_id} not found",
         )
 
-    await db.conn.execute(
-        "UPDATE users SET is_active = ?, updated_at = ? WHERE id = ?",
-        (active, datetime.now(UTC).isoformat(), user_id),
-    )
+    if active:
+        # Also undoes a self-serve deletion still inside its grace period.
+        await db.conn.execute(
+            "UPDATE users SET is_active = ?, deleted_at = NULL, updated_at = ? WHERE id = ?",
+            (active, datetime.now(UTC).isoformat(), user_id),
+        )
+    else:
+        await db.conn.execute(
+            "UPDATE users SET is_active = ?, updated_at = ? WHERE id = ?",
+            (active, datetime.now(UTC).isoformat(), user_id),
+        )
     await db.conn.commit()
 
     if not active:
@@ -998,6 +975,82 @@ async def toggle_user_active(
         "email": user_data["email"],
         "is_active": active,
     }
+
+
+class BillingFlagRow(BaseModel):
+    user_id: str
+    email: str | None = None
+    plan: str | None = None
+    billing_flag: str
+    billing_interval: str | None = None
+    seats: int | None = None
+    founding: bool = False
+    paddle_customer_id: str | None = None
+    paddle_subscription_id: str | None = None
+    updated_at: str | None = None
+
+
+class BillingFlagsResponse(BaseModel):
+    flags: list[BillingFlagRow]
+    total: int
+
+
+@router.get(
+    "/billing-flags",
+    response_model=BillingFlagsResponse,
+    summary="Accounts with a billing flag to review (superadmin only)",
+)
+@limiter.limit("30/minute")
+async def list_billing_flags(
+    request: Request,
+    current_user: CurrentUser,
+    _superadmin: RequireSuperadmin,
+    usage_meter: UsageMeterDep,
+) -> BillingFlagsResponse:
+    """Every account whose billing needs a human: a second subscription, a Founding
+    payment past seat 100, Team seats below the minimum, a refund or chargeback.
+    Each flag also sent the owner an alert when it was set."""
+    if usage_meter is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Cloud features not enabled")
+    rows = await usage_meter.list_billing_flags()
+    flags = [
+        BillingFlagRow(
+            user_id=str(r["user_id"]),
+            email=r.get("email"),
+            plan=r.get("plan"),
+            billing_flag=str(r["billing_flag"]),
+            billing_interval=r.get("billing_interval"),
+            seats=r.get("seats"),
+            founding=bool(r.get("founding")),
+            paddle_customer_id=r.get("stripe_customer_id"),
+            paddle_subscription_id=r.get("stripe_subscription_id"),
+            updated_at=r.get("updated_at"),
+        )
+        for r in rows
+    ]
+    return BillingFlagsResponse(flags=flags, total=len(flags))
+
+
+@router.delete(
+    "/billing-flags/{user_id}",
+    summary="Clear an account's billing flag after review (superadmin only)",
+)
+@limiter.limit("30/minute")
+async def clear_billing_flag(
+    request: Request,
+    user_id: str,
+    current_user: CurrentUser,
+    _superadmin: RequireSuperadmin,
+    usage_meter: UsageMeterDep,
+) -> dict[str, Any]:
+    if usage_meter is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Cloud features not enabled")
+    tenant = await usage_meter.get_tenant(user_id)
+    if tenant is None or not tenant.get("billing_flag"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No billing flag on that account")
+    await usage_meter.set_billing_flag(user_id, None)
+    log.info("billing_flag_cleared", user_id=user_id, flag=tenant.get("billing_flag"), by=current_user.user_id)
+    return {"status": "cleared", "user_id": user_id, "flag": tenant.get("billing_flag")}
 
 
 @router.get(

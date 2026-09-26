@@ -156,6 +156,14 @@ class CreditsUsage(BaseModel):
     llm_usd_used: float = Field(description="Actual AI spend this period (USD)")
     ceiling_usd: float = Field(description="Hard AI-spend ceiling for this period (USD)")
     unverified_cap_applied: bool = Field(description="Free credits held at the unverified-email cap")
+    bank_unlocks_at: str | None = Field(
+        None,
+        description=(
+            "Yearly plans: a new yearly bank releases one month's credits until this time (the 14-day refund "
+            "window), then the rest. None when the whole bank is available."
+        ),
+    )
+    full_limit: int | None = Field(None, description="The yearly bank once it unlocks (yearly plans only)")
 
 
 class EnrichmentStatus(BaseModel):
@@ -479,8 +487,9 @@ async def get_usage_summary(
     """Everything the billing panel shows.
 
     Smart credits are reported for the current billing period: a calendar
-    month, or the subscription year on annual plans (the whole year's credits
-    are banked up front). Relay events, pickups, trail reads and recalls never
+    month, or the subscription year on annual plans (the yearly bank; a new
+    bank releases one month's credits for its first 14 days, see
+    ``credits.bank_unlocks_at``). Relay events, pickups, trail reads and recalls never
     consume credits. ``enrichment.status`` is ``degraded`` when new stores will
     be saved without AI enrichment (credits exhausted or the platform's free
     tier budget paused).
@@ -525,6 +534,8 @@ async def get_usage_summary(
                 and unverified_cap is not None
                 and balance.limit <= unverified_cap
             ),
+            bank_unlocks_at=account.bank_unlock_at.isoformat() if account.bank_unlock_at else None,
+            full_limit=account.full_credit_limit,
         ),
         enrichment=EnrichmentStatus(status="degraded" if reason else "full", reason=reason),
         relay_events=RelayUsage(

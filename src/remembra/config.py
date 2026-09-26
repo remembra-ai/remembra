@@ -411,6 +411,22 @@ class Settings(BaseSettings):
             "allowance is released each month after (12 = the whole yearly bank up front)."
         ),
     )
+    annual_credit_unlock_days: int = Field(
+        14,
+        ge=0,
+        le=31,
+        description=(
+            "A new yearly plan (or a switch to yearly billing) holds its credit bank at "
+            "annual_credit_initial_months for this many days after the purchase, the refund window; the full bank "
+            "unlocks after that. Renewals of a subscription already held are not held back. 0 = off."
+        ),
+    )
+    annual_credit_initial_months: int = Field(
+        1,
+        ge=1,
+        le=12,
+        description="Months of credits a yearly bank releases before annual_credit_unlock_days have passed",
+    )
     credit_reservation_stale_minutes: int = Field(
         15,
         ge=1,

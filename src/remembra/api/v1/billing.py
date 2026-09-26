@@ -3,8 +3,10 @@
 Paddle is the sole billing provider.
 """
 
+from datetime import timedelta
 from typing import Annotated, Any
 
+import httpx
 import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
@@ -56,6 +58,15 @@ class FoundingOffer(BaseModel):
     price_yearly: int = FOUNDING_ANNUAL_PRICE_CENTS
     max_redemptions: int = FOUNDING_MAX_REDEMPTIONS
     remaining: int | None = Field(None, description="Seats left (None when metering is unavailable)")
+    available: bool = False
+
+
+class FoundingSeatsResponse(BaseModel):
+    """Founding 100 seats, for the pricing page (public)."""
+
+    max_redemptions: int = FOUNDING_MAX_REDEMPTIONS
+    taken: int | None = Field(None, description="Seats held by founders, open checkouts and founders in the 14-day lapse grace")
+    remaining: int | None = None
     available: bool = False
 
 
@@ -184,15 +195,37 @@ async def get_plans(
             )
         )
 
-    meter = getattr(request.app.state, "usage_meter", None)
-    remaining = None
-    if meter is not None:
-        remaining = max(0, FOUNDING_MAX_REDEMPTIONS - await meter.founding_redemptions())
-    founding = FoundingOffer(
-        remaining=remaining,
-        available=bool(config and config.founding_price_id) and remaining is not None and remaining > 0,
-    )
+    seats = await _founding_seats(request, config)
+    founding = FoundingOffer(remaining=seats.remaining, available=seats.available)
     return PlansResponse(plans=plans, founding=founding, provider=provider)
+
+
+async def _founding_seats(request: Request, config: Any) -> FoundingSeatsResponse:
+    meter = getattr(request.app.state, "usage_meter", None)
+    if meter is None:
+        return FoundingSeatsResponse()
+    taken = await meter.founding_seats_taken()
+    remaining = max(0, FOUNDING_MAX_REDEMPTIONS - taken)
+    return FoundingSeatsResponse(
+        taken=taken, remaining=remaining, available=bool(config and config.founding_price_id) and remaining > 0
+    )
+
+
+@router.get(
+    "/founding",
+    response_model=FoundingSeatsResponse,
+    summary="Founding 100 seats left",
+)
+@limiter.limit("120/minute")
+async def get_founding_seats(request: Request, settings: SettingsDep) -> FoundingSeatsResponse:
+    """Seats left in the Founding 100 (no authentication; the pricing page reads it).
+
+    A seat is taken by a founder holding the price, by a founding checkout in
+    progress (2 hours), and by a founder whose subscription ended less than 14
+    days ago. ``available`` is false once all 100 are taken.
+    """
+    config = get_paddle_config() if get_billing_provider(settings) == "paddle" else None
+    return await _founding_seats(request, config)
 
 
 class ClientConfigResponse(BaseModel):
@@ -369,11 +402,6 @@ async def create_checkout(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="This account already holds a Founding 100 price.",
                 )
-            if await meter.founding_redemptions() >= FOUNDING_MAX_REDEMPTIONS:
-                raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="Founding 100 is sold out. Solo is $12/mo or $120/yr.",
-                )
 
         # Fetch user email from database (AuthenticatedUser doesn't have email)
         db = request.app.state.db
@@ -390,7 +418,16 @@ async def create_checkout(
                 detail="User email not found. Please update your profile.",
             )
 
+        if founding and meter is not None:
+            # Taken before the buyer pays, so seat 101 is refused here, not after payment.
+            if not await meter.hold_founding_seat(current_user.user_id):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Founding 100 is sold out. Solo is $12/mo or $120/yr.",
+                )
         try:
+            if founding:
+                await _reopen_founding_price(request, billing)
             result = await billing.create_checkout_session(
                 customer_id=None,  # Will be created
                 plan=plan_tier,
@@ -401,7 +438,15 @@ async def create_checkout(
                 founding=founding,
             )
         except CheckoutUnavailableError as e:
+            if founding and meter is not None:
+                await meter.release_founding_hold(current_user.user_id)
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
+        except httpx.HTTPError as e:
+            if founding and meter is not None:
+                await meter.release_founding_hold(current_user.user_id)
+            raise _provider_unavailable("checkout", e) from e
+        if founding and meter is not None and result.get("transaction_id"):
+            await meter.set_founding_hold_transaction(current_user.user_id, str(result["transaction_id"]))
 
         return CheckoutResponse(
             checkout_url=result.get("checkout_url"),
@@ -459,8 +504,17 @@ async def get_portal(
                 detail="User email not found. Please update your profile.",
             )
 
-        # Look up customer by email address
-        url = await billing.create_portal_session_by_email(user_email)
+        # The Paddle customer recorded for the account, else a lookup by email.
+        meter = getattr(request.app.state, "usage_meter", None)
+        tenant = await meter.get_tenant(current_user.user_id) if meter is not None else None
+        customer_id = (tenant or {}).get("stripe_customer_id")
+        try:
+            if customer_id:
+                url: str | None = await billing.create_portal_session(str(customer_id))
+            else:
+                url = await billing.create_portal_session_by_email(user_email)
+        except httpx.HTTPError as e:
+            raise _provider_unavailable("portal", e) from e
 
         if not url:
             raise HTTPException(
@@ -473,6 +527,82 @@ async def get_portal(
     raise HTTPException(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="Billing is not configured on this instance.",
+    )
+
+
+def _provider_unavailable(operation: str, error: httpx.HTTPError) -> HTTPException:
+    """502 for a Paddle API failure (down, timeout or a refused call): a clean JSON error, never a bare 500."""
+    status_code = error.response.status_code if isinstance(error, httpx.HTTPStatusError) else None
+    log.error("paddle_api_error", operation=operation, error_type=type(error).__name__, status_code=status_code)
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail="Our billing provider did not respond as expected. Nothing was charged or changed; please try again in a minute.",
+    )
+
+
+# cloud_migrations marker: the Founding price is archived in Paddle (all 100 seats taken).
+_FOUNDING_ARCHIVED_MARKER = "state:founding_price_archived"
+
+
+async def _founding_price_archived(db: Any) -> bool:
+    cursor = await db.conn.execute("SELECT 1 FROM cloud_migrations WHERE name = ?", (_FOUNDING_ARCHIVED_MARKER,))
+    return await cursor.fetchone() is not None
+
+
+async def _reopen_founding_price(request: Request, billing: Any) -> None:
+    """A seat came free after the price was archived at 100: make it buyable again (raises httpx.HTTPError)."""
+    db = request.app.state.db
+    if not await _founding_price_archived(db):
+        return
+    from remembra.cloud.paddle_config import get_paddle_settings
+
+    price_id = get_paddle_settings().config.founding_price_id
+    if price_id:
+        await billing.set_price_status(price_id, "active")
+    await db.conn.execute("DELETE FROM cloud_migrations WHERE name = ?", (_FOUNDING_ARCHIVED_MARKER,))
+    await db.conn.commit()
+    log.info("founding_price_reopened")
+
+
+async def _close_founding_if_full(request: Request, meter: Any) -> None:
+    """Seat 100 was just taken: archive the Founding price in Paddle and tell the owner."""
+    holders = await meter.founding_redemptions()
+    if holders < FOUNDING_MAX_REDEMPTIONS:
+        return
+    db = request.app.state.db
+    if await _founding_price_archived(db):
+        return
+    from remembra.cloud.billing_paddle import PaddleBillingManager
+    from remembra.cloud.paddle_config import get_paddle_settings
+
+    paddle = get_paddle_settings()
+    price_id = paddle.config.founding_price_id
+    billing = PaddleBillingManager(api_key=paddle.api_key, webhook_secret=paddle.webhook_secret or "", sandbox=paddle.sandbox)
+    archived = False
+    if price_id:
+        try:
+            await billing.set_price_status(price_id, "archived")
+            archived = True
+        except httpx.HTTPError as e:
+            log.error("founding_price_archive_failed", error_type=type(e).__name__)
+    if archived:
+        from remembra.cloud.metering import now_utc
+
+        await db.conn.execute(
+            "INSERT OR IGNORE INTO cloud_migrations (name, applied_at) VALUES (?, ?)",
+            (_FOUNDING_ARCHIVED_MARKER, now_utc().isoformat()),
+        )
+        await db.conn.commit()
+    await _operator_alert(
+        request,
+        "founding_100_full",
+        "All 100 Founding seats are taken. "
+        + (
+            "The Founding price was archived in Paddle, so it cannot be bought any more."
+            if archived
+            else "Archiving the Founding price in Paddle FAILED: archive it by hand (Catalog > Prices)."
+        ),
+        {"holders": holders, "price_id": price_id, "archived": archived},
     )
 
 
@@ -547,6 +677,19 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
     if result is None or result.action in ("ignored", "payment_failed", "payment_issue"):
         if result is not None and result.action in ("payment_failed", "payment_issue"):
             log.warning("paddle_payment_problem", user_id=result.user_id, action=result.action)
+        if result is not None and getattr(result, "unknown_price_ids", None):
+            # Paid for something the catalog does not know: nothing was applied.
+            await _operator_alert(
+                request,
+                f"paddle_unknown_price:{result.transaction_id or result.paddle_subscription_id}",
+                "A Paddle payment used a price that is not in the configured catalog, so no plan was applied. "
+                "Check the price IDs in the Paddle settings and the payment in Paddle.",
+                {
+                    "prices": result.unknown_price_ids,
+                    "transaction_id": result.transaction_id,
+                    "subscription_id": result.paddle_subscription_id,
+                },
+            )
         return "no_change"
 
     if meter is None:
@@ -597,14 +740,16 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
         # A second paid subscription while one is active: never overwrite the
         # held plan (renewals of either would flip it). The customer may be
         # paying twice: flag it and tell the operator.
-        await meter.set_billing_flag(user_id, "second_subscription_review")
         log.error("paddle_second_subscription", user_id=user_id, plan=plan.value, transaction_id=result.transaction_id)
-        await _operator_alert(
+        await _flag_account(
             request,
-            f"paddle_second_subscription:{user_id}",
+            meter,
+            user_id,
+            "second_subscription_review",
             "A Paddle payment arrived for a second subscription on an account that already holds an active one. "
             "The held plan was kept; review the account and refund or cancel the duplicate in Paddle.",
-            {"user_id": user_id, "plan": plan.value, "transaction_id": result.transaction_id},
+            {"plan": plan.value, "transaction_id": result.transaction_id, "subscription_id": event_sub},
+            event=f"paddle_second_subscription:{user_id}",
         )
         return "flagged"
 
@@ -619,15 +764,41 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
         subscription_id=result.paddle_subscription_id,
         email=result.customer_email,
         name=result.customer_name,
+        bank_unlock_at=_new_bank_unlock(tenant, result, plan),
     )
-    if result.founding and not await meter.claim_founding(user_id):
-        # Over the Founding 100 cap (the price was bought client-side or raced
-        # the last seat): the account gets plain Solo annual and the charge is
-        # flagged for a refund of the difference.
-        await meter.set_billing_flag(user_id, "founding_over_cap_refund_due")
-        log.error("paddle_founding_over_cap", user_id=user_id, transaction_id=result.transaction_id)
+    if not result.founding and (tenant or {}).get("founding") and result.plan_from_price:
+        # The held subscription moved off the Founding price (a plan change in
+        # the portal): the lock ends, with the same 14-day grace as a lapse.
+        await meter.end_founding(user_id)
+    if result.founding:
+        if await meter.claim_founding(user_id):
+            await _close_founding_if_full(request, meter)
+        else:
+            # Past the Founding 100 cap (the price was bought client-side, or a
+            # checkout hold expired while all seats filled): the account gets
+            # plain Solo annual and the owner decides whether to honor $108 or
+            # move the subscription to the $120 Solo annual price with notice.
+            log.error("paddle_founding_over_cap", user_id=user_id, transaction_id=result.transaction_id)
+            await _flag_account(
+                request,
+                meter,
+                user_id,
+                "founding_over_cap",
+                "A Founding 100 payment arrived after all 100 seats were taken. The account got plain Solo annual. "
+                "Decide in Paddle: honor the $108 price, or move the subscription to the Solo annual price with "
+                "notice before it renews. Then clear the flag.",
+                {"transaction_id": result.transaction_id, "subscription_id": result.paddle_subscription_id},
+            )
     if result.seats_below_minimum:
-        await meter.set_billing_flag(user_id, "team_seats_below_minimum")
+        await _flag_account(
+            request,
+            meter,
+            user_id,
+            "team_seats_below_minimum",
+            "A Team subscription was paid for fewer seats than the 3-seat minimum; the paid seats were granted. "
+            "Set quantity.minimum on the Paddle price and adjust the subscription.",
+            {"seats": result.seats, "subscription_id": result.paddle_subscription_id},
+        )
 
     team_manager = getattr(request.app.state, "team_manager", None)
     if team_manager is not None:
@@ -684,7 +855,59 @@ async def _resolve_paddle_account(request: Request, meter: Any, result: Any) -> 
         )
     else:
         log.warning("paddle_event_unmatched_user", action=result.action)
+        if result.action != "cancel_subscription":
+            # A payment that names no account and matches no known customer.
+            await _operator_alert(
+                request,
+                f"paddle_unmatched_purchase:{result.paddle_subscription_id or result.transaction_id}",
+                "A Paddle payment matched no Remembra account (no signed account id, unknown subscription and "
+                "customer). Nothing was applied; find the buyer in Paddle and apply or refund it.",
+                {
+                    "action": result.action,
+                    "subscription_id": result.paddle_subscription_id,
+                    "customer_id": result.paddle_customer_id,
+                    "transaction_id": result.transaction_id,
+                },
+            )
     return None
+
+
+def _new_bank_unlock(tenant: dict[str, Any] | None, result: Any, plan: PlanTier) -> Any:
+    """When a NEW yearly bank unlocks in full (R-27), or None to leave the account as it is.
+
+    A yearly bank is new when the subscription is not the one the account
+    already holds (a new purchase) or the account switches to yearly billing.
+    Renewals and repeats of a held subscription never hold credits back.
+    """
+    from remembra.cloud.metering import now_utc
+
+    days = get_settings().annual_credit_unlock_days
+    if days <= 0 or plan == PlanTier.FREE or result.interval != BillingInterval.YEAR:
+        return None
+    tenant = tenant or {}
+    held = tenant.get("stripe_subscription_id") if str(tenant.get("plan") or "free") != PlanTier.FREE.value else None
+    new_subscription = bool(result.paddle_subscription_id) and result.paddle_subscription_id != held
+    switched = tenant.get("billing_interval") != BillingInterval.YEAR.value
+    if not (new_subscription or switched):
+        return None
+    return (result.period_anchor or now_utc()) + timedelta(days=days)
+
+
+async def _flag_account(
+    request: Request,
+    meter: Any,
+    user_id: str,
+    flag: str,
+    message: str,
+    details: dict[str, Any],
+    *,
+    event: str | None = None,
+) -> None:
+    """Record a billing flag on the account (listed at GET /admin/billing-flags) and alert the owner."""
+    await meter.set_billing_flag(user_id, flag)
+    await _operator_alert(
+        request, event or f"billing_flag:{flag}:{user_id}", message, {"user_id": user_id, "flag": flag, **details}
+    )
 
 
 async def _operator_alert(request: Request, event: str, message: str, details: dict[str, Any]) -> None:
@@ -717,7 +940,18 @@ async def _apply_paddle_refund(request: Request, meter: Any, result: Any) -> str
     )
     if user_id is None:
         log.warning("paddle_refund_unmatched", action=result.action)
+        await _operator_alert(
+            request,
+            f"paddle_refund_unmatched:{result.transaction_id}",
+            "An approved Paddle refund or chargeback matched no Remembra account. Check it in Paddle.",
+            {
+                "adjustment": result.adjustment_action,
+                "subscription_id": result.paddle_subscription_id,
+                "customer_id": result.paddle_customer_id,
+            },
+        )
         return "unmatched"
+    await _alert_refund_after_heavy_use(request, meter, user_id, result)
     if result.action != "refund_downgrade":
         log.info("paddle_partial_refund_recorded", user_id=user_id)
         return "no_change"
@@ -728,7 +962,14 @@ async def _apply_paddle_refund(request: Request, meter: Any, result: Any) -> str
         log.info("paddle_refund_for_other_subscription", user_id=user_id)
         return "no_change"
     await meter.apply_subscription(user_id, PlanTier.FREE)
-    await meter.set_billing_flag(user_id, f"{result.adjustment_action or 'refund'}_downgraded")
+    await _flag_account(
+        request,
+        meter,
+        user_id,
+        f"{result.adjustment_action or 'refund'}_downgraded",
+        f"An approved {result.adjustment_action or 'refund'} ended a paid plan; the account is back on Free.",
+        {"subscription_id": result.paddle_subscription_id, "adjustment_id": result.transaction_id},
+    )
     team_manager = getattr(request.app.state, "team_manager", None)
     if team_manager is not None:
         try:
@@ -737,3 +978,38 @@ async def _apply_paddle_refund(request: Request, meter: Any, result: Any) -> str
             log.warning("paddle_team_plan_sync_failed", user_id=user_id, error_type=type(e).__name__)
     log.warning("paddle_refund_downgraded", user_id=user_id)
     return "applied"
+
+
+# A refund after spending more than this share of the period's credits is worth a look (R-27).
+REFUND_HEAVY_USE_SHARE = 0.25
+
+
+async def _alert_refund_after_heavy_use(request: Request, meter: Any, user_id: str, result: Any) -> None:
+    """Tell the owner when a refunded account had already used over 25% of the credits it could spend.
+
+    The bank is what the period released so far: during the first 14 days of a
+    new yearly plan that is one month's credits (R-27), so a buyer who burns
+    that and asks for a refund is caught too.
+    """
+    account = await meter.get_account(user_id, include_team=False)
+    bank = account.credit_limit
+    if bank <= 0:
+        return
+    balance = await meter.get_credit_balance(account)
+    if balance.used <= bank * REFUND_HEAVY_USE_SHARE:
+        return
+    log.warning("paddle_refund_after_heavy_use", user_id=user_id, used=balance.used, bank=bank)
+    await _operator_alert(
+        request,
+        f"paddle_refund_heavy_use:{user_id}",
+        f"An approved {result.adjustment_action or 'refund'} arrived for an account that had used "
+        f"{balance.used:,} of its {bank:,} credits ({balance.used / bank:.0%}) this period, "
+        f"about ${balance.llm_usd:.2f} of AI spend. Review for refund abuse.",
+        {
+            "user_id": user_id,
+            "credits_used": balance.used,
+            "credit_bank": bank,
+            "llm_usd": round(balance.llm_usd, 4),
+            "adjustment_id": result.transaction_id,
+        },
+    )

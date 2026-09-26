@@ -141,7 +141,9 @@ async def test_webhook_maps_prices_seats_founding_and_revenue(tmp_path) -> None:
             assert r.status_code == 200 and r.json()["applied"] == "applied", r.text
         account = await c.meter.get_account(uid)
         assert (account.tier, account.interval, account.founding) == (PlanTier.SOLO, BillingInterval.YEAR, True)
-        assert account.period.key == "Y:2026-09-25" and account.credit_limit == 26_400
+        assert account.period.key == "Y:2026-09-25" and account.full_credit_limit == 26_400
+        # R-27: a new yearly bank releases one month's credits until 14 days after the purchase.
+        assert account.credit_limit == 2_200 and account.bank_unlock_at == datetime(2026, 10, 9, 10, tzinfo=UTC)
         assert await c.meter.founding_redemptions() == 1
         assert await c.meter.revenue_for_month("2026-09") == pytest.approx(102.10)
 
@@ -238,8 +240,16 @@ async def test_checkout_requires_configured_prices_and_enforces_offer_rules(tmp_
             [(f"f{i}", now, now) for i in range(100)],
         )
         await c.h.db.conn.commit()
-        r = await c.h.client.post("/api/v1/billing/checkout", json={"plan": "founding", "billing_cycle": "yearly"}, headers=hdr)
+        # This account's own checkout hold still counts as its seat; another buyer is refused.
+        late = await c.h.create_user("late-founder@example.com")
+        r = await c.h.client.post(
+            "/api/v1/billing/checkout",
+            json={"plan": "founding", "billing_cycle": "yearly"},
+            headers=c.h.jwt(late, "late-founder@example.com"),
+        )
         assert r.status_code == 409 and "sold out" in r.text
+        await c.h.db.conn.execute("DELETE FROM founding_holds")
+        await c.h.db.conn.commit()
 
         plans = (await c.h.client.get("/api/v1/billing/plans")).json()
         by_id = {p["id"]: p for p in plans["plans"]}

@@ -299,7 +299,7 @@ async def test_unknown_price_with_custom_data_plan_is_ignored(tmp_path, custom: 
 # ---------------------------------------------------------------------------
 
 
-async def test_founding_webhook_past_the_cap_grants_plain_solo_annual_and_flags_a_refund(tmp_path) -> None:
+async def test_founding_webhook_past_the_cap_grants_plain_solo_annual_and_flags_it(tmp_path) -> None:
     async with cost_app(tmp_path) as c:
         _paddle(c, **PRICES)
         now = datetime.now(UTC).isoformat()
@@ -322,7 +322,7 @@ async def test_founding_webhook_past_the_cap_grants_plain_solo_annual_and_flags_
         assert await c.meter.founding_redemptions() == 100
         account = await c.meter.get_account(uid)
         assert (account.tier, account.interval, account.founding) == (PlanTier.SOLO, BillingInterval.YEAR, False)
-        assert (await c.meter.get_tenant(uid))["billing_flag"] == "founding_over_cap_refund_due"
+        assert (await c.meter.get_tenant(uid))["billing_flag"] == "founding_over_cap"
 
         # A holder's renewal keeps the founding price.
         holder = await c.h.create_user("holder@example.com")
@@ -680,7 +680,9 @@ async def test_refund_and_chargeback_end_the_plan_and_reduce_revenue(tmp_path, m
             },
         }
         await _webhook(c, purchase)
-        assert (await c.meter.get_account(uid)).credit_limit == 26_400
+        # A new yearly bank: one month's credits until the 14-day refund window closes (R-27).
+        account = await c.meter.get_account(uid)
+        assert (account.credit_limit, account.full_credit_limit) == (2_200, 26_400)
         assert await c.meter.revenue_for_month("2026-09") == pytest.approx(105.0)
 
         def adjustment(adj_id: str, action: str, status: str, kind: str, earnings: str) -> dict:
