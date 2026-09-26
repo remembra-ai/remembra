@@ -74,7 +74,7 @@ def test_entrypoint_restores_then_replicates(tmp_path) -> None:
     assert proc.returncode == 0, proc.stderr
     assert "restore complete" in proc.stdout
     assert "litestream restore -if-replica-exists" in calls
-    assert "litestream replicate -exec python -m remembra.main" in calls
+    assert "litestream replicate -config " in calls and "-exec python -m remembra.main" in calls
 
 
 def test_entrypoint_existing_db_skips_restore(tmp_path) -> None:
@@ -82,7 +82,9 @@ def test_entrypoint_existing_db_skips_restore(tmp_path) -> None:
     (tmp_path / "data" / "remembra.db").write_text("")
     proc, calls = _run_entrypoint(tmp_path, {"LITESTREAM_REPLICA_URL": "s3://b/r"})
     assert proc.returncode == 0
-    assert "restore" not in calls and "replicate" in calls
+    # the main database is not restored over; crew.db (absent) is still looked for (WP-16)
+    assert f"-o {tmp_path / 'data' / 'remembra.db'}" not in calls
+    assert f"-o {tmp_path / 'data' / 'crew.db'} s3://b/r-crew" in calls and "replicate" in calls
 
 
 def test_entrypoint_without_replica_warns_loudly(tmp_path) -> None:
