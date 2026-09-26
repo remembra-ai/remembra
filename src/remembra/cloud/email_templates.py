@@ -34,8 +34,8 @@ SUPPORT_EMAIL = "support@remembra.dev"
 
 # The same three lines as the landing page's install block (landing/index.html).
 INSTALL_LINES: tuple[str, ...] = (
-    "pipx install 'remembra[mcp]'",
-    "remembra-install --all --api-key <your-key>",
+    "pipx install --force 'remembra[mcp]>=0.16'",
+    "remembra-install --all",
     "remembra-relay connect",
 )
 
@@ -355,10 +355,11 @@ def welcome(*, dashboard: str | None, verify_url: str | None = None, dashboard_a
     else:
         blocks.append(P("Your API key was shown once, where you signed up. It is never sent by email."))
     blocks += [
-        P("On each machine, run these three lines (put your key in place of <your-key>):"),
+        P("On each machine, run these three lines:"),
         Code(INSTALL_LINES),
         P(
-            "remembra-install saves your key and adds Remembra to the agents it finds. remembra-relay connect shows "
+            "remembra-install asks for your key without showing it, saves it and adds Remembra to the agents it finds. "
+            "remembra-relay connect shows "
             "what it will change; add --apply to wire it in."
         ),
         Link("Relay setup guide", RELAY_GUIDE_URL),
