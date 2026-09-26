@@ -341,6 +341,9 @@ def session_view(row: Mapping[str, Any]) -> dict[str, Any]:
         "last_activity_at": row.get("last_activity_at"),
         "ended_at": row.get("ended_at"),
         "end_reason": _clip(row.get("end_reason"), 64),
+        "provider": _clip(row.get("provider"), 32),
+        "parent_session_id": row.get("parent_session_id") if schemas.is_id("session", row.get("parent_session_id")) else None,
+        "sub_agent_id": _clip(row.get("sub_agent_id"), 128),
     }
 
 
@@ -574,6 +577,11 @@ class JoinRequest:
     zones_sha: str | None = None
     model: str | None = None
     resume_of: str | None = None
+    # Riders (gap analysis §7). A sub-agent is its own session linked to the one that started it.
+    provider: str | None = None
+    parent_session_id: str | None = None
+    sub_agent_id: str | None = None
+    capabilities: list[str] | None = None
 
 
 @dataclass
@@ -738,6 +746,7 @@ class CrewSessions:
             rejoined = row is not None
             if row is None:
                 resume_row = await self._check_resume_of(tx, crew_id, user_id, req)
+                await self._check_parent(tx, crew_id, user_id, req)
                 token = new_session_token()
                 row = await self._insert_session(tx, crew_id, user_id, req, host, token, now_s)
                 if host is not None:
@@ -801,6 +810,18 @@ class CrewSessions:
             raise _conflict("resume_of_live", "The session to resume is still active; end it before resuming it elsewhere.")
         return prior
 
+    async def _check_parent(self, tx: EventTx, crew_id: str, user_id: str, req: JoinRequest) -> None:
+        """A sub-agent's session names the live session of the same account, in the same crew, that started it."""
+        if not req.parent_session_id:
+            return
+        parent = await get_session(tx.conn, req.parent_session_id)
+        if parent is None or parent["crew_id"] != crew_id:
+            raise SessionError(422, "cross_crew_reference", "The parent session is not part of this crew.")
+        if parent["user_id"] != user_id:
+            raise SessionError(422, "parent_session_mismatch", "parent_session_id must name a session of the same account.")
+        if parent["state"] == "ended":
+            raise _conflict("parent_session_ended", "The parent session has ended; a sub-agent joins while it is live.")
+
     async def _allocate_callsign(self, conn: aiosqlite.Connection, crew_id: str, agent_id: str, now: datetime) -> str:
         prefix = callsign_prefix(agent_id)
         reuse_before = format_ts(now - timedelta(seconds=CALLSIGN_REUSE_AFTER_S))
@@ -845,8 +866,8 @@ class CrewSessions:
             """INSERT INTO crew_sessions (id, crew_id, user_id, agent_id, session_id, host_id, member_key, callsign,
                    client_kind, adapter, adapter_enforcement, agent_verified, model, checkout_fp, worktree_id, branch,
                    head_commit, state, joined_at, last_seen_at, last_activity_at, last_heartbeat_at, token_hash,
-                   token_version)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 1)""",
+                   token_version, provider, parent_session_id, sub_agent_id, capabilities)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)""",
             (
                 session_id,
                 crew_id,
@@ -870,6 +891,10 @@ class CrewSessions:
                 now_s,
                 now_s if host else None,
                 hash_token(token),
+                req.provider,
+                req.parent_session_id,
+                req.sub_agent_id,
+                json.dumps(list(req.capabilities)) if req.capabilities is not None else None,
             ),
         )
         row = await get_session(tx.conn, session_id)

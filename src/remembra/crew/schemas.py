@@ -757,6 +757,9 @@ SESSION_VIEW = Shape(
         "last_activity_at": _opt(TS),
         "ended_at": _opt(TS),
         "end_reason": _opt(_s(64)),
+        "provider": _opt(_s(32)),
+        "parent_session_id": _opt(_id("session")),
+        "sub_agent_id": _opt(_s(128)),
     },
 )
 
@@ -1366,6 +1369,15 @@ _EVENT_SPECS: tuple[EventSpec, ...] = (
     _spec("proposal.resolved", {"proposal_id": _id("proposal"), "outcome": _s(64)}, release="L1"),
     _spec("vote.cast", {"proposal_id": _id("proposal"), "choice": _s(64), "verified": _b()}, release="L1"),
     _spec("objection.raised", {"proposal_id": _id("proposal")}, release="L1"),
+    # Continuity riders (gap analysis §7): named now so crew.db's closed set need not change later;
+    # no producer yet (L0 servers must not emit them).
+    _spec(
+        "failure.recorded",
+        {"failure_id": _s(64), "session_id": _opt(_id("session")), "kind": _s(64)},
+        release="L1",
+    ),
+    _spec("failure.resolved", {"failure_id": _s(64), "resolution": _opt(_s(64))}, release="L1"),
+    _spec("artifact.recorded", {"artifact_id": _s(64), "kind": _s(64), "content_hash": _opt(_s(128))}, release="L1"),
     # inbox and human
     _spec("inbox.item_created", _ITEM),
     _spec("inbox.item_claimed", _ITEM),
@@ -2941,6 +2953,12 @@ REQUEST_SHAPES: Final[Mapping[str, Shape]] = {
             "model": _opt(_s(64)),
             "source": _s(32, desc="startup | resume | clear | compact | mcp | cli"),
             "resume_of": _opt(_id("session")),
+            # Riders (gap analysis §7). A sub-agent joins as its own session linked to the live
+            # session of the same account in the same crew that started it (owner decision, open question 1).
+            "provider": _opt(_s(32)),
+            "parent_session_id": _opt(_id("session")),
+            "sub_agent_id": _opt(_s(128)),
+            "capabilities": _opt(_l(_s(64), 32)),
         },
     ),
     "Heartbeat": Shape(
@@ -3094,6 +3112,9 @@ REQUEST_SHAPES: Final[Mapping[str, Shape]] = {
             "trigger": _e(CHECKPOINT_TRIGGERS),
             "facts": _any(MAX_CHECKPOINT_FACTS_BYTES),
             "task_id": _opt(_id("task")),
+            # Riders (gap analysis §7): decisions this checkpoint acted on, and a ref to the state before it.
+            "decisions": _opt(_l(_id("decision"), 20)),
+            "state_before": _opt(_s(256)),
         },
     ),
     "Message": Shape(

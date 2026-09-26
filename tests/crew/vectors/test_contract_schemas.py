@@ -122,12 +122,16 @@ def test_ids_have_type_prefixes() -> None:
 
 
 def test_closed_event_set_matches_the_spec() -> None:
-    assert len(S.EVENT_SPECS) == 101  # the spec's 100 plus baton.restored (§13.3 step 7 restore outcome)
+    # the spec's 100, baton.restored (§13.3 step 7 restore outcome) and the 3 reserved continuity names
+    assert len(S.EVENT_SPECS) == 104
     assert {t for t, s in S.EVENT_SPECS.items() if s.release == "L1"} == {
         "proposal.opened",
         "proposal.resolved",
         "vote.cast",
         "objection.raised",
+        "failure.recorded",
+        "failure.resolved",
+        "artifact.recorded",
     }
     assert set(S.CLIENT_EVENT_TYPES) == {
         "activity.burst",
@@ -168,6 +172,8 @@ def test_closed_event_set_matches_the_spec() -> None:
             "inbox",
             "human",
             "budget",
+            "failure",  # reserved continuity names (gap analysis §7), L1, no producer
+            "artifact",
         }
 
 

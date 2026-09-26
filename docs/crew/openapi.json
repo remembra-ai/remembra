@@ -326,6 +326,36 @@
         "title": "Actor",
         "type": "object"
       },
+      "ArtifactRecordedPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "artifact_id": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "content_hash": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "kind": {
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifact_id",
+          "kind"
+        ],
+        "title": "ArtifactRecordedPayload",
+        "type": "object"
+      },
       "BatonPassedPayload": {
         "additionalProperties": false,
         "properties": {
@@ -805,12 +835,40 @@
       "CheckpointRequest": {
         "additionalProperties": false,
         "properties": {
+          "decisions": {
+            "anyOf": [
+              {
+                "items": {
+                  "description": "decision id",
+                  "maxLength": 80,
+                  "pattern": "dec_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "facts": {},
           "session_id": {
             "description": "session id",
             "maxLength": 80,
             "pattern": "cs_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
             "type": "string"
+          },
+          "state_before": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "task_id": {
             "anyOf": [
@@ -2638,6 +2696,63 @@
         "title": "EventEnvelope",
         "type": "object"
       },
+      "FailureRecordedPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "failure_id": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "kind": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "description": "session id",
+                "maxLength": 80,
+                "pattern": "cs_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "failure_id",
+          "kind"
+        ],
+        "title": "FailureRecordedPayload",
+        "type": "object"
+      },
+      "FailureResolvedPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "failure_id": {
+            "maxLength": 64,
+            "type": "string"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "failure_id"
+        ],
+        "title": "FailureResolvedPayload",
+        "type": "object"
+      },
       "Footprint": {
         "additionalProperties": false,
         "properties": {
@@ -3682,6 +3797,21 @@
               }
             ]
           },
+          "capabilities": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 64,
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "checkout_fp": {
             "anyOf": [
               {
@@ -3742,9 +3872,33 @@
               }
             ]
           },
+          "parent_session_id": {
+            "anyOf": [
+              {
+                "description": "session id",
+                "maxLength": 80,
+                "pattern": "cs_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "project_id": {
             "maxLength": 128,
             "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "resume_of": {
             "anyOf": [
@@ -3767,6 +3921,17 @@
             "description": "startup | resume | clear | compact | mcp | cli",
             "maxLength": 32,
             "type": "string"
+          },
+          "sub_agent_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "worktree_id": {
             "anyOf": [
@@ -5768,6 +5933,30 @@
               }
             ]
           },
+          "parent_session_id": {
+            "anyOf": [
+              {
+                "description": "session id",
+                "maxLength": 80,
+                "pattern": "cs_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "quiet_reason": {
             "anyOf": [
               {
@@ -5810,6 +5999,17 @@
           },
           "stuck": {
             "type": "boolean"
+          },
+          "sub_agent_id": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "worktree_id": {
             "anyOf": [

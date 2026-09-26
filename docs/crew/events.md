@@ -141,6 +141,9 @@ action is a moment); client-submittable types never count as human actions.
 | `proposal.resolved` | `proposal_id`, `outcome` |  | if human | L1 |
 | `vote.cast` | `proposal_id`, `choice`, `verified` |  | if human | L1 |
 | `objection.raised` | `proposal_id` |  | if human | L1 |
+| `failure.recorded` | `failure_id`, `session_id`, `kind` |  | if human | L1 (reserved, no producer) |
+| `failure.resolved` | `failure_id`, `resolution` |  | if human | L1 (reserved, no producer) |
+| `artifact.recorded` | `artifact_id`, `kind`, `content_hash` |  | if human | L1 (reserved, no producer) |
 | `inbox.item_created` | `item` |  | if human | L0 |
 | `inbox.item_claimed` | `item` |  | if human | L0 |
 | `inbox.item_resolved` | `item` |  | if human | L0 |

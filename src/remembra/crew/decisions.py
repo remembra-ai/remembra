@@ -243,8 +243,8 @@ class CrewDecisions:
             """
             INSERT INTO crew_decisions (id, crew_id, number, title, decision, rationale, alternatives, decided_by_kind,
                 decided_by, participants, source, task_id, zone_id, supersedes_id, state, confirmed_by, confirmed_at,
-                created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, proposed_by_verified, decided_by_verified)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 decision_id,
@@ -265,6 +265,10 @@ class CrewDecisions:
                 author.user_id if human else None,
                 now if human else None,
                 now,
+                # Riders (gap analysis §7): whether the proposer's identity was verified (a human
+                # login, or a key-verified agent), and the decider's (only a human decides).
+                1 if author.verified else 0,
+                1 if human else None,
             ),
         )
         row = await self._get(tx, decision_id)
@@ -328,7 +332,7 @@ class CrewDecisions:
                 raise DecisionStateConflict(f"D-{row['number']} is {row['state']}")
             now = now_iso()
             await tx.conn.execute(
-                "UPDATE crew_decisions SET state = 'in_force', confirmed_by = ?, confirmed_at = ?"
+                "UPDATE crew_decisions SET state = 'in_force', confirmed_by = ?, confirmed_at = ?, decided_by_verified = 1"
                 " WHERE id = ? AND state = 'proposed'",
                 (human.user_id, now, decision_id),
             )

@@ -118,6 +118,9 @@ def session_view(row: Row) -> dict[str, Any]:
         "last_activity_at": row.get("last_activity_at"),
         "ended_at": row.get("ended_at"),
         "end_reason": row.get("end_reason"),
+        "provider": row.get("provider"),
+        "parent_session_id": row.get("parent_session_id") if schemas.is_id("session", row.get("parent_session_id")) else None,
+        "sub_agent_id": row.get("sub_agent_id"),
     }
 
 

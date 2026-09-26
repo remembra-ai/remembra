@@ -42,6 +42,16 @@ CREW_BUSY_TIMEOUT_MS = 5000
 
 # ---------------------------------------------------------------------------
 # CREW_MIGRATIONS v1 (spec §3.2). Append only: never edit an applied entry.
+#
+# v1 was amended once, before crew.db first deployed (continuity gap analysis §7,
+# "L0 riders"): nullable columns that change no behaviour when NULL, on
+# crew_sessions (provider, parent_session_id, sub_agent_id, run_id, capabilities,
+# context_window, env_fp_id), crew_checkpoints (run_id, state_before_ref,
+# decision_ids, quality, confidence, continuity_seq), crew_decisions (evidence,
+# proposed_by_verified, decided_by_verified, intent_version) and crew_footprints
+# (content_hash, artifact_id). A sub-agent is its own session row linked to the
+# session that started it by parent_session_id (owner decision, open question 1).
+# From the first deploy on, any change is a new version.
 # ---------------------------------------------------------------------------
 
 _V1_CREW_AND_MEMBERSHIP = [
@@ -83,11 +93,14 @@ _V1_HOSTS_AND_SESSIONS = [
       current_task_id TEXT, last_checkpoint_id TEXT, delivered_seq INTEGER NOT NULL DEFAULT 0,
       token_hash TEXT NOT NULL, token_version INTEGER NOT NULL DEFAULT 1, agent_pid INTEGER,
       ended_at TEXT, end_reason TEXT,
+      provider TEXT, parent_session_id TEXT, sub_agent_id TEXT, run_id TEXT, capabilities TEXT, context_window INTEGER,
+      env_fp_id TEXT,
       UNIQUE(crew_id, user_id, agent_id, session_id))""",
     "CREATE INDEX idx_crew_sessions_live ON crew_sessions(crew_id, state)",
     "CREATE INDEX idx_crew_sessions_reap ON crew_sessions(state, last_heartbeat_at)",
     "CREATE INDEX idx_crew_sessions_host ON crew_sessions(host_id, state)",
     "CREATE UNIQUE INDEX uq_crew_callsign_live ON crew_sessions(crew_id, callsign) WHERE state NOT IN ('ended')",
+    "CREATE INDEX idx_crew_sessions_parent ON crew_sessions(parent_session_id) WHERE parent_session_id IS NOT NULL",
 ]
 
 _V1_ZONES = [
@@ -138,7 +151,8 @@ _V1_CLAIMS_FOOTPRINTS_COLLISIONS = [
     """CREATE TABLE crew_footprints (crew_id TEXT, session_id TEXT, path TEXT, zone_ids TEXT, first_at TEXT, last_at TEXT,
       touches INTEGER DEFAULT 1, state TEXT NOT NULL DEFAULT 'dirty' CHECK(state IN ('dirty','committed','landed')),
       attribution TEXT NOT NULL DEFAULT 'certain' CHECK(attribution IN ('certain','probable')),
-      claim_epoch INTEGER, last_commit TEXT, worktree_id TEXT, PRIMARY KEY(crew_id, session_id, path))""",
+      claim_epoch INTEGER, last_commit TEXT, worktree_id TEXT, content_hash TEXT, artifact_id TEXT,
+      PRIMARY KEY(crew_id, session_id, path))""",
     "CREATE INDEX idx_footprints_path ON crew_footprints(crew_id, path, state)",
     """CREATE TABLE crew_collisions (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL, kind TEXT NOT NULL, severity TEXT NOT NULL,
       subject TEXT NOT NULL, zone_id TEXT, session_a TEXT, session_b TEXT, claim_id TEXT, attribution TEXT, evidence TEXT,
@@ -167,6 +181,7 @@ _V1_TASKS_REPORTS_BATONS = [
     """CREATE TABLE crew_checkpoints (id TEXT PRIMARY KEY, crew_id TEXT NOT NULL, session_id TEXT NOT NULL, task_id TEXT,
       trigger TEXT NOT NULL, facts TEXT, facts_hash TEXT NOT NULL, headline TEXT, facts_source TEXT NOT NULL,
       compacted INTEGER NOT NULL DEFAULT 0, memory_id TEXT, seq INTEGER, created_at TEXT NOT NULL,
+      run_id TEXT, state_before_ref TEXT, decision_ids TEXT, quality TEXT, confidence REAL, continuity_seq INTEGER,
       UNIQUE(session_id, facts_hash))""",
     "CREATE INDEX idx_ckp_session ON crew_checkpoints(crew_id, session_id, created_at)",
     "CREATE INDEX idx_ckp_task ON crew_checkpoints(task_id, created_at)",
@@ -214,7 +229,9 @@ _V1_CHANNEL_DECISIONS = [
       rationale TEXT, alternatives TEXT, decided_by_kind TEXT, decided_by TEXT, participants TEXT,
       source TEXT CHECK(source IN ('direct','proposal','override')), task_id TEXT, zone_id TEXT, supersedes_id TEXT,
       state TEXT NOT NULL DEFAULT 'proposed' CHECK(state IN ('proposed','in_force','rejected','superseded')),
-      confirmed_by TEXT, confirmed_at TEXT, memory_id TEXT, created_at TEXT, UNIQUE(crew_id, number))""",
+      confirmed_by TEXT, confirmed_at TEXT, memory_id TEXT, created_at TEXT,
+      evidence TEXT, proposed_by_verified INTEGER, decided_by_verified INTEGER, intent_version INTEGER,
+      UNIQUE(crew_id, number))""",
 ]
 
 _V1_INBOX_BYPASS = [

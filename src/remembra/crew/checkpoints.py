@@ -252,11 +252,26 @@ class CheckpointService:
                 row = await fetchone(tx.conn, "SELECT id FROM crew_tasks WHERE id = ? AND crew_id = ?", (task_id, crew_id))
                 if row is None:
                     raise _err(422, "cross_crew_reference", "The referenced task is not part of this crew.")
+            decision_ids = list(dict.fromkeys(body.get("decisions") or []))
+            for decision_id in decision_ids:
+                row = await fetchone(
+                    tx.conn, "SELECT id FROM crew_decisions WHERE id = ? AND crew_id = ?", (decision_id, crew_id)
+                )
+                if row is None:
+                    raise _err(422, "cross_crew_reference", "A referenced decision is not part of this crew.")
             fresh = await fetchone(tx.conn, "SELECT * FROM crew_sessions WHERE id = ? AND crew_id = ?", (session["id"], crew_id))
             if fresh is None:
                 raise _err(404, "not_found", "Not found.")
             result = await self.record_in_tx(
-                tx, crew_id, fresh, trigger=trigger, facts=facts, task_id=task_id, facts_source=session_channel_source(fresh)
+                tx,
+                crew_id,
+                fresh,
+                trigger=trigger,
+                facts=facts,
+                task_id=task_id,
+                facts_source=session_channel_source(fresh),
+                decision_ids=decision_ids or None,
+                state_before=body.get("state_before"),
             )
             if result.created and fresh.get("client_kind") == "mcp":
                 await self._mcp_footprints(tx, crew_id, fresh, facts)
@@ -291,6 +306,8 @@ class CheckpointService:
         task_id: str | None,
         facts_source: str,
         promote: bool = True,
+        decision_ids: list[str] | None = None,
+        state_before: str | None = None,
     ) -> CheckpointResult:
         """Store one checkpoint (already-redacted ``facts``) inside the caller's transaction, emit
         ``checkpoint.created`` and queue its memory promotion when D15 allows it."""
@@ -316,8 +333,21 @@ class CheckpointService:
         text = headline(str(session["callsign"]), trigger, number, facts)
         await tx.conn.execute(
             """INSERT INTO crew_checkpoints (id, crew_id, session_id, task_id, trigger, facts, facts_hash, headline,
-                   facts_source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (checkpoint_id, crew_id, session["id"], task_id, trigger, dumps(dict(facts)), digest, text, facts_source, now),
+                   facts_source, created_at, decision_ids, state_before_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                checkpoint_id,
+                crew_id,
+                session["id"],
+                task_id,
+                trigger,
+                dumps(dict(facts)),
+                digest,
+                text,
+                facts_source,
+                now,
+                dumps(decision_ids) if decision_ids else None,
+                state_before,
+            ),
         )
         settings = await crew_settings(tx.conn, crew_id)
         due = now_iso(now_dt + timedelta(seconds=int(settings["checkpoint"]["interval_s"])))

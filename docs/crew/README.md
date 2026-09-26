@@ -94,3 +94,27 @@ The spec leaves a few points open. The contracts settle them as follows (each ha
   (`footprints[]`), which guard rows 5 and 16 need.
 * **Redaction choke point**: §11 names `crew.redact.outbound()` but §14 gives it no owner. The
   signature and corpus are fixed here; the module still needs an owner (flagged to the lead).
+
+## Sub-agents and the continuity riders
+
+A sub-agent is its own crew session, not part of the session that started it
+(owner decision on the continuity gap analysis, open question 1). It joins with
+`parent_session_id` naming a live session of the same account in the same crew
+(else 422 `cross_crew_reference` / `parent_session_mismatch`, or 409
+`parent_session_ended`), and optionally `sub_agent_id`. It gets its own
+callsign, claims and checkpoints; the session view carries `parent_session_id`,
+`sub_agent_id` and `provider`.
+
+The crew.db v1 schema also carries the continuity riders as nullable columns,
+added before crew.db first deployed: `crew_sessions` (provider,
+parent_session_id, sub_agent_id, run_id, capabilities, context_window,
+env_fp_id), `crew_checkpoints` (run_id, state_before_ref, decision_ids,
+quality, confidence, continuity_seq), `crew_decisions` (evidence,
+proposed_by_verified, decided_by_verified, intent_version) and
+`crew_footprints` (content_hash, artifact_id).
+
+Several riders are optional request fields: `provider`, `capabilities` and
+`sub_agent_id` on Join, and `decisions` and `state_before` on Checkpoint. The
+decision service records whether the proposer and the decider were verified.
+`failure.recorded`, `failure.resolved` and `artifact.recorded` are reserved
+L1 event names with no producer yet. A NULL rider changes no behaviour.
