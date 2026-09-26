@@ -253,6 +253,8 @@ def test_qwen_sigterm_closes_and_continue_gets_a_fresh_brief(rig):
     term = rig.tui()
     try:
         rig.ask(term, "First prompt.")
+        # Work to hand off: a session that recorded nothing leaves no handoff (0.16.1).
+        (rig.repo / "wip.txt").write_text("left uncommitted\n")
         term.signal(signal.SIGTERM)
         term.wait_exit(30)
     finally:

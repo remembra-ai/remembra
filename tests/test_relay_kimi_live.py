@@ -314,6 +314,8 @@ def _tui_session(rig: Rig, prompt: str, *, resume: bool) -> dict[str, Any]:
 def test_kimi_session_resumed_and_ended_again_within_a_minute_closes_again(rig):
     """No transcript tells a resumed session's end from a repeat: only copies arriving together are dropped."""
     rig.connect()
+    # Work to hand off: a session that recorded nothing leaves no handoff (0.16.1).
+    (rig.repo / "wip.txt").write_text("left uncommitted\n")
     started = time.monotonic()
     first = _tui_session(rig, "First prompt.", resume=False)
     assert request_text(first).count(BRIEF) == 1
