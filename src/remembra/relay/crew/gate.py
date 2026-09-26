@@ -1309,6 +1309,11 @@ def _git_evaluate(
     snap = _load_snapshot(layout, crew_id) if crew_id else None
     if snap is None:
         return GitGateResult(True)
+    # §8.5: the git gates enforce for every agent, including advisory (unverified or observe-mode) adapters
+    # whose pre-write hooks only log would_deny; only the crew-level setting (observe / off) relaxes them.
+    mode = G.mode_for({**snap, "sessions": []}, "")
+    if mode is None:
+        return GitGateResult(True)
     status = crewd_status(layout)
     now_local = time.time()
     ctx = HookContext(layout, str(who.get("adapter") or DEFAULT_ADAPTER), {"session_id": who.get("client_session_id")})
@@ -1333,6 +1338,7 @@ def _git_evaluate(
             cwd=toplevel,
             home=str(layout.home),
             now=_server_dt(snap, now_local),
+            mode=mode,
             claim=claim,
             server_reachable=bool(status.get("server_reachable", True)) if status.get("running") else False,
             server_outage=bool(status.get("server_outage")),
