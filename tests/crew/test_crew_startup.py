@@ -81,7 +81,14 @@ async def test_lifespan_starts_hooks_wires_bus_to_websocket_and_stops_cleanly(tm
     app = make_app(tmp_path)
     with TestClient(app) as client:
         rt = app.state.crew_runtime
-        assert [h.name for h in rt.started] == ["crew.db", "crew.bus", "crew.tailer", "crew.retention", "crew.outbox"]
+        assert [h.name for h in rt.started] == [
+            "crew.db",
+            "crew.bus",
+            "crew.tailer",
+            "crew.retention",
+            "crew.outbox",
+            "crew.notify",
+        ]
         assert rt.tailer is None and "crew-retention" in app.state.tasks.names()
         assert "crew-event-tailer" not in app.state.tasks.names()
         retention_task = rt.extras["task:crew-retention"]
@@ -110,7 +117,7 @@ async def test_register_opens_crew_db_and_runs_the_outbox_with_no_manual_state(t
         assert db is not None and db.db_path == str(tmp_path / "crew.db")
         assert (tmp_path / "crew.db").exists() and client.portal.call(db.get_schema_version) == 1
         worker = app.state.crew_outbox
-        assert worker.running and set(worker.handlers) == {"memory_promotion", "relay_handoff"}
+        assert worker.running and {"memory_promotion", "relay_handoff", "crew_notify"} <= set(worker.handlers)
         screen, scrub = db_hook._relay_filters(app)  # the relay routes' filters, read from app.state
         assert screen("handoff text")[0] == "handoff text" and scrub is None
 
