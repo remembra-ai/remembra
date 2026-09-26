@@ -513,23 +513,50 @@ async def live_session_count(conn: aiosqlite.Connection, crew_id: str) -> int:
     return int(row["n"]) if row else 0
 
 
+# Live states that take one of the plan's seats. A session stopped on its credits (quota_blocked)
+# waits with its work reserved for pickup, so it gives its seat up (like a lost one) and the agent
+# that replaces it gets a seat to take the baton. Sub-agent sessions never count: they sit on their
+# parent's seat.
+SEAT_STATES: Final = tuple(s for s in LIVE_STATES if s != "quota_blocked")
+_MAX_PARENT_DEPTH: Final = 8
+
+
+async def seated_session_count(conn: aiosqlite.Connection, crew_id: str) -> int:
+    """Sessions of the crew that count toward its live-session seats (see :data:`SEAT_STATES`)."""
+    marks = ", ".join("?" for _ in SEAT_STATES)
+    row = await _one(
+        conn,
+        f"SELECT COUNT(*) AS n FROM crew_sessions WHERE crew_id = ? AND state IN ({marks}) AND parent_session_id IS NULL",
+        (crew_id, *SEAT_STATES),
+    )
+    return int(row["n"]) if row else 0
+
+
 async def has_seat(conn: aiosqlite.Connection, crew_id: str, session_id: str, max_live: int) -> bool:
     """True when the session holds one of the crew's ``max_live`` full seats (§12).
 
-    Seats go to live sessions in join order, so a session that joined over the
-    cap is observe-only (it cannot claim, adopt or be offered a baton) and gets
-    a seat automatically once an earlier session ends. Claim services (WP-5)
-    call this before granting.
+    Seats go to the sessions in :data:`SEAT_STATES` in join order, so a session that
+    joined over the cap is observe-only (it cannot claim, adopt or be offered a baton)
+    and gets a seat automatically once an earlier session ends, is lost or stops on its
+    credits. A sub-agent has its parent's seat. Claim services (WP-5) call this before granting.
     """
     row = await get_session(conn, session_id)
-    if row is None or row["crew_id"] != crew_id or row["state"] not in LIVE_STATES:
+    for _ in range(_MAX_PARENT_DEPTH):
+        if row is None or row["crew_id"] != crew_id or row["state"] not in LIVE_STATES:
+            return False
+        if not row.get("parent_session_id"):
+            break
+        row = await get_session(conn, str(row["parent_session_id"]))
+    else:
         return False
-    marks = ", ".join("?" for _ in LIVE_STATES)
+    assert row is not None
+    marks = ", ".join("?" for _ in SEAT_STATES)
     ahead = await _one(
         conn,
         f"""SELECT COUNT(*) AS n FROM crew_sessions
-             WHERE crew_id = ? AND state IN ({marks}) AND (joined_at < ? OR (joined_at = ? AND id < ?))""",
-        (crew_id, *LIVE_STATES, row["joined_at"], row["joined_at"], session_id),
+             WHERE crew_id = ? AND state IN ({marks}) AND parent_session_id IS NULL
+               AND (joined_at < ? OR (joined_at = ? AND id < ?))""",
+        (crew_id, *SEAT_STATES, row["joined_at"], row["joined_at"], row["id"]),
     )
     return (int(ahead["n"]) if ahead else 0) < max_live
 
@@ -768,7 +795,8 @@ class CrewSessions:
             observe_only = not await has_seat(tx.conn, crew_id, row["id"], limits.max_sessions_live)
             upgrade_hint = None
             if observe_only:
-                seat = seat_for_join(live_before, limits)
+                counted = row["state"] in SEAT_STATES and not row.get("parent_session_id")
+                seat = seat_for_join(await seated_session_count(tx.conn, crew_id) - (1 if counted else 0), limits)
                 upgrade_hint = seat.upgrade_hint
             actor = session_actor(row)
             adopted: list[dict[str, Any]] = []
@@ -776,9 +804,11 @@ class CrewSessions:
             if not observe_only:
                 if resume_row is not None:
                     adopted += await self._adopt_reserved_for(tx, crew_id, row, resume_row, settings, now)
-                if settings.get("auto_adopt") == "same_checkout" and row.get("checkout_fp"):
+                if settings.get("auto_adopt") == "same_checkout" and row.get("checkout_fp") and not row.get("parent_session_id"):
                     adopted += await self._adopt_same_checkout(tx, crew_id, row, settings, now)
-                offered = await self._offer_batons(tx, crew_id, row, now)
+                if not row.get("parent_session_id"):
+                    # a sub-agent works for its parent: batons go to top-level sessions (the parent may adopt)
+                    offered = await self._offer_batons(tx, crew_id, row, now)
             await self._emit_mode_change(tx, crew_id, live_before, actor, now)
             my_tasks = await self._my_tasks(tx.conn, row["id"])
             row = await get_session(tx.conn, row["id"]) or row

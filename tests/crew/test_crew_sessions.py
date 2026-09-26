@@ -483,7 +483,10 @@ async def test_observe_only_session_gets_no_baton(mk):
     env = await mk(max_live=1)
     a, _, _, claim = await _holder_with_task(env, checkout="fp-a")
     await env.svc.stall(a.session, error="billing_error", facts={}, baton_ref=None)
-    c = await _join(env, "s-c", checkout="fp-a")  # a (quota_blocked) still holds the only seat
+    # a (quota_blocked) gave its seat up; b takes the only seat (and is offered the baton)
+    b = await _join(env, "s-b", checkout="fp-b")
+    assert not b.observe_only and len(b.batons_offered) == 1
+    c = await _join(env, "s-c", checkout="fp-a")  # same checkout as a, but no seat left
     assert c.observe_only and c.auto_adopted == [] and c.batons_offered == []
 
 
