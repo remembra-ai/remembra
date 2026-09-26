@@ -51,12 +51,12 @@ export function PolicyPage({ crewId, project }: { crewId: string; project: strin
   const missing = checkoutRows(state).filter((r) => r.hook === 'missing').length;
   const activeCodes = (codes.data?.codes ?? []).filter((c) => c.state === 'active').length;
   const offset = crew.meta?.clock_offset_ms ?? 0;
+  // The crew state follows the action's events (stream or polling); only REST listings reload here.
   const refreshAll = () => {
     pending.refresh();
     recent.refresh();
     settings.refresh();
     detail.refresh();
-    crew.refresh();
   };
 
   return (

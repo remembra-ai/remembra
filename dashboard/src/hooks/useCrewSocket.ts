@@ -20,7 +20,7 @@ export interface UseCrewSocket extends CrewStreamView {
   refresh: () => void;
 }
 
-const NONE: CrewStreamView = { crewId: '', status: 'stopped', state: null, meta: null, error: null, lastFrameAt: 0 };
+const NONE: CrewStreamView = { crewId: '', status: 'stopped', state: null, meta: null, error: null, lastFrameAt: 0, presenceAt: {} };
 const noopSubscribe = () => () => {};
 
 export function useCrewSocket(crewId: string | null): UseCrewSocket {

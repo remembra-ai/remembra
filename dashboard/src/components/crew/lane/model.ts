@@ -62,8 +62,11 @@ export function sessionClaims(state: CrewState, sessionId: string): ClaimView[] 
 }
 
 export function presenceView(session: SessionState, claims: ClaimView[], nowMs: number, quotaSource: string | null = null): PresenceView {
-  const state = session.presence?.state ?? session.state;
-  const stuck = session.presence?.stuck ?? session.stuck;
+  // The server's session state is authoritative (§10.1): it moves with every session event. The
+  // presence overlay is a 5-second snapshot that stops arriving when an agent stops, so it never
+  // decides whether a lane is active, quiet, stuck or settled (it only adds the last action).
+  const state = session.state;
+  const stuck = session.stuck;
   const fenced = claims.some((c) => c.fenced && (c.state === 'active' || c.state === 'offered'));
   const idleMin = minutesAgo(session.last_activity_at, nowMs);
   switch (state) {
@@ -224,22 +227,33 @@ export interface NowLine {
   /** Untrusted task title (plain text). */
   taskTitle: string | null;
   task: TaskView | null;
-  action: { tool: string; path: string | null; ageS: number } | null;
+  /** `stale`: no presence frame for more than two intervals (the agent stopped acting): shown dimmed. */
+  action: { tool: string; path: string | null; ageS: number; stale: boolean } | null;
 }
 
+/** crewd sends a presence frame at most every 5 s, and only while the agent acts. */
+export const PRESENCE_INTERVAL_MS = 5000;
+
 /**
- * `frameAgeMs`: how long ago the presence frame carrying `last_action` arrived.
- * The action's age keeps counting between 5-second frames.
+ * `frameAgeMs`: how long ago (client clock) the presence frame carrying `last_action` arrived,
+ * from the store's per-session receipt time. The action's age keeps counting between frames and
+ * after the last one, so an idle agent never reads "just now".
  */
 export function nowLine(state: CrewState, session: SessionState, frameAgeMs: number): NowLine {
   const task = session.current_task_id ? (state.tasks[session.current_task_id] ?? null) : null;
   const action = session.presence?.last_action ?? null;
+  const frameAge = Math.max(0, Number.isFinite(frameAgeMs) ? frameAgeMs : 0);
   return {
     taskRef: task ? `T-${task.number}` : (session.current_task_id ?? null),
     taskTitle: task?.title ?? null,
     task,
     action: action
-      ? { tool: action.tool, path: action.path_rel ?? action.verb ?? null, ageS: Math.max(0, action.age_s + Math.round(frameAgeMs / 1000)) }
+      ? {
+          tool: action.tool,
+          path: action.path_rel ?? action.verb ?? null,
+          ageS: Math.max(0, action.age_s + Math.round(frameAge / 1000)),
+          stale: frameAge > 2 * PRESENCE_INTERVAL_MS,
+        }
       : null,
   };
 }

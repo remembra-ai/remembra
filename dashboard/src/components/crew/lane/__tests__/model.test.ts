@@ -55,9 +55,13 @@ describe('lane presence', () => {
     expect(view.stuck).toBe(true);
   });
 
-  it('prefers the live presence overlay over the stored state', () => {
-    const a = { ...s.sessions.cs_a, presence: { state: 'idle' as const, stuck: true, calls_since_checkpoint: 3 } };
-    expect(presenceView(a, [], NOW)).toMatchObject({ kind: 'solid', stuck: true });
+  it('takes state and stuck from the server state, never from a presence overlay', () => {
+    // an overlay from the last 5-second frame says "active"; the server has since said quota_blocked + stuck
+    const overlay = { state: 'active' as const, stuck: false, calls_since_checkpoint: 3 };
+    const a = { ...s.sessions.cs_a, state: 'quota_blocked' as const, stuck: true, state_reason: 'billing_error', presence: overlay };
+    expect(presenceView(a, [], NOW)).toMatchObject({ kind: 'dropped', label: 'credits ran out', stuck: true, settled: true });
+    const quiet = { ...s.sessions.cs_a, state: 'quiet' as const, quiet_reason: 'host_unreachable' as const, last_activity_at: iso(6), presence: overlay };
+    expect(presenceView(quiet, [], NOW)).toMatchObject({ kind: 'hollow', label: 'quiet 6m', detail: 'host offline' });
   });
 });
 

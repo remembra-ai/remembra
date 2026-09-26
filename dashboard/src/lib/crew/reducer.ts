@@ -249,8 +249,21 @@ const sessionJoined: Handler = (state, _e, p) => {
   return { ...state, sessions: put(state.sessions, s.id, { ...s, presence: null }) };
 };
 
+/**
+ * Session events after which the presence overlay (state, stuck, last action as of the last
+ * 5-second frame) is stale and dropped: the server's state is authoritative, and once an agent
+ * stops no new frame comes to replace it. `session.left` and `session.lost` clear it too.
+ */
+export const PRESENCE_CLEARING_TYPES: ReadonlySet<string> = new Set([
+  'session.state_changed',
+  'session.quota_blocked',
+  'session.paused',
+  'session.stuck',
+]);
+
 const sessionChange: Handler = (state, event, p) =>
-  withSession(state, event, (s) => {
+  withSession(state, event, (current) => {
+    const s: SessionState = PRESENCE_CLEARING_TYPES.has(event.type) ? { ...current, presence: null } : current;
     switch (event.type) {
       case 'session.state_changed': {
         const to = p.to as SessionState['state'];

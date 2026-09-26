@@ -334,5 +334,70 @@ describe('CrewStore', () => {
     expect(api.snapshotCalls).toBe(2);
     expect(store.getView().state?.last_seq).toBe(12);
   });
-});
 
+  it('stamps each session\'s presence frame with the client time it arrived (the now line counts from it)', async () => {
+    const { api, store, factory, timers } = setup();
+    api.snapshots.push(snapshotAt(10));
+    store.start();
+    await flush();
+    const ws = connectLast(factory);
+    ws.receive(subscribedFrame(10));
+    const lane = (sid: string) => ({ session_id: sid, state: 'active', stuck: false, calls_since_checkpoint: 1, last_action: { tool: 'Edit', path_rel: 'a.ts', age_s: 1 } });
+    const t0 = timers.now();
+    ws.receive({ type: 'presence', crew_id: CREW, lanes: [lane('cs_a'), lane('cs_b'), lane('cs_unknown')] });
+    expect(store.getView().presenceAt).toEqual({ cs_a: t0, cs_b: t0 });
+    await timers.advance(7000);
+    ws.receive({ type: 'presence', crew_id: CREW, lanes: [lane('cs_b')] });
+    expect(store.getView().presenceAt).toEqual({ cs_a: t0, cs_b: t0 + 7000 });
+    ws.receive({ type: 'crew.event', crew_id: CREW, data: event(11, 'quiet', 'cs_a') });
+    // the server moved cs_a: its overlay (and so its last action) is gone until a new frame
+    expect(store.getView().state?.sessions.cs_a.presence).toBeNull();
+    expect(store.getView().state?.sessions.cs_b.presence?.last_action?.tool).toBe('Edit');
+  });
+
+  it('a resync keeps the live-only state (lane badges, moments, presence) instead of blanking it', async () => {
+    const { api, store, factory } = setup();
+    api.snapshots.push(snapshotAt(10));
+    store.start();
+    await flush();
+    const ws = connectLast(factory);
+    ws.receive(subscribedFrame(10));
+    ws.receive({
+      type: 'presence',
+      crew_id: CREW,
+      lanes: [{ session_id: 'cs_a', state: 'active', stuck: false, calls_since_checkpoint: 4, last_action: { tool: 'Edit', path_rel: 'a.ts', age_s: 1 } }],
+    });
+    const tamper: CrewEvent = {
+      ...event(11),
+      type: 'guard.tamper_blocked',
+      moment: true,
+      summary: 'cc-1 tried to edit crew policy. Blocked.',
+      payload: { kind: 'crew_policy_write', surface: 'pretool' },
+    };
+    const blocked: CrewEvent = {
+      ...event(12),
+      type: 'guard.blocked',
+      summary: 'guard blocked',
+      payload: { path_rel: 'src/app/pos/a.ts', zone: 'pos', holder: 'cs_b', rule: 5, op: 'write', surface: 'pretool', coalesced: 2, decision: 'deny' },
+    };
+    ws.receive({ type: 'crew.event', crew_id: CREW, data: tamper });
+    ws.receive({ type: 'crew.event', crew_id: CREW, data: blocked });
+    const before = store.getView().state!;
+    expect(before.tamper_blocks).toEqual({ cs_a: 1 });
+    expect(before.guard_blocks).toEqual({ cs_a: 2 });
+    expect(before.moments.map((m) => m.seq)).toEqual([11]);
+    // a manual refresh (or a resync) re-applies a snapshot; cs_b has ended meanwhile and is gone from it
+    const snap = snapshotAt(12);
+    snap.sessions = snap.sessions.filter((x) => x.id !== 'cs_b');
+    api.snapshots.push(snap);
+    await store.refresh();
+    const after = store.getView().state!;
+    expect(after.last_seq).toBe(12);
+    expect(after.tamper_blocks).toEqual({ cs_a: 1 });
+    expect(after.guard_blocks).toEqual({ cs_a: 2 });
+    expect(after.moments.map((m) => m.seq)).toEqual([11]);
+    expect(after.sessions.cs_a.presence?.last_action?.path_rel).toBe('a.ts');
+    expect(after.sessions.cs_b).toBeUndefined();
+    expect(Object.keys(store.getView().presenceAt)).toEqual(['cs_a']);
+  });
+});
