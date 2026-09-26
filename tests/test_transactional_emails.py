@@ -422,6 +422,34 @@ async def test_paddle_events_send_plan_change_payment_failed_and_cancel(tmp_path
         assert [m.to for m in outbox.sent] == ["buyer@example.com"] * 4
 
 
+async def test_legacy_renewal_filling_in_the_interval_sends_nothing(tmp_path, outbox) -> None:
+    """A $49 subscriber's row predates billing_interval; its first renewal after the deploy is not a plan change."""
+    from tests.test_plans_billing_signup import LEGACY_PRO_PRICE
+
+    async with cost_app(tmp_path, resend_api_key=RESEND_TEST_KEY) as c:
+        _paddle(c, **PRICES)
+        c.h.app.state.tasks = None
+        uid = await c.h.create_user("legacy@example.com", verified=True)
+        await c.meter.register_tenant(
+            uid, plan=PlanTier.LEGACY_PRO, stripe_subscription_id="sub_legacy", stripe_customer_id="ctm_l"
+        )
+        assert (await c.meter.get_tenant(uid))["billing_interval"] is None
+        await _hook(c, "transaction.completed", _purchase("txn_l", "sub_legacy", LEGACY_PRO_PRICE, {}, customer="ctm_l"))
+        tenant = await c.meter.get_tenant(uid)
+        assert tenant["plan"] == "legacy_pro_49" and tenant["billing_interval"] == "month"
+        await outbox.settle()
+        assert outbox.sent == []
+        # A real interval change afterwards is announced.
+        from remembra.cloud import notify
+
+        before = dict(tenant)
+        await c.meter.apply_subscription(uid, PlanTier.LEGACY_PRO, interval=BillingInterval.YEAR, subscription_id="sub_legacy")
+        notify.notify_billing_change(c.h.app.state, uid, before)
+        await outbox.wait(1)
+        [changed] = outbox.of("plan_changed")
+        assert "Your Pro (legacy $49) plan was updated." in changed.text
+
+
 async def test_api_signup_tenant_welcome_has_no_key(tmp_path, outbox) -> None:
     from tests.security_harness import MASTER_KEY
 

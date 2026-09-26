@@ -125,6 +125,22 @@ def _plan_state(tenant: dict[str, Any] | None) -> tuple[PlanTier, BillingInterva
     return tier, interval, seats
 
 
+def _plan_changed(
+    old: tuple[PlanTier, BillingInterval | None, int | None], new: tuple[PlanTier, BillingInterval | None, int | None]
+) -> bool:
+    """A different plan, or a different known interval / seat count.
+
+    Rows from before intervals and seats were recorded (legacy subscribers) hold
+    NULL there; the first renewal filling them in is not a change to announce.
+    """
+    (old_tier, old_interval, old_seats), (new_tier, new_interval, new_seats) = old, new
+    if old_tier != new_tier:
+        return True
+    if old_interval is not None and new_interval != old_interval:
+        return True
+    return old_seats is not None and new_seats != old_seats
+
+
 def notify_billing_change(state: Any, user_id: str, before: dict[str, Any] | None, *, cancelled: bool = False) -> None:
     """Email the account when a billing event changed its plan, interval or seats.
 
@@ -139,7 +155,7 @@ def notify_billing_change(state: Any, user_id: str, before: dict[str, Any] | Non
         old_tier, old_interval, old_seats = _plan_state(before)
         after = await meter.get_tenant(user_id)
         new_tier, new_interval, new_seats = _plan_state(after)
-        if (old_tier, old_interval, old_seats) == (new_tier, new_interval, new_seats):
+        if not _plan_changed((old_tier, old_interval, old_seats), (new_tier, new_interval, new_seats)):
             return
         account = await meter.get_account(user_id)
         if cancelled and new_tier == PlanTier.FREE and old_tier != PlanTier.FREE:
