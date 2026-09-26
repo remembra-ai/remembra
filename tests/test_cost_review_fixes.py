@@ -660,8 +660,25 @@ def test_client_ip_behind_cloudflare(monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
+def _fake_paddle_api(monkeypatch: pytest.MonkeyPatch, *, cancel_error: int | None = None, status: str = "active") -> list[tuple]:
+    """Stand in for the Paddle API: record each call; optionally refuse the cancel with an HTTP error."""
+    calls: list[tuple] = []
+
+    async def fake_request(self: Any, method: str, endpoint: str, data: dict | None = None) -> dict:
+        calls.append((method, endpoint, data))
+        if endpoint.endswith("/cancel") and cancel_error is not None:
+            request = httpx.Request(method, f"https://api.paddle.com{endpoint}")
+            raise httpx.HTTPStatusError("refused", request=request, response=httpx.Response(cancel_error, request=request))
+        sub_id = endpoint.split("/")[2]
+        return {"data": {"id": sub_id, "status": "canceled" if endpoint.endswith("/cancel") else status}}
+
+    monkeypatch.setattr("remembra.cloud.billing_paddle.PaddleBillingManager._request", fake_request)
+    return calls
+
+
 async def test_refund_and_chargeback_end_the_plan_and_reduce_revenue(tmp_path, monkeypatch) -> None:
     _move_clock(monkeypatch, datetime(2026, 9, 10, tzinfo=UTC))
+    paddle_calls = _fake_paddle_api(monkeypatch)
     async with cost_app(tmp_path) as c:
         _paddle(c, **PRICES)
         uid = await c.h.create_user("refund@example.com")
@@ -698,24 +715,133 @@ async def test_refund_and_chargeback_end_the_plan_and_reduce_revenue(tmp_path, m
 
         # Pending refunds change nothing.
         assert (await _webhook(c, adjustment("adj_1", "refund", "pending_approval", "partial", "2000")))["action"] == "ignored"
-        # An approved partial refund reduces revenue, keeps the plan.
+        # An approved partial refund reduces revenue, keeps the plan and the subscription.
         result = await _webhook(c, adjustment("adj_2", "refund", "approved", "partial", "2000"))
         assert result["applied"] == "no_change"
         assert await c.meter.revenue_for_month("2026-09") == pytest.approx(85.0)
         assert (await c.meter.get_account(uid)).tier == PlanTier.SOLO
-        # An approved full refund ends the plan (and the banked credits) at once.
+        assert paddle_calls == []
+        # An approved full refund ends the plan (and the banked credits) at once,
+        # and cancels the subscription at Paddle so it never renews and charges again.
         result = await _webhook(c, adjustment("adj_3", "refund", "approved", "full", "8500"))
         assert result["applied"] == "applied"
         account = await c.meter.get_account(uid)
         assert account.tier == PlanTier.FREE and account.credit_limit == 500
         assert await c.meter.revenue_for_month("2026-09") == pytest.approx(0.0)
         assert (await c.meter.get_tenant(uid))["billing_flag"] == "refund_downgraded"
+        assert paddle_calls == [("POST", "/subscriptions/sub_solo_y/cancel", {"effective_from": "immediately"})]
 
-        # Chargebacks downgrade too (resubscribe first).
+        # Chargebacks downgrade and cancel too (resubscribe first).
         await _webhook(c, {**purchase, "data": {**purchase["data"], "id": "txn_solo_y2"}})
         assert (await c.meter.get_account(uid)).tier == PlanTier.SOLO
         await _webhook(c, adjustment("adj_4", "chargeback", "approved", "full", "10500"))
         assert (await c.meter.get_account(uid)).tier == PlanTier.FREE
+        assert (await c.meter.get_tenant(uid))["billing_flag"] == "chargeback_downgraded"
+        assert paddle_calls[-1] == ("POST", "/subscriptions/sub_solo_y/cancel", {"effective_from": "immediately"})
+        assert len(paddle_calls) == 2
+
+
+async def _refundable_solo(c: Any, email: str, sub_id: str) -> str:
+    uid = await c.h.create_user(email)
+    purchase = {
+        "event_type": "transaction.completed",
+        "data": {
+            "id": f"txn_{sub_id}",
+            "subscription_id": sub_id,
+            "customer_id": f"ctm_{sub_id}",
+            "currency_code": "USD",
+            "details": {"totals": {"earnings": "1000"}},
+            "items": [{"price": {"id": "pri_solo_m"}, "quantity": 1}],
+            "custom_data": {"remembra_user_id": uid},
+        },
+    }
+    await _webhook(c, purchase)
+    assert (await c.meter.get_account(uid)).tier == PlanTier.SOLO
+    return uid
+
+
+def _full_refund(adj_id: str, sub_id: str | None, customer_id: str) -> dict:
+    return {
+        "event_type": "adjustment.updated",
+        "data": {
+            "id": adj_id,
+            "action": "refund",
+            "type": "full",
+            "status": "approved",
+            "transaction_id": "txn_x",
+            "subscription_id": sub_id,
+            "customer_id": customer_id,
+            "totals": {"currency_code": "USD", "earnings": "1000", "total": "1200"},
+        },
+    }
+
+
+async def test_refund_of_an_already_cancelled_subscription_is_not_a_failure(tmp_path, monkeypatch) -> None:
+    # Paddle refuses to cancel a subscription the customer already cancelled; its status says so.
+    calls = _fake_paddle_api(monkeypatch, cancel_error=400, status="canceled")
+    async with cost_app(tmp_path) as c:
+        _paddle(c, **PRICES)
+        uid = await _refundable_solo(c, "cancelled-first@example.com", "sub_a")
+        result = await _webhook(c, _full_refund("adj_a", "sub_a", "ctm_sub_a"))
+        assert result["applied"] == "applied"
+        assert (await c.meter.get_account(uid)).tier == PlanTier.FREE
+        assert (await c.meter.get_tenant(uid))["billing_flag"] == "refund_downgraded"
+        assert [(m, e) for m, e, _ in calls] == [("POST", "/subscriptions/sub_a/cancel"), ("GET", "/subscriptions/sub_a")]
+
+
+async def test_refund_whose_cancel_fails_is_flagged_and_alerted(tmp_path, monkeypatch) -> None:
+    from remembra.core.alerts import AlertNotifier
+
+    calls = _fake_paddle_api(monkeypatch, cancel_error=500, status="active")
+    async with cost_app(tmp_path) as c:
+        _paddle(c, **PRICES)
+        alerts = AlertNotifier(webhook_url=None, email_to=None, email_sender=None, cooldown_seconds=0)
+        c.h.app.state.alerts = alerts
+        uid = await _refundable_solo(c, "cancel-fails@example.com", "sub_b")
+        result = await _webhook(c, _full_refund("adj_b", "sub_b", "ctm_sub_b"))
+        # The plan still ends; the webhook still succeeds (a retry would not cancel either).
+        assert result["applied"] == "applied"
+        assert (await c.meter.get_account(uid)).tier == PlanTier.FREE
+        assert (await c.meter.get_tenant(uid))["billing_flag"] == "refund_downgraded_cancel_failed"
+        assert [(m, e) for m, e, _ in calls] == [("POST", "/subscriptions/sub_b/cancel"), ("GET", "/subscriptions/sub_b")]
+        assert [a["event"] for a in alerts.sent] == ["paddle_refund_cancel_failed:sub_b"]
+        assert alerts.sent[0]["details"] == {"user_id": uid, "subscription_id": "sub_b"}
+
+
+async def test_refund_without_a_subscription_id_cancels_the_one_the_account_holds(tmp_path, monkeypatch) -> None:
+    calls = _fake_paddle_api(monkeypatch)
+    async with cost_app(tmp_path) as c:
+        _paddle(c, **PRICES)
+        uid = await _refundable_solo(c, "no-sub-id@example.com", "sub_c")
+        result = await _webhook(c, _full_refund("adj_c", None, "ctm_sub_c"))
+        assert result["applied"] == "applied"
+        assert (await c.meter.get_account(uid)).tier == PlanTier.FREE
+        assert calls == [("POST", "/subscriptions/sub_c/cancel", {"effective_from": "immediately"})]
+
+
+async def test_refund_of_another_subscription_cancels_nothing(tmp_path, monkeypatch) -> None:
+    calls = _fake_paddle_api(monkeypatch)
+    async with cost_app(tmp_path) as c:
+        _paddle(c, **PRICES)
+        uid = await _refundable_solo(c, "other-sub@example.com", "sub_d")
+        # A refund of an older subscription on the same customer: the held plan stays.
+        result = await _webhook(c, _full_refund("adj_d", "sub_old", "ctm_sub_d"))
+        assert result["applied"] in ("no_change", "unmatched")
+        assert (await c.meter.get_account(uid)).tier == PlanTier.SOLO
+        assert calls == []
+
+
+async def test_refund_cancel_reports_failure_without_a_paddle_api_key(monkeypatch) -> None:
+    from remembra.api.v1 import billing
+
+    calls = _fake_paddle_api(monkeypatch)
+
+    def no_key() -> Any:
+        raise ValueError("PADDLE_API_KEY not configured")
+
+    monkeypatch.setattr("remembra.cloud.paddle_config.get_paddle_settings", no_key)
+    assert await billing._cancel_refunded_subscription("sub_f", "user_f") is False
+    assert calls == []
 
 
 async def test_annual_bank_can_be_released_monthly(tmp_path, monkeypatch) -> None:
