@@ -1,5 +1,5 @@
 site_name: Remembra
-site_description: Persistent memory for AI applications. Self-host in 5 minutes.
+site_description: "Remembra Relay: one agent stops, the next one already knows. Handoffs from git facts, across agents and machines."
 site_url: https://docs.remembra.dev
 repo_url: https://github.com/remembra-ai/remembra
 repo_name: remembra-ai/remembra
@@ -20,9 +20,9 @@ theme:
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
-  font:
-    text: Inter
-    code: Fira Code
+  # No Google Fonts: the docs use the reader's system fonts, so a page view
+  # sends nothing to Google (see remembra.dev/privacy).
+  font: false
   features:
     - navigation.instant
     - navigation.tracking
@@ -67,12 +67,9 @@ extra:
     - icon: fontawesome/brands/github
       link: https://github.com/remembra-ai/remembra
     - icon: fontawesome/brands/discord
-      link: https://discord.gg/Bzv3JshRa3
+      link: https://discord.gg/mPYQRKzXz5
     - icon: fontawesome/brands/twitter
       link: https://twitter.com/remembradev
-  analytics:
-    provider: google
-    property: G-XXXXXXXXXX
   version:
     provider: mike
 
@@ -105,7 +102,7 @@ nav:
     - LangGraph: integrations/langgraph.md
   - Guides:
     - Multi-Agent Shared Memory: guides/multi-agent-shared-memory.md
-    - Relay (Session Continuity): guides/relay.md
+    - Remembra Relay: guides/relay.md
     - Conversation Ingestion: guides/conversation-ingestion.md
     - Sleep-Time Compute: guides/sleep-time-compute.md
     - Entity Resolution: guides/entity-resolution.md
@@ -116,6 +113,8 @@ nav:
     - Plugins: guides/plugins.md
     - Security: guides/security.md
     - Sign in with GitHub & Google: guides/sign-in-providers.md
+  - Comparisons:
+    - Remembra and other handoff tools: comparisons/handoff-tools.md
   - Concepts:
     - How It Works: concepts/how-it-works.md
     - Memory Model: concepts/memory-model.md

@@ -1,17 +1,37 @@
 # Remembra
 
-**Persistent memory for AI applications. Self-host in minutes.**
+**One agent stops. The next one already knows.**
 
-<div class="admonition tip" markdown>
-<p class="admonition-title">Remembra v0.13.x</p>
-<p>Now with dashboard v2, team collaboration, cold archive, adaptive thresholds, smart auto-forgetting, event-driven expiry, and stronger observability for agent memory.</p>
-</div>
+## Remembra Relay
+
+When an agent's session ends, Remembra Relay saves a **handoff**: what was done, what is not done, what is
+failing and the next step, read from git and (for Claude Code) the session's test runs, not written by an LLM.
+When the next session starts, in any tool, on any machine, that agent gets a **brief**: a short summary of
+where the work stands, led by the last handoff. Every handoff stays on the **trail**.
+
+```bash
+pipx install 'remembra[mcp]'
+remembra-install --all --api-key <your-key>
+remembra-relay connect
+```
+
+Get a free key at [app.remembra.dev](https://app.remembra.dev/signup), or [host the server yourself](getting-started/docker.md).
+`connect` is a dry run that shows what it would change; add `--apply` to write the hooks. remembra 0.16.0 is the
+first release with `remembra-relay`.
+
+- [Relay guide](guides/relay.md): how handoffs, briefs and the trail work, and which agents are verified.
+- [Agent setup](getting-started/agent-setup.md): connect Claude Code, Codex, Cursor and other agents.
+- [Remembra and other handoff tools](comparisons/handoff-tools.md): how it compares with claude-mem, agentmemory and local tools.
+
+Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi follow
+each tool's docs but have not been run against it yet; those agents use the MCP tools `session_brief` and
+`close_session` until they are.
 
 ---
 
-## What is Remembra?
+## The memory API underneath
 
-Remembra is a universal memory layer for LLMs. It solves the fundamental problem that every AI forgets everything between sessions.
+Remembra Relay runs on Remembra's memory layer, which you can also call directly from Python, JavaScript or any MCP client.
 
 === "Python"
 
@@ -32,7 +52,7 @@ Remembra is a universal memory layer for LLMs. It solves the fundamental problem
 === "JavaScript"
 
     ```typescript
-    import { Remembra } from '@remembra/client';
+    import { Remembra } from 'remembra';
 
     const memory = new Remembra({ url: 'http://localhost:8787' });
 
@@ -162,11 +182,11 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 === "JavaScript"
 
     ```bash
-    npm install @remembra/client
+    npm install remembra
     ```
 
     ```typescript
-    import { Remembra } from '@remembra/client';
+    import { Remembra } from 'remembra';
 
     const memory = new Remembra({
       url: 'http://localhost:8787',

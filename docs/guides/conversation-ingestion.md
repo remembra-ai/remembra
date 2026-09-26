@@ -112,7 +112,7 @@ result = await memory.ingest_conversation(
 ## TypeScript SDK
 
 ```typescript
-import { Remembra } from '@remembra/client';
+import { Remembra } from 'remembra';
 
 const memory = new Remembra({ url: 'http://localhost:8787' });
 

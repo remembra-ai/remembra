@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - unreleased (date set when tagged) - Remembra Relay
+
+**Remembra Relay: one agent stops, the next one already knows.** When a session ends, `remembra-relay close`
+saves a handoff built from facts it reads from git (and, for Claude Code, the session's test runs); the agent's
+own summary is checked against them. When the next session starts, in any tool or on any machine, that agent
+gets a short brief. Every handoff stays on the trail.
+
+```bash
+pipx install 'remembra[mcp]'
+remembra-install --all --api-key <your-key>
+remembra-relay connect          # dry run; add --apply to write the hooks
+```
+
+- **Handoff:** done / not done / failing / next step, from git and the Claude Code transcript; the transcript
+  never leaves the machine. **Brief:** about 1,500 tokens, everything recorded wrapped as untrusted data.
+  **Trail:** every handoff and checkpoint in order (`remembra-relay trail`, the dashboard's Trail page).
+- **Agent-scoped keys:** a handoff closed with one is key-verified; that key cannot write as another agent.
+- **Adapters:** Claude Code verified. Codex, Cursor, Gemini CLI, Qwen Code and Kimi shipped unverified
+  (left out of `connect` unless `--include-unverified`); any MCP agent can use `session_brief` and `close_session`.
+- **Existing users:** subscribers from before this release keep their plan and price on a grandfathered tier
+  (with a monthly AI ceiling; lower note caps only after notice); a repository the server has not seen joins
+  your configured project; briefs wrap recorded text as untrusted; `POST /memories` drops the relay-only
+  metadata keys. Details under Changed (breaking) below.
+- Billing moves to Paddle (Merchant of Record); after checkout, buyers land on the dashboard home
+  (`https://app.remembra.dev/?checkout=success`), and Paddle's payment link is the dashboard's `/pay` page.
+- remembra.dev is now served by nginx from `landing/` with its own config (security headers, a hashed-script
+  CSP, `/.well-known/security.txt`, redirects for old paths); new refund, subprocessor and DPA pages.
+
 ### Added
 - **Sign in with GitHub and Google.** "Continue with Google" / "Continue with GitHub" on the dashboard's
   Sign in and Sign up pages (authorization code + PKCE; Google ID tokens verified against the JWKS with
