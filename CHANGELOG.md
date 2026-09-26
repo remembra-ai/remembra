@@ -191,10 +191,9 @@ remembra-relay connect            # dry run; add --apply to write the hooks
   MCP servers from, so `session_brief` and `close_session` never appeared there. It now writes
   the user-scope entry to `~/.claude.json` (the shape `claude mcp add --scope user` writes) and
   removes the old `settings.json` entry, which held the key.
-- **Deleting an account cancels its paid plan** at Paddle, effective at the end of the period
-  already paid for (a deactivated account cannot reach Billing to cancel it). If the cancel
-  fails, the account is not deleted. The dashboard's delete dialog now says what delete does:
-  it deactivates the account and revokes its keys; stored data is erased on request.
+- **Deleting an account cancels its paid plan** at Paddle before anything is deleted (a deleted
+  account cannot reach Billing to cancel it). If Paddle does not confirm the cancel, the account is
+  not deleted. What deletion then does is under "Added (wave 2)".
 - `remembra-relay`: a queued handoff the server refuses (403, e.g. a key scoped to another
   agent) no longer holds back every other queued handoff; it stays queued and goes last.
 - Printed install and connect diffs also hide secrets in `docker -e NAME=value` and
@@ -300,6 +299,38 @@ remembra-relay connect            # dry run; add --apply to write the hooks
   (without the extra, `remembra-mcp` could not start).
 - `remembra`, `remembra-server` and `remembra-mcp` name the missing extra and exit 1 instead of failing
   with `ModuleNotFoundError`; `remembra-mcp --help` and `--version` answer once its imports load.
+
+### Added (wave 2)
+- **Account deletion erases the account (R-11, R-23).** `DELETE /api/v1/auth/me` confirms with the password,
+  or with a six-digit code emailed by `POST /api/v1/auth/me/deletion-code` for Google/GitHub sign-ins. Every
+  subscription of the account that can still bill is cancelled immediately (502 and nothing deleted when
+  Paddle does not confirm); the account is signed out everywhere, and after `REMEMBRA_ACCOUNT_ERASURE_GRACE_DAYS`
+  (7) the erasure job removes every row and vector it owns, keeping a content-free receipt. Terms, Privacy and
+  the dashboard say the same sentence. Main-DB migration 8 `account_erasure_and_founding_holds`.
+- **Founding 100 closes at 100 (R-26)**: open checkouts hold a seat, a lapsed founder keeps the seat and price
+  for 14 days, a payment past seat 100 is flagged `founding_over_cap` and alerted. The pricing page shows the
+  seats left from `GET /api/v1/billing/founding`.
+- **Yearly credit bank unlock (R-27)**: a new yearly plan unlocks its full bank 14 days after purchase; until
+  then one month's credits are available. A refund after heavy use alerts the owner.
+- **Brief trust policy (R-14, R-16)**: every agent-written line of the brief is scored; low-trust lines are
+  withheld with an id to review, command- or URL-shaped text is flagged, and MCP tools return stored content
+  inside the same untrusted data block. Inbox messages are redacted before storage and keep a trust score
+  (main-DB migration 6 `agent_inbox_trust_score`).
+- **Handoff health (R-21)**: each relay handoff gets a server grade (Ready, Ready with warnings, Incomplete,
+  Conflicted, Blocked) shown in the brief, the trail and `remembra-relay close`.
+- **Pickups (R-18)**: when a brief shows another agent's handoff, the pickup is recorded (ids and times only;
+  main-DB migration 7 `relay_pickups`) and the trail shows who picked it up.
+- **Transactional emails for Relay (R-29)**: welcome, verification, reset, key-created, plan-changed,
+  payment-failed and subscription-ended emails, with a text part and Reply-To support@remembra.dev; no email
+  carries an API key.
+
+### Changed (wave 2)
+- Session handoffs never count toward the notes-kept cap (R-17).
+- Social sign-in's callback is `/api/v1/auth/oauth/{provider}/callback` on the API host; an unchanged
+  `/session/status` re-send is not charged; decay cleanup never archives relay handoffs or pinned rows; CI
+  builds `Dockerfile.cloud` and boots it.
+- Main-DB migration version 5 is left free for Crew mode (`crew_agent_inbox_scoping`); 6 to 8 apply before or
+  after it.
 
 ## [0.16.0] - 2026-07-16
 
