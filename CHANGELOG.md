@@ -53,6 +53,11 @@ release.
   start one crew session per Claude Code session, so edits made by its Task-tool sub-agents count as that
   session's.
 - **An append-only, hash-chained crew event log** in its own SQLite file, `crew.db`, verified nightly.
+  Credentials in channel messages, tasks and decisions are redacted before they are stored, and a
+  message a human redacts leaves the event feed as well (its events keep their place in the chain).
+- **Seats and teammates.** A plan's live-session limit counts running top-level sessions: an agent stopped
+  on its credits gives its seat to the agent that picks its baton up, and sub-agents use their parent's
+  seat. On a plan with crew teammates (Team), the crew owner adds people who have joined their team.
 - Optional continuity fields for later releases: `provider`, `capabilities`, `sub_agent_id`, `run_id` and
   `context_window` on join; `decisions`, `state_before` and `run_id` on checkpoints; a file's sha256 on
   heartbeat footprints; `evidence` on decisions. Left out, they change nothing.
