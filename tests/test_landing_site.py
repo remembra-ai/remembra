@@ -1604,7 +1604,11 @@ def test_setup_md_says_what_the_adapters_say() -> None:
     bins = {b for adapter in REGISTRY.values() for b in adapter.spec.detect_bins}
     assert bins <= set(probe.group(1).split())
     unverified = [name for name, adapter in REGISTRY.items() if not adapter.spec.verified]
-    assert f"The names are {', '.join(f'`{n}`' for n in unverified[:-1])} and `{unverified[-1]}`." in text
+    if len(unverified) == 1:
+        assert f"The name is `{unverified[0]}`." in text
+    else:
+        assert f"The names are {', '.join(f'`{n}`' for n in unverified[:-1])} and `{unverified[-1]}`." in text
+    assert f"remembra-relay connect --apply --agent {unverified[0]} --include-unverified" in text
     codex = REGISTRY["codex"].spec
     events = [codex.start_event, codex.prompt_event, codex.end_event]
     assert len(events) == 3 and "trust 3 hooks" in text

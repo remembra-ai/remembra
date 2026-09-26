@@ -2,7 +2,7 @@
 
 Ask the user before each step that installs or writes anything. Run only the step they said yes to, then show them what it printed.
 
-This guide is for an AI agent (Claude Code, Codex or any other) helping its user. Remembra is one cloud memory for all your AI agents. When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. The next agent, in any tool and on any machine, starts with a short brief.
+This guide is for an AI agent (Claude Code, Codex or any other) helping its user. Remembra is one cloud memory for your AI agents. When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. The next agent, in another tool or on another machine, starts with a short brief.
 
 ## Rules
 
@@ -20,7 +20,7 @@ echo "$SHELL"
 command -v claude codex cursor-agent cursor gemini qwen kimi pipx
 ```
 
-Tell the user which agents you found. Claude Code's and Codex's session hooks are verified. The hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet.
+Tell the user which agents you found. Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. The hooks for Cursor are unverified: they follow Cursor's docs but have not been run against it yet.
 
 ## 2. pipx
 
@@ -73,13 +73,13 @@ This is the dry run. Show the user its output and ask before the next step.
 remembra-relay connect --apply
 ```
 
-It leaves the unverified hooks out. Only if the user chooses one of those agents, add its name and `--include-unverified`, for example:
+It leaves the unverified hooks out. Only if the user chooses one of those agents, add its name and `--include-unverified`:
 
 ```bash
-remembra-relay connect --apply --agent gemini --include-unverified
+remembra-relay connect --apply --agent cursor --include-unverified
 ```
 
-The names are `cursor`, `gemini`, `qwen` and `kimi`.
+The name is `cursor`.
 
 ## 8. Codex: the user trusts the hooks
 

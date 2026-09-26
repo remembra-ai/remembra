@@ -142,6 +142,6 @@ Make sure `REMEMBRA_USER_ID` is set consistently. Without it, each conversation 
 
 ## Next Steps
 
-- [MCP Tool Reference](mcp-server.md) — Full documentation of all 21 tools and 2 resources
+- [MCP Tool Reference](mcp-server.md) — Full documentation of all 24 tools and 2 resources
 - [Python SDK](../guides/python-sdk.md) — Programmatic access from Python
 - [Security Guide](../guides/security.md) — Encryption at rest, PII detection, RBAC

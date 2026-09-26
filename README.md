@@ -271,7 +271,7 @@ Run it yourself: `python benchmarks/locomo_runner.py --data /tmp/locomo/data/loc
 | [Python SDK](https://docs.remembra.dev/guides/python-sdk/) | Full Python reference |
 | [TypeScript SDK](https://docs.remembra.dev/guides/javascript-sdk/) | JavaScript/TypeScript guide |
 | [Remembra Relay](https://docs.remembra.dev/guides/relay/) | Handoffs, briefs and the trail across agents |
-| [MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Tool reference and setup guides for the 21 tools |
+| [MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Tool reference and setup guides for the 24 tools |
 | [REST API](https://docs.remembra.dev/guides/rest-api/) | API reference |
 | [Self-Hosting](https://docs.remembra.dev/getting-started/docker/) | Docker deployment guide |
 
@@ -286,7 +286,7 @@ pip install remembra[mcp]
 claude mcp add remembra -e REMEMBRA_URL=http://localhost:8787 -- remembra-mcp
 ```
 
-**Available tools (21):**
+**Available tools (24):**
 
 | Group | Tools |
 |------|-------|
@@ -296,6 +296,7 @@ claude mcp add remembra -e REMEMBRA_URL=http://localhost:8787 -- remembra-mcp
 | Entities and time | `search_entities`, `timeline`, `relationships_at` |
 | Sharing | `share_memory`, `list_spaces`, `create_space` |
 | Connection | `health_check` |
+| Setup and diagnosis (read-only) | `remembra_doctor`, `remembra_setup`, `remembra_help` |
 
 ---
 

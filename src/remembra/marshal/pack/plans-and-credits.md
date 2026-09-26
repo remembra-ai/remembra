@@ -14,17 +14,21 @@ applies to the hosted service, Remembra Cloud. Prices are in USD and exclude tax
 | **Enterprise** | Custom (from $399 / month) | Contracted | Contracted | Contracted | Contracted | Contracted |
 
 **Founding 100.** The first 100 customers can take Solo at **$108 a year**,
-with the price locked for life. It is billed annually only, one per account,
-and cannot be combined with other offers.
+and the price never goes up while the subscription stays active. If it ends,
+the price and the seat are kept for 14 days; after that the seat goes to the
+next customer. It is billed annually only, one per account, and cannot be
+combined with other offers.
 
-**Annual plans bank the year up front.** On a yearly plan you get twelve
-months of credits on day one (Solo: 26,400) and can use them in any month of
-your subscription year. The bank resets when your subscription year renews.
+**Annual plans bank the year.** On a yearly plan the whole year's credits
+(Solo: 26,400) go into one bank you can use in any month of your subscription
+year. A new yearly plan unlocks the full bank 14 days after purchase; until
+then one month's credits are available. The bank resets when your subscription year renews.
 A refund or chargeback of the subscription ends the plan and its bank at once.
 
-**Team is pooled.** The owner pays per seat; every member of the owner's
-teams (up to the seats paid for) stores and recalls against the owner's
-shared credits, memory cap and limits.
+**Team is pooled.** The owner pays per seat. A member of the owner's teams
+who has no paid plan of their own (seats go to the earliest joiners first, up
+to the seats paid for) stores and recalls against the owner's credits, memory
+cap and limits. Notes themselves are shared only through shared spaces.
 
 ### Input limits
 

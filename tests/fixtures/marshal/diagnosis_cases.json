@@ -372,9 +372,9 @@
       }
     },
     {
-      "name": "Gemini CLI (unverified): nothing waiting, and its hooks need --include-unverified",
+      "name": "Cursor (unverified): nothing waiting, and its hooks need --include-unverified",
       "input": {
-        "agent_id": "gemini",
+        "agent_id": "cursor",
         "keys": [
           {
             "name": "relay (mac, 2026-09-20)",
@@ -395,15 +395,15 @@
       "expect": {
         "code": "NOTHING_WAITING",
         "proven": true,
-        "unverified": "Gemini CLI's adapter is built from its hook docs and has never been run against the real tool.",
+        "unverified": "Cursor's adapter is built from its hook docs and has never been run against the real tool.",
         "commands": [
-          "remembra-relay connect --apply --agent gemini --include-unverified",
-          "remembra-relay doctor --agent gemini",
-          "run remembra_doctor for gemini",
-          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent gemini"
+          "remembra-relay connect --apply --agent cursor --include-unverified",
+          "remembra-relay doctor --agent cursor",
+          "run remembra_doctor for cursor",
+          "pipx run --spec 'remembra>=0.16.1' remembra-relay doctor --agent cursor"
         ],
-        "then": "End one Gemini CLI session in a repository. Its handoff ticks this row.",
-        "verdict": "Gemini CLI hasn't ended a session with the hooks yet, and no handoff was waiting for it.",
+        "then": "End one Cursor session in a repository. Its handoff ticks this row.",
+        "verdict": "Cursor hasn't ended a session with the hooks yet, and no handoff was waiting for it.",
         "doc": "https://docs.remembra.dev/guides/relay/#doctor"
       }
     },

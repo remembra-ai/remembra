@@ -80,7 +80,7 @@ Configure Remembra via environment variables in your MCP client config:
 
 ## Available Tools
 
-Once connected, your MCP client has 21 tools; the [MCP Tool Reference](mcp-server.md) lists them. The main ones:
+Once connected, your MCP client has 24 tools; the [MCP Tool Reference](mcp-server.md) lists them. The main ones:
 
 | Tool | Description |
 |------|-------------|

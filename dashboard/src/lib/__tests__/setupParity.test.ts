@@ -56,7 +56,7 @@ describe('setup.md runs the dashboard catalog', () => {
   });
 
   it('names an unverified agent the way its checklist row does', () => {
-    expect(bash(s['7'])[1]).toEqual([agentConnectCommand('gemini')]);
+    expect(bash(s['7'])[1]).toEqual([agentConnectCommand('cursor')]);
   });
 
   it('checks with the doctor lines the why? slip copies', () => {

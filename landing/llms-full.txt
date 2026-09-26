@@ -10,7 +10,7 @@ Source: https://remembra.dev/setup.md
 
 Ask the user before each step that installs or writes anything. Run only the step they said yes to, then show them what it printed.
 
-This guide is for an AI agent (Claude Code, Codex or any other) helping its user. Remembra is one cloud memory for all your AI agents. When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. The next agent, in any tool and on any machine, starts with a short brief.
+This guide is for an AI agent (Claude Code, Codex or any other) helping its user. Remembra is one cloud memory for your AI agents. When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. The next agent, in another tool or on another machine, starts with a short brief.
 
 ### Rules
 
@@ -28,7 +28,7 @@ echo "$SHELL"
 command -v claude codex cursor-agent cursor gemini qwen kimi pipx
 ```
 
-Tell the user which agents you found. Claude Code's and Codex's session hooks are verified. The hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet.
+Tell the user which agents you found. Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. The hooks for Cursor are unverified: they follow Cursor's docs but have not been run against it yet.
 
 ### 2. pipx
 
@@ -81,13 +81,13 @@ This is the dry run. Show the user its output and ask before the next step.
 remembra-relay connect --apply
 ```
 
-It leaves the unverified hooks out. Only if the user chooses one of those agents, add its name and `--include-unverified`, for example:
+It leaves the unverified hooks out. Only if the user chooses one of those agents, add its name and `--include-unverified`:
 
 ```bash
-remembra-relay connect --apply --agent gemini --include-unverified
+remembra-relay connect --apply --agent cursor --include-unverified
 ```
 
-The names are `cursor`, `gemini`, `qwen` and `kimi`.
+The name is `cursor`.
 
 ### 8. Codex: the user trusts the hooks
 
@@ -148,7 +148,7 @@ Out of credits on one? Keep going on another.
 
 ## One agent stops. The next one already knows.
 
-Remembra is one cloud memory for all your AI agents. When one runs out of credits or hits a usage limit, end its session and the next one picks up from its handoff: on another machine, from another vendor, or next week. Every handoff stays on the trail.
+Remembra is one cloud memory for your AI agents. When one runs out of credits or hits a usage limit, end its session and the next one picks up from its handoff: on another machine, from another vendor, or next week. Every handoff stays on the trail.
 
 `Set up Remembra Relay on this machine. Read https://remembra.dev/setup.md first and follow it. Ask me before each step that installs or writes anything. I will type my API key into remembra-install's hidden prompt myself; never ask me to paste a key into this chat.`
 
@@ -166,35 +166,35 @@ Nothing new to learn. When a session ends, Remembra keeps the facts, not the cha
 
 #### Switch anytime
 
-Open any agent on any machine. It starts with a short brief: who worked last, what is done, what is not, what is failing, and the next step.
+Open another connected agent, on this machine or another. It starts with a short brief: who worked last, what is done, what is not, what is failing, and the next step.
 
 Also built in: an inbox so agents can leave each other notes, and the trail, every handoff in order, like a git log for your agents.
 
-Every agent, every machine
+Across agents and machines
 
-### Whatever you run, wherever it runs.
+### Claude Code, Codex or any MCP agent, wherever it runs.
 
 Your memory lives in the cloud, not on one laptop. Start at your desk, keep going on a server, finish from home, with whichever agent still has credits.
 
-Claude Code's and Codex's session hooks are verified: Codex with a prerelease of codex-cli 0.155 (`codex exec`, with a local stand-in for the model); other Codex versions have not been run. Codex runs them only after you trust them, so open Codex and run `/hooks` once after connecting. The hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet. `connect` is a dry run until you add `--apply`, and it leaves the unverified hooks out unless you also add `--include-unverified`. Until they are tested, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent. `remembra-install` sets up those tools for Claude Code, Claude Desktop, Codex, Cursor and Gemini CLI. Windsurf, Qwen Code and Kimi you add by hand for now; the [setup guide](https://docs.remembra.dev/guides/relay/#mcp-by-hand) has the block to paste.
+Claude Code's and Codex's session hooks are verified: Codex with a prerelease of codex-cli 0.155 (`codex exec`, with a local stand-in for the model); other Codex versions have not been run. Codex runs them only after you trust them, so open Codex and run `/hooks` once after connecting. The Gemini CLI, Qwen Code and Kimi Code hooks are verified too, each run the same way at one version (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1); Gemini CLI runs them only in folders you trust. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. `connect` is a dry run until you add `--apply`, and it leaves the unverified hooks out unless you also add `--include-unverified`. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent. `remembra-install` sets up those tools for Claude Code, Claude Desktop, Codex, Cursor and Gemini CLI. Windsurf, Qwen Code and Kimi you add by hand for now; the [setup guide](https://docs.remembra.dev/guides/relay/#mcp-by-hand) has the block to paste.
 
 The dashboard
 
-### Mission control for Claude Code, Codex, Cursor and every agent you run.
+### Mission control for Claude Code, Codex, Cursor and the other agents you connect.
 
 See where each agent left off, what is failing, and the one command that continues the work. The trail keeps every handoff in order, newest first.
 
-Pick up from anywhere Beta
+Pick up from anywhere Coming, not live yet
 
-### Check on Codex, Cursor or Claude Code from your phone.
+### Soon: check on Codex, Cursor or Claude Code from your phone.
 
-Add the Remembra connector to the Claude apps or to ChatGPT. Ask where the work stands, read the trail, search your memory, or leave an agent an instruction. It sees it first thing in its next session.
+Once the connector is switched on, you add it to the Claude apps or to ChatGPT, then ask where the work stands, read the trail, search your memory, or leave an agent an instruction. It sees it first thing in its next session.
 
 - Claude: claude.ai, Claude Desktop and the Claude phone apps, as a custom connector.
 - ChatGPT: On the web, in developer mode (Plus, Pro, Business, Enterprise and Education).
 - Read-mostly: Nothing over the connector edits or deletes memories. It can add a note and message an agent's inbox.
 
-Beta: the connector is built and tested against Remembra's own server, and we are still verifying it inside the live Claude and ChatGPT apps. [Connector setup](https://docs.remembra.dev/integrations/claude-and-chatgpt-apps/)
+Coming, not live yet: the connector is built and tested against Remembra's own server, but it is not switched on at api.remembra.dev, and we have not yet verified it inside the live Claude and ChatGPT apps. [How it will work](https://docs.remembra.dev/integrations/claude-and-chatgpt-apps/)
 
 Start
 
@@ -225,9 +225,9 @@ Monthly: credits refresh each month. Switch to yearly for 2 months free and the 
 
 Founding 100 · launch offer
 
-### Solo for $9/mo, billed $108 yearly. Locked for life.
+### Solo for $9/mo, billed $108 yearly, while you stay subscribed.
 
-For the first 100 customers. Everything in Solo, including the yearly credit bank, and the price never goes up while you stay subscribed. Yearly billing only, one per account, and it can't be combined with other offers.
+For the first 100 customers. Everything in Solo, including the yearly credit bank, and the price never goes up while you stay subscribed. If the subscription ends, the price and the seat are kept for 14 days. Yearly billing only, one per account, and it can't be combined with other offers.
 
 ### Free
 
@@ -282,7 +282,7 @@ About $24.17/mo. 2 months free. · Billed monthly.
 
 ### Team
 
-Agents and people sharing one pool.
+Agents and people on one pooled allowance.
 
 $150/seat/yr · $15/seat/mo
 
@@ -290,11 +290,11 @@ That's $12.50/seat/mo. 3-seat minimum ($450/yr). · 3-seat minimum ($45/mo).
 
 26,400 credits per seat for the year, pooled · 2,200 credits per seat every month, pooled
 
-- Everything in Pro
-- Teammates store and recall against one shared pool
+- Everything in Solo, with Pro's faster background enrichment and priority support
+- Teammates on the plan draw on one pooled allowance
 - Per seat: 50,000 notes, 50,000 searches and 25,000 handoff events a month
-- Roles: owner, admin, member, viewer
-- Share notes between teammates
+- The owner and admins invite and remove teammates and set their roles
+- Share notes with teammates through shared spaces, read or write per person
 
 Prices in US dollars, excluding tax. Sign up free, then pick a paid plan from Billing in your dashboard.
 
@@ -311,7 +311,7 @@ Credits, in plain words
 - Handoffs, when an agent stops
 - Pickups, when the next agent starts
 - The inbox between your agents
-- The trail of every session
+- The trail of your agents' handoffs
 - Searching your memory
 
 #### Uses smart credits
@@ -336,7 +336,7 @@ Every yearly plan costs 10 months of the monthly price: $120 instead of $144 on 
 
 Twelve months of credits (26,400 on Solo) go into one bank you can spend in any month of your subscription year. A big month no longer waits for next month's refill. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available. The bank resets when the year renews.
 
-#### Founding 100, locked for life
+#### Founding 100, held while you stay subscribed
 
 The first 100 customers can take Solo at $108 a year, $9/mo, and that price never goes up while the subscription stays active. If it ends, the price and the seat are kept for 14 days; after that the seat goes to the next customer.
 
@@ -367,7 +367,7 @@ Security
 
 ## Your agents' memory, kept on a short leash.
 
-A memory that every agent reads has to be careful about what goes in, who can read it back, and who wrote it. This is how Remembra handles each, what it doesn't do yet, and when that changes.
+A memory that several agents read has to be careful about what goes in, who can read it back, and who wrote it. This is how Remembra handles each, what it doesn't do yet, and when that changes.
 
 Redacted
 
@@ -390,7 +390,7 @@ The core is MIT-licensed open source. Read it, run it, host it yourself.
 Remembra Relay passes work between agents, so it is built on the assumption that what one agent wrote may be wrong, or may try to steer the next one.
 
 - Redacted before storage. Every string in a handoff passes secret redaction and the server's PII policy, value by value. A blocked value is replaced with `[REDACTED:pii]`; a close is never rejected for it.
-- The raw transcript stays on your machine. Close-out reads git and, for Claude Code, the local session transcript, and sends only the facts it pulled out.
+- The raw transcript stays on your machine. Close-out reads git and, for Claude Code and Codex, the local session transcript (for Codex, its rollout file), and sends only the facts it pulled out.
 - Briefs are data, not instructions. Everything another agent or tool recorded is wrapped in one untrusted-data block with a fixed preamble. Text inside it cannot close the block.
 - One trust policy for every line. The handoff, inbox messages, status values, linked projects' headlines and recent memories all pass the same check. When recorded text matches prompt-injection patterns (instruction overrides, requests to keep something from you, hidden Unicode characters, including overrides spelled with look-alike or fullwidth letters), the brief shows a `LOW TRUST` marker and the id to review, not the text. This covers the brief's text and its JSON fields.
 - Commands are flagged, not trusted. Pipe-to-shell installs (also through `sudo`, `env` or a shell's full path), download-then-run commands, `base64 -d | sh`, `rm -rf`, force pushes, skipped git hooks, permission-bypass flags, reads of `~/.ssh`, `.env` or `~/.claude.json`, and links outside your repository (including hosts a download command names without `https://`, and links that climb out of it with `..`) are marked confirm with the user before running. Images (markdown inline or reference style, and HTML `<img>`) are removed from the brief's text and its JSON fields, so their URLs cannot carry data out.
@@ -407,7 +407,7 @@ Each item links to the code or the doc that does it, so you can check.
 - Untrusted-data framing of everything agents recorded, in every brief ([relay/handoff.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/handoff.py)).
 - Key-verified attribution. The agent on a handoff comes from the API key, not from the request ([relay/identity.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/identity.py)).
 - Scoped keys. Keys can be limited to one agent, to certain projects and to a role; keys are stored hashed ([auth/keys.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/auth/keys.py), [auth/rbac.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/auth/rbac.py)).
-- OAuth for the Claude and ChatGPT apps is authorization code with PKCE (S256 only), and you choose which projects a connection may see ([connector/oauth.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/connector/oauth.py)).
+- OAuth for the Claude and ChatGPT apps (coming: the connector is built but not switched on at api.remembra.dev yet) is authorization code with PKCE (S256 only), and you choose which projects a connection may see ([connector/oauth.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/connector/oauth.py)).
 - Encryption at rest for the vector store: memory content and metadata there are encrypted with AES-256-GCM, and two-factor secrets are encrypted ([security/encryption.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/encryption.py)).
 - HTTPS everywhere, with the API, dashboard and website behind Cloudflare, on servers rented from Hetzner in the United States.
 - Named subprocessors. Everyone who handles your data is on the [subprocessors](https://remembra.dev/subprocessors) page, with what they receive.
@@ -452,7 +452,7 @@ How Remembra lines up against the [OWASP Top 10 for Agentic Applications](https:
 | Risk | Status | What Remembra does, and what it doesn't |
 | --- | --- | --- |
 | ASI01 Agent goal hijack | Partly | Recorded text reaches the next agent inside an untrusted-data block, and text that looks like prompt injection is withheld. An agent can still choose to follow what it reads. |
-| ASI02 Tool misuse | Partly | Nothing over the Claude and ChatGPT connector edits or deletes memories, and key roles limit what a key can do. The tools on your machine are outside Remembra. |
+| ASI02 Tool misuse | Partly | Nothing over the Claude and ChatGPT connector (not switched on yet) edits or deletes memories, and key roles limit what a key can do. The tools on your machine are outside Remembra. |
 | ASI03 Identity and privilege abuse | Partly | Agent- and project-scoped keys, roles, and PKCE-only OAuth with per-project consent. Keys don't expire yet, and agent-scoped keys can read the whole account. |
 | ASI04 Agentic supply chain | Partly | The code is open, and dependencies are pinned in `uv.lock`. From 0.16.0, one tagged GitHub workflow builds each release once, with every action pinned to a commit and the build tools pinned by hash. The wheel and sdist go to PyPI by trusted publishing (no stored token) with PEP 740 attestations (Sigstore) that tie each file to that workflow. The Docker image carries build provenance and an SBOM. The Python packages have no SBOM, the files attached to the GitHub release carry no separate signature, and 0.13.2 and earlier have no attestations. [SECURITY.md](https://github.com/remembra-ai/remembra/blob/main/SECURITY.md) shows how to verify. |
 | ASI05 Unexpected code execution | Covered | The server never runs stored content, and the relay hooks run fixed commands; nothing in a brief is executed. |
@@ -518,7 +518,7 @@ OpenAI processes API data under its API terms: it says it does not train on it u
 These see your data only if you use them, under their own terms:
 
 - GitHub and Google sign-in. If you sign in with GitHub or Google, that company confirms who you are and we receive your account id and verified email address.
-- The AI tools you connect. Claude Code, Codex, Cursor and the other agents you connect read your briefs and memories through your own accounts with them. So do the Claude and ChatGPT apps, if you add the Remembra connector.
+- The AI tools you connect. Claude Code, Codex, Cursor and the other agents you connect read your briefs and memories through your own accounts with them. The Claude and ChatGPT apps will too, once the Remembra connector is switched on and you add it (it is not live yet).
 
 ### Off unless switched on
 
@@ -577,7 +577,7 @@ We decide how your account and billing information is used, so for that we are t
 - Account: your email address, an optional name, a hash of your password (never the password), and, if you sign in with GitHub or Google, your account id and verified email from that provider. If you turn on two-factor sign-in, its secret is stored encrypted.
 - API keys: the keys you create, with the agent and projects each is limited to.
 - What you store: notes and memories, the facts and names pulled out of them, handoffs and checkpoints your agents leave, inbox messages between agents, and the project and repository names they belong to.
-- Handoffs: when an agent's session ends, `remembra-relay` reads facts from git on your machine (branch, commit ids and messages, changed file names, whether commits are pushed) and, for Claude Code, from the local session transcript (commands run, test results, open items). Secrets and personal data the redaction rules catch are removed before anything is sent. The transcript itself is never uploaded.
+- Handoffs: when an agent's session ends, `remembra-relay` reads facts from git on your machine (branch, commit ids and messages, changed file names, whether commits are pushed) and, for Claude Code and Codex, from the local session transcript (commands run, test results, open items; for Codex, its rollout file). Secrets and personal data the redaction rules catch are removed before anything is sent. The transcript itself is never uploaded.
 - Usage: API requests, credits used, storage used and errors, for billing, plan limits and fixing problems. Our security log records sign-ins, key changes and other account events with the IP address that made them.
 - Pickup events: when an agent's session brief shows a handoff another agent left, we record which agents, which handoff and when (ids and times, never the handoff's content). They show you who picked up each handoff, and tell us, in aggregate, whether handoffs are being picked up. They are deleted with the handoff.
 - Billing: Paddle takes the payment. It tells us your email, plan, country, subscription status and whether a payment went through. Your card details go to Paddle, never to us.

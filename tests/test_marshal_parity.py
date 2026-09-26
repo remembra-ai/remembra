@@ -112,9 +112,9 @@ def _pipx_bullets() -> dict[str, str]:
 
 
 def _fresh_machine(tmp_path: Path) -> FakeHome:
-    """No pipx, no remembra, no key; Claude Code, Codex and Gemini CLI installed."""
+    """No pipx, no remembra, no key; Claude Code, Codex and Cursor (the one unverified adapter) installed."""
     fh = FakeHome(tmp_path)
-    fh.install("claude", "codex", "gemini")
+    fh.install("claude", "codex", "cursor-agent")
     return fh
 
 
@@ -129,10 +129,10 @@ def _setup_over_stdio(fh: FakeHome) -> dict[str, Any]:
 
 
 def test_setup_md_remembra_setup_and_the_dashboard_catalog_give_the_same_commands(tmp_path: Path) -> None:
-    """The three agree, step for step, on a new machine with Claude Code, Codex and Gemini CLI."""
+    """The three agree, step for step, on a new machine with Claude Code, Codex and Cursor."""
     payload = _setup_over_stdio(_fresh_machine(tmp_path))
     steps = payload["steps"]
-    assert payload["agents"] == ["claude-code", "codex", "gemini"]
+    assert payload["agents"] == ["claude-code", "codex", "cursor"]
     sections = _sections()
     catalog = _catalog() if NODE else None
 
@@ -176,7 +176,7 @@ def test_setup_md_remembra_setup_and_the_dashboard_catalog_give_the_same_command
         "install": (by_title["Install remembra (with the MCP server)"], _bash(sections["4"])[0][0]),
         "key": (by_title["Save the key and add the Remembra MCP server"], _bash(sections["5"])[0][0]),
         "apply": (by_title["Write the hooks"], _bash(sections["7"])[0][0]),
-        "unverified": (by_title["Only if you want them: Gemini CLI's hooks"], _bash(sections["7"])[1][0]),
+        "unverified": (by_title["Only if you want them: Cursor's hooks"], _bash(sections["7"])[1][0]),
         "doctor": (by_title["Check"], _bash(sections["10"])[0][0]),
     }
     for name, (from_setup, from_md) in expected.items():
@@ -186,14 +186,14 @@ def test_setup_md_remembra_setup_and_the_dashboard_catalog_give_the_same_command
         assert catalog["PIPX_INSTALL"] == expected["install"][0]
         assert catalog["saveKeyCommand"][""] == expected["key"][0]  # no server named: the machine's own
         assert catalog["oneLineInstall"][""].split(" && ") == first_run[0]
-        assert catalog["agentConnectCommand"]["gemini"] == expected["unverified"][0]
+        assert catalog["agentConnectCommand"]["cursor"] == expected["unverified"][0]
         assert catalog["doctorCommand"][""] == expected["doctor"][0]
         assert catalog["pipxRunDoctorCommand"][""] == commands.pipx_run_doctor()
         assert [s["command"] for s in catalog["UNINSTALL_STEPS"]] == uninstall
         assert catalog["CONNECTABLE_AGENTS"] == list(REGISTRY)
     # Without Node, the Python templates the parity test ties to agents.ts' source stand in.
     assert commands.one_line_install("").split(" && ") == first_run[0]
-    assert commands.agent_connect("gemini") == expected["unverified"][0]
+    assert commands.agent_connect("cursor") == expected["unverified"][0]
     assert [c for c, _ in commands.UNINSTALL_STEPS] == uninstall
 
 

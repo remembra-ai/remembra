@@ -33,7 +33,7 @@ OS_LABELS = {
     "windows": "Windows",
     "other": "another OS",
 }
-# remembra-install --all writes the MCP entry for these (Qwen Code and Kimi are added by hand).
+# remembra-install --all writes the MCP entry for these (Qwen Code and Kimi Code are added by hand).
 INSTALLER_AGENTS = ("claude-code", "codex", "cursor", "gemini")
 
 

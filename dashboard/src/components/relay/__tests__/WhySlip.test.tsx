@@ -199,9 +199,9 @@ describe('ConnectChecklist rows', () => {
       Claude: 'connected',
       Codex: 'codex-waiting',
       Cursor: 'unverified',
-      Gemini: 'unverified',
-      Qwen: 'unverified',
-      Kimi: 'unverified',
+      Gemini: 'waiting',
+      Qwen: 'waiting',
+      Kimi: 'waiting',
     });
     const whys = [...html.matchAll(/<button type="button" id="([^"]+)" aria-expanded="false" aria-controls="([^"]+)"/g)];
     expect(whys).toHaveLength(5); // not on the connected Claude Code row

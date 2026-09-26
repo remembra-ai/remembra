@@ -31,7 +31,7 @@ AGENT_NAMES: dict[str, str] = {
     "cursor": "Cursor",
     "gemini": "Gemini CLI",
     "qwen": "Qwen Code",
-    "kimi": "Kimi CLI",
+    "kimi": "Kimi Code",
 }
 
 # Other spellings of the same agents (``ALIASES`` in dashboard/src/lib/agents.ts): a pickup recorded as
@@ -45,6 +45,7 @@ AGENT_ALIASES: dict[str, str] = {
     "gemini-cli": "gemini",
     "qwen-code": "qwen",
     "kimi-cli": "kimi",
+    "kimi-code": "kimi",
 }
 
 # The rules both surfaces can reach. Each part is a template:

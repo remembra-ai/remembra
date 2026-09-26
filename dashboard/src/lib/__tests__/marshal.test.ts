@@ -118,8 +118,8 @@ describe('diagnoseAgent: the shared fixture', () => {
       'Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd.',
     );
     expect(CODEX_TRUST_EVENTS).toEqual(['SessionStart', 'UserPromptSubmit', 'SessionEnd']);
-    expect(say(UNVERIFIED, { name: 'Kimi CLI' })).toBe(
-      "Kimi CLI's adapter is built from its hook docs and has never been run against the real tool.",
+    expect(say(UNVERIFIED, { name: 'Cursor' })).toBe(
+      "Cursor's adapter is built from its hook docs and has never been run against the real tool.",
     );
   });
 
@@ -185,7 +185,8 @@ describe('command templates', () => {
     expect(pipxRunDoctorCommand()).toBe("pipx run --spec 'remembra>=0.16.1' remembra-relay doctor");
     expect(askAgentDoctor('codex')).toBe('run remembra_doctor for codex');
     expect(agentConnectCommand('codex')).toBe('remembra-relay connect --apply --agent codex');
-    expect(agentConnectCommand('kimi')).toBe('remembra-relay connect --apply --agent kimi --include-unverified');
+    expect(agentConnectCommand('kimi')).toBe('remembra-relay connect --apply --agent kimi');
+    expect(agentConnectCommand('cursor')).toBe('remembra-relay connect --apply --agent cursor --include-unverified');
   });
 });
 
@@ -233,7 +234,7 @@ describe('rowState: the checklist row before the slip opens', () => {
   it('shows other agents as briefed, waiting or unverified', () => {
     expect(rowState('claude-code', undefined, [trailItem({ agent_id: 'codex', picked_up_by: [pickup('claude')] })])).toBe('briefed');
     expect(rowState('claude-code', undefined, [])).toBe('waiting');
-    expect(rowState('gemini', undefined, [])).toBe('unverified');
+    expect(rowState('cursor', undefined, [])).toBe('unverified');
   });
 
   it('matches the verdict: the Codex row opens on the trust call, inferred', () => {

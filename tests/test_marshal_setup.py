@@ -149,7 +149,7 @@ def test_windows_stops_at_the_docs(fh: FakeHome) -> None:
 def test_qwen_and_kimi_get_the_mcp_by_hand_pointer_and_a_self_hosted_url(fh: FakeHome) -> None:
     payload = steps(fh, ["qwen", "kimi"], REMEMBRA_URL="https://memory.example.org")
     titles = [s["title"] for s in payload["steps"]]
-    assert "Add the MCP server by hand: Qwen Code, Kimi CLI" in titles
+    assert "Add the MCP server by hand: Qwen Code, Kimi Code" in titles
     save = next(s for s in payload["steps"] if s["runs_where"] == "user_terminal")
     assert save["command"] == "remembra-install --all --url https://memory.example.org"
 
