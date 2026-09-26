@@ -42,6 +42,10 @@ log = structlog.get_logger(__name__)
 RELAY_KEY_FIELD = "relay_key"
 MAX_LINKED_IN_BRIEF = 8
 FACTS_SOURCES = ("relay-cli:git+transcript", "relay-cli:git", "agent-declared")
+# Facts the server synthesized (Crew mode: a stalled or lost session's handoff, written
+# by the crew outbox). Accepted only from server callers (``server_facts=True``), never
+# from a client close.
+SERVER_FACTS_SOURCES = ("server-inferred",)
 
 # Keys a handoff's metadata carries that only the relay may write. Client
 # metadata on the generic memory endpoints is stripped of them (see
@@ -382,11 +386,25 @@ def relay_key(agent_id: str, session_id: str) -> str:
 class RelayService:
     """Close-out, trail and pickup brief over the memory store."""
 
-    def __init__(self, db: Any, memory_service: Any | None = None) -> None:
+    def __init__(
+        self,
+        db: Any,
+        memory_service: Any | None = None,
+        *,
+        crew_db: Any | None = None,
+        crew_events: Any | None = None,
+    ) -> None:
+        """``crew_db`` (``remembra.crew.db.CrewDatabase``) adds the Crew-mode parts: the crew
+        block in the brief and crew checkpoints, reports and batons in the trail.
+        ``crew_events`` (``remembra.crew.events.CrewEventLog``) makes a close record
+        ``handoff.created`` / ``session.left`` for the project's crew. Both are None when
+        Crew mode is off, and then nothing crew-related is read or written."""
         self.db = db
         self.memory_service = memory_service
         self.sessions = AgentSessionService(db=db, memory_service=memory_service)
         self.registry = ProjectRegistry(db)
+        self.crew_db = crew_db
+        self.crew_events = crew_events
 
     async def _current_handoffs_for_key(self, user_id: str, project_id: str, key: str) -> list[dict[str, Any]]:
         cursor = await self.db.conn.execute(
@@ -414,8 +432,16 @@ class RelayService:
         agent_verified: bool = False,
         screen: Any | None = None,
         scrub: Callable[[str], str] | None = None,
+        server_facts: bool = False,
     ) -> dict[str, Any]:
         """Store (or update) the ONE handoff for ``(agent_id, session_id)``.
+
+        ``server_facts`` marks facts the server synthesized itself (the crew
+        outbox's stalled/lost handoffs): only then is ``facts_source =
+        "server-inferred"`` kept; a client close claiming it is recorded as
+        ``agent-declared``. With Crew mode on (``crew_events``) the close also
+        records the crew side (:func:`remembra.crew.closeout.on_relay_close`)
+        and the result carries ``crew`` (None when the project has no crew).
 
         Every input string passes ``redact_secrets`` and then ``scrub`` (the
         API passes the PII policy) before anything is built, so the rendered
@@ -458,7 +484,11 @@ class RelayService:
             "session_id": session_id,
             # Who gathered the facts. Declared by the client: the CLI reads git and
             # the transcript itself, an MCP agent types them. Shown, never trusted.
-            "facts_source": facts_source if facts_source in FACTS_SOURCES else "agent-declared",
+            "facts_source": (
+                facts_source
+                if facts_source in FACTS_SOURCES or (server_facts and facts_source in SERVER_FACTS_SOURCES)
+                else "agent-declared"
+            ),
             "commit_evidence": facts.get("commit_evidence"),
             "incomplete": list(facts.get("incomplete") or []),
             # Sanitizer verdict on the rendered text, which carries every free-text
@@ -499,7 +529,22 @@ class RelayService:
                 prev_relay: dict[str, Any] = raw_relay if isinstance(raw_relay, dict) else {}
                 prev_body = (current[0].get("content") or "").split("\n", 1)[1:]
                 if _same_session_facts(prev_relay, relay_meta) and prev_body == text.strip().split("\n", 1)[1:]:
-                    return self._close_result(current[0]["id"], False, [], current[0]["content"], sections, grounding, counts)
+                    unchanged = self._close_result(
+                        current[0]["id"], False, [], current[0]["content"], sections, grounding, counts
+                    )
+                    unchanged["crew"] = await self._crew_close(
+                        user_id,
+                        project_id,
+                        agent_id,
+                        session_id,
+                        agent_verified,
+                        current[0]["id"],
+                        end_reason,
+                        facts,
+                        sections,
+                        relay_meta["facts_source"],
+                    )
+                    return unchanged
             request = StoreRequest(
                 content=text,
                 user_id=user_id,
@@ -542,7 +587,58 @@ class RelayService:
         log.info("relay_session_closed", project_id=project_id, agent_id=agent_id, handoff_id=new_id, superseded=len(superseded))
         result = self._close_result(new_id, True, superseded, text, sections, grounding, counts)
         result["status"] = status_updates
+        result["crew"] = await self._crew_close(
+            user_id,
+            project_id,
+            agent_id,
+            session_id,
+            agent_verified,
+            new_id,
+            end_reason,
+            facts,
+            sections,
+            relay_meta["facts_source"],
+        )
         return result
+
+    async def _crew_close(
+        self,
+        user_id: str,
+        project_id: str,
+        agent_id: str,
+        session_id: str,
+        agent_verified: bool,
+        handoff_id: str,
+        end_reason: str | None,
+        facts: dict[str, Any],
+        sections: dict[str, Any],
+        facts_source: str,
+    ) -> dict[str, Any] | None:
+        """The crew side of a close (Crew mode only). The handoff is already stored, so a crew
+        failure is logged and reported in the result instead of failing the close."""
+        if self.crew_events is None:
+            return None
+        from remembra.crew.closeout import on_relay_close
+
+        try:
+            return await on_relay_close(
+                self.crew_events,
+                user_id=user_id,
+                project_id=project_id,
+                agent_id=agent_id,
+                client_session_id=session_id,
+                agent_verified=agent_verified,
+                handoff_id=handoff_id,
+                end_reason=end_reason,
+                facts=facts,
+                sections=sections,
+                facts_source=facts_source,
+            )
+        except Exception as e:
+            log.error(
+                "crew_relay_close_failed", project_id=project_id, agent_id=agent_id, error_type=type(e).__name__, error=str(e)
+            )
+            return {"error": "crew_close_failed", "message": "The handoff is stored; the crew record could not be updated."}
 
     @staticmethod
     def _close_result(
@@ -574,6 +670,7 @@ class RelayService:
         offset: int = 0,
         agent_id: str | None = None,
         before: tuple[datetime, str | None] | None = None,
+        allowed: list[str] | None = None,
     ) -> dict[str, Any]:
         """Handoffs and checkpoints across agents, newest first.
 
@@ -586,7 +683,62 @@ class RelayService:
         commits and grounding) so a reader can expand it without another call.
         Checkpoints and free-form handoffs have no sections; their ``detail``
         holds the stored ``content`` instead.
+
+        With Crew mode on (``crew_db``) the crew's checkpoints (not yet
+        promoted to memories), reports and baton passes are merged in by time
+        (``memory_type`` ``crew_checkpoint`` / ``crew_report`` / ``crew_baton``,
+        ``source: "crew"``, a ``crew`` object with the ids). ``allowed`` limits
+        the crews read when ``project_id`` is None (project-restricted keys).
         """
+        crew_ids = await self._trail_crews(user_id, project_id, allowed)
+        if not crew_ids:
+            memories = await self._trail_memories(user_id, project_id, limit, offset, agent_id, before)
+            memories["before"] = {"created_at": before[0].isoformat(), "id": before[1]} if before is not None else None
+            return memories
+
+        from remembra.crew.core import CrewCore, parse_ts
+
+        need = offset + limit
+        memories = await self._trail_memories(user_id, project_id, need, 0, agent_id, before)
+        crew_db = self.crew_db
+        assert crew_db is not None  # _trail_crews returns nothing without it
+        crew_items, crew_total = await CrewCore(crew_db).trail_items(crew_ids, agent_id=agent_id, before=before, limit=need)
+        epoch = datetime.min.replace(tzinfo=UTC)
+        merged = sorted(
+            memories["items"] + crew_items,
+            key=lambda item: (parse_ts(item.get("created_at")) or epoch, str(item.get("id") or "")),
+            reverse=True,
+        )
+        out: dict[str, Any] = {
+            "project_id": project_id,
+            "agent_id": agent_id,
+            "items": merged[offset : offset + limit],
+            "total": memories["total"] + crew_total,
+        }
+        out["before"] = {"created_at": before[0].isoformat(), "id": before[1]} if before is not None else None
+        return out
+
+    async def _trail_crews(self, user_id: str, project_id: str | None, allowed: list[str] | None) -> list[str]:
+        """Crews whose records join the trail: the user's crew for ``project_id``, or all their crews."""
+        if self.crew_db is None:
+            return []
+        sql = "SELECT id, project_id FROM crews WHERE owner_user_id = ?"
+        params: list[Any] = [user_id]
+        if project_id:
+            sql += " AND project_id = ?"
+            params.append(project_id)
+        rows = await self.crew_db.fetchall(sql + " ORDER BY id", params)
+        return [r["id"] for r in rows if not allowed or r["project_id"] in allowed]
+
+    async def _trail_memories(
+        self,
+        user_id: str,
+        project_id: str | None,
+        limit: int,
+        offset: int,
+        agent_id: str | None,
+        before: tuple[datetime, str | None] | None,
+    ) -> dict[str, Any]:
         result = await self.sessions.timeline(
             user_id=user_id,
             project_id=project_id,
@@ -618,10 +770,8 @@ class RelayService:
                     "detail": _trail_detail(mem, relay),
                 }
             )
-        out: dict[str, Any] = {"project_id": project_id, "agent_id": agent_id, "items": items, "total": result["total"]}
-        # Echo the cursor so a client can tell this server paged by it.
-        out["before"] = {"created_at": before[0].isoformat(), "id": before[1]} if before is not None else None
-        return out
+        # The caller echoes the cursor so a client can tell this server paged by it.
+        return {"project_id": project_id, "agent_id": agent_id, "items": items, "total": result["total"]}
 
     async def activity_summary(
         self,
@@ -821,6 +971,7 @@ class RelayService:
         configured_project: str | None = None,
         checkout: dict[str, Any] | None = None,
         extra_warnings: list[str] | None = None,
+        client_session_id: str | None = None,
     ) -> dict[str, Any]:
         """The session brief plus linked projects and a compact rendered text.
 
@@ -830,6 +981,13 @@ class RelayService:
         handoff, so memories stored there are not silently out of view.
         ``checkout`` (``{branch, head_commit}`` of the reader) marks the
         handoff's failing/next items as possibly stale when it differs.
+
+        With Crew mode on (``crew_db``) and a crew for the project, ``crew``
+        holds the crew block's data and ``rendered`` ends with the crew block
+        (read-only: nothing is recorded). ``client_session_id`` (the reader's
+        own session id, with ``agent_id``) identifies its crew session, so
+        batons offered to it show as ``YOUR BATON`` and its own claims are not
+        listed under DO NOT TOUCH.
         """
         brief = await self.sessions.brief(
             user_id=user_id,
@@ -868,8 +1026,29 @@ class RelayService:
         brief["warnings"] = warnings
         brief["linked_projects"] = linked
         brief["checkout"] = checkout
+        brief["crew"] = await self._crew_brief(user_id, project_id, agent_id, client_session_id)
         brief["rendered"] = render_brief(brief)
         return brief
+
+    async def _crew_brief(
+        self, user_id: str, project_id: str | None, agent_id: str | None, client_session_id: str | None
+    ) -> dict[str, Any] | None:
+        """Crew block data for the brief (None without Crew mode or without a crew for the project)."""
+        if self.crew_db is None or not project_id:
+            return None
+        from remembra.crew.core import CrewCore
+
+        core = CrewCore(self.crew_db)
+        crews = await core.crews_for_project(user_id, project_id)
+        if not crews:
+            return None
+        crew_id = crews[0]["id"]
+        viewer = None
+        if agent_id and client_session_id:
+            session = await core.find_session(crew_id, user_id, agent_id, client_session_id)
+            if session is not None and session["state"] != "ended":
+                viewer = session["id"]
+        return await core.brief_data(crew_id, viewer_session_id=viewer)
 
 
 def _same_session_facts(prev: dict[str, Any], new: dict[str, Any]) -> bool:

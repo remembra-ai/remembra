@@ -51,7 +51,15 @@ _RELATION_RE = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
 
 
 def _service(request: Request) -> RelayService:
-    return RelayService(db=request.app.state.db, memory_service=getattr(request.app.state, "memory_service", None))
+    # Crew mode (when enabled, crew.startup sets these): brief crew block, crew trail
+    # entries, and the crew side of a close. None when Crew mode is off.
+    state = request.app.state
+    return RelayService(
+        db=state.db,
+        memory_service=getattr(state, "memory_service", None),
+        crew_db=getattr(state, "crew_db", None),
+        crew_events=getattr(state, "crew_events", None),
+    )
 
 
 def _require(current_user: Any, permission: str) -> None:
@@ -546,6 +554,10 @@ async def session_brief(
     hint_project: Annotated[str | None, Query(max_length=128)] = None,
     branch: Annotated[str | None, Query(max_length=255, description="The reader's current branch")] = None,
     head_commit: Annotated[str | None, Query(max_length=64, description="The reader's current HEAD")] = None,
+    session_id: Annotated[
+        str | None,
+        Query(max_length=200, description="The reader's own session id (Crew mode: baton offers made to it)"),
+    ] = None,
 ) -> dict[str, Any]:
     """Latest handoff ("Last session: ..."), unread inbox, status, linked
     projects and recent memories by time, plus ``rendered`` — a compact
@@ -572,6 +584,7 @@ async def session_brief(
         configured_project=configured if resolution is not None else None,
         checkout=checkout,
         extra_warnings=notes,
+        client_session_id=session_id.strip() if session_id and _SESSION_RE.match(session_id.strip()) else None,
     )
     brief["resolution"] = resolution
     return brief
@@ -609,7 +622,13 @@ async def trail(
     locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host)
     resolved, resolution = await _project_from_query(request, current_user, project_id or project, locator, hint_project)
     result = await _service(request).trail(
-        current_user.user_id, resolved, limit=limit, offset=offset, agent_id=agent_filter, before=cursor
+        current_user.user_id,
+        resolved,
+        limit=limit,
+        offset=offset,
+        agent_id=agent_filter,
+        before=cursor,
+        allowed=current_user.project_ids or None,
     )
     result["resolution"] = resolution
     return result
