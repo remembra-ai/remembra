@@ -12,31 +12,16 @@ import { HardHat, RadioTower } from 'lucide-react';
 import { useCrewSocket } from '../../hooks/useCrewSocket';
 import { useNow } from '../../hooks/useResource';
 import { absoluteTime, relativeTime } from '../time';
-import { Card, CardHeader, CopyCommand, ErrorNotice, Pill, PulseDot, StaleNotice, TrailSkeleton } from '../../components/relay/ui';
+import { Card, CardHeader, ErrorNotice, Pill, PulseDot, StaleNotice, TrailSkeleton } from '../../components/relay/ui';
 import { useCrewForProject, useCrewList } from './hooks';
 import { crewHref, inboxHref, useCrewRoute } from './routes';
 import { describeHolder, liveSessions, presenceText, sessionLabel, sortedZones, taskRef } from './selectors';
 import type { ConnectionStatus } from './socket';
 import type { CrewStreamStatus } from './store';
 import type { CrewListItem, CrewState } from './types';
-
-const INSTALL = 'pipx install remembra && remembra-crew connect --crew';
-
-function NoCrews() {
-  return (
-    <Card className="p-4 sm:p-5">
-      <p className="rr-eyebrow">No crews yet</p>
-      <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm text-ink">
-        <li>
-          Connect this machine (you will see every change before it is written):
-          <CopyCommand className="mt-2" command={INSTALL} label="Crew install command" />
-        </li>
-        <li>Open the repo in any connected agent; it joins automatically.</li>
-        <li>Name your zones so agents know what not to touch.</li>
-      </ol>
-    </Card>
-  );
-}
+import { CrewGoKeys, CrewLiveRegions, CrewMomentAnnouncer } from '../../components/crew/a11y/CrewA11y';
+import { NoCrewsEmpty } from '../../components/crew/empty/EmptyStates';
+import { EventFeed } from '../../components/crew/feed/EventFeed';
 
 function CrewCard({ item, now }: { item: CrewListItem; now: Date }) {
   const titleId = `crew-${item.crew.id}`;
@@ -97,7 +82,7 @@ function CrewList() {
   if (list.status === 'error' && list.items.length === 0) {
     return <ErrorNotice error={list.error} what="your crews" onRetry={list.refresh} />;
   }
-  if (list.items.length === 0) return <NoCrews />;
+  if (list.items.length === 0) return <NoCrewsEmpty />;
   return (
     <div className="space-y-3">
       {list.error && <StaleNotice error={list.error} what="your crews" />}
@@ -260,24 +245,24 @@ function CrewScreen() {
   }
   if (lookup.status === 'loading') return <TrailSkeleton rows={3} />;
   if (lookup.status === 'error') return <ErrorNotice error={lookup.error} what="your crews" />;
-  if (lookup.status === 'none') {
-    return (
-      <Card className="p-4 sm:p-5">
-        <p className="rr-eyebrow">No crew for {project}</p>
-        <p className="mt-2 text-sm text-ink-2">A crew starts when the first connected agent joins this project.</p>
-        <CopyCommand className="mt-3" command={INSTALL} label="Crew install command" />
-      </Card>
-    );
-  }
-  return <CrewLive crewId={lookup.crewId} project={project} />;
+  if (lookup.status === 'none') return <NoCrewsEmpty project={project} />;
+  return (
+    <>
+      <CrewMomentAnnouncer crewId={lookup.crewId} />
+      {route?.screen === 'feed' ? <EventFeed crewId={lookup.crewId} project={project} /> : <CrewLive crewId={lookup.crewId} project={project} />}
+    </>
+  );
 }
 
 export function CrewRoutes({ tab }: { tab: 'crews' | 'crew' }) {
+  const route = useCrewRoute();
   return (
     <section aria-label={tab === 'crews' ? 'Crews' : 'Crew'} className="space-y-3">
       <h1 className="sr-only">
         <HardHat aria-hidden="true" /> {tab === 'crews' ? 'Crews' : 'Crew'}
       </h1>
+      <CrewLiveRegions />
+      <CrewGoKeys project={tab === 'crew' ? (route?.project ?? null) : null} />
       {tab === 'crews' ? <CrewList /> : <CrewScreen />}
     </section>
   );
