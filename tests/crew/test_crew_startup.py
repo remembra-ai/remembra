@@ -89,7 +89,9 @@ async def test_lifespan_starts_hooks_wires_bus_to_websocket_and_stops_cleanly(tm
             "crew.outbox",
             "crew.reaper",
             "crew.claims",
+            "crew.report_invariant",
         ]
+        assert "task:crew-report-invariant" in rt.extras  # WP-6 nightly invariant job is running
         assert rt.tailer is None and "crew-retention" in app.state.tasks.names()
         assert "crew-reaper" in app.state.tasks.names()  # WP-4 reaper, registered through HOOK_MODULES
         assert "crew-event-tailer" not in app.state.tasks.names()

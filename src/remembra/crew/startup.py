@@ -50,7 +50,12 @@ StartFn = Callable[[FastAPI, "CrewRuntime"], Awaitable[None]]
 StopFn = Callable[[FastAPI, "CrewRuntime"], Awaitable[None]]
 
 # Modules whose import registers hooks (other WPs add one line each).
-HOOK_MODULES: tuple[str, ...] = ("remembra.crew.db_hook", "remembra.crew.reaper", "remembra.crew.claims")
+HOOK_MODULES: tuple[str, ...] = (
+    "remembra.crew.db_hook",
+    "remembra.crew.reaper",
+    "remembra.crew.claims",
+    "remembra.crew.reports",
+)
 
 TAILER_ENV: Final = "REMEMBRA_CREW_DB_TAILER"
 
