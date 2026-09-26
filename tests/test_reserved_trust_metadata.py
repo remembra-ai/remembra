@@ -170,5 +170,11 @@ def test_session_close_never_copies_client_trust_fields(api):
     out = _post(api, "/session/close", body)
     meta = _meta(row(api, out["handoff_id"])["metadata"])
     _assert_clean(meta)
-    _assert_clean(meta["relay"])
-    assert meta["relay"]["agent_id"] == "claude-code"
+    relay = dict(meta["relay"])
+    # R-21: the relay block's "health" is the server's own grade of the facts,
+    # never the client's value ("ready" above).
+    health = relay.pop("health")
+    assert health == out["health"] and health["rules_version"] == 1
+    assert health["status"] == "ready" and health["missing"] == []  # graded from the facts: nothing left open
+    _assert_clean(relay)
+    assert relay["agent_id"] == "claude-code"

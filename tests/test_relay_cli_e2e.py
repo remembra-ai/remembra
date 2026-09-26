@@ -175,8 +175,9 @@ def test_agent_a_closes_agent_b_picks_up_on_another_clone(server, home, tmp_path
     out = brief.stdout
     lines = out.splitlines()
     assert lines[0] == "# Remembra brief · project widget · you are codex"
-    assert lines[1] == '<remembra-data untrusted="true">'
-    last = lines[3]
+    assert lines[1].startswith("Handoff health: Blocked (1 failing test run(s);")  # R-21, above the data block
+    assert lines[2] == '<remembra-data untrusted="true">'
+    last = lines[4]
     assert last.startswith(f"Last session: claude-code (self-declared), just now, on main@{head[:7]}: done: ")
     assert "feat: widget api" in last and "test: widget api" in last
     assert "NOT done: TODO: make test_api pass" in last

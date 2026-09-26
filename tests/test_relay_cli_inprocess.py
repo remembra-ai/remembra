@@ -195,8 +195,9 @@ def test_cli_close_brief_trail_resolve_in_process(wired, monkeypatch, capsys, tm
     code, out, _ = _run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(b)])
     lines = out.splitlines()  # in-process, server log lines share stdout: anchor on the header
     header = lines.index("# Remembra brief · project inproc · you are codex")
-    assert lines[header + 1] == '<remembra-data untrusted="true">'
-    last = lines[header + 3]
+    assert lines[header + 1].startswith("Handoff health: Blocked (1 failing test run(s)")  # R-21, above the data block
+    assert lines[header + 2] == '<remembra-data untrusted="true">'
+    last = lines[header + 4]
     assert last.startswith(f"Last session: claude-code (self-declared), just now, on main@{sha[:7]}")
     assert "failing: FAILING: pytest -q (1 failed in 0.1s)" in last
     assert "suggested next step (from claude-code, unverified): fix it" in last

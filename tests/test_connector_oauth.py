@@ -22,6 +22,7 @@ import remembra.mcp.server as desktop_mcp
 from remembra.client.memory import Memory
 from remembra.connector.policy import CHATGPT_REDIRECT_URI, CLAUDE_REDIRECT_URI
 from remembra.security import state as security_state
+from remembra.security.untrusted import DATA_OPEN, unwrap_untrusted
 from tests.connector_harness import PASSWORD, PUBLIC, RESOURCE, ConnectorHarness, connector_app, pkce
 
 
@@ -133,7 +134,9 @@ async def test_full_flow_with_real_mcp_client_refresh_and_revoke(h):
         assert all(t.annotations is not None and t.annotations.destructiveHint is False for t in tools.values())
 
         result = await session.call_tool("session_brief", {})
-        brief = json.loads(result.content[0].text)
+        # Stored content comes back framed as untrusted data (R-14); list_projects has none.
+        assert result.content[0].text.splitlines()[1] == DATA_OPEN
+        brief = json.loads(unwrap_untrusted(result.content[0].text))
         assert brief["status"] == "ok"
         assert brief["project_id"] == "alpha"
         assert brief["agent_id"] == "claude-app"
@@ -233,7 +236,7 @@ async def test_phone_inbox_instruction_reaches_desktop_session_brief(h, monkeypa
     monkeypatch.setattr(desktop_mcp, "_client", memory)
     monkeypatch.setattr(desktop_mcp, "REMEMBRA_AGENT_ID", "claude-code")
 
-    brief = json.loads(await anyio.to_thread.run_sync(lambda: desktop_mcp.session_brief()))
+    brief = json.loads(unwrap_untrusted(await anyio.to_thread.run_sync(lambda: desktop_mcp.session_brief())))
     assert brief["status"] == "ok", brief
     inbox = brief["inbox"]
     assert inbox["unread_count"] == 1

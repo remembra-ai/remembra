@@ -22,6 +22,7 @@ from remembra import __version__
 from remembra.client.memory import Memory
 from remembra.client.types import EntityItem, MemoryItem, RecallResult
 from remembra.models.memory import EntityRef, UpdateResponse
+from remembra.security.untrusted import unwrap_untrusted
 from tests.agent_api_harness import build_api, row, seed
 
 
@@ -55,7 +56,8 @@ def mcp_env(api, monkeypatch):
 
 
 def _j(raw: str) -> dict[str, Any]:
-    return json.loads(raw)
+    # Tools that return stored content frame it as untrusted data (R-14); the JSON is inside.
+    return json.loads(unwrap_untrusted(raw))
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +307,7 @@ def test_spaces_list_create_and_share(mcp_env):
 def test_recent_resource_is_by_time(mcp_env):
     seed(mcp_env, "old", "old", datetime(2025, 1, 1))
     seed(mcp_env, "new", "new", datetime(2026, 1, 1))
-    out = json.loads(server.recent_memories())
+    out = _j(server.recent_memories())
     assert [m["id"] for m in out["memories"]] == ["new", "old"]
 
 

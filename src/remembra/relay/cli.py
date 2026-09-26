@@ -575,7 +575,9 @@ def cmd_brief(args: argparse.Namespace) -> int:
             save_session_state(ctx.home, ctx.agent, session_id, start)
         elif not session_id and not os.environ.get("REMEMBRA_SESSION_ID"):
             # No session id (AGENTS.md / manual use): start a fresh ad-hoc session here.
-            start_adhoc_session(ctx.home, ctx.agent or "unknown-agent", ctx.host, ctx.repo.toplevel or str(ctx.cwd), start)
+            session_id = start_adhoc_session(
+                ctx.home, ctx.agent or "unknown-agent", ctx.host, ctx.repo.toplevel or str(ctx.cwd), start
+            )
         replay = replay_outbox(ctx)  # first, so the brief below already includes what was queued
         params: dict[str, Any] = {"recent_n": args.recent}
         if ctx.agent:
@@ -585,6 +587,9 @@ def cmd_brief(args: argparse.Namespace) -> int:
             params["branch"] = ctx.repo.branch
         if ctx.repo.head_commit:
             params["head_commit"] = ctx.repo.head_commit
+        pickup_session = session_id or os.environ.get("REMEMBRA_SESSION_ID")
+        if pickup_session:
+            params["session_id"] = pickup_session  # one pickup is recorded per reader session
         try:
             response = ctx.request("GET", "/api/v1/session/brief", params=params)
         except Exception as e:
@@ -711,6 +716,14 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
     return payload
 
 
+def health_summary(health: Any) -> str | None:
+    """``Handoff: Ready with warnings - tests not run; 2 commit(s) not pushed`` (None without a grade)."""
+    if not isinstance(health, dict) or not health.get("label"):
+        return None
+    missing = [str(m) for m in health.get("missing") or [] if isinstance(m, str)]
+    return f"Handoff: {health['label']}" + (f" - {'; '.join(missing)}" if missing else "")
+
+
 def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status: int | None = None) -> None:
     """Keep an undelivered close for the next brief/close, and say so on stderr."""
     # Without a key there is no server either: send it wherever a key is configured later.
@@ -821,6 +834,9 @@ def cmd_close(args: argparse.Namespace) -> int:
         replay_outbox(ctx, skip=own)
         if not ctx.adapter:  # interactive use; hooks keep stdout clean (some require JSON-only stdout)
             print(f"Remembra handoff {result.get('handoff_id')} · project {result.get('project_id')} · {result.get('headline')}")
+            health = health_summary(result.get("health"))
+            if health:
+                print(health)
     except Exception as e:  # never break the agent's shutdown
         _err(f"close failed: {e.__class__.__name__}: {e}")
         if ctx is not None and payload is not None and not getattr(args, "dry_run", False):

@@ -32,6 +32,25 @@ export interface TrailDetailFreeform {
 
 export type TrailDetail = TrailDetailStructured | TrailDetailFreeform;
 
+/** The server's grade of a handoff, computed from its recorded facts (R-21). */
+export interface HandoffHealth {
+  status: 'ready' | 'ready_with_warnings' | 'incomplete' | 'conflicted' | 'blocked' | string;
+  label: string;
+  /** What stands between the handoff and Ready (server text: counts and fixed phrases). */
+  missing: string[];
+  /** Contradicted or uncheckable claims in the agent's summary. */
+  warnings: string[];
+  rules_version?: number;
+}
+
+/** A different agent that was served this handoff in its session brief (R-18). */
+export interface Pickup {
+  agent_id: string;
+  agent_verified: boolean;
+  picked_up_at: string;
+  gap_seconds: number | null;
+}
+
 export interface TrailItem {
   id: string;
   project_id: string | null;
@@ -46,6 +65,51 @@ export interface TrailItem {
   open: number;
   /** Present on servers with the dashboard read endpoints. */
   detail?: TrailDetail;
+  /** The server's grade; null for handoffs recorded before grading or not by the relay. */
+  health?: HandoffHealth | null;
+  /** Agents that picked this handoff up, first pickup first. */
+  picked_up_by?: Pickup[];
+}
+
+type PillTone = 'neutral' | 'fail' | 'open' | 'ok' | 'signal';
+
+const HEALTH_TONES: Record<string, PillTone> = {
+  ready: 'ok',
+  ready_with_warnings: 'open',
+  incomplete: 'neutral',
+  conflicted: 'fail',
+  blocked: 'fail',
+};
+
+/** Badge for a handoff's health grade (null when the server sent none). */
+export function healthBadge(health: HandoffHealth | null | undefined): { label: string; tone: PillTone; title: string } | null {
+  if (!health || !health.label) return null;
+  const tone = HEALTH_TONES[health.status] ?? 'neutral';
+  const title = health.missing.length
+    ? `${health.label}: ${health.missing.join('; ')}`
+    : `${health.label}: nothing left open in the recorded facts`;
+  return { label: health.label, tone, title };
+}
+
+/** "3m", "2h 5m", "4d": the gap between a handoff and its pickup. */
+export function formatGap(seconds: number | null | undefined): string | null {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return null;
+  if (seconds < 60) return 'under a minute';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return minutes % 60 ? `${hours}h ${minutes % 60}m` : `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+/** "picked up by Codex 2m after it stopped" (plus "and N others"); null when nobody picked it up. */
+export function pickupLine(pickups: Pickup[] | undefined, nameOf: (agentId: string) => string): string | null {
+  if (!pickups || pickups.length === 0) return null;
+  const [first, ...rest] = pickups;
+  const gap = formatGap(first.gap_seconds);
+  const when = gap ? (gap === 'under a minute' ? ' under a minute after it stopped' : ` ${gap} after it stopped`) : '';
+  const others = rest.length ? `, then ${rest.map((p) => nameOf(p.agent_id)).join(', ')}` : '';
+  return `picked up by ${nameOf(first.agent_id)}${when}${others}`;
 }
 
 export interface TrailResponse {
@@ -319,4 +383,45 @@ export function explainError(err: unknown, what: string): { title: string; fix: 
     };
   }
   return { title: `Couldn't load ${what}.`, fix: message || 'Try again in a moment.' };
+}
+
+/** GET /admin/relay/metrics (superadmin): activation funnel and weekly pickups / handoff health. */
+export interface RelayMetrics {
+  generated_at: string;
+  funnel: {
+    signups: number;
+    users_with_handoff: number;
+    users_with_cross_agent_pickup: number;
+    activated_users: number;
+    median_hours_signup_to_first_handoff: number | null;
+    median_hours_signup_to_first_pickup: number | null;
+  };
+  weekly: RelayWeek[];
+}
+
+export interface RelayWeek {
+  week_start: string;
+  pickups: number;
+  users_picking_up: number;
+  repeat_users: number;
+  handoffs: number;
+  health: Record<string, number>;
+  health_share: Record<string, number>;
+}
+
+const HEALTH_SHORT: [string, string][] = [
+  ['ready', 'ready'],
+  ['ready_with_warnings', 'warnings'],
+  ['incomplete', 'incomplete'],
+  ['conflicted', 'conflicted'],
+  ['blocked', 'blocked'],
+  ['not_graded', 'not graded'],
+];
+
+/** "50% ready · 25% warnings · 25% blocked" for one week (only grades that occurred); "none" without handoffs. */
+export function healthShareLine(week: Pick<RelayWeek, 'handoffs' | 'health_share'>): string {
+  if (!week.handoffs) return 'none';
+  return HEALTH_SHORT.filter(([key]) => (week.health_share[key] ?? 0) > 0)
+    .map(([key, label]) => `${Math.round((week.health_share[key] ?? 0) * 100)}% ${label}`)
+    .join(' · ');
 }

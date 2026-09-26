@@ -24,6 +24,26 @@ log = structlog.get_logger(__name__)
 # (litestream checkpoints, CLI tools) before raising "database is locked".
 SQLITE_BUSY_TIMEOUT_MS = 5000
 
+# agent_inbox as InboxManager.init_schema() creates it (inbox/manager.py; a test
+# keeps the two identical). Migrations that alter the table run this first.
+AGENT_INBOX_BASE_DDL = """
+            CREATE TABLE IF NOT EXISTS agent_inbox (
+                inbox_id    TEXT PRIMARY KEY,
+                owner_user_id TEXT NOT NULL,
+                from_agent  TEXT NOT NULL,
+                to_agent    TEXT NOT NULL,
+                subject     TEXT NOT NULL,
+                body        TEXT NOT NULL,
+                metadata    TEXT NOT NULL DEFAULT '{}',
+                status      TEXT NOT NULL DEFAULT 'unread',
+                created_at  TEXT NOT NULL,
+                ack_at      TEXT,
+                ack_note    TEXT,
+                ack_result  TEXT,
+                expires_at  TEXT
+            )
+"""
+
 # Versioned migrations (REL-15). Each entry runs once, inside a transaction,
 # and is recorded in schema_version. Append only — never edit an applied entry.
 # Version 1 marks the legacy idempotent ALTER list in _run_migrations().
@@ -104,6 +124,47 @@ VERSIONED_MIGRATIONS: list[tuple[int, str, list[str]]] = [
             # Relay (G): a key bound to one agent id; the server attributes
             # every relay write to it instead of trusting the request body.
             "ALTER TABLE api_keys ADD COLUMN agent_id TEXT",
+        ],
+    ),
+    # Version 5 is taken by feat/crew ("crew_agent_inbox_scoping": project_id,
+    # crew_id, kind, sender_kind, sender_verified on agent_inbox). The entries
+    # below come after it so the branches merge in either order: they touch
+    # other columns and tables, and create agent_inbox from the same DDL first.
+    (
+        6,
+        "agent_inbox_trust_score",
+        [
+            # R-16: the trust policy's score of each inbox message (NULL on rows
+            # written before this; the brief scores those when it shows them).
+            # agent_inbox is otherwise created by InboxManager.init_schema(), which
+            # runs after this, so a fresh database needs the table first.
+            AGENT_INBOX_BASE_DDL,
+            "ALTER TABLE agent_inbox ADD COLUMN trust_score REAL",
+        ],
+    ),
+    (
+        7,
+        "relay_pickups",
+        [
+            # R-18: one row per handoff served to another agent in a brief (ids
+            # and times only, never content), deduplicated per reader session.
+            """
+            CREATE TABLE IF NOT EXISTS relay_pickups (
+                user_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                handoff_id TEXT NOT NULL,
+                handoff_agent TEXT,
+                reader_agent TEXT NOT NULL,
+                reader_verified INTEGER NOT NULL DEFAULT 0,
+                reader_session TEXT NOT NULL DEFAULT '',
+                handoff_at TEXT,
+                picked_up_at TEXT NOT NULL,
+                gap_seconds INTEGER,
+                PRIMARY KEY (user_id, handoff_id, reader_agent, reader_session)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_relay_pickups_user_time ON relay_pickups(user_id, picked_up_at)",
+            "CREATE INDEX IF NOT EXISTS idx_relay_pickups_time ON relay_pickups(picked_up_at)",
         ],
     ),
 ]
@@ -1555,6 +1616,8 @@ class Database:
                 (memory_id,),
             )
             await self.conn.execute("DELETE FROM memories_fts WHERE id = ?", (memory_id,))
+            # Pickup events of a deleted handoff (ids and times only) go with it.
+            await self.conn.execute("DELETE FROM relay_pickups WHERE handoff_id = ?", (memory_id,))
 
             # Now safe to delete the memory
             cursor = await self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
@@ -1587,6 +1650,7 @@ class Database:
                 memory_ids,
             )
             await self.conn.execute("DELETE FROM memories_fts WHERE user_id = ?", (user_id,))
+            await self.conn.execute("DELETE FROM relay_pickups WHERE user_id = ?", (user_id,))
 
             # Now safe to delete the memories
             cursor = await self.conn.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))
@@ -1623,6 +1687,10 @@ class Database:
             )
             await self.conn.execute(
                 "DELETE FROM memories_fts WHERE user_id = ? AND project_id = ?",
+                (user_id, project_id),
+            )
+            await self.conn.execute(
+                "DELETE FROM relay_pickups WHERE user_id = ? AND project_id = ?",
                 (user_id, project_id),
             )
 

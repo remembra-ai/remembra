@@ -975,7 +975,8 @@ export interface UsageSummaryResponse {
   enrichment: { status: 'full' | 'degraded'; reason: 'credits_exhausted' | 'free_breaker_open' | string | null };
   relay_events: { this_month: number; soft_cap: number; over_soft_cap: boolean; burst_per_min: number; free: boolean };
   recalls: { this_month: number; limit: number; burst_per_min: number };
-  memories: { stored: number; cap: number };
+  /** stored counts toward the cap; handoffs (session handoffs the relay wrote) are free and not counted. */
+  memories: { stored: number; cap: number; handoffs?: number };
   stores: { this_month: number; degraded_this_month: number };
   /** The account holds an active paid subscription (legacy tiers included). */
   subscription_active?: boolean;

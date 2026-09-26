@@ -15,6 +15,7 @@ from remembra.auth.keys import APIKeyManager, _key_cache
 from remembra.auth.middleware import authenticate_api_key
 from remembra.auth.rbac import RoleManager
 from remembra.client.memory import Memory
+from remembra.security.untrusted import unwrap_untrusted
 from remembra.storage.database import Database
 from tests.agent_api_harness import build_api
 
@@ -48,7 +49,8 @@ def mcp_env(api, monkeypatch):
 
 
 def _j(raw: str) -> dict[str, Any]:
-    return json.loads(raw)
+    # Results that carry stored content are framed as untrusted data (R-14); the JSON is inside.
+    return json.loads(unwrap_untrusted(raw))
 
 
 def test_instructions_tell_every_agent_to_brief_and_close():
@@ -85,9 +87,10 @@ def test_mcp_close_then_compact_brief_for_hookless_agent(mcp_env, monkeypatch):
     assert brief["project_id"] == "parser" and brief["handoff_id"] == again["handoff_id"]
     assert set(brief) == {"status", "project_id", "agent_id", "brief", "handoff_id", "inbox_unread", "warnings"}
     lines = brief["brief"].splitlines()
-    assert lines[1] == '<remembra-data untrusted="true">'
-    assert lines[3].startswith("Last session: kimi (self-declared), just now, on dev: ")
-    assert "suggested next step (from kimi, unverified): port the tokenizer" in lines[3]
+    assert lines[1] == "Handoff health: Ready. Graded by the server from the recorded facts."  # R-21
+    assert lines[2] == '<remembra-data untrusted="true">'
+    assert lines[4].startswith("Last session: kimi (self-declared), just now, on dev: ")
+    assert "suggested next step (from kimi, unverified): port the tokenizer" in lines[4]
 
 
 def test_mcp_repo_binds_to_configured_project_and_close_follows_the_brief(mcp_env):

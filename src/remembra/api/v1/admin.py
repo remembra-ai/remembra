@@ -27,6 +27,7 @@ from remembra.cloud.plans import PlanTier, get_plan
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
 from remembra.security.audit import AuditAction, AuditLogger
+from remembra.services.relay_metrics import relay_metrics
 from remembra.storage.database import Database
 
 log = structlog.get_logger(__name__)
@@ -998,6 +999,39 @@ async def toggle_user_active(
         "email": user_data["email"],
         "is_active": active,
     }
+
+
+@router.get(
+    "/relay/metrics",
+    summary="Relay activation funnel and weekly pickups / handoff health (superadmin only)",
+)
+@limiter.limit("30/minute")
+async def get_relay_metrics(
+    request: Request,
+    db: DatabaseDep,
+    current_user: CurrentUser,
+    _superadmin: RequireSuperadmin,
+    weeks: Annotated[int, Query(ge=1, le=52, description="Length of the weekly series")] = 8,
+    since: Annotated[
+        str | None, Query(max_length=40, description="Only users who signed up at or after this ISO date/time")
+    ] = None,
+) -> dict[str, Any]:
+    """Activation (True North: a handoff picked up by a different agent) from first-party rows.
+
+    ``funnel``: signups, users with a handoff, users with a cross-agent pickup,
+    activated users (pickup by another agent within 7 days of the handoff) and
+    median hours from signup to each. ``weekly``: pickups, users picking up,
+    repeat users, and the share of handoffs by health grade.
+
+    **Superadmin only.** Counts and times only; no memory content is read.
+    """
+    since_dt: datetime | None = None
+    if since and since.strip():
+        try:
+            since_dt = datetime.fromisoformat(since.strip().replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="since must be an ISO date/time") from None
+    return await relay_metrics(db, weeks=weeks, since=since_dt)
 
 
 @router.get(

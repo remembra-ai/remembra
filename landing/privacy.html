@@ -115,6 +115,7 @@
 <li><strong>What you store:</strong> notes and memories, the facts and names pulled out of them, handoffs and checkpoints your agents leave, inbox messages between agents, and the project and repository names they belong to.</li>
 <li><strong>Handoffs:</strong> when an agent's session ends, <code>remembra-relay</code> reads facts from git on your machine (branch, commit ids and messages, changed file names, whether commits are pushed) and, for Claude Code, from the local session transcript (commands run, test results, open items). Secrets and personal data the redaction rules catch are removed before anything is sent. The transcript itself is never uploaded.</li>
 <li><strong>Usage:</strong> API requests, credits used, storage used and errors, for billing, plan limits and fixing problems. Our security log records sign-ins, key changes and other account events with the IP address that made them.</li>
+<li><strong>Pickup events:</strong> when an agent's session brief shows a handoff another agent left, we record which agents, which handoff and when (ids and times, never the handoff's content). They show you who picked up each handoff, and tell us, in aggregate, whether handoffs are being picked up. They are deleted with the handoff.</li>
 <li><strong>Billing:</strong> Paddle takes the payment. It tells us your email, plan, country, subscription status and whether a payment went through. Your card details go to Paddle, never to us.</li>
 </ul>
 

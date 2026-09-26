@@ -178,8 +178,11 @@ class RecallUsage(BaseModel):
 
 
 class MemoryUsage(BaseModel):
-    stored: int
+    stored: int = Field(description="Memories counted toward the cap (session handoffs written by the relay are excluded)")
     cap: int
+    handoffs: int = Field(
+        default=0, description="Session handoffs written by the relay (every version kept); free, not counted toward the cap"
+    )
 
 
 class StoreUsage(BaseModel):
@@ -532,7 +535,11 @@ async def get_usage_summary(
             limit=limits.max_recalls_per_month,
             burst_per_min=limits.recall_burst_per_min,
         ),
-        memories=MemoryUsage(stored=await meter.count_pool_memories(account), cap=account.memory_cap),
+        memories=MemoryUsage(
+            stored=await meter.count_pool_memories(account),
+            cap=account.memory_cap,
+            handoffs=await meter.count_pool_relay_records(account),
+        ),
         stores=StoreUsage(this_month=month["stores"], degraded_this_month=month["degraded_stores"]),
         subscription_active=meter.active_subscription_id(await meter.get_tenant(account.user_id)) is not None,
     )

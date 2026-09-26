@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { API_V1 } from '../config';
+import { healthShareLine, type RelayMetrics } from '../lib/relay';
 
 interface User {
   id: string;
@@ -64,6 +65,7 @@ const PLAN_COLORS: Record<string, string> = {
 export function Admin() {
   const [users, setUsers] = useState<User[]>([]);
   const [stats, setStats] = useState<PlatformStats | null>(null);
+  const [relayMetrics, setRelayMetrics] = useState<RelayMetrics | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -119,6 +121,15 @@ export function Admin() {
       }
     } catch (err) {
       console.error('Failed to fetch stats:', err);
+    }
+  };
+
+  const fetchRelayMetrics = async () => {
+    try {
+      const response = await fetch(`${API_V1}/admin/relay/metrics?weeks=8`, { headers: getAuthHeaders() });
+      if (response.ok) setRelayMetrics(await response.json());
+    } catch (err) {
+      console.error('Failed to fetch relay metrics:', err);
     }
   };
 
@@ -279,7 +290,7 @@ export function Admin() {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      await Promise.all([fetchUsers(), fetchStats()]);
+      await Promise.all([fetchUsers(), fetchStats(), fetchRelayMetrics()]);
       setLoading(false);
     };
     loadData();
@@ -360,6 +371,57 @@ export function Admin() {
                 <span className="text-gray-600 dark:text-gray-400">{count} users</span>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* Relay activation (True North: a handoff picked up by a different agent) */}
+      {relayMetrics && (
+        <div className="bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-700">
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Relay activation</h3>
+          <dl className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <dt className="text-gray-500 dark:text-gray-400">Signups</dt>
+              <dd className="text-xl font-bold text-gray-900 dark:text-white">{relayMetrics.funnel.signups}</dd>
+            </div>
+            <div>
+              <dt className="text-gray-500 dark:text-gray-400">With a handoff</dt>
+              <dd className="text-xl font-bold text-gray-900 dark:text-white">{relayMetrics.funnel.users_with_handoff}</dd>
+            </div>
+            <div>
+              <dt className="text-gray-500 dark:text-gray-400">Cross-agent pickup</dt>
+              <dd className="text-xl font-bold text-gray-900 dark:text-white">{relayMetrics.funnel.users_with_cross_agent_pickup}</dd>
+            </div>
+            <div>
+              <dt className="text-gray-500 dark:text-gray-400">Activated (pickup within 7 days)</dt>
+              <dd className="text-xl font-bold text-gray-900 dark:text-white">{relayMetrics.funnel.activated_users}</dd>
+            </div>
+          </dl>
+          <div className="mt-4 overflow-x-auto">
+            <table className="w-full text-xs text-left text-gray-600 dark:text-gray-400">
+              <thead>
+                <tr>
+                  <th className="py-1 pr-3 font-medium">Week of</th>
+                  <th className="py-1 pr-3 font-medium">Pickups</th>
+                  <th className="py-1 pr-3 font-medium">Users</th>
+                  <th className="py-1 pr-3 font-medium">Repeat</th>
+                  <th className="py-1 pr-3 font-medium">Handoffs</th>
+                  <th className="py-1 font-medium">Health</th>
+                </tr>
+              </thead>
+              <tbody>
+                {relayMetrics.weekly.map((week) => (
+                  <tr key={week.week_start} className="border-t border-gray-100 dark:border-gray-700">
+                    <td className="py-1 pr-3 font-mono">{week.week_start}</td>
+                    <td className="py-1 pr-3">{week.pickups}</td>
+                    <td className="py-1 pr-3">{week.users_picking_up}</td>
+                    <td className="py-1 pr-3">{week.repeat_users}</td>
+                    <td className="py-1 pr-3">{week.handoffs}</td>
+                    <td className="py-1">{healthShareLine(week)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

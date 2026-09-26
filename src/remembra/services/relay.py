@@ -27,15 +27,20 @@ from remembra.core.time import utcnow
 from remembra.models.memory import StoreRequest
 from remembra.relay.handoff import (
     HANDOFF_FORMAT_VERSION,
+    assess_handoff,
     build_sections,
     check_summary_grounding,
     handoff_ended_at,
     handoff_headline,
+    handoff_stored_trust,
+    police_brief,
     redact,
     render_brief,
     render_handoff,
+    stored_health,
 )
 from remembra.relay.identity import KIND_GIT, KIND_PATH, KIND_ROOT, Fingerprint, ProjectLocator, slugify_project
+from remembra.security.untrusted import repo_url_prefixes
 from remembra.services.agent_session import HANDOFF_ENDED_JD, AgentSessionService, _parse_metadata
 
 log = structlog.get_logger(__name__)
@@ -144,6 +149,10 @@ class ProjectRegistry:
             (user_id, project_id),
         )
         return await cursor.fetchone() is not None
+
+    async def fingerprint_values(self, user_id: str, project_id: str) -> dict[str, list[str]]:
+        """Fingerprint values on record for a project, grouped by kind (``git`` values are ``host/owner/repo``)."""
+        return await self._kinds_of(user_id, project_id)
 
     async def _kinds_of(self, user_id: str, project_id: str) -> dict[str, list[str]]:
         """Fingerprint values on record for a project, grouped by kind."""
@@ -451,7 +460,9 @@ class RelayService:
         text AND the structured metadata are clean. ``screen`` post-processes
         the rendered text (sanitizer) and returns ``(text, trust_score, checksum)``.
         Returns ``{handoff_id, changed, superseded, rendered, headline, sections,
-        grounding, redactions, status}``.
+        grounding, health, redactions, status}``; ``health`` is the server's
+        grade (:func:`~remembra.relay.handoff.assess_handoff`), also stored in
+        the relay block.
         """
         if self.memory_service is None:
             raise RuntimeError("close_session requires a memory service")
@@ -479,6 +490,7 @@ class RelayService:
         if screen is not None:
             text, trust_score, checksum = screen(text)
 
+        health = assess_handoff(facts, grounding, trust=float(trust_score))
         key = relay_key(agent_id, session_id)
         facts_source = facts.get("facts_source")
         relay_meta: dict[str, Any] = {
@@ -509,6 +521,9 @@ class RelayService:
             "headline": sections["headline"],
             "end_reason": end_reason,
             "grounding": grounding,
+            # Server-computed from the facts above (never accepted from a client:
+            # "health" is a reserved metadata key on every generic write path).
+            "health": health,
             "closed_at": closed_at.isoformat(),
             "received_at": received_at.isoformat(),
         }
@@ -538,6 +553,8 @@ class RelayService:
                         _stored_sections(stored_relay),
                         stored_relay.get("grounding") or {},
                         counts,
+                        # The stored (newer) handoff's own server grade; None for one closed before grading.
+                        stored_relay.get("health") if isinstance(stored_relay.get("health"), dict) else None,
                     )
                     result["late"] = True
                     return result
@@ -549,7 +566,9 @@ class RelayService:
                 prev_relay: dict[str, Any] = raw_relay if isinstance(raw_relay, dict) else {}
                 prev_body = (current[0].get("content") or "").split("\n", 1)[1:]
                 if _same_session_facts(prev_relay, relay_meta) and prev_body == text.strip().split("\n", 1)[1:]:
-                    return self._close_result(current[0]["id"], False, [], current[0]["content"], sections, grounding, counts)
+                    return self._close_result(
+                        current[0]["id"], False, [], current[0]["content"], sections, grounding, counts, health
+                    )
             request = StoreRequest(
                 content=text,
                 user_id=user_id,
@@ -596,7 +615,7 @@ class RelayService:
             except Exception as e:  # the handoff is stored; a status hiccup must not fail the close
                 log.warning("relay_status_upsert_failed", key=status_key, error=str(e))
         log.info("relay_session_closed", project_id=project_id, agent_id=agent_id, handoff_id=new_id, superseded=len(superseded))
-        result = self._close_result(new_id, True, superseded, text, sections, grounding, counts)
+        result = self._close_result(new_id, True, superseded, text, sections, grounding, counts, health)
         result["status"] = status_updates
         result["late"] = late
         return result
@@ -625,6 +644,7 @@ class RelayService:
         sections: dict[str, Any],
         grounding: dict[str, Any],
         counts: dict[str, int],
+        health: dict[str, Any] | None,
     ) -> dict[str, Any]:
         return {
             "handoff_id": handoff_id,
@@ -634,6 +654,7 @@ class RelayService:
             "headline": sections["headline"],
             "sections": {k: sections[k] for k in ("done", "not_done", "failing", "next")},
             "grounding": grounding,
+            "health": health,
             "redactions": counts,
             "status": [],
         }
@@ -669,6 +690,7 @@ class RelayService:
             agent_id=agent_id,
             before=before,
         )
+        pickups = await self.pickups_for(user_id, [m["id"] for m in result["memories"] if m.get("memory_type") == "handoff"])
         items = []
         for mem in result["memories"]:
             meta = mem.get("metadata") or {}
@@ -687,6 +709,8 @@ class RelayService:
                     "headline": handoff_headline(mem),
                     "failing": len(relay.get("failing") or []),
                     "open": len(relay.get("not_done") or []),
+                    "health": stored_health(mem),
+                    "picked_up_by": pickups.get(mem["id"], []),
                     "detail": _trail_detail(mem, relay),
                 }
             )
@@ -864,6 +888,7 @@ class RelayService:
             "created_at": latest.get("created_at"),
             "ended_at": handoff_ended_at(latest),
             "headline": handoff_headline(latest),
+            "trust_score": handoff_stored_trust(latest),
         }
 
     async def linked_with_headlines(self, user_id: str, project_id: str, allowed: list[str] | None) -> list[dict[str, Any]]:
@@ -941,24 +966,116 @@ class RelayService:
         brief["warnings"] = warnings
         brief["linked_projects"] = linked
         brief["checkout"] = checkout
+        # URLs into the project's own repository are not flagged in the brief.
+        remotes = (await self.registry.fingerprint_values(user_id, project_id)).get(KIND_GIT, []) if project_id else []
+        brief["repo_url_prefixes"] = list(repo_url_prefixes(remotes))
+        brief["handoff_health"] = stored_health(brief.get("handoff"))
         brief["rendered"] = render_brief(brief)
+        police_brief(brief)  # the JSON fields get the same verdicts as the rendered text
         return brief
+
+    # -- pickups (R-18) ---------------------------------------------------------
+
+    async def record_pickup(
+        self,
+        *,
+        user_id: str,
+        project_id: str | None,
+        handoff: dict[str, Any] | None,
+        reader_agent: str | None,
+        reader_verified: bool,
+        reader_session: str | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        """Record that ``reader_agent`` was served another agent's handoff in a brief.
+
+        One row per (handoff, reader agent, reader session): a repeated brief
+        is ignored. Nothing is recorded without a handoff, for a withheld
+        (low-trust) handoff, for a reader with no agent id, or when the reader
+        is the agent that wrote the handoff. The row holds ids and times only,
+        never content. Returns True when a new row was written.
+        """
+        if not handoff or not handoff.get("id") or not reader_agent or not project_id:
+            return False
+        if handoff.get("withheld"):
+            return False
+        meta = handoff.get("metadata") or {}
+        relay = meta.get("relay") if isinstance(meta, dict) else None
+        handoff_agent = (relay or {}).get("agent_id") or handoff.get("agent_id")
+        if handoff_agent and handoff_agent == reader_agent:
+            return False
+        at = (now or datetime.now(UTC)).astimezone(UTC)
+        created = _parse_iso(handoff.get("created_at"))
+        gap = max(0, int((at - created).total_seconds())) if created else None
+        try:
+            async with self.db.transaction():
+                cursor = await self.db.conn.execute(
+                    """
+                    INSERT OR IGNORE INTO relay_pickups (
+                        user_id, project_id, handoff_id, handoff_agent, reader_agent, reader_verified,
+                        reader_session, handoff_at, picked_up_at, gap_seconds
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        project_id,
+                        str(handoff["id"]),
+                        str(handoff_agent)[:128] if handoff_agent else None,
+                        reader_agent[:128],
+                        1 if reader_verified else 0,
+                        (reader_session or "")[:200],
+                        created.isoformat() if created else None,
+                        at.isoformat(),
+                        gap,
+                    ),
+                )
+                inserted = (cursor.rowcount or 0) > 0
+        except Exception as e:  # a pickup record must never fail the brief
+            log.warning("relay_pickup_record_failed", error=str(e))
+            return False
+        if inserted:
+            log.info("relay_pickup", project_id=project_id, handoff_id=handoff["id"], reader=reader_agent, gap_seconds=gap)
+        return inserted
+
+    async def pickups_for(self, user_id: str, handoff_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        """First pickup per reader agent for each handoff, oldest first."""
+        if not handoff_ids:
+            return {}
+        marks = ",".join("?" for _ in handoff_ids)
+        cursor = await self.db.conn.execute(
+            f"""
+            SELECT handoff_id, reader_agent, MAX(reader_verified), MIN(picked_up_at), MIN(gap_seconds)
+            FROM relay_pickups WHERE user_id = ? AND handoff_id IN ({marks})
+            GROUP BY handoff_id, reader_agent
+            ORDER BY MIN(julianday(picked_up_at))
+            """,  # noqa: S608 - placeholders only; values are bound
+            [user_id, *handoff_ids],
+        )
+        out: dict[str, list[dict[str, Any]]] = {}
+        for handoff_id, agent, verified, at, gap in await cursor.fetchall():
+            out.setdefault(handoff_id, []).append(
+                {"agent_id": agent, "agent_verified": bool(verified), "picked_up_at": at, "gap_seconds": gap}
+            )
+        return out
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str) and value:
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def _same_session_facts(prev: dict[str, Any], new: dict[str, Any]) -> bool:
     """True when two relay metadata blocks describe the same facts (ignoring close and receipt time)."""
     ignore = {"closed_at", "received_at"}
     return {k: v for k, v in prev.items() if k not in ignore} == {k: v for k, v in new.items() if k not in ignore}
-
-
-def _parse_iso(value: Any) -> datetime | None:
-    if not isinstance(value, str) or not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value)
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
 def _stored_sections(relay: dict[str, Any]) -> dict[str, Any]:

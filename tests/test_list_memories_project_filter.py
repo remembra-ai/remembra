@@ -79,8 +79,10 @@ class TestMCPListMemoriesForwardsProjectId:
         with patch.object(mcp_server, "_get_client", return_value=fake_client):
             import json
 
+            from remembra.security.untrusted import unwrap_untrusted
+
             raw = mcp_server.list_memories(limit=5, project_id="trademind")
-            parsed = json.loads(raw)
+            parsed = json.loads(unwrap_untrusted(raw))
 
         # Verify the call landed on the SDK
         fake_client.list.assert_called_once()

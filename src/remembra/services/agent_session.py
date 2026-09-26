@@ -31,6 +31,7 @@ import structlog
 
 from remembra.core.time import utcnow
 from remembra.models.memory import StoreRequest
+from remembra.relay.handoff import assess_text
 
 log = structlog.get_logger(__name__)
 
@@ -318,6 +319,7 @@ class AgentSessionService:
                     "updated_at": row.get("created_at"),
                     "expires_at": row.get("expires_at"),
                     "agent_id": metadata.get("agent_id"),
+                    "trust_score": row.get("trust_score"),
                 }
             )
         items.sort(key=lambda item: item["key"])
@@ -423,9 +425,11 @@ class AgentSessionService:
                 (user_id, agent_id, now_iso, *project_args),
             )
             count_row = await cursor.fetchone()
+            cursor = await self.db.conn.execute("PRAGMA table_info(agent_inbox)")
+            trust_col = "trust_score" if "trust_score" in {r[1] for r in await cursor.fetchall()} else "NULL"
             cursor = await self.db.conn.execute(
                 f"""
-                SELECT inbox_id, from_agent, subject, body, created_at FROM agent_inbox
+                SELECT inbox_id, from_agent, subject, body, created_at, {trust_col} AS trust_score FROM agent_inbox
                 WHERE owner_user_id = ? AND to_agent = ? AND status = 'unread'
                   AND (expires_at IS NULL OR expires_at > ?){project_sql}
                 ORDER BY julianday(created_at) DESC, inbox_id DESC
@@ -441,6 +445,11 @@ class AgentSessionService:
         items = []
         for r in rows:
             body = r["body"] or ""
+            trust = r["trust_score"]
+            if trust is None:
+                # Written before messages were scored (or on a table without the
+                # column): score the whole message now, not just the preview.
+                trust = assess_text(r["from_agent"], r["subject"], body).trust
             items.append(
                 {
                     "inbox_id": r["inbox_id"],
@@ -448,6 +457,7 @@ class AgentSessionService:
                     "subject": r["subject"],
                     "created_at": r["created_at"],
                     "body_preview": body[:INBOX_PREVIEW_CHARS] + ("..." if len(body) > INBOX_PREVIEW_CHARS else ""),
+                    "trust_score": trust,
                 }
             )
         return {
