@@ -1,0 +1,16 @@
+{
+  "action": "record",
+  "env": {
+    "CLAUDE_ENV_FILE_set": false,
+    "CLAUDE_PROJECT_DIR": "<S0_TMP>/repo"
+  },
+  "event": "SessionEnd",
+  "payload": {
+    "cwd": "<S0_TMP>/repo",
+    "hook_event_name": "SessionEnd",
+    "reason": "other",
+    "session_id": "c7647534-2fa7-412e-96af-cb71b0f631a6",
+    "transcript_path": "<S0_TMP>/config/projects/-S0-TMP-repo/c7647534-2fa7-412e-96af-cb71b0f631a6.jsonl"
+  },
+  "received_at": 1790408355.4704168
+}

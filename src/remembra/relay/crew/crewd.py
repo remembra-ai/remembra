@@ -1502,6 +1502,17 @@ class Crewd:
         }
         return facts
 
+    def closing_facts(self, sess: Mapping[str, Any]) -> dict[str, Any]:
+        """``checkpoint_facts`` for a stall, SessionEnd or orphan: ``commits`` is every commit this session made
+        (``started_head..HEAD``), not only those since the last checkpoint, so the stalled or partial report the
+        server writes from it lists the session's work (§13.3 step 4)."""
+        facts = self.checkpoint_facts(sess)
+        started = sess.get("started_head")
+        if started:
+            since_start = (B.try_out(["rev-list", "--max-count=50", f"{started}..HEAD"], str(sess["toplevel"])) or "").split()
+            facts["commits"] = list(dict.fromkeys([*since_start, *(facts.get("commits") or [])]))[:50]
+        return facts
+
     async def checkpoint(
         self, sess: dict[str, Any], trigger: str, *, extra: Mapping[str, Any] | None = None, force: bool = False
     ) -> dict[str, Any]:
@@ -1904,7 +1915,7 @@ class Crewd:
                 baton = self._baton_from_args(sess, args) or await self.make_baton(sess)
                 if baton is not None:  # a replay of this stall reuses the same baton ref
                     fast = self._spool_fast("stall", sess, {**fast_args, "baton": baton.as_dict()})
-            facts = await asyncio.to_thread(self.checkpoint_facts, sess)
+            facts = await asyncio.to_thread(self.closing_facts, sess)
             if baton is not None:
                 facts["baton_ref"] = baton.ref
                 facts["uncommitted_files"] = baton.dirty_files[:50]
@@ -1966,9 +1977,10 @@ class Crewd:
                 if baton is not None:  # a replay of this SessionEnd reuses the same baton ref
                     fast = self._spool_fast("leave", sess, {"reason": reason, "baton": baton.as_dict()})
             await self.relay_close(sess, reason, args.get("transcript_path"))
-            facts = await asyncio.to_thread(self.checkpoint_facts, sess)
+            facts = await asyncio.to_thread(self.closing_facts, sess)
             if baton is not None:
                 facts["baton_ref"] = baton.ref
+                facts["uncommitted_files"] = baton.dirty_files[:50]  # as a stall does: the partial report lists them
             body: dict[str, Any] = {
                 "reason": reason,
                 "facts": outbound("checkpoint", facts, repo_root=top, home=str(self.layout.home)),
@@ -2059,7 +2071,7 @@ class Crewd:
                 except B.GitError:
                     pass
                 await self.relay_close(sess, "orphaned", sess.get("transcript_path"))
-                facts = await asyncio.to_thread(self.checkpoint_facts, sess)
+                facts = await asyncio.to_thread(self.closing_facts, sess)
                 body: dict[str, Any] = {
                     "reason": "process_exited",
                     "facts": outbound("checkpoint", facts, repo_root=sess.get("toplevel"), home=str(self.layout.home)),

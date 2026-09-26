@@ -757,7 +757,11 @@ async def test_oversized_payloads_still_get_the_crew_policy_and_zone_denies(tmp_
         # a free path in the caller's own worktree is still allowed
         decision, _ = await gate("Write", {"file_path": str(wt_b / "src/app/reports/export.ts"), "content": big})
         assert decision is None
+        # the gate.error is spooled, then delivered by crewd's outbox flush (POST /crews/{id}/events)
+        await d.drain()
         errors = [e.body["payload"] for e in O.read_entries(layout.outbox, ("event",)) if e.body["type"] == "gate.error"]
+        rows = await srv.rows("SELECT payload FROM crew_events WHERE crew_id = ? AND type = 'gate.error'", (crew_id,))
+        errors += [json.loads(r["payload"]) for r in rows]
         assert {"stage": "payload", "error_class": "payload_oversized"} in errors
         assert (wt_b / "src/app/pos/split.ts").read_text() == "export const split = 1;\n"
         assert read_json(layout.session_file(a["key"])) is not None

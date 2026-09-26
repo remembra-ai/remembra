@@ -9,6 +9,7 @@ routers over a real ``crew.db`` and main database with auth enabled and a real A
 from __future__ import annotations
 
 import importlib
+import json
 import os
 import subprocess
 from contextlib import asynccontextmanager
@@ -181,3 +182,15 @@ def new_crewd(layout: Layout, server: Server, *, alive: set[int] | None = None, 
 
 def peer(pid: int) -> Peer:
     return Peer(pid, os.getuid(), (pid,))
+
+
+async def client_events(srv: Server, layout: Layout, crew_id: str, crewd: Crewd | None = None) -> list[dict[str, Any]]:
+    """Client events crewd produced: still spooled in its outbox, or already delivered (``POST /crews/{id}/events``)."""
+    from remembra.relay.crew import outbox as O
+
+    if crewd is not None:
+        await crewd.drain()
+    out = [{"type": e.body["type"], "payload": e.body["payload"]} for e in O.read_entries(layout.outbox, ("event",))]
+    sql = "SELECT type, payload FROM crew_events WHERE crew_id = ? AND origin = 'client' ORDER BY seq"
+    rows = await srv.rows(sql, (crew_id,))
+    return out + [{"type": r["type"], "payload": json.loads(r["payload"])} for r in rows]

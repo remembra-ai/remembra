@@ -25,7 +25,7 @@ from remembra.crew import schemas as S
 from remembra.relay.crew import gate as gate_mod
 from remembra.relay.crew import outbox as O
 from remembra.relay.crew.gate import Layout, read_json, session_key, vendor_gate, verify_gate
-from tests.crew.wp9_support import add_worktree, crew_server, git, make_repo, new_crewd, peer
+from tests.crew.wp9_support import add_worktree, client_events, crew_server, git, make_repo, new_crewd, peer
 
 PY = sys.executable
 
@@ -249,7 +249,7 @@ async def test_pretool_decisions_through_the_real_gate(tmp_path, sleeper):
         assert {"zone_id": reports["id"], "holder_session_id": b["session_id"], "source": "first_write"} in claims
 
         # the denies became client events (guard.blocked / guard.tamper_blocked) spooled for the server
-        types = [e.body["type"] for e in O.read_entries(layout.outbox, ("event",))]
+        types = [e["type"] for e in await client_events(srv, layout, crew_id, d)]
         assert "guard.blocked" in types and "guard.tamper_blocked" in types
         for e in O.read_entries(layout.outbox, ("event",)):
             assert S.validate_client_event({"id": "evt_test_1234", "type": e.body["type"], "payload": e.body["payload"]}) == []
@@ -294,8 +294,7 @@ async def test_posttool_turn_and_stop(tmp_path):
                 "tool_response": {"stdout": ""},
             },
         )
-        await d.drain()
-        ev = [e.body for e in O.read_entries(layout.outbox, ("event",)) if e.body["type"] == "activity.commit"]
+        ev = [e for e in await client_events(srv, layout, crew_id, d) if e["type"] == "activity.commit"]
         assert ev and ev[0]["payload"]["files"] == ["src/app/reports/export.ts"]
         assert await srv.rows(
             "SELECT trigger FROM crew_checkpoints WHERE session_id = ? AND trigger = 'commit'", (a["session_id"],)
@@ -360,6 +359,9 @@ async def test_git_gates_precommit_trailer_and_prepush(tmp_path, sleeper):
     me = os.getpid()
     async with crew_server(tmp_path) as srv:
         layout, d = await _start_crewd(tmp_path, srv, alive={sleeper})
+        # keep the gates' client events spooled for inspection: the server coalesces guard.blocked per zone
+        # for 5 min (their delivery is covered end to end in tests/crew/e2e)
+        d.flush_outbox = lambda: asyncio.sleep(0)  # type: ignore[method-assign,assignment,return-value]
         a = await d.join(
             peer(sleeper), {"adapter": "claude-code", "client_session_id": "sess-a", "cwd": str(repo), "agent_pid": sleeper}
         )

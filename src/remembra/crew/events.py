@@ -648,6 +648,11 @@ async def verify_crew_chain(conn: aiosqlite.Connection, crew_id: str, *, batch: 
     this detects partial edits and deletions, not a full re-forge.
     """
     report = ChainReport(crew_id)
+    # The head first: events committed after it are the next run's business. Reading it after the scan
+    # raced with live writers (the nightly job runs while agents work) and reported their fresh tail as
+    # "missing" (found by the WP-15 load run).
+    head = await crew_head(conn, crew_id)
+    upto = head.last_seq if head is not None else None
     ranges = await _pruned_ranges(conn, crew_id)
     used: set[int] = set()
     expected = 1  # the next seq the chain needs
@@ -668,9 +673,10 @@ async def verify_crew_chain(conn: aiosqlite.Connection, crew_id: str, *, batch: 
 
     cursor = 0
     while True:
+        bound, params = ("", (crew_id, cursor, batch)) if upto is None else (" AND seq <= ?", (crew_id, cursor, upto, batch))
         async with conn.execute(
-            f"{EVENT_SELECT} WHERE crew_id = ? AND seq > ? ORDER BY seq LIMIT ?",
-            (crew_id, cursor, batch),
+            f"{EVENT_SELECT} WHERE crew_id = ? AND seq > ?{bound} ORDER BY seq LIMIT ?",
+            params,
         ) as cur:
             rows = await cur.fetchall()
         if not rows:
@@ -693,8 +699,14 @@ async def verify_crew_chain(conn: aiosqlite.Connection, crew_id: str, *, batch: 
             link = ev.hash or ""
             expected = seq + 1
             cursor = seq
-    head = await crew_head(conn, crew_id)
     if head is not None:
+        # an event stored beyond the head is forged: a real one moves crews.last_seq in its own transaction,
+        # so read the highest stored seq first and the head again after it
+        async with conn.execute("SELECT MAX(seq) FROM crew_events WHERE crew_id = ?", (crew_id,)) as cur:
+            top = (await cur.fetchone() or (None,))[0]
+        now_head = await crew_head(conn, crew_id)
+        if top is not None and now_head is not None and int(top) > now_head.last_seq:
+            report.errors.append(f"event seq {int(top)} beyond crews.last_seq {now_head.last_seq}")
         if expected - 1 > head.last_seq:
             report.errors.append(f"event seq {expected - 1} beyond crews.last_seq {head.last_seq}")
         else:

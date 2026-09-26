@@ -549,9 +549,15 @@ async def resolve_inbox_items(
     return out
 
 
+def baton_inbox_keys(task_id: str) -> list[str]:
+    """The dedupe keys of a task baton's items: this module's ``baton:`` item and the Needs-you
+    ``baton_available`` / crew ``baton_reserved`` items the session stall path raises (sessions.py)."""
+    return [f"baton:{task_id}", f"baton_available:{task_id}", f"baton_reserved:{task_id}"]
+
+
 def task_inbox_keys(task_id: str) -> list[str]:
     """Every dedupe key a task's inbox items use (resolved together when the task finishes)."""
-    return [f"review_report:{task_id}", f"task_ready:{task_id}", f"task_blocked:{task_id}", f"baton:{task_id}"]
+    return [f"review_report:{task_id}", f"task_ready:{task_id}", f"task_blocked:{task_id}", *baton_inbox_keys(task_id)]
 
 
 # ---------------------------------------------------------------------------
@@ -2012,7 +2018,7 @@ class TaskService:
             await tx.conn.execute(
                 "UPDATE crew_sessions SET current_task_id = ? WHERE id = ? AND crew_id = ?", (task_id, session["id"], crew_id)
             )
-            await resolve_inbox_items(tx, crew_id, [f"baton:{task_id}"], resolved_by=str(session["id"]))
+            await resolve_inbox_items(tx, crew_id, baton_inbox_keys(task_id), resolved_by=str(session["id"]))
         return TaskResult(detail, seq, {"claims": claims, "baton": baton, "cross_checkout": cross})
 
     async def _check_adopter_zones(

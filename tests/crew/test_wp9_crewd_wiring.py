@@ -13,9 +13,8 @@ import time
 
 from remembra.crew import schemas as S
 from remembra.relay.crew import baton as B
-from remembra.relay.crew import outbox as O
 from remembra.relay.crew.gate import Layout, read_json
-from tests.crew.wp9_support import add_worktree, crew_server, git, make_repo, new_crewd, peer
+from tests.crew.wp9_support import add_worktree, client_events, crew_server, git, make_repo, new_crewd, peer
 
 A_PID, X_PID = 51001, 51002
 
@@ -170,7 +169,7 @@ async def test_githook_missing_event_and_presence_frames_and_redaction(tmp_path)
         sess["githook_state"] = "ok"
         d.check_githooks()
         assert sess["githook_state"] == "missing"
-        missing = [e.body for e in O.read_entries(layout.outbox, ("event",)) if e.body["type"] == "githook.missing"]
+        missing = [e for e in await client_events(srv, layout, a["crew_id"], d) if e["type"] == "githook.missing"]
         assert {m["payload"]["hook"] for m in missing} == {"pre-commit", "prepare-commit-msg", "pre-push"}
         # presence: at most one frame per session per 5 s, schema-valid, command metadata only
         await d.activity(peer(A_PID), {"key": a["key"], "phase": "start", "tool": "Bash", "verb": "curl"})
@@ -186,7 +185,7 @@ async def test_githook_missing_event_and_presence_frames_and_redaction(tmp_path)
         }
         # a test fingerprint carrying a secret is redacted before it leaves the host
         await d.on_test(sess, {"argv": ["pytest", "--token=sk-ant-api03-" + "x" * 40], "passed": 3, "failed": 0})
-        events = [e.body for e in O.read_entries(layout.outbox, ("event",)) if e.body["type"] == "activity.test_verdict_changed"]
+        events = [e for e in await client_events(srv, layout, a["crew_id"], d) if e["type"] == "activity.test_verdict_changed"]
         assert events and "sk-ant-api03" not in json.dumps(events)
         await d.checkpoint(sess, "test", force=True)
         ck = await srv.rows("SELECT facts FROM crew_checkpoints WHERE session_id = ?", (a["session_id"],))

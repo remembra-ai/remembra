@@ -1,0 +1,45 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": [
+      "node"
+    ],
+    "typeRoots": [
+      "../../../../dashboard/node_modules/@types"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "vitest": [
+        "../../../../dashboard/node_modules/vitest"
+      ],
+      "react": [
+        "../../../../dashboard/node_modules/@types/react"
+      ],
+      "react/*": [
+        "../../../../dashboard/node_modules/@types/react/*"
+      ],
+      "*": [
+        "../../../../dashboard/node_modules/*",
+        "../../../../dashboard/node_modules/@types/*"
+      ]
+    }
+  },
+  "include": [
+    "*.ts",
+    "../../../../dashboard/node_modules/vite/client.d.ts"
+  ]
+}
