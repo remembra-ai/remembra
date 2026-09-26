@@ -1294,6 +1294,14 @@ class UsageMeter:
             return None
         return str(held)
 
+    async def tenants_for_billing(self, *, subscription_id: str | None = None, customer_id: str | None = None) -> list[str]:
+        """Every account recording this Paddle subscription id, or this customer id (one payer can pay for several)."""
+        column, value = ("stripe_subscription_id", subscription_id) if subscription_id else ("stripe_customer_id", customer_id)
+        if not value:
+            return []
+        cursor = await self._db.conn.execute(f"SELECT user_id FROM cloud_tenants WHERE {column} = ?", (value,))
+        return [str(row[0]) for row in await cursor.fetchall()]
+
     async def find_tenant_by_billing_ids(self, *, subscription_id: str | None, customer_id: str | None) -> str | None:
         """The user id holding a Paddle subscription (preferred) or customer id."""
         for column, value in (("stripe_subscription_id", subscription_id), ("stripe_customer_id", customer_id)):

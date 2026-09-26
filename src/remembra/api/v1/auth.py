@@ -876,7 +876,7 @@ async def delete_account(
 
     meter = getattr(request.app.state, "usage_meter", None)
     try:
-        cancelled = await cancel_billing(meter, user_id)
+        cancelled = (await cancel_billing(meter, user_id, app_state=request.app.state)).cancelled
     except BillingCancelError as e:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
 

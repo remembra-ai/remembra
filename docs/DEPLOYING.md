@@ -202,10 +202,20 @@ Qdrant is not backed up — it is rebuilt from SQLite by the rebuild reindex.
 ## Account deletion and erasure (R-11, R-23)
 
 `DELETE /api/v1/auth/me` (password, or a code from `POST /api/v1/auth/me/deletion-code`
-for Google/GitHub accounts) first cancels every billable Paddle subscription of
-the account immediately. If Paddle cannot confirm it, the request fails with 502
-and nothing is deleted. Then the account is deactivated (sessions and API keys
-stop at once) and `users.deleted_at` is set.
+for Google/GitHub accounts) first cancels, immediately, the Paddle subscription
+the account holds and any other billable subscription of its Paddle customer
+that is this account's (recorded on it, or its checkout `custom_data` names it,
+or no other account shares the customer). One payer email can pay for several
+accounts: subscriptions of the same customer that belong to another account are
+left running and the owner gets an `account_deletion_shared_customer` alert. A
+recorded subscription id Paddle does not know (404: sandbox, Stripe-era or
+hand-edited ids) counts as done and alerts `account_deletion_subscription_unknown`
+(check nothing still charges that customer elsewhere). If Paddle cannot confirm
+a cancel, the request fails with 502, nothing is deleted and the owner gets an
+`account_deletion_billing_failed` alert; the user is told to retry when Paddle
+was unreachable (429/5xx/timeout) and that support will sort it out when Paddle
+refused. Then the account is deactivated (sessions and API keys stop at once)
+and `users.deleted_at` is set.
 
 The `account-erasure-loop` task (every `REMEMBRA_ACCOUNT_ERASURE_INTERVAL_SECONDS`,
 default 3600) erases accounts deleted more than `REMEMBRA_ACCOUNT_ERASURE_GRACE_DAYS`
@@ -236,7 +246,23 @@ of the account id and row counts, nothing else. To undo a deletion inside the
 grace period: `POST /api/v1/admin/users/{id}/activate?active=true` (the user
 then buys again if they had a plan; the cancelled subscription stays cancelled).
 `DELETE /api/v1/admin/users/{id}?confirm=true` does the same billing cancel and
-erases immediately.
+erases immediately. It also erases API-signup tenants (`POST /cloud/signup`),
+which have no `users` row and no dashboard to delete themselves from. When
+Paddle refuses a cancel and the subscription has been checked by hand, add
+`&force_billing=skip`: Paddle is not asked, and the owner alert
+`account_deletion_billing_skipped` lists the subscription and customer to cancel
+in Paddle.
+
+Accounts deleted before this release: the old "Delete account" only set
+`is_active = FALSE` (no `deleted_at`, billing NOT cancelled), so the erasure job
+never sees them. `GET /api/v1/admin/deactivated-accounts` lists every
+deactivated account with no erasure scheduled, with any subscription it still
+holds. Superadmin deactivations look the same; the old self-delete logged
+`account_deactivated` with the user id, a superadmin deactivation did not. For
+each confirmed self-deletion run
+`POST /api/v1/admin/deactivated-accounts/{id}/schedule-erasure?confirm=true`
+(cancels billing, sets `deleted_at`; the job erases after the grace period) or
+the hard delete above.
 
 Backups are not rewritten. Pre-deploy copies (`backups/remembra-predeploy-*`)
 keep the newest `REMEMBRA_PRE_MIGRATION_BACKUP_KEEP` (3), so an erased account

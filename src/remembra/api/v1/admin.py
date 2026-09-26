@@ -10,7 +10,7 @@ import io
 import json
 import secrets
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -831,19 +831,28 @@ async def delete_user(
     current_user: CurrentUser,
     _superadmin: RequireSuperadmin,
     confirm: bool = Query(False, description="Must be true to confirm deletion"),
+    force_billing: Literal["skip"] | None = Query(
+        None,
+        description=(
+            "skip: delete without asking Paddle to cancel anything (when Paddle refuses and the subscription "
+            "was checked by hand). The owner alert lists what to cancel in Paddle."
+        ),
+    ),
 ) -> dict[str, Any]:
     """
     Permanently delete a user and ALL their data, now.
 
-    Cancels every Paddle subscription of the account that can still bill
-    (502 and nothing deleted if the billing provider cannot confirm it), then
-    erases every row the account owns in every table and its Qdrant vectors,
-    and writes a content-free ``account_erased`` audit receipt.
+    Works for dashboard users and for API-signup tenants (``POST /cloud/signup``),
+    which have no ``users`` row. Cancels every Paddle subscription of the
+    account that can still bill (502 and nothing deleted if the billing
+    provider cannot confirm it, unless ``force_billing=skip``), then erases
+    every row the account owns in every table and its Qdrant vectors, and
+    writes a content-free ``account_erased`` audit receipt.
 
     **Superadmin only** - requires owner_emails access.
     **Requires confirm=true** to execute.
     """
-    from remembra.account.deletion import BillingCancelError, cancel_billing
+    from remembra.account.deletion import BillingCancelError, cancel_billing, skip_billing
     from remembra.account.erasure import eraser_for
 
     if not confirm:
@@ -852,18 +861,25 @@ async def delete_user(
             detail="Add ?confirm=true to confirm permanent deletion",
         )
 
+    meter = getattr(request.app.state, "usage_meter", None)
     user_data = await db.get_user_by_id(user_id)
-    if not user_data:
+    tenant = await meter.get_tenant(user_id) if meter is not None and not user_data else None
+    if not user_data and not tenant:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User {user_id} not found",
         )
 
-    email = user_data["email"]
-    try:
-        cancelled = await cancel_billing(getattr(request.app.state, "usage_meter", None), user_id)
-    except BillingCancelError as e:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    email = (user_data or tenant or {}).get("email")
+    cancelled: list[str] = []
+    if force_billing == "skip":
+        await skip_billing(meter, user_id, app_state=request.app.state)
+    else:
+        try:
+            cancelled = (await cancel_billing(meter, user_id, app_state=request.app.state)).cancelled
+        except BillingCancelError as e:
+            detail = str(e) if e.transient else f"{e} Superadmin: add force_billing=skip once Paddle is checked by hand."
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail) from e
 
     receipt = await eraser_for(request.app.state).erase(user_id)
 
@@ -871,7 +887,9 @@ async def delete_user(
         "status": "deleted",
         "user_id": user_id,
         "email": email,
+        "account_kind": "dashboard" if user_data else "api_tenant",
         "subscriptions_cancelled": len(cancelled),
+        "billing_skipped": force_billing == "skip",
         "rows_deleted": receipt.total_rows,
         "vectors_deleted": receipt.vectors,
         "receipt": f"sha256:{receipt.digest}",
@@ -1051,6 +1069,125 @@ async def clear_billing_flag(
     await usage_meter.set_billing_flag(user_id, None)
     log.info("billing_flag_cleared", user_id=user_id, flag=tenant.get("billing_flag"), by=current_user.user_id)
     return {"status": "cleared", "user_id": user_id, "flag": tenant.get("billing_flag")}
+
+
+class DeactivatedAccountRow(BaseModel):
+    user_id: str
+    email: str | None = None
+    created_at: str | None = None
+    deactivated_at: str | None = Field(None, description="Last update of the row: the deactivation, unless changed since")
+    plan: str | None = None
+    paddle_subscription_id: str | None = Field(None, description="Paid subscription the account still holds, if any")
+    paddle_customer_id: str | None = None
+
+
+class DeactivatedAccountsResponse(BaseModel):
+    accounts: list[DeactivatedAccountRow]
+    total: int
+    note: str
+
+
+@router.get(
+    "/deactivated-accounts",
+    response_model=DeactivatedAccountsResponse,
+    summary="Deactivated accounts with no erasure scheduled (superadmin only)",
+)
+@limiter.limit("30/minute")
+async def list_deactivated_accounts(
+    request: Request,
+    db: DatabaseDep,
+    current_user: CurrentUser,
+    _superadmin: RequireSuperadmin,
+    usage_meter: UsageMeterDep,
+) -> DeactivatedAccountsResponse:
+    """Accounts that are deactivated but will never be erased: ``is_active`` false, ``deleted_at`` empty.
+
+    Before R-11, "Delete account" in Settings only deactivated the account
+    (no ``deleted_at``, billing not cancelled), which looks the same as a
+    superadmin deactivation. Review each: a self-deletion goes to
+    ``POST /admin/deactivated-accounts/{id}/schedule-erasure?confirm=true``
+    (cancels billing, then the erasure job removes it after the grace period)
+    or ``DELETE /admin/users/{id}?confirm=true`` (now).
+    """
+    cursor = await db.conn.execute(
+        "SELECT id, email, created_at, updated_at FROM users"
+        " WHERE (is_active = 0 OR is_active = 'false') AND deleted_at IS NULL ORDER BY updated_at"
+    )
+    accounts: list[DeactivatedAccountRow] = []
+    for user_id, email, created_at, updated_at in await cursor.fetchall():
+        tenant = await usage_meter.get_tenant(str(user_id)) if usage_meter is not None else None
+        accounts.append(
+            DeactivatedAccountRow(
+                user_id=str(user_id),
+                email=email,
+                created_at=str(created_at) if created_at else None,
+                deactivated_at=str(updated_at) if updated_at else None,
+                plan=(tenant or {}).get("plan"),
+                paddle_subscription_id=UsageMeter.active_subscription_id(tenant),
+                paddle_customer_id=(tenant or {}).get("stripe_customer_id"),
+            )
+        )
+    return DeactivatedAccountsResponse(
+        accounts=accounts,
+        total=len(accounts),
+        note=(
+            "Self-deletions made before R-11 and superadmin deactivations look alike here. Before release, "
+            "'Delete account' logged account_deactivated with the user id; a superadmin deactivation did not."
+        ),
+    )
+
+
+@router.post(
+    "/deactivated-accounts/{user_id}/schedule-erasure",
+    summary="Treat a deactivated account as a self-serve deletion (superadmin only)",
+)
+@limiter.limit("10/minute")
+async def schedule_erasure_of_deactivated(
+    request: Request,
+    user_id: str,
+    db: DatabaseDep,
+    current_user: CurrentUser,
+    _superadmin: RequireSuperadmin,
+    confirm: bool = Query(False, description="Must be true"),
+) -> dict[str, Any]:
+    """Cancel the account's billing and stamp ``deleted_at``: the erasure job removes it after the grace period.
+
+    Only for a deactivated account with no erasure scheduled (see
+    ``GET /admin/deactivated-accounts``). Undo inside the grace period with
+    ``POST /admin/users/{id}/activate?active=true``.
+    """
+    from datetime import timedelta
+
+    from remembra.account.deletion import BillingCancelError, cancel_billing, mark_deleted
+
+    if not confirm:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Add ?confirm=true to schedule erasure")
+    cursor = await db.conn.execute("SELECT is_active, deleted_at FROM users WHERE id = ?", (user_id,))
+    row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User {user_id} not found")
+    if row[1] is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Erasure is already scheduled")
+    if row[0] and str(row[0]).lower() not in ("0", "false"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="The account is active; deactivate it first or use DELETE /admin/users/{id}",
+        )
+    meter = getattr(request.app.state, "usage_meter", None)
+    try:
+        cancelled = (await cancel_billing(meter, user_id, app_state=request.app.state)).cancelled
+    except BillingCancelError as e:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e)) from e
+    deleted_at = await mark_deleted(db, meter, user_id)
+    erase_after = deleted_at + timedelta(days=get_settings().account_erasure_grace_days)
+    log.info("deactivated_account_erasure_scheduled", user_id=user_id, by=current_user.user_id)
+    return {
+        "status": "scheduled",
+        "user_id": user_id,
+        "subscriptions_cancelled": len(cancelled),
+        "deleted_at": deleted_at.isoformat(),
+        "erasure_after": erase_after.isoformat(),
+    }
 
 
 @router.get(

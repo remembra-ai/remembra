@@ -914,19 +914,9 @@ async def _flag_account(
 
 async def _operator_alert(request: Request, event: str, message: str, details: dict[str, Any]) -> None:
     """Best-effort operator alert (webhook / email); never fails the webhook."""
-    alerts = getattr(request.app.state, "alerts", None)
-    if alerts is None:
-        return
-    tasks = getattr(request.app.state, "tasks", None)
-    coro = alerts.notify(event, message, details)
-    try:
-        if tasks is not None:
-            tasks.spawn(coro, name=f"alert:{event}")
-        else:
-            await coro
-    except Exception as e:
-        coro.close()  # never scheduled (e.g. the registry is shutting down)
-        log.warning("paddle_operator_alert_failed", error_type=type(e).__name__)
+    from remembra.account.deletion import notify_owner
+
+    await notify_owner(request.app.state, event, message, details)
 
 
 async def _apply_paddle_refund(request: Request, meter: Any, result: Any) -> str:

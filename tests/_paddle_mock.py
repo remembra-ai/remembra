@@ -21,7 +21,7 @@ from remembra.cloud import billing_paddle
 
 @dataclass
 class PaddleMock:
-    subscriptions: dict[str, dict[str, str]] = field(default_factory=dict)  # id -> {status, customer_id}
+    subscriptions: dict[str, dict[str, Any]] = field(default_factory=dict)  # id -> {status, customer_id, custom_data}
     prices: dict[str, str] = field(default_factory=dict)  # id -> status
     customers_by_email: dict[str, str] = field(default_factory=dict)
     calls: list[tuple[str, str, dict[str, str], Any]] = field(default_factory=list)
@@ -29,8 +29,10 @@ class PaddleMock:
     failures: dict[str, Any] = field(default_factory=dict)
     transactions: int = 0
 
-    def add_subscription(self, sub_id: str, customer_id: str, status: str = "active") -> None:
-        self.subscriptions[sub_id] = {"status": status, "customer_id": customer_id}
+    def add_subscription(
+        self, sub_id: str, customer_id: str, status: str = "active", custom_data: dict[str, Any] | None = None
+    ) -> None:
+        self.subscriptions[sub_id] = {"status": status, "customer_id": customer_id, "custom_data": custom_data or {}}
 
     def requests(self, method: str | None = None, path_prefix: str = "") -> list[tuple[str, str, dict[str, str], Any]]:
         return [c for c in self.calls if (method is None or c[0] == method) and c[1].startswith(path_prefix)]
@@ -51,7 +53,7 @@ class PaddleMock:
         if method == "GET" and parts == ["subscriptions"]:
             wanted = set((params.get("status") or "").split(","))
             data = [
-                {"id": sid, "status": s["status"]}
+                {"id": sid, "status": s["status"], "custom_data": s["custom_data"] or None}
                 for sid, s in self.subscriptions.items()
                 if s["customer_id"] == params.get("customer_id") and s["status"] in wanted
             ]
@@ -60,7 +62,9 @@ class PaddleMock:
             sub = self.subscriptions.get(parts[1])
             if sub is None:
                 return httpx.Response(404, json={"error": {"code": "entity_not_found"}})
-            return httpx.Response(200, json={"data": {"id": parts[1], "status": sub["status"], "custom_data": {}}})
+            return httpx.Response(
+                200, json={"data": {"id": parts[1], "status": sub["status"], "custom_data": sub["custom_data"] or None}}
+            )
         if parts[:1] == ["subscriptions"] and parts[2:] == ["cancel"] and method == "POST":
             sub = self.subscriptions.get(parts[1])
             if sub is None:

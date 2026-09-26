@@ -350,33 +350,47 @@ class PaddleBillingManager:
         return {
             "id": data["id"],
             "status": data["status"],
-            "plan": data.get("custom_data", {}).get("plan", "unknown"),
+            "plan": (data.get("custom_data") or {}).get("plan", "unknown"),
             "current_billing_period": data.get("current_billing_period"),
             "scheduled_change": data.get("scheduled_change"),
         }
 
-    async def list_billable_subscriptions(self, customer_id: str) -> list[str]:
-        """IDs of the customer's subscriptions that can still bill (active, trialing, past due, paused)."""
+    async def list_billable_subscriptions(self, customer_id: str) -> list[dict[str, Any]]:
+        """The customer's subscriptions that can still bill (active, trialing, past due, paused).
+
+        Each is ``{"id": ..., "custom_data": {...}}``: one customer (one payer
+        email) can pay for several accounts, and ``custom_data`` says which.
+        """
         result = await self._request(
             "GET",
             "/subscriptions",
             params={"customer_id": customer_id, "status": ",".join(BILLABLE_SUBSCRIPTION_STATUSES), "per_page": "50"},
         )
-        return [str(item["id"]) for item in result.get("data") or [] if isinstance(item, dict) and item.get("id")]
+        return [
+            {"id": str(item["id"]), "custom_data": item.get("custom_data") or {}}
+            for item in result.get("data") or []
+            if isinstance(item, dict) and item.get("id")
+        ]
 
     async def cancel_subscription_now(self, subscription_id: str) -> str:
-        """Cancel a subscription immediately; safe to repeat. Returns ``canceled`` or ``already_canceled``.
+        """Cancel a subscription immediately; safe to repeat.
 
-        Paddle refuses to cancel a subscription that is already canceled, so
-        the current status is read first and re-read after a refused cancel:
-        a retry after a timeout, or a cancel that raced a webhook, is a success.
-        Raises ``httpx.HTTPError`` when the subscription is still billable.
+        Returns ``canceled``, ``already_canceled``, or ``not_found`` when Paddle
+        does not know the id (404: nothing can bill through Paddle under it,
+        e.g. a Stripe-era or sandbox id). Paddle refuses to cancel a
+        subscription that is already canceled, so the current status is read
+        first and re-read after a refused cancel: a retry after a timeout, or a
+        cancel that raced a webhook, is a success. Raises ``httpx.HTTPError``
+        when the subscription is still billable.
         """
-        if (await self.get_subscription(subscription_id))["status"] == "canceled":
-            return "already_canceled"
         try:
+            if (await self.get_subscription(subscription_id))["status"] == "canceled":
+                return "already_canceled"
             await self.cancel_subscription(subscription_id, effective_from="immediately")
-        except httpx.HTTPStatusError:
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("Paddle does not know subscription %s; nothing to cancel", subscription_id)
+                return "not_found"
             if (await self.get_subscription(subscription_id))["status"] == "canceled":
                 return "already_canceled"
             raise
