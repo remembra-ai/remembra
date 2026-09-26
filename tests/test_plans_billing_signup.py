@@ -504,7 +504,7 @@ async def test_usage_summary_reports_everything_the_dashboard_shows(tmp_path) ->
         assert s["enrichment"] == {"status": "degraded", "reason": "credits_exhausted"}
         assert s["relay_events"]["this_month"] == 2 and s["relay_events"]["soft_cap"] == 100_000
         assert s["recalls"]["limit"] == 200_000 and s["recalls"]["burst_per_min"] == 120
-        assert s["memories"] == {"stored": 3, "cap": 200_000}
+        assert s["memories"] == {"stored": 3, "cap": 200_000, "handoffs": 0}
         assert s["stores"] == {"this_month": 2, "degraded_this_month": 1}
 
         daily = (await c.h.client.get("/api/v1/cloud/usage/daily", headers=hdr)).json()["days"]

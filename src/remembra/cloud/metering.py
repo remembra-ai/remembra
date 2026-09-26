@@ -41,6 +41,7 @@ from remembra.cloud.plans import (
     get_plan,
 )
 from remembra.config import get_settings
+from remembra.storage.database import RELAY_RECORD_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -1185,15 +1186,28 @@ class UsageMeter:
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
-    async def count_pool_memories(self, account: AccountState) -> int:
-        """Memories stored by every user sharing the account's memory cap (a team pool)."""
-        pool = account.pool
-        if len(pool) == 1:
-            return await self.count_memories(pool[0])
+    async def _count_pool(self, pool: list[str], relay: bool) -> int:
         marks = ",".join("?" for _ in pool)
-        cursor = await self._db.conn.execute(f"SELECT COUNT(*) FROM memories WHERE user_id IN ({marks})", pool)
+        cursor = await self._db.conn.execute(
+            f"SELECT COUNT(*) FROM memories WHERE user_id IN ({marks}) AND {'' if relay else 'NOT '}{RELAY_RECORD_SQL}",  # noqa: S608
+            pool,
+        )
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
+
+    async def count_pool_memories(self, account: AccountState) -> int:
+        """Memories counted toward the account's memory cap, over every user sharing it (a team pool).
+
+        Relay handoffs and checkpoints (server-written continuity records,
+        superseded versions included) are not counted: handoffs are free on
+        every plan, so closing sessions must never fill the cap and block a
+        note. See :meth:`count_pool_relay_records` for their number.
+        """
+        return await self._count_pool(list(account.pool), relay=False)
+
+    async def count_pool_relay_records(self, account: AccountState) -> int:
+        """Relay handoffs and checkpoints stored by the account's pool (not counted toward the cap)."""
+        return await self._count_pool(list(account.pool), relay=True)
 
     async def project_exists(self, user_id: str, project_id: str) -> bool:
         cursor = await self._db.conn.execute(
