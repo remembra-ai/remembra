@@ -304,18 +304,24 @@ def _wrong_url(key: KeyCheck, seen: list[str]) -> Finding:
         seen.append(key.error or "the answer was not Remembra's JSON")
     seen.append("the key was never checked")
     target = key.redirect_base
+    try:
+        command = cmd.save_key_command(target) if target else None
+    except ValueError:  # a URL no template takes (odd characters in its path): named, never run
+        command = None
     fix: Fix
     if target and key.source == "env":
         fix = Fix(kind="none", text=f"Set REMEMBRA_URL to {target} where your agents start.", runs_where="none")
-    elif target:
+    elif target and command:
         fix = Fix(
             kind="command",
             text=f"Save the server it redirects to, {target}, with your key (it asks for the key at a hidden prompt):",
-            command=cmd.save_key_command(target),
+            command=command,
             runs_where="user_terminal",
             writes=("~/.remembra/credentials", "the remembra MCP entry of each agent it finds"),
             backup=True,
         )
+    elif target:
+        fix = Fix(kind="none", text=f"Set the server URL in {key.source} to {target}, where it redirects.", runs_where="none")
     else:
         where = "REMEMBRA_URL" if key.source == "env" else f"the server URL in {key.source}"
         fix = Fix(

@@ -198,6 +198,10 @@ def test_a_redirect_is_not_an_accepted_key(fh: FakeHome) -> None:
     moved.key_headers = {"location": "/login?next=%2Fapi"}
     g = only(run(fh, moved), "SERVER_WRONG_URL")
     assert g.fix is not None and g.fix.command is None and "it redirects to http://api.remembra.test/login" in g.evidence
+    # It kept the API path, but under a base no command template takes: named, no command.
+    moved.key_headers = {"location": "https://api.remembra.test/v%201/api/v1/trail/summary"}
+    odd = only(run(fh, moved), "SERVER_WRONG_URL")
+    assert odd.fix is not None and odd.fix.command is None and "/v%201" in odd.fix.text
     # A 200 that is a web page, not the API's JSON: not accepted either.
     page = FakeTrail(key_status=200, key_text="<!doctype html><title>Remembra</title>", key_headers={"content-type": "text/html"})
     h = only(run(fh, page), "SERVER_WRONG_URL")
