@@ -19,6 +19,11 @@ Scoping inside a tenant (the same rules as the crew branch, so its merge is clea
 * **agent scoping**: ``recipient`` limits reads and acks to rows addressed to
   that agent (an agent-scoped key or agent-bound connector grant reads only its
   own inbox).
+
+Content protection (R-16): every message's subject, body and metadata strings
+pass secret redaction before they are stored, and the row keeps the trust
+policy's score of the text (``trust_score``, main-DB migration v6), which the
+session brief uses to withhold low-trust messages.
 """
 
 from __future__ import annotations
@@ -28,6 +33,9 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
+
+from remembra.relay.handoff import assess_text
+from remembra.security.secrets import scrub
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +95,17 @@ def _new_inbox_id() -> str:
     return f"inbox_{uuid4().hex[:16]}"
 
 
+def _scrub_deep(value: Any) -> Any:
+    """``value`` with credentials redacted from every string inside it (keys included)."""
+    if isinstance(value, str):
+        return scrub(value)
+    if isinstance(value, dict):
+        return {(scrub(k) if isinstance(k, str) else k): _scrub_deep(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_scrub_deep(v) for v in value]
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Inbox Manager
 # ---------------------------------------------------------------------------
@@ -102,7 +121,7 @@ class InboxManager:
 
     def __init__(self, db: Any) -> None:
         self._db = db
-        self._has_v5: bool | None = None
+        self._columns: set[str] | None = None
 
     async def init_schema(self) -> None:
         """Create agent_inbox table and indexes if not present."""
@@ -175,35 +194,43 @@ class InboxManager:
         if not body.strip():
             raise ValueError("body must not be empty")
 
+        # Secrets never reach the table; the stored score is the brief's trust
+        # policy applied to everything the sender wrote.
+        subject = scrub(subject)
+        body = scrub(body)
+        meta = _scrub_deep(dict(metadata or {}))
+        trust_score = assess_text(from_agent, subject, body).trust
+
         inbox_id = _new_inbox_id()
         now = datetime.now(UTC).isoformat()
-        meta = dict(metadata or {})
         if project_id:
             meta["project_id"] = project_id
         meta_json = json.dumps(meta)
         expires_iso = expires_at.isoformat() if expires_at else None
 
-        base = (inbox_id, owner_user_id, from_agent, to_agent, subject, body, meta_json, now, expires_iso)
-        if await self._scoped_columns():
-            await self._db.conn.execute(
-                """
-                INSERT INTO agent_inbox (
-                    inbox_id, owner_user_id, from_agent, to_agent, subject, body,
-                    metadata, status, created_at, expires_at, project_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'unread', ?, ?, ?)
-                """,
-                (*base, project_id),
-            )
-        else:  # pre-v5 table: the project lives in metadata.project_id only
-            await self._db.conn.execute(
-                """
-                INSERT INTO agent_inbox (
-                    inbox_id, owner_user_id, from_agent, to_agent, subject, body,
-                    metadata, status, created_at, expires_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'unread', ?, ?)
-                """,
-                base,
-            )
+        columns = await self._table_columns()
+        values: dict[str, Any] = {
+            "inbox_id": inbox_id,
+            "owner_user_id": owner_user_id,
+            "from_agent": from_agent,
+            "to_agent": to_agent,
+            "subject": subject,
+            "body": body,
+            "metadata": meta_json,
+            "status": "unread",
+            "created_at": now,
+            "expires_at": expires_iso,
+        }
+        if "project_id" in columns:  # main-DB migration v5 (crew); before it the project is metadata.project_id
+            values["project_id"] = project_id
+        if "trust_score" in columns:  # main-DB migration v6
+            values["trust_score"] = trust_score
+        names = ", ".join(values)
+        marks = ", ".join("?" for _ in values)
+        await self._db.conn.execute(
+            f"INSERT INTO agent_inbox ({names}) VALUES ({marks})",  # noqa: S608 - fixed column names; values are bound
+            tuple(values.values()),
+        )
         await self._db.conn.commit()
 
         logger.info(
@@ -229,11 +256,19 @@ class InboxManager:
             "ack_note": None,
             "ack_result": None,
             "project_id": project_id,
+            "trust_score": trust_score,
         }
 
     # -----------------------------------------------------------------------
     # Read
     # -----------------------------------------------------------------------
+
+    async def _table_columns(self) -> set[str]:
+        """Columns of ``agent_inbox`` (read once; migrations run before the manager is used)."""
+        if self._columns is None:
+            cursor = await self._db.conn.execute("PRAGMA table_info(agent_inbox)")
+            self._columns = {r[1] for r in await cursor.fetchall()}
+        return self._columns
 
     async def _scoped_columns(self) -> bool:
         """True when ``agent_inbox`` has the ``project_id`` column (main-DB migration v5, crew).
@@ -241,11 +276,7 @@ class InboxManager:
         Before v5 the row's project is ``metadata.project_id``; project
         restrictions then filter on that instead of the column.
         """
-        if self._has_v5 is None:
-            cursor = await self._db.conn.execute("PRAGMA table_info(agent_inbox)")
-            cols = {r[1] for r in await cursor.fetchall()}
-            self._has_v5 = "project_id" in cols
-        return self._has_v5
+        return "project_id" in await self._table_columns()
 
     async def _scope_sql(
         self, project_ids: list[str] | None, project_id: str | None = None, scope: str = "all"

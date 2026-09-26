@@ -39,7 +39,7 @@ SUPPORTED_SCOPES: tuple[str, ...] = (SCOPE_BRIEF, SCOPE_RECALL, SCOPE_STORE)
 SCOPE_DESCRIPTIONS: dict[str, str] = {
     SCOPE_BRIEF: "Read the pickup brief and the handoff/checkpoint trail your agents left",
     SCOPE_RECALL: "Search your memories",
-    SCOPE_STORE: "Leave notes and send instructions to your agents' inboxes (no edits, no deletes)",
+    SCOPE_STORE: "Leave notes, and messages or requests in your agents' inboxes (no edits, no deletes)",
 }
 
 # Clients may ask for these; they are accepted and ignored because a refresh

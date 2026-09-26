@@ -554,7 +554,11 @@ async def session_brief(
     ``hint_project`` is the client's configured project (used for a location
     seen for the first time, and reported when the location resolves
     elsewhere). ``branch`` / ``head_commit`` mark a handoff recorded on
-    another checkout as possibly stale. Read-only: nothing is recorded."""
+    another checkout as possibly stale.
+
+    Every recorded line passes one trust policy: low-trust text is withheld,
+    command-shaped text is flagged, and the JSON fields carry the same
+    verdicts (``trust_score`` / ``withheld`` / ``flags``). Read-only: nothing is recorded."""
     _require(current_user, "memory:recall")
     notes: list[str] = []
     agent, _ = effective_agent(request, current_user, agent_id, strict=False, warnings=notes)

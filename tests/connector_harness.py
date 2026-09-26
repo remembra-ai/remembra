@@ -35,6 +35,7 @@ from remembra.connector.policy import CLAUDE_REDIRECT_URI
 from remembra.inbox.manager import InboxManager
 from remembra.security.audit import AuditLogger
 from remembra.security.sanitizer import ContentSanitizer
+from remembra.security.untrusted import unwrap_untrusted
 from remembra.services.memory import MemoryService
 from remembra.spaces.manager import SpaceManager
 from remembra.storage.database import Database
@@ -67,6 +68,7 @@ class ConnectorHarness:
     http: httpx.AsyncClient
     db: Database
     settings: Settings
+    last_tool_text: str = ""
 
     # -- accounts -------------------------------------------------------
     async def create_user(self, email: str) -> str:
@@ -203,7 +205,10 @@ class ConnectorHarness:
         )
         assert resp.status_code == 200, (resp.status_code, resp.text)
         result = resp.json()["result"]
-        return dict(json.loads(result["content"][0]["text"]))
+        text = result["content"][0]["text"]
+        self.last_tool_text = text  # the raw result, for tests of the untrusted-data framing
+        # Results that carry stored content are framed as untrusted data (R-14); the JSON is inside.
+        return dict(json.loads(unwrap_untrusted(text)))
 
 
 @asynccontextmanager

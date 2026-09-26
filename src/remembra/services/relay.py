@@ -30,11 +30,14 @@ from remembra.relay.handoff import (
     build_sections,
     check_summary_grounding,
     handoff_headline,
+    handoff_stored_trust,
+    police_brief,
     redact,
     render_brief,
     render_handoff,
 )
 from remembra.relay.identity import KIND_GIT, KIND_PATH, KIND_ROOT, Fingerprint, ProjectLocator, slugify_project
+from remembra.security.untrusted import repo_url_prefixes
 from remembra.services.agent_session import AgentSessionService, _parse_metadata
 
 log = structlog.get_logger(__name__)
@@ -127,6 +130,10 @@ class ProjectRegistry:
             (user_id, project_id),
         )
         return await cursor.fetchone() is not None
+
+    async def fingerprint_values(self, user_id: str, project_id: str) -> dict[str, list[str]]:
+        """Fingerprint values on record for a project, grouped by kind (``git`` values are ``host/owner/repo``)."""
+        return await self._kinds_of(user_id, project_id)
 
     async def _kinds_of(self, user_id: str, project_id: str) -> dict[str, list[str]]:
         """Fingerprint values on record for a project, grouped by kind."""
@@ -794,6 +801,7 @@ class RelayService:
             "agent_id": latest.get("agent_id"),
             "created_at": latest.get("created_at"),
             "headline": handoff_headline(latest),
+            "trust_score": handoff_stored_trust(latest),
         }
 
     async def linked_with_headlines(self, user_id: str, project_id: str, allowed: list[str] | None) -> list[dict[str, Any]]:
@@ -871,7 +879,11 @@ class RelayService:
         brief["warnings"] = warnings
         brief["linked_projects"] = linked
         brief["checkout"] = checkout
+        # URLs into the project's own repository are not flagged in the brief.
+        remotes = (await self.registry.fingerprint_values(user_id, project_id)).get(KIND_GIT, []) if project_id else []
+        brief["repo_url_prefixes"] = list(repo_url_prefixes(remotes))
         brief["rendered"] = render_brief(brief)
+        police_brief(brief)  # the JSON fields get the same verdicts as the rendered text
         return brief
 
 

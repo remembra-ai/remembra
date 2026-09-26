@@ -60,6 +60,30 @@ SUSPICIOUS_PATTERNS: list[tuple[str, float, str]] = [
     (r"disregard\s+(all\s+)?(previous\s+)?instructions?", 0.35, "instruction_override"),
     (r"forget\s+(all\s+)?previous\s+(context|instructions?)", 0.35, "instruction_override"),
     (r"ignore\s+all\s+previous", 0.35, "instruction_override"),
+    # Variants the four above miss ("ignore the above instructions", "disregard prior
+    # rules"); "previous instructions/context" stays with them so it is not counted twice.
+    (
+        r"\b(ignore|disregard|forget|override|bypass)\s+(all\s+|any\s+|the\s+|your\s+|of\s+)*"
+        r"(prior|above|earlier|preceding|existing|safety|system)\s+"
+        r"(instructions?|context|rules|messages?|directions?|guidelines|prompts?|constraints)",
+        0.35,
+        "instruction_override",
+    ),
+    (
+        r"\b(ignore|disregard|forget|override|bypass)\s+(all\s+|any\s+|the\s+|your\s+|of\s+)*previous\s+"
+        r"(rules|messages?|directions?|guidelines|prompts?|constraints)",
+        0.35,
+        "instruction_override",
+    ),
+    (r"\bnew\s+(system\s+)?instructions?\s*:", 0.35, "instruction_override"),
+    # Concealment: text asking the reading agent to act behind the user's back.
+    (
+        r"\b(do\s*n[o']?t|never|without)\s+(tell(ing)?|mention(ing)?|inform(ing)?|reveal(ing)?)\s+"
+        r"(it\s+|this\s+|anything\s+|that\s+)?(to\s+)?(the\s+)?(user|human|owner|operator)",
+        0.35,
+        "concealment",
+    ),
+    (r"\bkeep\s+(this|it|that)\s+(secret|hidden|quiet)\s+from\b", 0.35, "concealment"),
     # Role manipulation
     (r"you\s+are\s+now\s+a?", 0.30, "role_manipulation"),
     (r"act\s+as\s+if\s+you", 0.25, "role_manipulation"),

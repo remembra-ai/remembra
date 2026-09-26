@@ -162,6 +162,10 @@ class InboxRow(BaseModel):
     ack_note: str | None = None
     ack_result: str | None = None
     expires_at: str | None = None
+    trust_score: float | None = Field(
+        default=None,
+        description="Trust policy score of the message text when it was sent (1.0 = no injection pattern; null on older rows)",
+    )
 
 
 def _inbox_row(row: dict[str, Any]) -> InboxRow:
@@ -212,6 +216,10 @@ async def send_to_inbox(
     response: Response,
 ) -> SendInboxResponse:
     """Write an inbox row addressed to `payload.to_agent`.
+
+    Secrets in the subject, body and metadata are redacted before the row is
+    stored, and the row keeps the trust policy's score of the text; the
+    recipient's session brief withholds a low-trust message.
 
     An inbox message is a relay event: free on every plan (never uses smart
     credits), subject only to the plan's relay burst limit.

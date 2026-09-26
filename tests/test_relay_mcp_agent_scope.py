@@ -15,6 +15,7 @@ from remembra.auth.keys import APIKeyManager, _key_cache
 from remembra.auth.middleware import authenticate_api_key
 from remembra.auth.rbac import RoleManager
 from remembra.client.memory import Memory
+from remembra.security.untrusted import unwrap_untrusted
 from remembra.storage.database import Database
 from tests.agent_api_harness import build_api
 
@@ -48,7 +49,8 @@ def mcp_env(api, monkeypatch):
 
 
 def _j(raw: str) -> dict[str, Any]:
-    return json.loads(raw)
+    # Results that carry stored content are framed as untrusted data (R-14); the JSON is inside.
+    return json.loads(unwrap_untrusted(raw))
 
 
 def test_instructions_tell_every_agent_to_brief_and_close():
