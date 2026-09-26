@@ -22,7 +22,7 @@ def steps(fh: FakeHome, agents: list[str] | None = None, os_id: str = "macos", *
 
 
 def test_a_new_machine_gets_every_step_key_first(fh: FakeHome) -> None:
-    payload = steps(fh, ["claude-code", "codex", "gemini"])
+    payload = steps(fh, ["claude-code", "codex", "cursor"])
     by_title = {s["title"]: s for s in payload["steps"]}
     order = [s["title"] for s in payload["steps"]]
     assert order == [
@@ -44,19 +44,19 @@ def test_a_new_machine_gets_every_step_key_first(fh: FakeHome) -> None:
     assert save["command"] == "remembra-install --all" and save["runs_where"] == "user_terminal"
     assert "Never paste a key into a chat." in save["note"]
     assert by_title["See what connect would change (dry run)"]["command"] == (
-        "remembra-relay connect --agent claude-code --agent codex --agent gemini"
+        "remembra-relay connect --agent claude-code --agent codex --agent cursor"
     )
     write = by_title["Write the hooks"]
     assert (
-        write["command"] == "remembra-relay connect --apply --agent claude-code --agent codex --agent gemini --include-unverified"
+        write["command"] == "remembra-relay connect --apply --agent claude-code --agent codex --agent cursor --include-unverified"
     )
-    assert write["needs_yes"] is True and "gemini" in write["note"]
+    assert write["needs_yes"] is True and "cursor" in write["note"]
     assert by_title["Check"]["command"] == "remembra-relay doctor"
     for step in payload["steps"]:
         assert step["command"] is None or commands.is_allowed(step["command"])
     assert payload["rendered"].rstrip().endswith("Nothing was changed.")
     assert payload["rendered"].startswith("remembra setup · macOS · zsh")
-    assert "  agents: claude-code, codex, gemini" in payload["rendered"]
+    assert "  agents: claude-code, codex, cursor" in payload["rendered"]
     assert all(len(line) <= 76 or commands.is_allowed(line.strip()) for line in payload["rendered"].splitlines())
 
 

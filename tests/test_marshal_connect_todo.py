@@ -48,6 +48,7 @@ def todo(stdout: str) -> list[str]:
 def test_codex_apply_lists_trust_until_codex_has_it(tmp_path: Path) -> None:
     fh = FakeHome(tmp_path)
     fh.credentials()
+    (fh.home / ".codex").mkdir()
     first = connect(fh, "--agent", "codex", "--apply")
     assert first.returncode == 0, first.stderr
     assert todo(first.stdout) == [TRUST]
@@ -66,6 +67,7 @@ def test_codex_apply_lists_trust_until_codex_has_it(tmp_path: Path) -> None:
 def test_one_trusted_hook_is_not_enough(tmp_path: Path) -> None:
     fh = FakeHome(tmp_path)
     fh.credentials()
+    (fh.home / ".codex").mkdir()
     connect(fh, "--agent", "codex", "--apply")
     fh.trust_codex(trusted=["SessionStart", "SessionEnd"])
     assert todo(connect(fh, "--agent", "codex", "--apply").stdout) == [TRUST]
@@ -74,12 +76,13 @@ def test_one_trusted_hook_is_not_enough(tmp_path: Path) -> None:
 def test_a_dry_run_lists_apply_then_trust(tmp_path: Path) -> None:
     fh = FakeHome(tmp_path)
     fh.credentials()
+    (fh.home / ".codex").mkdir()
     dry = connect(fh, "--agent", "codex")
     assert todo(dry.stdout) == [
         "Write the hooks (this was a dry run): `remembra-relay connect --apply --agent codex`.",
         "After --apply: " + TRUST,
     ]
-    assert not (fh.home / ".codex" / "hooks.json").exists()
+    assert not (fh.home / ".codex" / "hooks.json").exists()  # a dry run writes nothing
 
 
 def test_nothing_left_prints_nothing(tmp_path: Path) -> None:
@@ -94,12 +97,14 @@ def test_nothing_left_prints_nothing(tmp_path: Path) -> None:
 def test_missing_key_and_unverified_agents(tmp_path: Path) -> None:
     fh = FakeHome(tmp_path)
     no_key = {"REMEMBRA_API_KEY": "", "REMEMBRA_URL": ""}
-    out = connect(fh, "--agent", "claude-code", "--agent", "gemini", "--apply", env=no_key)
+    (fh.home / ".claude").mkdir()
+    (fh.home / ".cursor").mkdir()
+    out = connect(fh, "--agent", "claude-code", "--agent", "cursor", "--apply", env=no_key)
     assert out.returncode == 1
     assert todo(out.stdout) == [
         "Save your key: run `remembra-install --all` in your own terminal; it asks for the key at a hidden prompt.",
         "Unverified adapters were skipped; to write them anyway:"
-        " `remembra-relay connect --apply --agent gemini --include-unverified`.",
+        " `remembra-relay connect --apply --agent cursor --include-unverified`.",
     ]
     self_hosted = connect(fh, "--agent", "claude-code", "--apply", env={"REMEMBRA_URL": "https://memory.example.org"})
     assert todo(self_hosted.stdout) == [
@@ -112,6 +117,8 @@ def test_missing_key_and_unverified_agents(tmp_path: Path) -> None:
 def test_dry_run_with_unverified_agents(tmp_path: Path) -> None:
     fh = FakeHome(tmp_path)
     fh.credentials()
+    (fh.home / ".claude").mkdir()
+    (fh.home / ".cursor").mkdir()
     out = connect(fh, "--agent", "claude-code", "--agent", "cursor")
     assert todo(out.stdout) == [
         "Write the hooks (this was a dry run): `remembra-relay connect --apply --agent claude-code`.",
