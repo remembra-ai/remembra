@@ -1,0 +1,14 @@
+# Actions are pinned to commit SHAs (see .github/workflows/release.yml).
+# Dependabot keeps those pins current: each update is a reviewable PR that
+# changes the SHA and the version comment together.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci(actions)"

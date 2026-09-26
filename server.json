@@ -1,8 +1,8 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.remembra-ai/remembra",
-  "title": "Remembra — AI Memory Layer",
-  "description": "Persistent AI memory with entity resolution, temporal knowledge graph & 11 MCP tools.",
+  "title": "Remembra Relay",
+  "description": "Cross-agent handoff: the next coding agent starts from the last one's facts, not a blank page.",
   "repository": {
     "url": "https://github.com/remembra-ai/remembra",
     "source": "github"
@@ -12,16 +12,35 @@
   "packages": [
     {
       "registryType": "pypi",
-      "identifier": "remembra",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "remembra-mcp",
       "version": "0.16.0",
+      "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
       },
-      "runtimeHint": "python",
-      "packageArguments": [
+      "environmentVariables": [
         {
-          "type": "positional",
-          "valueHint": "remembra-mcp"
+          "name": "REMEMBRA_API_KEY",
+          "description": "Remembra API key (dashboard: Settings > API keys)",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "REMEMBRA_URL",
+          "description": "Remembra server URL: https://api.remembra.dev, or your self-hosted server",
+          "isRequired": true,
+          "isSecret": false,
+          "format": "string",
+          "default": "https://api.remembra.dev"
+        },
+        {
+          "name": "REMEMBRA_AGENT_ID",
+          "description": "Name this agent signs its handoffs with, e.g. claude-code, codex, cursor",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "string"
         }
       ]
     }

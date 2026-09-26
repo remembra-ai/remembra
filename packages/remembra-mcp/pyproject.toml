@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# Launcher for MCP registry clients. `uvx remembra-mcp` installs this package,
+# which pulls in `remembra[mcp]` at the same version and runs its MCP server
+# over stdio. The version is kept equal to remembra's by
+# tests/test_mcp_registry_package.py; release.yml builds and publishes both.
+[project]
+name = "remembra-mcp"
+version = "0.16.0"
+description = "Remembra MCP server (stdio): session handoffs between coding agents. Installs remembra[mcp]."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+authors = [{ name = "DolphyTech", email = "admin@dolphytech.com" }]
+maintainers = [{ name = "Damany Dolphy", email = "admin@dolphytech.com" }]
+keywords = ["mcp", "model-context-protocol", "remembra", "agents", "memory"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = ["remembra[mcp]==0.16.0"]
+
+[project.scripts]
+remembra-mcp = "remembra_mcp:main"
+
+[project.urls]
+Homepage = "https://remembra.dev"
+Repository = "https://github.com/remembra-ai/remembra"
+Issues = "https://github.com/remembra-ai/remembra/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/remembra_mcp"]
