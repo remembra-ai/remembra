@@ -27,6 +27,7 @@ from typing import Any
 
 import pytest
 
+from remembra.relay.crew.crewd import ZONES_S
 from tests.crew.e2e.harness import WEBHOOK_URL, FakeAgent, World, git, wait_for
 
 pytestmark = pytest.mark.skipif(shutil.which("git") is None, reason="needs git")
@@ -277,9 +278,25 @@ def test_a_loosening_zones_commit_stays_pending_until_a_human_approves(world: Wo
     text = zones.read_text()
     loosened = text.split("  pos:")[0] + "  reports:" + text.split("  reports:")[1]
     zones.write_text(loosened)
+    compiled = world.layout.snapshots / f"{crew}.zones.json"
+    before = (json.loads(compiled.read_text()) if compiled.exists() else {}).get("sha")
     git(wts["main"], "commit", "-qam", "drop the pos zone", env=env)
-    pending = wait_for(lambda: of_type(feed.events(), "zone.change_pending"), timeout=75, interval=1)
-    assert pending and pending[0]["payload"]["loosening"] is True, " ".join(feed.types())
+    # crewd reads the default branch's zones.yml every ZONES_S (30 s): first it compiles the new file,
+    # then it uploads it and the server raises zone.change_pending. Wait on each step, not one fixed
+    # deadline, and say which step did not happen (a failed upload is retried on the next tick).
+    picked = wait_for(
+        lambda: compiled.exists() and json.loads(compiled.read_text()).get("sha") not in (None, before),
+        timeout=ZONES_S + 30,
+        interval=1,
+    )
+    status = json.loads(world.layout.status_file.read_text()) if world.layout.status_file.exists() else {}
+    assert picked, f"crewd did not compile the committed zones.yml (status {status})"
+    assert world.server is not None and world.server.proc is not None and world.server.proc.poll() is None, (
+        "the e2e server exited during the test; see server/server.log"
+    )
+    pending = wait_for(lambda: of_type(feed.events(), "zone.change_pending"), timeout=3 * ZONES_S, interval=1)
+    status = json.loads(world.layout.status_file.read_text()) if world.layout.status_file.exists() else {}
+    assert pending and pending[0]["payload"]["loosening"] is True, f"{' '.join(feed.types())} (crewd status {status})"
     assert any(z["slug"] == "pos" for z in world.snapshot(crew)["zones"])  # policy unchanged
     b = world.agent("B", wts["wt-b"])
     b.start()
