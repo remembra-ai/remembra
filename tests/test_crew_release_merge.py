@@ -103,6 +103,28 @@ async def test_reserved_sender_is_refused_before_anything_is_stored(h: Harness) 
     assert (await cursor.fetchone())[0] == 0
 
 
+async def test_an_old_client_with_a_reserved_word_in_its_agent_id_is_told_what_to_change(h: Harness) -> None:
+    """0.15/0.16 MCP clients send REMEMBRA_AGENT_ID as the sender; one named like 'remembra-bridge' or
+    'mani-laptop' is refused (breaking in 0.17.0), with a message that says how to fix it."""
+    owner = await h.create_user("merge-reserved-old@example.com")
+    key = await _key(h, owner)
+    for name in ("remembra-bridge", "mani-laptop", "system-bot"):
+        resp = await h.client.post(
+            "/api/v1/inbox/send",
+            headers={"X-API-Key": key},
+            json={"to_agent": "claude-code", "subject": "s", "body": "b", "from_agent": name},
+        )
+        assert resp.status_code == 422, resp.text
+        message = resp.json()["detail"]["message"]
+        assert name in message and "REMEMBRA_AGENT_ID" in message
+    ok = await h.client.post(
+        "/api/v1/inbox/send",
+        headers={"X-API-Key": key},
+        json={"to_agent": "claude-code", "subject": "s", "body": "b", "from_agent": "claude-code"},
+    )
+    assert ok.status_code == 201, ok.text
+
+
 async def test_idempotent_resend_returns_the_stored_row(h: Harness) -> None:
     manager: InboxManager = h.app.state.inbox_manager
     first = await manager.send("u1", "codex", "claude-code", "s", f"b {SECRET}", inbox_id="inbox_fixed")

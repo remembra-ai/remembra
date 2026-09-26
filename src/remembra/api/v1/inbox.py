@@ -273,7 +273,11 @@ async def send_to_inbox(
         from_agent = getattr(current_user, "agent_id", None) or payload.from_agent or "unknown"
         sender_kind = "agent"
         if is_reserved_sender(from_agent):
-            raise _reserved_422(f"sender name '{from_agent}' is reserved for the server")
+            raise _reserved_422(
+                f"sender name '{from_agent}' is reserved for the server: an agent's name may not contain"
+                " 'mani', 'human', 'system' or 'remembra' as a word. Set REMEMBRA_AGENT_ID (or from_agent) to"
+                " another id, such as 'claude-code' or 'codex'."
+            )
         if payload.kind in RESERVED_KINDS:
             raise _reserved_422(f"kind '{payload.kind}' is reserved for the server")
     project_id = _send_project(current_user, _requested_project(payload))

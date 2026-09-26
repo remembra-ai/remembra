@@ -64,6 +64,14 @@ release.
   the account's name removed. Events in that crew's log that carry the account's identity keep their
   place and chain links and lose their content, so the chain still verifies.
 
+### Changed (breaking)
+- **Reserved sender names in the agent inbox.** An agent (API key) can no longer send inbox messages as a
+  name that contains `mani`, `human`, `system` or `remembra` as a word, look-alike letters included:
+  `POST /api/v1/inbox/send` answers 422 `reserved_sender` where 0.16 stored the message. MCP clients from
+  0.15 and 0.16 send `REMEMBRA_AGENT_ID` as the sender, so an agent id such as `remembra-bridge`,
+  `system-bot` or `mani-laptop` stops being able to send: set `REMEMBRA_AGENT_ID` to another id (the
+  error message says so). Dashboard logins still send as `human`.
+
 ### Upgrading
 - The main database gets one additive migration, **v5** (project and crew columns on the agent inbox),
   even with Crew mode off. A message's own `metadata.project_id` is copied into the new column; untagged
