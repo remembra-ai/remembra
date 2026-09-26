@@ -8,10 +8,12 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 def _scrub_secrets(value: str) -> str:
-    """Redact credentials (SEC-23). Imported lazily: remembra.security imports storage, which imports these models."""
+    """Remove terminal control characters (CLI-02) and redact credentials (SEC-23).
+    Imported lazily: remembra.security imports storage, which imports these models."""
     from remembra.security.secrets import scrub
+    from remembra.security.untrusted import strip_controls
 
-    return scrub(value)
+    return scrub(strip_controls(value))
 
 
 # Agent-hygiene types (AGT-5): "checkpoint" = short-lived progress note (default
@@ -601,7 +603,8 @@ class SupersedeRequest(BaseModel):
     new_content: str = Field(
         ...,
         min_length=1,
-        description="The new content that supersedes the old memory",
+        max_length=50000,
+        description="The new content that supersedes the old memory (max 50,000 characters; the plan's per-store limit applies)",
     )
     reason: str = Field(
         ...,

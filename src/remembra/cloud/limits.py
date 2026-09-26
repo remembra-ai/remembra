@@ -201,11 +201,25 @@ async def _memory_cap_guard(
     meter: UsageMeter,
     account: AccountState,
     adding: int,
+    *,
+    reserve: bool = True,
 ) -> None:
-    """Usage headers + warning emails; 429 when ``adding`` memories would pass the cap."""
+    """Usage headers + warning emails; 429 when ``adding`` memories would pass the cap.
+
+    BILL-10: the check and a reservation of the ``adding`` slots are atomic
+    (:meth:`UsageMeter.reserve_memory_slots`), so concurrent writes see each
+    other's slots before any row lands. ``reserve=False`` checks only (relay
+    rows, which never count toward the cap). The reservation is remembered on
+    the request and released by :func:`release_memory_slot_holds` (called by
+    :func:`record_store_usage`) once the write's rows are stored.
+    """
     user_id = account.user_id
-    stored = await meter.count_pool_memories(account)
     cap = max(1, account.memory_cap)
+    fits, stored, hold_id = await meter.reserve_memory_slots(account, adding, cap=cap, hold=reserve)
+    if hold_id is not None:
+        holds: list[str] = getattr(request.state, "memory_slot_holds", None) or []
+        holds.append(hold_id)
+        request.state.memory_slot_holds = holds
     usage_percent = round(stored / cap * 100, 1)
 
     if response is not None:
@@ -226,7 +240,7 @@ async def _memory_cap_guard(
         except Exception as e:
             logger.warning("failed_to_queue_warning_email", error=str(e))
 
-    if adding > 0 and stored + adding > cap:
+    if adding > 0 and not fits:
         logger.warning("memory_cap_reached", user_id=user_id, plan=account.tier.value, requested=adding)
         if user_id not in _warned_users_limit:
             try:
@@ -387,23 +401,68 @@ async def _project_guard(meter: UsageMeter, account: AccountState, writer_id: st
         )
 
 
+def _unenriched_cap_reached(account: AccountState, cap: int, requested: int) -> HTTPException:
+    logger.warning("unenriched_daily_cap_reached", user_id=account.user_id, plan=account.tier.value, requested=requested)
+    return HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail=(
+            f"Daily limit reached: {cap:,} stores without enrichment per day on the "
+            f"{account.limits.display_name} plan. It resets at 00:00 UTC; Solo has no daily limit."
+        ),
+        headers={"Retry-After": "3600", "X-RateLimit-Limit": str(cap), "X-RateLimit-Remaining": "0"},
+    )
+
+
 async def _unenriched_guard(meter: UsageMeter, account: AccountState, texts: Sequence[str]) -> None:
     """Free: 429 past the daily cap on unenriched writes; their embedding cost feeds the free breaker."""
     if not texts:
         return
     cap = account.limits.max_unenriched_writes_per_day
     if cap is not None and account.free_group and not await meter.take_unenriched_writes(account, len(texts)):
-        logger.warning("unenriched_daily_cap_reached", user_id=account.user_id, plan=account.tier.value, requested=len(texts))
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"Daily limit reached: {cap:,} stores without enrichment per day on the "
-                f"{account.limits.display_name} plan. It resets at 00:00 UTC; Solo has no daily limit."
-            ),
-            headers={"Retry-After": "3600", "X-RateLimit-Limit": str(cap), "X-RateLimit-Remaining": "0"},
-        )
+        raise _unenriched_cap_reached(account, cap, len(texts))
     if account.free_group:
         await meter.record_embedding_spend(account, list(texts))
+
+
+@dataclass
+class UnenrichedWriteHold:
+    """Unenriched writes counted against the Free daily cap BEFORE a write whose size is known only after it."""
+
+    meter: UsageMeter
+    account: AccountState
+    taken: int
+    day: str
+
+    async def commit(self, texts: Sequence[str]) -> None:
+        """The write stored ``texts``: their embedding cost feeds the free breaker."""
+        if self.account.free_group and texts:
+            await self.meter.record_embedding_spend(self.account, list(texts))
+
+    async def release(self) -> None:
+        """The write stored nothing: give the counted writes back."""
+        taken, self.taken = self.taken, 0
+        await self.meter.release_unenriched_writes(self.account, taken, day=self.day)
+
+
+async def hold_unenriched_writes(request: Request, user_id: str, count: int = 1) -> UnenrichedWriteHold | None:
+    """Count ``count`` unenriched writes now (429 past the Free daily cap); ``commit`` or ``release`` after.
+
+    For writes that learn only while storing whether they stored anything (a
+    session close that may be an unchanged re-close, BILL-8). None without
+    cloud metering.
+    """
+    meter = _get_meter_or_none(request)
+    if meter is None:
+        return None
+    account = await meter.get_account(user_id)
+    day = now_utc().strftime("%Y-%m-%d")
+    cap = account.limits.max_unenriched_writes_per_day
+    taken = 0
+    if cap is not None and account.free_group and count > 0:
+        if not await meter.take_unenriched_writes(account, count, day=day):
+            raise _unenriched_cap_reached(account, cap, count)
+        taken = count
+    return UnenrichedWriteHold(meter=meter, account=account, taken=taken, day=day)
 
 
 async def relay_guard(request: Request, response: Response | None, user_id: str) -> None:
@@ -480,7 +539,9 @@ async def gate_write(
                 ),
             )
 
-    await _memory_cap_guard(request, response, meter, account, len(contents) if memories_added is None else memories_added)
+    await _memory_cap_guard(
+        request, response, meter, account, len(contents) if memories_added is None else memories_added, reserve=not relay
+    )
     await _project_guard(meter, account, user_id, project_ids)
     if relay:
         await relay_guard(request, response, user_id)
@@ -558,11 +619,27 @@ async def gate_write(
 # -----------------------------------------------------------------------
 
 
+async def release_memory_slot_holds(request: Request) -> None:
+    """The request's write finished: release the memory slots its gates reserved (BILL-10).
+
+    Whatever it stored is counted from the table now; slots it did not use
+    (failed items, duplicates, relay rows) are free again at once.
+    """
+    meter = _get_meter_or_none(request)
+    holds: list[str] = getattr(request.state, "memory_slot_holds", None) or []
+    if meter is None or not holds:
+        return
+    request.state.memory_slot_holds = []
+    for hold_id in holds:
+        await meter.release_memory_slots(hold_id)
+
+
 async def record_store_usage(request: Request, user_id: str, count: int = 1) -> None:
-    """Record ``count`` store events in usage metering (no-op if cloud disabled)."""
+    """Record ``count`` store events in usage metering (no-op if cloud disabled); releases the request's slot holds."""
     meter = _get_meter_or_none(request)
     if meter is not None and count > 0:
         await meter.record_store(user_id, count)
+    await release_memory_slot_holds(request)
 
 
 async def record_relay_usage(request: Request, user_id: str, count: int = 1) -> None:

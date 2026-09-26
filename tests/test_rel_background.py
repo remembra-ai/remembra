@@ -187,7 +187,7 @@ async def test_worker_defers_while_provider_down_and_drains_after_recovery(stack
         stack["clock"],
     )
     for i in range(3):
-        await _save(db, f"00000000-0000-0000-0000-00000000000{i}", content=f"fact number {i} about Kingston")
+        await _save(db, f"00000000-0000-0000-0000-00000000000{i}", content=f"fact number {i} about Lisbon")
     queue = PendingEmbeddingQueue(db)
     for i in range(3):
         await queue.enqueue(f"00000000-0000-0000-0000-00000000000{i}", "u1", reason="provider_down")
@@ -218,9 +218,9 @@ async def test_worker_defers_while_provider_down_and_drains_after_recovery(stack
     # Vectors + full payload are in Qdrant; rows are keyword-searchable.
     point = await qdrant.get_by_id("00000000-0000-0000-0000-000000000001")
     assert point is not None
-    assert point["content"] == "fact number 1 about Kingston"
+    assert point["content"] == "fact number 1 about Lisbon"
     assert point["user_id"] == "u1" and point["metadata"] == {"k": "v"}
-    fts = await db.search_fts("Kingston", user_id="u1", project_id="default", limit=10)
+    fts = await db.search_fts("Lisbon", user_id="u1", project_id="default", limit=10)
     assert len(fts) == 3
 
 

@@ -21,11 +21,11 @@ class TestIPv4NotRedacted:
     """IPv4 addresses must flow through unredacted in both scan and redact."""
 
     def test_bare_ipv4_not_flagged(self):
-        result = scan_for_pii("Server IP is 178.156.226.84")
+        result = scan_for_pii("Server IP is 203.0.113.10")
         assert not result.has_pii, f"IPv4 should not be flagged, got: {result.matches}"
 
     def test_bare_ipv4_not_redacted(self):
-        content = "Coolify server IP is 178.156.226.84 — deploy via ssh coolify"
+        content = "Build server IP is 203.0.113.10 — deploy via ssh build-host"
         assert redact_pii(content) == content
 
     def test_localhost_and_private_ranges_not_redacted(self):
@@ -34,12 +34,12 @@ class TestIPv4NotRedacted:
             assert redact_pii(content) == content, f"IP {ip} was redacted"
 
     def test_ipv4_in_url_not_redacted(self):
-        content = "http://178.156.226.84:8000/health"
+        content = "http://203.0.113.10:8000/health"
         assert redact_pii(content) == content
 
     def test_detector_redact_mode_leaves_ipv4_intact(self):
         detector = PIIDetector(enabled=True, mode="redact")
-        result = detector.scan("deploy to 178.156.226.84")
+        result = detector.scan("deploy to 203.0.113.10")
         # No PII → no redacted_content substitution
         assert not result.has_pii
         assert result.redacted_content is None
@@ -78,9 +78,9 @@ class TestRealPIIStillRedacted:
         assert "4111 1111 1111 1111" not in out
 
     def test_mixed_ip_and_password_only_redacts_password(self):
-        content = "server 178.156.226.84 password: s3cretValue99"
+        content = "server 203.0.113.10 password: s3cretValue99"
         out = redact_pii(content)
-        assert "178.156.226.84" in out, "IP should survive"
+        assert "203.0.113.10" in out, "IP should survive"
         assert "s3cretValue99" not in out, "Password should be redacted"
 
 
@@ -94,14 +94,14 @@ class TestStorePathRoundTrip:
 
     def test_owner_deploy_config_survives(self):
         detector = PIIDetector(enabled=True, mode="redact")
-        original = "Coolify server IP is 178.156.226.84 — deploy via ssh coolify"
+        original = "Build server IP is 203.0.113.10 — deploy via ssh build-host"
 
         pii_result = detector.scan(original, source="user_input")
         # Mirror the branch in memories.py: only substitute when has_pii+redacted_content
         stored = pii_result.redacted_content if (pii_result.has_pii and pii_result.redacted_content) else original
 
         assert stored == original
-        assert "178.156.226.84" in stored
+        assert "203.0.113.10" in stored
 
 
 def test_compact_dates_are_not_bank_accounts():

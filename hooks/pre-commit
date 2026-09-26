@@ -72,6 +72,21 @@ if [ -f "pyproject.toml" ]; then
 fi
 
 # ============================================
+# CHECK 3: Remembra API keys in staged files (LEAK-2)
+# ============================================
+# "rem_" + 40 or more random characters (mixed case with digits). Tests build
+# fake keys at runtime; a real one must be revoked, not just deleted, because
+# a commit is published the moment it is pushed. The key is never printed.
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM || true)
+for file in $STAGED_FILES; do
+    if git show ":$file" 2>/dev/null | grep -aoE '(^|[^A-Za-z0-9_])rem_[A-Za-z0-9_-]{40,}' | grep '[A-Z]' | grep '[a-z]' | grep -q '[0-9]'; then
+        echo -e "${RED}❌ BLOCKED: $file contains what looks like a Remembra API key (rem_...)${NC}"
+        echo -e "   ${YELLOW}Remove it and revoke the key on the server; tests assemble fake keys at runtime.${NC}"
+        ERRORS=1
+    fi
+done
+
+# ============================================
 # FINAL RESULT
 # ============================================
 if [ $ERRORS -eq 1 ]; then

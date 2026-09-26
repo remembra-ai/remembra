@@ -2997,6 +2997,9 @@ class Database:
         entity_id: str,
         as_of: datetime | None = None,
         include_superseded: bool = False,
+        *,
+        user_id: str | None = None,
+        project_id: str | None = None,
     ) -> list[Relationship]:
         """Get relationships for an entity with temporal filtering.
 
@@ -3004,14 +3007,32 @@ class Database:
             entity_id: Entity to get relationships for
             as_of: Optional point-in-time filter. Returns relationships valid at this time.
             include_superseded: If True, include superseded relationships (default: False)
+            user_id: If set, only edges whose BOTH ends are this user's entities (TI-H1)
+            project_id: If set (with user_id), both ends must also be in this project
         """
-        cursor = await self.conn.execute(
+        if user_id:
+            # Scope by both endpoints: an edge is visible only if the caller could
+            # read each entity it names.
+            query = """
+                SELECT r.* FROM relationships r
+                JOIN entities fe ON fe.id = r.from_entity_id
+                JOIN entities te ON te.id = r.to_entity_id
+                WHERE (r.from_entity_id = ? OR r.to_entity_id = ?)
+                  AND fe.user_id = ? AND te.user_id = ?
             """
-            SELECT * FROM relationships 
-            WHERE from_entity_id = ? OR to_entity_id = ?
-            """,
-            (entity_id, entity_id),
-        )
+            params: list[Any] = [entity_id, entity_id, user_id, user_id]
+            if project_id:
+                query += " AND fe.project_id = ? AND te.project_id = ?"
+                params += [project_id, project_id]
+            cursor = await self.conn.execute(query, params)
+        else:
+            cursor = await self.conn.execute(
+                """
+                SELECT * FROM relationships 
+                WHERE from_entity_id = ? OR to_entity_id = ?
+                """,
+                (entity_id, entity_id),
+            )
         rows = await cursor.fetchall()
 
         relationships = []

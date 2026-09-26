@@ -68,6 +68,15 @@ FOUNDING_LAPSE_GRACE = timedelta(days=14)
 # A pending Founding checkout hold is never extended, and an account gets one per this window.
 FOUNDING_HOLD_WINDOW = timedelta(hours=24)
 
+# BILL-10: memory slots a write reserved are released when it finishes; a write that
+# died without finishing (or a route that never reports) holds them this long at most.
+MEMORY_SLOT_HOLD_TTL = timedelta(seconds=90)
+
+# BILL-2: a Paddle event claim older than this was left by a crash and may be taken over.
+WEBHOOK_CLAIM_STALE = timedelta(minutes=10)
+# Processed Paddle event ids are kept this long (Paddle retries a delivery for 3 days).
+WEBHOOK_EVENT_RETENTION = timedelta(days=30)
+
 
 class FoundingHoldLimitError(Exception):
     """This account's Founding checkout hold expired unpaid less than a day ago (``retry_at``: when a new one is allowed)."""
@@ -297,6 +306,44 @@ class UsageMeter:
                 name TEXT PRIMARY KEY,
                 applied_at TEXT NOT NULL
             );
+
+            -- BILL-2: one row per Paddle event (event_id) taken for processing;
+            -- a repeat delivery or replay of a finished one is a duplicate.
+            CREATE TABLE IF NOT EXISTS paddle_webhook_events (
+                event_id TEXT PRIMARY KEY,
+                event_type TEXT,
+                occurred_at TEXT,
+                status TEXT NOT NULL,
+                outcome TEXT,
+                claimed_at TEXT NOT NULL,
+                finished_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_paddle_webhook_events_finished
+                ON paddle_webhook_events(finished_at);
+
+            -- BILL-10: memory slots reserved by a write in flight (one row per
+            -- gate), counted toward the billing account's (user_id) memory cap
+            -- until the write finishes (or the row expires).
+            CREATE TABLE IF NOT EXISTS cloud_memory_holds (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                slots INTEGER NOT NULL,
+                expires_at TEXT NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_cloud_memory_holds_user
+                ON cloud_memory_holds(user_id, expires_at);
+
+            -- BILL-2: per Paddle subscription, the newest event applied and
+            -- when (event time) a cancel or refund ended it.
+            CREATE TABLE IF NOT EXISTS paddle_subscription_events (
+                subscription_id TEXT PRIMARY KEY,
+                last_event_at TEXT,
+                ended_at TEXT,
+                ended_reason TEXT,
+                updated_at TEXT NOT NULL
+            );
         """)
         await self._db.conn.commit()
 
@@ -321,6 +368,10 @@ class UsageMeter:
         await self._add_column("cloud_usage_daily", "llm_usd REAL DEFAULT 0")
         # R-27: when a new yearly bank unlocks in full (NULL = no hold).
         await self._add_column("cloud_tenants", "bank_unlock_at TEXT")
+        # BILL-4: the end of the last paid billing period (transaction.completed),
+        # and when the held subscription went past due (cleared by the next payment).
+        await self._add_column("cloud_tenants", "paid_through TEXT")
+        await self._add_column("cloud_tenants", "past_due_at TEXT")
         # Also created by the versioned migrations; kept here for databases that
         # only run the metering schema.
         await self._db.conn.executescript(FOUNDING_HOLDS_DDL)
@@ -441,14 +492,17 @@ class UsageMeter:
         email: str | None = None,
         name: str | None = None,
         bank_unlock_at: datetime | None = None,
+        paid_through: datetime | None = None,
     ) -> None:
         """Apply a verified billing event: plan, interval, seats, yearly-bank anchor.
 
         ``founding`` marks the account as holding the Founding 100 price (use
         :meth:`claim_founding`, which enforces the cap). ``bank_unlock_at``
         holds a NEW yearly bank back until then (R-27); renewals leave it.
-        Falling back to Free clears the interval, the seat count and the bank
-        hold, and a founder's seat becomes a 14-day lapse hold.
+        ``paid_through`` is the end of the period a payment covered (BILL-4);
+        a paid event also ends a past-due state. Falling back to Free clears
+        the interval, the seat count, the bank hold and the payment state, and
+        a founder's seat becomes a 14-day lapse hold.
         """
         await self.register_tenant(
             user_id,
@@ -464,7 +518,7 @@ class UsageMeter:
                 await self.end_founding(user_id)
                 await self._db.conn.execute(
                     "UPDATE cloud_tenants SET billing_interval = NULL, seats = NULL, period_anchor = NULL,"
-                    " bank_unlock_at = NULL, updated_at = ? WHERE user_id = ?",
+                    " bank_unlock_at = NULL, paid_through = NULL, past_due_at = NULL, updated_at = ? WHERE user_id = ?",
                     (now.isoformat(), user_id),
                 )
         else:
@@ -481,6 +535,8 @@ class UsageMeter:
                     period_anchor = ?,
                     founding = CASE WHEN ? THEN 1 ELSE COALESCE(founding, 0) END,
                     bank_unlock_at = COALESCE(?, bank_unlock_at),
+                    paid_through = COALESCE(?, paid_through),
+                    past_due_at = NULL,
                     updated_at = ?
                 WHERE user_id = ?
                 """,
@@ -490,10 +546,19 @@ class UsageMeter:
                     anchor.isoformat() if anchor else tenant.get("period_anchor"),
                     1 if founding else 0,
                     bank_unlock_at.isoformat() if bank_unlock_at else None,
+                    paid_through.astimezone(UTC).isoformat() if paid_through else None,
                     now.isoformat(),
                     user_id,
                 ),
             )
+        await self._db.conn.commit()
+
+    async def set_past_due(self, user_id: str, since: datetime) -> None:
+        """The held subscription's renewal payment failed (BILL-4); the next paid event clears it."""
+        await self._db.conn.execute(
+            "UPDATE cloud_tenants SET past_due_at = COALESCE(past_due_at, ?), updated_at = ? WHERE user_id = ?",
+            (since.astimezone(UTC).isoformat(), now_utc().isoformat(), user_id),
+        )
         await self._db.conn.commit()
 
     async def founding_redemptions(self) -> int:
@@ -685,6 +750,10 @@ class UsageMeter:
                 # month's worth is spendable (R-27), then the rest unlocks.
                 bank_unlock_at = unlock
                 released = min(released, int(settings.annual_credit_initial_months))
+            if self._renewal_unpaid(tenant, now):
+                # BILL-4: the year's renewal is not paid (Paddle dunning runs for
+                # weeks): only a month's worth until the payment arrives.
+                released = min(released, int(settings.annual_credit_initial_months))
             credit_limit = limits.credit_allowance(interval, released)
         else:
             period = CreditPeriod.monthly(now)
@@ -715,6 +784,14 @@ class UsageMeter:
             full_credit_limit=full_credit_limit,
             bank_unlock_at=bank_unlock_at,
         )
+
+    @staticmethod
+    def _renewal_unpaid(tenant: dict[str, Any] | None, now: datetime) -> bool:
+        """Past the end of the last paid period, or (no period recorded) past due (BILL-4)."""
+        paid_through = _parse_dt((tenant or {}).get("paid_through"))
+        if paid_through is not None:
+            return now >= paid_through
+        return bool((tenant or {}).get("past_due_at"))
 
     @staticmethod
     def _unverified_cap_applies(
@@ -1027,6 +1104,161 @@ class UsageMeter:
         await self._db.conn.commit()
         return bool(cursor.rowcount)
 
+    # -----------------------------------------------------------------------
+    # Paddle webhook dedupe and ordering (BILL-2)
+    # -----------------------------------------------------------------------
+
+    async def claim_webhook_event(self, event_id: str, event_type: str | None, occurred_at: datetime | None) -> str:
+        """Take a Paddle event for processing: ``claimed``, ``duplicate`` (already done) or ``busy``.
+
+        ``busy`` means another delivery of the same event is being processed
+        right now (answer non-2xx so Paddle retries). A claim left behind by a
+        crash is taken over after :data:`WEBHOOK_CLAIM_STALE`. Finished rows are
+        pruned after :data:`WEBHOOK_EVENT_RETENTION` (Paddle retries for 3 days).
+        """
+        now = now_utc()
+        async with self._tx():
+            await self._db.conn.execute(
+                "DELETE FROM paddle_webhook_events WHERE finished_at IS NOT NULL AND finished_at < ?",
+                ((now - WEBHOOK_EVENT_RETENTION).isoformat(),),
+            )
+            cursor = await self._db.conn.execute(
+                "INSERT OR IGNORE INTO paddle_webhook_events (event_id, event_type, occurred_at, status, claimed_at)"
+                " VALUES (?, ?, ?, 'processing', ?)",
+                (event_id, event_type, occurred_at.isoformat() if occurred_at else None, now.isoformat()),
+            )
+            if cursor.rowcount:
+                return "claimed"
+            cursor = await self._db.conn.execute(
+                "SELECT status, claimed_at FROM paddle_webhook_events WHERE event_id = ?", (event_id,)
+            )
+            row = await cursor.fetchone()
+            if row is None or row[0] != "processing":
+                return "duplicate"
+            claimed_at = _parse_dt(row[1])
+            if claimed_at is not None and now - claimed_at < WEBHOOK_CLAIM_STALE:
+                return "busy"
+            await self._db.conn.execute(
+                "UPDATE paddle_webhook_events SET claimed_at = ? WHERE event_id = ?", (now.isoformat(), event_id)
+            )
+            return "claimed"
+
+    async def finish_webhook_event(self, event_id: str, outcome: str) -> None:
+        """Mark a claimed event done.
+
+        One that matched no account, or that was stale (it changed no plan), is
+        forgotten, so a later replay from Paddle is processed again.
+        """
+        if outcome in ("unmatched", "stale"):
+            await self.release_webhook_event(event_id)
+            return
+        await self._db.conn.execute(
+            "UPDATE paddle_webhook_events SET status = 'done', outcome = ?, finished_at = ? WHERE event_id = ?",
+            (outcome, now_utc().isoformat(), event_id),
+        )
+        await self._db.conn.commit()
+
+    async def release_webhook_event(self, event_id: str) -> None:
+        """Drop a claim whose processing failed, so Paddle's retry is processed."""
+        await self._db.conn.execute("DELETE FROM paddle_webhook_events WHERE event_id = ?", (event_id,))
+        await self._db.conn.commit()
+
+    async def _subscription_event_row(self, subscription_id: str) -> tuple[datetime | None, datetime | None] | None:
+        cursor = await self._db.conn.execute(
+            "SELECT last_event_at, ended_at FROM paddle_subscription_events WHERE subscription_id = ?", (subscription_id,)
+        )
+        row = await cursor.fetchone()
+        return (_parse_dt(row[0]), _parse_dt(row[1])) if row else None
+
+    async def subscription_event_is_stale(self, subscription_id: str, occurred_at: datetime | None) -> bool:
+        """Whether an event that would (re)activate or re-plan ``subscription_id`` must be ignored.
+
+        Stale: the subscription was ended by a cancel or refund and the event
+        did not occur after that (an event without a time never re-activates
+        it), or the event occurred before the newest event already applied.
+        """
+        return await self.subscription_event_staleness(subscription_id, occurred_at) is not None
+
+    async def subscription_event_staleness(self, subscription_id: str, occurred_at: datetime | None) -> str | None:
+        """Why an event of ``subscription_id`` is stale: ``ended``, ``superseded`` or None (not stale).
+
+        ``ended``: a cancel or refund ended the subscription at or after the
+        event. ``superseded``: only a newer event of the (still live)
+        subscription was already applied.
+        """
+        row = await self._subscription_event_row(subscription_id)
+        if row is None:
+            return None
+        last_event_at, ended_at = row
+        if ended_at is not None and (occurred_at is None or occurred_at <= ended_at):
+            return "ended"
+        if occurred_at is not None and last_event_at is not None and occurred_at < last_event_at:
+            return "superseded"
+        return None
+
+    async def record_late_payment(self, user_id: str, paid_through: datetime, occurred_at: datetime | None) -> bool:
+        """Record the period a completed payment covers when the payment arrived after a newer event (BILL-2 x BILL-4).
+
+        The late event changes no plan, interval or seats, but the renewal WAS
+        paid: ``paid_through`` only moves forward, and only to a date still in
+        the future (an old payment releases nothing). A past-due state that
+        began at or before the payment is cleared. Returns True when recorded.
+        """
+        now = now_utc()
+        if paid_through <= now:
+            return False
+        async with self._tx():
+            tenant = await self.get_tenant(user_id)
+            if tenant is None:
+                return False
+            existing = _parse_dt(tenant.get("paid_through"))
+            if existing is not None and paid_through <= existing:
+                return False
+            past_due = _parse_dt(tenant.get("past_due_at"))
+            clear = past_due is not None and (occurred_at is None or past_due <= occurred_at)
+            await self._db.conn.execute(
+                "UPDATE cloud_tenants SET paid_through = ?, past_due_at = CASE WHEN ? THEN NULL ELSE past_due_at END,"
+                " updated_at = ? WHERE user_id = ?",
+                (paid_through.astimezone(UTC).isoformat(), 1 if clear else 0, now.isoformat(), user_id),
+            )
+        return True
+
+    async def note_subscription_event(self, subscription_id: str, occurred_at: datetime | None) -> None:
+        """Record that an event of ``subscription_id`` that occurred at ``occurred_at`` was applied."""
+        now = now_utc().isoformat()
+        at = occurred_at.isoformat() if occurred_at else None
+        async with self._tx():
+            row = await self._subscription_event_row(subscription_id)
+            if row is None:
+                await self._db.conn.execute(
+                    "INSERT INTO paddle_subscription_events (subscription_id, last_event_at, updated_at) VALUES (?, ?, ?)",
+                    (subscription_id, at, now),
+                )
+            elif occurred_at is not None and (row[0] is None or occurred_at > row[0]):
+                await self._db.conn.execute(
+                    "UPDATE paddle_subscription_events SET last_event_at = ?, updated_at = ? WHERE subscription_id = ?",
+                    (at, now, subscription_id),
+                )
+
+    async def note_subscription_ended(self, subscription_id: str, occurred_at: datetime | None, reason: str) -> None:
+        """Record that a cancel or refund ended ``subscription_id`` (event time, else now); the latest end is kept."""
+        now = now_utc()
+        ended = occurred_at or now
+        async with self._tx():
+            row = await self._subscription_event_row(subscription_id)
+            if row is None:
+                await self._db.conn.execute(
+                    "INSERT INTO paddle_subscription_events (subscription_id, ended_at, ended_reason, updated_at)"
+                    " VALUES (?, ?, ?, ?)",
+                    (subscription_id, ended.isoformat(), reason, now.isoformat()),
+                )
+            elif row[1] is None or ended > row[1]:
+                await self._db.conn.execute(
+                    "UPDATE paddle_subscription_events SET ended_at = ?, ended_reason = ?, updated_at = ?"
+                    " WHERE subscription_id = ?",
+                    (ended.isoformat(), reason, now.isoformat(), subscription_id),
+                )
+
     async def revenue_for_month(self, month: str) -> float | None:
         """Net paid revenue recorded for ``month`` (YYYY-MM), or None when nothing is known."""
         cursor = await self._db.conn.execute(
@@ -1100,8 +1332,8 @@ class UsageMeter:
     # Unenriched writes (atomic / degraded / relay): daily cap + embedding spend
     # -----------------------------------------------------------------------
 
-    async def take_unenriched_writes(self, account: AccountState, count: int) -> bool:
-        """Count ``count`` unenriched writes for today; False when the plan's daily cap would be passed.
+    async def take_unenriched_writes(self, account: AccountState, count: int, *, day: str | None = None) -> bool:
+        """Count ``count`` unenriched writes for today (or ``day``); False when the plan's daily cap would be passed.
 
         Atomic (check and increment in one UPDATE), so concurrent requests
         cannot overshoot the cap. Plans without a cap always succeed.
@@ -1109,7 +1341,7 @@ class UsageMeter:
         if count <= 0:
             return True
         cap = account.limits.max_unenriched_writes_per_day
-        today = now_utc().strftime("%Y-%m-%d")
+        today = day or now_utc().strftime("%Y-%m-%d")
         async with self._tx():
             await self._db.conn.execute(
                 "INSERT OR IGNORE INTO cloud_usage_daily (user_id, date) VALUES (?, ?)", (account.user_id, today)
@@ -1127,6 +1359,17 @@ class UsageMeter:
                 (count, account.user_id, today, count, cap),
             )
             return bool(cursor.rowcount)
+
+    async def release_unenriched_writes(self, account: AccountState, count: int, *, day: str) -> None:
+        """Give back ``count`` writes taken on ``day`` for a write that stored nothing."""
+        if count <= 0:
+            return
+        await self._db.conn.execute(
+            "UPDATE cloud_usage_daily SET unenriched_writes = MAX(0, COALESCE(unenriched_writes, 0) - ?)"
+            " WHERE user_id = ? AND date = ?",
+            (count, account.user_id, day),
+        )
+        await self._db.conn.commit()
 
     @staticmethod
     def embedding_usd(texts: list[str], model: str | None = None) -> float:
@@ -1454,6 +1697,48 @@ class UsageMeter:
             [*pool, *RELAY_WRITTEN_TYPES],
         )
         return total - relay
+
+    async def reserve_memory_slots(
+        self, account: AccountState, adding: int, *, cap: int, hold: bool = True
+    ) -> tuple[bool, int, str | None]:
+        """Check (and with ``hold``, reserve) ``adding`` memory slots under ``cap`` atomically (BILL-10).
+
+        Returns ``(fits, in_use, hold_id)``: ``in_use`` is the stored rows
+        counted toward the cap plus the slots reserved by writes still in
+        flight; ``hold_id`` names the new reservation (None when nothing was
+        reserved). The count and the reservation run in one transaction, so
+        concurrent writes cannot all pass a count taken before any of them
+        stored. The writer releases the reservation when it finishes
+        (:meth:`release_memory_slots`); otherwise it expires after
+        :data:`MEMORY_SLOT_HOLD_TTL`.
+        """
+        now = now_utc()
+        async with self._tx():
+            await self._db.conn.execute(
+                "DELETE FROM cloud_memory_holds WHERE user_id = ? AND expires_at <= ?", (account.user_id, now.isoformat())
+            )
+            stored = await self.count_pool_memories(account)
+            pending = await self._count(
+                "SELECT COALESCE(SUM(slots), 0) FROM cloud_memory_holds WHERE user_id = ?", [account.user_id]
+            )
+            in_use = stored + pending
+            if adding <= 0:
+                return True, in_use, None
+            if in_use + adding > cap:
+                return False, in_use, None
+            if not hold:
+                return True, in_use, None
+            hold_id = uuid.uuid4().hex
+            await self._db.conn.execute(
+                "INSERT INTO cloud_memory_holds (id, user_id, slots, expires_at) VALUES (?, ?, ?, ?)",
+                (hold_id, account.user_id, adding, (now + MEMORY_SLOT_HOLD_TTL).isoformat()),
+            )
+            return True, in_use, hold_id
+
+    async def release_memory_slots(self, hold_id: str) -> None:
+        """The write behind a reservation finished: its rows (if any) are counted as stored now."""
+        await self._db.conn.execute("DELETE FROM cloud_memory_holds WHERE id = ?", (hold_id,))
+        await self._db.conn.commit()
 
     async def count_pool_relay_records(self, account: AccountState) -> int:
         """Relay handoffs and checkpoints stored by the account's pool (not counted toward the cap)."""

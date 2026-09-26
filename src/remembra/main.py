@@ -25,6 +25,7 @@ from remembra.auth.keys import APIKeyManager
 from remembra.auth.rbac import RoleManager
 from remembra.cloud.metering import UsageMeter
 from remembra.config import get_settings
+from remembra.core.body_limit import BodySizeLimitMiddleware
 from remembra.core.health import build_health_response, check_qdrant
 from remembra.core.logging import configure_logging
 from remembra.core.tasks import set_task_registry
@@ -674,6 +675,12 @@ def create_app() -> FastAPI:
                 "error_id": error_id,
             },
         )
+
+    # DEP-1: cap request bodies before any route reads them. FastAPI parses a
+    # form or upload before the auth dependency runs, so without a cap anyone
+    # can make the single worker parse a huge body. Added first, so it is the
+    # innermost middleware and its 413 still gets the headers added below.
+    app.add_middleware(BodySizeLimitMiddleware)
 
     # Add SlowAPI middleware for rate limiting
     app.add_middleware(SlowAPIMiddleware)

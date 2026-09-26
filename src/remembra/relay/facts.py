@@ -94,6 +94,12 @@ def _clip(value: str, limit: int) -> str:
     return value if len(value) <= limit else value[: limit - 1] + "…"
 
 
+def _scrub_clip(value: str, limit: int) -> str:
+    """Scrub, then clip (CLI-01): clipping first could cut a credential so that
+    the scrubber no longer recognizes the part that is kept."""
+    return _clip(_scrub(value), limit)
+
+
 # ---------------------------------------------------------------------------
 # git
 # ---------------------------------------------------------------------------
@@ -519,13 +525,13 @@ def _result_text(content: Any) -> str:
 def _test_summary(output: str) -> str | None:
     for line in reversed([ln.strip(" =") for ln in output.splitlines() if ln.strip()]):
         if _TEST_SUMMARY_RE.search(line):
-            return _clip(line, 200)
+            return _scrub_clip(line, 200)
     return None
 
 
 def _last_meaningful_line(output: str) -> str:
     lines = [ln.strip() for ln in output.splitlines() if ln.strip() and not _EXIT_RE.match(ln)]
-    return _clip(lines[-1], 200) if lines else ""
+    return _scrub_clip(lines[-1], 200) if lines else ""
 
 
 def _iter_lines(path: Path) -> Iterable[str]:
@@ -595,17 +601,15 @@ def _finish(
             continue
         seen.add(cmd)
         detail = _last_meaningful_line(item["output"])
-        errors.append(f"`{_clip(cmd, 160)}` exited {item['exit_code']}" + (f": {detail}" if detail else ""))
+        errors.append(f"`{_scrub_clip(cmd, 160)}` exited {item['exit_code']}" + (f": {detail}" if detail else ""))
         if len(errors) >= 8:
             break
     errors.reverse()
 
-    facts.commands = [
-        {"cmd": _scrub(_clip(c["cmd"], CMD_CLIP)), "exit_code": c["exit_code"]} for c in command_log[-MAX_COMMANDS:]
-    ]
+    facts.commands = [{"cmd": _scrub_clip(c["cmd"], CMD_CLIP), "exit_code": c["exit_code"]} for c in command_log[-MAX_COMMANDS:]]
     facts.tests = [
         {
-            "cmd": _scrub(_clip(t["cmd"], CMD_CLIP)),
+            "cmd": _scrub_clip(t["cmd"], CMD_CLIP),
             "passed": t["passed"],
             "summary": _scrub(t["summary"]) if t["summary"] else None,
         }
@@ -613,7 +617,7 @@ def _finish(
     ]
     facts.errors = [_scrub(e) for e in errors]
     facts.files = list(dict.fromkeys(files))
-    facts.todos_open = [_scrub(_clip(t, 300)) for t in open_todos if t.strip()]
+    facts.todos_open = [_scrub_clip(t, 300) for t in open_todos if t.strip()]
     return facts
 
 
@@ -757,7 +761,7 @@ def _codex_error(payload: dict[str, Any]) -> str | None:
         return None
     message = error.get("message")
     if error.get("codex_error_info") == CODEX_USAGE_LIMIT_INFO or _codex_limit_text(message):
-        return _clip(str(message or "usage limit reached"), 300)
+        return _scrub_clip(str(message or "usage limit reached"), 300)
     return None
 
 

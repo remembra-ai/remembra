@@ -97,17 +97,17 @@ def test_mcp_repo_gets_its_own_project_and_close_follows_the_brief(mcp_env):
     """REMEMBRA_PROJECT=alpha: an unseen repository still gets its own project (the configured project names
     only folders), and close_session / store_memory without a locator land where session_brief resolved."""
     server.store_memory("existing fact in alpha")
-    brief = _j(server.session_brief(git_remote="https://github.com/freshvybz/clawbot.git"))
+    brief = _j(server.session_brief(git_remote="https://github.com/example-org/clawbot.git"))
     assert brief["project_id"] == "clawbot"
     assert brief["resolution"]["persisted"] is False  # a brief never writes a binding
     assert brief["recent"] == [] and brief["linked_projects"] == []  # alpha's memories are not this repository's
 
     closed = _j(server.close_session(next_step="ship it", facts={"branch": "main"}))  # no locator, no project
     assert closed["project_id"] == "clawbot"
-    resolved = mcp_env["http"].post("/api/v1/projects/resolve", json={"git_remote": "git@github.com:freshvybz/clawbot"}).json()
+    resolved = mcp_env["http"].post("/api/v1/projects/resolve", json={"git_remote": "git@github.com:example-org/clawbot"}).json()
     assert resolved["project_id"] == "clawbot" and resolved["created"] is False  # the close recorded the binding
 
-    again = _j(server.session_brief(git_remote="git@github.com:freshvybz/clawbot"))
+    again = _j(server.session_brief(git_remote="git@github.com:example-org/clawbot"))
     assert again["handoff_id"] == closed["handoff_id"]
     assert "suggested next step (from kimi, unverified): ship it" in again["brief"]
 

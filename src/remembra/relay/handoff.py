@@ -39,6 +39,7 @@ from remembra.security.untrusted import (
     defang_markdown_images,
     detect_actionable,
     neutralize,
+    strip_controls,
     strip_hidden,
 )
 
@@ -67,12 +68,13 @@ _NEGATED_PUSH_RE = re.compile(r"\b(not|n't|never|un)\s*(yet\s+)?(pushed|deployed
 
 
 def redact(value: Any, counts: dict[str, int] | None = None, extra: Callable[[str], str] | None = None) -> Any:
-    """Return ``value`` with ``redact_secrets`` (then ``extra``, e.g. a PII
-    scrubber) applied to every string inside it."""
+    """Return ``value`` with terminal control characters removed (CLI-02), then
+    ``redact_secrets`` (then ``extra``, e.g. a PII scrubber) applied to every
+    string inside it."""
     if counts is None:
         counts = {}
     if isinstance(value, str):
-        result = redact_secrets(value)
+        result = redact_secrets(strip_controls(value))
         for kind, n in result.counts.items():
             counts[kind] = counts.get(kind, 0) + n
         text = result.text
@@ -95,8 +97,8 @@ def redact(value: Any, counts: dict[str, int] | None = None, extra: Callable[[st
 
 
 def clip(text: Any, limit: int) -> str:
-    """Single-line, whitespace-collapsed, clipped to ``limit`` chars."""
-    value = " ".join(str(text or "").split())
+    """Single-line, whitespace-collapsed, no control characters, clipped to ``limit`` chars."""
+    value = " ".join(strip_controls(str(text or "")).split())
     return value if len(value) <= limit else value[: max(0, limit - 1)].rstrip() + "…"
 
 

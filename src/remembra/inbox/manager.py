@@ -36,6 +36,7 @@ from uuid import uuid4
 
 from remembra.relay.handoff import assess_text
 from remembra.security.secrets import scrub
+from remembra.security.untrusted import strip_controls
 
 logger = logging.getLogger(__name__)
 
@@ -95,12 +96,17 @@ def _new_inbox_id() -> str:
     return f"inbox_{uuid4().hex[:16]}"
 
 
+def _clean(text: str) -> str:
+    """Terminal control characters removed (CLI-02), then credentials redacted (SEC-23)."""
+    return scrub(strip_controls(text))
+
+
 def _scrub_deep(value: Any) -> Any:
-    """``value`` with credentials redacted from every string inside it (keys included)."""
+    """``value`` with control characters removed and credentials redacted from every string inside it (keys included)."""
     if isinstance(value, str):
-        return scrub(value)
+        return _clean(value)
     if isinstance(value, dict):
-        return {(scrub(k) if isinstance(k, str) else k): _scrub_deep(v) for k, v in value.items()}
+        return {(_clean(k) if isinstance(k, str) else k): _scrub_deep(v) for k, v in value.items()}
     if isinstance(value, list):
         return [_scrub_deep(v) for v in value]
     return value
@@ -196,8 +202,8 @@ class InboxManager:
 
         # Secrets never reach the table; the stored score is the brief's trust
         # policy applied to everything the sender wrote.
-        subject = scrub(subject)
-        body = scrub(body)
+        subject = _clean(subject)
+        body = _clean(body)
         meta = _scrub_deep(dict(metadata or {}))
         trust_score = assess_text(from_agent, subject, body).trust
 

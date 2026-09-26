@@ -10,7 +10,7 @@ inline script is allowed by its SHA-256 hash, and nothing else inline runs.
 
 At launch the policy ships as Content-Security-Policy-Report-Only (CSP_HEADER):
 browsers apply nothing, and send each violation to the API's /csp-report,
-which logs it. docs/DEPLOYING.md says how to switch to enforcing (set
+which logs it. docs/OPERATIONS.md says how to switch to enforcing (set
 CSP_HEADER to "Content-Security-Policy" and rerun this script) after a clean
 week of reports. frame-ancestors is ignored in report-only mode; the enforced
 X-Frame-Options: DENY keeps the site out of frames meanwhile.

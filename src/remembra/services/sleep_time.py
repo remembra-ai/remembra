@@ -382,10 +382,10 @@ class SleepTimeWorker:
         max_merges_per_pass = 100  # Limit work per pass
 
         try:
-            # Get all entities for this user
+            # Get all entities for this user (merges stay within one project, below)
             cursor = await self.db.conn.execute(
                 """
-                SELECT id, canonical_name, aliases, type
+                SELECT id, canonical_name, aliases, type, project_id
                 FROM entities
                 WHERE user_id = ?
                 """,
@@ -404,6 +404,7 @@ class SleepTimeWorker:
                         "name": row[1],
                         "aliases": row[2].split(",") if row[2] else [],
                         "type": row[3],
+                        "project_id": row[4],
                     }
                 )
 
@@ -429,8 +430,9 @@ class SleepTimeWorker:
                     break
 
                 for entity2 in entities[i + 1 :]:
-                    # Only match same type
-                    if entity1["type"] != entity2["type"]:
+                    # Only match same type, and never across projects (TI-H1): a
+                    # merge would move one project's links onto the other's entity.
+                    if entity1["type"] != entity2["type"] or entity1["project_id"] != entity2["project_id"]:
                         continue
 
                     # Check if names are similar
@@ -616,6 +618,20 @@ class SleepTimeWorker:
         now = utcnow().isoformat()
         try:
             async with self.db.transaction():
+                # 0. Both entities must still exist and belong to the same user AND
+                # project (TI-H1). Earlier merges in the same pass can delete either
+                # one; merging into a deleted entity would orphan the other's links.
+                cursor = await self.db.conn.execute(
+                    "SELECT COUNT(DISTINCT user_id || char(0) || COALESCE(project_id, '')), COUNT(*)"
+                    " FROM entities WHERE id IN (?, ?)",
+                    (keep_id, delete_id),
+                )
+                row = await cursor.fetchone()
+                scopes, found = (row[0], row[1]) if row else (0, 0)
+                if found != 2 or scopes != 1:
+                    log.warning("entity_merge_skipped_scope", keep=keep_id, delete=delete_id, found=found)
+                    return
+
                 # 1. Transfer aliases from deleted to kept
                 cursor = await self.db.conn.execute(
                     "SELECT aliases FROM entities WHERE id = ?",

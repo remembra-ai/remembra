@@ -147,10 +147,10 @@ async def test_entity_matching_threshold_setting_is_wired(tmp_path) -> None:
 async def test_store_reports_entities_status_honestly(tmp_path) -> None:
     service, *_ = await make_service(tmp_path, enable_entity_resolution=True)
     service.entity_extractor = _Extractor(ExtractionResult(entities=[], relationships=[]))  # type: ignore[assignment]
-    resp = await service.store(StoreRequest(content="Suzan lives in Kingston", user_id="u1"))
+    resp = await service.store(StoreRequest(content="Suzan lives in Lisbon", user_id="u1"))
     assert resp.entities_status == "pending" and resp.entities == []
     # Atomic stores never run the (LLM) entity pass, and say so.
-    resp = await service.store(StoreRequest(content="Suzan moved to Montego Bay", user_id="u1"), skip_extraction=True)
+    resp = await service.store(StoreRequest(content="Suzan moved to Porto", user_id="u1"), skip_extraction=True)
     assert resp.entities_status == "disabled" and resp.entities == []
 
 
@@ -195,7 +195,7 @@ class _Extractor:
 @pytest.mark.asyncio
 async def test_concurrent_entity_processing_does_not_duplicate_entities(tmp_path) -> None:
     service, db, _, _, _ = await make_service(tmp_path)
-    m1 = await seed(service, "Suzan lives in Kingston")
+    m1 = await seed(service, "Suzan lives in Lisbon")
     m2 = await seed(service, "Suzan likes mangoes")
     service.entity_extractor = _Extractor(  # type: ignore[assignment]
         ExtractionResult(
@@ -204,7 +204,7 @@ async def test_concurrent_entity_processing_does_not_duplicate_entities(tmp_path
     )
 
     await asyncio.gather(
-        service._process_entities_for_memory(m1, "Suzan lives in Kingston", "u1", "default"),
+        service._process_entities_for_memory(m1, "Suzan lives in Lisbon", "u1", "default"),
         service._process_entities_for_memory(m2, "Suzan likes mangoes", "u1", "default"),
     )
 

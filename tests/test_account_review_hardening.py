@@ -635,3 +635,98 @@ async def test_github_verified_primary_signs_in_to_a_legacy_account_under_review
         mine = await review_of(h, h.jwt(uid, "legacy@example.org")["Authorization"][7:])
         assert mine["can_review"] is False and mine["message"] == "Sign in with GitHub and finish checking your account first."
         assert (await keep_all(h, token)).status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# AUTH-2: while the review is open, the unproven password's session cannot
+# change the password, delete the account or turn off 2FA
+# ---------------------------------------------------------------------------
+
+
+async def _review_with_squatter(h: Any, fake: FakeProviders) -> tuple[str, str, str, Any]:
+    """The owner proves the mailbox with Google (review opens); the squatter signs in with the password."""
+    from types import SimpleNamespace
+
+    uid = await h.create_user("victim@gmail.com", password=PASSWORD, verified=False)
+    app_connection = SimpleNamespace(user_id=uid, signed_in_at_ms=int(time.time() * 1000) - 5000)
+    owner = (await google_session(h, fake, "victim@gmail.com"))["access_token"]
+    assert claims_of(owner).get("rvw")
+    assert await account_review.pending_review(h.db, uid) is not None
+    r = await h.client.post("/api/v1/auth/login", json={"email": "victim@gmail.com", "password": PASSWORD})
+    assert r.status_code == 200, r.text
+    squatter = r.json()["access_token"]
+    assert not claims_of(squatter).get("rvw")
+    return uid, owner, squatter, app_connection
+
+
+async def test_untrusted_session_cannot_change_password_delete_or_drop_2fa_during_review(tmp_path, providers, mail) -> None:
+    async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
+        uid, owner, squatter, app_connection = await _review_with_squatter(h, providers)
+        blocked = "Sign in with Google and finish checking your account first."
+
+        r = await h.client.post(
+            "/api/v1/auth/change-password",
+            headers=bearer(squatter),
+            json={"current_password": PASSWORD, "new_password": "N3w!Passw0rdZ"},
+        )
+        assert r.status_code == 403 and r.json()["detail"] == blocked
+        assert h.users.verify_password(PASSWORD, (await h.db.get_user_by_id(uid))["password_hash"])
+        # Nothing was cut off: the owner's review session and app connections keep working.
+        assert (await h.client.get("/api/v1/auth/me", headers=bearer(owner))).status_code == 200
+        assert await account_allows_grant(h.db, app_connection)
+
+        r = await h.client.request("DELETE", "/api/v1/auth/me", headers=bearer(squatter), json={"password": PASSWORD})
+        assert r.status_code == 403 and r.json()["detail"] == blocked
+        row = await h.db.get_user_by_id(uid)
+        assert row["is_active"] and not row.get("deleted_at")
+
+        # The owner turns 2FA on; the squatter's session (from before) cannot turn it off.
+        secret = (await h.client.post("/api/v1/auth/2fa/setup", headers=bearer(owner))).json()["secret"]
+        r = await h.client.post("/api/v1/auth/2fa/enable", headers=bearer(owner), json={"code": pyotp.TOTP(secret).now()})
+        assert r.status_code == 200, r.text
+        r = await h.client.post("/api/v1/auth/2fa/disable", headers=bearer(squatter), json={"password": PASSWORD})
+        assert r.status_code == 403 and r.json()["detail"] == blocked
+        assert (await h.db.get_user_by_id(uid))["totp_enabled"]
+        assert await account_allows_grant(h.db, app_connection)
+
+
+async def test_the_mailbox_proving_session_can_still_change_password_drop_2fa_and_delete(tmp_path, providers, mail) -> None:
+    async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
+        uid, owner, _, _ = await _review_with_squatter(h, providers)
+        await with_totp(h, uid)
+
+        r = await h.client.post("/api/v1/auth/2fa/disable", headers=bearer(owner), json={"password": PASSWORD})
+        assert r.status_code == 200, r.text
+        assert not (await h.db.get_user_by_id(uid))["totp_enabled"]
+
+        r = await h.client.post(
+            "/api/v1/auth/change-password",
+            headers=bearer(owner),
+            json={"current_password": PASSWORD, "new_password": "N3w!Passw0rdZ"},
+        )
+        assert r.status_code == 200, r.text
+
+        # A password change signs out every session; the owner proves the mailbox again.
+        owner = (await google_session(h, providers, "victim@gmail.com", code="g-2"))["access_token"]
+        assert claims_of(owner).get("rvw")
+        r = await h.client.request("DELETE", "/api/v1/auth/me", headers=bearer(owner), json={"password": "N3w!Passw0rdZ"})
+        assert r.status_code == 200, r.text
+        assert not (await h.db.get_user_by_id(uid))["is_active"]
+
+
+async def test_outside_a_review_the_three_routes_are_unchanged(tmp_path, providers, mail) -> None:
+    async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
+        uid = await h.create_user("plain@example.com", password=PASSWORD, verified=True)
+        assert await account_review.pending_review(h.db, uid) is None
+        session = h.jwt(uid, "plain@example.com")
+        await with_totp(h, uid)
+        assert (await h.client.post("/api/v1/auth/2fa/disable", headers=session, json={"password": PASSWORD})).status_code == 200
+        r = await h.client.post(
+            "/api/v1/auth/change-password",
+            headers=session,
+            json={"current_password": PASSWORD, "new_password": "N3w!Passw0rdZ"},
+        )
+        assert r.status_code == 200, r.text
+        session = h.jwt(uid, "plain@example.com")
+        r = await h.client.request("DELETE", "/api/v1/auth/me", headers=session, json={"password": "N3w!Passw0rdZ"})
+        assert r.status_code == 200, r.text

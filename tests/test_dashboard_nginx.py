@@ -42,7 +42,7 @@ def _headers() -> dict[str, str]:
 
 
 # Report-only for launch: the Paddle hosts are not verified against a live checkout
-# (docs/DEPLOYING.md, "Content-Security-Policy: report-only at launch").
+# (docs/OPERATIONS.md, "Content-Security-Policy: report-only").
 CSP_HEADER = "Content-Security-Policy-Report-Only"
 
 
@@ -105,7 +105,23 @@ def test_every_location_that_adds_a_header_includes_the_shared_set() -> None:
             assert ["include", "/etc/nginx/remembra-headers.conf"] in loc.body, loc.pattern
     docker = (DASH / "Dockerfile").read_text()
     assert "COPY security-headers.conf /etc/nginx/remembra-headers.conf" in docker
-    assert "COPY nginx.conf /etc/nginx/conf.d/default.conf" in docker
+    assert "COPY nginx.conf /etc/nginx/nginx.conf" in docker
+
+
+def test_the_image_runs_nginx_unprivileged_and_redirects_stay_relative() -> None:
+    """CTR-1: nginx ran as root with the image's own nginx.conf; now the whole config is ours (as landing/)."""
+    docker = (DASH / "Dockerfile").read_text()
+    final = docker[docker.rindex("\nFROM ") :]
+    conf = CONF.read_text()
+    assert re.search(r"^USER nginx$", final, re.M)
+    assert "rm -f /etc/nginx/conf.d/default.conf" in final and "nginx -t" in final and "rm -rf /tmp/*" in final
+    port = re.search(r"listen (\d+) default_server;", conf)
+    assert port is not None and int(port.group(1)) >= 1024 and f"EXPOSE {port.group(1)}" in final
+    assert f"127.0.0.1:{port.group(1)}/health" in final  # the HEALTHCHECK probes the port nginx listens on
+    assert "pid /tmp/nginx.pid;" in conf and "client_body_temp_path /tmp/client_temp;" in conf
+    assert re.search(r"^\s*absolute_redirect off;$", conf, re.M) and re.search(r"^\s*port_in_redirect off;$", conf, re.M)
+    assert re.search(r"^\s*server_tokens off;$", conf, re.M)
+    assert 'Coolify app "remembra-dashboard": exposed port 8080' in docker + conf
 
 
 def test_csp_allows_the_inline_theme_script_by_its_hash_and_nothing_inline_else() -> None:

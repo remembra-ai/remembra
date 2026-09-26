@@ -91,7 +91,7 @@ from remembra.relay.adapters.base import OUTPUT_MODES, AdapterSpec, RefusedEdit
 from remembra.relay.config import RelayConfig, load_config, load_config_from_source
 from remembra.relay.handoff import build_sections, sections_have_substance
 from remembra.relay.identity import HINT_SCOPE_ALL, HINT_SCOPE_FOLDERS
-from remembra.security.untrusted import neutralize_encoded
+from remembra.security.untrusted import neutralize_encoded, strip_controls
 
 TOTAL_BUDGET_SECONDS = 9.5
 GIT_BUDGET_SECONDS = 4.0
@@ -111,7 +111,7 @@ USAGE_LIMIT_REASON = "usage_limit"  # end_reason when the transcript shows a usa
 
 def _err(message: str) -> None:
     try:
-        print(f"remembra-relay: {message}", file=sys.stderr)
+        print(f"remembra-relay: {strip_controls(message)}", file=sys.stderr)
     except Exception:
         pass
 
@@ -750,6 +750,8 @@ def _emit_brief(
     text = neutralize_encoded(text)
     if notices:  # the relay's own lines, above the brief (outside its untrusted-data block)
         text = "\n".join(notices) + ("\n" + text if text else "")
+    # Recorded text never drives the terminal (CLI-02), nor reaches a hook's context with escape sequences.
+    text = strip_controls(text)
     if mode == "hook-json":
         print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
     elif mode == "cursor-json":
@@ -1304,10 +1306,14 @@ def cmd_close(args: argparse.Namespace) -> int:
         # This close supersedes a queued copy of the same session; then send what is still waiting.
         replay_outbox(ctx, skip=own)
         if not ctx.adapter:  # interactive use; hooks keep stdout clean (some require JSON-only stdout)
-            print(f"Remembra handoff {result.get('handoff_id')} · project {result.get('project_id')} · {result.get('headline')}")
+            print(
+                strip_controls(
+                    f"Remembra handoff {result.get('handoff_id')} · project {result.get('project_id')} · {result.get('headline')}"
+                )
+            )
             health = health_summary(result.get("health"))
             if health:
-                print(health)
+                print(strip_controls(health))
     except Exception as e:  # never break the agent's shutdown
         _err(f"close failed: {e.__class__.__name__}: {e}")
         if ctx is not None and payload is not None and not getattr(args, "dry_run", False):
@@ -1339,15 +1345,17 @@ def cmd_trail(args: argparse.Namespace) -> int:
         if args.format == "json":
             print(json.dumps(data, indent=2, default=str))
             return 0
-        print(f"Trail · project {data.get('project_id')} · {data.get('total')} entries")
+        print(strip_controls(f"Trail · project {data.get('project_id')} · {data.get('total')} entries"))
         for item in data.get("items") or []:
             where = item.get("branch") or ""
             if item.get("head_commit"):
                 where += f"@{str(item['head_commit'])[:7]}"
-            print(
+            # Every field was written by an agent: no escape sequence reaches the terminal (CLI-02).
+            line = (
                 f"- {str(item.get('created_at') or '')[:16].replace('T', ' ')}  {item.get('agent_id') or '?':<14} "
                 f"{item.get('memory_type'):<10} {where:<24} {item.get('headline')}"
             )
+            print(strip_controls(line))
     except Exception as e:
         _err(f"trail failed: {e.__class__.__name__}: {e}")
     return 0

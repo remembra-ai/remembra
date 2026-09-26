@@ -5,7 +5,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 
-from remembra.auth.middleware import CurrentUser, RequireMasterKey
+from remembra.auth.middleware import CurrentUser, RequireMasterKey, require_master_key
 from remembra.cloud.metering import AccountState, CreditPeriod, UsageMeter, now_utc
 from remembra.cloud.plans import CREDIT_USD, RESERVE_CREDITS_PER_CHUNK, PlanLimits, PlanTier, get_plan
 from remembra.config import Settings, get_settings
@@ -790,6 +790,15 @@ async def redeem_promo_code(
     # Get user's Stripe customer ID if they have one
     tenant_info = await meter.get_tenant(user.user_id)
     stripe_customer_id = tenant_info.get("stripe_customer_id") if tenant_info else None
+    if meter.active_subscription_id(tenant_info):
+        # BILL-12: a trial on top of a paid subscription never expires (a
+        # subscription id turns the trial expiry off) and would replace the
+        # paid plan until the next renewal. Refused before the code is used.
+        return PromoResponse(
+            success=False,
+            error="This account has an active subscription, so a trial code cannot be applied. Change your plan "
+            "from Manage subscription instead.",
+        )
 
     # Fetch email from database (AuthenticatedUser doesn't carry email)
     user_data = await db.get_user_by_id(user.user_id)
@@ -828,7 +837,9 @@ async def redeem_promo_code(
     response_model=PromoListResponse,
     summary="List active promo codes",
     description="Admin endpoint: List all active promotional codes with stats.",
-    dependencies=[Depends(RequireMasterKey)],
+    # The function, not the RequireMasterKey alias: Depends(<Annotated alias>)
+    # silently becomes ?args=&kwargs= and never runs the check (LIVE-2).
+    dependencies=[Depends(require_master_key)],
 )
 async def list_promo_codes(request: Request) -> PromoListResponse:
     """List all active promo codes (admin only)."""
@@ -844,7 +855,9 @@ async def list_promo_codes(request: Request) -> PromoListResponse:
     "/promo/{code}/stats",
     summary="Get promo code stats",
     description="Admin endpoint: Get redemption stats for a specific promo code.",
-    dependencies=[Depends(RequireMasterKey)],
+    # The function, not the RequireMasterKey alias: Depends(<Annotated alias>)
+    # silently becomes ?args=&kwargs= and never runs the check (LIVE-2).
+    dependencies=[Depends(require_master_key)],
 )
 async def get_promo_stats(request: Request, code: str) -> dict[str, Any]:
     """Get stats for a specific promo code (admin only)."""

@@ -144,3 +144,79 @@ def test_the_build_job_installs_only_hash_pinned_tools():
     assert {name for name, _, _ in requirements} == {"build", "packaging", "pyproject-hooks", "uv"}
     config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
     assert any(u["package-ecosystem"] == "pip" and u["directory"] == "/.github" for u in config["updates"])
+
+
+# ---------------------------------------------------------------------------
+# CI-1: OIDC and Pages rights only on publish/deploy jobs; no unpinned installs
+# ---------------------------------------------------------------------------
+
+# The jobs that may mint an OIDC token or write Pages: they publish or deploy
+# an artifact another job built, and run no third-party install themselves.
+PUBLISH_OR_DEPLOY_JOBS = {"publish-pypi", "publish-mcp-registry", "deploy"}
+
+
+def _effective_permissions(workflow: dict[str, Any], job: dict[str, Any]) -> dict[str, str]:
+    perms = job["permissions"] if "permissions" in job else workflow.get("permissions")
+    if perms in (None, "write-all"):
+        # No permissions key anywhere (or write-all) gives the token broad rights.
+        return {"id-token": "write", "pages": "write", "contents": "write"}
+    if perms == "read-all":
+        return {}
+    return dict(perms or {})
+
+
+def test_only_publish_or_deploy_jobs_can_mint_oidc_or_write_pages():
+    offenders = []
+    for path in WORKFLOWS:
+        workflow = _load(path)
+        top = workflow.get("permissions") or {}
+        if isinstance(top, dict) and (top.get("id-token") == "write" or top.get("pages") == "write"):
+            offenders.append(f"{path.name}: top-level {top}")
+        for name, job in workflow["jobs"].items():
+            perms = _effective_permissions(workflow, job)
+            if (perms.get("id-token") == "write" or perms.get("pages") == "write") and name not in PUBLISH_OR_DEPLOY_JOBS:
+                offenders.append(f"{path.name}:{name}: {perms}")
+    assert offenders == []
+
+
+def _is_local_install(line: str) -> bool:
+    """`pip install` of this repo's own project or built wheel: `-e .[extras]`, `.`, `dist/*.whl`."""
+    import shlex
+
+    args = shlex.split(line.split("pip install", 1)[1])
+    targets = [a for a in args if not a.startswith("-")]
+    return bool(targets) and all(re.match(r"^(\.|dist/|\$\(ls dist/)", t) for t in targets)
+
+
+def _is_hash_pinned_install(line: str) -> bool:
+    return "--require-hashes" in line and re.search(r"(^|\s)-r\s+\S+", line) is not None
+
+
+def test_no_workflow_runs_an_unpinned_pip_install():
+    """Third-party tools come from a hash-pinned file; only the repo's own package installs by path."""
+    unpinned = []
+    for path in WORKFLOWS:
+        for job, step in _steps(_load(path)):
+            for line in str(step.get("run", "")).splitlines():
+                if "pip install" in line and not (_is_hash_pinned_install(line) or _is_local_install(line)):
+                    unpinned.append(f"{path.name}:{job}: {line.strip()}")
+    assert unpinned == []
+    assert _is_local_install('pip install -e ".[server,cloud]"') and _is_local_install("/tmp/b/bin/pip install dist/*.whl")
+    assert _is_local_install('/tmp/mcp/bin/pip install "$(ls dist/*.whl)[mcp]"')
+    assert not _is_local_install("pip install mkdocs-material pymdown-extensions")
+    assert not _is_hash_pinned_install("pip install --require-hashes mkdocs")
+
+
+def test_docs_workflow_builds_with_read_only_rights_and_pinned_tools():
+    workflow = _load(ROOT / ".github" / "workflows" / "docs.yml")
+    assert workflow["permissions"] == {"contents": "read"}
+    build, deploy = workflow["jobs"]["build"], workflow["jobs"]["deploy"]
+    assert build["permissions"] == {"contents": "read", "pages": "read"}
+    assert deploy["permissions"] == {"pages": "write", "id-token": "write"}
+    assert all("run" not in step for step in deploy["steps"])  # deploy runs no code of its own
+    runs = "\n".join(str(s.get("run", "")) for s in build["steps"])
+    assert "python -m pip install --require-hashes --no-deps -r .github/docs-requirements.txt" in runs
+    assert "python scripts/docs_csp.py site --check" in runs
+    for step in build["steps"]:
+        if "actions/checkout" in str(step.get("uses")):
+            assert (step.get("with") or {}).get("persist-credentials") is False

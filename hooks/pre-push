@@ -1,0 +1,22 @@
+#!/bin/sh
+#
+# REMEMBRA PRE-PUSH GUARD
+# Refuses a push that would publish private material: remediation trackers
+# (docs/audits/, *-fixlog.md) and the other kinds scripts/ci/repo_hygiene.py
+# lists. Every commit the push adds to the remote is checked, not only the tip.
+#
+# Install: ./scripts/install-hooks.sh (copies this hook and the checker into
+# the repository's hooks folder, shared by every worktree).
+#
+set -u
+root=$(git rev-parse --show-toplevel) || exit 1
+checker="$root/scripts/ci/repo_hygiene.py"
+if [ ! -f "$checker" ]; then
+    # A branch from before the checker existed: use the copy install-hooks.sh left next to this hook.
+    checker="$(git rev-parse --git-path hooks)/repo_hygiene.py"
+fi
+if [ ! -f "$checker" ]; then
+    echo "pre-push: scripts/ci/repo_hygiene.py not found; refusing to push unchecked. Run ./scripts/install-hooks.sh." >&2
+    exit 1
+fi
+exec "${PYTHON:-python3}" "$checker" pre-push "$@"

@@ -3,3 +3,6 @@
 *
 !mkdocs.yml
 !docs/
+!docs-nginx/
+!scripts/docs_csp.py
+!.github/docs-requirements.txt

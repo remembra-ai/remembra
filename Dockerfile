@@ -4,7 +4,7 @@
 # =============================================================================
 # Stage 1: Build Dashboard
 # =============================================================================
-FROM node:20-alpine AS dashboard-builder
+FROM node:22-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS dashboard-builder
 
 WORKDIR /app/dashboard
 
@@ -19,7 +19,7 @@ RUN npm run build
 # =============================================================================
 # Stage 2: Python Dependencies
 # =============================================================================
-FROM python:3.11-slim AS python-builder
+FROM python:3.11-slim@sha256:e41613d42d4891e4930f79523f93f81bbc7632584ec65e36ab055f41a800b41e AS python-builder
 
 WORKDIR /app
 
@@ -30,8 +30,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Create virtual environment
-RUN python -m venv /opt/venv && pip install --no-cache-dir "uv==0.10.0"
+# Create virtual environment; uv from a hash-pinned requirement (CTR-1), build stage only
+COPY scripts/uv-requirements.txt /tmp/uv-requirements.txt
+RUN python -m venv /opt/venv \
+    && pip install --no-cache-dir --require-hashes --no-deps -r /tmp/uv-requirements.txt
 ENV PATH="/opt/venv/bin:$PATH" \
     VIRTUAL_ENV=/opt/venv
 
@@ -49,7 +51,7 @@ RUN uv pip install --no-cache --no-deps .
 # =============================================================================
 # Stage 3: Production Image
 # =============================================================================
-FROM python:3.11-slim AS production
+FROM python:3.11-slim@sha256:e41613d42d4891e4930f79523f93f81bbc7632584ec65e36ab055f41a800b41e AS production
 
 LABEL org.opencontainers.image.title="Remembra"
 LABEL org.opencontainers.image.description="AI Memory Layer - Self-hosted"

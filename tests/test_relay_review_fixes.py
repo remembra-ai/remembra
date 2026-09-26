@@ -116,7 +116,7 @@ def _seed_clawdbot(api) -> dict[str, Any]:
 
 def test_existing_namespace_survives_upgrade_to_location_briefs(api):
     handoff = _seed_clawdbot(api)
-    remote = "git@github.com:freshvybz/clawbot.git"
+    remote = "git@github.com:example-org/clawbot.git"
     brief = _get(api, "/session/brief", {"git_remote": remote, "hint_project": "clawdbot"})
     assert brief["project_id"] == "clawdbot"
     assert brief["handoff"]["id"] == handoff["handoff_id"]
@@ -127,17 +127,19 @@ def test_existing_namespace_survives_upgrade_to_location_briefs(api):
     closed = _close(api, project={"git_remote": remote, "hint_project": "clawdbot"}, project_id=None, session_id="new-1")
     assert closed["project_id"] == "clawdbot" and closed["resolution"]["persisted"] is True
     # Bound now: later calls without any hint (another agent, another config) stay in clawdbot.
-    assert _get(api, "/session/brief", {"git_remote": "https://github.com/freshvybz/clawbot"})["project_id"] == "clawdbot"
+    assert _get(api, "/session/brief", {"git_remote": "https://github.com/example-org/clawbot"})["project_id"] == "clawdbot"
     assert _get(api, "/trail", {"git_remote": remote})["total"] == 2
 
 
 def test_hint_that_cannot_apply_is_reported_with_the_configured_projects_handoff(api):
     handoff = _seed_clawdbot(api)
-    _post(api, "/projects/resolve", {"git_remote": "https://github.com/freshvybz/clawbot"})  # bound to the slug
-    resolved = _post(api, "/projects/resolve", {"git_remote": "https://github.com/freshvybz/clawbot", "hint_project": "clawdbot"})
+    _post(api, "/projects/resolve", {"git_remote": "https://github.com/example-org/clawbot"})  # bound to the slug
+    resolved = _post(
+        api, "/projects/resolve", {"git_remote": "https://github.com/example-org/clawbot", "hint_project": "clawdbot"}
+    )
     assert resolved["project_id"] == "clawbot" and "not applied" in resolved["warnings"][0]
 
-    brief = _get(api, "/session/brief", {"git_remote": "https://github.com/freshvybz/clawbot", "hint_project": "clawdbot"})
+    brief = _get(api, "/session/brief", {"git_remote": "https://github.com/example-org/clawbot", "hint_project": "clawdbot"})
     assert brief["project_id"] == "clawbot"
     assert any("configured for 'clawdbot'" in w and "--bind" in w for w in brief["warnings"])
     configured = brief["linked_projects"][0]

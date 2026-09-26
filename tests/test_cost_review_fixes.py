@@ -73,7 +73,7 @@ async def test_write_stops_calling_the_llm_at_its_reservation_and_never_passes_t
     async with cost_app(tmp_path) as c:
         uid, hdr = await c.account("budget@example.com")  # verified Free: 500 credits
         await c.set_credits_used(uid, 484)  # 16 left: exactly one chunk hold
-        sentences = [f"Mani met client number {i} in Kingston on Tuesday." for i in range(25)]
+        sentences = [f"Mani met client number {i} in Lisbon on Tuesday." for i in range(25)]
         c.llm.extraction_facts = [sentences]  # the first model call returns 25 facts
 
         r = await c.h.client.post("/api/v1/memories", json={"content": " ".join(sentences)}, headers=hdr)
@@ -489,7 +489,7 @@ async def test_typesafe_calls_are_billed_to_the_write_and_skipped_on_free_recall
         assert c.service.jev.enabled and c.service.intent_router.jev is c.service.jev
 
         uid, hdr = await c.account("jev@example.com")
-        for content in ("Mani moved the office to Montego Bay.", "Mani moved the office to Montego Bay in June."):
+        for content in ("Ava moved the office to Lisbon.", "Ava moved the office to Lisbon in June."):
             c.llm.extraction_facts = [[content]]
             r = await c.h.client.post("/api/v1/memories", json={"content": content}, headers=hdr)
             assert r.status_code == 201 and r.headers[ENRICH] == "full"
@@ -736,13 +736,19 @@ async def test_refund_and_chargeback_end_the_plan_and_reduce_revenue(tmp_path, m
         assert (await c.meter.get_tenant(uid))["billing_flag"] == "refund_downgraded"
         assert paddle_calls == [("POST", "/subscriptions/sub_solo_y/cancel", {"effective_from": "immediately"})]
 
-        # Chargebacks downgrade and cancel too (resubscribe first).
-        await _webhook(c, {**purchase, "data": {**purchase["data"], "id": "txn_solo_y2"}})
+        # A payment of the refunded (cancelled) subscription never puts the plan back (BILL-2).
+        await _webhook(c, {**purchase, "data": {**purchase["data"], "id": "txn_solo_y_late"}})
+        assert (await c.meter.get_account(uid)).tier == PlanTier.FREE
+
+        # Chargebacks downgrade and cancel too (resubscribe first: a new subscription).
+        await _webhook(c, {**purchase, "data": {**purchase["data"], "id": "txn_solo_y2", "subscription_id": "sub_solo_y2"}})
         assert (await c.meter.get_account(uid)).tier == PlanTier.SOLO
-        await _webhook(c, adjustment("adj_4", "chargeback", "approved", "full", "10500"))
+        chargeback = adjustment("adj_4", "chargeback", "approved", "full", "10500")
+        chargeback["data"]["subscription_id"] = "sub_solo_y2"
+        await _webhook(c, chargeback)
         assert (await c.meter.get_account(uid)).tier == PlanTier.FREE
         assert (await c.meter.get_tenant(uid))["billing_flag"] == "chargeback_downgraded"
-        assert paddle_calls[-1] == ("POST", "/subscriptions/sub_solo_y/cancel", {"effective_from": "immediately"})
+        assert paddle_calls[-1] == ("POST", "/subscriptions/sub_solo_y2/cancel", {"effective_from": "immediately"})
         assert len(paddle_calls) == 2
 
 
@@ -914,7 +920,7 @@ async def test_anthropic_entity_extraction_is_budgeted_and_metered() -> None:
 
     job = ai_spend.SpendJob(user_id="u", budget_usd=0.05)
     with ai_spend.activate(job):
-        result = await extractor.extract("Mani lives in Kingston and runs DolphyTech.")
+        result = await extractor.extract("Mani lives in Lisbon and runs DolphyTech.")
         assert [e.name for e in result.entities] == ["Mani"]
         assert job.usd == pytest.approx(expected)
         job.budget_usd = job.usd  # used up: the next call must not be made

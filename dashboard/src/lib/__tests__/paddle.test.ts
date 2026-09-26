@@ -6,6 +6,7 @@ import {
   confirmCheckout,
   initPaddle,
   isCheckoutReturn,
+  overlayCheckoutOptions,
   paddleEnvironment,
   paddleGlobal,
   paymentLinkTransaction,
@@ -14,6 +15,7 @@ import {
   sessionStore,
   successUrl,
   takeCheckoutIntent,
+  transactionCheckoutOptions,
   waitForPlan,
   withoutCheckoutParam,
   type PaddleLike,
@@ -74,7 +76,9 @@ describe('initPaddle', () => {
     const p = fakePaddle();
     expect(initPaddle(p, CONFIG, 'https://app.remembra.dev')).toBe(true);
     expect(initPaddle(p, CONFIG, 'https://app.remembra.dev')).toBe(true);
-    expect(p.init).toEqual([{ token: 'live_abc', checkout: { settings: { successUrl: 'https://app.remembra.dev/?checkout=success' } } }]);
+    expect(p.init).toEqual([
+      { token: 'live_abc', checkout: { settings: { successUrl: 'https://app.remembra.dev/?checkout=success', allowLogout: false } } },
+    ]);
     expect(p.env).toEqual([]);
   });
 
@@ -240,5 +244,27 @@ describe('an upgrade confirms the new plan, never the old one', () => {
     expect(sessionStore(blocked)).toBeNull();
     const store = memoryStorage();
     expect(sessionStore({ sessionStorage: store })).toBe(store);
+  });
+});
+
+describe('checkouts stay on the account email (BILL-1 review)', () => {
+  it('opens a client-price checkout with the account email and no way to change it', () => {
+    const custom = { remembra_user_id: 'u1', remembra_binding: 'sig', plan: 'solo' };
+    expect(overlayCheckoutOptions('pri_solo_m', custom, 'owner@example.com', 'https://app.remembra.dev/?checkout=success')).toEqual({
+      items: [{ priceId: 'pri_solo_m', quantity: 1 }],
+      customer: { email: 'owner@example.com' },
+      customData: custom,
+      settings: { successUrl: 'https://app.remembra.dev/?checkout=success', allowLogout: false },
+    });
+    // No stored email: nothing is prefilled, but the lock still applies.
+    expect(overlayCheckoutOptions('pri_solo_m', custom, undefined, 'https://x/?checkout=success')).not.toHaveProperty('customer');
+    expect(overlayCheckoutOptions('pri_solo_m', custom, '  ', 'https://x/?checkout=success')).not.toHaveProperty('customer');
+  });
+
+  it('opens a server-created transaction with the email locked too', () => {
+    expect(transactionCheckoutOptions('txn_01hv8x2kq3m9zq4w5e6r7t8y9u')).toEqual({
+      transactionId: 'txn_01hv8x2kq3m9zq4w5e6r7t8y9u',
+      settings: { allowLogout: false },
+    });
   });
 });

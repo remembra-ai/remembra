@@ -222,6 +222,7 @@ ERASURE_RULES: tuple[TableRule, ...] = (
     _by_user("reindex_jobs"),
     _by_user("audit_log"),
     _by_user("cloud_credit_reservations"),
+    _by_user("cloud_memory_holds"),
     _by_user("cloud_credit_periods"),
     _by_user("cloud_usage_daily"),
     _by_user("founding_holds"),
@@ -233,6 +234,8 @@ ERASURE_RULES: tuple[TableRule, ...] = (
 EXEMPT_TABLES: dict[str, str] = {
     "cloud_ai_spend_monthly": "platform AI spend per month and group, no account column",
     "cloud_revenue_events": "net revenue per Paddle transaction id, the accounting record (no account column)",
+    "paddle_webhook_events": "Paddle event ids already processed, for dedupe (no account column)",
+    "paddle_subscription_events": "per Paddle subscription id, the newest event time and when it ended (no account column)",
     "cloud_migrations": "one-time data migration markers",
     "schema_version": "applied schema migrations",
     "vector_store_state": "which Qdrant collection is active",

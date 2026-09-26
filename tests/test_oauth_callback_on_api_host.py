@@ -89,7 +89,7 @@ async def test_provider_round_trip_lands_on_the_spa(tmp_path, provider: str) -> 
         start = await h.http.get(f"/api/v1/auth/oauth/{provider}/start")
         assert start.status_code == 302, start.text
         query = dict(parse_qsl(urlsplit(start.headers["location"]).query))
-        # The exact redirect URI the owner registers with GitHub / Google (docs/DEPLOYING.md).
+        # The exact redirect URI the operator registers with GitHub / Google (docs/OPERATIONS.md).
         assert query["redirect_uri"] == f"{PUBLIC}/api/v1/auth/oauth/{provider}/callback"
 
         # The user cancels at the provider: it redirects back to that URI.
@@ -106,17 +106,17 @@ async def test_provider_round_trip_lands_on_the_spa(tmp_path, provider: str) -> 
         assert landing.status_code == 200 and landing.text == INDEX
 
 
-def test_deploying_doc_lists_the_redirect_uris_the_code_sends(monkeypatch) -> None:
-    """docs/DEPLOYING.md tells the owner what to register; it must match callback_url()."""
+def test_operations_doc_lists_the_redirect_uris_the_code_sends(monkeypatch) -> None:
+    """docs/OPERATIONS.md tells the operator what to register; it must match callback_url()."""
     import remembra.config as config_module
     from remembra.auth import social
     from tests.security_harness import make_settings
 
-    doc = (Path(__file__).resolve().parents[1] / "docs" / "DEPLOYING.md").read_text()
-    monkeypatch.setattr(config_module, "_settings", make_settings(public_url="https://api.remembra.dev"))
+    doc = (Path(__file__).resolve().parents[1] / "docs" / "OPERATIONS.md").read_text()
+    monkeypatch.setattr(config_module, "_settings", make_settings(public_url="https://memory.example.com"))
     for provider in ("github", "google"):
         uri = social.callback_url(provider)
-        assert uri == f"https://api.remembra.dev/api/v1/auth/oauth/{provider}/callback"
+        assert uri == f"https://memory.example.com/api/v1/auth/oauth/{provider}/callback"
         assert f"`{uri}`" in doc, provider
     assert "`user:email`" in doc and social.PROVIDERS["github"].scope == "user:email"
     assert "`openid email profile`" in doc and social.PROVIDERS["google"].scope == "openid email profile"

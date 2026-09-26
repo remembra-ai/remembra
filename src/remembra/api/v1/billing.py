@@ -19,6 +19,7 @@ from remembra.cloud.paddle_config import CheckoutUnavailableError, get_paddle_co
 from remembra.cloud.plans import (
     FOUNDING_ANNUAL_PRICE_CENTS,
     FOUNDING_MAX_REDEMPTIONS,
+    LEGACY_TIERS,
     SELF_SERVE_TIERS,
     BillingInterval,
     PlanTier,
@@ -283,6 +284,26 @@ class ClientConfigResponse(BaseModel):
     )
 
 
+async def _require_dashboard_session(request: Request, user: Any) -> None:
+    """BILL-3: checkout and the billing portal take a dashboard session, never an API key.
+
+    A pre-signed-in Paddle portal can cancel the subscription, change the card
+    and read invoices, so a leaked key (even a read-only one limited to one
+    project) must not reach it. The dashboard is the only caller and uses its
+    session. While an account review is pending, a session that did not prove
+    the mailbox is refused too.
+    """
+    if getattr(user, "api_key_id", None) != "jwt_auth":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sign in with your email (not an API key) to manage billing: API keys cannot open checkout or "
+            "the billing portal. In the dashboard (app.remembra.dev), sign out and choose Sign in with email.",
+        )
+    from remembra.api.v1.auth import refuse_untrusted_session_during_review
+
+    await refuse_untrusted_session_during_review(request, user)
+
+
 def dashboard_origin(settings: Any) -> str:
     """The dashboard's public origin: Settings.public_dashboard_url, else app.remembra.dev."""
     configured = getattr(settings, "public_dashboard_url", None)
@@ -382,8 +403,9 @@ async def create_checkout(
 ) -> CheckoutResponse:
     """Create a checkout session for plan upgrade.
 
-    Returns a Paddle client token for overlay checkout.
+    Returns a Paddle client token for overlay checkout. Dashboard sessions only.
     """
+    await _require_dashboard_session(request, current_user)
     provider = get_billing_provider(settings)
 
     if provider == "paddle":
@@ -499,10 +521,13 @@ async def create_checkout(
             if founding:
                 await _reopen_founding_price(request, billing)
             result = await billing.create_checkout_session(
-                customer_id=None,  # Will be created
+                customer_id=None,
                 plan=plan_tier,
                 user_id=current_user.user_id,
                 email=user_email,
+                # A verified account pays under its own email's Paddle customer,
+                # so its portal (which opens only that customer) works for it.
+                email_verified=bool(user_data.get("email_verified")),
                 interval=interval,
                 quantity=quantity,
                 founding=founding,
@@ -545,7 +570,9 @@ async def get_portal(
     """Get URL to customer billing portal.
 
     Users can manage subscriptions, update payment methods, view invoices.
+    Dashboard sessions only.
     """
+    await _require_dashboard_session(request, current_user)
     provider = get_billing_provider(settings)
 
     if provider == "paddle":
@@ -574,23 +601,27 @@ async def get_portal(
                 detail="User email not found. Please update your profile.",
             )
 
-        # The Paddle customer recorded for the account, else a lookup by email.
         meter = getattr(request.app.state, "usage_meter", None)
         tenant = await meter.get_tenant(current_user.user_id) if meter is not None else None
         customer_id = (tenant or {}).get("stripe_customer_id")
-        try:
+        if not user_data.get("email_verified"):
+            # BILL-1: a Paddle customer is keyed by email, and anyone can sign up
+            # with any address. Until the mailbox is proven, nothing is looked
+            # up (no "is this a customer?" answer) and no portal opens.
             if customer_id:
-                url: str | None = await billing.create_portal_session(str(customer_id))
-            else:
-                url = await billing.create_portal_session_by_email(user_email)
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Verify your email address to manage billing: Settings, Profile, Resend verification "
+                    "email, then open the link we send.",
+                )
+            raise _no_billing_account()
+        try:
+            url = await _owned_portal_url(billing, current_user.user_id, str(user_email), customer_id)
         except httpx.HTTPError as e:
             raise _provider_unavailable("portal", e) from e
 
         if not url:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="No billing account found. Please contact support if you have an active subscription.",
-            )
+            raise _no_billing_account()
 
         return PortalResponse(portal_url=url)
 
@@ -598,6 +629,46 @@ async def get_portal(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="Billing is not configured on this instance.",
     )
+
+
+def _no_billing_account() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="No billing account found for this sign-in email. If you paid with another email address, use the "
+        "Manage subscription link in your Paddle receipt, or contact support@remembra.dev.",
+    )
+
+
+def _same_email(a: Any, b: Any) -> bool:
+    return isinstance(a, str) and isinstance(b, str) and a.strip().casefold() == b.strip().casefold() != ""
+
+
+async def _owned_portal_url(billing: Any, user_id: str, verified_email: str, customer_id: Any) -> str | None:
+    """A portal session for a Paddle customer this account owns, else None (BILL-1, BILL-6).
+
+    Paddle customers are keyed by email, and a checkout (overlay or server) can
+    attach a purchase to any existing customer whose email was typed in. So a
+    customer id recorded on the account is not proof on its own: the portal
+    opens only when that customer's email is the account's verified email.
+    Without such a customer, the verified email is looked up and its customer
+    is used only when one of its subscriptions names this account. Raises
+    ``httpx.HTTPError`` when Paddle cannot be asked.
+    """
+    if customer_id:
+        customer = await billing.get_customer(str(customer_id))
+        if _same_email(customer.get("email"), verified_email):
+            url: str = await billing.create_portal_session(str(customer_id))
+            return url
+        log.warning("paddle_portal_customer_email_mismatch", user_id=user_id)
+    found = await billing.get_customer_by_email(verified_email)
+    if not found or found == customer_id:
+        return None
+    for subscription in await billing.list_billable_subscriptions(found):
+        if str((subscription.get("custom_data") or {}).get("remembra_user_id") or "") == user_id:
+            url = await billing.create_portal_session(found)
+            return url
+    log.info("paddle_portal_email_customer_not_this_account", user_id=user_id)
+    return None
 
 
 def _provider_unavailable(operation: str, error: httpx.HTTPError) -> HTTPException:
@@ -685,7 +756,8 @@ async def paddle_webhook(request: Request) -> dict[str, str]:
     """Process Paddle webhook events.
 
     Handles subscription lifecycle events.
-    Validates via Paddle webhook signature.
+    Validates via Paddle webhook signature. Each Paddle event (``event_id``) is
+    applied once: a retry or replay of a processed event answers ``duplicate``.
     """
     settings = get_settings()
 
@@ -726,9 +798,34 @@ async def paddle_webhook(request: Request) -> dict[str, str]:
             detail="Invalid webhook signature.",
         ) from e
 
+    # BILL-2: one Paddle event is applied once, whatever the retries and replays.
+    from remembra.cloud.billing_paddle import parse_event_time, webhook_event_id
+
+    meter = getattr(request.app.state, "usage_meter", None)
+    event_id = webhook_event_id(event)
+    claimed = False
+    if meter is not None and event_id:
+        claim = await meter.claim_webhook_event(event_id, event.get("event_type"), parse_event_time(event.get("occurred_at")))
+        if claim == "duplicate":
+            log.info("paddle_webhook_duplicate", event_type=event.get("event_type"))
+            return {"status": "duplicate", "action": "ignored", "applied": "duplicate"}
+        if claim == "busy":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This event is already being processed; retry later.",
+            )
+        claimed = True
+
     # Process the event and apply it to the tenant's plan.
-    result = await billing.handle_webhook_event(event)
-    applied = await _apply_paddle_result(request, result)
+    try:
+        result = await billing.handle_webhook_event(event)
+        applied = await _apply_paddle_result(request, result)
+    except BaseException:
+        if claimed and meter is not None and event_id:
+            await meter.release_webhook_event(event_id)  # Paddle retries: process it again then
+        raise
+    if claimed and meter is not None and event_id:
+        await meter.finish_webhook_event(event_id, applied)
 
     return {"status": "ok", "action": result.action if result else "ignored", "applied": applied}
 
@@ -736,8 +833,10 @@ async def paddle_webhook(request: Request) -> dict[str, str]:
 async def _apply_paddle_result(request: Request, result: Any) -> str:
     """Persist a verified Paddle lifecycle event to the tenant record.
 
-    Returns a short status: ``applied``, ``no_change`` or ``unmatched``.
-    Raises 503 when metering is unavailable so Paddle retries later.
+    Returns a short status: ``applied``, ``no_change``, ``unmatched``,
+    ``flagged`` (held for the owner) or ``stale`` (a late or replayed event of
+    a subscription that already moved on, BILL-2). Raises 503 when metering is
+    unavailable so Paddle retries later.
     """
     meter = getattr(request.app.state, "usage_meter", None)
     if meter is not None and result is not None and result.revenue_usd is not None and result.transaction_id:
@@ -747,6 +846,8 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
     if result is None or result.action in ("ignored", "payment_failed", "payment_issue"):
         if result is not None and result.action in ("payment_failed", "payment_issue"):
             log.warning("paddle_payment_problem", user_id=result.user_id, action=result.action)
+        if result is not None and result.action in ("payment_failed", "payment_issue") and meter is not None:
+            await _mark_past_due(meter, result)
         if result is not None and result.action == "payment_failed" and meter is not None:
             await _notify_payment_failed(request, meter, result)
         if result is not None and getattr(result, "unknown_price_ids", None):
@@ -773,6 +874,21 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
     if result.action in ("refund_downgrade", "refund_partial"):
         return await _apply_paddle_refund(request, meter, result)
 
+    # BILL-2: a cancel ends the subscription for good (Paddle never re-activates
+    # a canceled one); an event that would (re)activate or re-plan it and that
+    # occurred before the end, or before a newer event already applied, is a
+    # late or replayed delivery and changes nothing.
+    event_sub = result.paddle_subscription_id
+    if event_sub and result.action == "cancel_subscription":
+        await meter.note_subscription_ended(str(event_sub), result.occurred_at, "canceled")
+    elif event_sub and (staleness := await meter.subscription_event_staleness(str(event_sub), result.occurred_at)):
+        log.warning("paddle_stale_event_ignored", action=result.action, event_type=result.event_type)
+        if staleness == "superseded":
+            # A completed payment delivered after a newer event of the same live
+            # subscription: no plan change, but the period it paid for counts.
+            await _record_late_payment(meter, result)
+        return "stale"
+
     user_id = await _resolve_paddle_account(request, meter, result)
     if user_id is None:
         return "unmatched"
@@ -794,7 +910,6 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
     # naming this account) must neither cancel nor re-plan it.
     tenant = await meter.get_tenant(user_id)
     held = meter.active_subscription_id(tenant)
-    event_sub = result.paddle_subscription_id
     if result.action == "cancel_subscription":
         recorded = (tenant or {}).get("stripe_subscription_id")
         # Accounts upgraded before subscription ids were recorded: the cancel
@@ -833,7 +948,28 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
         )
         return "flagged"
 
+    if plan in LEGACY_TIERS and not _holds_legacy(tenant, event_sub, plan):
+        # BILL-5: the $49 Pro / $199 Team prices are retired. Their ids stay
+        # mapped so held subscriptions keep renewing, but a new subscription
+        # on one (Paddle.js opened with the old price id) never grants the tier.
+        log.error("paddle_legacy_price_new_purchase", user_id=user_id, plan=plan.value, transaction_id=result.transaction_id)
+        if tenant is None:
+            await meter.register_tenant(user_id, PlanTier.FREE)  # somewhere to keep the flag
+        await _flag_account(
+            request,
+            meter,
+            user_id,
+            "legacy_price_new_purchase",
+            f"A new Paddle subscription was bought on a retired legacy price ({plan.value}). The legacy plan was NOT "
+            "applied and the account's plan is unchanged. Refund and cancel the subscription in Paddle, or move it to "
+            "a current price, and archive the retired prices in Paddle so they cannot be bought again.",
+            {"plan": plan.value, "subscription_id": event_sub, "transaction_id": result.transaction_id},
+            event=f"paddle_legacy_price_new_purchase:{user_id}:{event_sub or result.transaction_id}",
+        )
+        return "flagged"
+
     before = dict(tenant) if tenant else None
+    customer_holders = await _other_customer_holders(meter, user_id, result)
     await meter.apply_subscription(
         user_id,
         plan,
@@ -841,12 +977,15 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
         seats=result.seats,
         period_anchor=result.period_anchor,
         founding=False,  # claimed below, against the cap
-        customer_id=result.paddle_customer_id,
+        customer_id=None if customer_holders else result.paddle_customer_id,
         subscription_id=result.paddle_subscription_id,
         email=result.customer_email,
         name=result.customer_name,
         bank_unlock_at=_new_bank_unlock(tenant, result, plan),
+        paid_through=result.paid_through,
     )
+    if customer_holders:
+        await _flag_customer_conflict(request, meter, user_id, tenant, result, customer_holders)
     if not result.founding and (tenant or {}).get("founding") and result.plan_from_price:
         # The held subscription moved off the Founding price (a plan change in
         # the portal): the lock ends, with the same 14-day grace as a lapse.
@@ -889,6 +1028,8 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
         except Exception as e:  # team sync is best-effort; the tenant plan is authoritative
             log.warning("paddle_team_plan_sync_failed", user_id=user_id, error_type=type(e).__name__)
 
+    if event_sub and result.action != "cancel_subscription":
+        await meter.note_subscription_event(str(event_sub), result.occurred_at)
     log.info("paddle_plan_applied", user_id=user_id, plan=plan.value, action=result.action)
     # Tell the customer when the plan, interval or seats changed (renewals send nothing).
     # The price quoted is the one this event charged, not the sticky Founding
@@ -901,6 +1042,61 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
         founding=result.founding,
     )
     return "applied"
+
+
+def _holds_legacy(tenant: dict[str, Any] | None, event_sub: str | None, plan: PlanTier) -> bool:
+    """Whether a legacy-price event renews what the account already has (BILL-5).
+
+    True for the subscription the account records (held, or a lapsed one it
+    held before), and for an account already on that legacy tier (rows from
+    before subscription ids were stored).
+    """
+    tenant = tenant or {}
+    recorded = tenant.get("stripe_subscription_id")
+    if event_sub and recorded and str(recorded) == str(event_sub):
+        return True
+    return str(tenant.get("plan") or "") == plan.value
+
+
+async def _other_customer_holders(meter: Any, user_id: str, result: Any) -> list[str]:
+    """Other accounts that already hold the event's Paddle customer id (BILL-6); empty when none or no id."""
+    customer_id = result.paddle_customer_id
+    if not customer_id:
+        return []
+    return [u for u in await meter.tenants_for_billing(customer_id=str(customer_id)) if u != user_id]
+
+
+async def _flag_customer_conflict(
+    request: Request, meter: Any, user_id: str, tenant: dict[str, Any] | None, result: Any, others: list[str]
+) -> None:
+    """A payment made as another account's Paddle customer: the id was not recorded (BILL-6).
+
+    A checkout attaches the payment to whatever Paddle customer owns the email
+    typed in, so a buyer can end up paying as someone else's customer. That id
+    is never recorded on the buyer's account (it would find, refund-match and
+    open the other person's billing): the account keeps the id it had (none
+    when it had none), is flagged, and the owner is alerted once.
+    """
+    log.error("paddle_customer_on_another_account", user_id=user_id, subscription_id=result.paddle_subscription_id)
+    if (tenant or {}).get("billing_flag") == "paddle_customer_conflict":
+        return
+    await _flag_account(
+        request,
+        meter,
+        user_id,
+        "paddle_customer_conflict",
+        "A Paddle payment for this account was made as a Paddle customer that another Remembra account already holds "
+        "(one payer email paying for both accounts, or a buyer who typed the other account's email at checkout). "
+        "The plan was applied, but the customer id was not recorded on this account, so its portal will not open "
+        "that customer. Check both accounts in Paddle; move or refund the subscription if it is not the same payer.",
+        {
+            "customer_id": result.paddle_customer_id,
+            "other_accounts": others,
+            "subscription_id": result.paddle_subscription_id,
+            "transaction_id": result.transaction_id,
+        },
+        event=f"paddle_customer_conflict:{user_id}:{result.paddle_customer_id}",
+    )
 
 
 async def _account_deleted(db: Any, user_id: str) -> bool:
@@ -946,6 +1142,42 @@ async def _refuse_payment_for_deleted_account(request: Request, meter: Any, user
         event=f"paddle_payment_after_deletion:{user_id}:{result.transaction_id or subscription_id}",
     )
     return "flagged"
+
+
+async def _record_late_payment(meter: Any, result: Any) -> None:
+    """Record a late completed payment's billing period on the account holding its subscription (BILL-4).
+
+    Like :func:`_mark_past_due`, only the account whose plan comes from this
+    subscription is updated.
+    """
+    subscription_id = result.paddle_subscription_id
+    if not subscription_id or result.paid_through is None:
+        return
+    user_id = await meter.find_tenant_by_billing_ids(subscription_id=str(subscription_id), customer_id=None)
+    if user_id is None or meter.active_subscription_id(await meter.get_tenant(user_id)) != subscription_id:
+        return
+    if await meter.record_late_payment(str(user_id), result.paid_through, result.occurred_at):
+        log.info("paddle_late_payment_recorded", user_id=user_id)
+
+
+async def _mark_past_due(meter: Any, result: Any) -> None:
+    """The held subscription's payment failed: hold the next yearly bank until it is paid (BILL-4).
+
+    Only the account whose plan comes from this subscription is marked, and a
+    past-due event older than the newest one applied (a late delivery after
+    the recovery payment) changes nothing.
+    """
+    from remembra.cloud.metering import now_utc
+
+    subscription_id = result.paddle_subscription_id
+    if not subscription_id or await meter.subscription_event_is_stale(str(subscription_id), result.occurred_at):
+        return
+    user_id = await meter.find_tenant_by_billing_ids(subscription_id=str(subscription_id), customer_id=None)
+    if user_id is None or meter.active_subscription_id(await meter.get_tenant(user_id)) != subscription_id:
+        return
+    await meter.set_past_due(str(user_id), result.occurred_at or now_utc())
+    await meter.note_subscription_event(str(subscription_id), result.occurred_at)
+    log.warning("paddle_subscription_past_due", user_id=user_id)
 
 
 async def _notify_payment_failed(request: Request, meter: Any, result: Any) -> None:
@@ -1113,6 +1345,9 @@ async def _apply_paddle_refund(request: Request, meter: Any, result: Any) -> str
         log.info("paddle_refund_for_other_subscription", user_id=user_id)
         return "no_change"
     await meter.apply_subscription(user_id, PlanTier.FREE)
+    if result.paddle_subscription_id or held:
+        # BILL-2: a late payment of the refunded subscription never puts the paid plan back.
+        await meter.note_subscription_ended(str(result.paddle_subscription_id or held), result.occurred_at, "refunded")
     flag = f"{result.adjustment_action or 'refund'}_downgraded"
     message = f"An approved {result.adjustment_action or 'refund'} ended a paid plan; the account is back on Free."
     event = None

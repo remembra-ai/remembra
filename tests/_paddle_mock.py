@@ -24,6 +24,8 @@ class PaddleMock:
     subscriptions: dict[str, dict[str, Any]] = field(default_factory=dict)  # id -> {status, customer_id, custom_data}
     prices: dict[str, str] = field(default_factory=dict)  # id -> status
     customers_by_email: dict[str, str] = field(default_factory=dict)
+    # id -> email for GET /customers/{id} (customers_by_email entries are found too).
+    customers: dict[str, str] = field(default_factory=dict)
     calls: list[tuple[str, str, dict[str, str], Any]] = field(default_factory=list)
     # "METHOD /path" -> HTTP status to answer, or an exception to raise (a transport failure).
     failures: dict[str, Any] = field(default_factory=dict)
@@ -81,9 +83,21 @@ class PaddleMock:
         if parts[:1] == ["prices"] and len(parts) == 2 and method == "PATCH":
             self.prices[parts[1]] = str(body["status"])
             return httpx.Response(200, json={"data": {"id": parts[1], "status": body["status"]}})
+        if parts == ["customers"] and method == "POST":
+            email = str(body["email"])
+            if email in self.customers_by_email:
+                return httpx.Response(409, json={"error": {"type": "request_error", "code": "customer_already_exists"}})
+            cid = f"ctm_mock_{len(self.customers_by_email) + len(self.customers) + 1}"
+            self.customers_by_email[email] = cid
+            return httpx.Response(201, json={"data": {"id": cid, "email": email}})
         if parts == ["customers"] and method == "GET":
             cid = self.customers_by_email.get(params.get("email", ""))
             return httpx.Response(200, json={"data": [{"id": cid}] if cid else []})
+        if parts[:1] == ["customers"] and len(parts) == 2 and method == "GET":
+            by_id = {cid: email for email, cid in self.customers_by_email.items()} | self.customers
+            if parts[1] not in by_id:
+                return httpx.Response(404, json={"error": {"code": "entity_not_found"}})
+            return httpx.Response(200, json={"data": {"id": parts[1], "email": by_id[parts[1]], "custom_data": None}})
         if parts[:1] == ["customers"] and parts[2:] == ["portal-sessions"] and method == "POST":
             url = f"https://portal.example/{parts[1]}"
             return httpx.Response(201, json={"data": {"urls": {"general": {"overview": url}}}})

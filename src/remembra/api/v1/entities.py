@@ -210,30 +210,35 @@ async def search_relationships_by_name(
         # Return empty list if entity not found (don't error)
         return RelationshipsListResponse(relationships=[], total=0)
 
-    # Get relationships with temporal filtering
+    # Get relationships with temporal filtering, both ends in the caller's scope (TI-H1)
     relationships = await db.get_entity_relationships(
         entity.id,
         as_of=as_of_dt,
         include_superseded=include_history,
+        user_id=current_user.user_id,
+        project_id=project_id,
     )
 
     # Filter by relationship type if specified
     if relationship_type:
         relationships = [r for r in relationships if r.type.upper() == relationship_type.upper()]
 
-    # Enrich with entity names
+    # Enrich with entity names, under the same scope; an edge whose other end the
+    # caller cannot read is dropped, never rendered (TI-H1).
     relationship_responses = []
     for rel in relationships:
-        from_entity = await db.get_entity(rel.from_entity_id)
-        to_entity = await db.get_entity(rel.to_entity_id)
+        from_entity = await db.get_entity(rel.from_entity_id, user_id=current_user.user_id, project_id=project_id)
+        to_entity = await db.get_entity(rel.to_entity_id, user_id=current_user.user_id, project_id=project_id)
+        if from_entity is None or to_entity is None:
+            continue
 
         relationship_responses.append(
             RelationshipResponse(
                 id=rel.id,
                 from_entity_id=rel.from_entity_id,
-                from_entity_name=from_entity.canonical_name if from_entity else "Unknown",
+                from_entity_name=from_entity.canonical_name,
                 to_entity_id=rel.to_entity_id,
-                to_entity_name=to_entity.canonical_name if to_entity else "Unknown",
+                to_entity_name=to_entity.canonical_name,
                 type=rel.type,
                 confidence=rel.confidence,
                 valid_from=rel.valid_from.isoformat() if rel.valid_from else None,
@@ -342,26 +347,31 @@ async def get_entity_relationships(
                 detail=f"Invalid date format for as_of: {as_of}. Use ISO format (e.g., 2022-01-15)",
             )
 
-    # Get relationships with temporal filtering
+    # Get relationships with temporal filtering, both ends in the caller's scope (TI-H1)
     relationships = await db.get_entity_relationships(
         entity_id,
         as_of=as_of_dt,
         include_superseded=include_history,
+        user_id=current_user.user_id,
+        project_id=project_id,
     )
 
-    # Enrich with entity names
+    # Enrich with entity names, under the same scope; an edge whose other end the
+    # caller cannot read is dropped, never rendered (TI-H1).
     relationship_responses = []
     for rel in relationships:
-        from_entity = await db.get_entity(rel.from_entity_id)
-        to_entity = await db.get_entity(rel.to_entity_id)
+        from_entity = await db.get_entity(rel.from_entity_id, user_id=current_user.user_id, project_id=project_id)
+        to_entity = await db.get_entity(rel.to_entity_id, user_id=current_user.user_id, project_id=project_id)
+        if from_entity is None or to_entity is None:
+            continue
 
         relationship_responses.append(
             RelationshipResponse(
                 id=rel.id,
                 from_entity_id=rel.from_entity_id,
-                from_entity_name=from_entity.canonical_name if from_entity else "Unknown",
+                from_entity_name=from_entity.canonical_name,
                 to_entity_id=rel.to_entity_id,
-                to_entity_name=to_entity.canonical_name if to_entity else "Unknown",
+                to_entity_name=to_entity.canonical_name,
                 type=rel.type,
                 confidence=rel.confidence,
                 valid_from=rel.valid_from.isoformat() if rel.valid_from else None,

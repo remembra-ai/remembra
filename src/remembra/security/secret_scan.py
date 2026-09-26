@@ -1,7 +1,8 @@
 """Find and redact credentials already stored in memories (SEC-23 backfill).
 
-Scans ``memories`` and ``archived_memories`` (content + extracted_facts), the
-FTS index, and the Qdrant payload of each affected point. Dry-run by default:
+Scans ``memories`` and ``archived_memories`` (content, extracted_facts and the
+string values of metadata, such as a relay handoff's Failing section), the FTS
+index, and the Qdrant payload of each affected point. Dry-run by default:
 it only reports counts per secret type. With ``apply=True`` it rewrites the text
 in place with ``[REDACTED:<kind>]`` placeholders — an in-place redaction, never a
 delete. Secret values are never logged or returned.
@@ -73,7 +74,60 @@ def _redact_facts(raw: str | None) -> tuple[str | None, dict[str, int]]:
     return (json.dumps(cleaned) if counts else raw), counts
 
 
-async def _update_qdrant(qdrant: Any, memory_id: str, content: str, facts_json: str | None) -> None:
+# Metadata values that identify things (the relay row key, session and agent ids,
+# commit shas, checksums): a long random session id reads like a token, and
+# rewriting it would break the lookups that use it.
+_METADATA_ID_KEYS = frozenset(
+    {
+        "relay_key",
+        "session_id",
+        "agent_id",
+        "user_id",
+        "project_id",
+        "memory_id",
+        "source_id",
+        "id",
+        "sha",
+        "head_commit",
+        "checksum",
+        "content_checksum",
+    }
+)
+
+
+def _redact_value(value: Any, counts: dict[str, int]) -> Any:
+    if isinstance(value, str):
+        result = redact_secrets(value)
+        for kind, n in result.counts.items():
+            counts[kind] = counts.get(kind, 0) + n
+        return result.text
+    if isinstance(value, dict):
+        return {k: v if k in _METADATA_ID_KEYS else _redact_value(v, counts) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_value(v, counts) for v in value]
+    return value
+
+
+def _redact_metadata(raw: str | None) -> tuple[str | None, dict[str, Any] | None, dict[str, int]]:
+    """``(metadata_json, metadata, counts)`` with credentials redacted from its string values (keys and ids kept)."""
+    if not raw:
+        return raw, None, {}
+    try:
+        metadata = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return raw, None, {}
+    if not isinstance(metadata, dict):
+        return raw, None, {}
+    counts: dict[str, int] = {}
+    cleaned = _redact_value(metadata, counts)
+    if not counts:
+        return raw, None, {}
+    return json.dumps(cleaned), cleaned, counts
+
+
+async def _update_qdrant(
+    qdrant: Any, memory_id: str, content: str, facts_json: str | None, metadata: dict[str, Any] | None = None
+) -> None:
     """Overwrite the text fields of one Qdrant point (encrypted like QdrantStore.upsert)."""
     client = await qdrant._get_client()
     payload: dict[str, Any] = {"content": qdrant._encryptor.encrypt(content)}
@@ -82,6 +136,8 @@ async def _update_qdrant(qdrant: Any, memory_id: str, content: str, facts_json: 
             payload["extracted_facts"] = json.loads(facts_json)
         except (TypeError, json.JSONDecodeError):
             pass
+    if metadata is not None:
+        payload["metadata"] = qdrant._encryptor.encrypt_dict(metadata)
     await client.set_payload(collection_name=qdrant.collection_name, payload=payload, points=[memory_id])
 
 
@@ -103,7 +159,7 @@ async def scan_and_redact(
                 where += " AND user_id = ?"
                 params.append(user_id)
             cursor = await db.conn.execute(
-                f"SELECT rowid, id, user_id, project_id, content, extracted_facts FROM {table} "
+                f"SELECT rowid, id, user_id, project_id, content, extracted_facts, metadata FROM {table} "
                 f"WHERE {where} ORDER BY rowid LIMIT {_BATCH}",
                 params,
             )
@@ -116,18 +172,20 @@ async def scan_and_redact(
                 report.rows_scanned += 1
                 content_result = redact_secrets(content)
                 new_facts, fact_counts = _redact_facts(facts_raw)
-                if not content_result.redacted and not fact_counts:
+                new_meta_json, new_meta, meta_counts = _redact_metadata(row[6])
+                if not content_result.redacted and not fact_counts and not meta_counts:
                     continue
                 report.rows_with_secrets += 1
                 report.add(content_result.counts)
                 report.add(fact_counts)
+                report.add(meta_counts)
                 report.affected_ids.append(memory_id)
                 if not apply:
                     continue
 
                 await db.conn.execute(
-                    f"UPDATE {table} SET content = ?, extracted_facts = ?, updated_at = ? WHERE id = ?",
-                    (content_result.text, new_facts, datetime.now(UTC).isoformat(), memory_id),
+                    f"UPDATE {table} SET content = ?, extracted_facts = ?, metadata = ?, updated_at = ? WHERE id = ?",
+                    (content_result.text, new_facts, new_meta_json, datetime.now(UTC).isoformat(), memory_id),
                 )
                 if has_vectors:
                     await db.conn.execute("DELETE FROM memories_fts WHERE id = ?", (memory_id,))
@@ -140,7 +198,7 @@ async def scan_and_redact(
 
                 if has_vectors and qdrant is not None:
                     try:
-                        await _update_qdrant(qdrant, memory_id, content_result.text, new_facts)
+                        await _update_qdrant(qdrant, memory_id, content_result.text, new_facts, new_meta)
                         report.qdrant_payloads_updated += 1
                     except Exception as e:
                         report.qdrant_errors += 1

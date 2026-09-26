@@ -24,9 +24,11 @@ what actually survived.
 
 ## Methodology
 
-- **Corpus:** 25 fact-dense statements (`corpus.json`) spanning trading,
-  accounting, ops, security, meetings, preferences, and general facts. Each has
-  a paraphrased probe query and a list of the exact figures it contains.
+- **Corpus:** 25 fact-dense statements (`corpus.json`, version 2.0) spanning
+  trading, accounting, ops, security, meetings, preferences, and general facts.
+  Each has a paraphrased probe query and a list of the exact figures it
+  contains. Every statement is synthetic: the people, companies, products,
+  places and figures are made up.
 - **Same models for every provider:** `gpt-4o-mini` extraction,
   `text-embedding-3-small` embeddings — so results reflect the *memory-layer
   design*, not model choice.
@@ -46,6 +48,12 @@ Raw per-item results are written to `results/<provider>.json`.
 
 ## Results
 
+These figures come from the September 2026 run on corpus version 1.0, which
+had the same shape (25 items across the same categories) but has
+been replaced by the synthetic version 2.0. Its per-item results were removed
+with it. Re-run both providers on version 2.0 to refresh the table and commit
+the new `results/` files.
+
 | Metric | Remembra (lossless) | Mem0 (OSS) |
 | --- | --- | --- |
 | Verbatim retention | **100.0%** ✅ | 0.0% |
@@ -55,7 +63,7 @@ Raw per-item results are written to `results/<provider>.json`.
 | Drifted records (<0.5 overlap) | **0** ✅ | 5 |
 | Recall hit (paraphrased probe) | **60.0%**  | 100.0% |
 
-> Run: 25-item corpus, gpt-4o-mini + text-embedding-3-small for both. Remembra = live api.remembra.dev (v0.16.0). Mem0 = OSS pipeline, local. Both recall at 100% when queried; Remembra's recall-hit figure reflects 10 transient recall errors during this run (a graph-path metadata bug found _by_ this benchmark and since fixed), not retrieval misses.
+> Run: 25-item corpus (version 1.0), gpt-4o-mini + text-embedding-3-small for both. Remembra = live api.remembra.dev (v0.16.0). Mem0 = OSS pipeline, local. Both recall at 100% when queried; Remembra's recall-hit figure reflects 10 transient recall errors during this run (a graph-path metadata bug found _by_ this benchmark and since fixed), not retrieval misses.
 
 
 ## Why Remembra wins fidelity

@@ -21,7 +21,7 @@ from remembra.core.llm_guard import (
 from remembra.extraction.consolidator import ConsolidationAction, ExistingMemory, MemoryConsolidator
 from remembra.extraction.extractor import ExtractionConfig, FactExtractor
 
-CONTENT = "Mani moved to Kingston in 2024. He runs a low-voltage contracting company."
+CONTENT = "Mani moved to Lisbon in 2024. She runs a small bakery."
 FAST_RETRY = {"retry-after-ms": "1"}
 
 
@@ -77,7 +77,7 @@ async def test_quota_opens_llm_breaker_immediately_and_stops_http_calls() -> Non
 
     with llm_fallback_scope() as fallbacks:
         facts = await extractor.extract(CONTENT)
-    assert facts == ["Mani moved to Kingston in 2024.", "He runs a low-voltage contracting company."]
+    assert facts == ["Mani moved to Lisbon in 2024.", "She runs a small bakery."]
     assert fallbacks == {"extraction": "quota_exhausted"}
     assert get_llm_breaker().state == CircuitState.OPEN
     assert upstream.calls == 1  # the SDK's retry was refused locally by the open breaker
@@ -105,9 +105,9 @@ async def test_consolidator_auth_error_falls_back_without_tripping_breaker() -> 
     upstream = Upstream(401, {"error": {"message": "Incorrect API key provided"}})
     consolidator = MemoryConsolidator(api_key="t")
     consolidator._client = make_llm_client("t", inner_transport=upstream.transport())
-    existing = [ExistingMemory(id="m1", content="Mani lives in Kingston", score=0.9)]
+    existing = [ExistingMemory(id="m1", content="Mani lives in Lisbon", score=0.9)]
     with llm_fallback_scope() as fallbacks:
-        result = await consolidator.consolidate("Mani lives in Kingston, Jamaica", existing)
+        result = await consolidator.consolidate("Mani lives in Lisbon, Portugal", existing)
     assert result.action == ConsolidationAction.ADD
     assert fallbacks == {"consolidation": "auth"}
     assert get_llm_breaker().state == CircuitState.CLOSED
@@ -115,11 +115,11 @@ async def test_consolidator_auth_error_falls_back_without_tripping_breaker() -> 
 
 
 async def test_success_path_unchanged_and_no_fallback_marked() -> None:
-    upstream = Upstream(200, _completion(json.dumps({"facts": ["Mani moved to Kingston in 2024"]})))
+    upstream = Upstream(200, _completion(json.dumps({"facts": ["Mani moved to Lisbon in 2024"]})))
     extractor = _extractor(upstream)
     with llm_fallback_scope() as fallbacks:
         facts = await extractor.extract(CONTENT)
-    assert facts == ["Mani moved to Kingston in 2024"]
+    assert facts == ["Mani moved to Lisbon in 2024"]
     assert fallbacks == {}
     assert get_llm_breaker().last_success_at is not None
 

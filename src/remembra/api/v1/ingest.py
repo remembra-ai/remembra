@@ -81,8 +81,22 @@ async def _gate_conversation(
         memories_added=1,
         enforce_batch_limit=False,
         enforce_content_limit=False,
+        count_unenriched=False,  # a degraded ingest is counted per stored message below
     )
     if not grant.enrich:
+        # BILL-9: degrade to raw storage of every message, gated like the
+        # infer=false path: n unenriched writes and n rows against the memory
+        # cap (the response keeps the degraded grant's headers).
+        await gate_write(
+            request,
+            None,
+            user_id,
+            messages,
+            atomic=[True] * len(messages),
+            project_ids=[body.project_id or "default"],
+            enforce_batch_limit=False,
+            enforce_content_limit=False,
+        )
         body.options.infer = False  # degrade: keep every message verbatim, no LLM
     return grant
 

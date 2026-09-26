@@ -617,8 +617,16 @@ def test_split_output_follows_the_trust_policy(env):
         "host": "mac",
         "hint_project": "clawdbot",
     }
+    # A branch name git would refuse is refused at the close (CLI-07), so it never reaches the split;
+    # the crafted text rides in the recorded path instead.
+    refused = env["http"].post(
+        "/api/v1/session/close",
+        json={"agent_id": "codex", "session_id": "s-a", "project": widget, "facts": {"branch": bad_branch}},
+        headers={"X-API-Key": OWNER_KEY, "X-Remembra-Agent-Id": "codex"},
+    )
+    assert refused.status_code == 422 and "valid git branch name" in refused.text
     post_close(
-        env, {"agent_id": "codex", "session_id": "s-a", "project": widget, "facts": {"branch": bad_branch, "todos_open": ["x"]}}
+        env, {"agent_id": "codex", "session_id": "s-a", "project": widget, "facts": {"branch": "widget", "todos_open": ["x"]}}
     )
     post_close(
         env, {"agent_id": "codex", "session_id": "s-b", "project": other, "facts": {"branch": "main", "todos_open": ["y"]}}

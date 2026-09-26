@@ -39,6 +39,14 @@ export function successUrl(config: Pick<BillingClientConfigResponse, 'success_ur
 }
 
 /**
+ * The buyer cannot switch the checkout to another email. The billing portal
+ * opens only the Paddle customer whose email is the account's verified email
+ * (BILL-1/BILL-6), so a purchase made under another address would leave the
+ * owner unable to manage it from the dashboard.
+ */
+const EMAIL_LOCKED = { allowLogout: false } as const;
+
+/**
  * Initialize Paddle.js once per page with the server's client token.
  * Returns false when there is nothing to initialize with (Paddle is not the
  * provider, or the server has no client token).
@@ -47,9 +55,31 @@ export function initPaddle(p: PaddleLike, config: BillingClientConfigResponse | 
   if (!config || config.provider !== 'paddle' || !config.client_token) return false;
   if (p.Initialized) return true;
   if (paddleEnvironment(config.client_token) === 'sandbox') p.Environment?.set('sandbox');
-  p.Initialize({ token: config.client_token, checkout: { settings: { successUrl: successUrl(config, origin) } } });
+  // Defaults for every checkout on the page, including the one Paddle.js opens for ?_ptxn.
+  p.Initialize({ token: config.client_token, checkout: { settings: { successUrl: successUrl(config, origin), ...EMAIL_LOCKED } } });
   p.Initialized = true;
   return true;
+}
+
+/** Paddle.Checkout.open options for a client price: the account email prefilled and locked. */
+export function overlayCheckoutOptions(
+  priceId: string,
+  customData: Record<string, string>,
+  email: string | undefined,
+  success: string,
+): Record<string, unknown> {
+  const prefill = email?.trim();
+  return {
+    items: [{ priceId, quantity: 1 }],
+    ...(prefill ? { customer: { email: prefill } } : {}),
+    customData,
+    settings: { successUrl: success, ...EMAIL_LOCKED },
+  };
+}
+
+/** Paddle.Checkout.open options for a server-created transaction (it names the account's Paddle customer). */
+export function transactionCheckoutOptions(transactionId: string): Record<string, unknown> {
+  return { transactionId, settings: { ...EMAIL_LOCKED } };
 }
 
 const TXN_ID = /^txn_[a-z0-9]{10,64}$/;

@@ -13,9 +13,13 @@ agent. This module holds the pieces every surface shares:
   :func:`wrap_untrusted` applies the same framing to any tool output (the MCP
   tools that return stored content).
 * :func:`strip_hidden`: removes invisible characters (Unicode tag characters,
-  zero-width and bidirectional controls) and reports what was hidden. Tag
-  characters spell ASCII the reader cannot see, so their decoded text is
-  returned for inspection.
+  zero-width and bidirectional controls, terminal control characters) and
+  reports what was hidden. Tag characters spell ASCII the reader cannot see,
+  so their decoded text is returned for inspection.
+* :func:`strip_controls`: removes terminal escape sequences and C0/C1 control
+  characters (keeping newlines and tabs), so recorded text printed by the
+  relay CLI cannot set the clipboard (OSC 52), hide a link target (OSC 8) or
+  erase a warning line (CSI).
 * :func:`detect_actionable`: a deterministic detector for command-shaped text
   (pipe-to-shell, ``base64 -d | sh``, ``rm -rf``, force pushes, hook
   overrides, permission-bypass flags, reads of credentials files) and for
@@ -112,10 +116,39 @@ _BIDI_RE = re.compile("[‪-‮⁦-⁩]")
 _ZERO_WIDTH_RE = re.compile("[­͏؜ᅟᅠ឴឵᠎​-‏⁠-⁤ㅤ﻿ﾠ]")
 
 
+# Terminal escape sequences, removed whole so nothing of them is left behind: OSC (hyperlinks, clipboard,
+# window title) and DCS/SOS/PM/APC strings up to their terminator (or the end of the line), CSI sequences
+# (colors, cursor moves, erase), and the other two- and three-byte ESC sequences. 7-bit and C1 forms.
+_ESCAPE_SEQ_RE = re.compile(
+    "(?:\x1b\\]|\x9d)[^\x07\x1b\x9c\n]*(?:\x07|\x1b\\\\|\x9c)?"
+    "|(?:\x1b[PX^_]|[\x90\x98\x9e\x9f])[^\x07\x1b\x9c\n]*(?:\x07|\x1b\\\\|\x9c)?"
+    "|(?:\x1b\\[|\x9b)[0-?]*[ -/]*[@-~]?"
+    "|\x1b[ -/]*[0-~]?"
+)
+# C0 and C1 control characters except tab and newline (carriage return included: it rewrites the line).
+_CONTROL_RE = re.compile("[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+
+
+def strip_controls(text: str) -> str:
+    """``text`` without terminal escape sequences or control characters (tabs and newlines kept, CRLF -> LF).
+
+    Recorded text (handoff fields, inbox messages, memories) is printed by the
+    relay CLI and pasted into terminals; an escape sequence in it could set the
+    clipboard (OSC 52), disguise a link (OSC 8) or erase the line above (CSI).
+    """
+    if not text:
+        return text
+    text = text.replace("\r\n", "\n")
+    if not _CONTROL_RE.search(text):
+        return text
+    return _CONTROL_RE.sub("", _ESCAPE_SEQ_RE.sub("", text))
+
+
 def strip_hidden(text: str) -> tuple[str, list[str], str]:
     """``(visible_text, kinds, decoded_tags)``.
 
-    ``kinds`` lists what was removed (``"tag"``, ``"bidi"``, ``"zero_width"``);
+    ``kinds`` lists what was removed (``"tag"``, ``"bidi"``, ``"zero_width"``,
+    ``"control"`` for terminal escape sequences and control characters);
     ``decoded_tags`` is the ASCII a run of Unicode tag characters spells
     (invisible to a person, readable to a model), for inspection.
     """
@@ -133,6 +166,10 @@ def strip_hidden(text: str) -> tuple[str, list[str], str]:
     if _ZERO_WIDTH_RE.search(text):
         kinds.append("zero_width")
         text = _ZERO_WIDTH_RE.sub("", text)
+    text = text.replace("\r\n", "\n")
+    if _CONTROL_RE.search(text):
+        kinds.append("control")
+        text = strip_controls(text)
     return text, kinds, decoded
 
 

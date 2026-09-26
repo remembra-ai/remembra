@@ -203,8 +203,10 @@ async def test_checkout_requires_configured_prices_and_enforces_offer_rules(tmp_
         _paddle(c, **PRICES)
         sent: list[dict] = []
 
-        async def fake_request(self, method: str, endpoint: str, data: dict | None = None) -> dict:
+        async def fake_request(self, method: str, endpoint: str, data: dict | None = None, params: dict | None = None) -> dict:
             sent.append({"method": method, "endpoint": endpoint, "data": data})
+            if endpoint == "/customers":  # the verified email's Paddle customer (found)
+                return {"data": [{"id": "ctm_checkout"}]}
             return {"data": {"id": "txn_1", "checkout": {"url": "https://pay.example/txn_1"}}}
 
         monkeypatch.setattr("remembra.cloud.billing_paddle.PaddleBillingManager._request", fake_request)
@@ -217,6 +219,7 @@ async def test_checkout_requires_configured_prices_and_enforces_offer_rules(tmp_
         assert r.status_code == 200, r.text
         assert sent[-1]["data"]["items"] == [{"price_id": "pri_solo_y", "quantity": 1}]
         assert sent[-1]["data"]["custom_data"]["interval"] == "year"
+        assert sent[-1]["data"]["customer_id"] == "ctm_checkout"  # paid under the verified email's customer
 
         r = await c.h.client.post("/api/v1/billing/checkout", json={"plan": "team", "seats": 2}, headers=hdr)
         assert r.status_code == 400 and "3 seats" in r.text
@@ -500,7 +503,7 @@ async def test_queue_drops_droppable_work_beyond_backlog_and_releases_the_job() 
 async def test_usage_summary_reports_everything_the_dashboard_shows(tmp_path) -> None:
     async with cost_app(tmp_path) as c:
         uid, hdr = await c.account("dash@example.com", plan=PlanTier.TEAM, interval=BillingInterval.MONTH, seats=4)
-        await c.h.client.post("/api/v1/memories", json={"content": "Team note about the Kingston office"}, headers=hdr)
+        await c.h.client.post("/api/v1/memories", json={"content": "Team note about the Lisbon office"}, headers=hdr)
         await c.h.client.post("/api/v1/memories", json={"content": "handoff text", "memory_type": "handoff"}, headers=hdr)
         await c.h.client.post("/api/v1/inbox/send", json={"to_agent": "a", "subject": "s", "body": "b"}, headers=hdr)
         await c.settle_all()

@@ -7,7 +7,7 @@
 -- accounts returns 500 until this runs.
 --
 -- Run it BEFORE redeploying b034314, after taking a consistent copy. The image
--- has no sqlite3 CLI and does not contain this file: docs/DEPLOYING.md
+-- has no sqlite3 CLI and does not contain this file: docs/OPERATIONS.md
 -- ("Rolling back past the plans v2 migration") copies it into the container
 -- and applies it with Python's sqlite3 module.
 --

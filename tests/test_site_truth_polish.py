@@ -82,7 +82,7 @@ def test_no_page_says_install_all_sets_up_windsurf() -> None:
     claims = re.compile(r"(auto-detects|configures|Auto-configured|sets up)[^.\n]*Windsurf|Windsurf[^.\n|]*Auto-configured", re.I)
     bad = []
     for path in DOC_FILES:
-        if path.name in ("changelog.md", "changelog.html", "competitive-analysis-2026.md", "connect.md"):
+        if path.name in ("changelog.md", "changelog.html", "connect.md"):
             continue  # past releases, and a page about adding the server by hand
         for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if claims.search(line) and "unverified" not in line.lower() and "does not" not in line:

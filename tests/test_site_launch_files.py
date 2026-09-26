@@ -23,10 +23,19 @@ def test_apple_pay_domain_association_ships_with_the_dashboard():
 def test_docs_image_builds_the_site_from_docs_only():
     text = DOCS_DOCKERFILE.read_text()
     copies = re.findall(r"^COPY (?!--from)(.+)$", text, flags=re.MULTILINE)
-    assert copies == ["mkdocs.yml ./", "docs ./docs"]
+    # The pages come from mkdocs.yml and docs/ only; the rest is the pinned build
+    # tools, and the nginx config plus the CSP script (LIVE-4 / CTR-1).
+    assert copies == [
+        ".github/docs-requirements.txt ./docs-requirements.txt",
+        "mkdocs.yml ./",
+        "docs ./docs",
+        "docs-nginx/remembra-headers.conf scripts/docs_csp.py ./",
+        "docs-nginx/nginx.conf /etc/nginx/nginx.conf",
+    ]
     assert "mkdocs build --strict" in text
+    pins = (ROOT / ".github" / "docs-requirements.txt").read_text()
     for pinned in ("mkdocs==", "mkdocs-material==", "pymdown-extensions=="):
-        assert pinned in text
+        assert re.search(rf"^{re.escape(pinned)}\S+ \\\n\s+--hash=sha256:[0-9a-f]{{64}}", pins, re.M), pinned
     assert "COPY --from=build /out /usr/share/nginx/html" in text
 
 
@@ -40,4 +49,4 @@ def test_docs_image_has_its_own_build_context():
         for line in (ROOT / "docs.Dockerfile.dockerignore").read_text().splitlines()
         if line.strip() and not line.startswith("#")
     ]
-    assert lines == ["*", "!mkdocs.yml", "!docs/"]
+    assert lines == ["*", "!mkdocs.yml", "!docs/", "!docs-nginx/", "!scripts/docs_csp.py", "!.github/docs-requirements.txt"]

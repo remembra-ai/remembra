@@ -79,6 +79,26 @@ def checkout_binding_valid(user_id: str | None, binding: Any) -> bool:
     return hmac.compare_digest(checkout_binding(user_id), binding)
 
 
+def webhook_event_id(event: dict[str, Any]) -> str | None:
+    """The id that identifies one Paddle event across retries and replays (``event_id``, else ``notification_id``)."""
+    for key in ("event_id", "notification_id"):
+        value = event.get(key)
+        if isinstance(value, str) and value.strip() and len(value) <= 128:
+            return value.strip()
+    return None
+
+
+def parse_event_time(value: Any) -> datetime | None:
+    """A Paddle RFC 3339 timestamp (``occurred_at``, ``billing_period.ends_at``) as an aware UTC datetime, or None."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.astimezone(UTC) if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
 class PaddleBillingManager:
     """Manages Paddle billing for Remembra Cloud.
 
@@ -222,11 +242,18 @@ class PaddleBillingManager:
         interval: BillingInterval = BillingInterval.MONTH,
         quantity: int = 1,
         founding: bool = False,
+        email_verified: bool = False,
     ) -> dict[str, Any]:
         """Create a Paddle transaction for checkout.
 
         Returns transaction_id and checkout URL (for hosted checkout).
         For overlay checkout, use transaction_id with Paddle.js.
+
+        ``email_verified``: ``customer_email`` is the account's proven email.
+        Without a ``paddle_customer_id``, that email's Paddle customer (found,
+        else created) is attached, so the payment cannot land on a customer
+        with another email (the portal opens only the account email's
+        customer). Never for an unproven email, which may be someone else's.
 
         Raises:
             CheckoutUnavailableError: no Paddle price is configured for the plan/interval.
@@ -234,6 +261,8 @@ class PaddleBillingManager:
         if plan.value not in ("solo", "pro", "team"):
             raise CheckoutUnavailableError(f"The {plan.value} plan is not sold through self-serve checkout.")
         price_id = self._price_for(plan, interval, founding)
+        if not paddle_customer_id and customer_email and email_verified:
+            paddle_customer_id = await self._customer_for_verified_email(user_id, customer_email)
         limits = get_plan(plan)
         quantity = max(limits.min_seats, quantity) if limits.per_seat else 1
 
@@ -284,6 +313,7 @@ class PaddleBillingManager:
         interval: BillingInterval = BillingInterval.MONTH,
         quantity: int = 1,
         founding: bool = False,
+        email_verified: bool = False,
     ) -> dict[str, Any]:
         """Create a checkout session (alias for create_checkout_transaction).
 
@@ -299,7 +329,29 @@ class PaddleBillingManager:
             interval=interval,
             quantity=quantity,
             founding=founding,
+            email_verified=email_verified,
         )
+
+    async def _customer_for_verified_email(self, user_id: str, email: str) -> str | None:
+        """The Paddle customer of a verified email (found, else created); None when Paddle cannot be asked.
+
+        Best effort: a checkout without a customer still works (the buyer
+        enters the email in the checkout, as before).
+        """
+        try:
+            found = await self.get_customer_by_email(email)
+            if found:
+                return found
+            try:
+                return await self.create_customer(user_id, email)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code != 409:
+                    raise
+                # Created in the meantime (a second checkout tab): use that one.
+                return await self.get_customer_by_email(email)
+        except (httpx.HTTPError, KeyError, TypeError, IndexError) as e:
+            logger.warning("paddle_checkout_customer_unavailable error_type=%s", type(e).__name__)
+            return None
 
     # -----------------------------------------------------------------------
     # Customer lookup
@@ -339,15 +391,8 @@ class PaddleBillingManager:
         overview_url: str = result["data"]["urls"]["general"]["overview"]
         return overview_url
 
-    async def create_portal_session_by_email(self, email: str) -> str | None:
-        """Create a customer portal session URL by looking up email.
-
-        Returns portal URL if customer found, None otherwise.
-        """
-        customer_id = await self.get_customer_by_email(email)
-        if not customer_id:
-            return None
-        return await self.create_portal_session(customer_id)
+    # No "portal by email" helper (BILL-1): an email is not proof of owning a
+    # Paddle customer. remembra.api.v1.billing._owned_portal_url decides.
 
     # -----------------------------------------------------------------------
     # Subscription management
@@ -677,6 +722,21 @@ class PaddleBillingManager:
         self,
         event: dict[str, Any],
     ) -> WebhookResult:
+        """Process a verified Paddle webhook event (see :meth:`_event_result`).
+
+        The result carries the event's id (``event_id``, else the notification
+        id) and ``occurred_at``, used to drop duplicates and out-of-order
+        deliveries (BILL-2).
+        """
+        result = await self._event_result(event)
+        result.event_id = webhook_event_id(event)
+        result.occurred_at = parse_event_time(event.get("occurred_at"))
+        return result
+
+    async def _event_result(
+        self,
+        event: dict[str, Any],
+    ) -> WebhookResult:
         """Process a verified Paddle webhook event.
 
         Handles:
@@ -723,6 +783,9 @@ class PaddleBillingManager:
             )
             result.transaction_id = data.get("id")
             result.revenue_usd = self._net_revenue_usd(data)
+            # BILL-4: a completed payment covers its billing period.
+            period = data.get("billing_period")
+            result.paid_through = parse_event_time(period.get("ends_at")) if isinstance(period, dict) else None
             return result
 
         if event_type == "subscription.activated":
@@ -747,7 +810,12 @@ class PaddleBillingManager:
                     user_verified=verified,
                 )
             if status == "past_due":
-                return WebhookResult(action="payment_issue", user_id=user_id)
+                return WebhookResult(
+                    action="payment_issue",
+                    user_id=user_id,
+                    paddle_customer_id=data.get("customer_id"),
+                    paddle_subscription_id=data.get("id"),
+                )
 
         if event_type == "subscription.canceled":
             # The subscription id is what the cancel applies to: the account
@@ -831,6 +899,11 @@ class WebhookResult:
         self.adjustment_action: str | None = None
         # Price IDs of a paid event the catalog does not know (nothing was applied).
         self.unknown_price_ids: list[str] = []
+        # The Paddle event's id and time (BILL-2: duplicates and late deliveries are dropped).
+        self.event_id: str | None = None
+        self.occurred_at: datetime | None = None
+        # End of the billing period a completed payment covers (BILL-4).
+        self.paid_through: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"action": self.action}

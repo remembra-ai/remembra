@@ -563,7 +563,8 @@ def test_config_view_rules() -> None:
     assert toml_view is not None and PLAIN_SECRET not in toml_view and KEY not in toml_view and GH_TOKEN not in toml_view
     assert 'model = "gpt-5"' in toml_view and 'REMEMBRA_AGENT_ID = "codex"' in toml_view
     assert f'REMEMBRA_API_KEY = "{mask_key(KEY)}"' in toml_view and 'mode = "fast"' in toml_view
-    assert 'args = ["--secret=[hidden]", "--flag"]' in toml_view
+    # Hidden by the view's own rule, or already by the SEC-23 redactor's command-line rules (CLI-01).
+    assert any(f'args = ["--secret={marker}", "--flag"]' in toml_view for marker in ("[hidden]", "[REDACTED:secret]"))
     text_view = config_view(f"# notes\nkey: {GH_TOKEN}\n", Path("AGENTS.md"))
     assert text_view is not None and GH_TOKEN not in text_view and "# notes" in text_view
 
@@ -591,7 +592,10 @@ def test_config_view_hides_secrets_in_common_mcp_shapes() -> None:
         assert secret not in view, secret
     servers = json.loads(view)["mcpServers"]
     assert servers["remote"]["args"] == ["mcp-remote", "https://x.dev/mcp", "--header", "Authorization: [hidden]"]
-    assert servers["db"]["args"] == ["run", "-e", "DB_PASSWORD=[hidden]", "-e", "MODE=fast", "img:latest"]
+    # "[hidden]" from the view's own NAME=value rule, or "[REDACTED:password]" from the SEC-23 redactor (CLI-01).
+    assert servers["db"]["args"] in (
+        ["run", "-e", f"DB_PASSWORD={marker}", "-e", "MODE=fast", "img:latest"] for marker in ("[hidden]", "[REDACTED:password]")
+    )
     assert servers["url"]["url"] == "https://h.dev/mcp?key=[hidden]&region=eu&access_token=[hidden]"
 
     toml = (
@@ -621,7 +625,8 @@ def test_config_view_hides_secrets_in_common_mcp_shapes() -> None:
     assert toml_view is not None
     for secret in ("ghs_short1", "pw12", "tok3n", "t0k", "multilinesecret"):
         assert secret not in toml_view, secret
-    assert '  "[hidden]",\n' in toml_view and '"DB_PASSWORD=[hidden]"' in toml_view and '"8080"' in toml_view
+    assert '  "[hidden]",\n' in toml_view and '"8080"' in toml_view
+    assert '"DB_PASSWORD=[hidden]"' in toml_view or '"DB_PASSWORD=[REDACTED:password]"' in toml_view
     assert 'password = """\n[hidden]\n"""\n' in toml_view
     assert "plain words stay" in toml_view and 'after = "shown"' in toml_view and 'model = "o4"' in toml_view
     assert tomllib.loads(toml_view)["mcp_servers"]["gh"]["args"][2] == "[hidden]"  # still valid TOML

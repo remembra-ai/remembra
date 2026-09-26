@@ -5,8 +5,9 @@ Dry run (default) prints counts per secret type and never modifies data:
 
     python scripts/maintenance/redact_stored_secrets.py
 
-Apply the redaction in place (SQLite content + extracted_facts, FTS index, and
-the Qdrant payload of each affected point; archived memories too):
+Apply the redaction in place (SQLite content, extracted_facts and metadata
+string values such as a relay handoff's failed commands, the FTS index, and the
+Qdrant payload of each affected point; archived memories too):
 
     python scripts/maintenance/redact_stored_secrets.py --apply
 

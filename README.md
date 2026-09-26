@@ -88,7 +88,7 @@ Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155
 | Durable trail of sessions | Yes | No | No | No |
 | Enforced coordination between agents | Crew mode, in build | Claude-only agent teams | No | No |
 
-Details, with a source and date for every claim: [Remembra and other handoff tools](docs/comparisons/handoff-tools.md) and [the competitive landscape](docs/competitive-analysis-2026.md). claude-mem and agentmemory are larger projects that also carry memory between sessions; the comparison says where each is the better pick.
+Details, with a source and date for every claim: [Remembra and other handoff tools](docs/comparisons/handoff-tools.md). claude-mem and agentmemory are larger projects that also carry memory between sessions; the comparison says where each is the better pick.
 
 ## Pricing
 

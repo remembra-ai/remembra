@@ -125,7 +125,7 @@ Based on their arxiv paper (2504.19413) and production system:
 | SQLite → Postgres migration | — | 📋 Planned |
 | Recall-quality regression gate in CI (LoCoMo runner exists) | `benchmarks/` | 📋 Planned |
 
-Deployment: see `docs/DEPLOYING.md` (production runs on Coolify, builds `Dockerfile.cloud`).
+Operations: see `docs/OPERATIONS.md` (production builds `Dockerfile.cloud`; the hosted service's own runbook is kept outside this repository).
 
 ---
 

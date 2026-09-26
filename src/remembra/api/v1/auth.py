@@ -295,7 +295,9 @@ async def refuse_until_review_done(user_manager: UserManager, current_user: dict
     """403 while an account review is pending and this session did not prove the mailbox.
 
     Used on the routes that add a way into the account (2FA, a new sign-in
-    method): during the review only the mailbox owner may add one.
+    method) and on those that could take it over or lock the owner out
+    (change password, turn off 2FA, delete the account): during the review only
+    the mailbox owner may do them.
     """
     payload = user_manager.verify_jwt_token(current_user["token"])
     message = await account_review.untrusted_block(user_manager.db, current_user["id"], payload)
@@ -771,6 +773,8 @@ async def change_password(
     Requires a valid Bearer token in the Authorization header.
     """
     user_manager = await get_user_manager(request)
+    # AUTH-2: during a review, the unproven password's session cannot take the account over.
+    await refuse_until_review_done(user_manager, current_user)
 
     success, error = await user_manager.change_password(
         user_id=current_user["id"],
@@ -911,6 +915,9 @@ async def delete_account(
     )
 
     user_manager = await get_user_manager(request)
+    # AUTH-2: during a review, the unproven password's session cannot delete (and so
+    # lock out) the account. Checked first, so a refusal spends no emailed code.
+    await refuse_until_review_done(user_manager, current_user)
     user_id = current_user["id"]
     user_data = await user_manager.db.get_user_by_id(user_id)
     if not user_data:
@@ -1117,6 +1124,8 @@ async def disable_totp(
     Requires a valid Bearer token in the Authorization header.
     """
     user_manager = await get_user_manager(request)
+    # AUTH-2: during a review, only the mailbox owner may turn 2FA off.
+    await refuse_until_review_done(user_manager, current_user)
 
     success, error = await user_manager.disable_totp(current_user["id"], body.password)
 

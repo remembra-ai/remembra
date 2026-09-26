@@ -1,8 +1,8 @@
 """Content-Security-Policy violation reports from remembra.dev and app.remembra.dev.
 
 At launch both sites send their CSP as ``Content-Security-Policy-Report-Only``
-with ``report-uri`` pointing here (see "Content-Security-Policy: report-only
-at launch" in docs/DEPLOYING.md). Browsers then load everything as before and
+with ``report-uri`` pointing here (see "Content-Security-Policy: report-only"
+in docs/OPERATIONS.md). Browsers then load everything as before and
 POST a report for each thing an enforced policy would have blocked. Each
 report becomes one ``csp_violation`` log line, so the operator can read what
 enforcing would break (a Paddle host missing from the allowlist, say) before

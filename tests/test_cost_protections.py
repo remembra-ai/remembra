@@ -61,7 +61,7 @@ async def test_handoff_checkpoint_status_and_inbox_make_zero_llm_calls(tmp_path)
         r = await c.h.client.post(
             "/api/v1/memories",
             json={
-                "content": "Handoff: finished the billing gate, next wire the dashboard. Mani, Kingston.",
+                "content": "Handoff: finished the billing gate, next wire the dashboard. Mani, Lisbon.",
                 "memory_type": "handoff",
             },
             headers=hdr,
@@ -95,7 +95,7 @@ async def test_handoff_checkpoint_status_and_inbox_make_zero_llm_calls(tmp_path)
 async def test_normal_store_still_runs_entity_resolution(tmp_path) -> None:
     async with cost_app(tmp_path) as c:
         _, hdr = await c.account("normal@example.com")
-        r = await c.h.client.post("/api/v1/memories", json={"content": "Suzan lives in Kingston with Mani."}, headers=hdr)
+        r = await c.h.client.post("/api/v1/memories", json={"content": "Suzan lives in Lisbon with Mani."}, headers=hdr)
         assert r.status_code == 201, r.text
         assert r.headers[ENRICH] == "full"
         await c.settle_all()
@@ -282,7 +282,7 @@ async def test_transfer_import_degrades_when_out_of_credits(tmp_path) -> None:
 async def test_reservation_settles_from_actual_usage_after_background_work_and_refunds(tmp_path) -> None:
     async with cost_app(tmp_path) as c:
         uid, hdr = await c.account("settle@example.com")
-        r = await c.h.client.post("/api/v1/memories", json={"content": "Mani founded DolphyTech in Kingston."}, headers=hdr)
+        r = await c.h.client.post("/api/v1/memories", json={"content": "Mani founded DolphyTech in Lisbon."}, headers=hdr)
         assert r.status_code == 201, r.text
         # The response went out with 16 held; the entity pass may still be running.
         assert int(r.headers[REMAINING]) == 500 - RESERVE_CREDITS_PER_CHUNK
@@ -357,7 +357,7 @@ async def test_unverified_free_account_is_held_at_25_credits(tmp_path) -> None:
     async with cost_app(tmp_path, unverified_credit_cap_effective_at=CAP_ON) as c:
         uid, hdr = await c.account("new@example.com", verified=False)
         assert (await c.meter.get_account(uid)).credit_limit == 25
-        r = await c.h.client.post("/api/v1/memories", json={"content": "Mani lives in Kingston"}, headers=hdr)
+        r = await c.h.client.post("/api/v1/memories", json={"content": "Mani lives in Lisbon"}, headers=hdr)
         assert r.status_code == 201 and r.headers[ENRICH] == "full"
         await c.settle_all()
 
@@ -532,7 +532,7 @@ async def test_update_is_gated_like_a_store(tmp_path) -> None:
 
         await c.set_credits_used(uid, 0)
         r = await c.h.client.patch(
-            f"/api/v1/memories/{memory_id}", json={"content": "Mani drives a Hilux in Kingston"}, headers=hdr
+            f"/api/v1/memories/{memory_id}", json={"content": "Mani drives a Hilux in Lisbon"}, headers=hdr
         )
         assert r.headers[ENRICH] == "full"
         await c.settle_all()

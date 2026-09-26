@@ -143,7 +143,7 @@ class Registry:
 REGISTRY = Registry()
 
 # ---------------------------------------------------------------------------
-# Remembra metrics (names are part of the ops contract — see docs/DEPLOYING.md)
+# Remembra metrics (names are part of the ops contract — see docs/OPERATIONS.md)
 # ---------------------------------------------------------------------------
 
 EMBEDDING_ERRORS = REGISTRY.counter(

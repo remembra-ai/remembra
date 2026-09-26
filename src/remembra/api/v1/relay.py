@@ -48,7 +48,7 @@ from remembra.auth.middleware import (
     resolve_project_access,
 )
 from remembra.client.project import normalize_project_id
-from remembra.cloud.limits import record_relay_usage, relay_guard
+from remembra.cloud.limits import hold_unenriched_writes, record_relay_usage, relay_guard
 from remembra.core.limiter import limiter
 from remembra.relay.identity import HINT_SCOPE_FOLDERS, ProjectLocator, location_record
 from remembra.security.audit import AuditAction
@@ -63,6 +63,20 @@ _AGENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$")
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+=-]{0,199}$")
 _RELATION_RE = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
 HintScope = Literal["all", "folders"]  # see remembra.relay.identity.HINT_SCOPES
+# git check-ref-format --branch (CLI-02, CLI-07): the branch is printed by the relay CLI and pasted into
+# "git switch <branch>" by the dashboard, so a name git itself refuses (a leading "-" reads as an option,
+# control characters drive the terminal) is rejected instead of stored.
+_BRANCH_FORBIDDEN_RE = re.compile(r"[\x00-\x20\x7f-\x9f~^:?*\[\\]|\.\.|@\{|//|/\.")
+
+
+def valid_branch_name(value: str) -> bool:
+    """Whether ``value`` is a branch name git would accept (the relay CLI's ``(detached)`` label too)."""
+    return not (
+        value.startswith(("-", "/", "."))
+        or value.endswith(("/", ".", ".lock"))
+        or value == "@"
+        or _BRANCH_FORBIDDEN_RE.search(value)
+    )
 
 
 def _service(request: Request) -> RelayService:
@@ -311,6 +325,13 @@ class FactsIn(BaseModel):
     )
     commit_evidence: str | None = Field(default=None, description="How commits were chosen (session-reflog, last-12h, ...)")
     incomplete: list[str] = Field(default_factory=list, description="git probes that did not finish (log, status, ...)")
+
+    @field_validator("branch")
+    @classmethod
+    def _branch(cls, v: str | None) -> str | None:
+        if v and not valid_branch_name(v):
+            raise ValueError("branch must be a valid git branch name (see git check-ref-format --branch)")
+        return v
 
     @model_validator(mode="before")
     @classmethod
@@ -664,20 +685,33 @@ async def close_session(
             requested = normalize_project_id(raw) if raw and raw.strip() else None
         project = resolve_project_access(current_user, requested) or "default"
 
-        result = await _service(request).close_session(
-            user_id=current_user.user_id,
-            project_id=project,
-            agent_id=agent,
-            session_id=session_id,
-            facts=body.facts.model_dump(),
-            summary=body.summary,
-            end_reason=body.end_reason,
-            agent_verified=verified,
-            screen=lambda text: screen_text(request, text, apply_pii=False),
-            scrub=pii_scrubber(request),
-            closed_at=body.closed_at,
-            location=location,
-        )
+        # BILL-8: a stored handoff is an embedded write without enrichment, so it
+        # counts toward the Free daily unenriched cap (429 past it) and the
+        # embedding spend; an unchanged re-close stores nothing and is given back.
+        hold = await hold_unenriched_writes(request, current_user.user_id)
+        try:
+            result = await _service(request).close_session(
+                user_id=current_user.user_id,
+                project_id=project,
+                agent_id=agent,
+                session_id=session_id,
+                facts=body.facts.model_dump(),
+                summary=body.summary,
+                end_reason=body.end_reason,
+                agent_verified=verified,
+                screen=lambda text: screen_text(request, text, apply_pii=False),
+                scrub=pii_scrubber(request),
+                closed_at=body.closed_at,
+                location=location,
+            )
+        except BaseException:
+            if hold is not None:
+                await hold.release()
+            raise
+    if hold is not None and result["changed"]:
+        await hold.commit([str(result.get("rendered") or "")])
+    elif hold is not None:
+        await hold.release()
     if result["changed"]:
         await record_relay_usage(request, current_user.user_id)
     return {

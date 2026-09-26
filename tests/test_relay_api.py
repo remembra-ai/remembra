@@ -100,7 +100,7 @@ def test_remote_added_later_joins_the_root_commit_project(api):
 
 
 def test_hint_names_new_location_and_bind_rebinds(api):
-    new = _post(api, "/projects/resolve", {"git_remote": "https://github.com/dolphy/clawbot", "hint_project": "clawdbot"})
+    new = _post(api, "/projects/resolve", {"git_remote": "https://github.com/example-org/clawbot", "hint_project": "clawdbot"})
     assert new["project_id"] == "clawdbot"
     other = _post(api, "/projects/resolve", {"git_remote": GH_HTTPS})
     assert other["project_id"] == "widget"

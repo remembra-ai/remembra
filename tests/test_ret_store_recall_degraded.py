@@ -303,11 +303,11 @@ async def test_extraction_fallback_is_persisted_and_reprocessed(tmp_path) -> Non
         class QuotaExtractor:
             async def extract_detailed(self, content: str, reference_date: Any = None) -> ExtractionOutcome:
                 mark_llm_fallback("extraction", "quota_exhausted")  # what the real extractor does
-                return ExtractionOutcome(facts=["Mani prefers dark roast.", "He buys it in Kingston."], method="fallback")
+                return ExtractionOutcome(facts=["Mani prefers dark roast.", "He buys it in Lisbon."], method="fallback")
 
         s.service.extractor = QuotaExtractor()  # type: ignore[assignment]
         resp = await s.service.store(
-            StoreRequest(content="Mani prefers dark roast. He buys it in Kingston.", user_id=USER, project_id="p")
+            StoreRequest(content="Mani prefers dark roast. He buys it in Lisbon.", user_id=USER, project_id="p")
         )
         assert resp.extraction == "fallback" and resp.source_id
         facts = await find_fallback_facts(s.db)
@@ -324,7 +324,7 @@ async def test_extraction_fallback_is_persisted_and_reprocessed(tmp_path) -> Non
 
         # Apply with a recovered extractor: new facts stored, old ones superseded (kept).
         s.service.extractor = ScriptedExtractor(  # type: ignore[assignment]
-            ExtractionOutcome(facts=["Mani prefers dark roast coffee", "Mani buys coffee in Kingston"], method="llm")
+            ExtractionOutcome(facts=["Mani prefers dark roast coffee", "Mani buys coffee in Lisbon"], method="llm")
         )
         report = await reprocess_fallback(s.service, apply=True)
         assert (report.replaced_groups, report.new_memories, report.superseded) == (1, 2, 2)
@@ -334,7 +334,7 @@ async def test_extraction_fallback_is_persisted_and_reprocessed(tmp_path) -> Non
             old = await s.row(oid)
             assert old["superseded_by"] and old["valid_to"]
         live = [r for r in await _all_rows(s.db) if r["superseded_by"] is None and r["memory_type"] != "source"]
-        assert sorted(r["content"] for r in live) == ["Mani buys coffee in Kingston", "Mani prefers dark roast coffee"]
+        assert sorted(r["content"] for r in live) == ["Mani buys coffee in Lisbon", "Mani prefers dark roast coffee"]
         assert all(json.loads(r["metadata"])["extraction"] == "reprocessed" for r in live)
     finally:
         await s.close()

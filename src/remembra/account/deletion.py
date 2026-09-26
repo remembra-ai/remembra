@@ -176,14 +176,17 @@ def _cancel_error(error: httpx.HTTPError, subscription_id: str | None, cancelled
     return BillingCancelError(message, transient=transient, subscription_id=subscription_id, cancelled=cancelled)
 
 
-async def _other_owner(meter: Any, user_id: str, customer: str, subscription: dict[str, Any]) -> str | None:
+async def _other_owner(
+    meter: Any, user_id: str, customer: str, subscription: dict[str, Any], *, shared: bool = False
+) -> str | None:
     """Why a subscription listed under the account's Paddle customer is not this account's; None when it is.
 
     A Paddle customer is one payer email, and one payer can pay for several
     Remembra accounts. Evidence, strongest first: the account row that records
     the subscription id, then the ``custom_data.remembra_user_id`` the checkout
     wrote. With neither, the subscription is this account's only when no other
-    account shares the customer.
+    account shares the customer (``shared``: another account holds one of the
+    customer's subscriptions, or records the customer id).
     """
     holders = await meter.tenants_for_billing(subscription_id=str(subscription["id"]))
     if holders:
@@ -191,7 +194,7 @@ async def _other_owner(meter: Any, user_id: str, customer: str, subscription: di
     named = (subscription.get("custom_data") or {}).get("remembra_user_id")
     if named:
         return None if str(named) == user_id else "its checkout names another account"
-    sharing = [u for u in await meter.tenants_for_billing(customer_id=customer) if u != user_id]
+    sharing = shared or [u for u in await meter.tenants_for_billing(customer_id=customer) if u != user_id]
     return "its Paddle customer also pays for another account" if sharing else None
 
 
@@ -239,11 +242,18 @@ async def cancel_billing(meter: Any | None, user_id: str, *, app_state: Any = No
     current: str | None = None
     try:
         if customer:
-            for sub in await billing.list_billable_subscriptions(str(customer)):
+            billable = await billing.list_billable_subscriptions(str(customer))
+            # A second account paying as this customer does not record the customer id (BILL-6: another
+            # account holds it) but records its subscription id, which also shows the customer is shared.
+            shared = False
+            for sub in billable:
+                holders = await meter.tenants_for_billing(subscription_id=str(sub["id"]))
+                shared = shared or any(holder != user_id for holder in holders)
+            for sub in billable:
                 sub_id = str(sub["id"])
                 if sub_id in subscriptions:
                     continue
-                reason = await _other_owner(meter, user_id, str(customer), sub)
+                reason = await _other_owner(meter, user_id, str(customer), sub, shared=shared)
                 if reason is None:
                     subscriptions.append(sub_id)
                 else:

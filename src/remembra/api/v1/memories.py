@@ -23,6 +23,7 @@ from remembra.cloud.limits import (
     record_recall_usage,
     record_relay_usage,
     record_store_usage,
+    release_memory_slot_holds,
 )
 from remembra.config import Settings, get_settings
 from remembra.core.http_errors import embedding_http_exception
@@ -789,6 +790,7 @@ async def bulk_import(
         if embeddings is not None and body.embeddings is not None:
             embeddings.append(body.embeddings[i])
     if not items:
+        await release_memory_slot_holds(request)  # nothing will be stored (BILL-10)
         return {"status": "ok", "stored": 0, "errors": policy_errors}
 
     try:
@@ -1262,6 +1264,7 @@ async def supersede_memory(
     audit_logger: AuditLoggerDep,
     sanitizer: SanitizerDep,
     current_user: CurrentUser,
+    response: Response,
 ) -> SupersedeResponse:
     """
     Explicitly supersede a memory with new information.
@@ -1292,11 +1295,24 @@ async def supersede_memory(
             detail="Permission denied: memory:store required",
         )
     # Ownership + project scope of the memory being superseded (SEC-14).
-    await _require_owned_memory(memory_service, memory_id, current_user)
+    old = await _require_owned_memory(memory_service, memory_id, current_user)
 
     # SECURITY: XSS sanitization for new content
     sanitization = sanitizer.analyze(body.new_content, source="user_input")
     sanitized_content = sanitization.content
+
+    # BILL-7: the replacement is a new embedded row (stored atomically; the old
+    # one stays and still counts), so it passes the same plan gate as a store:
+    # memory cap, per-store length, and the Free daily unenriched-write cap.
+    await gate_write(
+        request,
+        response,
+        current_user.user_id,
+        [sanitized_content],
+        atomic=[True],
+        project_ids=[old.get("project_id") or "default"],
+        memories_added=1,
+    )
 
     try:
         result = await memory_service.supersede(
@@ -1306,6 +1322,7 @@ async def supersede_memory(
             reason=body.reason,
             metadata=_client_metadata(current_user, body.metadata),
         )
+        await record_store_usage(request, current_user.user_id)
 
         # Audit log
         from remembra.security.audit import AuditAction

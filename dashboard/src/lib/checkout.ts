@@ -31,10 +31,31 @@ export function checkoutRoute(
   return { kind: 'server' };
 }
 
-/** What a plan row offers: nothing (it is the plan), the billing portal (already subscribed), or checkout. */
-export function planRowAction(planId: string, currentPlan: string, subscribed: boolean): 'current' | 'manage' | 'buy' {
+/**
+ * What a plan row offers: nothing (it is the plan), the billing portal (already
+ * subscribed), checkout, or nothing to act on (`view`: a session that cannot
+ * open checkout or the portal, see billingActionsNote).
+ */
+export function planRowAction(
+  planId: string,
+  currentPlan: string,
+  subscribed: boolean,
+  canManage = true,
+): 'current' | 'manage' | 'buy' | 'view' {
   if (planId === currentPlan) return 'current';
+  if (!canManage) return 'view';
   return subscribed ? 'manage' : 'buy';
+}
+
+/**
+ * Checkout and the billing portal take an email sign-in only: the server
+ * refuses API keys (BILL-3), so an "API key instead" session sees its plan and
+ * usage but is asked to sign in with email instead of getting a 403.
+ */
+export function billingActionsNote(authMode: 'jwt' | 'api_key' | 'none'): string | null {
+  return authMode === 'api_key'
+    ? 'You signed in with an API key. To buy a plan or manage your subscription, sign in with your email: API keys cannot open checkout or the billing portal.'
+    : null;
 }
 
 /**

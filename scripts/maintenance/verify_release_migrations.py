@@ -98,7 +98,7 @@ async def _seed(app: Any) -> dict[str, Any]:
                 mid,
                 uid,
                 "alpha" if i % 2 == 0 else "default",
-                f"Mani met client number {i} in Kingston; the invoice total was {100 * i} JMD.",
+                f"Mani met client number {i} in Lisbon; the invoice total was {100 * i} JMD.",
                 f"2026-09-0{i + 1}T10:00:00+00:00",
                 f"2026-09-0{i + 1}T10:00:00+00:00",
                 json.dumps(meta),
@@ -110,7 +110,7 @@ async def _seed(app: Any) -> dict[str, Any]:
         )
         await conn.execute(
             "INSERT INTO memories_fts (id, user_id, project_id, content) VALUES (?, ?, ?, ?)",
-            (mid, uid, "alpha" if i % 2 == 0 else "default", f"Mani met client number {i} in Kingston"),
+            (mid, uid, "alpha" if i % 2 == 0 else "default", f"Mani met client number {i} in Lisbon"),
         )
     await conn.execute(
         "UPDATE memories SET superseded_by = 'mem_2', superseded_at = ? WHERE id = 'mem_0'", ("2026-09-03T10:00:00+00:00",)

@@ -365,7 +365,7 @@ def test_changelog_leads_with_v0_16_0() -> None:
 # Headers
 # ---------------------------------------------------------------------------
 
-# Report-only for launch (docs/DEPLOYING.md): a wrong allowlist is reported, never enforced.
+# Report-only for launch (docs/OPERATIONS.md): a wrong allowlist is reported, never enforced.
 CSP_HEADER = "Content-Security-Policy-Report-Only"
 
 REQUIRED_HEADERS = {

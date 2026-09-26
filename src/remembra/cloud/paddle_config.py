@@ -125,6 +125,12 @@ class PaddleConfig:
 
 # =============================================================================
 # Base configurations: the fixed legacy prices per environment
+#
+# The $49 Pro / $199 Team prices are retired: they stay mapped only so the
+# subscriptions already on them keep renewing. A NEW subscription on one never
+# grants the legacy tier (remembra.api.v1.billing._apply_paddle_result flags it
+# as legacy_price_new_purchase, BILL-5); archive both prices in Paddle so they
+# cannot start a checkout at all.
 # =============================================================================
 SANDBOX_CONFIG = PaddleConfig(
     environment=PaddleEnvironment.SANDBOX,

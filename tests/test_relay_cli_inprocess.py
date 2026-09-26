@@ -312,7 +312,7 @@ def test_configured_project_names_folders_and_each_repository_gets_its_own(wired
     api = wired["api"]
     api["http"].post("/api/v1/memories", json={"content": "pos cache decision", "project_id": "clawdbot"})
     _, clones = make_remote_and_clones(tmp_path, ("a", "b", "c"))
-    git(clones["a"], "remote", "set-url", "origin", "git@github.com:freshvybz/clawbot.git")
+    git(clones["a"], "remote", "set-url", "origin", "git@github.com:example-org/clawbot.git")
     git(clones["b"], "remote", "set-url", "origin", "https://github.com/acme/newthing.git")
     git(clones["c"], "remote", "set-url", "origin", "https://github.com/acme/together.git")
     folder = tmp_path / "Codex" / "2026-09-26" / "task"
