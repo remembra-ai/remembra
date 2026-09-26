@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import socket
 import subprocess
 import time
@@ -23,6 +24,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlsplit
 
 from remembra.relay.handoff import is_probe_command
 from remembra.security.secrets import redact_secrets
@@ -488,6 +490,8 @@ class TranscriptFacts:
     commit_shas: list[str] = field(default_factory=list)
     started_at: datetime | None = None
     session_id: str | None = None
+    # The agent's own message when its last turn stopped on a plan/usage limit (Codex rollouts only).
+    usage_limit: str | None = None
 
 
 def _result_text(content: Any) -> str:
@@ -549,6 +553,54 @@ def _outside_root(command: str, root: str | None, cwd: str | None = None) -> boo
     target_path = os.path.realpath(where)
     root_path = os.path.realpath(root)
     return not (target_path == root_path or target_path.startswith(root_path.rstrip(os.sep) + os.sep))
+
+
+def _finish(
+    facts: TranscriptFacts, command_log: list[dict[str, Any]], files: list[str], open_todos: list[str]
+) -> TranscriptFacts:
+    """Turn a parsed command log (oldest first: ``cmd``, ``exit_code``, ``output``) into the facts
+    every transcript parser reports: commands, test verdicts, errors, files, open todos."""
+    # Tests: last result per exact command.
+    tests: dict[str, dict[str, Any]] = {}
+    for item in command_log:
+        if _TEST_RE.search(item["cmd"]):
+            tests[item["cmd"]] = {
+                "cmd": item["cmd"],
+                "passed": item["exit_code"] == 0,
+                "summary": _test_summary(item["output"]),
+            }
+    # Errors: failed non-probe, non-test commands whose exact command did not later succeed.
+    last_exit: dict[str, int] = {}
+    for item in command_log:
+        last_exit[item["cmd"]] = item["exit_code"]
+    errors: list[str] = []
+    seen: set[str] = set()
+    for item in reversed(command_log):
+        cmd = item["cmd"]
+        if cmd in seen or item["exit_code"] == 0 or last_exit.get(cmd) == 0 or _TEST_RE.search(cmd) or is_probe_command(cmd):
+            continue
+        seen.add(cmd)
+        detail = _last_meaningful_line(item["output"])
+        errors.append(f"`{_clip(cmd, 160)}` exited {item['exit_code']}" + (f": {detail}" if detail else ""))
+        if len(errors) >= 8:
+            break
+    errors.reverse()
+
+    facts.commands = [
+        {"cmd": _scrub(_clip(c["cmd"], CMD_CLIP)), "exit_code": c["exit_code"]} for c in command_log[-MAX_COMMANDS:]
+    ]
+    facts.tests = [
+        {
+            "cmd": _scrub(_clip(t["cmd"], CMD_CLIP)),
+            "passed": t["passed"],
+            "summary": _scrub(t["summary"]) if t["summary"] else None,
+        }
+        for t in tests.values()
+    ]
+    facts.errors = [_scrub(e) for e in errors]
+    facts.files = list(dict.fromkeys(files))
+    facts.todos_open = [_scrub(_clip(t, 300)) for t in open_todos if t.strip()]
+    return facts
 
 
 def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: str | None = None) -> TranscriptFacts:
@@ -651,32 +703,6 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
                             "status": "pending",
                         }
 
-    # Tests: last result per exact command.
-    tests: dict[str, dict[str, Any]] = {}
-    for item in command_log:
-        if _TEST_RE.search(item["cmd"]):
-            tests[item["cmd"]] = {
-                "cmd": item["cmd"],
-                "passed": item["exit_code"] == 0,
-                "summary": _test_summary(item["output"]),
-            }
-    # Errors: failed non-probe, non-test commands whose exact command did not later succeed.
-    last_exit: dict[str, int] = {}
-    for item in command_log:
-        last_exit[item["cmd"]] = item["exit_code"]
-    errors: list[str] = []
-    seen: set[str] = set()
-    for item in reversed(command_log):
-        cmd = item["cmd"]
-        if cmd in seen or item["exit_code"] == 0 or last_exit.get(cmd) == 0 or _TEST_RE.search(cmd) or is_probe_command(cmd):
-            continue
-        seen.add(cmd)
-        detail = _last_meaningful_line(item["output"])
-        errors.append(f"`{_clip(cmd, 160)}` exited {item['exit_code']}" + (f": {detail}" if detail else ""))
-        if len(errors) >= 8:
-            break
-    errors.reverse()
-
     open_todos: list[str] = []
     if todo_snapshot is not None:
         open_todos.extend(str(t.get("content") or "") for t in todo_snapshot if t.get("status") != "completed")
@@ -684,21 +710,256 @@ def parse_claude_transcript(path: Path, deadline: Deadline | None = None, root: 
         t["subject"] for _, t in sorted(tasks.items(), key=lambda kv: kv[0]) if t["status"] not in ("completed", "deleted")
     )
 
-    facts.commands = [
-        {"cmd": _scrub(_clip(c["cmd"], CMD_CLIP)), "exit_code": c["exit_code"]} for c in command_log[-MAX_COMMANDS:]
-    ]
-    facts.tests = [
-        {
-            "cmd": _scrub(_clip(t["cmd"], CMD_CLIP)),
-            "passed": t["passed"],
-            "summary": _scrub(t["summary"]) if t["summary"] else None,
-        }
-        for t in tests.values()
-    ]
-    facts.errors = [_scrub(e) for e in errors]
-    facts.files = list(dict.fromkeys(files))
-    facts.todos_open = [_scrub(_clip(t, 300)) for t in open_todos if t.strip()]
-    return facts
+    return _finish(facts, command_log, files, open_todos)
+
+
+# ---------------------------------------------------------------------------
+# Codex rollout transcripts
+# ---------------------------------------------------------------------------
+
+CLAUDE_JSONL = "claude-jsonl"
+CODEX_ROLLOUT = "codex-rollout-jsonl"
+TRANSCRIPT_FORMATS = (CLAUDE_JSONL, CODEX_ROLLOUT)
+
+# Codex's own text when a turn stops on the plan's usage limit. Recorded from
+# codex-cli 0.155.0-alpha.16.4 (tests/fixtures/relay/codex/rollout_usage_limit.jsonl):
+# "You’ve hit your usage limit. Upgrade to Pro (...), visit https://chatgpt.com/codex/settings/usage ...".
+# The structured marker on the same record is codex_error_info = "usage_limit_exceeded".
+CODEX_USAGE_LIMIT_INFO = "usage_limit_exceeded"
+_CODEX_LIMIT_PREFIXES = ("you've hit your usage limit", "you have hit your usage limit")
+_CODEX_SHELL_TOOLS = ("exec_command", "shell", "shell_command", "local_shell")
+_CODEX_EXIT_RE = re.compile(r"(?:Process exited with code|Exit code:?)\s+(-?\d+)")
+
+
+def _codex_limit_text(message: Any) -> bool:
+    text = str(message or "").replace("’", "'").strip().lower()
+    return text.startswith(_CODEX_LIMIT_PREFIXES) or ": you've hit your usage limit" in text
+
+
+def _codex_error(payload: dict[str, Any]) -> str | None:
+    """The usage-limit message on a ``task_complete`` / ``error`` event, else None."""
+    error = payload.get("error") if payload.get("type") == "task_complete" else payload
+    if not isinstance(error, dict):
+        return None
+    message = error.get("message")
+    if error.get("codex_error_info") == CODEX_USAGE_LIMIT_INFO or _codex_limit_text(message):
+        return _clip(str(message or "usage limit reached"), 300)
+    return None
+
+
+def _codex_command_text(command: Any) -> str:
+    """``["/bin/zsh", "-lc", "pytest -q"]`` -> ``pytest -q``; a plain string stays as is."""
+    if isinstance(command, str):
+        return command.strip()
+    if isinstance(command, list) and all(isinstance(c, str) for c in command):
+        if len(command) >= 3 and command[-2] in ("-lc", "-c") and os.path.basename(command[0]) in ("bash", "zsh", "sh"):
+            return str(command[-1]).strip()
+        return shlex.join(command).strip()
+    return ""
+
+
+def _codex_cwd(value: Any) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    if value.startswith("file://"):
+        return unquote(urlsplit(value).path) or None
+    return value
+
+
+def _codex_output_exit(output: Any) -> tuple[str, int | None]:
+    """(text, exit code) from a ``function_call_output`` payload's ``output``.
+
+    Unified exec returns text with "Process exited with code N"; the older
+    shell tool returned JSON ``{"output": ..., "metadata": {"exit_code": N}}``.
+    """
+    if isinstance(output, dict):  # structured output: {"content": ...}
+        output = output.get("content") or output.get("output")
+    text = output if isinstance(output, str) else ""
+    if text.lstrip().startswith("{"):
+        try:
+            decoded = json.loads(text)
+        except ValueError:
+            decoded = None
+        if isinstance(decoded, dict) and isinstance(decoded.get("metadata"), dict):
+            code = decoded["metadata"].get("exit_code")
+            return str(decoded.get("output") or ""), code if isinstance(code, int) else None
+    match = _CODEX_EXIT_RE.search(text)
+    return text, int(match.group(1)) if match else None
+
+
+def parse_codex_rollout(path: Path, deadline: Deadline | None = None, root: str | None = None) -> TranscriptFacts:
+    """Commands + exit codes, test runs, edited files, open plan steps and a
+    usage-limit stop from a Codex rollout (``~/.codex/sessions/.../rollout-*.jsonl``).
+
+    Every line is ``{"timestamp", "type", "payload"}``. Recorded from
+    codex-cli 0.155.0-alpha.16.4 (tests/fixtures/relay/codex/):
+
+    - ``session_meta``: ``payload.id`` (the session id the hooks receive) and ``cwd``.
+    - ``event_msg`` / ``item_completed`` with ``item.type == "CommandExecution"``:
+      ``command`` (argv), ``cwd`` (``file://`` URL), ``exit_code``, ``aggregated_output``.
+      This is the authoritative record of a shell command.
+    - ``event_msg`` / ``item_completed`` with ``item.type == "FileChange"``:
+      ``changes`` maps each edited path to its diff; ``status == "completed"``.
+    - ``event_msg`` / ``task_complete`` with ``error.codex_error_info ==
+      "usage_limit_exceeded"`` when the turn stopped on the plan's limit.
+    - ``response_item`` / ``function_call`` + ``function_call_output`` (same
+      ``call_id``): used for a command only when no ``CommandExecution`` event
+      exists for it (older rollouts); ``exec_command_end`` events from older
+      versions are read the same way.
+
+    Codex has no hook for its usage limit (openai/codex#45977), so the stop is
+    read here from the transcript tail. A later turn that starts clears it.
+    """
+    facts = TranscriptFacts()
+    order: list[str] = []
+    entries: dict[str, dict[str, Any]] = {}
+    from_event: set[str] = set()
+    calls: dict[str, tuple[str, str | None]] = {}  # call_id -> (command, workdir)
+    files: list[str] = []
+    plan: list[dict[str, Any]] | None = None
+    session_cwd: str | None = None
+    limit: str | None = None
+
+    def record(key: str, command: str, exit_code: int, output: str, cwd: str | None, event: bool) -> None:
+        if key in from_event and not event:
+            return
+        if key not in entries:
+            order.append(key)
+        entries[key] = {"cmd": command, "exit_code": exit_code, "output": output, "cwd": cwd}
+        if event:
+            from_event.add(key)
+
+    for n, line in enumerate(_iter_lines(path)):
+        if deadline is not None and deadline.expired:
+            break
+        try:
+            entry = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(entry, dict) or not isinstance(entry.get("payload"), dict):
+            continue
+        kind, payload = entry.get("type"), entry["payload"]
+        if kind == "session_meta":
+            sid = payload.get("id") or payload.get("session_id")
+            if isinstance(sid, str) and facts.session_id is None:
+                facts.session_id = sid
+            ts = payload.get("timestamp") or entry.get("timestamp")
+            if isinstance(ts, str) and facts.started_at is None:
+                try:
+                    facts.started_at = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                except ValueError:
+                    pass
+            session_cwd = _codex_cwd(payload.get("cwd")) or session_cwd
+            continue
+        if kind == "turn_context":
+            session_cwd = _codex_cwd(payload.get("cwd")) or session_cwd
+            continue
+        ptype = payload.get("type")
+        if kind == "event_msg":
+            if ptype == "task_started":
+                limit = None
+            elif ptype == "task_complete" and isinstance(payload.get("error"), dict):
+                limit = _codex_error(payload)  # this turn's outcome (a different error clears it)
+            elif ptype == "error":
+                limit = _codex_error(payload) or limit  # older versions: an error event, then task_complete
+            elif ptype == "item_completed" and isinstance(payload.get("item"), dict):
+                item = payload["item"]
+                if item.get("type") == "CommandExecution" and isinstance(item.get("exit_code"), int):
+                    output = item.get("aggregated_output") or item.get("formatted_output") or ""
+                    if not output:
+                        output = "\n".join(str(item.get(k) or "") for k in ("stdout", "stderr")).strip()
+                    key = str(item.get("id") or f"line-{n}")
+                    record(
+                        key,
+                        _codex_command_text(item.get("command")),
+                        item["exit_code"],
+                        str(output),
+                        _codex_cwd(item.get("cwd")),
+                        True,
+                    )
+                elif item.get("type") == "FileChange" and item.get("status") == "completed":
+                    changes = item.get("changes")
+                    if isinstance(changes, dict):
+                        files.extend(p for p in changes if isinstance(p, str) and p)
+            elif ptype == "exec_command_end" and isinstance(payload.get("exit_code"), int):
+                output = payload.get("aggregated_output") or payload.get("formatted_output") or ""
+                key = str(payload.get("call_id") or f"line-{n}")
+                record(
+                    key,
+                    _codex_command_text(payload.get("command")),
+                    payload["exit_code"],
+                    str(output),
+                    _codex_cwd(payload.get("cwd")),
+                    True,
+                )
+            continue
+        if kind != "response_item":
+            continue
+        if ptype == "function_call":
+            name = str(payload.get("name") or "")
+            try:
+                args = json.loads(payload.get("arguments") or "{}")
+            except (TypeError, ValueError):
+                args = {}
+            if not isinstance(args, dict):
+                continue
+            call_id = str(payload.get("call_id") or "")
+            if name in _CODEX_SHELL_TOOLS and call_id:
+                command = _codex_command_text(args.get("cmd") or args.get("command"))
+                workdir = args.get("workdir")
+                calls[call_id] = (command, workdir if isinstance(workdir, str) else None)
+            elif name == "update_plan" and isinstance(args.get("plan"), list):
+                plan = [p for p in args["plan"] if isinstance(p, dict)]
+        elif ptype == "function_call_output":
+            call_id = str(payload.get("call_id") or "")
+            if call_id in calls and call_id not in from_event:
+                command, workdir = calls[call_id]
+                text, code = _codex_output_exit(payload.get("output"))
+                if command and code is not None:
+                    record(call_id, command, code, text, workdir, False)
+
+    command_log: list[dict[str, Any]] = []
+    for key in order:
+        item = entries[key]
+        command = item["cmd"]
+        if not command:
+            continue
+        cwd = item["cwd"] or session_cwd
+        if _outside_root(command, root, cwd):
+            continue
+        facts.commit_shas.extend(_COMMIT_LINE_RE.findall(item["output"]))
+        command_log.append(item)
+    open_todos = [str(p.get("step") or "") for p in plan or [] if p.get("status") != "completed"]
+    facts.usage_limit = _scrub(limit) if limit else None
+    return _finish(facts, command_log, files, open_todos)
+
+
+def detect_transcript_format(path: Path) -> str | None:
+    """``codex-rollout-jsonl`` when the first record is a Codex ``session_meta``,
+    ``claude-jsonl`` for any other JSONL, None when unreadable or empty."""
+    try:
+        with path.open("rb") as fh:
+            for raw in fh:
+                if not raw.strip():
+                    continue
+                try:
+                    first = json.loads(raw.decode("utf-8", errors="replace"))
+                except ValueError:
+                    return None
+                if isinstance(first, dict) and first.get("type") == "session_meta" and isinstance(first.get("payload"), dict):
+                    return CODEX_ROLLOUT
+                return CLAUDE_JSONL
+    except OSError:
+        return None
+    return None
+
+
+def parse_transcript(path: Path, fmt: str, deadline: Deadline | None = None, root: str | None = None) -> TranscriptFacts:
+    if fmt == CODEX_ROLLOUT:
+        return parse_codex_rollout(path, deadline, root=root)
+    if fmt == CLAUDE_JSONL:
+        return parse_claude_transcript(path, deadline, root=root)
+    raise ValueError(f"unknown transcript format {fmt!r}")
 
 
 def relativize(paths: Iterable[str], root: str | None) -> list[str]:

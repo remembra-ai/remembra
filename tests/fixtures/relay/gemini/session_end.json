@@ -1,0 +1,8 @@
+{
+  "session_id": "3f2b1c9e-5d7a-4e2b-9c1f-8a6d4e2b7c10",
+  "transcript_path": "/home/dev/.gemini/tmp/5d41402abc4b2a76/chats/session-2026-09-25T14-02-3f2b1c9e.json",
+  "cwd": "/home/dev/work/widget",
+  "hook_event_name": "SessionEnd",
+  "timestamp": "2026-09-25T14:40:52.107Z",
+  "reason": "exit"
+}

@@ -1,0 +1,10 @@
+{
+  "session_id": "01a0dbed-5554-7a10-bf02-e61547db3290",
+  "turn_id": "01a0dbed-558a-7dc0-b761-2cf88b073957",
+  "transcript_path": "/home/dev/.codex/sessions/2026/09/26/rollout-2026-09-26T00-15-59-01a0dbed-5554-7a10-bf02-e61547db3290.jsonl",
+  "cwd": "/home/dev/work/widget",
+  "hook_event_name": "UserPromptSubmit",
+  "model": "mock-model",
+  "permission_mode": "bypassPermissions",
+  "prompt": "Pick up where the last agent stopped."
+}

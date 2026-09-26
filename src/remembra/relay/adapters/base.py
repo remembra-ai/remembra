@@ -81,12 +81,29 @@ class AdapterSpec:
     end_event: str | None
     payload: PayloadMap = field(default_factory=PayloadMap)
     output: str = "text"
-    transcript_format: str | None = None  # only "claude-jsonl" is parsed
+    transcript_format: str | None = None  # "claude-jsonl" | "codex-rollout-jsonl" (facts.TRANSCRIPT_FORMATS); None: not parsed
     detect_bins: tuple[str, ...] = ()
     detect_dirs: tuple[str, ...] = ()  # relative to home
     config_source: str | None = None  # prefer this config file for the API key ("claude" | "codex")
-    hook_timeout: int | None = None  # seconds, only where the unit is verified
+    # Per-hook timeouts in SECONDS, keyed "start" / "prompt" / "end"; written in the agent's
+    # own unit (``timeout_unit``). Only set where the agent documents the field and unit.
+    hook_timeouts: dict[str, int] = field(default_factory=dict)
+    timeout_unit: str = "s"  # "s" or "ms" (Gemini CLI reads milliseconds: 15 would be 15 ms)
+    # A third event that runs `brief --once`: delivers the brief when the start event did
+    # not fire (Codex does not fire SessionStart when it auto-restores a thread).
+    prompt_event: str | None = None
+    # `close` hands the work to a detached process and exits at once: for agents that
+    # do not wait for the end hook or kill it after a short timeout.
+    detach_close: bool = False
+    # Printed by `connect` after writing: a step the user must take before the hooks run.
+    setup_note: str = ""
     notes: str = ""
+
+    def timeout_value(self, key: str) -> int | None:
+        seconds = self.hook_timeouts.get(key)
+        if not seconds:
+            return None
+        return seconds * 1000 if self.timeout_unit == "ms" else seconds
 
 
 @dataclass
@@ -115,7 +132,7 @@ def relay_command() -> str:
 
 
 # Our hook entries end with "<verb> --hook <adapter> --agent <id>", whatever the binary path is.
-_RELAY_ARGS_RE = re.compile(r"\s(?:brief|close) --hook [\w.-]+ --agent \S+$")
+_RELAY_ARGS_RE = re.compile(r"\s(?:brief|close) --hook [\w.-]+ --agent \S+(?: --once)?$")
 
 
 def is_relay_command(command: Any) -> bool:
@@ -159,7 +176,15 @@ class Adapter:
 
     def commands(self, relay: str) -> dict[str, str]:
         base = f"{relay} {{verb}} --hook {self.spec.name} --agent {self.spec.name}"
-        return {"start": base.format(verb="brief"), "end": base.format(verb="close")}
+        commands = {"start": base.format(verb="brief"), "end": base.format(verb="close")}
+        if self.spec.prompt_event:
+            commands["prompt"] = base.format(verb="brief") + " --once"
+        return commands
+
+    def events(self) -> list[tuple[str, str]]:
+        """(command key, agent event name) for every hook this adapter writes."""
+        pairs = [("start", self.spec.start_event), ("prompt", self.spec.prompt_event), ("end", self.spec.end_event)]
+        return [(key, event) for key, event in pairs if event]
 
     def plan(self, home: Path, relay: str) -> Change:
         path = self.spec.config_path(home)
@@ -190,10 +215,11 @@ class JsonHooksAdapter(Adapter):
 
     legacy_markers: tuple[str, ...] = ()
 
-    def _entry(self, command: str) -> dict[str, Any]:
+    def _entry(self, key: str, command: str) -> dict[str, Any]:
         hook: dict[str, Any] = {"type": "command", "command": command}
-        if self.spec.hook_timeout:
-            hook["timeout"] = self.spec.hook_timeout
+        timeout = self.spec.timeout_value(key)
+        if timeout:
+            hook["timeout"] = timeout
         return {"hooks": [hook]}
 
     def render(self, before: str | None, relay: str) -> tuple[str, list[str]]:
@@ -204,9 +230,7 @@ class JsonHooksAdapter(Adapter):
             raise ValueError("'hooks' in the config is not an object")
         summary: list[str] = []
         commands = self.commands(relay)
-        for key, event in (("start", self.spec.start_event), ("end", self.spec.end_event)):
-            if not event:
-                continue
+        for key, event in self.events():
             groups = hooks.get(event)
             groups = list(groups) if isinstance(groups, list) else []
             kept: list[Any] = []
@@ -220,7 +244,7 @@ class JsonHooksAdapter(Adapter):
                 for hook in inner:
                     command = hook.get("command") if isinstance(hook, dict) else None
                     if is_relay_command(command):
-                        if command == commands[key] and not present and hook == self._entry(commands[key])["hooks"][0]:
+                        if command == commands[key] and not present and hook == self._entry(key, commands[key])["hooks"][0]:
                             present = True
                             remaining.append(hook)
                         else:
@@ -233,7 +257,7 @@ class JsonHooksAdapter(Adapter):
                 if remaining:
                     kept.append({**group, "hooks": remaining})
             if not present:
-                kept.append(self._entry(commands[key]))
+                kept.append(self._entry(key, commands[key]))
                 summary.append(f"{event}: add `{commands[key]}`")
             hooks[event] = kept
         text = json.dumps(new, indent=2, ensure_ascii=False) + "\n"

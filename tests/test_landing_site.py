@@ -223,7 +223,8 @@ def test_lede_does_not_promise_a_handoff_after_a_closed_lid() -> None:
 
 def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
     note = _text(re.search(r'<p class="fine" id="agents-note">.*?</p>', (LANDING / "index.html").read_text(), re.S).group(0))
-    assert "Claude Code's session hooks are verified" in note
+    assert "Claude Code's and Codex's session hooks are verified" in note
+    assert "run /hooks once" in note  # Codex skips untrusted hooks silently
     assert "unverified" in note and "beta" not in note.lower()
     assert "through Remembra's MCP tools" in note
     # what remembra-relay connect really does (relay/cli.py): a dry run until --apply, unverified adapters opt-in
@@ -232,8 +233,10 @@ def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
 
     specs = [adapter.spec for adapter in REGISTRY.values()]
     unverified = [spec for spec in specs if not spec.verified]
-    assert [spec.name for spec in specs if spec.verified] == ["claude-code"]
-    assert len(unverified) == 5  # Codex, Cursor, Gemini CLI, Qwen Code and Kimi, as the note names them
+    assert [spec.name for spec in specs if spec.verified] == ["claude-code", "codex"]
+    assert "codex-cli 0.155" in note and REGISTRY["codex"].spec.notes.startswith("Verified with codex-cli 0.155.")
+    assert len(unverified) == 4  # Cursor, Gemini CLI, Qwen Code and Kimi, as the note names them
+    assert "hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified" in note
     # which agents the second install line really writes MCP config for (tools/agents.py)
     from remembra.tools.agents import AGENT_CONFIGS
 

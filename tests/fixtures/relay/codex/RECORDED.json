@@ -1,0 +1,8 @@
+{
+  "codex_cli": "0.155.0-alpha.16.4",
+  "recorded_by": "tests/test_relay_codex_live.py",
+  "exec_output_tail": [
+    "test_totals still fails."
+  ],
+  "resume_fired_session_start": true
+}

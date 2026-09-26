@@ -1,0 +1,9 @@
+{
+  "session_id": "01a0dbed-5554-7a10-bf02-e61547db3290",
+  "transcript_path": "/home/dev/.codex/sessions/2026/09/26/rollout-2026-09-26T00-15-59-01a0dbed-5554-7a10-bf02-e61547db3290.jsonl",
+  "cwd": "/home/dev/work/widget",
+  "hook_event_name": "SessionStart",
+  "model": "mock-model",
+  "permission_mode": "bypassPermissions",
+  "source": "startup"
+}

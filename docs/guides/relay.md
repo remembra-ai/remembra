@@ -14,8 +14,8 @@ tool, machine, or checkout location, picks that up at session start.
    [Which project a repository uses](#which-project-a-repository-uses).
 2. **Close-out.** When a session ends, `remembra-relay close` gathers facts mechanically from git (branch,
    head, this session's commits, changed and uncommitted files, diff stat, unpushed commits) and,
-   for Claude Code, from the session transcript (shell commands and exit codes, test runs, edited files,
-   open todo items). The raw transcript never leaves the machine. The server stores **one** handoff
+   for Claude Code and Codex, from the session transcript (shell commands and exit codes, test runs,
+   edited files, open todo or plan items, and for Codex a usage-limit stop). The raw transcript never leaves the machine. The server stores **one** handoff
    with fixed sections: *Done · Not done / open · Failing / errors · Next step*. An agent-written
    summary is optional and is checked against the facts. It is shown as *unverified* or *contradicted*.
 3. **Pickup.** At session start, `remembra-relay brief` (or the `session_brief` MCP tool) leads with one line:
@@ -52,14 +52,37 @@ remembra-install --all --api-key <your key> --url <your server URL>   # writes ~
 | Agent | Hooks | Status |
 |-------|-------|--------|
 | Claude Code | `~/.claude/settings.json` SessionStart → `brief`, SessionEnd → `close` (transcript parsed) | verified |
-| Codex CLI | `~/.codex/hooks.json` SessionStart / SessionEnd | unverified |
-| Cursor | `~/.cursor/hooks.json` sessionStart / sessionEnd | unverified |
-| Gemini CLI | `~/.gemini/settings.json` SessionStart / SessionEnd (JSON-only stdout) | unverified |
-| Qwen Code | `~/.qwen/settings.json` SessionStart / SessionEnd (JSON-only stdout) | unverified |
+| Codex CLI | `~/.codex/hooks.json` SessionStart → `brief`, UserPromptSubmit → `brief --once`, SessionEnd → `close` (rollout parsed) | verified (codex-cli 0.155.0-alpha.16.4) |
+| Cursor IDE | `~/.cursor/hooks.json` sessionStart / sessionEnd (`additional_context` output) | unverified |
+| Gemini CLI | `~/.gemini/settings.json` SessionStart / SessionEnd (JSON-only stdout, timeouts in ms) | unverified |
+| Qwen Code | `~/.qwen/settings.json` SessionStart / SessionEnd (timeouts in seconds) | unverified |
 | Kimi Code | `~/.kimi/config.toml` `[[hooks]]` | unverified |
 
+"Verified" means the hooks were run against the real tool: Claude Code against its hook docs and real
+transcripts; Codex in a live round trip (a Claude Code close, then a real `codex exec` that got the brief,
+ran commands and left its own handoff), recorded under `tests/fixtures/relay/codex/`. Only the Codex version
+in the table has been run. Cursor, Gemini CLI and Qwen Code are built from their hook docs and tested
+against payloads written from those docs, not against the tools.
+
 Unverified adapters are dry-run only unless you pass `--include-unverified`; `connect --apply` ends by
-listing the ones it skipped and the command that writes them. For agents without hooks,
+listing the ones it skipped and the command that writes them.
+
+**Codex: trust the hooks.** Codex runs a hook only after you trust it, and skips untrusted hooks without a
+message. After `connect --apply`, open Codex, run `/hooks` and trust the three `remembra-relay` hooks.
+Codex asks again whenever a hook's command changes (for example after `connect` rewrites it for a new
+install path). The UserPromptSubmit hook covers sessions where SessionStart does not fire (Codex
+auto-restoring a thread): it prints the brief only if that session has not had one.
+
+**Agents that do not wait for the end hook.** Codex stops a SessionEnd hook after 1 to 3 seconds; Gemini CLI,
+Qwen Code and Cursor do not wait for it at all. For these `close` hands the work to a detached background
+process and returns at once; that process logs to `~/.remembra/relay/last-detached-close.log`.
+
+**Usage limits.** Codex has no hook for its usage limit. When a Codex session's last turn stopped on the
+limit, the handoff says `ended: usage_limit` and lists Codex's limit message first under
+"Failing / errors", so the next agent knows the work stopped mid-way.
+
+**Cursor's CLI.** Cursor's docs say `cursor-agent` also runs hooks; that has not been tried. Use the MCP
+tools (`session_brief`, `close_session`) there until it is. For agents without hooks,
 `connect --agents-md PATH --apply` adds a short marked section to an `AGENTS.md`. Any MCP-capable agent is
 also told by the MCP server to call `session_brief` at start and `close_session` before finishing.
 
@@ -97,7 +120,7 @@ there instead: it points Codex at a local bridge that holds the key.
 ## CLI
 
 ```text
-remembra-relay brief   [--agent X] [--cwd DIR] [--hook NAME] [--format text|json|hook-json|cursor-json]
+remembra-relay brief   [--agent X] [--cwd DIR] [--hook NAME] [--format text|json|hook-json|cursor-json] [--once]
 remembra-relay close   [--agent X] [--session-id S] [--cwd DIR] [--transcript PATH] [--reason R]
                        [--summary S] [--notes N] [--next STEP] [--todo ITEM]... [--dry-run]
 remembra-relay trail   [--cwd DIR] [--project P] [--limit N] [--format text|json]
@@ -112,7 +135,7 @@ sends its answer a byte at a time gets the fallback text ("Remembra brief unavai
 `brief` records where a session starts (HEAD and time). `close` then reports only the commits this
 checkout created since then, read from `git reflog`: commits that arrived by `pull`, `merge` or
 `checkout` are someone else's work and are left out. Without a recorded start, commits come from the
-transcript (Claude Code) or from a branch/time window, and the brief labels window commits as
+transcript (Claude Code, Codex) or from a branch/time window, and the brief labels window commits as
 *not necessarily by this agent*. Commands the transcript shows running in another directory (a `cd`
 elsewhere, a subshell, `git -C`, or the shell already sitting in another repository) are not reported
 for this project. If git does not answer in time, the handoff says *unknown (git status did not finish
