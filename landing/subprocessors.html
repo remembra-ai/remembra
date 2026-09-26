@@ -57,7 +57,6 @@
     <h1 id="doc-title">Subprocessors</h1>
     <p class="lede">Last updated: September 26, 2026. Every company that handles data for Remembra Cloud or our websites, what it gets and where. Self-hosted Remembra uses none of them.</p>
     <!-- requires counsel review of privacy.html, subprocessors.html, dpa.html and refunds.html (legal bases, transfers, retention, entity name) before paid plans go live -->
-    <!-- requires owner: confirm where Namecheap forwards support@, sales@ and contact@remembra.dev; if that mailbox is not Google Workspace, add its provider to the table (DNS on 2026-09-26: remembra.dev MX = Namecheap eforward, dolphytech.com MX = Google) -->
     <!-- requires owner: confirm on remembra-api whether TYPESAFE_API_KEY, an Anthropic key with REMEMBRA_LLM_PROVIDER=anthropic, and LITESTREAM_REPLICA_URL are set; move each one that is into the main table with its provider -->
   </section>
   <div class="wrap doc-grid">
@@ -82,8 +81,8 @@
 <tr><td>Resend, Inc.</td><td>Sends account email: verification, password resets, security and billing notices</td><td>Your email address and the email's content</td><td>United States</td></tr>
 <tr><td>Formsubmit (formsubmit.co)</td><td>Forwards messages from our contact form to our inbox</td><td>What you type in the form: name, email, company, message</td><td>Not published by the provider</td></tr>
 <tr><td>Google LLC (Google Fonts)</td><td>Serves the typefaces on remembra.dev and the dashboard (app.remembra.dev)</td><td>Your IP address and browser details when a page loads</td><td>United States and its global network</td></tr>
-<tr><td>Google LLC (Google Workspace)</td><td>Hosts our dolphytech.com mailboxes: admin@ (privacy, erasure and DPA requests) and security@ (vulnerability reports)</td><td>The email you send those addresses: your address, name and what you write</td><td>United States and its global network</td></tr>
-<tr><td>Namecheap, Inc.</td><td>Email forwarding for remembra.dev: passes mail sent to support@, sales@ and contact@remembra.dev (which is where the contact form goes) on to the mailbox we read it in</td><td>The email you send those addresses: your address, name and what you write</td><td>United States</td></tr>
+<tr><td>Google LLC (Google Workspace)</td><td>Hosts our dolphytech.com mailboxes: the one mail to support@, sales@ and contact@remembra.dev is forwarded to, admin@ (privacy, erasure and DPA requests) and security@ (vulnerability reports)</td><td>The email you send those addresses: your address, name and what you write</td><td>United States and its global network</td></tr>
+<tr><td>Namecheap, Inc.</td><td>Email forwarding for remembra.dev: passes mail sent to support@, sales@ and contact@remembra.dev (which is where the contact form goes) on to our dolphytech.com mailbox at Google Workspace</td><td>The email you send those addresses: your address, name and what you write</td><td>United States</td></tr>
 </tbody>
 </table>
 <p>OpenAI processes API data under its API terms: it says it does not train on it unless the customer opts in, and may keep it for up to 30 days to detect abuse (<a href="https://developers.openai.com/api/docs/guides/your-data">details</a>). The <a href="/privacy#ai">privacy policy</a> explains what we send and when.</p>
