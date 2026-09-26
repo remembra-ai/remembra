@@ -43,3 +43,16 @@ def plan(path: Path, relay: str) -> Change:
         after = (text.rstrip() + "\n\n" if text.strip() else "") + section
     summary = [] if after == text else [f"write the Remembra Relay section in {path}"]
     return Change(path=path, before=before, after=after, summary=summary)
+
+
+def plan_removal(path: Path) -> Change:
+    """The file without the relay section (unchanged when it has none)."""
+    before = path.read_text(encoding="utf-8") if path.exists() else None
+    text = before or ""
+    if BEGIN not in text or END not in text:
+        return Change(path=path, before=before, after=text, summary=[], delete=before is None)
+    head, rest = text.split(BEGIN, 1)
+    _, tail = rest.split(END, 1)
+    after = head.rstrip() + ("\n\n" if head.strip() and tail.strip() else "") + tail.lstrip("\n")
+    after = after.rstrip() + "\n" if after.strip() else ""
+    return Change(path=path, before=before, after=after, summary=[f"remove the Remembra Relay section from {path}"])

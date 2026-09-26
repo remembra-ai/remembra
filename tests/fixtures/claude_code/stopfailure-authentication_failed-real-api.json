@@ -1,0 +1,16 @@
+{
+  "captured_with": "Claude Code 2.1.168 (Claude Code)",
+  "source": "feat/crew tests/crew/fixtures/captures/claude-code-2.1.168/real/real_stopfailure_model/03-StopFailure.json (docs/crew/S0-results.md)",
+  "event": "StopFailure",
+  "payload": {
+    "cwd": "<S0_TMP>/real-real_stopfailure_model/repo",
+    "effort": {
+      "level": "high"
+    },
+    "error": "authentication_failed",
+    "hook_event_name": "StopFailure",
+    "last_assistant_message": "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+    "session_id": "19272491-dcad-4ffe-a99a-25835dd1f066",
+    "transcript_path": "<HOME>/.claude/projects/-S0-TMP-real-real-stopfailure-model-repo/19272491-dcad-4ffe-a99a-25835dd1f066.jsonl"
+  }
+}

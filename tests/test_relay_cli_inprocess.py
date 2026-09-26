@@ -85,6 +85,7 @@ def test_payload_maps():
         "cwd": "/w",
         "transcript": "/t",
         "reason": "exit",
+        "event": None,
     }
     cursor = get_adapter("cursor")
     assert cursor is not None
@@ -96,6 +97,7 @@ def test_payload_maps():
         "cwd": "/p",
         "transcript": None,
         "reason": None,
+        "event": None,
     }
     assert get_adapter("nope") is None and get_adapter(None) is None
 
@@ -108,7 +110,8 @@ def test_every_adapter_plans_idempotently(tmp_path):
         _write(first.path, first.after)
         assert not adapter.plan(tmp_path, "/bin/relay").changed, name
         moved = adapter.plan(tmp_path, "/new/relay")  # relay moved: our entry is replaced, not duplicated
-        assert moved.changed and moved.after.count("/new/relay") == 2 and "/bin/relay" not in moved.after, name
+        hooks = 2 + len(adapter.spec.extra_close_events)
+        assert moved.changed and moved.after.count("/new/relay") == hooks and "/bin/relay" not in moved.after, name
 
 
 def test_json_adapter_rejects_non_object_config(tmp_path):
@@ -140,10 +143,10 @@ def wired(api, monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     http = api["http"]
 
-    def client(self: cli.Context) -> httpx.Client:
-        http.headers.update({"X-API-Key": self.config.api_key or ""})
-        if self.agent:
-            http.headers["X-Remembra-Agent-Id"] = self.agent
+    def client(self: cli.Context, config=None, agent=None, budget=None) -> httpx.Client:
+        http.headers.update({"X-API-Key": (config or self.config).api_key or ""})
+        if agent or self.agent:
+            http.headers["X-Remembra-Agent-Id"] = agent or self.agent
         return _NoClose(http)
 
     monkeypatch.setattr(cli.Context, "client", client)

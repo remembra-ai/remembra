@@ -451,11 +451,43 @@ def _relay_meta(handoff: dict[str, Any] | None) -> dict[str, Any] | None:
     return relay if isinstance(relay, dict) else None
 
 
+# End reasons ``remembra-relay close`` records for a session that is still open:
+# the API error that stopped a turn (Claude Code's StopFailure ``error``) and a
+# close written just before context compaction.
+STOP_REASONS = frozenset(
+    {
+        "rate_limit",
+        "billing_error",
+        "account_on_hold",
+        "cloud_credential_error",
+        "authentication_failed",
+        "oauth_org_not_allowed",
+        "server_error",
+        "overloaded",
+        "invalid_request",
+        "model_not_found",
+        "max_output_tokens",
+    }
+)
+PRE_COMPACT_REASON = "pre-compact"
+
+
+def end_reason_note(reason: Any) -> str | None:
+    """``stopped: rate_limit`` / ``still open (…)`` for a mid-session close; None for an ordinary end."""
+    value = str(reason or "").strip()
+    if value in STOP_REASONS:
+        return f"stopped: {value}"
+    if value == PRE_COMPACT_REASON or value.startswith(PRE_COMPACT_REASON + ":"):
+        return "still open (saved before context compaction)"
+    return None
+
+
 def handoff_headline(memory: dict[str, Any]) -> str:
     """One-line description of a handoff/checkpoint memory (relay or legacy)."""
     relay = _relay_meta(memory)
     if relay and relay.get("headline") and _trust(memory, relay) >= 1.0:
-        return clip(relay["headline"], 160)
+        note = end_reason_note(relay.get("end_reason"))
+        return clip(f"{note} · {relay['headline']}" if note else relay["headline"], 160)
     content = str(memory.get("content") or "")
     first = next((ln for ln in content.splitlines() if ln.strip()), "")
     return clip(first, 160)
@@ -523,6 +555,9 @@ def render_last_session(
         )
     agent = relay.get("agent_id") or handoff.get("agent_id") or "unknown agent"
     who = f"{agent} ({'key-verified' if relay.get('agent_verified') is True else 'self-declared'})"
+    stop = end_reason_note(relay.get("end_reason"))
+    if stop:
+        when = f"{when}, {stop}"
     where = _where(relay.get("branch"), relay.get("head_commit"))
     done = list(relay.get("done") or [])
     not_done = list(relay.get("not_done") or [])
