@@ -16,7 +16,12 @@ logs. So the printed view hides:
   an HTTP header (``--header "Authorization: Bearer ..."``) whose name says it
   is a secret;
 - a URL query parameter whose name says it is a secret (``?key=...``), however
-  short the value;
+  short the value, and a URL path segment shaped like a token or a UUID
+  (``https://actions.zapier.com/mcp/<token>/sse``, ``.../server/<uuid>/mcp``);
+- a JSON object passed as one argument (``--config '{"apiKey": "..."}'``, the
+  Smithery shape), with the same rules as the file itself;
+- JSON with comments or trailing commas (Cursor, Windsurf, Gemini CLI and VS
+  Code accept them) is read the same way, not line by line;
 - in TOML, the lines of a multi-line array and a multi-line string with the
   same rules as a one-line value (a multi-line string of a secret setting is
   hidden whole);
@@ -84,9 +89,47 @@ def _hide_query(text: str) -> str:
     return _QUERY_PARAM_RE.sub(one, text)
 
 
+_URL_RE = re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://[^/\s\"'?#]+)(/[^\s\"'?#]*)")
+_UUID_RE = re.compile(r"(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_TOKEN_SEGMENT_RE = re.compile(r"^[A-Za-z0-9_\-.~]{16,}$")
+
+
+def _secret_segment(segment: str) -> bool:
+    """A URL path segment that is a credential rather than a name: a UUID, or 16+ characters mixing letters and digits."""
+    if _UUID_RE.match(segment):
+        return True
+    if not _TOKEN_SEGMENT_RE.match(segment) or "." in segment.strip("."):
+        return False  # names with a dot (package@1.2.3, file.json) are not tokens
+    return any(c.isdigit() for c in segment) and any(c.isalpha() for c in segment)
+
+
+def _hide_url_paths(text: str) -> str:
+    """``https://host/mcp/<token>/sse`` -> ``https://host/mcp/[hidden]/sse``."""
+
+    def one(match: re.Match[str]) -> str:
+        origin, path = match.groups()
+        return origin + "/".join(HIDDEN if _secret_segment(seg) else seg for seg in path.split("/"))
+
+    return _URL_RE.sub(one, text)
+
+
 def scrub(text: str, keys: tuple[str, ...] = ()) -> str:
     """Credential-looking substrings of free text hidden (the given keys and rem_ keys masked)."""
-    return redact_secrets(_hide_query(mask_text(text, keys))).text
+    return redact_secrets(_hide_url_paths(_hide_query(mask_text(text, keys)))).text
+
+
+def _embedded_json(item: str, keys: tuple[str, ...]) -> str | None:
+    """A string that holds a JSON object or array (``--config '{"apiKey": ...}'``), viewed; None otherwise."""
+    stripped = item.strip()
+    if not stripped.startswith(("{", "[")):
+        return None
+    try:
+        data = json.loads(stripped)
+    except ValueError:
+        return None
+    if not isinstance(data, (dict, list)):
+        return None
+    return json.dumps(_view(data, keys, in_block=False), ensure_ascii=False)
 
 
 def _arg_value(item: str) -> str | None:
@@ -114,6 +157,9 @@ def _view_arg(item: str, after_flag: bool, keys: tuple[str, ...]) -> tuple[str, 
     """One string of an argument list as printed, and whether the next one follows a secret flag."""
     if after_flag:
         return hide(item), False
+    embedded = _embedded_json(item, keys)
+    if embedded is not None:
+        return embedded, False
     assigned = _SECRET_FLAG_ASSIGN_RE.match(item)
     if assigned:
         return assigned.group(1) + hide(assigned.group(2)), False
@@ -148,7 +194,7 @@ def _view(value: Any, keys: tuple[str, ...], in_block: bool) -> Any:
             elif isinstance(item, (dict, list)):
                 out[name] = _view(item, keys, secret)
             elif isinstance(item, str):
-                out[name] = hide(item) if secret else scrub(item, keys)
+                out[name] = hide(item) if secret else _view(item, keys, in_block=False)
             else:
                 out[name] = item  # numbers, booleans, null
         return out
@@ -157,7 +203,10 @@ def _view(value: Any, keys: tuple[str, ...], in_block: bool) -> Any:
             return [hide(v) if isinstance(v, str) else _view(v, keys, True) for v in value]
         return _view_args(value, keys)
     if isinstance(value, str):
-        return hide(value) if in_block else scrub(value, keys)
+        if in_block:
+            return hide(value)
+        embedded = _embedded_json(value, keys)
+        return embedded if embedded is not None else scrub(value, keys)
     return value
 
 
@@ -172,11 +221,22 @@ def canonical_json(text: str) -> str | None:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
+_JSONC_TOKEN_RE = re.compile(r'"(?:[^"\\]|\\.)*"|//[^\n]*|/\*.*?\*/|,(?=\s*[}\]])', re.S)
+
+
+def _strip_jsonc(text: str) -> str:
+    """JSON with ``//`` and ``/* */`` comments and trailing commas made plain JSON (strings untouched)."""
+    return _JSONC_TOKEN_RE.sub(lambda m: m.group(0) if m.group(0).startswith('"') else "", text)
+
+
 def _json_view(text: str, keys: tuple[str, ...]) -> str | None:
     try:
         data = json.loads(text)
     except ValueError:
-        return None
+        try:
+            data = json.loads(_strip_jsonc(text))
+        except ValueError:
+            return None
     if not isinstance(data, (dict, list)):
         return None
     return json.dumps(_view(data, keys, in_block=False), indent=2, ensure_ascii=False) + "\n"

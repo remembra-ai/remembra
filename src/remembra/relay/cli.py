@@ -61,7 +61,7 @@ from remembra.client.project import normalize_project_id, parse_project_aliases
 from remembra.relay import facts as factlib
 from remembra.relay import outbox
 from remembra.relay.adapters import REGISTRY, Adapter, agents_md, backup_and_write, get_adapter, relay_command
-from remembra.relay.config import RelayConfig, load_config
+from remembra.relay.config import RelayConfig, load_config, load_config_from_source
 
 TOTAL_BUDGET_SECONDS = 9.5
 GIT_BUDGET_SECONDS = 4.0
@@ -352,10 +352,36 @@ class Replay:
         self.remaining: list[outbox.Entry] = []
 
 
-def _config_prefer(source: str | None) -> str | None:
-    """``load_config(prefer=…)`` for an entry's recorded config source ("claude:/path" -> "claude")."""
-    kind = (source or "").split(":", 1)[0]
-    return kind if kind in ("claude", "codex", "credentials") else None
+def replay_config(entry: outbox.Entry) -> tuple[RelayConfig | None, str | None]:
+    """The config a queued close may be sent with, or ``(None, why it is held)``.
+
+    An entry queued with a key goes only with the key of the SAME config source
+    (``env``, ``claude:<path>``, ...), and only while that source still points
+    at the server it was queued for: a key configured elsewhere may belong to
+    another account. An entry queued without a key is kept for the server that
+    was configured then (``REMEMBRA_URL``, else the local default) and goes
+    only once a key for that same server is configured; it is never sent to a
+    server set up later. An entry without a recorded server (written before
+    this rule) is held.
+    """
+    recorded = entry.data.get("config_source")
+    agent = entry.agent_id or None
+    if recorded and recorded != "none":
+        config = load_config_from_source(str(recorded), agent=agent)
+        if config is None or not config.api_key:
+            return None, f"its key source ({recorded}) has no key now"
+    else:
+        config = load_config(agent=agent)
+        if not config.api_key:
+            return None, "no API key is configured yet"
+    if not entry.url:
+        return None, "it was queued without a server; it is only kept, never sent (delete the file to drop it)"
+    if outbox.clean_url(config.url) != entry.url:
+        return None, (
+            f"it is for {entry.url}, and the key now points at {outbox.clean_url(config.url)}; it is only sent to the"
+            " server it was queued for (delete the file to drop it)"
+        )
+    return config, None
 
 
 def _failure(response: httpx.Response | None, error: BaseException | None) -> str:
@@ -367,8 +393,9 @@ def _failure(response: httpx.Response | None, error: BaseException | None) -> st
 def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: float = 0.0, drop_skipped: bool = True) -> Replay:
     """Send queued closes, oldest first, within a small budget. Never raises.
 
-    Each entry goes with the key of the config source that queued it and as
-    the agent that wrote it. Stops at the first network failure (the server is
+    Each entry goes with the key of the config source that queued it, to the
+    server it was queued for (see :func:`replay_config`), and as the agent that
+    wrote it. Stops at the first network failure (the server is
     still unreachable), 5xx, 429 or rejected key (401); a 4xx that resending
     cannot fix drops the entry (logged). A refusal (403: the key may not write
     as that agent or to that project) holds back only that entry and the
@@ -399,9 +426,9 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
         if stop or attempted >= REPLAY_MAX_ENTRIES or left < REPLAY_BUDGET_SECONDS + reserve:
             report.remaining.append(entry)
             continue
-        config = load_config(agent=entry.agent_id or None, prefer=_config_prefer(entry.data.get("config_source")))
-        if not config.api_key or (entry.url and outbox.clean_url(config.url) != entry.url):
-            report.remaining.append(entry)  # no key yet, or the key now points at another server
+        config, _held = replay_config(entry)
+        if config is None:
+            report.remaining.append(entry)  # no key for its source, or that source now points at another server
             continue
         scope = (config.source, entry.agent_id, str(entry.payload.get("project_id") or ""))
         if scope in refused_scopes:
@@ -713,9 +740,11 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
 
 def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status: int | None = None) -> None:
     """Keep an undelivered close for the next brief/close, and say so on stderr."""
-    # Without a key there is no server either: send it wherever a key is configured later.
-    url = ctx.config.url if ctx.config.api_key else None
-    path = outbox.enqueue(ctx.home, payload, url=url, config_source=ctx.config.source, error=error, http_status=http_status)
+    # Always the server this close was for: without a key that is REMEMBRA_URL (or the local default),
+    # and the entry is only ever sent there (replay_config).
+    path = outbox.enqueue(
+        ctx.home, payload, url=ctx.config.url, config_source=ctx.config.source, error=error, http_status=http_status
+    )
     outbox.record(
         ctx.home,
         agent_id=str(payload.get("agent_id") or ctx.agent or ""),
@@ -1039,7 +1068,9 @@ def cmd_disconnect(args: argparse.Namespace) -> int:
         "  1. remembra-relay disconnect --apply     (the session hooks, above)\n"
         "  2. remembra-install --remove --all --apply   (the MCP server entries)\n"
         "  3. pipx uninstall remembra\n"
-        "  4. revoke the key in the dashboard (API keys) and delete ~/.remembra (saved key, queue, log)"
+        "  4. revoke the key in the dashboard (API keys) and delete ~/.remembra (saved key, queue, log)\n"
+        "  Backups of agent configs (*.bak-remembra-*, *.bak-relay-*) can still hold the key: step 2 lists them,\n"
+        "  and remembra-install --remove --all --apply --delete-backups deletes them."
     )
     return exit_code
 
@@ -1108,6 +1139,8 @@ def cmd_status(args: argparse.Namespace) -> int:
             "attempts": e.attempts,
             "last_error": e.data.get("last_error"),
             "url": e.url,
+            "config_source": e.data.get("config_source"),
+            "held": replay_config(e)[1],
         }
         for e in entries
     ]
@@ -1146,6 +1179,8 @@ def cmd_status(args: argparse.Namespace) -> int:
             f"    - {item['agent_id']} session {str(item['session_id'])[:24]}, queued {item['queued_at']}, "
             f"{item['attempts']} attempt(s), last error: {item['last_error']}"
         )
+        if item["held"]:
+            print(f"      held: {item['held']}")
     if agents:
         print("  agents:")
         for agent, slot in sorted(agents.items()):
@@ -1187,6 +1222,7 @@ def _warn_missing_key() -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="remembra-relay", description="Session continuity across AI agents (Remembra Relay).")
+    parser.add_argument("--version", action="version", version=f"remembra-relay {_version()}")
     sub = parser.add_subparsers(dest="command", required=True)
     hooks = ", ".join(REGISTRY)
 

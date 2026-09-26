@@ -4,6 +4,12 @@ The key is taken, in order, from ``--api-key-stdin`` (piped), ``--api-key``
 (still accepted, with a warning: it lands in shell history and the process
 list), ``REMEMBRA_API_KEY``, a prompt on a terminal (Enter keeps the saved
 key), or ``~/.remembra/credentials``. Output only ever shows it masked.
+
+A key typed at the prompt or piped on stdin must look like a Remembra key
+(``rem_`` and at least 20 letters, digits, ``-`` or ``_``; the server issues
+``rem_`` + 43): a hidden prompt shows nothing of what was pasted, so a wrong
+clipboard (a password, a JWT, half a key) would otherwise be written to every
+agent's config without anyone seeing it.
 """
 
 from __future__ import annotations
@@ -22,6 +28,27 @@ ARGV_KEY_WARNING = (
 )
 
 _REM_KEY_RE = re.compile(r"\brem_[A-Za-z0-9_\-]{4,}")
+KEY_SHAPE_RE = re.compile(r"^rem_[A-Za-z0-9_\-]{20,}$")
+PROMPT_ATTEMPTS = 3
+KEY_SHAPE_HINT = (
+    "that is not a Remembra API key: a key starts with rem_ followed by letters, digits, - and _ "
+    "(copy it from the dashboard, Settings > API keys)"
+)
+
+
+def looks_like_key(value: str) -> bool:
+    """True when ``value`` has the shape of a Remembra API key (``rem_`` + 20 or more URL-safe characters)."""
+    return bool(KEY_SHAPE_RE.match(value))
+
+
+def _clean_typed(value: str) -> str:
+    """What was pasted, without surrounding whitespace or quotes."""
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1].strip()
+    return value
+
+
 _ASSIGNED_RE = re.compile(r"""((?:REMEMBRA_API_KEY|"api_key")["']?\s*[:=]\s*["']?)([^"'\s,]+)""")
 
 
@@ -71,8 +98,12 @@ def resolve_api_key(
     """``(key, where it came from)``; ``(None, reason)`` when there is none."""
     warn = warn or (lambda message: print(message, file=sys.stderr))
     if from_stdin:
-        key = sys.stdin.readline().strip() if sys.stdin is not None else ""
-        return (key, "stdin") if key else (None, "nothing on stdin")
+        key = _clean_typed(sys.stdin.readline()) if sys.stdin is not None else ""
+        if not key:
+            return None, "nothing on stdin"
+        if not looks_like_key(key):
+            return None, f"stdin: {KEY_SHAPE_HINT}"
+        return key, "stdin"
     if cli_key:
         warn(ARGV_KEY_WARNING)
         return cli_key.strip(), "--api-key"
@@ -84,9 +115,16 @@ def resolve_api_key(
         interactive = _is_tty(sys.stdin) and _is_tty(sys.stderr)
     if interactive:
         hint = f" [Enter keeps the saved key {mask_key(saved)}]" if saved else ""
-        typed = prompt(f"Remembra API key (input hidden){hint}: ").strip()
-        if typed:
-            return typed, "prompt"
+        for attempt in range(PROMPT_ATTEMPTS):
+            typed = _clean_typed(prompt(f"Remembra API key (input hidden){hint}: "))
+            if not typed:
+                break  # Enter: keep the saved key
+            if looks_like_key(typed):
+                return typed, "prompt"
+            left = PROMPT_ATTEMPTS - attempt - 1
+            warn(f"{KEY_SHAPE_HINT}." + (f" Try again ({left} left)." if left else ""))
+        else:
+            return None, f"the prompt: {KEY_SHAPE_HINT}"
     if saved:
         return saved, str(credentials)
     return None, "no key given"

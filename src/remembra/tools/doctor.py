@@ -20,7 +20,8 @@ DEFAULT_CLAUDE_DESKTOP_CONFIG = Path.home() / "Library/Application Support/Claud
 DEFAULT_CLAUDE_CODE_CONFIG = Path.home() / ".claude.json"  # user-scope MCP servers (`claude mcp add --scope user`)
 DEFAULT_GEMINI_CONFIG = Path.home() / ".gemini" / "settings.json"
 DEFAULT_CURSOR_CONFIG = Path.home() / ".cursor" / "mcp.json"
-DEFAULT_WINDSURF_CONFIG = Path.home() / ".windsurf" / "mcp_config.json"
+# The Windsurf Editor's file per its docs (unverified here; see remembra.tools.agents.UNVERIFIED_AGENTS).
+DEFAULT_WINDSURF_CONFIG = Path.home() / ".codeium" / "windsurf" / "mcp_config.json"
 DEFAULT_CREDENTIALS = Path.home() / ".remembra" / "credentials"
 
 

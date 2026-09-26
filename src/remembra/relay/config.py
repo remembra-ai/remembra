@@ -10,7 +10,13 @@ source, so a key is never sent to a server configured somewhere else):
 4. ``~/.remembra/credentials`` (written by ``remembra-install``).
 
 The agent id is ``--agent`` > ``REMEMBRA_AGENT_ID`` > the source's value.
+With no key anywhere, the URL is ``REMEMBRA_URL`` (else the local default):
+that is the server a handoff queued without a key is kept for.
 Nothing here writes configuration: keys stay where the user put them.
+
+:func:`load_config_from_source` reads ONE named source (``"env"``,
+``"claude:<path>"``, ...): the outbox sends a queued handoff only with the
+key of the source that queued it.
 """
 
 from __future__ import annotations
@@ -117,7 +123,36 @@ def load_config(
                 sources.append((f"{name}:{path}", found))
                 break
 
-    source_name, chosen = sources[0] if sources else ("none", {})
+    if sources:
+        return _build(sources[0][0], sources[0][1], agent, env)
+    return _build("none", {"REMEMBRA_URL": env.get("REMEMBRA_URL") or ""}, agent, env)
+
+
+_LOADERS = {"claude": _from_claude_json, "codex": _from_codex_toml, "credentials": _from_credentials}
+
+
+def load_config_from_source(
+    source: str | None,
+    agent: str | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> RelayConfig | None:
+    """The config from exactly ``source`` (a ``RelayConfig.source`` value), or None when it holds no key now.
+
+    Unlike :func:`load_config` nothing falls through to another source: a key
+    found elsewhere may belong to another account or server.
+    """
+    env = dict(os.environ if environ is None else environ)
+    if source == "env":
+        return _build("env", env, agent, env) if (env.get("REMEMBRA_API_KEY") or "").strip() else None
+    kind, _, path = (source or "").partition(":")
+    loader = _LOADERS.get(kind)
+    if loader is None or not path:
+        return None
+    found = loader(Path(path))
+    return _build(source or kind, found, agent, env) if found else None
+
+
+def _build(source_name: str, chosen: Mapping[str, str], agent: str | None, env: Mapping[str, str]) -> RelayConfig:
     url = (chosen.get("REMEMBRA_URL") or DEFAULT_URL).strip().rstrip("/")
     agent_id = (agent or env.get("REMEMBRA_AGENT_ID") or chosen.get("REMEMBRA_AGENT_ID") or "").strip() or None
     project = (env.get("REMEMBRA_PROJECT") or chosen.get("REMEMBRA_PROJECT") or "").strip() or None

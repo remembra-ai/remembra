@@ -573,8 +573,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Start the local Remembra bridge.")
     parser.add_argument(
         "--upstream",
+        "--url",  # older docs showed --url; both set the upstream
+        dest="upstream",
         default=DEFAULT_BRIDGE_UPSTREAM,
-        help="Upstream Remembra API URL",
+        help="Upstream Remembra API URL (--url is accepted too)",
     )
     parser.add_argument(
         "--host",
