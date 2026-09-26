@@ -28,16 +28,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from remembra.relay.config_view import canonical_json, config_view
+from remembra.relay.config_view import canonical_json, config_view, loads_jsonc
 from remembra.relay.handoff import PRE_COMPACT_REASON
 
 RELAY_MARKERS = ("remembra-relay", "remembra.relay")
 
 # Output modes for `remembra-relay brief`:
-#   text         plain text on stdout (agent adds stdout to the context)
-#   hook-json    {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": ...}}
-#   cursor-json  {"additional_context": ...}
-OUTPUT_MODES = ("text", "json", "hook-json", "cursor-json")
+#   text                     plain text on stdout (agent adds stdout to the context)
+#   hook-json                {"hookSpecificOutput": {"hookEventName": <the payload's event>, "additionalContext": ...}}
+#   cursor-json              {"additional_context": ...}; `close` prints {} (Cursor logs empty stdout as a failed hook)
+#   additional-context-json  {"additionalContext": ...} (GitHub Copilot CLI)
+OUTPUT_MODES = ("text", "json", "hook-json", "cursor-json", "additional-context-json")
 
 
 @dataclass(frozen=True)
@@ -136,12 +137,58 @@ class AdapterSpec:
     # StopFailure on a usage/billing limit, PreCompact). A later close of the
     # same session supersedes it on the server.
     extra_close_events: tuple[CloseEvent, ...] = ()
+    # Environment variable that moves the agent's own directory (the first part of
+    # ``config_path`` under home, e.g. ``~/.qwen``); see :meth:`config_file`.
+    home_env: str | None = None
+    # Payload keys that mean "not a session of its own" (a subagent's end): the hook does nothing.
+    skip_payload_keys: tuple[str, ...] = ()
+    # A second close of the same session, event and end reason within this many seconds is
+    # dropped (Gemini CLI fires SessionEnd 2-3 times on exit; a session can run several
+    # agents' copies of one hook). 0 turns it off.
+    dedupe_close_seconds: int = 60
+    # A close hook with empty stdin does nothing: the agent also runs an orphaned copy of the
+    # end hook without its payload (Gemini CLI's third SessionEnd on /quit).
+    drop_empty_payload_close: bool = False
 
     def timeout_value(self, key: str) -> int | None:
         seconds = self.hook_timeouts.get(key)
         if not seconds:
             return None
         return seconds * 1000 if self.timeout_unit == "ms" else seconds
+
+    def moved_home(self, home: Path) -> Path | None:
+        """``$home_env`` when it is set, else None.
+
+        Read only for the real home (``Path.home()``): an adapter asked about any
+        other home (a test's temporary one) never follows the user's own setting.
+        """
+        if not self.home_env or Path(home) != Path.home():
+            return None
+        value = os.environ.get(self.home_env, "").strip()
+        return Path(value).expanduser() if value else None
+
+    def config_file(self, home: Path) -> Path:
+        """The config file the agent reads: ``config_path(home)``, inside ``$home_env`` when that is set."""
+        default = self.config_path(Path(home))
+        moved = self.moved_home(home)
+        if moved is None:
+            return default
+        try:
+            inside = default.relative_to(home).parts[1:]
+        except ValueError:
+            return default
+        return moved.joinpath(*inside)
+
+    def config_home(self, home: Path) -> Path:
+        """The agent's own directory (``~/.claude``, ``~/.codex``, ..., or ``$home_env``)."""
+        moved = self.moved_home(home)
+        if moved is not None:
+            return moved
+        default = self.config_path(Path(home))
+        try:
+            return Path(home) / default.relative_to(home).parts[0]
+        except (ValueError, IndexError):
+            return default.parent
 
 
 @dataclass
@@ -255,7 +302,10 @@ class Adapter:
         self.spec = spec
 
     def detect(self, home: Path, which: Callable[[str], str | None] = shutil.which) -> bool:
-        return any(which(b) for b in self.spec.detect_bins) or any((home / d).is_dir() for d in self.spec.detect_dirs)
+        if any(which(b) for b in self.spec.detect_bins) or any((home / d).is_dir() for d in self.spec.detect_dirs):
+            return True
+        moved = self.spec.moved_home(home)
+        return moved is not None and moved.is_dir()
 
     def commands(self, relay: str) -> dict[str, str]:
         base = f"{relay} {{verb}} --hook {self.spec.name} --agent {self.spec.name}"
@@ -280,32 +330,51 @@ class Adapter:
         return [(key, event) for key, event, _ in self.hook_events()]
 
     def plan(self, home: Path, relay: str) -> Change:
-        path = self.spec.config_path(home)
+        path = self.spec.config_file(home)
         before = path.read_text(encoding="utf-8") if path.exists() else None
         after, summary = self.render(before, relay)
-        return Change(path=path, before=before, after=after, summary=summary)
+        return _note_dropped_comments(Change(path=path, before=before, after=after, summary=summary))
 
     def render(self, before: str | None, relay: str) -> tuple[str, list[str]]:
         raise NotImplementedError
 
     def plan_removal(self, home: Path) -> Change:
         """The config without any relay hook (``disconnect``); unchanged when there is none."""
-        path = self.spec.config_path(home)
+        path = self.spec.config_file(home)
         before = path.read_text(encoding="utf-8") if path.exists() else None
         if before is None:
             return Change(path=path, before=None, after="", summary=[], delete=True)  # nothing to remove
         after, summary, empty = self.render_removal(before)
-        return Change(path=path, before=before, after=after, summary=summary, delete=empty and bool(summary))
+        change = Change(path=path, before=before, after=after, summary=summary, delete=empty and bool(summary))
+        return _note_dropped_comments(change)
 
     def render_removal(self, before: str) -> tuple[str, list[str], bool]:
         """``(new text, summary, nothing else left)``."""
         raise NotImplementedError
 
+    def connected(self, home: Path) -> bool:
+        """True when the config file already holds relay hooks (``connect --apply`` keeps them current)."""
+        return self.plan_removal(home).changed
+
+
+def _note_dropped_comments(change: Change) -> Change:
+    """Add a summary line when writing ``change`` drops the comments of a JSON-with-comments file."""
+    if not change.changed or change.delete or change.before is None or change.path.suffix.lower() != ".json":
+        return change
+    try:
+        _, with_comments = loads_jsonc(change.before)
+    except ValueError:
+        return change
+    if with_comments:
+        change.summary.append(f"comments in {change.path.name} are not kept; the backup keeps them")
+    return change
+
 
 def _load_json_object(text: str | None, path_hint: str) -> dict[str, Any]:
-    if not text or not text.strip():
+    """``text`` as a JSON object ({} when empty); a BOM, comments and trailing commas are accepted."""
+    if not text or not text.removeprefix("\ufeff").strip():
         return {}
-    data = json.loads(text)
+    data, _ = loads_jsonc(text)
     if not isinstance(data, dict):
         raise ValueError(f"{path_hint} is not a JSON object")
     return data
@@ -333,7 +402,7 @@ class JsonHooksAdapter(Adapter):
         return {"matcher": matcher, **group} if matcher else group
 
     def render(self, before: str | None, relay: str) -> tuple[str, list[str]]:
-        data = _load_json_object(before, str(self.spec.config_path))
+        data = _load_json_object(before, f"the {self.spec.display} config")
         new = copy.deepcopy(data)
         hooks = new.setdefault("hooks", {})
         if not isinstance(hooks, dict):
@@ -379,7 +448,7 @@ class JsonHooksAdapter(Adapter):
         return text, summary
 
     def render_removal(self, before: str) -> tuple[str, list[str], bool]:
-        data = _load_json_object(before, str(self.spec.config_path))
+        data = _load_json_object(before, f"the {self.spec.display} config")
         hooks = data.get("hooks")
         if not isinstance(hooks, dict):
             return before, [], False

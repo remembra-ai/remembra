@@ -68,14 +68,14 @@ LIMIT = "Keep going on the totals fix."
 class Rig:
     """Temp HOME + CODEX_HOME + repo + hook-payload capture for one Codex setup."""
 
-    def __init__(self, tmp: Path, server_url: str, mock: MockResponses) -> None:
+    def __init__(self, tmp: Path, server_url: str, mock: MockResponses, codex_home: Path | None = None) -> None:
         assert CODEX is not None
         self.codex, self.version = CODEX
         self.tmp = tmp
         self.server = server_url
         self.home = tmp / "home"
         self.home.mkdir()
-        self.codex_home = self.home / ".codex"
+        self.codex_home = codex_home or self.home / ".codex"
         self.config = write_codex_config(self.codex_home, mock.base_url)
         self.payloads = tmp / "payloads"
         self.payloads.mkdir()
@@ -103,7 +103,8 @@ class Rig:
         }
 
     def connect(self) -> Any:
-        out = relay(self.home, self.server, "connect", "--agent", "codex", "--apply", "--relay-command", str(self.hook))
+        args = ("connect", "--agent", "codex", "--apply", "--relay-command", str(self.hook))
+        out = relay(self.home, self.server, *args, env={"CODEX_HOME": str(self.codex_home)})
         assert out.returncode == 0, out.stderr
         return out
 
@@ -303,3 +304,20 @@ def test_usage_limit_stop_reaches_the_relay(server, tmp_path):  # noqa: F811
         rollout = Path(end["transcript_path"])
         assert parse_codex_rollout(rollout).usage_limit
         _record(rig, "rollout_usage_limit.jsonl", scrub_rollout(rollout.read_text(), rig.replacements()))
+
+
+def test_connect_writes_the_hooks_into_codex_home(server, tmp_path):  # noqa: F811
+    """CODEX_HOME moves ~/.codex: connect writes hooks.json there, and Codex runs them from there."""
+    with MockResponses({"Say hi.": [("say", "Hi.")]}) as mock:
+        rig = Rig(tmp_path, server, mock, codex_home=tmp_path / "codex-elsewhere")
+        _claude_closes(rig)
+        connect = rig.connect()
+        assert f"-> {rig.codex_home / 'hooks.json'}" in connect.stdout
+        assert (rig.codex_home / "hooks.json").exists() and not (rig.home / ".codex").exists()
+        trust_hooks(rig.codex, rig.env, rig.repo, rig.config)
+        before = len(mock.requests)
+        rig.exec("Say hi.")
+        first = MockResponses.developer_texts(mock.requests[before])
+        assert _brief_count(first) == 1 and any("Last session: claude-code" in t for t in first), first
+        assert len(rig.trail("codex")) == 1
+        assert Path(rig.captured()["SessionEnd"][0]["transcript_path"]).is_relative_to(rig.codex_home)

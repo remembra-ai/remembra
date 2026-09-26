@@ -122,3 +122,31 @@ def _no_real_paddle_api(request, monkeypatch):
         billing_paddle, "http_client_factory", lambda: httpx.AsyncClient(transport=httpx.MockTransport(_refuse_paddle))
     )
     yield
+
+
+# ---------------------------------------------------------------------------
+# No test follows the developer's own agent settings
+# ---------------------------------------------------------------------------
+
+# Variables that move an agent's config directory (the relay writes hooks there when the
+# home is the real one) and that name the agent running a relay hook (remembra.relay.hosts).
+# A suite run from inside Codex, Qwen Code or Gemini CLI inherits some of them.
+_AGENT_ENV = (
+    "CLAUDE_CONFIG_DIR",
+    "CODEX_HOME",
+    "QWEN_HOME",
+    "KIMI_CODE_HOME",
+    "GROK_HOME",
+    "COPILOT_HOME",
+    "GROK_WORKSPACE_ROOT",
+    "GEMINI_SESSION_ID",
+    "QWEN_CODE_SESSION_ID",
+    "DEVIN_PROJECT_DIR",
+    "CONTINUE_PROJECT_DIR",
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_agent_env(monkeypatch):
+    for name in _AGENT_ENV:
+        monkeypatch.delenv(name, raising=False)

@@ -50,6 +50,7 @@ SPEC = AdapterSpec(
     hook_timeouts={"start": 15, "end": 15},
     timeout_unit="s",
     detach_close=True,
+    home_env="QWEN_HOME",
     notes="Unverified: built from the Qwen Code hook docs and doc-derived payloads; not yet run against qwen.",
 )
 

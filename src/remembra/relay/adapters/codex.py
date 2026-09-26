@@ -66,6 +66,7 @@ SPEC = AdapterSpec(
     hook_timeouts={"start": 15, "prompt": 15, "end": 3},
     timeout_unit="s",
     detach_close=True,
+    home_env="CODEX_HOME",
     setup_note=(
         "Open Codex and run /hooks to trust the three remembra-relay hooks (SessionStart, UserPromptSubmit, SessionEnd); "
         "they will not run until you do. Codex asks again whenever a hook's command changes."

@@ -48,6 +48,9 @@ SPEC = AdapterSpec(
     hook_timeouts={"start": 15, "end": 15},
     timeout_unit="ms",
     detach_close=True,
+    # Seen on 0.61.0: /quit fires SessionEnd three times, the third orphaned with empty stdin.
+    # The repeats are dropped by the close dedupe; the empty one would close without a reason.
+    drop_empty_payload_close=True,
     notes="Unverified: built from the Gemini CLI hook docs and doc-derived payloads; not yet run against gemini.",
 )
 

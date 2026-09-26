@@ -1,8 +1,11 @@
 """Adapters replayed against payload fixtures (tests/fixtures/relay/, see its README).
 
 Codex fixtures are recorded from a live run (tests/test_relay_codex_live.py);
-Gemini CLI, Qwen Code and Cursor fixtures are written from each tool's hook
-docs. Also here, against the local test server:
+Cursor's from cursor-agent's own hook runner driven by a harness; Gemini CLI
+and Qwen Code fixtures are written from each tool's hook docs. Also here:
+config files with comments and a byte order mark (C3), config homes moved by
+an environment variable (C4) and the brief's output modes (C7). Against the
+local test server:
 
 - ``brief --once`` (Codex's UserPromptSubmit hook) delivers a brief once per
   session, and a resumed Codex session does not get a second copy;
@@ -319,7 +322,7 @@ def test_gemini_transcript_is_not_parsed_but_close_still_works(tmp_path, dry_clo
 
 @pytest.mark.parametrize(
     ("agent", "reason"),
-    [("gemini", "exit"), ("qwen", "prompt_input_exit"), ("cursor", "user_close")],
+    [("gemini", "exit"), ("qwen", "prompt_input_exit"), ("cursor", "aborted")],
 )
 def test_doc_payloads_map_to_session_fields(agent, reason):
     spec = REGISTRY[agent].spec
@@ -626,3 +629,201 @@ def test_relay_guide_marks_verified_exactly_the_verified_adapters():
         assert verified == REGISTRY[name].spec.verified, (label, rows[label])
         if verified and name != "claude-code":
             assert (FIXTURES / name / "RECORDED.json").exists(), name
+
+
+# ---------------------------------------------------------------------------
+# C3: config files with comments, trailing commas and a byte order mark
+# ---------------------------------------------------------------------------
+
+JSONC = """\ufeff// user settings: Gemini CLI, Qwen Code and Cursor read comments
+{
+  /* theme picked in the UI */
+  "theme": "dark", // trailing comment
+  "url": "https://example.test/a//b", // "//" inside a string is kept
+  "hooks": {
+    "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo pre"}],},],
+  },
+}
+"""
+
+
+def test_strip_jsonc_and_loads_jsonc():
+    from remembra.relay.config_view import loads_jsonc, strip_jsonc
+
+    data, with_comments = loads_jsonc(JSONC)
+    assert with_comments and data["url"] == "https://example.test/a//b" and data["theme"] == "dark"
+    assert data["hooks"]["PreToolUse"][0]["hooks"][0]["command"] == "echo pre"
+    assert loads_jsonc('\ufeff{"a": 1}') == ({"a": 1}, False)  # a BOM alone is not a comment
+    assert json.loads(strip_jsonc('{"a": [1, 2, /* x */], // y\n}')) == {"a": [1, 2]}  # comma, then a comment
+    assert json.loads(strip_jsonc('{"s": "a, ] // b /* c */"}')) == {"s": "a, ] // b /* c */"}
+    with pytest.raises(json.JSONDecodeError) as bad:
+        loads_jsonc('{"a": 1,\n "b": }')
+    assert bad.value.lineno == 2  # the error of the file as written
+
+
+@pytest.mark.parametrize("agent", ["claude-code", "gemini", "qwen", "cursor"])
+def test_a_config_with_comments_and_a_bom_is_connected_and_says_the_comments_go(agent, tmp_path):
+    adapter = REGISTRY[agent]
+    path = adapter.spec.config_file(tmp_path)
+    path.parent.mkdir(parents=True)
+    text = JSONC if agent != "cursor" else JSONC.replace('"hooks": {', '"version": 1, "hooks": {"stop": [{"command": "x"}],', 1)
+    path.write_text(text, encoding="utf-8")
+    change = adapter.plan(tmp_path, "/bin/relay")
+    assert change.changed
+    assert change.summary[-1] == f"comments in {path.name} are not kept; the backup keeps them"
+    data = json.loads(change.after)  # written as plain JSON, BOM dropped
+    assert not change.after.startswith("\ufeff")
+    assert data["theme"] == "dark" and data["url"] == "https://example.test/a//b"
+    assert f"brief --hook {agent} --agent {agent}" in change.after
+    if agent == "cursor":
+        assert data["hooks"]["stop"] == [{"command": "x"}]
+    else:
+        assert data["hooks"]["PreToolUse"] == [{"matcher": "Bash", "hooks": [{"type": "command", "command": "echo pre"}]}]
+    assert "[hidden]" not in change.diff() and "+" in change.diff()  # the diff reads the commented file too
+
+    # Written, then planned again: nothing to do. Removed: the other settings are back, no comment line then.
+    path.write_text(change.after)
+    assert not adapter.plan(tmp_path, "/bin/relay").changed
+    removal = adapter.plan_removal(tmp_path)
+    assert removal.changed and not any("comments" in line for line in removal.summary)
+
+
+def test_a_commented_config_already_connected_is_left_byte_for_byte(tmp_path):
+    adapter = REGISTRY["gemini"]
+    first = adapter.plan(tmp_path, "/bin/relay")
+    path = first.path
+    path.parent.mkdir(parents=True)
+    commented = "// mine\n" + first.after.replace('"hooks": {', '"hooks": { // relay below', 1)
+    path.write_text(commented)
+    again = adapter.plan(tmp_path, "/bin/relay")
+    assert not again.changed and again.after == commented
+
+
+def test_connect_writes_a_commented_config_and_the_backup_keeps_the_comments(tmp_path):
+    home = tmp_path / "home"
+    settings = home / ".qwen" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(JSONC, encoding="utf-8")
+    out = relay(home, "http://x", "connect", "--agent", "qwen", "--apply", "--include-unverified", "--relay-command", "/r")
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "- comments in settings.json are not kept; the backup keeps them" in out.stdout
+    [backup] = settings.parent.glob("settings.json.bak-relay-*")
+    assert backup.read_text(encoding="utf-8") == JSONC
+    assert (
+        json.loads(settings.read_text())["hooks"]["SessionEnd"][0]["hooks"][0]["command"] == "/r close --hook qwen --agent qwen"
+    )
+    gone = relay(home, "http://x", "disconnect", "--agent", "qwen", "--apply")
+    assert gone.returncode == 0 and "theme" in settings.read_text()
+
+
+def test_remembra_install_reads_a_commented_mcp_config(tmp_path):
+    from remembra.tools.agents import plan_json_config, plan_json_removal
+
+    path = tmp_path / "mcp.json"
+    path.write_text('\ufeff{\n  // servers\n  "mcpServers": {"other": {"command": "x"},},\n}\n')
+    change = plan_json_config(path, {"command": "remembra-mcp", "env": {"REMEMBRA_AGENT_ID": "cursor"}})
+    assert change.summary == ["add the remembra MCP server", "comments in mcp.json are not kept; the backup keeps them"]
+    assert set(json.loads(change.after)["mcpServers"]) == {"other", "remembra"}
+    path.write_text(change.after)
+    assert plan_json_removal(path).summary == ["remove the remembra MCP server"]
+    path.write_text('{"mcpServers": {')
+    with pytest.raises(ValueError, match=r"is not valid JSON \(Expecting property name enclosed in double quotes at line 1\)"):
+        plan_json_config(path, {"command": "remembra-mcp"})
+
+
+# ---------------------------------------------------------------------------
+# C4: config homes moved by an environment variable
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("agent", "variable", "inside"),
+    [
+        ("qwen", "QWEN_HOME", "settings.json"),
+        ("codex", "CODEX_HOME", "hooks.json"),
+        ("claude-code", "CLAUDE_CONFIG_DIR", "settings.json"),
+    ],
+)
+def test_a_config_home_variable_moves_the_file_for_the_real_home_only(agent, variable, inside, tmp_path, monkeypatch):
+    home, moved = tmp_path / "home", tmp_path / "elsewhere" / "agent-home"
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
+    spec = REGISTRY[agent].spec
+    assert spec.home_env == variable
+    default = spec.config_path(home)
+    assert spec.config_file(home) == default  # not set: the usual place
+    monkeypatch.setenv(variable, str(moved))
+    assert spec.config_file(home) == moved / inside and spec.config_home(home) == moved
+    other = tmp_path / "test-home"
+    assert spec.config_file(other) == spec.config_path(other)  # any other home: never the user's variable
+    assert REGISTRY[agent].plan(home, "/bin/relay").path == moved / inside
+    assert not REGISTRY[agent].detect(home, which=lambda b: None)
+    moved.mkdir(parents=True)
+    assert REGISTRY[agent].detect(home, which=lambda b: None)  # the moved home counts as installed
+    monkeypatch.setenv(variable, "   ")
+    assert spec.config_file(home) == default  # blank is unset
+
+
+def test_connect_and_disconnect_follow_qwen_home(tmp_path):
+    home, qwen_home = tmp_path / "home", tmp_path / "qwen-home"
+    home.mkdir()
+    qwen_home.mkdir()
+    env = {"QWEN_HOME": str(qwen_home)}
+    out = relay(
+        home, "http://x", "connect", "--agent", "qwen", "--apply", "--include-unverified", "--relay-command", "/r", env=env
+    )
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert f"-> {qwen_home / 'settings.json'}" in out.stdout
+    assert "/r close --hook qwen" in (qwen_home / "settings.json").read_text()
+    assert not (home / ".qwen").exists()
+    gone = relay(home, "http://x", "disconnect", "--agent", "qwen", "--apply", env=env)
+    assert gone.returncode == 0 and not (qwen_home / "settings.json").exists()
+    assert qwen_home.is_dir()  # the user's own directory: never removed
+
+
+# ---------------------------------------------------------------------------
+# C7: output modes
+# ---------------------------------------------------------------------------
+
+
+def test_hook_json_is_labelled_with_the_event_that_asked(server, home, tmp_path):  # noqa: F811
+    repo = _repo(tmp_path)
+    before_agent = {"session_id": "g-ba", "cwd": str(repo), "hook_event_name": "BeforeAgent", "prompt": "hi"}
+    out = relay(home, server, "brief", "--hook", "gemini", "--agent", "gemini", stdin=json.dumps(before_agent))
+    assert json.loads(out.stdout)["hookSpecificOutput"]["hookEventName"] == "BeforeAgent"
+    start = {**_load("gemini", "session_start.json"), "cwd": str(repo)}
+    out = relay(home, server, "brief", "--hook", "gemini", "--agent", "gemini", stdin=json.dumps(start))
+    assert json.loads(out.stdout)["hookSpecificOutput"]["hookEventName"] == "SessionStart"
+
+
+def test_additional_context_json_output(server, home, tmp_path):  # noqa: F811
+    repo = _repo(tmp_path)
+    out = relay(home, server, "brief", "--agent", "copilot", "--cwd", str(repo), "--format", "additional-context-json")
+    assert out.returncode == 0, out.stderr
+    body = json.loads(out.stdout)
+    assert list(body) == ["additionalContext"] and "you are copilot" in body["additionalContext"]
+    no_key = relay(
+        home,
+        server,
+        "brief",
+        "--agent",
+        "copilot",
+        "--cwd",
+        str(repo),
+        "--format",
+        "additional-context-json",
+        env={"REMEMBRA_API_KEY": ""},
+    )
+    assert json.loads(no_key.stdout)["additionalContext"].startswith("Remembra brief unavailable: no API key")
+
+
+def test_cursor_close_prints_an_empty_json_object(server, home, tmp_path):  # noqa: F811
+    """Cursor logs a hook whose stdout is empty as failed (errorClass empty_stdout, seen in its hook runner)."""
+    repo = _repo(tmp_path)
+    end = {**_load("cursor", "session_end.json"), "workspace_roots": [str(repo)]}
+    out = relay(home, server, "close", "--hook", "cursor", "--agent", "cursor", stdin=json.dumps(end))
+    assert out.returncode == 0 and out.stdout == "{}\n" and out.stderr == "", out.stderr
+    assert _wait_for_handoff(home, server, repo, "cursor")
+    dry = relay(home, server, "close", "--hook", "cursor", "--agent", "cursor", "--dry-run", stdin=json.dumps(end))
+    assert json.loads(dry.stdout)["agent_id"] == "cursor"  # a dry run prints the payload only
+    codex = relay(home, server, "close", "--hook", "codex", "--agent", "codex", "--dry-run", stdin=json.dumps(end))
+    assert not codex.stdout.startswith("{}")

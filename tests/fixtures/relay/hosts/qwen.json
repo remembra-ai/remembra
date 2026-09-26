@@ -1,0 +1,34 @@
+{
+  "host": "qwen",
+  "how": "recorded: Qwen Code 0.24.6 against a local OpenAI-compatible stand-in; stdin and environment dumped by the hook. Paths replaced.",
+  "hook_cwd": "/home/dev/work/widget",
+  "env": {
+    "QWEN_CODE_SESSION_ID": "d5c75303-7f2a-4b34-a1d3-caabc7e47df9",
+    "QWEN_PROJECT_DIR": "/home/dev/work/widget",
+    "GEMINI_PROJECT_DIR": "/home/dev/work/widget",
+    "CLAUDE_PROJECT_DIR": "/home/dev/work/widget",
+    "QWEN_CODE_PROJECT_DIR": "/home/dev/.qwen/projects/-home-dev-work-widget",
+    "QWEN_CODE_STARTUP_VERSION": "0.24.6"
+  },
+  "payloads": {
+    "start": {
+      "session_id": "d5c75303-7f2a-4b34-a1d3-caabc7e47df9",
+      "transcript_path": "/home/dev/.qwen/projects/-home-dev-work-widget/chats/d5c75303-7f2a-4b34-a1d3-caabc7e47df9.jsonl",
+      "cwd": "/home/dev/work/widget",
+      "hook_event_name": "SessionStart",
+      "timestamp": "2026-09-26T14:48:28.570Z",
+      "permission_mode": "auto",
+      "source": "startup",
+      "model": "mock-model"
+    },
+    "end": {
+      "session_id": "d5c75303-7f2a-4b34-a1d3-caabc7e47df9",
+      "transcript_path": "/home/dev/.qwen/projects/-home-dev-work-widget/chats/d5c75303-7f2a-4b34-a1d3-caabc7e47df9.jsonl",
+      "cwd": "/home/dev/work/widget",
+      "hook_event_name": "SessionEnd",
+      "timestamp": "2026-09-26T14:48:57.907Z",
+      "permission_mode": "auto",
+      "reason": "prompt_input_exit"
+    }
+  }
+}

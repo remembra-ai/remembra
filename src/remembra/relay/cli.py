@@ -2,11 +2,12 @@
 
 Subcommands::
 
-    remembra-relay brief   [--agent X] [--cwd DIR] [--hook NAME] [--format text|json|hook-json|cursor-json] [--once]
+    remembra-relay brief   [--agent X] [--cwd DIR] [--hook NAME] [--format text|json|hook-json|cursor-json|
+                           additional-context-json] [--once]
     remembra-relay close   [--agent X] [--session-id S] [--cwd DIR] [--transcript PATH] [--reason R] [--hook NAME]
     remembra-relay trail   [--cwd DIR] [--project P] [--limit N]
     remembra-relay resolve [--cwd DIR] [--project P] [--bind]
-    remembra-relay connect [--apply] [--agent NAME ...] [--include-unverified] [--agents-md PATH]
+    remembra-relay connect [--apply] [--agent NAME ...] [--include-unverified] [--force] [--agents-md PATH]
     remembra-relay disconnect [--apply] [--agent NAME ...] [--agents-md PATH]
     remembra-relay status  [--format text|json] [--no-check]
 
@@ -18,6 +19,13 @@ on stderr. With ``--hook NAME`` the agent's hook payload is read from stdin
 per-prompt hook that covers a missed start hook). For adapters whose agent
 does not wait for the end hook, ``close --hook`` re-runs itself in a detached
 process and returns at once.
+
+A hook another agent runs (Grok Build, Cursor, Devin and Continue load Claude
+Code's hooks; see :mod:`remembra.relay.hosts`) is routed: ``brief`` does
+nothing, and ``close`` files the session under the agent that ran it (or does
+nothing when the relay has no adapter for it). ``close --hook`` drops a repeat
+of the same session's end within ``dedupe_close_seconds`` (Gemini CLI fires
+SessionEnd two or three times on exit).
 
 A close that cannot be delivered is queued in ``~/.remembra/relay/outbox``
 and sent again by the next ``brief`` or ``close`` (see
@@ -43,6 +51,7 @@ Configuration is discovered from the environment or existing agent config
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -59,8 +68,9 @@ import httpx
 
 from remembra.client.project import normalize_project_id, parse_project_aliases
 from remembra.relay import facts as factlib
-from remembra.relay import outbox
-from remembra.relay.adapters import REGISTRY, Adapter, agents_md, backup_and_write, get_adapter, relay_command
+from remembra.relay import hosts, outbox
+from remembra.relay.adapters import REGISTRY, Adapter, Change, agents_md, backup_and_write, get_adapter, relay_command
+from remembra.relay.adapters.base import OUTPUT_MODES
 from remembra.relay.config import RelayConfig, load_config, load_config_from_source
 
 TOTAL_BUDGET_SECONDS = 9.5
@@ -185,6 +195,70 @@ def mark_brief_delivered(home: Path, key: str, session_id: str) -> None:
         os.chmod(path, 0o600)
     except OSError as e:
         _err(f"could not record the brief ({e.__class__.__name__})")
+
+
+def _close_claim_path(home: Path, agent: str, session_id: str, event: str, reason: str, transcript: str) -> Path:
+    key = f"close\x1f{agent}\x1f{session_id}\x1f{event}\x1f{reason}\x1f{transcript}"
+    return _state_dir(home) / f"close-{hashlib.sha256(key.encode()).hexdigest()[:24]}.json"
+
+
+def claim_close(
+    home: Path,
+    agent: str,
+    session_id: str,
+    event: str,
+    reason: str,
+    window: float,
+    transcript_size: int | None = None,
+) -> bool:
+    """True when this close should run; False when the same close ran within ``window`` seconds.
+
+    "The same close" is the same agent, session, hook event and end reason, so
+    Claude Code's StopFailure followed by its SessionEnd still closes twice (the
+    later one supersedes), while Gemini CLI's two or three SessionEnds on exit,
+    or one session's end run by several agents' copies of a hook, close once.
+    With ``transcript_size`` (the session transcript's size) a session resumed
+    and ended again after new turns is a new close, even within the window.
+    The claim is a marker file created with ``O_EXCL``; a stale one (older than
+    ``window``) is renamed away first, so of two closes racing for it exactly
+    one wins. Never raises, and fails open: a close that cannot record its
+    claim runs (a duplicate handoff is superseded; a lost one is not).
+    """
+    size = "" if transcript_size is None else str(transcript_size)
+    path = _close_claim_path(home, agent, session_id, event, reason, size)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return True
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            pass
+        except OSError:
+            return True
+        else:
+            with os.fdopen(fd, "w") as fh:
+                fh.write(json.dumps({"at": datetime.now(UTC).isoformat()}))
+            return True
+        try:
+            age = time.time() - path.stat().st_mtime
+        except FileNotFoundError:
+            continue  # released in between: try to create it again
+        except OSError:
+            return True
+        if age < window:
+            return False
+        stale = path.with_name(f"{path.name}.stale-{os.getpid()}-{os.urandom(3).hex()}")
+        try:
+            os.rename(path, stale)
+        except FileNotFoundError:
+            return False  # another close is taking over the stale claim right now
+        except OSError:
+            return True
+        with contextlib.suppress(OSError):
+            stale.unlink()
+    return False
 
 
 def _adhoc_marker_path(home: Path, agent: str, host: str, anchor: str) -> Path:
@@ -546,7 +620,10 @@ def queue_notices(ctx: Context, replay: Replay, brief_status: int | None = None)
 # ---------------------------------------------------------------------------
 
 
-def _emit_brief(mode: str, text: str, raw: dict[str, Any] | None, notices: list[str] | None = None) -> None:
+def _emit_brief(
+    mode: str, text: str, raw: dict[str, Any] | None, notices: list[str] | None = None, event: str = "SessionStart"
+) -> None:
+    """Print the brief in ``mode``; ``event`` labels the hook-json output (the hook event that asked for it)."""
     if mode == "json":
         body: dict[str, Any] = dict(raw) if raw is not None else {"error": text}
         if notices:
@@ -556,9 +633,11 @@ def _emit_brief(mode: str, text: str, raw: dict[str, Any] | None, notices: list[
     if notices:  # the relay's own lines, above the brief (outside its untrusted-data block)
         text = "\n".join(notices) + ("\n" + text if text else "")
     if mode == "hook-json":
-        print(json.dumps({"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": text}}))
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": event, "additionalContext": text}}))
     elif mode == "cursor-json":
         print(json.dumps({"additional_context": text}))
+    elif mode == "additional-context-json":
+        print(json.dumps({"additionalContext": text}))
     else:
         print(text)
 
@@ -567,15 +646,70 @@ def _once_key(args: argparse.Namespace, adapter: Adapter | None) -> str:
     return (adapter.spec.name if adapter else None) or getattr(args, "agent", None) or "unknown-agent"
 
 
+def _home() -> Path:
+    return Path(os.environ.get("HOME") or Path.home())
+
+
+def route_hook(
+    args: argparse.Namespace, adapter: Adapter, payload: dict[str, Any], *, closing: bool
+) -> tuple[Adapter | None, Adapter]:
+    """``(adapter that reads this hook's payload, or None to do nothing; adapter of the agent running it)``.
+
+    When another agent runs this hook (:func:`remembra.relay.hosts.detect_host`),
+    ``brief`` does nothing: a brief here would record a false pickup, and that
+    agent gets its brief from its own hooks or the MCP tools. ``close`` files
+    the session under that agent when the relay has an adapter for it: ``--hook``
+    and ``--agent`` (unless ``--agent`` names a custom id) become its name, so
+    its payload mapping reads the session id and cwd and its transcript is never
+    read in the first agent's format. Without an adapter the close does nothing.
+    A payload key in the adapter's ``skip_payload_keys`` (a subagent's end) also
+    does nothing. The detached child of a close gets the same payload and
+    environment, so it routes the same way.
+    """
+    home = _home()
+    host = hosts.detect_host(adapter, payload, os.environ, home)
+    reader = adapter
+    if host is not None:
+        target = get_adapter(host)
+        reader = target or adapter
+        verb = "close" if closing else "brief"
+        if not closing or target is None:
+            outbox.log(home, f"{verb} --hook {adapter.spec.name}: run by {host}, nothing to do")
+            return None, reader
+        outbox.log(home, f"{verb} --hook {adapter.spec.name}: run by {host}, filed as {host}")
+        if getattr(args, "agent", None) in (None, adapter.spec.name):
+            args.agent = host
+        args.hook = host
+        adapter = target
+    skip = [key for key in adapter.spec.skip_payload_keys if key in payload]
+    if skip:
+        outbox.log(home, f"--hook {adapter.spec.name}: payload has {skip[0]} (not a session of its own), nothing to do")
+        return None, reader
+    return adapter, reader
+
+
+def _hook_ack(adapter: Adapter) -> None:
+    """What a hook prints when it has nothing to say: ``{}`` for Cursor, which logs empty stdout as a failed hook."""
+    if adapter.spec.output == "cursor-json":
+        print("{}", flush=True)
+
+
 def cmd_brief(args: argparse.Namespace) -> int:
     mode = args.format or "text"
     ctx: Context | None = None
+    event = "SessionStart"
     try:
         adapter = get_adapter(getattr(args, "hook", None))
         payload = read_hook_payload() if adapter else {}
+        if adapter:
+            routed, reader = route_hook(args, adapter, payload, closing=False)
+            if routed is None:
+                _hook_ack(reader)
+                return 0
         fields = adapter.spec.payload.extract(payload) if adapter else {}
+        event = fields.get("event") or event
         hook_session = fields.get("session_id") or args.session_id
-        home = Path(os.environ.get("HOME") or Path.home())
+        home = _home()
         # --once (a per-prompt hook) and a resumed session whose context already holds the
         # brief: deliver only if this session has not had one. Checked before any git or HTTP
         # work, because the prompt hook runs on every prompt.
@@ -596,6 +730,7 @@ def cmd_brief(args: argparse.Namespace) -> int:
                 "Remembra brief unavailable: no API key (set REMEMBRA_API_KEY or configure the remembra MCP server).",
                 None,
                 queue_notices(ctx, Replay()),
+                event=event,
             )
             return 0
         session_id = ctx.hook_fields.get("session_id") or args.session_id
@@ -641,11 +776,11 @@ def cmd_brief(args: argparse.Namespace) -> int:
                 error=_http_error(response),
                 http_status=response.status_code,
             )
-            _emit_brief(mode, message, None, queue_notices(ctx, replay, response.status_code))
+            _emit_brief(mode, message, None, queue_notices(ctx, replay, response.status_code), event=event)
             return 0
         outbox.record(ctx.home, agent_id=ctx.agent, command="brief", ok=True, config_source=ctx.config.source)
         brief = response.json()
-        _emit_brief(mode, str(brief.get("rendered") or ""), brief, queue_notices(ctx, replay))
+        _emit_brief(mode, str(brief.get("rendered") or ""), brief, queue_notices(ctx, replay), event=event)
     except Exception as e:  # never break the agent's session start
         _err(f"brief failed: {e.__class__.__name__}: {e}")
         try:
@@ -653,7 +788,8 @@ def cmd_brief(args: argparse.Namespace) -> int:
         except Exception:
             notices = []
         try:
-            _emit_brief(mode, f"Remembra brief unavailable: {e.__class__.__name__}. Call the session_brief tool.", None, notices)
+            unavailable = f"Remembra brief unavailable: {e.__class__.__name__}. Call the session_brief tool."
+            _emit_brief(mode, unavailable, None, notices, event=event)
         except Exception:
             pass
     return 0
@@ -819,16 +955,49 @@ def spawn_detached_close(args: argparse.Namespace, hook_payload: dict[str, Any])
     return True
 
 
+def _first_close(args: argparse.Namespace, adapter: Adapter, hook_payload: dict[str, Any]) -> bool:
+    """False when this hook's close is a repeat to drop (see :func:`claim_close`); True otherwise."""
+    window = adapter.spec.dedupe_close_seconds
+    fields = adapter.spec.payload.extract(hook_payload)
+    session_id = args.session_id or fields.get("session_id")
+    if window <= 0 or not session_id:
+        return True
+    agent = getattr(args, "agent", None) or adapter.spec.name
+    event = (fields.get("event") or "").lower()
+    reason = args.reason or fields.get("reason") or ""
+    size: int | None = None
+    transcript = args.transcript or fields.get("transcript")
+    if transcript:
+        with contextlib.suppress(OSError, ValueError):
+            size = Path(transcript).expanduser().stat().st_size
+    if claim_close(_home(), agent, session_id, event, reason, window, transcript_size=size):
+        return True
+    outbox.log(_home(), f"close: dropped a repeat {event or 'close'} of {agent} session {session_id[:40]} within {window}s")
+    return False
+
+
 def cmd_close(args: argparse.Namespace) -> int:
     ctx: Context | None = None
     payload: dict[str, Any] | None = None
     try:
         adapter = get_adapter(getattr(args, "hook", None))
         hook_payload: dict[str, Any] | None = None
-        if adapter and adapter.spec.detach_close and not args.foreground and not args.dry_run:
+        if adapter:
             hook_payload = read_hook_payload()
-            if spawn_detached_close(args, hook_payload):
+            routed, reader = route_hook(args, adapter, hook_payload, closing=True)
+            if not args.dry_run:
+                _hook_ack(reader)  # before any slow work; the detached child's stdout goes nowhere
+            if routed is None:
                 return 0
+            adapter = routed
+            if not args.foreground and not args.dry_run:  # the detached child was cleared by its parent
+                if not hook_payload and adapter.spec.drop_empty_payload_close:
+                    outbox.log(_home(), f"close --hook {adapter.spec.name}: empty payload (an orphaned end hook), skipped")
+                    return 0
+                if not _first_close(args, adapter, hook_payload):
+                    return 0
+                if adapter.spec.detach_close and spawn_detached_close(args, hook_payload):
+                    return 0
         ctx = Context(args, payload=hook_payload)
         payload = build_close_payload(ctx, args)
         if args.dry_run:
@@ -946,8 +1115,136 @@ def cmd_resolve(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 
 
+def _server_line(config: RelayConfig) -> str:
+    """Where the hooks send handoffs, as printed (never the key)."""
+    if config.source == "none" and not (os.environ.get("REMEMBRA_URL") or "").strip():
+        return "not configured (run remembra-install)"
+    return f"{config.url} ({f'key from {config.source}' if config.api_key else 'no API key yet'})"
+
+
+def _created_path(home: Path) -> Path:
+    return outbox.relay_dir(home) / "created.json"
+
+
+def missing_dirs(path: Path) -> list[Path]:
+    """The directories writing ``path`` creates, outermost first (none when its directory exists)."""
+    missing: list[Path] = []
+    parent = path.parent
+    while not parent.exists() and parent != parent.parent:
+        missing.append(parent)
+        parent = parent.parent
+    return missing[::-1]
+
+
+def created_dirs(home: Path) -> list[str]:
+    """The directories ``connect`` created (``~/.remembra/relay/created.json``)."""
+    try:
+        data = json.loads(_created_path(home).read_text())
+    except (OSError, ValueError):
+        return []
+    dirs = data.get("dirs") if isinstance(data, dict) else None
+    return [d for d in dirs if isinstance(d, str)] if isinstance(dirs, list) else []
+
+
+def _save_created_dirs(home: Path, dirs: list[str]) -> None:
+    path = _created_path(home)
+    if dirs:
+        outbox.atomic_write_private(path, json.dumps({"dirs": sorted(set(dirs))}, indent=2) + "\n")
+    else:
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
+
+
+def record_created_dirs(home: Path, dirs: list[Path]) -> None:
+    """Remember directories a write created, so ``disconnect`` can take them away again."""
+    if not dirs:
+        return
+    try:
+        _save_created_dirs(home, [*created_dirs(home), *(str(d) for d in dirs)])
+    except OSError as e:
+        _err(f"could not record the directories connect created ({e.__class__.__name__}); disconnect will leave them")
+
+
+def _relay_backup(entry: Path) -> bool:
+    return ".bak-relay-" in entry.name and entry.is_file() and not entry.is_symlink()
+
+
+def remove_created_dirs(home: Path, apply: bool) -> list[Path]:
+    """Directories ``connect`` created that hold nothing but the relay's own backups now.
+
+    With ``apply`` they are deleted (backups first), innermost first, so a parent
+    that held only such a directory goes too; without it they are only listed.
+    A directory holding anything else (an agent installed since, another tool's
+    file) is kept, and stays recorded. Returns the directories removed (or that
+    would be).
+    """
+    recorded = created_dirs(home)
+    keep: list[str] = []
+    removed: list[Path] = []
+    for name in sorted(recorded, key=lambda d: len(Path(d).parts), reverse=True):
+        directory = Path(name)
+        if not directory.exists() and not directory.is_symlink():
+            continue  # already gone: forget it
+        try:
+            entries = [] if directory.is_symlink() else [e for e in directory.iterdir() if e not in removed]
+        except OSError:
+            entries = None
+        if entries is None or directory.is_symlink() or not all(_relay_backup(e) for e in entries):
+            keep.append(name)
+            continue
+        if apply:
+            try:
+                for entry in entries:
+                    entry.unlink()
+                directory.rmdir()
+            except OSError as e:
+                _err(f"could not remove {directory} ({e.__class__.__name__})")
+                keep.append(name)
+                continue
+        removed.append(directory)
+    if apply and sorted(keep) != sorted(recorded):
+        try:
+            _save_created_dirs(home, keep)
+        except OSError as e:
+            _err(f"could not update {_created_path(home)} ({e.__class__.__name__})")
+    return removed
+
+
+def _print_copied_hooks(home: Path) -> None:
+    """Point out relay hooks an import copied into another agent's config (they are routed; they can go)."""
+    try:
+        copied = hosts.copied_relay_hooks(home, REGISTRY)
+    except Exception as e:  # a report only: never fail connect over it
+        _err(f"could not check other agents' configs for copied relay hooks ({e.__class__.__name__})")
+        return
+    for item in copied:
+        names = ", ".join(f"{n} {name}" for name, n in sorted(item.hooks.items()))
+        how = f", copied by {hosts.COPIED_BY[item.host]}" if item.host in hosts.COPIED_BY else ""
+        routed = f"files the session under {item.host}" if get_adapter(item.host) else "does nothing"
+        print(
+            f"\n[copied hooks] {item.path} holds {item.total} relay hook(s) written for another agent ({names}{how}).\n"
+            f"  {item.host} runs them there: the relay sees that it is {item.host} and {routed}, never"
+            " under the agent they were written for. They can be deleted from that file."
+        )
+
+
+def _is_connected(adapter: Adapter, home: Path) -> bool:
+    try:
+        return adapter.connected(home)
+    except Exception:  # an unreadable config: plan() reports it
+        return False
+
+
 def cmd_connect(args: argparse.Namespace) -> int:
-    home = Path(os.environ.get("HOME") or Path.home())
+    """Write the relay hooks for detected agents (dry run unless --apply; backups kept).
+
+    Exit 0 when every write it was asked for succeeded (a missing key is only
+    warned about: the hooks read it at run time), 1 when a config could not be
+    read or written, or an agent named with ``--agent`` was not written because
+    it is not installed here (``--force`` writes it anyway), 2 for an unknown
+    agent name.
+    """
+    home = _home()
     relay = args.relay_command or relay_command()
     wanted = [a.lower() for a in (args.agent or [])]
     unknown = [a for a in wanted if a not in REGISTRY]
@@ -956,19 +1253,20 @@ def cmd_connect(args: argparse.Namespace) -> int:
         return 2
 
     config = load_config()
-    print(f"Remembra config: {json.dumps(config.redacted())} (keys are read from there at run time; none are written)")
+    print(f"Remembra server: {_server_line(config)}")
+    print("  The hooks read the key there at run time; connect writes no key.")
     print(f"Relay command: {relay}")
-    missing_key = not config.api_key
-    if missing_key:
-        _warn_missing_key()
     exit_code = 0
     skipped_unverified: list[str] = []
+    not_installed: list[str] = []
     stamp = _stamp()
     for name, adapter in REGISTRY.items():
         if wanted and name not in wanted:
             continue
         spec = adapter.spec
-        detected = adapter.detect(home)
+        # Relay hooks already in the file count as installed: they are kept current (a new relay path).
+        connected = _is_connected(adapter, home)
+        detected = adapter.detect(home) or connected
         label = "verified" if spec.verified else "UNVERIFIED"
         if not detected and name not in wanted:
             print(f"\n[{name}] {spec.display}: not detected, skipped")
@@ -976,7 +1274,7 @@ def cmd_connect(args: argparse.Namespace) -> int:
         try:
             change = adapter.plan(home, relay)
         except Exception as e:
-            print(f"\n[{name}] {spec.display} ({label}): cannot read {spec.config_path(home)}: {e}")
+            print(f"\n[{name}] {spec.display} ({label}): cannot read {spec.config_file(home)}: {e}")
             exit_code = 1
             continue
         print(f"\n[{name}] {spec.display} ({label}) -> {change.path}")
@@ -992,15 +1290,33 @@ def cmd_connect(args: argparse.Namespace) -> int:
         diff = change.diff()
         if diff:
             print("  " + diff.replace("\n", "\n  ").rstrip())
+        # Named with --agent but not installed: writing would create its directory, which then
+        # looks like an installed agent to every detector. Only with --force.
+        new_dirs = missing_dirs(change.path)
+        absent = not detected and bool(new_dirs)
         if not args.apply:
+            if absent and not args.force:
+                print(f"  not detected on this machine: --apply writes it only with --force (it would create {new_dirs[0]})")
             print("  (dry run: re-run with --apply to write, a backup is kept)")
             continue
-        if not spec.verified and not args.include_unverified:
-            print("  skipped: unverified adapter (add --include-unverified to write it anyway)")
-            skipped_unverified.append(name)
+        if absent and not args.force:
+            print(
+                f"  not written: {spec.display} is not detected on this machine and {new_dirs[0]} does not exist."
+                " Install it first, or add --force to write it anyway"
+            )
+            not_installed.append(name)
+            exit_code = 1
             continue
-        backup = backup_and_write(change, stamp)
-        print(f"  written{f' (backup: {backup})' if backup else ''}")
+        if not spec.verified and not args.include_unverified:
+            if not connected:
+                print("  skipped: unverified adapter (add --include-unverified to write it anyway)")
+                skipped_unverified.append(name)
+                continue
+            print("  updating the relay hooks already in this file (written earlier with --include-unverified)")
+        if not _write(change, stamp):
+            exit_code = 1
+            continue
+        record_created_dirs(home, new_dirs)
 
     md_path = Path(args.agents_md).expanduser() if args.agents_md else None
     print("\n[agents-md] fallback for agents without hooks (plus MCP session_brief / close_session):")
@@ -1012,8 +1328,8 @@ def cmd_connect(args: argparse.Namespace) -> int:
         if not change.changed:
             print(f"  {md_path}: already present")
         elif args.apply:
-            backup = backup_and_write(change, stamp)
-            print(f"  {md_path}: written{f' (backup: {backup})' if backup else ''}")
+            if not _write(change, stamp, indent="  ", label=f"{md_path}: "):
+                exit_code = 1
         else:
             print("  " + change.diff().replace("\n", "\n  ").rstrip())
             print("  (dry run: re-run with --apply to write)")
@@ -1022,10 +1338,27 @@ def cmd_connect(args: argparse.Namespace) -> int:
         agents_flags = " ".join(f"--agent {name}" for name in skipped_unverified)
         print(f"\nNot written (unverified adapters): {', '.join(skipped_unverified)}. To write them anyway:")
         print(f"  remembra-relay connect --apply --include-unverified {agents_flags}")
-    if missing_key:
-        _warn_missing_key()  # again at the end, where it is seen
-        return 1
+    if not_installed:
+        print(
+            f"\nNot written (not detected on this machine): {', '.join(not_installed)}. If one is installed where this"
+            " shell does not look, add --force; disconnect removes the directories connect created."
+        )
+    _print_copied_hooks(home)
+    if not config.api_key:
+        _warn_missing_key()  # once, at the end, where it is seen
     return exit_code
+
+
+def _write(change: Change, stamp: str, *, indent: str = "  ", label: str = "") -> bool:
+    """Back up and write ``change``, printing the outcome; False when the write failed."""
+    try:
+        backup = backup_and_write(change, stamp)
+    except OSError as e:
+        print(f"{indent}{label}NOT written: {e.__class__.__name__}: {e}")
+        return False
+    verb = "removed" if change.delete else "written"
+    print(f"{indent}{label}{verb}{f' (backup: {backup})' if backup else ''}")
+    return True
 
 
 def _stamp() -> str:
@@ -1033,8 +1366,12 @@ def _stamp() -> str:
 
 
 def cmd_disconnect(args: argparse.Namespace) -> int:
-    """Remove the relay hooks this tool wrote (dry run unless --apply; backups kept)."""
-    home = Path(os.environ.get("HOME") or Path.home())
+    """Remove the relay hooks this tool wrote (dry run unless --apply; backups kept).
+
+    With ``--apply`` it also removes directories ``connect`` created that hold
+    nothing but the relay's own backups afterwards.
+    """
+    home = _home()
     wanted = [a.lower() for a in (args.agent or [])]
     unknown = [a for a in wanted if a not in REGISTRY]
     if unknown:
@@ -1050,7 +1387,7 @@ def cmd_disconnect(args: argparse.Namespace) -> int:
         try:
             change = adapter.plan_removal(home)
         except Exception as e:
-            print(f"\n[{name}] {spec.display}: cannot read {spec.config_path(home)}: {e}")
+            print(f"\n[{name}] {spec.display}: cannot read {spec.config_file(home)}: {e}")
             exit_code = 1
             continue
         if not change.changed:
@@ -1067,8 +1404,8 @@ def cmd_disconnect(args: argparse.Namespace) -> int:
         if diff:
             print("  " + diff.replace("\n", "\n  ").rstrip())
         if args.apply:
-            backup = backup_and_write(change, stamp)
-            print(f"  {'removed' if change.delete else 'written'}{f' (backup: {backup})' if backup else ''}")
+            if not _write(change, stamp):
+                exit_code = 1
         else:
             print("  (dry run: re-run with --apply to write, a backup is kept)")
     if args.agents_md:
@@ -1078,14 +1415,22 @@ def cmd_disconnect(args: argparse.Namespace) -> int:
             print(f"\n[agents-md] {md.path}")
             print("  " + md.diff().replace("\n", "\n  ").rstrip())
             if args.apply:
-                backup = backup_and_write(md, stamp)
-                print(f"  written{f' (backup: {backup})' if backup else ''}")
+                if not _write(md, stamp):
+                    exit_code = 1
             else:
                 print("  (dry run: re-run with --apply to write)")
         else:
             print(f"\n[agents-md] {md.path}: no Remembra Relay section")
     if not found:
         print("No relay hooks found: nothing to remove.")
+    leftover = remove_created_dirs(home, apply=args.apply)
+    if leftover:
+        where = ", ".join(str(d) for d in leftover)
+        if args.apply:
+            print(f"\nRemoved the directories connect had created (only the relay's backups were left in them): {where}")
+        else:
+            print(f"\nWith --apply, also removes the directories connect created once only the relay's backups are left: {where}")
+    _print_copied_hooks(home)
     print(
         "\nTo remove Remembra completely:\n"
         "  1. remembra-relay disconnect --apply     (the session hooks, above)\n"
@@ -1131,7 +1476,7 @@ def _check_key(config: RelayConfig) -> dict[str, Any]:
 
 def cmd_status(args: argparse.Namespace) -> int:
     """Queue depth, last result per agent and whether the key is accepted. Exit 1 when something needs attention."""
-    home = Path(os.environ.get("HOME") or Path.home())
+    home = _home()
     config = load_config(agent=args.agent)
     entries = outbox.pending(home)
     recorded = outbox.read_status(home)
@@ -1187,7 +1532,7 @@ def cmd_status(args: argparse.Namespace) -> int:
         )
         return 1 if attention else 0
     print("Remembra relay status")
-    print(f"  server: {config.url} (key from {config.source})")
+    print(f"  server: {_server_line(config)}")
     state = key["state"]
     key_line = {
         "accepted": "accepted by the server",
@@ -1258,7 +1603,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_brief = sub.add_parser("brief", help="Print the pickup brief for this project")
     common(p_brief)
-    p_brief.add_argument("--format", choices=["text", "json", "hook-json", "cursor-json"], help="Output format")
+    p_brief.add_argument("--format", choices=list(OUTPUT_MODES), help="Output format")
     p_brief.add_argument("--recent", type=int, default=8, help="Recent memories to include (default 8)")
     p_brief.add_argument(
         "--once", action="store_true", help="Print nothing if this session already had its brief (for per-prompt hooks)"
@@ -1295,6 +1640,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_connect.add_argument("--apply", action="store_true", help="Write the changes (backups are kept)")
     p_connect.add_argument("--agent", action="append", help=f"Only these agents ({hooks}); repeatable")
     p_connect.add_argument("--include-unverified", action="store_true", help="Also write unverified adapters")
+    p_connect.add_argument(
+        "--force", action="store_true", help="Write an agent named with --agent even when it is not detected on this machine"
+    )
     p_connect.add_argument("--agents-md", help="Also add the relay section to this AGENTS.md")
     p_connect.add_argument("--relay-command", help=argparse.SUPPRESS)
     p_connect.set_defaults(func=cmd_connect)
