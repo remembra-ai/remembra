@@ -504,6 +504,25 @@ def _forget_all_preview(client: Memory, project: str) -> dict[str, Any]:
     }
 
 
+def _forget_entity_preview(client: Memory, entity: str, project: str) -> dict[str, Any]:
+    # include_superseded: the delete takes older versions of a memory too.
+    sample = client.timeline(entity=entity, project_id=project, limit=5, order="desc", include_superseded=True)
+    phrase = f"DELETE MEMORIES ABOUT {entity} IN {project}"
+    return {
+        "status": "dry_run",
+        "entity": entity,
+        "project_id": project,
+        "would_delete": sample.get("total", 0),
+        "sample": [{"id": m["id"], "content": (m.get("content") or "")[:120]} for m in sample.get("memories", [])],
+        "confirm_phrase": phrase,
+        "message": (
+            f"Nothing deleted. Deletes the memories linked to the entity '{entity}' (exact name or alias) in "
+            f"{project}, and the entity once nothing mentions it. To delete, call again with dry_run=false "
+            f"and confirm='{phrase}'."
+        ),
+    }
+
+
 @mcp.tool(
     annotations=ToolAnnotations(
         title="Forget Memories",
@@ -525,19 +544,25 @@ def forget_memories(
 
     Provide exactly one of memory_id, entity, or all_memories=true.
 
-    Bulk delete (all_memories=true) is guarded (AGT-11): it is limited to ONE
-    project (project_id is required — never user-wide), and it is a dry run
-    by default that reports what would be deleted plus the exact confirmation
-    phrase. It only deletes when called with dry_run=false AND
-    confirm="DELETE ALL MEMORIES IN <project_id>".
+    Bulk deletes are guarded (AGT-11) and limited to ONE project (never
+    user-wide). Both are a dry run by default that reports what would be
+    deleted plus the exact confirmation phrase, and only delete when called
+    with dry_run=false AND the matching confirm phrase:
+
+    - entity: the memories linked to the entity with that exact name or alias
+      (any case) in project_id (default: the configured project), then the
+      entity once nothing mentions it. Phrase:
+      "DELETE MEMORIES ABOUT <entity> IN <project_id>".
+    - all_memories=true: every memory in project_id (required). Phrase:
+      "DELETE ALL MEMORIES IN <project_id>".
 
     Args:
         memory_id: Delete one memory by id (no confirmation needed).
-        entity: Delete memories about an entity (not supported by the server yet).
+        entity: Delete the memories about this entity in one project (guarded, see above).
         all_memories: Bulk-delete every memory in project_id (guarded, see above).
-        project_id: Required with all_memories.
-        confirm: Confirmation phrase for all_memories.
-        dry_run: For all_memories: preview only (default true).
+        project_id: Required with all_memories; the project for an entity delete.
+        confirm: Confirmation phrase for entity or all_memories.
+        dry_run: For entity and all_memories: preview only (default true).
 
     Returns:
         JSON with deletion counts, or the dry-run preview.
@@ -551,13 +576,17 @@ def forget_memories(
         if memory_id:
             result = client.forget(memory_id=memory_id)
         elif entity:
-            return json.dumps(
-                {
-                    "status": "not_supported",
-                    "error": "Entity-based deletion is not implemented server-side; nothing was deleted. "
-                    "Find the memories with recall_memories/timeline and delete them by memory_id.",
-                }
-            )
+            name = entity.strip()
+            if not name:
+                return json.dumps({"status": "error", "error": "entity must not be blank"})
+            project = client._project((project_id or "").strip() or None)
+            if dry_run or confirm != f"DELETE MEMORIES ABOUT {name} IN {project}":
+                preview = _forget_entity_preview(client, name, project)
+                if not dry_run:
+                    preview["error"] = "Confirmation phrase missing or wrong; nothing was deleted."
+                # The preview's sample quotes stored memories: framed as untrusted data like every read tool.
+                return _dump_data(preview)
+            result = client.forget(entity=name, project_id=project)
         else:
             project = (project_id or "").strip()
             if not project:

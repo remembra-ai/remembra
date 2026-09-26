@@ -149,6 +149,20 @@ project, `remembra-relay projects split` shows how it would separate them; nothi
 
 ### Fixed (accounts, privacy and the site)
 
+- **Deleting by entity could delete the whole account.** `DELETE /api/v1/memories?entity=John`, which the
+  Python SDK's `forget(entity="John")` and the TypeScript SDK's `forget({ entity: 'John' })` send, deleted
+  every memory, entity, relationship and decision log in the caller's account and reported a wrong count; with
+  `project_id` it deleted every memory in that project. Now only `all_memories=true` deletes the whole account,
+  and a delete by entity deletes what it names: the caller's memories linked to the entity with that exact name
+  or alias (any case), in every project or only in `project_id`, then the entity and its relationships once no
+  memory mentions it, with the true counts. A call that combines `memory_id`, `entity` and `all_memories=true`,
+  or has a blank `entity` or `project_id`, is refused with 422 and deletes nothing, and a project-scoped key's
+  delete by entity stays inside its projects. In both SDKs `forget()` now takes exactly one of a memory id, an
+  entity (with an optional project) or all memories, as the server does; `forget()` with no arguments and the
+  Python `user_id=` argument (the server never accepted either: the call failed with 422) fail before anything
+  is sent. A delete by entity reads the server version first and is not sent to a server older than 0.16.1.
+  The MCP `forget_memories` tool and the Clawdbot plugin can now delete by entity too, in one project and only
+  after a dry run and a confirmation phrase, like their project wipe.
 - **Sign in with Google or GitHub on older accounts.** An account whose email was never verified (accounts
   made before email verification existed) is now linked when Google, or GitHub with a verified primary email,
   confirms the address: the email becomes verified and the user is signed in. A one-time account check then

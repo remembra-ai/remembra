@@ -139,18 +139,22 @@ const result = await memory.ingestConversation(messages, {
 
 #### `forget(options)`
 
-Delete memories (GDPR-compliant).
+Delete memories (GDPR-compliant). Give exactly one of `memoryId`, `entity` or `allMemories: true`;
+anything else throws a `ValidationError` before a request is sent.
 
 ```typescript
 // Delete specific memory
 await memory.forget({ memoryId: 'mem_123' });
 
-// Delete all about an entity
-await memory.forget({ entity: 'John' });
+// Delete the memories linked to an entity (exact name or alias), in one project
+await memory.forget({ entity: 'John', projectId: 'work' });
 
-// Delete all user memories
-await memory.forget();
+// Delete every memory, entity and relationship in the account (explicit only)
+await memory.forget({ allMemories: true });
 ```
+
+`entity` deletes only memories that entity extraction linked to that entity, in every project unless
+`projectId` is given, then the entity itself once no memory mentions it.
 
 #### `get(memoryId)`
 

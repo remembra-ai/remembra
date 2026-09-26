@@ -462,23 +462,31 @@ def test_team_role_labels_promise_no_access_the_teams_api_does_not_enforce() -> 
 
 
 def test_sdk_guides_document_the_forget_signature_the_client_has() -> None:
-    """client/memory.py: forget(memory_id, user_id, entity) and forget_project(project_id). The server has no
-    delete by entity yet, so no guide shows one."""
+    """client/memory.py: forget(memory_id, *, entity, project_id, all_memories) and forget_project(project_id).
+    Delete by entity works since 0.16.1 (tests/test_forget_by_entity.py): the guides show it, and say that an
+    older server deleted the whole account for it."""
     import inspect
 
     from remembra.client.memory import Memory
 
-    assert list(inspect.signature(Memory.forget).parameters) == ["self", "memory_id", "user_id", "entity"]
+    params = inspect.signature(Memory.forget).parameters
+    assert list(params) == ["self", "memory_id", "entity", "project_id", "all_memories"]
+    assert all(params[name].kind is inspect.Parameter.KEYWORD_ONLY for name in ("entity", "project_id", "all_memories"))
     assert hasattr(Memory, "forget_project")
     py = (ROOT / "docs" / "guides" / "python-sdk.md").read_text()
     js = (ROOT / "docs" / "guides" / "javascript-sdk.md").read_text()
+    ts_readme = (ROOT / "sdk" / "typescript" / "README.md").read_text()
     assert "memory_ids" not in py and "all=True" not in py and 'memory.forget(memory_id="mem_abc123")' in py
-    assert 'memory.forget_project("my-project")' in py
-    assert "forget({ entity" not in js and "forget({ all" not in js
+    assert 'memory.forget_project("my-project")' in py and 'memory.forget(entity="John", project_id="work")' in py
+    assert "forget({ all:" not in js and "forget({ entity: 'John', projectId: 'work' })" in js
+    assert "forget({ allMemories: true })" in js and "forget();" not in ts_readme
     rest = (ROOT / "docs" / "guides" / "rest-api.md").read_text()
     assert "memory_ids" not in rest and "DELETE /api/v1/memories?memory_id=" in rest
+    assert "DELETE /api/v1/memories?entity=John&project_id=work" in rest
     for guide in (py, js, rest):
-        assert "`entity` does not limit what is deleted, so do not pass it" in " ".join(guide.split())
+        flat = " ".join(guide.split())
+        assert "does not limit what is deleted" not in flat and "not implemented" not in flat
+        assert "Servers before 0.16.1" in flat
 
 
 async def test_docs_state_the_mcp_tool_count_the_server_registers() -> None:

@@ -238,11 +238,55 @@ def test_plugin_forget_all_is_guarded(proxy, node_dir):
     assert no_project["status"] == "error"
     assert preview["status"] == "dry_run" and preview["would_delete"] == 2
     assert wrong["status"] == "dry_run" and "nothing was deleted" in wrong["error"]
-    assert entity["status"] == "not_supported"
+    # An entity delete is guarded the same way: a dry run in one project.
+    assert entity["status"] == "dry_run" and entity["confirm_phrase"] == "DELETE MEMORIES ABOUT Alice IN clawbot"
     assert done["status"] == "deleted"
     assert after["total"] == 0 and other["total"] == 1
     deletes = [r for r in proxy["seen"] if r["method"] == "DELETE"]
     assert len(deletes) == 1 and "project_id=clawbot" in deletes[0]["path"] and "user_id" not in deletes[0]["path"]
+
+
+def test_plugin_forget_entity_is_scoped_and_confirmed(proxy, node_dir):
+    seed(proxy["api"], "c1", "Alice ships clawbot", datetime(2026, 1, 1), project_id="clawbot")
+    seed(proxy["api"], "c2", "clawbot deploy notes", datetime(2026, 1, 2), project_id="clawbot")
+    seed(proxy["api"], "o1", "Alice in other", datetime(2026, 1, 3), project_id="other")
+
+    async def _link() -> None:
+        from remembra.models.memory import Entity
+
+        db = proxy["api"]["app"].state.db
+        for project, mid in (("clawbot", "c1"), ("other", "o1")):
+            alice = Entity(canonical_name="Alice", type="person")
+            await db.save_entity(alice, "default_user", project)
+            await db.link_memory_to_entity(mid, alice.id)
+
+    proxy["api"]["http"].portal.call(_link)
+    phrase = "DELETE MEMORIES ABOUT Alice IN clawbot"
+    confirmed = ["remembra_forget", {"entity": "Alice", "dry_run": False, "confirm": phrase}]
+
+    # A server before 0.16.1 deletes the whole account for this: the plugin does not send it.
+    proxy["api"]["app"].state.reported_version = "0.16.0"
+    old = _plugin(node_dir, _cfg(proxy), [confirmed])["results"][0]
+    assert old["status"] == "error" and "0.16.1" in old["error"]
+    assert not [r for r in proxy["seen"] if r["method"] == "DELETE"]
+    proxy["api"]["app"].state.reported_version = "0.16.1"
+
+    out = _plugin(
+        node_dir,
+        _cfg(proxy),
+        [
+            ["remembra_forget", {"entity": "Alice"}],
+            confirmed,
+            ["remembra_timeline", {}],
+            ["remembra_timeline", {"project_id": "other"}],
+        ],
+    )
+    preview, done, after, other = out["results"]
+    assert preview["status"] == "dry_run" and preview["would_delete"] == 1 and preview["confirm_phrase"] == phrase
+    assert done["status"] == "deleted" and done["deleted_memories"] == 1
+    assert after["total"] == 1 and other["total"] == 1
+    deletes = [r for r in proxy["seen"] if r["method"] == "DELETE"]
+    assert len(deletes) == 1 and "entity=Alice" in deletes[0]["path"] and "project_id=clawbot" in deletes[0]["path"]
 
 
 def test_plugin_timeline_list_and_spaces(proxy, node_dir):

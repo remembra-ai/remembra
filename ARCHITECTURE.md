@@ -289,8 +289,9 @@ print(result.context)  # "John is the CTO at Acme Corp."
 print(result.memories)  # [Memory(...)]
 
 # Forget
-memory.forget(user_id="user_123")  # Delete all
 memory.forget(memory_id="01HQXYZ...")  # Delete specific
+memory.forget(entity="John")  # Delete the memories linked to an entity
+memory.forget(all_memories=True)  # Delete everything in the account (explicit only)
 ```
 
 ---

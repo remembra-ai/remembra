@@ -2890,19 +2890,35 @@ class MemoryService:
         user_id: str | None = None,
         entity: str | None = None,
         project_id: str | None = None,
+        all_memories: bool = False,
     ) -> ForgetResponse:
         """
-        GDPR-compliant deletion of memories.
+        GDPR-compliant deletion of memories. The first target given decides:
 
-        Can delete by:
-        - Specific memory ID
-        - All memories for a user
-        - All memories for a user within a project (project-scoped delete)
-        - All memories mentioning an entity (TODO: Week 5)
+        - ``memory_id``: that one memory (only if ``user_id`` owns it, when given).
+        - ``entity``: the user's memories linked to an entity whose canonical
+          name or alias is exactly ``entity`` (ignoring case), only in
+          ``project_id`` when given; then each such entity no memory mentions
+          any more, with its relationships.
+        - ``project_id``: every memory the user has in that project.
+        - ``all_memories=True``: everything the user holds (memories, entities,
+          relationships, decision logs).
+
+        ``user_id`` only scopes a delete; it never selects one. The whole
+        account is deleted only with ``all_memories=True``. Every target but
+        ``memory_id`` needs ``user_id``, and a call with no target raises
+        ``ValueError``.
         """
         deleted_memories = 0
         deleted_entities = 0
         deleted_relationships = 0
+        entity_name = entity.strip() if entity else ""
+        if entity and not entity_name:
+            raise ValueError("entity must not be blank")
+        if not (memory_id or entity_name or project_id or all_memories):
+            raise ValueError("Nothing to delete: give memory_id, entity, project_id or all_memories=True")
+        if not memory_id and not user_id:
+            raise ValueError("Deleting by entity, project_id or all_memories requires user_id")
 
         if memory_id:
             # SECURITY: Verify ownership before deleting (prevent IDOR)
@@ -2923,7 +2939,27 @@ class MemoryService:
                 deleted_memories = 1
             log.info("forgot_memory", memory_id=memory_id, user_id=user_id)
 
-        elif user_id and project_id:
+        elif entity_name and user_id:
+            # The user's memories about one entity, never anything else.
+            memory_ids = await self.db.find_entity_memory_ids(user_id, entity_name, project_id)
+            for mid in memory_ids:
+                # User-filtered, like the single-memory delete (ING-2).
+                await self.qdrant.delete(mid, user_id=user_id)
+            (
+                deleted_memories,
+                deleted_entities,
+                deleted_relationships,
+            ) = await self.db.delete_entity_memories(user_id, entity_name, memory_ids, project_id)
+            log.info(
+                "forgot_entity",
+                user_id=user_id,
+                project_id=project_id,
+                memories=deleted_memories,
+                entities=deleted_entities,
+                relationships=deleted_relationships,
+            )
+
+        elif project_id and user_id:
             # Project-scoped deletion: delete all memories for user within a specific project
             deleted_memories = await self.qdrant.delete_by_project(user_id, project_id)
             await self.db.delete_project_memories(user_id, project_id)
@@ -2934,8 +2970,8 @@ class MemoryService:
                 memories=deleted_memories,
             )
 
-        elif user_id:
-            # Delete all user data
+        elif all_memories and user_id:
+            # Explicit account-wide wipe: all user data. Never reached by falling through.
             deleted_memories = await self.qdrant.delete_by_user(user_id)
             await self.db.delete_user_memories(user_id)
             deleted_relationships = await self.db.delete_user_relationships(user_id)
@@ -2948,9 +2984,8 @@ class MemoryService:
                 entities=deleted_entities,
             )
 
-        elif entity:
-            # TODO(Week 5): Entity-based deletion
-            log.warning("entity_deletion_not_implemented", entity=entity)
+        else:  # unreachable after the checks above; never fall through to a wider delete
+            raise ValueError("Nothing to delete: give memory_id, entity, project_id or all_memories=True")
 
         return ForgetResponse(
             deleted_memories=deleted_memories,

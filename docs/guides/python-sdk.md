@@ -198,18 +198,41 @@ Delete memories. They leave the database and the vector store at once; copies in
 ```python
 memory.forget(
     memory_id: str | None = None,
-    user_id: str | None = None,
+    *,
     entity: str | None = None,
+    project_id: str | None = None,
+    all_memories: bool = False,
 ) -> ForgetResult
 ```
 
-Pass `memory_id`. The server rejects a delete by `user_id` alone. Delete by entity is not implemented yet: `entity` does not limit what is deleted, so do not pass it. To delete every memory in one project, use `forget_project(project_id)`.
+Give exactly one of `memory_id`, `entity` or `all_memories=True`. Any other call raises `MemoryError` and sends
+nothing: no call deletes everything unless it says `all_memories=True`. The server deletes only the memories of
+the account your API key belongs to.
+
+- `memory_id` deletes that one memory.
+- `entity` deletes the memories that entity extraction linked to the entity with that exact name or alias
+  (any case; never a partial name), in every project, or only in `project_id` when you pass it. The entity and
+  its relationships go too once no memory mentions it. A memory that names the entity but was never linked to it
+  (entity extraction off or still pending) stays.
+- `all_memories=True` deletes every memory, entity and relationship in the account. A project-scoped API key
+  cannot use it.
+
+!!! warning "Servers before 0.16.1"
+    A server before 0.16.1 deleted every memory in the account for a delete by `entity`. `forget(entity=...)`
+    reads the server version from `/health` first and raises `MemoryError` without deleting anything when the
+    server is older than 0.16.1 or does not report a version.
+
+To delete every memory in one project, use `forget_project(project_id)`.
 
 **Example:**
 
 ```python
 # Forget one memory
 memory.forget(memory_id="mem_abc123")
+
+# Forget what was stored about John in one project
+result = memory.forget(entity="John", project_id="work")
+print(result.deleted_memories, result.deleted_entities)
 
 # Forget every memory in one project
 memory.forget_project("my-project")

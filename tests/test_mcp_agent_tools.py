@@ -21,7 +21,7 @@ import remembra.mcp.server as server
 from remembra import __version__
 from remembra.client.memory import Memory
 from remembra.client.types import EntityItem, MemoryItem, RecallResult
-from remembra.models.memory import EntityRef, UpdateResponse
+from remembra.models.memory import Entity, EntityRef, UpdateResponse
 from remembra.security.untrusted import DATA_OPEN, TOOL_PREAMBLE, unwrap_untrusted
 from tests.agent_api_harness import build_api, row, seed
 
@@ -252,10 +252,52 @@ def test_forget_all_is_project_scoped_dry_run_then_confirmed(mcp_env):
     assert _j(server.timeline(project_id="beta"))["total"] == 1
 
 
-def test_forget_requires_exactly_one_target_and_entity_is_honest(mcp_env):
+def test_forget_requires_exactly_one_target(mcp_env):
     assert _j(server.forget_memories())["status"] == "error"
     assert _j(server.forget_memories(memory_id="x", all_memories=True))["status"] == "error"
-    assert _j(server.forget_memories(entity="Alice"))["status"] == "not_supported"
+    assert _j(server.forget_memories(memory_id="x", entity="Alice"))["status"] == "error"
+    assert _j(server.forget_memories(entity="  "))["status"] == "error"
+
+
+def test_forget_entity_is_project_scoped_dry_run_then_confirmed(mcp_env):
+    seed(mcp_env, "a1", "Alice ships the alpha release", datetime(2026, 1, 1))
+    seed(mcp_env, "a2", "Alice reviews alpha PRs", datetime(2026, 1, 2))
+    seed(mcp_env, "n1", "The alpha deploy runs at 9", datetime(2026, 1, 3))
+    seed(mcp_env, "b1", "Alice reviews beta PRs", datetime(2026, 1, 4), project_id="beta")
+
+    async def _link() -> None:
+        db = mcp_env["app"].state.db
+        for project, memory_ids in (("alpha", ["a1", "a2"]), ("beta", ["b1"])):
+            alice = Entity(canonical_name="Alice", type="person")
+            await db.save_entity(alice, "default_user", project)
+            for mid in memory_ids:
+                await db.link_memory_to_entity(mid, alice.id)
+
+    mcp_env["http"].portal.call(_link)
+
+    # The configured project (alpha) unless project_id says otherwise; aliases resolve.
+    raw_preview = server.forget_memories(entity="Alice", project_id="alpha-old")
+    assert raw_preview.startswith(TOOL_PREAMBLE + "\n" + DATA_OPEN)
+    preview = _j(raw_preview)
+    assert preview["status"] == "dry_run" and preview["project_id"] == "alpha"
+    assert preview["would_delete"] == 2 and {m["id"] for m in preview["sample"]} == {"a1", "a2"}
+    assert preview["confirm_phrase"] == "DELETE MEMORIES ABOUT Alice IN alpha"
+
+    wrong = _j(server.forget_memories(entity="Alice", dry_run=False, confirm="DELETE ALL MEMORIES IN alpha"))
+    assert wrong["status"] == "dry_run" and "nothing was deleted" in wrong["error"]
+    assert _j(server.timeline())["total"] == 3
+
+    # A server before 0.16.1 deletes the whole account for this: the SDK does not send it.
+    mcp_env["app"].state.reported_version = "0.16.0"
+    old = _j(server.forget_memories(entity="Alice", dry_run=False, confirm="DELETE MEMORIES ABOUT Alice IN alpha"))
+    assert old["status"] == "error" and "0.16.1" in json.dumps(old)
+    assert _j(server.timeline())["total"] == 3
+    mcp_env["app"].state.reported_version = __version__
+
+    done = _j(server.forget_memories(entity="Alice", dry_run=False, confirm="DELETE MEMORIES ABOUT Alice IN alpha"))
+    assert done["status"] == "deleted" and done["deleted_memories"] == 2 and done["deleted_entities"] == 1
+    assert [m["id"] for m in _j(server.timeline())["memories"]] == ["n1"]
+    assert _j(server.timeline(project_id="beta"))["total"] == 1
 
 
 def test_forget_single_memory_by_id(mcp_env):

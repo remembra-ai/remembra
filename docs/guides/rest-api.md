@@ -149,16 +149,40 @@ PUT /api/v1/memories/{memory_id}
 
 ### Delete Memory
 
-Delete one memory, or every memory in one project. The parameters go in the query string.
+Delete one memory, the memories about one entity, every memory in one project, or the whole account. The
+parameters go in the query string, and only the caller's own memories are ever deleted.
 
 ```http
 DELETE /api/v1/memories?memory_id=mem_abc123
+DELETE /api/v1/memories?entity=John
+DELETE /api/v1/memories?entity=John&project_id=work
 DELETE /api/v1/memories?project_id=my-project
+DELETE /api/v1/memories?all_memories=true
 ```
 
-`all_memories=true` deletes every memory the account holds; a project-scoped key cannot use it. Delete by
-entity is not implemented yet: `entity` does not limit what is deleted, so do not pass it. A call with none of
-these parameters is rejected.
+| Parameters | Deletes |
+|------------|---------|
+| `memory_id` | That one memory |
+| `entity` | The memories that entity extraction linked to the entity with that exact canonical name or alias (any case; never a partial name or a pattern), in every project. Then each such entity no memory mentions any more, with its relationships |
+| `entity` and `project_id` | The same, only in that project |
+| `project_id` alone | Every memory in that project |
+| `all_memories=true` | Every memory, entity, relationship and decision log in the account |
+
+Give at most one of `memory_id`, `entity` and `all_memories=true`. A call with none of these and no
+`project_id`, with more than one, or with a blank `entity` or `project_id` is rejected with `422` and deletes
+nothing. Only `all_memories=true` deletes the whole account. A project-scoped key cannot use it, and its
+`entity` deletes stay inside its projects: a key for several projects must pass `project_id`.
+
+The response gives the counts deleted:
+
+```json
+{"deleted_memories": 2, "deleted_entities": 1, "deleted_relationships": 3}
+```
+
+!!! warning "Servers before 0.16.1"
+    Before 0.16.1, `DELETE /api/v1/memories?entity=...` deleted every memory, entity, relationship and
+    decision log in the account, and with `project_id` it deleted every memory in that project. Check that
+    `GET /health` reports 0.16.1 or later before you delete by entity.
 
 ---
 

@@ -125,23 +125,35 @@ Delete memories from persistent storage. Prefer deleting one memory by id.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `memory_id` | string | ❌ | Delete one memory by ID |
-| `entity` | string | ❌ | Not implemented server-side: returns `status: "not_supported"` and deletes nothing |
+| `entity` | string | ❌ | Delete the memories linked to the entity with this exact name or alias (any case) in ONE project, then the entity once nothing mentions it (guarded, see below) |
 | `all_memories` | bool | ❌ | Delete every memory in ONE project (guarded, see below) |
-| `project_id` | string | with `all_memories` | The project to wipe. There is no user-wide wipe via MCP |
-| `dry_run` | bool | ❌ | `all_memories` preview only. Default `true` |
-| `confirm` | string | with `all_memories` | Must equal `DELETE ALL MEMORIES IN <project_id>` |
+| `project_id` | string | with `all_memories` | The project to wipe, or the project of an `entity` delete (default: the configured project). There is no user-wide delete via MCP |
+| `dry_run` | bool | ❌ | `entity` and `all_memories`: preview only. Default `true` |
+| `confirm` | string | with `entity` or `all_memories` | Must equal `DELETE MEMORIES ABOUT <entity> IN <project_id>` or `DELETE ALL MEMORIES IN <project_id>` |
 
 !!! warning
     Exactly one of `memory_id`, `entity`, `all_memories` must be provided.
-    `all_memories` first returns a dry-run preview (`would_delete`, a sample,
-    and the exact `confirm_phrase`). It deletes only when called again with
-    `dry_run: false` and the matching `confirm` phrase.
+    `entity` and `all_memories` first return a dry-run preview (`would_delete`,
+    a sample, and the exact `confirm_phrase`). They delete only when called
+    again with `dry_run: false` and the matching `confirm` phrase. An `entity`
+    delete is refused, deleting nothing, when the API server is older than
+    0.16.1: those servers deleted the whole account for it.
 
 **Examples:**
 ```
 # Delete specific memory
 [Tool: forget_memories]
 memory_id: "mem_abc123"
+
+# Preview deleting what is stored about John in the configured project (deletes nothing)
+[Tool: forget_memories]
+entity: "John"
+
+# Confirmed delete by entity
+[Tool: forget_memories]
+entity: "John"
+dry_run: false
+confirm: "DELETE MEMORIES ABOUT John IN my-project"
 
 # Preview a project wipe (deletes nothing)
 [Tool: forget_memories]

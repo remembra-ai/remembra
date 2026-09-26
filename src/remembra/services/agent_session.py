@@ -33,6 +33,7 @@ import structlog
 from remembra.core.time import utcnow
 from remembra.models.memory import StoreRequest
 from remembra.relay.handoff import assess_text, handoff_has_substance
+from remembra.storage.database import ENTITY_NAME_MATCH
 
 log = structlog.get_logger(__name__)
 
@@ -240,18 +241,12 @@ class AgentSessionService:
             where += f" AND (memory_type IS NULL OR memory_type NOT IN ({','.join('?' for _ in exclude_types)}))"
             params.extend(exclude_types)
         if entity:
-            where += """
+            # Same match as a delete by entity (storage/database.py).
+            where += f"""
               AND id IN (
                 SELECT me.memory_id FROM memory_entities me
                 JOIN entities e ON e.id = me.entity_id
-                WHERE e.user_id = ?
-                  AND (
-                    lower(e.canonical_name) = lower(?)
-                    OR (
-                      e.aliases IS NOT NULL AND json_valid(e.aliases)
-                      AND EXISTS (SELECT 1 FROM json_each(e.aliases) WHERE lower(json_each.value) = lower(?))
-                    )
-                  )
+                WHERE {ENTITY_NAME_MATCH}
               )
             """
             params.extend([user_id, entity.strip(), entity.strip()])

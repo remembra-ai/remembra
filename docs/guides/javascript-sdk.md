@@ -150,9 +150,29 @@ Delete memories. They leave the database and the vector store at once; copies in
 ```typescript
 // By ID
 await memory.forget({ memoryId: '01HQ...' });
+
+// The memories linked to an entity, in one project
+await memory.forget({ entity: 'John', projectId: 'work' });
+
+// Everything in the account (explicit only)
+await memory.forget({ allMemories: true });
 ```
 
-Pass `memoryId`. Delete by entity is not implemented yet: `entity` does not limit what is deleted, so do not pass it. A call with neither option is rejected by the server.
+Give exactly one of `memoryId`, `entity` or `allMemories: true`. Any other call throws a `ValidationError` and
+sends nothing: no call deletes everything unless it says `allMemories: true`. The server deletes only the
+memories of the account your API key belongs to.
+
+- `entity` deletes the memories that entity extraction linked to the entity with that exact name or alias (any
+  case; never a partial name), in every project, or only in `projectId` when you pass it. The entity and its
+  relationships go too once no memory mentions it. A memory that names the entity but was never linked to it
+  stays.
+- `allMemories: true` deletes every memory, entity and relationship in the account. A project-scoped API key
+  cannot use it.
+
+!!! warning "Servers before 0.16.1"
+    A server before 0.16.1 deleted every memory in the account for a delete by `entity`. `forget({ entity })`
+    reads the server version from `/health` first and throws a `RemembraError` with code `SERVER_TOO_OLD`,
+    deleting nothing, when the server is older than 0.16.1 or does not report a version.
 
 **Returns:** `ForgetResult`
 
