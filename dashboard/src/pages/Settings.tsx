@@ -5,11 +5,12 @@ import { api } from '../lib/api';
 import { API_V1 } from '../config';
 import type { UserResponse } from '../lib/api';
 import { useRoute } from '../lib/nav';
+import { DELETION_COPY, deletionConfirm } from '../lib/accountDeletion';
+import type { DeletionMethod } from '../lib/accountDeletion';
 import { SignInMethods } from '../components/auth/SignInMethods';
 import { EmailVerificationStatus } from '../components/auth/EmailVerificationStatus';
 import { UNINSTALL_STEPS } from '../lib/agents';
 import { hrefFor } from '../lib/nav';
-import { DELETE_ACCOUNT_BILLING, DELETE_ACCOUNT_EFFECT, DELETE_ACCOUNT_SOCIAL, DELETE_ACCOUNT_SUMMARY } from '../lib/accountDeletion';
 
 const SETTINGS_TABS: readonly SettingsTab[] = ['profile', 'password', 'security', 'workspace', 'retrieval', 'diagnostics', 'account'];
 
@@ -598,37 +599,62 @@ function UninstallCard() {
 }
 
 // Account Settings Component (Delete Account)
-function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => void }) {
+function AccountSettings({ user, onLogout }: { user: UserResponse; onLogout: () => void }) {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [method, setMethod] = useState<DeletionMethod>('password');
   const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [codeSentTo, setCodeSentTo] = useState<string | null>(null);
   const [confirmText, setConfirmText] = useState('');
   const [loading, setLoading] = useState(false);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const confirm = deletionConfirm(method, confirmText, password, code);
+
+  const reset = () => {
+    setShowDeleteModal(false);
+    setMethod('password');
+    setPassword('');
+    setCode('');
+    setCodeSentTo(null);
+    setConfirmText('');
+    setError(null);
+  };
+
+  const sendCode = async () => {
+    setSending(true);
+    setError(null);
+    try {
+      await api.requestDeletionCode();
+      setCodeSentTo(user.email);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not send the code');
+    } finally {
+      setSending(false);
+    }
+  };
+
   const handleDelete = async () => {
-    if (confirmText !== 'DELETE') {
-      setError('Please type DELETE to confirm');
+    if (!confirm) {
+      setError(method === 'password' ? 'Type DELETE and enter your password' : 'Type DELETE and enter the 6-digit code');
       return;
     }
-
-    if (!password) {
-      setError('Please enter your password');
-      return;
-    }
-
     setLoading(true);
     setError(null);
-
     try {
-      await api.deleteAccount(password);
-      // Account deleted, logout user
+      await api.deleteAccount(confirm);
       onLogout();
     } catch (err) {
+      // Nothing was deleted (e.g. the subscription could not be cancelled): the server says why.
       setError(err instanceof Error ? err.message : 'Failed to delete account');
     } finally {
       setLoading(false);
     }
   };
+
+  const inputClass =
+    'w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent';
 
   return (
     <>
@@ -642,7 +668,7 @@ function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => voi
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
               Delete Account
             </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{DELETE_ACCOUNT_SUMMARY}</p>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{DELETION_COPY}</p>
             <button
               onClick={() => setShowDeleteModal(true)}
               className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium transition-colors"
@@ -656,19 +682,23 @@ function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => voi
       {/* Delete Confirmation Modal */}
       {showDeleteModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="w-full max-w-md bg-white dark:bg-gray-800 rounded-xl shadow-2xl">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="delete-account-title"
+            className="w-full max-w-md max-h-[90vh] overflow-y-auto bg-white dark:bg-gray-800 rounded-xl shadow-2xl"
+          >
             {/* Header */}
             <div className="p-4 border-b border-gray-200 dark:border-gray-700">
               <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
                 <AlertTriangle className="w-5 h-5" />
-                <h2 className="text-lg font-semibold">Delete Account</h2>
+                <h2 id="delete-account-title" className="text-lg font-semibold">Delete Account</h2>
               </div>
             </div>
 
             {/* Content */}
             <div className="p-4 space-y-4">
-              <p className="text-gray-600 dark:text-gray-300">{DELETE_ACCOUNT_EFFECT}</p>
-              <p className="text-sm text-gray-600 dark:text-gray-300">{DELETE_ACCOUNT_BILLING}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-300">{DELETION_COPY}</p>
 
               <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -679,36 +709,90 @@ function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => voi
 
               {/* Confirmation */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                <label htmlFor="delete-confirm-text" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Type <span className="font-mono text-red-600">DELETE</span> to confirm
                 </label>
                 <input
+                  id="delete-confirm-text"
                   type="text"
                   value={confirmText}
                   onChange={(e) => setConfirmText(e.target.value)}
                   placeholder="Type DELETE"
-                  className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                  className={inputClass}
                 />
               </div>
 
-              {/* Password */}
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Enter your password
-                </label>
-                <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">{DELETE_ACCOUNT_SOCIAL}</p>
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password"
-                  className="w-full px-4 py-3 rounded-lg bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
-                />
-              </div>
+              {method === 'password' ? (
+                <div>
+                  <label htmlFor="delete-password" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Enter your password
+                  </label>
+                  <input
+                    id="delete-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Password"
+                    className={inputClass}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMethod('code');
+                      setError(null);
+                    }}
+                    className="mt-2 text-sm text-red-600 dark:text-red-400 underline"
+                  >
+                    Signed in with Google or GitHub? Confirm with an emailed code
+                  </button>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-2">
+                    {codeSentTo
+                      ? `We emailed a 6-digit code to ${codeSentTo}. It expires in 15 minutes.`
+                      : `We will email a 6-digit code to ${user.email}.`}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={sendCode}
+                    disabled={sending}
+                    className="px-3 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 text-sm font-medium"
+                  >
+                    {sending ? <Loader2 className="w-4 h-4 animate-spin inline mr-2" /> : null}
+                    {codeSentTo ? 'Send a new code' : 'Email me a code'}
+                  </button>
+                  <label htmlFor="delete-code" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mt-3 mb-2">
+                    Code from the email
+                  </label>
+                  <input
+                    id="delete-code"
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={code}
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="123456"
+                    className={clsx(inputClass, 'font-mono tracking-widest')}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMethod('password');
+                      setError(null);
+                    }}
+                    className="mt-2 text-sm text-red-600 dark:text-red-400 underline"
+                  >
+                    Use my password instead
+                  </button>
+                </div>
+              )}
 
               {/* Error */}
               {error && (
-                <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm">
+                <div role="alert" className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 text-sm">
                   {error}
                 </div>
               )}
@@ -716,12 +800,7 @@ function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => voi
               {/* Actions */}
               <div className="flex justify-end gap-3 pt-2">
                 <button
-                  onClick={() => {
-                    setShowDeleteModal(false);
-                    setPassword('');
-                    setConfirmText('');
-                    setError(null);
-                  }}
+                  onClick={reset}
                   className="px-4 py-2 rounded-lg bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium"
                   disabled={loading}
                 >
@@ -729,11 +808,11 @@ function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => voi
                 </button>
                 <button
                   onClick={handleDelete}
-                  disabled={loading || confirmText !== 'DELETE' || !password}
+                  disabled={loading || !confirm}
                   className={clsx(
                     'px-4 py-2 rounded-lg font-medium transition-colors',
                     'bg-red-600 hover:bg-red-700 text-white',
-                    (loading || confirmText !== 'DELETE' || !password) && 'opacity-50 cursor-not-allowed'
+                    (loading || !confirm) && 'opacity-50 cursor-not-allowed'
                   )}
                 >
                   {loading ? (

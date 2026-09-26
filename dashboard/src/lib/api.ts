@@ -713,12 +713,26 @@ class ApiClient {
     });
   }
 
-  async deleteAccount(password: string): Promise<void> {
-    await this.fetchApi<{ message: string }>('/auth/me', {
+  /** Delete the account, confirmed by the password or by the emailed code (Google/GitHub sign-in). */
+  async deleteAccount(confirm: { password: string } | { code: string }): Promise<DeleteAccountResponse> {
+    return this.fetchApi<DeleteAccountResponse>('/auth/me', {
       method: 'DELETE',
-      body: JSON.stringify({ password }),
+      body: JSON.stringify(confirm),
     });
   }
+
+  /** Email a six-digit code (valid 15 minutes) that confirms an account deletion. */
+  async requestDeletionCode(): Promise<{ message: string; expires_in_minutes: number }> {
+    return this.fetchApi<{ message: string; expires_in_minutes: number }>('/auth/me/deletion-code', { method: 'POST' });
+  }
+}
+
+export interface DeleteAccountResponse {
+  message: string;
+  deleted_at: string;
+  /** Every row and vector of the account is erased at the first job run after this. */
+  erasure_after: string;
+  subscriptions_cancelled: number;
 }
 
 // User Response type (for settings)
@@ -971,6 +985,10 @@ export interface UsageSummaryResponse {
     llm_usd_used: number;
     ceiling_usd: number;
     unverified_cap_applied: boolean;
+    /** Yearly plans: a new bank releases one month's credits until this time, then the rest. */
+    bank_unlocks_at?: string | null;
+    /** The yearly bank once it unlocks. */
+    full_limit?: number | null;
   };
   enrichment: { status: 'full' | 'degraded'; reason: 'credits_exhausted' | 'free_breaker_open' | string | null };
   relay_events: { this_month: number; soft_cap: number; over_soft_cap: boolean; burst_per_min: number; free: boolean };

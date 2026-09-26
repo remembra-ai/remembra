@@ -1,30 +1,29 @@
-// What "Delete account" really does, worded once. The backend deactivates the
-// account and revokes its keys (auth/users.py delete_account); it does not
-// erase stored data, which is done on request within 30 days, as the privacy
-// policy, terms and security page say. A paid plan is cancelled first, at the
-// end of the period already paid for (api/v1/billing.py
-// end_subscription_before_account_deletion). A vitest keeps this in step with
-// landing/privacy.html.
+// What deleting an account does, in the same words as the Terms (7.2) and the
+// Privacy page (Data Retention). tests/test_account_copy.py keeps them equal and
+// checks the numbers against the server defaults (erasure grace, backup keep).
 
-export const ERASURE_EMAIL = 'admin@dolphytech.com';
+export const DELETION_COPY =
+  'Deleting your account cancels any subscription at once, with no further charges, and signs you out everywhere. ' +
+  '7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. ' +
+  'Until then, email support@remembra.dev to undo it. ' +
+  'Backups are not edited; the copies in them age out: the continuous backup keeps 24 hours of history, ' +
+  'and the database copy taken before each deploy is kept only until 3 newer deploys replace it.';
 
-/** The card on the Settings page. */
-export const DELETE_ACCOUNT_SUMMARY =
-  'Deactivate your account and revoke its API keys. Stored data is not erased automatically: ' +
-  `email ${ERASURE_EMAIL} from the account's address and we erase it within 30 days.`;
+export type DeletionMethod = 'password' | 'code';
 
-/** The first paragraph of the confirmation dialog. */
-export const DELETE_ACCOUNT_EFFECT =
-  'Deleting your account deactivates it and revokes its API keys: you can no longer sign in, and your agents lose access. ' +
-  'It does not erase what is stored yet. To have everything erased, email ' +
-  `${ERASURE_EMAIL} from the account's address and we erase it within 30 days.`;
+/** Six digits, as emailed by POST /auth/me/deletion-code. */
+export function isDeletionCode(value: string): boolean {
+  return /^\d{6}$/.test(value.trim());
+}
 
-/** Billing: the account cannot reach Billing after this, so the plan is cancelled here. */
-export const DELETE_ACCOUNT_BILLING =
-  'A paid plan is cancelled when you delete: it is not charged again and ends with the period you have paid for. ' +
-  'If it cannot be cancelled, the account is not deleted and you are told why.';
-
-/** Accounts created with GitHub or Google have no password until one is set. */
-export const DELETE_ACCOUNT_SOCIAL =
-  'Signed up with GitHub or Google? Your account has no password yet: sign out, use "Forgot password" on the sign-in page ' +
-  'to set one, then come back here.';
+/** The confirm body for DELETE /auth/me, or null while the form is incomplete. */
+export function deletionConfirm(
+  method: DeletionMethod,
+  typed: string,
+  password: string,
+  code: string,
+): { password: string } | { code: string } | null {
+  if (typed !== 'DELETE') return null;
+  if (method === 'password') return password ? { password } : null;
+  return isDeletionCode(code) ? { code: code.trim() } : null;
+}

@@ -86,7 +86,8 @@ async def test_applies_after_crew_version_5(tmp_path, monkeypatch):
     conn = await _migrate(path)
     try:
         assert {"project_id", "crew_id", "kind", "trust_score"} <= _columns(conn, "agent_inbox")
-        assert sorted(r[0] for r in conn.execute("SELECT version FROM schema_version")) == [1, 2, 3, 4, 5, 6, 7]
+        applied = sorted(r[0] for r in conn.execute("SELECT version FROM schema_version"))
+        assert applied == sorted({5} | {v for v, _, _ in VERSIONED_MIGRATIONS}) == [1, 2, 3, 4, 5, 6, 7, 8]
     finally:
         conn.close()
 
@@ -94,3 +95,7 @@ async def test_applies_after_crew_version_5(tmp_path, monkeypatch):
 def test_versions_are_unique_and_leave_5_to_crew():
     versions = [v for v, _, _ in VERSIONED_MIGRATIONS]
     assert len(versions) == len(set(versions)) and 5 not in versions and {6, 7} <= set(versions)
+    # w2/account's migration was renumbered from 6 to 8 when the wave-2 lanes merged.
+    names = {v: n for v, n, _ in VERSIONED_MIGRATIONS}
+    assert (names[6], names[7], names[8]) == ("agent_inbox_trust_score", "relay_pickups", "account_erasure_and_founding_holds")
+    assert versions == sorted(versions)

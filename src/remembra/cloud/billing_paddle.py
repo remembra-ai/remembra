@@ -19,6 +19,7 @@ import hmac
 import json
 import logging
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -43,6 +44,17 @@ DEFAULT_PAYMENT_LINK = f"{DEFAULT_DASHBOARD_ORIGIN}/pay"
 
 # custom_data key carrying the server's signature over remembra_user_id.
 CHECKOUT_BINDING_KEY = "remembra_binding"
+
+# Subscription statuses that can still bill (Paddle: active, trialing, past_due, paused, canceled).
+BILLABLE_SUBSCRIPTION_STATUSES = ("active", "trialing", "past_due", "paused")
+
+
+def _default_http_client() -> httpx.AsyncClient:
+    return httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=10.0))
+
+
+# Factory for the Paddle API client (tests swap in an httpx.MockTransport).
+http_client_factory: Callable[[], httpx.AsyncClient] = _default_http_client
 
 
 def checkout_binding(user_id: str) -> str:
@@ -108,12 +120,17 @@ class PaddleBillingManager:
         method: str,
         endpoint: str,
         data: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """Make authenticated request to Paddle API."""
+        """Make authenticated request to Paddle API.
+
+        Raises ``httpx.HTTPError`` (``HTTPStatusError`` for a non-2xx answer,
+        a transport error when Paddle cannot be reached).
+        """
         url = f"{self._api_base}{endpoint}"
-        async with httpx.AsyncClient() as client:
+        async with http_client_factory() as client:
             if method == "GET":
-                response = await client.get(url, headers=self._headers())
+                response = await client.get(url, headers=self._headers(), params=params)
             elif method == "POST":
                 response = await client.post(url, headers=self._headers(), json=data)
             elif method == "PATCH":
@@ -291,21 +308,16 @@ class PaddleBillingManager:
     async def get_customer_by_email(self, email: str) -> str | None:
         """Look up a Paddle customer ID by email address.
 
-        Returns the customer ID if found, None otherwise.
+        Returns the customer ID if found, None when Paddle has no customer
+        with that address. Raises ``httpx.HTTPError`` when Paddle cannot be
+        asked, so an outage is not mistaken for "no billing account".
         """
-        try:
-            result = await self._request(
-                "GET",
-                f"/customers?email={email}",
-            )
-            customers = result.get("data", [])
-            if customers and len(customers) > 0:
-                customer_id: str = customers[0]["id"]
-                return customer_id
-            return None
-        except Exception as e:
-            logger.warning("Failed to look up customer by email %s: %s", email, e)
-            return None
+        result = await self._request("GET", "/customers", params={"email": email})
+        customers = result.get("data") or []
+        if customers:
+            customer_id: str = customers[0]["id"]
+            return customer_id
+        return None
 
     # -----------------------------------------------------------------------
     # Portal - Customer portal URL
@@ -348,10 +360,62 @@ class PaddleBillingManager:
         return {
             "id": data["id"],
             "status": data["status"],
-            "plan": data.get("custom_data", {}).get("plan", "unknown"),
+            "plan": (data.get("custom_data") or {}).get("plan", "unknown"),
             "current_billing_period": data.get("current_billing_period"),
             "scheduled_change": data.get("scheduled_change"),
         }
+
+    async def list_billable_subscriptions(self, customer_id: str) -> list[dict[str, Any]]:
+        """The customer's subscriptions that can still bill (active, trialing, past due, paused).
+
+        Each is ``{"id": ..., "custom_data": {...}}``: one customer (one payer
+        email) can pay for several accounts, and ``custom_data`` says which.
+        """
+        result = await self._request(
+            "GET",
+            "/subscriptions",
+            params={"customer_id": customer_id, "status": ",".join(BILLABLE_SUBSCRIPTION_STATUSES), "per_page": "50"},
+        )
+        return [
+            {"id": str(item["id"]), "custom_data": item.get("custom_data") or {}}
+            for item in result.get("data") or []
+            if isinstance(item, dict) and item.get("id")
+        ]
+
+    async def cancel_subscription_now(self, subscription_id: str) -> str:
+        """Cancel a subscription immediately; safe to repeat.
+
+        Returns ``canceled``, ``already_canceled``, or ``not_found`` when Paddle
+        does not know the id (404: nothing can bill through Paddle under it,
+        e.g. a Stripe-era or sandbox id). Paddle refuses to cancel a
+        subscription that is already canceled, so the current status is read
+        first and re-read after a refused cancel: a retry after a timeout, or a
+        cancel that raced a webhook, is a success. Raises ``httpx.HTTPError``
+        when the subscription is still billable.
+        """
+        try:
+            if (await self.get_subscription(subscription_id))["status"] == "canceled":
+                return "already_canceled"
+            await self.cancel_subscription(subscription_id, effective_from="immediately")
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning("Paddle does not know subscription %s; nothing to cancel", subscription_id)
+                return "not_found"
+            if (await self.get_subscription(subscription_id))["status"] == "canceled":
+                return "already_canceled"
+            raise
+        return "canceled"
+
+    async def set_price_status(self, price_id: str, status: str) -> None:
+        """Archive (``archived``) or re-activate (``active``) a catalog price.
+
+        An archived price cannot start a new checkout; subscriptions already on
+        it keep renewing.
+        """
+        if status not in ("active", "archived"):
+            raise ValueError(f"Unsupported price status: {status}")
+        await self._request("PATCH", f"/prices/{price_id}", {"status": status})
+        logger.info("Paddle price %s set to %s", price_id, status)
 
     async def cancel_subscription(
         self,
@@ -535,7 +599,9 @@ class PaddleBillingManager:
                 if isinstance(i, dict)
             ]
             logger.error("paddle_event_unknown_price action=%s prices=%s; ignored", action, price_ids)
-            return WebhookResult(action="ignored", event_type=action, user_id=user_id)
+            ignored = WebhookResult(action="ignored", event_type=action, user_id=user_id, paddle_subscription_id=subscription_id)
+            ignored.unknown_price_ids = [str(p) for p in price_ids if p]
+            return ignored
         limits = get_plan(mapping.tier)
         seats: int | None = None
         below_minimum = False
@@ -763,6 +829,8 @@ class WebhookResult:
         self.user_verified = user_verified
         self.refunded_transaction_id: str | None = None
         self.adjustment_action: str | None = None
+        # Price IDs of a paid event the catalog does not know (nothing was applied).
+        self.unknown_price_ids: list[str] = []
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {"action": self.action}

@@ -1,6 +1,7 @@
 // Plain-language reading of GET /cloud/usage/summary: smart credits for the
-// current period (a month, or the whole year banked up front on annual
-// plans), what "degraded" means, and the plan line.
+// current period (a month, or the whole year in one bank on annual plans,
+// unlocked in full 14 days after purchase), what "degraded" means, and the
+// plan line.
 
 import type { UsageSummaryResponse } from './api';
 
@@ -116,4 +117,18 @@ export function handoffsNote(summary: Pick<UsageSummaryResponse, 'memories'>): s
   const count = summary.memories.handoffs;
   if (count == null) return null;
   return `${count.toLocaleString()} ${count === 1 ? 'handoff' : 'handoffs'} (not counted)`;
+}
+
+/** The same sentence as the pricing FAQ and the Terms (R-27). */
+export const BANK_UNLOCK_RULE =
+  "A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available.";
+
+/** "The full yearly bank of 60,000 credits unlocks Oct 15." while a new bank is held back, else null. */
+export function bankUnlockLabel(summary: UsageSummaryResponse): string | null {
+  const at = summary.credits.bank_unlocks_at ? parseDate(summary.credits.bank_unlocks_at) : null;
+  if (!at || summary.credits.bank !== 'yearly') return null;
+  const day = at.toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
+  const full = summary.credits.full_limit;
+  const bank = full ? `The full yearly bank of ${full.toLocaleString()} credits` : 'The full yearly bank';
+  return `${bank} unlocks ${day}.`;
 }

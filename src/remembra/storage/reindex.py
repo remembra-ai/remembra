@@ -22,7 +22,8 @@ rebuild a lost Qdrant from SQLite.
    is persisted in ``vector_store_state`` (read at boot by
    :func:`apply_active_collection`). A post-swap pass re-upserts anything
    written during the swap. The old collection is kept (never deleted) for
-   rollback; its name is recorded on the job.
+   rollback; its name is recorded on the job. Account erasure deletes an
+   erased account's points from it too (``delete_by_user_everywhere``).
 
 ``mode="in_place"`` keeps the legacy vector-only update for user/project-scoped
 jobs (keyset paging, source rows skipped).
@@ -47,6 +48,7 @@ from typing import Any
 from uuid import uuid4
 
 from remembra.storage.memory_rows import is_source_row, memory_from_row
+from remembra.storage.qdrant import REBUILD_MARKER, rebuild_base
 
 logger = logging.getLogger(__name__)
 
@@ -278,8 +280,9 @@ class ReindexManager:
             project_id=project_id,
         )
         if mode == "rebuild":
-            base = re.sub(r"__rb_.*$", "", self._qdrant.collection_name)
-            job.target_collection = f"{base}__rb_{_slug(new_model)}_{uuid4().hex[:8]}"
+            # Account erasure finds rollback copies by this name (QdrantStore.delete_by_user_everywhere).
+            base = rebuild_base(self._qdrant.collection_name)
+            job.target_collection = f"{base}{REBUILD_MARKER}{_slug(new_model)}_{uuid4().hex[:8]}"
         self._current_job = job
         self._cancel_requested = False
         await self._save_job(job)

@@ -438,11 +438,102 @@ than booting on an empty database; set `LITESTREAM_ALLOW_EMPTY_START=1` to
 override deliberately. Without `LITESTREAM_REPLICA_URL`, litestream is inert and
 the entrypoint prints a warning on every boot that SQLite is not backed up.
 
+Retention: the entrypoint writes a litestream config whose replica keeps
+`LITESTREAM_RETENTION` of history (default `24h`), so data erased from the live
+database leaves the replica within about 48 hours. The privacy page states
+24 hours; change both together.
+
 Restore drill (OPS-4, owner): on a scratch host run
 `litestream restore -o /tmp/drill.db "$LITESTREAM_REPLICA_URL"` and
 `python3 -c "import sqlite3; print(sqlite3.connect('/tmp/drill.db').execute('SELECT COUNT(*) FROM memories').fetchone()[0])"`;
 compare with prod.
 Qdrant is not backed up — it is rebuilt from SQLite by the rebuild reindex.
+
+## Account deletion and erasure (R-11, R-23)
+
+`DELETE /api/v1/auth/me` (password, or a code from `POST /api/v1/auth/me/deletion-code`
+for Google/GitHub accounts) first cancels, immediately, the Paddle subscription
+the account holds and any other billable subscription of its Paddle customer
+that is this account's (recorded on it, or its checkout `custom_data` names it,
+or no other account shares the customer). One payer email can pay for several
+accounts: subscriptions of the same customer that belong to another account are
+left running and the owner gets an `account_deletion_shared_customer` alert. A
+recorded subscription id Paddle does not know (404: sandbox, Stripe-era or
+hand-edited ids) counts as done and alerts `account_deletion_subscription_unknown`
+(check nothing still charges that customer elsewhere). If Paddle cannot confirm
+a cancel, the request fails with 502, nothing is deleted and the owner gets an
+`account_deletion_billing_failed` alert; the user is told to retry when Paddle
+was unreachable (429/5xx/timeout) and that support will sort it out when Paddle
+refused. Then the account is deactivated (sessions and API keys stop at once)
+and `users.deleted_at` is set.
+
+The `account-erasure-loop` task (every `REMEMBRA_ACCOUNT_ERASURE_INTERVAL_SECONDS`,
+default 3600) erases accounts deleted more than `REMEMBRA_ACCOUNT_ERASURE_GRACE_DAYS`
+ago (default 7, max 30; the privacy page and dashboard say 7): Qdrant points by
+`user_id` filter first, in the active collection AND every rollback copy a
+rebuild reindex kept (`<base>__rb_*` collections and any collection a
+`reindex_jobs` row names; other applications' collections are never touched),
+then every SQLite row the account owns in one transaction
+(`remembra.account.erasure.ERASURE_RULES`, plus any table found with a
+user-keyed column; actor columns such as `added_by` are cleared, never used to
+delete).
+
+Crew mode (`crew.db`, feat/crew) is NOT covered yet. Do not pass `crew.db` to
+`AccountEraser` bare (it refuses): it takes
+`ExtraDatabase("crew", crew_db, rules=CREW_ERASURE_RULES, exempt=...)`, and
+feat/crew must first ship those rules with a coverage test that runs
+`registry_problems` over the real `CREW_MIGRATIONS` schema. The rules must
+delete children before parents; reach session-keyed rows (checkpoints, reports,
+batons, footprints, claims) through `crew_sessions.user_id`, message edit
+history through `crew_messages.author_user_id`, and votes through `voter_id`;
+delete the crews the account owns with all their child rows; clear (NULL) actor
+columns (`added_by`, `created_by`, `shared_by`, ...) in other people's crews;
+and deal with the `crew_events` hash chain (record erased seqs in
+`crew_pruned_ranges`, or redact payloads in place). Until then an account that
+used Crew mode keeps its crew rows after erasure, so Crew mode must stay off in
+production. It keeps one `account_erased` audit row holding a SHA-256
+of the account id and row counts, nothing else. To undo a deletion inside the
+grace period: `POST /api/v1/admin/users/{id}/activate?active=true` (the user
+then buys again if they had a plan; the cancelled subscription stays cancelled).
+`DELETE /api/v1/admin/users/{id}?confirm=true` does the same billing cancel and
+erases immediately. It also erases API-signup tenants (`POST /cloud/signup`),
+which have no `users` row and no dashboard to delete themselves from. When
+Paddle refuses a cancel and the subscription has been checked by hand, add
+`&force_billing=skip`: Paddle is not asked, and the owner alert
+`account_deletion_billing_skipped` lists the subscription and customer to cancel
+in Paddle.
+
+Accounts deleted before this release: the old "Delete account" only set
+`is_active = FALSE` (no `deleted_at`, billing NOT cancelled), so the erasure job
+never sees them. `GET /api/v1/admin/deactivated-accounts` lists every
+deactivated account with no erasure scheduled, with any subscription it still
+holds. Superadmin deactivations look the same; the old self-delete logged
+`account_deactivated` with the user id, a superadmin deactivation did not. For
+each confirmed self-deletion run
+`POST /api/v1/admin/deactivated-accounts/{id}/schedule-erasure?confirm=true`
+(cancels billing, sets `deleted_at`; the job erases after the grace period) or
+the hard delete above.
+
+Backups are not rewritten. Pre-deploy copies (`backups/remembra-predeploy-*`)
+keep the newest `REMEMBRA_PRE_MIGRATION_BACKUP_KEEP` (3), so an erased account
+leaves them after 3 more deploys. Manual copies made by hand (for example
+`/data/remembra-pre-relay-launch.db` from the launch runbook) never age out:
+delete them once the release is confirmed.
+
+## Billing flags and Founding 100 (R-26)
+
+Every billing flag (second subscription, Founding payment past seat 100, Team
+below 3 seats, refund or chargeback) and every payment that matches no account
+or no catalog price sends an operator alert (`REMEMBRA_ALERT_EMAIL` and/or
+`REMEMBRA_ALERT_WEBHOOK_URL`; set at least one). `GET /api/v1/admin/billing-flags`
+lists flagged accounts; `DELETE /api/v1/admin/billing-flags/{user_id}` clears one
+after review. A refund of an account that used over 25% of its credits also alerts.
+
+Founding checkouts hold a seat for 2 hours before payment; seats also stay held
+14 days after a founder's subscription ends. When seat 100 is taken the Founding
+price is archived in Paddle (`PATCH /prices/{id}`; the API key needs price write
+permission) and re-activated at the next Founding checkout after a seat frees.
+`GET /api/v1/billing/founding` (public) reports seats left for the pricing page.
 
 ## Notes
 

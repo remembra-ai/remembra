@@ -411,6 +411,22 @@ class Settings(BaseSettings):
             "allowance is released each month after (12 = the whole yearly bank up front)."
         ),
     )
+    annual_credit_unlock_days: int = Field(
+        14,
+        ge=0,
+        le=31,
+        description=(
+            "A new yearly plan (or a switch to yearly billing) holds its credit bank at "
+            "annual_credit_initial_months for this many days after the purchase, the refund window; the full bank "
+            "unlocks after that. Renewals of a subscription already held are not held back. 0 = off."
+        ),
+    )
+    annual_credit_initial_months: int = Field(
+        1,
+        ge=1,
+        le=12,
+        description="Months of credits a yearly bank releases before annual_credit_unlock_days have passed",
+    )
     credit_reservation_stale_minutes: int = Field(
         15,
         ge=1,
@@ -737,6 +753,18 @@ class Settings(BaseSettings):
         ),
     )
     temporal_cleanup_interval_seconds: int = Field(3600, description="Seconds between TTL cleanup runs")
+    account_erasure_grace_days: int = Field(
+        7,
+        ge=0,
+        le=30,
+        description=(
+            "Days between a self-serve account deletion and the permanent erasure of every row and vector the "
+            "account owns (a window to undo a mistaken or hostile deletion). Keep the privacy page in step."
+        ),
+    )
+    account_erasure_interval_seconds: int = Field(
+        3600, ge=60, description="Seconds between runs of the job that erases accounts past their grace period"
+    )
     pre_migration_backup: bool = Field(
         True,
         description=(

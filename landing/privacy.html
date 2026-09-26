@@ -158,13 +158,14 @@
 <h2 id="retention">How long we keep it</h2>
 <ul>
 <li><strong>Your account and what you store</strong> are kept while your account is open. Handoffs and structured checkpoints do not expire: they stay on your trail until you delete them or your account is erased. Free-text checkpoints expire after 7 days by default.</li>
-<li><strong>Deleting your account:</strong> deleting it from the dashboard today deactivates it and revokes its keys, but does not yet erase what is stored. To have everything erased, email <a href="mailto:admin@dolphytech.com">admin@dolphytech.com</a> from the account's address and we will erase it within 30 days. Backup copies are removed as backups are replaced.</li>
+<li><strong>Deleting your account:</strong> Deleting your account cancels any subscription at once, with no further charges, and signs you out everywhere. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it. Backups are not edited; the copies in them age out: the continuous backup keeps 24 hours of history, and the database copy taken before each deploy is kept only until 3 newer deploys replace it.</li>
+<li><strong>After an erasure</strong> we keep one audit entry that says an account was erased, identified only by a one-way hash of its id, with no email and no content.</li>
 <li><strong>Request logs and security logs</strong> are kept only as long as we need them to run and protect the service.</li>
-<li><strong>Billing records</strong> are kept by Paddle for as long as tax law requires.</li>
+<li><strong>Billing records</strong> stay with Paddle, our Merchant of Record, under its own retention rules (for as long as tax law requires); we keep only each Paddle transaction id and its net amount for our accounts.</li>
 </ul>
 
 <h2 id="rights">Your rights</h2>
-<p>Depending on where you live, you can ask us to give you a copy of your data, correct it, erase it, restrict or object to how we use it, or hand it over in a machine-readable format. You can export your memories yourself through the API. For anything else, email <a href="mailto:admin@dolphytech.com">admin@dolphytech.com</a>; we answer within 30 days. If you are in the EEA or UK and think we got it wrong, you can complain to your data protection authority.</p>
+<p>You can delete your account yourself under Settings, Account (Google and GitHub sign-ins confirm with a code we email you); what deletion removes, and when, is under <a href="#retention">How long we keep it</a>. Depending on where you live, you can also ask us to give you a copy of your data, correct it, erase it, restrict or object to how we use it, or hand it over in a machine-readable format. You can export your memories yourself through the API. For anything else, email <a href="mailto:admin@dolphytech.com">admin@dolphytech.com</a>; we answer within 30 days. If you are in the EEA or UK and think we got it wrong, you can complain to your data protection authority.</p>
 <p>California residents: we do not sell or share personal information as the CCPA defines those terms.</p>
 
 <h2 id="cookies">Cookies and local storage</h2>

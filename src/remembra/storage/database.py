@@ -44,6 +44,20 @@ AGENT_INBOX_BASE_DDL = """
             )
 """
 
+# Founding 100 seat holds (R-26): a pending checkout (kind 'pending') or a
+# founder whose subscription lapsed (kind 'lapsed') keeps a seat until ``until``.
+# Active founders are cloud_tenants.founding = 1. Shared with UsageMeter, which
+# also runs on databases that never ran the versioned migrations.
+FOUNDING_HOLDS_DDL = """
+CREATE TABLE IF NOT EXISTS founding_holds (
+    user_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    until TEXT NOT NULL,
+    transaction_id TEXT,
+    created_at TEXT NOT NULL
+)
+"""
+
 # Versioned migrations (REL-15). Each entry runs once, inside a transaction,
 # and is recorded in schema_version. Append only — never edit an applied entry.
 # Version 1 marks the legacy idempotent ALTER list in _run_migrations().
@@ -165,6 +179,31 @@ VERSIONED_MIGRATIONS: list[tuple[int, str, list[str]]] = [
             """,
             "CREATE INDEX IF NOT EXISTS idx_relay_pickups_user_time ON relay_pickups(user_id, picked_up_at)",
             "CREATE INDEX IF NOT EXISTS idx_relay_pickups_time ON relay_pickups(picked_up_at)",
+        ],
+    ),
+    (
+        8,
+        "account_erasure_and_founding_holds",
+        [
+            # R-11/R-23: a self-serve deletion stamps deleted_at; the erasure job
+            # removes every row the account owns once the grace period is over.
+            "ALTER TABLE users ADD COLUMN deleted_at TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_users_deleted_at ON users(deleted_at)",
+            # R-11: accounts that sign in with Google/GitHub confirm a deletion
+            # with a code emailed to the account address (hashed here).
+            """
+            CREATE TABLE IF NOT EXISTS account_deletion_codes (
+                user_id TEXT PRIMARY KEY,
+                code_hash TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            )
+            """,
+            # R-26: Founding 100 seats held by a checkout in progress or by a
+            # founder whose subscription lapsed less than 14 days ago.
+            FOUNDING_HOLDS_DDL,
+            "CREATE INDEX IF NOT EXISTS idx_founding_holds_until ON founding_holds(until)",
         ],
     ),
 ]

@@ -487,7 +487,7 @@ def _updated(sub: str, customer: str, price: str) -> dict[str, Any]:
 
 
 async def test_former_founding_member_is_quoted_the_price_paddle_charges(tmp_path, outbox, fresh_payment_dedupe) -> None:
-    """The tenant's founding column is sticky; the emails quote the event's price, not the redemption record."""
+    """The emails quote the event's price, not the tenant's founding record (which, since R-26, ends with a lapse)."""
     async with cost_app(tmp_path, resend_api_key=RESEND_TEST_KEY, public_dashboard_url=DASH) as c:
         _paddle(c, **PRICES)
         c.h.app.state.tasks = None
@@ -504,23 +504,35 @@ async def test_former_founding_member_is_quoted_the_price_paddle_charges(tmp_pat
         [failed] = outbox.of("payment_failed")
         _message_ok(failed)
         assert "Solo plan ($108/year (Founding 100, price locked for life))" in failed.text
+        # A founder's past-due event without items cannot say which of $108 and $120 is due: no price is quoted.
+        from remembra.cloud import notify
 
-        # Cancelled: the redemption record stays (the seat is not released).
-        await _hook(c, "subscription.canceled", {"id": "sub_f1", "customer_id": "ctm_f", "status": "canceled"})
+        notify._payment_failed_sent.clear()
+        await _hook(c, "subscription.past_due", _past_due("sub_f1", "ctm_f", None))
         await outbox.wait(3)
+        unknown_founder = outbox.of("payment_failed")[-1]
+        _message_ok(unknown_founder)
+        assert "payment for your Solo plan. Your plan keeps working" in unknown_founder.text
+        assert "$108" not in unknown_founder.text and "$120" not in unknown_founder.text
+
+        # Cancelled: the account stops holding the price; its seat is held 14 days (R-26 lapse grace).
+        await _hook(c, "subscription.canceled", {"id": "sub_f1", "customer_id": "ctm_f", "status": "canceled"})
+        await outbox.wait(4)
         tenant = await c.meter.get_tenant(uid)
-        assert tenant["plan"] == "free" and tenant["founding"] == 1
+        assert tenant["plan"] == "free" and tenant["founding"] == 0
+        cursor = await c.h.db.conn.execute("SELECT kind FROM founding_holds WHERE user_id = ?", (uid,))
+        assert [r[0] for r in await cursor.fetchall()] == ["lapsed"]
 
         # Back on Solo monthly at the regular price: $12/month, no Founding line.
         await _hook(c, "transaction.completed", _purchase("txn_m1", "sub_m1", "pri_solo_m", _bound(uid), customer="ctm_f"))
-        await outbox.wait(4)
+        await outbox.wait(5)
         monthly = outbox.of("plan_changed")[-1]
         _message_ok(monthly)
         assert "Price:" in monthly.text and "$12/month" in monthly.text
         assert "Founding" not in monthly.text and "$108" not in monthly.text
-        assert (await c.meter.get_tenant(uid))["founding"] == 1  # still sticky
+        assert (await c.meter.get_tenant(uid))["founding"] == 0  # a regular-price plan holds no Founding price
         await _hook(c, "subscription.past_due", _past_due("sub_m1", "ctm_f", "pri_solo_m"))
-        await outbox.wait(5)
+        await outbox.wait(6)
         failed_monthly = outbox.of("payment_failed")[-1]
         assert "Solo plan ($12/month)" in failed_monthly.text and "Founding" not in failed_monthly.text
 
@@ -530,27 +542,24 @@ async def test_former_founding_member_is_quoted_the_price_paddle_charges(tmp_pat
             "subscription.updated",
             _updated("sub_m1", "ctm_f", "pri_solo_y"),
         )
-        await outbox.wait(6)
+        await outbox.wait(7)
         yearly = outbox.of("plan_changed")[-1]
         assert "$120/year" in yearly.text and "Founding" not in yearly.text and "$108" not in yearly.text
 
         # Past due again on the same subscription the next day (dedupe cleared): the event names the $120 price.
-        from remembra.cloud import notify
-
         notify._payment_failed_sent.clear()
         await _hook(c, "subscription.past_due", _past_due("sub_m1", "ctm_f", "pri_solo_y"))
-        await outbox.wait(7)
+        await outbox.wait(8)
         failed_yearly = outbox.of("payment_failed")[-1]
         assert "Solo plan ($120/year)" in failed_yearly.text and "Founding" not in failed_yearly.text
 
-        # A past-due event without items cannot say which of $108 and $120 is due: no price is quoted.
+        # Without items, an account that holds no Founding price is on the regular $120 plan.
         notify._payment_failed_sent.clear()
         await _hook(c, "subscription.past_due", _past_due("sub_m1", "ctm_f", None))
-        await outbox.wait(8)
+        await outbox.wait(9)
         unknown = outbox.of("payment_failed")[-1]
         _message_ok(unknown)
-        assert "payment for your Solo plan. Your plan keeps working" in unknown.text
-        assert "$108" not in unknown.text and "$120" not in unknown.text
+        assert "Solo plan ($120/year)" in unknown.text and "$108" not in unknown.text
 
         # Back to Pro from Solo: $29/month, whatever the sticky flag says.
         await _hook(
@@ -558,10 +567,10 @@ async def test_former_founding_member_is_quoted_the_price_paddle_charges(tmp_pat
             "subscription.updated",
             _updated("sub_m1", "ctm_f", "pri_pro_m"),
         )
-        await outbox.wait(9)
+        await outbox.wait(10)
         pro = outbox.of("plan_changed")[-1]
         assert "from Solo to Pro" in pro.text and "$29/month" in pro.text and "Founding" not in pro.text
-        assert [m.to for m in outbox.sent] == ["founder@example.com"] * 9
+        assert [m.to for m in outbox.sent] == ["founder@example.com"] * 10
 
 
 async def test_founding_charge_over_the_cap_is_quoted_at_what_was_charged(tmp_path, outbox, fresh_payment_dedupe) -> None:
@@ -581,7 +590,7 @@ async def test_founding_charge_over_the_cap_is_quoted_at_what_was_charged(tmp_pa
 
         await _hook(c, "transaction.completed", _purchase("txn_late", "sub_late", "pri_founding", _bound(uid), customer="ctm_l"))
         tenant = await c.meter.get_tenant(uid)
-        assert tenant["billing_flag"] == "founding_over_cap_refund_due" and not tenant["founding"]
+        assert tenant["billing_flag"] == "founding_over_cap" and not tenant["founding"]
         assert await c.meter.founding_redemptions() == 100
         await outbox.wait(1)
         [changed] = outbox.of("plan_changed")

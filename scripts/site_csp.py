@@ -40,6 +40,7 @@ JS_TYPES = {"", "text/javascript", "application/javascript", "module"}
 FONT_CSS = "https://fonts.googleapis.com"
 FONT_FILES = "https://fonts.gstatic.com"
 FORM_POST = "https://formsubmit.co"  # contact.html posts its form here
+API = "https://api.remembra.dev"  # pricing.html reads the Founding 100 seats left (GET /api/v1/billing/founding)
 
 # Report-only for launch; "Content-Security-Policy" once a week of reports is clean.
 CSP_HEADER = "Content-Security-Policy-Report-Only"
@@ -123,7 +124,7 @@ def policy() -> str:
         f"style-src 'self' 'unsafe-inline' {FONT_CSS}",
         f"font-src 'self' {FONT_FILES}",
         "img-src 'self' data:",
-        "connect-src 'self'",
+        f"connect-src 'self' {API}",
         f"form-action 'self' {FORM_POST}",
         "frame-ancestors 'none'",
         "base-uri 'self'",

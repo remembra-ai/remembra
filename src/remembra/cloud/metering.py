@@ -41,7 +41,7 @@ from remembra.cloud.plans import (
     get_plan,
 )
 from remembra.config import get_settings
-from remembra.storage.database import RELAY_RECORD_SQL
+from remembra.storage.database import FOUNDING_HOLDS_DDL, RELAY_RECORD_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,22 @@ EMBEDDING_CHARS_PER_TOKEN = 4
 _POOLED_MIN_USERS = 2
 
 _LEGACY_MIGRATION = "2026_09_plans_v2_legacy_tiers"
+_FOUNDING_LAPSE_MIGRATION = "2026_09_founding_lapse_holds"
+# A Founding 100 checkout keeps its seat this long while the buyer pays.
+FOUNDING_CHECKOUT_HOLD = timedelta(hours=2)
+# A founder whose subscription ends keeps the seat (and the price) this long.
+FOUNDING_LAPSE_GRACE = timedelta(days=14)
+
+
+@dataclass(frozen=True)
+class FoundingSeatHold:
+    """A Founding seat held for one checkout, and the ``founding_holds`` row it replaced (kind, until, txn, created)."""
+
+    user_id: str
+    until: str
+    prior: tuple[str, str, str | None, str] | None
+
+
 # cloud_tenants.signup_source for tenants created by POST /api/v1/cloud/signup.
 TENANT_SIGNUP_SOURCE = "cloud_signup"
 
@@ -151,6 +167,9 @@ class AccountState:
     # The requesting user when it is a team member billed to ``user_id`` (the owner).
     member_user_id: str | None = None
     created_at: datetime | None = None
+    # Yearly bank held back (R-27): the whole year's credits and when they unlock.
+    full_credit_limit: int | None = None
+    bank_unlock_at: datetime | None = None
 
     @property
     def pool(self) -> tuple[str, ...]:
@@ -288,8 +307,15 @@ class UsageMeter:
         for column in ("relay_events", "credits_used", "degraded_stores", "unenriched_writes"):
             await self._add_column("cloud_usage_daily", f"{column} INTEGER DEFAULT 0")
         await self._add_column("cloud_usage_daily", "llm_usd REAL DEFAULT 0")
+        # R-27: when a new yearly bank unlocks in full (NULL = no hold).
+        await self._add_column("cloud_tenants", "bank_unlock_at TEXT")
+        # Also created by the versioned migrations; kept here for databases that
+        # only run the metering schema.
+        await self._db.conn.executescript(FOUNDING_HOLDS_DDL)
+        await self._db.conn.commit()
 
         await self._migrate_legacy_tiers()
+        await self._migrate_founding_lapses()
 
     async def _migrate_legacy_tiers(self) -> None:
         """One time: existing $49 Pro / $199 Team subscribers become the grandfathered tiers.
@@ -326,6 +352,35 @@ class UsageMeter:
         except Exception:
             logger.info("cloud_legacy_team_plan_sync_skipped (no teams table)")
         logger.info("cloud_legacy_tier_migration_applied")
+
+    async def _migrate_founding_lapses(self) -> None:
+        """One time: founders already back on Free stop holding the price and get the lapse grace.
+
+        Before R-26 ``founding`` was sticky, so a founder who cancelled kept a
+        seat forever. From now on ``founding = 1`` means "holds the price
+        today"; a lapsed founder keeps the seat for 14 days from their last
+        change and can resubscribe at $108 until then.
+        """
+        cursor = await self._db.conn.execute("SELECT 1 FROM cloud_migrations WHERE name = ?", (_FOUNDING_LAPSE_MIGRATION,))
+        if await cursor.fetchone():
+            return
+        now = now_utc()
+        async with self._tx():
+            cursor = await self._db.conn.execute(
+                "SELECT user_id, updated_at FROM cloud_tenants WHERE founding = 1 AND plan = ?", (PlanTier.FREE.value,)
+            )
+            for user_id, updated_at in await cursor.fetchall():
+                since = _parse_dt(updated_at) or now
+                await self._db.conn.execute(
+                    "INSERT OR REPLACE INTO founding_holds (user_id, kind, until, created_at) VALUES (?, 'lapsed', ?, ?)",
+                    (user_id, (since + FOUNDING_LAPSE_GRACE).isoformat(), now.isoformat()),
+                )
+            await self._db.conn.execute(
+                "UPDATE cloud_tenants SET founding = 0 WHERE founding = 1 AND plan = ?", (PlanTier.FREE.value,)
+            )
+            await self._db.conn.execute(
+                "INSERT INTO cloud_migrations (name, applied_at) VALUES (?, ?)", (_FOUNDING_LAPSE_MIGRATION, now.isoformat())
+            )
 
     # -----------------------------------------------------------------------
     # Tenant management
@@ -373,11 +428,15 @@ class UsageMeter:
         subscription_id: str | None = None,
         email: str | None = None,
         name: str | None = None,
+        bank_unlock_at: datetime | None = None,
     ) -> None:
         """Apply a verified billing event: plan, interval, seats, yearly-bank anchor.
 
-        ``founding`` is sticky (a redemption record for the Founding 100 cap).
-        Falling back to Free clears the interval and seat count.
+        ``founding`` marks the account as holding the Founding 100 price (use
+        :meth:`claim_founding`, which enforces the cap). ``bank_unlock_at``
+        holds a NEW yearly bank back until then (R-27); renewals leave it.
+        Falling back to Free clears the interval, the seat count and the bank
+        hold, and a founder's seat becomes a 14-day lapse hold.
         """
         await self.register_tenant(
             user_id,
@@ -389,11 +448,13 @@ class UsageMeter:
         )
         now = now_utc()
         if plan == PlanTier.FREE:
-            await self._db.conn.execute(
-                "UPDATE cloud_tenants SET billing_interval = NULL, seats = NULL, period_anchor = NULL,"
-                " updated_at = ? WHERE user_id = ?",
-                (now.isoformat(), user_id),
-            )
+            async with self._tx():
+                await self.end_founding(user_id)
+                await self._db.conn.execute(
+                    "UPDATE cloud_tenants SET billing_interval = NULL, seats = NULL, period_anchor = NULL,"
+                    " bank_unlock_at = NULL, updated_at = ? WHERE user_id = ?",
+                    (now.isoformat(), user_id),
+                )
         else:
             tenant = await self.get_tenant(user_id) or {}
             anchor = period_anchor
@@ -407,6 +468,7 @@ class UsageMeter:
                     seats = COALESCE(?, seats),
                     period_anchor = ?,
                     founding = CASE WHEN ? THEN 1 ELSE COALESCE(founding, 0) END,
+                    bank_unlock_at = COALESCE(?, bank_unlock_at),
                     updated_at = ?
                 WHERE user_id = ?
                 """,
@@ -415,6 +477,7 @@ class UsageMeter:
                     seats,
                     anchor.isoformat() if anchor else tenant.get("period_anchor"),
                     1 if founding else 0,
+                    bank_unlock_at.isoformat() if bank_unlock_at else None,
                     now.isoformat(),
                     user_id,
                 ),
@@ -422,7 +485,7 @@ class UsageMeter:
         await self._db.conn.commit()
 
     async def founding_redemptions(self) -> int:
-        """Accounts that ever bought the Founding 100 price."""
+        """Accounts holding the Founding 100 price right now."""
         cursor = await self._db.conn.execute("SELECT COUNT(*) FROM cloud_tenants WHERE founding = 1")
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
@@ -596,10 +659,19 @@ class UsageMeter:
         interval = BillingInterval.MONTH
         if paid and tenant and tenant.get("billing_interval") == BillingInterval.YEAR.value:
             interval = BillingInterval.YEAR
+        full_credit_limit: int | None = None
+        bank_unlock_at: datetime | None = None
         if interval == BillingInterval.YEAR:
             anchor = _parse_dt((tenant or {}).get("period_anchor")) or _parse_dt((tenant or {}).get("created_at")) or now
             period = CreditPeriod.yearly(now, anchor)
             released = min(12, int(settings.annual_credit_upfront_months) + _months_elapsed(period.start, now))
+            full_credit_limit = limits.credit_allowance(interval, released)
+            unlock = _parse_dt((tenant or {}).get("bank_unlock_at"))
+            if unlock is not None and now < unlock and period.start <= unlock <= period.end:
+                # A new yearly bank: until the refund window closes only a
+                # month's worth is spendable (R-27), then the rest unlocks.
+                bank_unlock_at = unlock
+                released = min(released, int(settings.annual_credit_initial_months))
             credit_limit = limits.credit_allowance(interval, released)
         else:
             period = CreditPeriod.monthly(now)
@@ -627,6 +699,8 @@ class UsageMeter:
             memory_cap=limits.memory_cap(now, settings.memory_cap_notice_effective_at),
             pool_user_ids=pool,
             created_at=created_at,
+            full_credit_limit=full_credit_limit,
+            bank_unlock_at=bank_unlock_at,
         )
 
     @staticmethod
@@ -1063,28 +1137,124 @@ class UsageMeter:
     # Founding 100 and billing flags
     # -----------------------------------------------------------------------
 
-    async def claim_founding(self, user_id: str) -> bool:
-        """Mark ``user_id`` as a Founding 100 holder if a seat is left (atomic). True if it holds one.
+    async def _founding_seats_taken(self, now: datetime, *, excluding: str | None = None) -> int:
+        """Seats in use: founders holding the price plus live holds (checkouts in progress, recent lapses)."""
+        cursor = await self._db.conn.execute(
+            """
+            SELECT (SELECT COUNT(*) FROM cloud_tenants WHERE founding = 1)
+                 + (SELECT COUNT(*) FROM founding_holds h
+                    WHERE h.until > ? AND h.user_id != ?
+                      AND NOT EXISTS (SELECT 1 FROM cloud_tenants t WHERE t.user_id = h.user_id AND t.founding = 1))
+            """,
+            (now.isoformat(), excluding or ""),
+        )
+        row = await cursor.fetchone()
+        return int(row[0]) if row else 0
 
-        An account that already holds the founding price keeps it (renewals).
-        The count check and the flag are one UPDATE, so concurrent webhooks
-        cannot pass the cap.
+    async def founding_seats_taken(self) -> int:
+        """Founding 100 seats in use now (holders, open checkouts and founders inside the 14-day lapse grace)."""
+        return await self._founding_seats_taken(now_utc())
+
+    async def end_founding(self, user_id: str) -> None:
+        """The account stops holding the Founding price; its seat stays held 14 days (the lapse grace)."""
+        now = now_utc()
+        async with self._tx():
+            cursor = await self._db.conn.execute("SELECT COALESCE(founding, 0) FROM cloud_tenants WHERE user_id = ?", (user_id,))
+            row = await cursor.fetchone()
+            if not (row and row[0]):
+                return
+            await self._db.conn.execute(
+                "INSERT OR REPLACE INTO founding_holds (user_id, kind, until, created_at) VALUES (?, 'lapsed', ?, ?)",
+                (user_id, (now + FOUNDING_LAPSE_GRACE).isoformat(), now.isoformat()),
+            )
+            await self._db.conn.execute(
+                "UPDATE cloud_tenants SET founding = 0, updated_at = ? WHERE user_id = ?", (now.isoformat(), user_id)
+            )
+
+    async def hold_founding_seat(self, user_id: str) -> FoundingSeatHold | None:
+        """Reserve a Founding 100 seat for a checkout (atomic). None when all 100 are taken.
+
+        Checkouts in progress count against the cap, so the 101st buyer is
+        refused before paying instead of after. A founder inside the 14-day
+        lapse grace already holds a seat and may buy the price back. The
+        returned hold remembers the row it replaced, so a checkout that cannot
+        be created gives it back (:meth:`release_founding_hold`).
         """
-        tenant = await self.get_tenant(user_id)
-        if tenant is None:
-            return False
-        if tenant.get("founding"):
-            return True
+        now = now_utc()
         async with self._tx():
             cursor = await self._db.conn.execute(
-                """
-                UPDATE cloud_tenants SET founding = 1, updated_at = ?
-                WHERE user_id = ? AND COALESCE(founding, 0) = 0
-                  AND (SELECT COUNT(*) FROM cloud_tenants WHERE founding = 1) < ?
-                """,
-                (now_utc().isoformat(), user_id, FOUNDING_MAX_REDEMPTIONS),
+                "SELECT kind, until, transaction_id, created_at FROM founding_holds WHERE user_id = ?", (user_id,)
             )
-            return bool(cursor.rowcount)
+            existing = await cursor.fetchone()
+            until = now + FOUNDING_CHECKOUT_HOLD
+            live = existing is not None and (_parse_dt(existing[1]) or now) > now
+            if not live and await self._founding_seats_taken(now, excluding=user_id) >= FOUNDING_MAX_REDEMPTIONS:
+                return None
+            if live and existing is not None:
+                until = max(until, _parse_dt(existing[1]) or until)
+            await self._db.conn.execute(
+                """
+                INSERT INTO founding_holds (user_id, kind, until, created_at) VALUES (?, 'pending', ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET kind = 'pending', until = excluded.until
+                """,
+                (user_id, until.isoformat(), now.isoformat()),
+            )
+        prior = (str(existing[0]), str(existing[1]), existing[2], str(existing[3])) if existing is not None else None
+        return FoundingSeatHold(user_id=user_id, until=until.isoformat(), prior=prior)
+
+    async def set_founding_hold_transaction(self, user_id: str, transaction_id: str) -> None:
+        await self._db.conn.execute(
+            "UPDATE founding_holds SET transaction_id = ? WHERE user_id = ? AND kind = 'pending'", (transaction_id, user_id)
+        )
+        await self._db.conn.commit()
+
+    async def release_founding_hold(self, hold: FoundingSeatHold) -> None:
+        """Undo ``hold`` because its checkout will not be paid (the Paddle transaction could not be created).
+
+        The row it replaced comes back: a lapsed founder keeps the 14-day
+        grace and an earlier open checkout keeps its hold. A hold this request
+        did not set (a later checkout replaced it, or a payment claimed the
+        seat) is left alone.
+        """
+        async with self._tx():
+            if hold.prior is None:
+                await self._db.conn.execute(
+                    "DELETE FROM founding_holds WHERE user_id = ? AND kind = 'pending' AND until = ?",
+                    (hold.user_id, hold.until),
+                )
+            else:
+                kind, until, transaction_id, created_at = hold.prior
+                await self._db.conn.execute(
+                    "UPDATE founding_holds SET kind = ?, until = ?, transaction_id = ?, created_at = ?"
+                    " WHERE user_id = ? AND kind = 'pending' AND until = ?",
+                    (kind, until, transaction_id, created_at, hold.user_id, hold.until),
+                )
+
+    async def claim_founding(self, user_id: str) -> bool:
+        """Mark ``user_id`` as holding the Founding 100 price if it has a seat (atomic). True if it holds one.
+
+        A holder keeps it (renewals). The account's own live hold (a checkout
+        it started, or its 14-day lapse grace) is converted; otherwise a free
+        seat is taken only while fewer than 100 are in use. The count and the
+        flag change in one transaction, so concurrent webhooks cannot pass the cap.
+        """
+        now = now_utc()
+        async with self._tx():
+            tenant = await self.get_tenant(user_id)
+            if tenant is None:
+                return False
+            if tenant.get("founding"):
+                return True
+            cursor = await self._db.conn.execute("SELECT until FROM founding_holds WHERE user_id = ?", (user_id,))
+            hold = await cursor.fetchone()
+            held = hold is not None and (_parse_dt(hold[0]) or now) > now
+            if not held and await self._founding_seats_taken(now, excluding=user_id) >= FOUNDING_MAX_REDEMPTIONS:
+                return False
+            await self._db.conn.execute(
+                "UPDATE cloud_tenants SET founding = 1, updated_at = ? WHERE user_id = ?", (now.isoformat(), user_id)
+            )
+            await self._db.conn.execute("DELETE FROM founding_holds WHERE user_id = ?", (user_id,))
+        return True
 
     async def set_billing_flag(self, user_id: str, flag: str | None) -> None:
         await self._db.conn.execute(
@@ -1092,6 +1262,22 @@ class UsageMeter:
             (flag, now_utc().isoformat(), user_id),
         )
         await self._db.conn.commit()
+
+    async def list_billing_flags(self) -> list[dict[str, Any]]:
+        """Every account with a billing flag the owner has not cleared, most recent first."""
+        columns = (
+            "t.user_id, {email} AS email, t.plan, t.billing_flag, t.billing_interval, t.seats,"
+            " COALESCE(t.founding, 0) AS founding, t.stripe_customer_id, t.stripe_subscription_id, t.updated_at"
+        )
+        where = "WHERE t.billing_flag IS NOT NULL AND t.billing_flag != '' ORDER BY t.updated_at DESC"
+        try:
+            cursor = await self._db.conn.execute(
+                f"SELECT {columns.format(email='COALESCE(u.email, t.email)')}"
+                f" FROM cloud_tenants t LEFT JOIN users u ON u.id = t.user_id {where}"
+            )
+        except Exception:  # no users table in minimal deployments
+            cursor = await self._db.conn.execute(f"SELECT {columns.format(email='t.email')} FROM cloud_tenants t {where}")
+        return [dict(row) for row in await cursor.fetchall()]
 
     @staticmethod
     def active_subscription_id(tenant: dict[str, Any] | None) -> str | None:
@@ -1107,6 +1293,14 @@ class UsageMeter:
         if not held or str(tenant.get("plan") or PlanTier.FREE.value) == PlanTier.FREE.value:
             return None
         return str(held)
+
+    async def tenants_for_billing(self, *, subscription_id: str | None = None, customer_id: str | None = None) -> list[str]:
+        """Every account recording this Paddle subscription id, or this customer id (one payer can pay for several)."""
+        column, value = ("stripe_subscription_id", subscription_id) if subscription_id else ("stripe_customer_id", customer_id)
+        if not value:
+            return []
+        cursor = await self._db.conn.execute(f"SELECT user_id FROM cloud_tenants WHERE {column} = ?", (value,))
+        return [str(row[0]) for row in await cursor.fetchall()]
 
     async def find_tenant_by_billing_ids(self, *, subscription_id: str | None, customer_id: str | None) -> str | None:
         """The user id holding a Paddle subscription (preferred) or customer id."""

@@ -425,6 +425,17 @@ def test_csp_is_up_to_date_and_the_pages_need_nothing_it_forbids() -> None:
     wanted = {csp.script_hash(body) for page in csp.served_pages() for body in csp.scan(page).inline}
     assert set(re.findall(r"'sha256-[^']+'", script_src.group(1))) == wanted
     assert len(wanted) >= 4  # theme bootstrap, pricing toggle, contact, crew, home
+    # Every host a page script fetches from is allowed by connect-src (pricing.html: Founding seats left).
+    connect_src = re.search(r"connect-src ([^;]+)", policy)
+    assert connect_src is not None
+    fetched = {
+        m.group(1)
+        for page in csp.served_pages()
+        for body in csp.scan(page).inline
+        for m in re.finditer(r"fetch\(\s*[\"'](https://[^/\"']+)", body)
+    }
+    assert "https://api.remembra.dev" in fetched
+    assert fetched <= set(connect_src.group(1).split())
 
 
 def test_csp_hash_is_the_browser_hash_of_the_exact_script_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

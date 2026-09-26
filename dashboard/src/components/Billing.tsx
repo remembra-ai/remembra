@@ -15,7 +15,17 @@ import {
   type UsageSummaryResponse,
 } from '../lib/api';
 import { checkoutRoute, planRowAction } from '../lib/checkout';
-import { clampSeats, creditsView, formatUsd, handoffsNote, parseSeatDraft, planLine, resetLabel } from '../lib/credits';
+import {
+  BANK_UNLOCK_RULE,
+  bankUnlockLabel,
+  clampSeats,
+  creditsView,
+  formatUsd,
+  handoffsNote,
+  parseSeatDraft,
+  planLine,
+  resetLabel,
+} from '../lib/credits';
 import { useResource } from '../hooks/useResource';
 import { Card, CardHeader, ErrorNotice, Pill, Skeleton } from './relay/ui';
 import { DegradedNotice, PixelMeter } from './credits/Credits';
@@ -136,6 +146,11 @@ function PeriodCard({ summary, onPortal, portalBusy }: { summary: UsageSummaryRe
         </p>
         <PixelMeter summary={summary} cells={64} className="mt-3" />
         <Legend />
+        {bankUnlockLabel(summary) && (
+          <p className="mt-3 text-sm text-ink-2">
+            <span className="font-semibold text-ink">{bankUnlockLabel(summary)}</span> {BANK_UNLOCK_RULE}
+          </p>
+        )}
         {summary.credits.unverified_cap_applied && (
           <p className="mt-3 text-sm text-signal-ink">
             Free credits are held at a starter amount until you verify your email. Verify it from the link we sent to unlock the full
@@ -206,7 +221,8 @@ function HowCreditsWork() {
         <div>
           <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">Monthly or yearly</p>
           <p className="mt-1 text-sm text-ink-2">
-            Monthly plans get the allowance each month. Yearly plans bank the whole year up front, so a busy month can draw on later ones.
+            Monthly plans get the allowance each month. Yearly plans put the whole year in one bank, so a busy month can draw on later
+            ones. {BANK_UNLOCK_RULE}
           </p>
         </div>
       </div>

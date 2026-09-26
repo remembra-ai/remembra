@@ -132,7 +132,7 @@
         <li><strong>The metadata database is not field-encrypted.</strong> Encryption at rest covers the vector store; the database that holds account records and a second copy of your notes does not have field-level encryption yet. One encryption key protects the vector store, and it is not rotated yet.</li>
         <li><strong>API keys don't expire.</strong> You revoke them yourself. An agent-scoped key fixes who a handoff is from, but it can read everything the account can; limit reads with project-scoped keys.</li>
         <li><strong>No SSO or SAML</strong> for the dashboard.</li>
-        <li><strong>Account erasure is manual.</strong> Deleting an account in the dashboard deactivates it and revokes its keys; erasing the stored data is done by us on request, within 30 days (see <a href="#retention">retention</a>).</li>
+        <li><strong>Backups are not edited when an account is erased.</strong> A deleted account is erased automatically 7 days later; the copies of it in backups age out instead (see <a href="#retention">retention</a>).</li>
       </ul>
 
       <h2 id="roadmap">Roadmap</h2>
@@ -140,7 +140,7 @@
       <table>
         <thead><tr><th>What</th><th>When</th></tr></thead>
         <tbody>
-          <tr><td>Automated, complete account erasure, including backups</td><td>Q4 2026</td></tr>
+          <tr><td>Account erasure that also reaches backups (today backup copies age out)</td><td>Q4 2026</td></tr>
           <tr><td>Key expiry, key rotation, and read limits for agent-scoped keys</td><td>Q1 2027</td></tr>
           <tr><td>Field-level encryption for the metadata database, with key rotation</td><td>Q1 2027</td></tr>
           <tr><td>SSO (SAML and OIDC) for Team plans</td><td>Q2 2027</td></tr>
@@ -153,7 +153,7 @@
       <ul>
         <li><strong>Handoffs and structured checkpoints never expire.</strong> They stay on your trail until you delete them or your account is erased. Free-text checkpoints expire after 7 days by default.</li>
         <li><strong>Notes and memories</strong> are kept while your account is open, unless you set an expiry on them.</li>
-        <li><strong>Account erasure</strong> is done on request today: email <a href="mailto:admin@dolphytech.com">admin@dolphytech.com</a> from the account's address and we erase it within 30 days. The <a href="/privacy#retention">privacy policy</a> has the rest.</li>
+        <li><strong>Deleting your account</strong> cancels any subscription at once, with no further charges, and ends every session. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it. Backups are not edited; the copies in them age out: the continuous backup keeps 24 hours of history, and the database copy taken before each deploy is kept only until 3 newer deploys replace it. The <a href="/privacy#retention">privacy policy</a> has the rest.</li>
         <li><strong>Export</strong> your memories whenever you want, through the API.</li>
         <li><strong>No training on your data:</strong> we never use what you store to train AI models, and OpenAI, which embeds and enriches it, does not train on API data under its terms.</li>
       </ul>

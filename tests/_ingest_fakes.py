@@ -94,6 +94,15 @@ class MemQdrant:
         del self.points[memory_id]
         return True
 
+    async def delete_by_user(self, user_id: str) -> int:
+        doomed = [pid for pid, point in self.points.items() if point["payload"]["user_id"] == user_id]
+        for pid in doomed:
+            del self.points[pid]
+        return len(doomed)
+
+    async def delete_by_user_everywhere(self, user_id: str, also: Any = ()) -> int:
+        return await self.delete_by_user(user_id)  # one collection, no rollback copies
+
     async def get_by_id(self, memory_id: str) -> dict[str, Any] | None:
         point = self.points.get(memory_id)
         return None if point is None else {"id": memory_id, **point["payload"]}

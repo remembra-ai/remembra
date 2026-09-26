@@ -24,6 +24,7 @@ from remembra.cloud.billing_paddle import checkout_binding
 from remembra.cloud.plans import CREDIT_USD, RESERVE_CREDITS_PER_CHUNK, BillingInterval, PlanTier
 from remembra.core import ai_spend
 from remembra.core.tasks import TaskRegistry, get_task_registry, set_task_registry
+from tests import _paddle_mock
 from tests._cost_harness import USD_PER_CALL, cost_app
 
 ENRICH = "X-Remembra-Enrichment"
@@ -299,7 +300,7 @@ async def test_unknown_price_with_custom_data_plan_is_ignored(tmp_path, custom: 
 # ---------------------------------------------------------------------------
 
 
-async def test_founding_webhook_past_the_cap_grants_plain_solo_annual_and_flags_a_refund(tmp_path) -> None:
+async def test_founding_webhook_past_the_cap_grants_plain_solo_annual_and_flags_it(tmp_path) -> None:
     async with cost_app(tmp_path) as c:
         _paddle(c, **PRICES)
         now = datetime.now(UTC).isoformat()
@@ -322,7 +323,7 @@ async def test_founding_webhook_past_the_cap_grants_plain_solo_annual_and_flags_
         assert await c.meter.founding_redemptions() == 100
         account = await c.meter.get_account(uid)
         assert (account.tier, account.interval, account.founding) == (PlanTier.SOLO, BillingInterval.YEAR, False)
-        assert (await c.meter.get_tenant(uid))["billing_flag"] == "founding_over_cap_refund_due"
+        assert (await c.meter.get_tenant(uid))["billing_flag"] == "founding_over_cap"
 
         # A holder's renewal keeps the founding price.
         holder = await c.h.create_user("holder@example.com")
@@ -697,7 +698,9 @@ async def test_refund_and_chargeback_end_the_plan_and_reduce_revenue(tmp_path, m
             },
         }
         await _webhook(c, purchase)
-        assert (await c.meter.get_account(uid)).credit_limit == 26_400
+        # A new yearly bank: one month's credits until the 14-day refund window closes (R-27).
+        account = await c.meter.get_account(uid)
+        assert (account.credit_limit, account.full_credit_limit) == (2_200, 26_400)
         assert await c.meter.revenue_for_month("2026-09") == pytest.approx(105.0)
 
         def adjustment(adj_id: str, action: str, status: str, kind: str, earnings: str) -> dict:
@@ -808,7 +811,12 @@ async def test_refund_whose_cancel_fails_is_flagged_and_alerted(tmp_path, monkey
         assert (await c.meter.get_tenant(uid))["billing_flag"] == "refund_downgraded_cancel_failed"
         assert [(m, e) for m, e, _ in calls] == [("POST", "/subscriptions/sub_b/cancel"), ("GET", "/subscriptions/sub_b")]
         assert [a["event"] for a in alerts.sent] == ["paddle_refund_cancel_failed:sub_b"]
-        assert alerts.sent[0]["details"] == {"user_id": uid, "subscription_id": "sub_b"}
+        assert alerts.sent[0]["details"] == {
+            "user_id": uid,
+            "flag": "refund_downgraded_cancel_failed",
+            "subscription_id": "sub_b",
+            "adjustment_id": "adj:adj_b",
+        }
 
 
 async def test_refund_without_a_subscription_id_cancels_the_one_the_account_holds(tmp_path, monkeypatch) -> None:
@@ -926,43 +934,52 @@ async def _delete_me(c: Any, uid: str, email: str, password: str = PASSWORD) -> 
     return await c.h.client.request("DELETE", "/api/v1/auth/me", json={"password": password}, headers=c.h.jwt(uid, email))
 
 
-async def test_deleting_an_account_cancels_its_paddle_subscription_at_period_end(tmp_path, monkeypatch) -> None:
-    """A deactivated account cannot sign in to Billing to cancel, so the delete cancels it (no further charge)."""
-    calls = _fake_paddle_api(monkeypatch)
+async def test_deleting_an_account_cancels_its_paddle_subscription_first(tmp_path, monkeypatch) -> None:
+    """A deleted account cannot sign in to Billing to cancel, so the delete cancels it (no further charge).
+
+    Since w2/account (R-11) the cancel is immediate: the account is erased 7 days later.
+    """
+    paddle = _paddle_mock.install(monkeypatch)
     async with cost_app(tmp_path) as c:
         _paddle(c, **PRICES)
         uid = await _refundable_solo(c, "leaving@example.com", "sub_leave")
+        paddle.add_subscription("sub_leave", "ctm_sub_leave")
         wrong = await _delete_me(c, uid, "leaving@example.com", password="not-the-password")
-        assert wrong.status_code == 400 and calls == []  # nothing is cancelled before the password checks out
+        assert wrong.status_code == 400 and paddle.calls == []  # nothing is cancelled before the password checks out
 
         r = await _delete_me(c, uid, "leaving@example.com")
         assert r.status_code == 200, r.text
-        assert calls == [("POST", "/subscriptions/sub_leave/cancel", {"effective_from": "next_billing_period"})]
+        [cancel] = paddle.requests("POST", "/subscriptions/sub_leave/cancel")
+        assert cancel[3] == {"effective_from": "immediately"}
+        assert paddle.subscriptions["sub_leave"]["status"] == "canceled"
         assert not (await c.h.db.get_user_by_id(uid))["is_active"]
 
 
 async def test_an_account_whose_subscription_cannot_be_cancelled_is_not_deleted(tmp_path, monkeypatch) -> None:
-    calls = _fake_paddle_api(monkeypatch, cancel_error=500, status="active")
+    paddle = _paddle_mock.install(monkeypatch)
     async with cost_app(tmp_path) as c:
         _paddle(c, **PRICES)
         uid = await _refundable_solo(c, "stuck@example.com", "sub_stuck")
+        paddle.add_subscription("sub_stuck", "ctm_sub_stuck")
+        paddle.failures["POST /subscriptions/sub_stuck/cancel"] = 500
         r = await _delete_me(c, uid, "stuck@example.com")
-        assert r.status_code == 400
-        assert "subscription could not be cancelled" in r.json()["detail"] and "Manage subscription" in r.json()["detail"]
-        assert [(m, e) for m, e, _ in calls] == [("POST", "/subscriptions/sub_stuck/cancel"), ("GET", "/subscriptions/sub_stuck")]
+        assert r.status_code == 502, r.text
+        assert "not deleted" in r.json()["detail"]
+        assert paddle.subscriptions["sub_stuck"]["status"] == "active"
         assert (await c.h.db.get_user_by_id(uid))["is_active"]  # still there: Billing is still reachable
         me = await c.h.client.get("/api/v1/auth/me", headers=c.h.jwt(uid, "stuck@example.com"))
         assert me.status_code == 200
 
 
 async def test_deleting_an_account_whose_subscription_is_already_cancelled_goes_ahead(tmp_path, monkeypatch) -> None:
-    calls = _fake_paddle_api(monkeypatch, cancel_error=400, status="canceled")
+    paddle = _paddle_mock.install(monkeypatch)
     async with cost_app(tmp_path) as c:
         _paddle(c, **PRICES)
         uid = await _refundable_solo(c, "cancelled@example.com", "sub_done")
+        paddle.add_subscription("sub_done", "ctm_sub_done", status="canceled")
         r = await _delete_me(c, uid, "cancelled@example.com")
         assert r.status_code == 200, r.text
-        assert [(m, e) for m, e, _ in calls] == [("POST", "/subscriptions/sub_done/cancel"), ("GET", "/subscriptions/sub_done")]
+        assert paddle.subscriptions["sub_done"]["status"] == "canceled"
         assert not (await c.h.db.get_user_by_id(uid))["is_active"]
 
 

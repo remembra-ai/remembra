@@ -89,3 +89,36 @@ def make_httpx_response(json_data: dict, status_code: int = 200):
     resp.json.return_value = json_data
     resp.raise_for_status = MagicMock()
     return resp
+
+
+# ---------------------------------------------------------------------------
+# No test reaches the real Paddle API
+# ---------------------------------------------------------------------------
+
+
+def _refuse_paddle(request):  # noqa: ANN001 - httpx.Request
+    import httpx
+
+    raise httpx.ConnectError(f"the Paddle API is not reachable from tests ({request.method} {request.url.path})", request=request)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_paddle_api(request, monkeypatch):
+    """Every Paddle API call goes through ``billing_paddle.http_client_factory``.
+
+    Unless a test installs a fake (tests/_paddle_mock.py, or a patched
+    ``PaddleBillingManager._request``), the call fails like an unreachable
+    network instead of going out to api.paddle.com / sandbox-api.paddle.com.
+    Only the opt-in ``integration`` tests keep the real client.
+    """
+    if request.node.get_closest_marker("integration"):
+        yield
+        return
+    import httpx
+
+    from remembra.cloud import billing_paddle
+
+    monkeypatch.setattr(
+        billing_paddle, "http_client_factory", lambda: httpx.AsyncClient(transport=httpx.MockTransport(_refuse_paddle))
+    )
+    yield
