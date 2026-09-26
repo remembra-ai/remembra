@@ -746,7 +746,7 @@ class CrewSessions:
             rejoined = row is not None
             if row is None:
                 resume_row = await self._check_resume_of(tx, crew_id, user_id, req)
-                await self._check_parent(tx, crew_id, user_id, req)
+                await self._check_parent(tx, crew_id, user_id, req, session_token)
                 token = new_session_token()
                 row = await self._insert_session(tx, crew_id, user_id, req, host, token, now_s)
                 if host is not None:
@@ -810,8 +810,14 @@ class CrewSessions:
             raise _conflict("resume_of_live", "The session to resume is still active; end it before resuming it elsewhere.")
         return prior
 
-    async def _check_parent(self, tx: EventTx, crew_id: str, user_id: str, req: JoinRequest) -> None:
-        """A sub-agent's session names the live session of the same account, in the same crew, that started it."""
+    async def _check_parent(self, tx: EventTx, crew_id: str, user_id: str, req: JoinRequest, session_token: str | None) -> None:
+        """A sub-agent's session names the live session of the same account, in the same crew, that started it.
+
+        The link has to be proven, because the parent answers for the sub-agent (its claims show
+        in the parent's YOU line, its events name the parent): the join carries the parent's
+        current session token (``X-Remembra-Crew-Session``), or it is made with the parent's own
+        verified agent key (the same key-bound agent). The parent must be live: not ended, not lost.
+        """
         if not req.parent_session_id:
             return
         parent = await get_session(tx.conn, req.parent_session_id)
@@ -821,6 +827,15 @@ class CrewSessions:
             raise SessionError(422, "parent_session_mismatch", "parent_session_id must name a session of the same account.")
         if parent["state"] == "ended":
             raise _conflict("parent_session_ended", "The parent session has ended; a sub-agent joins while it is live.")
+        if parent["state"] not in LIVE_STATES:
+            raise _conflict("parent_session_not_live", "The parent session is not live; a sub-agent joins while it is live.")
+        same_agent_key = bool(req.agent_verified and parent.get("agent_verified") and parent.get("agent_id") == req.agent_id)
+        if not (same_agent_key or tokens_match(session_token, parent.get("token_hash"))):
+            raise SessionError(
+                403,
+                "parent_session_unproven",
+                "A sub-agent joins with its parent's session token (X-Remembra-Crew-Session) or the parent's own agent key.",
+            )
 
     async def _allocate_callsign(self, conn: aiosqlite.Connection, crew_id: str, agent_id: str, now: datetime) -> str:
         prefix = callsign_prefix(agent_id)

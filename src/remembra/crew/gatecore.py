@@ -5336,6 +5336,29 @@ def turn_digest(
     return hashlib.sha256(S.canonical_json(body)).hexdigest()[:32]
 
 
+# A path glob as the YOU line may show it: repo-relative glob characters only, no spaces.
+_YOU_GLOB_RE: Final = re.compile(r"[A-Za-z0-9._/*?{}\[\],!@+=-]{1,64}")
+
+
+def _you_claim_label(idx: SnapshotIndex, claim: Mapping[str, Any], *, own: bool) -> str:
+    """How a claim reads in the YOU line, which is server-template text outside the data block.
+
+    A zone is its slug and a resource its checked ``kind:name``. A path claim's glob is free
+    text another session wrote (``check_glob`` allows spaces and prose), so a sub-agent's is
+    never shown ("a path claim"), and the caller's own only when it is a plain glob.
+    """
+    z = idx.zones.by_id.get(str(claim.get("zone_id") or ""))
+    if z:
+        return f"zone {_safe_token(str(z.get('slug') or ''))}"
+    resource = str(claim.get("resource") or "")
+    if resource and re.fullmatch(S.RESOURCE_PATTERN, resource):
+        return resource
+    glob = str(claim.get("path_glob") or "")
+    if own and glob and _YOU_GLOB_RE.fullmatch(glob):
+        return glob
+    return "a path claim" if glob else "a claim"
+
+
 def render_you_line(
     snapshot: Mapping[str, Any],
     caller: str,
@@ -5357,8 +5380,7 @@ def render_you_line(
     for c in idx.claims:
         if c.get("holder_session_id") != caller:
             continue
-        z = idx.zones.by_id.get(str(c.get("zone_id") or ""))
-        what = f"zone {z.get('slug')}" if z else str(c.get("resource") or c.get("path_glob") or "claim")
+        what = _you_claim_label(idx, c, own=True)
         if c.get("state") == "reserved":
             state = "reserved for you"
         elif c.get("unconfirmed"):
@@ -5373,8 +5395,7 @@ def render_you_line(
         holder = str(c.get("holder_session_id") or "")
         if not holder or holder == caller or idx.parent_of(holder) != caller:
             continue
-        z = idx.zones.by_id.get(str(c.get("zone_id") or ""))
-        what = f"zone {z.get('slug')}" if z else str(c.get("resource") or c.get("path_glob") or "claim")
+        what = _you_claim_label(idx, c, own=False)
         parts.append(f"{what} (via sub-agent {idx.callsign(holder)})")
     you = " ".join(parts) if parts else "no claims"
     line = f"[crew {project} {clock}] YOU: {you}"

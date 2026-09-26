@@ -44,7 +44,8 @@ release.
 - **MCP crew tools:** `crew_status`, `crew_claim`, `crew_guard`, `crew_task`, `crew_say`, `crew_checkpoint`
   and `crew_report`.
 - **Sub-agents are sessions of their own.** A client joins a sub-agent with `parent_session_id` naming the
-  live session of the same account in the same crew that started it. The sub-agent gets its own callsign,
+  live session of the same account in the same crew that started it, proven by that session's token or the
+  parent's own agent key. The sub-agent gets its own callsign,
   heartbeats, claims, tasks and checkpoints, and the parent stays accountable: the actor of every event the
   sub-agent causes names the parent, the parent may release the sub-agent's claims and block, unblock or
   release its tasks, and a parent that ends takes its live sub-agents with it. The snapshot lists each

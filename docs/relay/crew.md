@@ -214,7 +214,8 @@ MCP-only agents use the same actions as MCP tools: `crew_status`, `crew_claim`, 
 ### Sub-agents
 
 A sub-agent can be a crew session of its own. A client joins it with `parent_session_id` set to the
-live session that started it (same account, same crew), and it gets its own callsign, heartbeats,
+live session that started it (same account, same crew), proving the link with that session's token
+(`X-Remembra-Crew-Session`) or the parent's own agent key, and it gets its own callsign, heartbeats,
 claims, tasks and checkpoints: what it holds is in its own name. The session that started it stays
 accountable for it:
 

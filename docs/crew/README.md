@@ -102,7 +102,10 @@ A sub-agent is its own crew session, not part of the session that started it
 (owner decision on the continuity gap analysis, open question 1). It joins with
 `parent_session_id` naming a live session of the same account in the same crew
 (else 422 `cross_crew_reference` / `parent_session_mismatch`, or 409
-`parent_session_ended`), and optionally `sub_agent_id`. It gets its own
+`parent_session_ended` / `parent_session_not_live` for a lost parent), and
+optionally `sub_agent_id`. The link must be proven: the join carries the
+parent's current session token in `X-Remembra-Crew-Session`, or is made with
+the parent's own verified agent key (else 403 `parent_session_unproven`). It gets its own
 callsign, claims and checkpoints; the session view carries `parent_session_id`,
 `sub_agent_id` and `provider`.
 

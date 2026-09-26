@@ -278,9 +278,7 @@ async def test_legacy_untagged_row_stays_invisible_to_project_keys_after_v5(tmp_
         assert sync_rows(tmp_path / "legacy.db", "SELECT version FROM schema_version ORDER BY version") == [
             (v,) for v, _, _ in main_migrations().migrations
         ]
-        assert sync_rows(tmp_path / "legacy.db", "SELECT project_id FROM agent_inbox WHERE inbox_id = 'i_payroll'") == [
-            (None,)
-        ]
+        assert sync_rows(tmp_path / "legacy.db", "SELECT project_id FROM agent_inbox WHERE inbox_id = 'i_payroll'") == [(None,)]
         inbox = InboxManager(db)  # a fresh process sees the v5 column
         assert await inbox.get_for_agent("u1", "codex", "all", project_ids=["alpha"]) == []
         assert await inbox.get_one("u1", "i_payroll", project_ids=["alpha"]) is None

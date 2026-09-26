@@ -82,7 +82,7 @@ async def test_sub_agent_lifecycle_over_http(tmp_path) -> None:
         res = await h.client.post(
             "/api/v1/crews/join",
             json=_join("p-1:task:1", host_id=reg["host_id"], parent_session_id=parent["session_id"], sub_agent_id="explore"),
-            headers=hk,
+            headers={**hk, HEADER: parent["session_token"]},  # the parent's token proves the link
         )
         assert res.status_code == 201, res.text
         child = res.json()
@@ -169,7 +169,7 @@ async def test_sub_agent_lifecycle_over_http(tmp_path) -> None:
         # a second sub-agent can leave on its own; the parent stays live
         second = (
             await h.client.post(
-                "/api/v1/crews/join", json=_join("p-1:task:2", parent_session_id=pid, sub_agent_id="plan"), headers=k
+                "/api/v1/crews/join", json=_join("p-1:task:2", parent_session_id=pid, sub_agent_id="plan"), headers=ps
             )
         ).json()
         leave = {"reason": "other", "facts": {}, "summary": None, "baton": False}
