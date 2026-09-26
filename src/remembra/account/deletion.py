@@ -45,10 +45,19 @@ class BillingCancelError(RuntimeError):
     in a few minutes may work. Otherwise Paddle refused and a person must look.
     """
 
-    def __init__(self, message: str, *, transient: bool, subscription_id: str | None = None) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        transient: bool,
+        subscription_id: str | None = None,
+        cancelled: list[str] | None = None,
+    ) -> None:
         super().__init__(message)
         self.transient = transient
         self.subscription_id = subscription_id
+        # Subscriptions Paddle had already cancelled before the one that failed (cancels are not undone).
+        self.cancelled = list(cancelled or [])
 
 
 @dataclass
@@ -138,8 +147,23 @@ def _is_transient(error: httpx.HTTPError) -> bool:
     return True  # timeouts, connection errors: Paddle was not reached
 
 
-def _cancel_error(error: httpx.HTTPError, subscription_id: str | None) -> BillingCancelError:
-    if _is_transient(error):
+def _cancel_error(error: httpx.HTTPError, subscription_id: str | None, cancelled: list[str] | None = None) -> BillingCancelError:
+    cancelled = list(cancelled or [])
+    transient = _is_transient(error)
+    if cancelled:
+        # Cancels already made at Paddle stand: "nothing changed" would be false, and the
+        # user must know their paid plan is ending even though the account was kept.
+        done = (
+            "Your subscription was cancelled" if len(cancelled) == 1 else f"{len(cancelled)} of your subscriptions were cancelled"
+        )
+        message = f"{done} and will not charge again, so your paid plan ends now. Your account was not deleted: " + (
+            "we could not confirm the cancellation of another subscription with our billing provider. "
+            "Please try again in a few minutes to finish deleting your account."
+            if transient
+            else "our billing provider did not accept the cancellation of another subscription. We have been "
+            f"alerted and will sort it out; you can also email {SUPPORT_EMAIL}."
+        )
+    elif transient:
         message = (
             "We could not confirm with our billing provider that your subscription is cancelled, so your account "
             "was not deleted. Nothing changed; please try again in a few minutes."
@@ -149,7 +173,7 @@ def _cancel_error(error: httpx.HTTPError, subscription_id: str | None) -> Billin
             "Our billing provider did not accept the cancellation of your subscription, so your account was not "
             f"deleted and nothing changed. We have been alerted and will sort it out; you can also email {SUPPORT_EMAIL}."
         )
-    return BillingCancelError(message, transient=_is_transient(error), subscription_id=subscription_id)
+    return BillingCancelError(message, transient=transient, subscription_id=subscription_id, cancelled=cancelled)
 
 
 async def _other_owner(meter: Any, user_id: str, customer: str, subscription: dict[str, Any]) -> str | None:
@@ -236,13 +260,25 @@ async def cancel_billing(meter: Any | None, user_id: str, *, app_state: Any = No
     except httpx.HTTPError as e:
         status_code = e.response.status_code if isinstance(e, httpx.HTTPStatusError) else None
         log.error("account_deletion_billing_cancel_failed", user_id=user_id, error_type=type(e).__name__, status=status_code)
-        error = _cancel_error(e, current)
+        error = _cancel_error(e, current, outcome.cancelled)
         await notify_owner(
             app_state,
             f"account_deletion_billing_failed:{user_id}",
             "An account deletion was refused because Paddle did not confirm the subscription cancel. "
-            + ("It may clear on a retry." if error.transient else "Paddle refused it: check the subscription in Paddle."),
-            {"user_id": user_id, "subscription_id": current, "paddle_status": status_code, "transient": error.transient},
+            + ("It may clear on a retry." if error.transient else "Paddle refused it: check the subscription in Paddle.")
+            + (
+                f" {len(outcome.cancelled)} subscription(s) of the account WERE cancelled before the failure; "
+                "the account stays active and moves to Free when their cancellation webhooks arrive."
+                if outcome.cancelled
+                else ""
+            ),
+            {
+                "user_id": user_id,
+                "subscription_id": current,
+                "paddle_status": status_code,
+                "transient": error.transient,
+                "cancelled_subscription_ids": list(outcome.cancelled),
+            },
         )
         raise error from e
     if outcome.not_found:
@@ -296,10 +332,64 @@ async def mark_deleted(db: Any, meter: Any | None, user_id: str) -> datetime:
         if tenant is not None and str(tenant.get("plan") or PlanTier.FREE.value) != PlanTier.FREE.value:
             # Billing was cancelled above; the account no longer holds a paid plan.
             await meter.apply_subscription(user_id, PlanTier.FREE)
+        # A Founding checkout still open (2h) or a lapse grace (14 days) would keep a seat from the next buyer.
+        drop = getattr(meter, "drop_founding_holds", None)
+        if drop is not None:
+            await drop(user_id)
     cursor = await db.conn.execute("SELECT deleted_at FROM users WHERE id = ?", (user_id,))
     row = await cursor.fetchone()
     stamp = datetime.fromisoformat(str(row[0])) if row and row[0] else now
     return stamp if stamp.tzinfo else stamp.replace(tzinfo=UTC)
+
+
+async def owned_teams_with_members(db: Any, user_id: str) -> list[dict[str, Any]]:
+    """Teams ``user_id`` owns that have other members: deleting the account ends them for everyone."""
+    try:
+        cursor = await db.conn.execute(
+            """
+            SELECT t.id, t.name,
+                   (SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id AND m.user_id != t.owner_id) AS others
+            FROM teams t WHERE t.owner_id = ? ORDER BY t.name
+            """,
+            (user_id,),
+        )
+        rows = await cursor.fetchall()
+    except Exception:  # no teams table on a minimal deployment
+        return []
+    return [{"id": str(r[0]), "name": str(r[1]), "members": int(r[2])} for r in rows if int(r[2] or 0) > 0]
+
+
+async def _send_account_deleted(to: str, deleted_on: str, erase_after: str, subscriptions_cancelled: int) -> None:
+    from remembra.cloud.email import email_service_or_none
+
+    service = email_service_or_none()
+    if service is None:
+        return
+    await service.send_account_deleted_email(
+        to, deleted_on=deleted_on, erase_after=erase_after, subscriptions_cancelled=subscriptions_cancelled
+    )
+
+
+# Swapped in tests; called with (email, deleted_on, erase_after, subscriptions_cancelled).
+account_deleted_notifier = _send_account_deleted
+
+
+async def notify_account_deleted(
+    app_state: Any, to: str | None, deleted_at: datetime, erase_after: datetime, subscriptions_cancelled: int
+) -> None:
+    """Email the account's address that it is deleted, when it is erased and how to undo (best effort; never raises)."""
+    if not to:
+        return
+    coro = account_deleted_notifier(to, deleted_at.date().isoformat(), erase_after.date().isoformat(), subscriptions_cancelled)
+    tasks = getattr(app_state, "tasks", None)
+    try:
+        if tasks is not None:
+            tasks.spawn(coro, name="email:account_deleted")
+        else:
+            await coro
+    except Exception as e:
+        coro.close()
+        log.warning("account_deleted_email_failed", error_type=type(e).__name__)
 
 
 async def cancel_pending_deletion(db: Any, user_id: str) -> bool:

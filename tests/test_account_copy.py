@@ -49,6 +49,10 @@ def test_deletion_copy_is_the_same_everywhere_and_matches_the_code() -> None:
     assert f"only until {_default('pre_migration_backup_keep')} newer deploys replace it" in DELETION
     entrypoint = (ROOT / "scripts" / "cloud-entrypoint.sh").read_text()
     assert 'RETENTION="${LITESTREAM_RETENTION:-24h}"' in entrypoint and "keeps 24 hours of history" in DELETION
+    # Retention is enforced by an hourly check: a copy can outlive the window by up to that hour.
+    assert "retention-check-interval: 1h" in entrypoint and "within about 25 hours" in DELETION
+    # The undo line says what an undo does not bring back.
+    assert "a cancelled subscription and revoked API keys do not" in DELETION
     # The old promise the code never kept is gone.
     for page in ("terms.html", "privacy.html"):
         assert "delete your data within 30 days" not in _text(LANDING / page)

@@ -472,6 +472,19 @@ class EmailService:
             ),
         )
 
+    async def send_account_deleted_email(
+        self, to: str, *, deleted_on: str, erase_after: str, subscriptions_cancelled: int
+    ) -> EmailResult:
+        return await self.send_rendered(
+            to,
+            templates.account_deleted(
+                dashboard=self.dashboard,
+                deleted_on=deleted_on,
+                erase_after=erase_after,
+                subscriptions_cancelled=subscriptions_cancelled,
+            ),
+        )
+
     async def send_identity_linked_email(self, to: str, *, provider_name: str, provider_email: str) -> EmailResult:
         return await self.send_rendered(
             to,

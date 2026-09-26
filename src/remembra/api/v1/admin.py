@@ -820,6 +820,11 @@ async def update_user_tier(
     }
 
 
+# deleted_at written by the superadmin hard delete: long past any grace period, so the erasure job
+# erases the account on its next run if the immediate erasure fails.
+_ERASE_NOW_STAMP = "1970-01-01T00:00:00+00:00"
+
+
 @router.delete(
     "/users/{user_id}",
     summary="Delete user and all data (superadmin only)",
@@ -853,7 +858,7 @@ async def delete_user(
     **Superadmin only** - requires owner_emails access.
     **Requires confirm=true** to execute.
     """
-    from remembra.account.deletion import BillingCancelError, cancel_billing, skip_billing
+    from remembra.account.deletion import BillingCancelError, cancel_billing, mark_deleted, skip_billing
     from remembra.account.erasure import eraser_for
 
     if not confirm:
@@ -882,7 +887,31 @@ async def delete_user(
             detail = str(e) if e.transient else f"{e} Superadmin: add force_billing=skip once Paddle is checked by hand."
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail) from e
 
-    receipt = await eraser_for(request.app.state).erase(user_id)
+    if user_data:
+        # Deactivate and stamp the deletion before erasing, dated so the erasure job treats it as due:
+        # if the erasure below fails, the account is not left active with its billing cancelled, and
+        # the job (or a retry of this request) finishes it.
+        await mark_deleted(db, meter, user_id)
+        await db.conn.execute("UPDATE users SET deleted_at = ? WHERE id = ?", (_ERASE_NOW_STAMP, user_id))
+        await db.conn.commit()
+    try:
+        receipt = await eraser_for(request.app.state).erase(user_id)
+    except Exception as e:
+        log.error("admin_account_erasure_failed", user_id=user_id, error_type=type(e).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"Billing was handled ({len(cancelled)} subscription(s) cancelled"
+                + (", Paddle skipped" if force_billing == "skip" else "")
+                + f") but the erasure failed ({type(e).__name__}). "
+                + (
+                    "The account is deactivated and marked for erasure: the erasure job retries on its next run, "
+                    "or repeat this request."
+                    if user_data
+                    else "Repeat this request to finish (cancelling billing again is safe)."
+                )
+            ),
+        ) from e
 
     return {
         "status": "deleted",

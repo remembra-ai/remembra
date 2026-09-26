@@ -533,3 +533,100 @@ def test_registry_problems_reports_uncovered_tables_and_columns() -> None:
         "crews: rule does not match user columns ['created_by']",
         "crew_votes: no erasure rule and no exemption",
     ]
+
+
+async def test_erasing_an_admin_keeps_the_rows_they_acted_on_in_other_owners_spaces_and_teams(tmp_path) -> None:
+    """Launch review: explicit rules deleted by actor columns. An admin of someone
+    else's space and team (granted access, invited, linked a space, shared a
+    memory) was erased and the owner's grants, invites, links and shared
+    memories went with them. Now those rows stay, credited to the owner."""
+    db = Database(str(tmp_path / "actors.db"))
+    await db.connect()
+    await db.init_schema()
+    await init_every_schema(db)
+    try:
+        c = db.conn
+        now = "2026-09-26T00:00:00+00:00"
+        for uid in ("owner_b", "admin_a", "member_c"):
+            await c.execute(
+                "INSERT INTO users (id, email, password_hash, created_at, updated_at) VALUES (?, ?, 'x', ?, ?)",
+                (uid, f"{uid}@example.com", now, now),
+            )
+        await c.execute(
+            "INSERT INTO memory_spaces (id, name, description, owner_id, project_id, created_at, updated_at)"
+            " VALUES ('space_s', 'S', '', 'owner_b', 'default', ?, ?)",
+            (now, now),
+        )
+        # The admin's own space: everything in it goes.
+        await c.execute(
+            "INSERT INTO memory_spaces (id, name, description, owner_id, project_id, created_at, updated_at)"
+            " VALUES ('space_a', 'A', '', 'admin_a', 'default', ?, ?)",
+            (now, now),
+        )
+        access = "INSERT INTO space_access (space_id, agent_id, permission, granted_by, granted_at) VALUES (?, ?, ?, ?, ?)"
+        await c.execute(access, ("space_s", "admin_a", "admin", "owner_b", now))
+        await c.execute(access, ("space_s", "member_c", "read", "admin_a", now))
+        await c.execute(access, ("space_a", "member_c", "read", "admin_a", now))
+        await c.execute(
+            "INSERT INTO space_invites (space_id, agent_id, permission, invited_by, invited_at)"
+            " VALUES ('space_s', 'u_pending', 'read', 'admin_a', ?)",
+            (now,),
+        )
+        await c.execute(
+            "INSERT INTO memory_space_membership (memory_id, space_id, added_at, added_by)"
+            " VALUES ('mem_b', 'space_s', ?, 'admin_a')",
+            (now,),
+        )
+        await c.execute(
+            "INSERT INTO teams (id, name, slug, description, owner_id, plan, max_seats, used_seats, created_at, updated_at)"
+            " VALUES ('team_t', 'T', 't', '', 'owner_b', 'team', 5, 1, ?, ?)",
+            (now, now),
+        )
+        await c.execute(
+            "INSERT INTO team_spaces (team_id, space_id, created_at, created_by) VALUES ('team_t', 'space_s', ?, 'admin_a')",
+            (now,),
+        )
+        await c.execute(
+            "INSERT INTO team_invites (id, team_id, email, role, invited_by, status, token_hash, expires_at, created_at)"
+            " VALUES ('inv_1', 'team_t', 'new@example.com', 'member', 'admin_a', 'pending', 'tok_1', 'later', ?)",
+            (now,),
+        )
+        # An invite TO the erased address is theirs (it holds their email) and goes.
+        await c.execute(
+            "INSERT INTO team_invites (id, team_id, email, role, invited_by, status, token_hash, expires_at, created_at)"
+            " VALUES ('inv_2', 'team_t', 'admin_a@example.com', 'member', 'owner_b', 'pending', 'tok_2', 'later', ?)",
+            (now,),
+        )
+        await c.commit()
+
+        receipt = await AccountEraser(db, None).erase("admin_a")
+
+        async def rows(sql: str) -> list[tuple[Any, ...]]:
+            cursor = await c.execute(sql)
+            return [tuple(r) for r in await cursor.fetchall()]
+
+        assert await rows("SELECT space_id, agent_id, granted_by FROM space_access ORDER BY space_id, agent_id") == [
+            ("space_s", "member_c", "owner_b")
+        ]
+        assert await rows("SELECT space_id, agent_id, invited_by FROM space_invites") == [("space_s", "u_pending", "owner_b")]
+        assert await rows("SELECT memory_id, space_id, added_by FROM memory_space_membership") == [
+            ("mem_b", "space_s", "owner_b")
+        ]
+        assert await rows("SELECT team_id, space_id, created_by FROM team_spaces") == [("team_t", "space_s", "owner_b")]
+        assert await rows("SELECT id, invited_by FROM team_invites") == [("inv_1", "owner_b")]
+        assert await rows("SELECT id FROM memory_spaces") == [("space_s",)]
+        assert await rows("SELECT id FROM users ORDER BY id") == [("member_c",), ("owner_b",)]
+        # Nothing anywhere still names the erased account.
+        for table in ("space_access", "space_invites", "memory_space_membership", "team_spaces", "team_invites"):
+            cursor = await c.execute(f"SELECT * FROM {table}")
+            assert all("admin_a" not in map(str, r) for r in await cursor.fetchall()), table
+        assert receipt.rows.get("space_access") == 2  # the admin's own grant in S and the grant in their own space
+        assert "team_spaces" not in receipt.rows
+    finally:
+        await db.close()
+
+
+def test_actor_reassign_falls_back_to_a_sentinel_owner() -> None:
+    from remembra.account.erasure import ERASED_ACTOR, _space_owner
+
+    assert f"'{ERASED_ACTOR}'" in _space_owner("space_access") and ERASED_ACTOR == "erased"

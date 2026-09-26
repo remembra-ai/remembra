@@ -83,7 +83,7 @@ async def test_the_101st_founding_webhook_leaves_100_holders_flags_and_alerts(tm
     async with cost_app(tmp_path) as c:
         await _app(c, alerts)
         await _founders(c, 100)
-        late = await c.h.create_user("late@example.com")
+        late = await c.h.create_user("late@example.com", verified=True)
         result = await _hook(c, "transaction.completed", _founding_purchase("txn_101", "sub_101", late, "ctm_101"))
         assert result["applied"] == "applied"
         assert await c.meter.founding_redemptions() == 100
@@ -122,8 +122,8 @@ async def test_checkout_holds_the_seat_so_two_buyers_cannot_both_take_the_last_o
         await _app(c, alerts)
         await _founders(c, 99)
         assert await _seats(c) == {"max_redemptions": 100, "taken": 99, "remaining": 1, "available": True}
-        a = await c.h.create_user("a@example.com")
-        b = await c.h.create_user("b@example.com")
+        a = await c.h.create_user("a@example.com", verified=True)
+        b = await c.h.create_user("b@example.com", verified=True)
         ra, rb = await asyncio.gather(_checkout_founding(c, a, "a@example.com"), _checkout_founding(c, b, "b@example.com"))
         assert sorted([ra.status_code, rb.status_code]) == [200, 409]
         loser = rb if rb.status_code == 409 else ra
@@ -153,8 +153,8 @@ async def test_an_unpaid_hold_expires_and_a_failed_checkout_releases_it(tmp_path
     async with cost_app(tmp_path) as c:
         await _app(c, alerts)
         await _founders(c, 99)
-        a = await c.h.create_user("a@example.com")
-        b = await c.h.create_user("b@example.com")
+        a = await c.h.create_user("a@example.com", verified=True)
+        b = await c.h.create_user("b@example.com", verified=True)
 
         # Paddle is down: 502, and the seat is not kept for a checkout that never opened.
         paddle.failures["POST /transactions"] = httpx.ConnectError("paddle down")
@@ -181,7 +181,7 @@ async def test_a_lapsed_founder_keeps_the_seat_14_days_then_it_reopens(tmp_path,
     async with cost_app(tmp_path) as c:
         await _app(c, alerts)
         await _founders(c, 99)
-        founder = await c.h.create_user("founder@example.com")
+        founder = await c.h.create_user("founder@example.com", verified=True)
         assert (await _checkout_founding(c, founder, "founder@example.com")).status_code == 200
         await _hook(c, "transaction.completed", _founding_purchase("txn_f", "sub_f", founder, "ctm_f"))
         assert paddle.prices == {"pri_founding": "archived"}
@@ -191,7 +191,7 @@ async def test_a_lapsed_founder_keeps_the_seat_14_days_then_it_reopens(tmp_path,
         account = await c.meter.get_account(founder)
         assert (account.tier, account.founding) == (PlanTier.FREE, False)
         assert await _seats(c) == {"max_redemptions": 100, "taken": 100, "remaining": 0, "available": False}
-        newcomer = await c.h.create_user("new@example.com")
+        newcomer = await c.h.create_user("new@example.com", verified=True)
         assert (await _checkout_founding(c, newcomer, "new@example.com")).status_code == 409
 
         # Within the grace the founder buys the price back.
@@ -219,7 +219,7 @@ async def test_a_failed_buy_back_keeps_the_lapsed_founders_seat_and_grace(tmp_pa
     async with cost_app(tmp_path) as c:
         await _app(c, alerts)
         await _founders(c, 99)
-        founder = await c.h.create_user("founder@example.com")
+        founder = await c.h.create_user("founder@example.com", verified=True)
         assert (await _checkout_founding(c, founder, "founder@example.com")).status_code == 200
         await _hook(c, "transaction.completed", _founding_purchase("txn_f", "sub_f", founder, "ctm_f"))
         await _hook(c, "subscription.canceled", {"id": "sub_f", "customer_id": "ctm_f", "status": "canceled"})
@@ -235,7 +235,7 @@ async def test_a_failed_buy_back_keeps_the_lapsed_founders_seat_and_grace(tmp_pa
         cursor = await c.h.db.conn.execute("SELECT kind, until FROM founding_holds WHERE user_id = ?", (founder,))
         assert tuple(await cursor.fetchone()) == lapsed  # the 14-day grace is back, unchanged
         assert await _seats(c) == {"max_redemptions": 100, "taken": 100, "remaining": 0, "available": False}
-        newcomer = await c.h.create_user("new@example.com")
+        newcomer = await c.h.create_user("new@example.com", verified=True)
         assert (await _checkout_founding(c, newcomer, "new@example.com")).status_code == 409
 
         # Paddle recovers: the founder's retry succeeds and the payment restores the price.
@@ -253,7 +253,7 @@ async def test_a_failed_checkout_only_undoes_its_own_hold(tmp_path, monkeypatch)
     async with cost_app(tmp_path) as c:
         await _app(c, RecordingAlerts())
         await _founders(c, 99)
-        buyer = await c.h.create_user("buyer@example.com")
+        buyer = await c.h.create_user("buyer@example.com", verified=True)
         assert (await _checkout_founding(c, buyer, "buyer@example.com")).status_code == 200
         cursor = await c.h.db.conn.execute("SELECT kind, until, transaction_id FROM founding_holds WHERE user_id = ?", (buyer,))
         first = tuple(await cursor.fetchone())
@@ -266,7 +266,7 @@ async def test_a_failed_checkout_only_undoes_its_own_hold(tmp_path, monkeypatch)
         assert tuple(await cursor.fetchone()) == first
 
         # A fresh buyer with no earlier hold: the failed checkout leaves no row behind.
-        other = await c.h.create_user("other@example.com")
+        other = await c.h.create_user("other@example.com", verified=True)
         await c.h.db.conn.execute("DELETE FROM founding_holds WHERE user_id = ?", (buyer,))
         await c.h.db.conn.commit()
         assert (await _checkout_founding(c, other, "other@example.com")).status_code == 502
@@ -306,7 +306,7 @@ async def test_unmatched_and_unknown_price_payments_alert_the_owner(tmp_path, mo
         event, _message, details = alerts.sent[-1]
         assert event == "paddle_unmatched_purchase:sub_o" and details["customer_id"] == "ctm_nobody"
         # A price the catalog does not know.
-        uid = await c.h.create_user("buyer@example.com")
+        uid = await c.h.create_user("buyer@example.com", verified=True)
         odd = _purchase("txn_x", "sub_x", "pri_not_in_catalog", _bound(uid), customer="ctm_b")
         assert (await _hook(c, "transaction.completed", odd))["applied"] == "no_change"
         event, _message, details = alerts.sent[-1]
@@ -329,7 +329,7 @@ async def test_checkout_and_portal_turn_paddle_failures_into_502(tmp_path, monke
     paddle = _paddle_mock.install(monkeypatch)
     async with cost_app(tmp_path) as c:
         _paddle(c, **PRICES)
-        uid = await c.h.create_user("err@example.com")
+        uid = await c.h.create_user("err@example.com", verified=True)
         hdr = c.h.jwt(uid, "err@example.com")
         paddle.failures["POST /transactions"] = failure
         r = await c.h.client.post("/api/v1/billing/checkout", json={"plan": "solo"}, headers=hdr)
@@ -354,7 +354,7 @@ async def test_portal_without_a_billing_account_is_404_not_502(tmp_path, monkeyp
     paddle = _paddle_mock.install(monkeypatch)
     async with cost_app(tmp_path) as c:
         _paddle(c, **PRICES)
-        uid = await c.h.create_user("new+tag@example.com")
+        uid = await c.h.create_user("new+tag@example.com", verified=True)
         r = await c.h.client.post("/api/v1/billing/portal", headers=c.h.jwt(uid, "new+tag@example.com"))
         assert r.status_code == 404
         # The email is sent as a query parameter, encoded ("+" survives).
@@ -369,7 +369,7 @@ async def test_moving_off_the_founding_price_ends_the_lock_with_the_same_grace(t
     _paddle_mock.install(monkeypatch)
     async with cost_app(tmp_path) as c:
         await _app(c, alerts)
-        founder = await c.h.create_user("mover@example.com")
+        founder = await c.h.create_user("mover@example.com", verified=True)
         await _hook(c, "transaction.completed", _founding_purchase("txn_m", "sub_m", founder, "ctm_m"))
         assert (await c.meter.get_account(founder)).founding is True
         # Renewals keep it.

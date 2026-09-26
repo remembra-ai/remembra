@@ -19,6 +19,9 @@ from remembra.storage.database import Database
 
 log = structlog.get_logger(__name__)
 
+# authenticate()'s error for the right password on an account deleted and not yet erased; followed by deleted_at.
+PENDING_ERASURE_PREFIX = "pending_erasure:"
+
 # JWT settings
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24  # 24 hours (tightened from 7 days - March 22, 2026)
@@ -189,6 +192,11 @@ class UserManager:
             return None, None, "Invalid email or password"
 
         if not user_data.get("is_active", True):
+            if user_data.get("deleted_at") and self.verify_password(password, user_data["password_hash"]):
+                # The right password for an account waiting for erasure: the caller may say so
+                # (the password proves it is the owner asking), with the date and how to undo.
+                log.info("login_refused_pending_erasure", user_id=user_data["id"])
+                return None, None, PENDING_ERASURE_PREFIX + str(user_data["deleted_at"])
             log.warning("login_failed_user_inactive", user_id=user_data["id"])
             return None, None, "Account is deactivated"
 

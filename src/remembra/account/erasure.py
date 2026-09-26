@@ -17,7 +17,10 @@ job deletes, for that account:
   run, so a table added later is erased even before it is registered (and the
   schema test fails until it is). Actor columns (``invited_by``, ``added_by``,
   ...) of such a table are set to NULL, never used to delete: a row the account
-  merely acted on belongs to someone else.
+  merely acted on belongs to someone else. The explicit rules follow the same
+  principle: a grant, invite, team link or shared memory the account made as an
+  admin of someone else's space or team stays, credited to that owner
+  (``TableRule.reassigns``; those columns are NOT NULL).
 
 Another SQLite database (for example Crew mode's ``crew.db``) is erased only
 through an :class:`ExtraDatabase` that carries its own explicit rules; the
@@ -76,6 +79,11 @@ class TableRule:
     ``deletes``: WHERE clauses, each run as ``DELETE FROM table WHERE ...``.
     ``nulls``: (column, WHERE) pairs set to NULL instead (a user who only
     acted on someone else's row, e.g. invited a member to another team).
+    ``reassigns``: (column, value SQL, WHERE) triples for a NOT NULL actor
+    column on a row that belongs to someone else (an admin granted access to
+    another owner's space): the row stays and the column is set to the
+    value, normally that space's or team's owner. They run after
+    ``deletes``, so they only reach rows the account does not own.
     Parameters: ``:uid`` (user id), ``:email`` (lower-case address),
     ``:login_key`` (the login-lockout key of that address).
     """
@@ -83,11 +91,13 @@ class TableRule:
     table: str
     deletes: tuple[str, ...] = ()
     nulls: tuple[tuple[str, str], ...] = ()
+    reassigns: tuple[tuple[str, str, str], ...] = ()
 
     def columns(self) -> set[str]:
         """Columns of ``table`` this rule matches on (for the coverage test)."""
         out: set[str] = set()
-        for clause in (*self.deletes, *(where for _col, where in self.nulls)):
+        wheres = (*self.deletes, *(where for _col, where in self.nulls), *(where for _c, _v, where in self.reassigns))
+        for clause in wheres:
             # Only the leading "<column> = / IN" of each clause names this table's column.
             match = re.match(r"\s*(?:LOWER\()?(\w+)\)?\s*(=|IN)", clause)
             if match:
@@ -102,6 +112,21 @@ _SPACES = "SELECT id FROM memory_spaces WHERE owner_id = :uid"
 _WEBHOOKS = "SELECT id FROM webhooks WHERE user_id = :uid"
 _KEYS = "SELECT id FROM api_keys WHERE user_id = :uid"
 _GRANTS = "SELECT grant_id FROM oauth_grants WHERE user_id = :uid"
+
+
+# Stand-in actor id when the owner cannot be found (never a real account id).
+ERASED_ACTOR = "erased"
+
+
+def _space_owner(table: str) -> str:
+    return (
+        f"COALESCE((SELECT s.owner_id FROM memory_spaces s WHERE s.id = {table}.space_id AND s.owner_id != :uid), "
+        f"'{ERASED_ACTOR}')"
+    )
+
+
+def _team_owner(table: str) -> str:
+    return f"COALESCE((SELECT t.owner_id FROM teams t WHERE t.id = {table}.team_id AND t.owner_id != :uid), '{ERASED_ACTOR}')"
 
 
 def _by_user(table: str, column: str = "user_id") -> TableRule:
@@ -122,14 +147,34 @@ ERASURE_RULES: tuple[TableRule, ...] = (
         ),
     ),
     TableRule("memory_feedback", deletes=("user_id = :uid", f"memory_id IN ({_MEMORIES})")),
+    # Actor columns (added_by, granted_by, invited_by, created_by) never delete: a row the account only
+    # acted on as an admin of someone else's space or team stays, credited to that space's or team's owner
+    # (the columns are NOT NULL).
     TableRule(
         "memory_space_membership",
-        deletes=(f"memory_id IN ({_MEMORIES})", f"space_id IN ({_SPACES})", "added_by = :uid"),
+        deletes=(f"memory_id IN ({_MEMORIES})", f"space_id IN ({_SPACES})"),
+        reassigns=(("added_by", _space_owner("memory_space_membership"), "added_by = :uid"),),
     ),
-    TableRule("space_access", deletes=(f"space_id IN ({_SPACES})", "agent_id = :uid", "granted_by = :uid")),
-    TableRule("space_invites", deletes=(f"space_id IN ({_SPACES})", "agent_id = :uid", "invited_by = :uid")),
-    TableRule("team_spaces", deletes=(f"team_id IN ({_TEAMS})", f"space_id IN ({_SPACES})", "created_by = :uid")),
-    TableRule("team_invites", deletes=(f"team_id IN ({_TEAMS})", "invited_by = :uid", "LOWER(email) = :email")),
+    TableRule(
+        "space_access",
+        deletes=(f"space_id IN ({_SPACES})", "agent_id = :uid"),
+        reassigns=(("granted_by", _space_owner("space_access"), "granted_by = :uid"),),
+    ),
+    TableRule(
+        "space_invites",
+        deletes=(f"space_id IN ({_SPACES})", "agent_id = :uid"),
+        reassigns=(("invited_by", _space_owner("space_invites"), "invited_by = :uid"),),
+    ),
+    TableRule(
+        "team_spaces",
+        deletes=(f"team_id IN ({_TEAMS})", f"space_id IN ({_SPACES})"),
+        reassigns=(("created_by", _team_owner("team_spaces"), "created_by = :uid"),),
+    ),
+    TableRule(
+        "team_invites",
+        deletes=(f"team_id IN ({_TEAMS})", "LOWER(email) = :email"),
+        reassigns=(("invited_by", _team_owner("team_invites"), "invited_by = :uid"),),
+    ),
     TableRule(
         "team_members",
         deletes=(f"team_id IN ({_TEAMS})", "user_id = :uid"),
@@ -298,6 +343,9 @@ async def erase_rows(
             cursor = await conn.execute(f'DELETE FROM "{rule.table}" WHERE {where}', params)
             if cursor.rowcount and cursor.rowcount > 0:
                 counts[rule.table] = counts.get(rule.table, 0) + cursor.rowcount
+        for column, value, where in rule.reassigns:
+            if column in schema[rule.table] and _tables_in(value) | _tables_in(where) <= schema.keys():
+                await conn.execute(f'UPDATE "{rule.table}" SET "{column}" = {value} WHERE {where}', params)
     unregistered: list[str] = []
     for table, columns in schema.items():
         if table in ruled or table in exempt or table.startswith(exempt_prefixes):
@@ -436,10 +484,19 @@ class AccountEraser:
         return receipt
 
     async def due_accounts(self, grace: timedelta, now: datetime | None = None) -> list[str]:
-        """Accounts whose self-serve deletion is older than ``grace``."""
+        """Accounts whose self-serve deletion is older than ``grace``.
+
+        An account that is active again is skipped even when ``deleted_at`` is
+        still set: an undo through an older API build (the admin activate
+        endpoint of b034314/0741a96 sets ``is_active`` and leaves
+        ``deleted_at``) must not be erased after the roll-forward.
+        """
         now = now or datetime.now(UTC)
         try:
-            cursor = await self._db.conn.execute("SELECT id, deleted_at FROM users WHERE deleted_at IS NOT NULL")
+            cursor = await self._db.conn.execute(
+                "SELECT id, deleted_at FROM users WHERE deleted_at IS NOT NULL"
+                " AND (is_active IS NULL OR is_active = 0 OR LOWER(CAST(is_active AS TEXT)) = 'false')"
+            )
         except Exception as e:  # pre-migration database
             log.warning("erasure_due_query_failed", error_type=type(e).__name__)
             return []

@@ -260,7 +260,17 @@ async def test_deletion_cancels_billing_and_the_job_erases_every_row_and_vector(
             assert len(victim_grants) == 1
 
             # --- Delete (password) ------------------------------------------------
-            r = await c.h.client.request("DELETE", "/api/v1/auth/me", json={"password": PASSWORD}, headers=vjwt)
+            # The victim owns a team with another member: refused until the end of the team is confirmed,
+            # before the password is checked or billing touched.
+            r = await c.h.client.request("DELETE", "/api/v1/auth/me", json={"password": "wrong"}, headers=vjwt)
+            assert r.status_code == 409, r.text
+            detail = r.json()["detail"]
+            assert detail["code"] == "TEAM_OWNER" and detail["teams"] == [{"id": team["id"], "name": "Victim team", "members": 1}]
+            assert "Victim team (1 other member)" in detail["message"]
+            assert paddle.requests("POST", "/subscriptions/") == []
+            r = await c.h.client.request(
+                "DELETE", "/api/v1/auth/me", json={"password": PASSWORD, "end_teams": True}, headers=vjwt
+            )
             assert r.status_code == 200, r.text
             body = r.json()
             assert body["subscriptions_cancelled"] == 2

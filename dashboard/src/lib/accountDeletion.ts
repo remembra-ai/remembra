@@ -5,8 +5,9 @@
 export const DELETION_COPY =
   'Deleting your account cancels any subscription at once, with no further charges, and signs you out everywhere. ' +
   '7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. ' +
-  'Until then, email support@remembra.dev to undo it. ' +
-  'Backups are not edited; the copies in them age out: the continuous backup keeps 24 hours of history, ' +
+  'Until then, email support@remembra.dev to undo it: sign-in comes back, but a cancelled subscription and revoked API keys do not. ' +
+  'Backups are not edited; the copies in them age out: the continuous backup keeps 24 hours of history and drops older copies ' +
+  'every hour, so an erased copy leaves it within about 25 hours, ' +
   'and the database copy taken before each deploy is kept only until 3 newer deploys replace it.';
 
 export type DeletionMethod = 'password' | 'code';

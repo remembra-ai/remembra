@@ -194,7 +194,7 @@ async def test_legacy_renewals_keep_the_grandfathered_tier(tmp_path) -> None:
 async def test_checkout_requires_configured_prices_and_enforces_offer_rules(tmp_path, monkeypatch) -> None:
     async with cost_app(tmp_path) as c:
         _paddle(c)  # no catalog prices configured yet
-        uid = await c.h.create_user("checkout@example.com")
+        uid = await c.h.create_user("checkout@example.com", verified=True)
         hdr = c.h.jwt(uid, "checkout@example.com")
 
         r = await c.h.client.post("/api/v1/billing/checkout", json={"plan": "solo"}, headers=hdr)
@@ -241,7 +241,7 @@ async def test_checkout_requires_configured_prices_and_enforces_offer_rules(tmp_
         )
         await c.h.db.conn.commit()
         # This account's own checkout hold still counts as its seat; another buyer is refused.
-        late = await c.h.create_user("late-founder@example.com")
+        late = await c.h.create_user("late-founder@example.com", verified=True)
         r = await c.h.client.post(
             "/api/v1/billing/checkout",
             json={"plan": "founding", "billing_cycle": "yearly"},
@@ -263,6 +263,8 @@ async def test_checkout_requires_configured_prices_and_enforces_offer_rules(tmp_
             "max_redemptions": 100,
             "remaining": 0,
             "available": False,
+            "held_until": None,
+            "held_kind": None,
         }
         config = (await c.h.client.get("/api/v1/billing/client-config")).json()
         assert config["prices"]["solo"] == "pri_solo_m" and config["prices"]["solo_annual"] == "pri_solo_y"

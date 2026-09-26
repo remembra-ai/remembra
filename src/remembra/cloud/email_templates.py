@@ -620,6 +620,37 @@ def identity_linked(*, dashboard: str | None, provider_name: str, provider_email
     )
 
 
+PRIVACY_RETENTION_URL = "https://remembra.dev/privacy#retention"
+
+
+def account_deleted(*, dashboard: str | None, deleted_on: str, erase_after: str, subscriptions_cancelled: int) -> RenderedEmail:
+    """Sent when an account is deleted (self-serve): what stopped, when the data goes, and how to undo."""
+    blocks: list[Block] = [
+        P(f"Your Remembra account was deleted on {deleted_on}. You are signed out everywhere and its API keys no longer work."),
+    ]
+    if subscriptions_cancelled:
+        blocks.append(P("Your subscription is cancelled and will not charge again."))
+    blocks += [
+        P(
+            f"After {erase_after} everything the account holds is erased for good: memories, handoffs, inbox, "
+            "API keys, connections and settings. Until then this address cannot sign up again."
+        ),
+        P(
+            "Changed your mind? Before that date, reply to this email or write to support@remembra.dev. Sign-in "
+            "comes back; a cancelled subscription and revoked API keys do not."
+        ),
+        Button("What we erase and what we keep", PRIVACY_RETENTION_URL),
+        Small("If you did not delete your account, reply to this email right away."),
+    ]
+    return render(
+        "account_deleted",
+        subject="Remembra: your account is deleted",
+        heading="Your account is deleted",
+        blocks=blocks,
+        dashboard=dashboard or DEFAULT_DASHBOARD_URL,
+    )
+
+
 def sample_renders(dashboard: str = DEFAULT_DASHBOARD_URL) -> dict[str, RenderedEmail]:
     """Every template rendered with sample data (previews and tests)."""
     now = datetime(2026, 9, 26, 14, 30)
@@ -664,5 +695,8 @@ def sample_renders(dashboard: str = DEFAULT_DASHBOARD_URL) -> dict[str, Rendered
             expires_at="2026-10-03 14:30 UTC",
         ),
         "identity_linked": identity_linked(dashboard=dashboard, provider_name="GitHub", provider_email="me@example.com"),
+        "account_deleted": account_deleted(
+            dashboard=dashboard, deleted_on="2026-09-26", erase_after="2026-10-03", subscriptions_cancelled=1
+        ),
     }
     return samples

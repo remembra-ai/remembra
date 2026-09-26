@@ -10,7 +10,7 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 
 from remembra.auth.middleware import authenticate_jwt, get_client_ip
 from remembra.auth.superadmin import account_is_owner
-from remembra.auth.users import UserManager, email_verified_on_another_account
+from remembra.auth.users import PENDING_ERASURE_PREFIX, UserManager, email_verified_on_another_account
 from remembra.cloud.signup_guard import TURNSTILE_HEADER, guard_signup
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
@@ -417,6 +417,9 @@ async def login(
         password=body.password,
     )
 
+    if error and error.startswith(PENDING_ERASURE_PREFIX):
+        # Only reached with the account's own password, so saying it exists reveals nothing new.
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=pending_erasure_message(error))
     if error:
         await security_state.record_failure(db, lock_key)
         # Same message for unknown email / wrong password / inactive account.
@@ -750,6 +753,11 @@ class DeleteAccountRequest(BaseModel):
     code: str | None = Field(
         None, max_length=12, description="Six-digit code emailed by POST /auth/me/deletion-code (Google/GitHub sign-in)"
     )
+    end_teams: bool = Field(
+        False,
+        description="Confirms that teams this account owns, which have other members, end with it "
+        "(without it such a deletion is refused with 409 TEAM_OWNER)",
+    )
 
 
 class DeleteAccountResponse(BaseModel):
@@ -802,6 +810,25 @@ async def request_deletion_code(request: Request, current_user: CurrentUser) -> 
     return DeletionCodeResponse(message=f"We emailed a code to {user_row['email']}.", expires_in_minutes=minutes)
 
 
+def pending_erasure_message(error: str) -> str:
+    """What a sign-in to a deleted (not yet erased) account is told: when it goes, and how to undo."""
+    from datetime import datetime, timedelta
+
+    from remembra.account.deletion import SUPPORT_EMAIL
+
+    raw = error[len(PENDING_ERASURE_PREFIX) :]
+    try:
+        deleted = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return f"This account was deleted and is waiting to be erased. To undo it, email {SUPPORT_EMAIL}."
+    erase_after = deleted + timedelta(days=get_settings().account_erasure_grace_days)
+    return (
+        f"This account was deleted on {deleted.date().isoformat()} and is erased for good after "
+        f"{erase_after.date().isoformat()}. Until then this address cannot sign up again. To undo the deletion, "
+        f"email {SUPPORT_EMAIL} before that date."
+    )
+
+
 @router.delete(
     "/me",
     response_model=DeleteAccountResponse,
@@ -832,13 +859,40 @@ async def delete_account(
     """
     from datetime import timedelta
 
-    from remembra.account.deletion import BillingCancelError, cancel_billing, consume_deletion_code, mark_deleted
+    from remembra.account.deletion import (
+        SUPPORT_EMAIL,
+        BillingCancelError,
+        cancel_billing,
+        consume_deletion_code,
+        mark_deleted,
+        notify_account_deleted,
+        owned_teams_with_members,
+    )
 
     user_manager = await get_user_manager(request)
     user_id = current_user["id"]
     user_data = await user_manager.db.get_user_by_id(user_id)
     if not user_data:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    teams = await owned_teams_with_members(user_manager.db, user_id)
+    if teams and not body.end_teams:
+        # Checked before the password or code, so a refusal changes nothing
+        # (an emailed code is single-use and is not spent by it).
+        names = ", ".join(f"{t['name']} ({t['members']} other member{'s' if t['members'] != 1 else ''})" for t in teams)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "TEAM_OWNER",
+                "message": (
+                    f"You own {names}. Deleting your account ends "
+                    + ("that team" if len(teams) == 1 else "those teams")
+                    + " for every member: they lose its shared spaces and seats. To keep it, email "
+                    f"{SUPPORT_EMAIL} to move ownership first. To go ahead, confirm that the team ends."
+                ),
+                "teams": teams,
+            },
+        )
 
     if body.password:
         if not user_manager.verify_password(body.password, user_data["password_hash"]):
@@ -874,7 +928,8 @@ async def delete_account(
             await eraser_for(request.app.state).erase(user_id)
         except Exception as e:  # the erasure job retries on its next run
             log.error("account_erasure_immediate_failed", error_type=type(e).__name__)
-    log.info("account_deletion_requested", user_id=user_id, subscriptions_cancelled=len(cancelled))
+    await notify_account_deleted(request.app.state, user_data.get("email"), deleted_at, erase_after, len(cancelled))
+    log.info("account_deletion_requested", user_id=user_id, subscriptions_cancelled=len(cancelled), teams_ended=len(teams))
     return DeleteAccountResponse(
         message=(
             "Your account is deleted and you are signed out everywhere. "

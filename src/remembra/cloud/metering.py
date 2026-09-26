@@ -65,6 +65,18 @@ FOUNDING_CHECKOUT_HOLD = timedelta(hours=2)
 FOUNDING_LAPSE_GRACE = timedelta(days=14)
 
 
+# A pending Founding checkout hold is never extended, and an account gets one per this window.
+FOUNDING_HOLD_WINDOW = timedelta(hours=24)
+
+
+class FoundingHoldLimitError(Exception):
+    """This account's Founding checkout hold expired unpaid less than a day ago (``retry_at``: when a new one is allowed)."""
+
+    def __init__(self, retry_at: datetime) -> None:
+        super().__init__(f"founding hold limit until {retry_at.isoformat()}")
+        self.retry_at = retry_at
+
+
 @dataclass(frozen=True)
 class FoundingSeatHold:
     """A Founding seat held for one checkout, and the ``founding_holds`` row it replaced (kind, until, txn, created)."""
@@ -1151,9 +1163,27 @@ class UsageMeter:
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
-    async def founding_seats_taken(self) -> int:
-        """Founding 100 seats in use now (holders, open checkouts and founders inside the 14-day lapse grace)."""
-        return await self._founding_seats_taken(now_utc())
+    async def founding_seats_taken(self, *, excluding: str | None = None) -> int:
+        """Founding 100 seats in use now (holders, open checkouts and founders inside the 14-day lapse grace).
+
+        ``excluding``: leave out that account's own hold (its seat is already its own).
+        """
+        return await self._founding_seats_taken(now_utc(), excluding=excluding)
+
+    async def founding_hold_of(self, user_id: str) -> tuple[str, datetime] | None:
+        """``(kind, until)`` of the live seat hold ``user_id`` has without holding the price, else None."""
+        cursor = await self._db.conn.execute(
+            """
+            SELECT h.kind, h.until FROM founding_holds h
+            WHERE h.user_id = ? AND NOT EXISTS (SELECT 1 FROM cloud_tenants t WHERE t.user_id = h.user_id AND t.founding = 1)
+            """,
+            (user_id,),
+        )
+        row = await cursor.fetchone()
+        until = _parse_dt(row[1]) if row else None
+        if row is None or until is None or until <= now_utc():
+            return None
+        return str(row[0]), until
 
     async def end_founding(self, user_id: str) -> None:
         """The account stops holding the Founding price; its seat stays held 14 days (the lapse grace)."""
@@ -1187,20 +1217,35 @@ class UsageMeter:
             )
             existing = await cursor.fetchone()
             until = now + FOUNDING_CHECKOUT_HOLD
+            created = now
             live = existing is not None and (_parse_dt(existing[1]) or now) > now
+            if existing is not None and str(existing[0]) == "pending":
+                # One checkout hold per account per day, never extended: re-opening
+                # checkout every two hours must not keep a seat forever.
+                first = _parse_dt(existing[3]) or now
+                if live:
+                    until, created = _parse_dt(existing[1]) or until, first
+                elif now - first < FOUNDING_HOLD_WINDOW:
+                    raise FoundingHoldLimitError(first + FOUNDING_HOLD_WINDOW)
+            elif live and existing is not None:
+                until = max(until, _parse_dt(existing[1]) or until)  # a lapsed founder keeps the 14-day grace
             if not live and await self._founding_seats_taken(now, excluding=user_id) >= FOUNDING_MAX_REDEMPTIONS:
                 return None
-            if live and existing is not None:
-                until = max(until, _parse_dt(existing[1]) or until)
             await self._db.conn.execute(
                 """
                 INSERT INTO founding_holds (user_id, kind, until, created_at) VALUES (?, 'pending', ?, ?)
-                ON CONFLICT(user_id) DO UPDATE SET kind = 'pending', until = excluded.until
+                ON CONFLICT(user_id) DO UPDATE SET kind = 'pending', until = excluded.until, created_at = excluded.created_at
                 """,
-                (user_id, until.isoformat(), now.isoformat()),
+                (user_id, until.isoformat(), created.isoformat()),
             )
         prior = (str(existing[0]), str(existing[1]), existing[2], str(existing[3])) if existing is not None else None
         return FoundingSeatHold(user_id=user_id, until=until.isoformat(), prior=prior)
+
+    async def drop_founding_holds(self, user_id: str) -> None:
+        """Give back any seat ``user_id`` holds without holding the price (an open checkout or a
+        lapse grace): a deleted account will not buy, so its seat goes to the next buyer."""
+        async with self._tx():
+            await self._db.conn.execute("DELETE FROM founding_holds WHERE user_id = ?", (user_id,))
 
     async def set_founding_hold_transaction(self, user_id: str, transaction_id: str) -> None:
         await self._db.conn.execute(

@@ -481,8 +481,18 @@ hand-edited ids) counts as done and alerts `account_deletion_subscription_unknow
 a cancel, the request fails with 502, nothing is deleted and the owner gets an
 `account_deletion_billing_failed` alert; the user is told to retry when Paddle
 was unreachable (429/5xx/timeout) and that support will sort it out when Paddle
-refused. Then the account is deactivated (sessions and API keys stop at once)
-and `users.deleted_at` is set.
+refused. When an earlier subscription was already cancelled before the one that
+failed, the message says so (the paid plan ends; the account was kept) and the
+alert lists `cancelled_subscription_ids`. An owner of a team with other members
+is refused with 409 `TEAM_OWNER` (before the password or code is checked) until
+the request carries `end_teams: true`. Then the account is deactivated
+(sessions and API keys stop at once), `users.deleted_at` is set, any Founding
+seat hold it had is released, and the address gets an "account deleted" email
+with the erase date and the undo address. Signing in with the right password
+until then answers 403 with the same dates. A Paddle payment that arrives for a
+deleted account afterwards (a checkout opened before the deletion) is never
+applied: the subscription is cancelled at once, the account is flagged
+`paid_after_deletion` and the owner is alerted to refund it.
 
 The `account-erasure-loop` task (every `REMEMBRA_ACCOUNT_ERASURE_INTERVAL_SECONDS`,
 default 3600) erases accounts deleted more than `REMEMBRA_ACCOUNT_ERASURE_GRACE_DAYS`
@@ -492,8 +502,11 @@ rebuild reindex kept (`<base>__rb_*` collections and any collection a
 `reindex_jobs` row names; other applications' collections are never touched),
 then every SQLite row the account owns in one transaction
 (`remembra.account.erasure.ERASURE_RULES`, plus any table found with a
-user-keyed column; actor columns such as `added_by` are cleared, never used to
-delete).
+user-keyed column; actor columns such as `added_by` are never used to delete:
+the explicit rules credit a grant, invite, team link or shared memory the
+account made in someone else's space or team to that owner, and the safety net
+clears them). An account that is active again is skipped even if `deleted_at`
+is still set (an undo through an older API build's activate endpoint).
 
 Crew mode (`crew.db`, feat/crew) is NOT covered yet. Do not pass `crew.db` to
 `AccountEraser` bare (it refuses): it takes
@@ -513,7 +526,9 @@ of the account id and row counts, nothing else. To undo a deletion inside the
 grace period: `POST /api/v1/admin/users/{id}/activate?active=true` (the user
 then buys again if they had a plan; the cancelled subscription stays cancelled).
 `DELETE /api/v1/admin/users/{id}?confirm=true` does the same billing cancel and
-erases immediately. It also erases API-signup tenants (`POST /cloud/signup`),
+erases immediately. If that erasure fails (for example Qdrant is down) it answers
+503 and the account is already deactivated and marked due, so the erasure job
+(or a repeat of the request) finishes it. It also erases API-signup tenants (`POST /cloud/signup`),
 which have no `users` row and no dashboard to delete themselves from. When
 Paddle refuses a cancel and the subscription has been checked by hand, add
 `&force_billing=skip`: Paddle is not asked, and the owner alert
@@ -546,8 +561,12 @@ or no catalog price sends an operator alert (`REMEMBRA_ALERT_EMAIL` and/or
 lists flagged accounts; `DELETE /api/v1/admin/billing-flags/{user_id}` clears one
 after review. A refund of an account that used over 25% of its credits also alerts.
 
-Founding checkouts hold a seat for 2 hours before payment; seats also stay held
-14 days after a founder's subscription ends. When seat 100 is taken the Founding
+Founding checkouts need a verified email and hold a seat for 2 hours before
+payment; the hold is never extended and an account gets one per 24 hours (429
+with the time otherwise). Seats also stay held 14 days after a founder's
+subscription ends; `GET /api/v1/billing/plans` with the founder's credentials
+reports `available: true` and `held_until` for that seat even when the other
+seats are all taken. When seat 100 is taken the Founding
 price is archived in Paddle (`PATCH /prices/{id}`; the API key needs price write
 permission) and re-activated at the next Founding checkout after a seat frees.
 `GET /api/v1/billing/founding` (public) reports seats left for the pricing page.

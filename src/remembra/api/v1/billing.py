@@ -11,9 +11,10 @@ import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, JWTOrAPIKeyUser
+from remembra.auth.middleware import CurrentUser, JWTOrAPIKeyUser, get_user_from_jwt_or_api_key
 from remembra.cloud import notify
 from remembra.cloud.billing_paddle import DEFAULT_DASHBOARD_ORIGIN
+from remembra.cloud.metering import FoundingHoldLimitError
 from remembra.cloud.paddle_config import CheckoutUnavailableError, get_paddle_config
 from remembra.cloud.plans import (
     FOUNDING_ANNUAL_PRICE_CENTS,
@@ -60,7 +61,15 @@ class FoundingOffer(BaseModel):
     price_yearly: int = FOUNDING_ANNUAL_PRICE_CENTS
     max_redemptions: int = FOUNDING_MAX_REDEMPTIONS
     remaining: int | None = Field(None, description="Seats left (None when metering is unavailable)")
-    available: bool = False
+    available: bool = Field(
+        False,
+        description="Checkout can be opened for the offer; for a signed-in caller holding a seat (an open checkout, "
+        "or a founder inside the 14-day lapse grace) this is true even when the other 100 seats are taken",
+    )
+    held_until: str | None = Field(
+        None, description="Signed-in caller only: when the seat (and price) this account still holds is released"
+    )
+    held_kind: str | None = Field(None, description="'lapsed' (founder inside the 14-day grace) or 'pending' (open checkout)")
 
 
 class FoundingSeatsResponse(BaseModel):
@@ -199,7 +208,29 @@ async def get_plans(
 
     seats = await _founding_seats(request, config)
     founding = FoundingOffer(remaining=seats.remaining, available=seats.available)
+    meter = getattr(request.app.state, "usage_meter", None)
+    caller = await _caller_id(request) if meter is not None else None
+    if caller is not None and meter is not None:
+        # The seat a lapsed founder (or an open checkout) still holds is theirs even when all 100 are taken:
+        # the 14-day "price and seat kept" promise needs a way to buy it back.
+        hold = await meter.founding_hold_of(caller)
+        if hold is not None:
+            kind, until = hold
+            left = max(0, FOUNDING_MAX_REDEMPTIONS - await meter.founding_seats_taken(excluding=caller))
+            founding.available = bool(config and config.founding_price_id) and left > 0
+            founding.held_until, founding.held_kind = until.isoformat(), kind
     return PlansResponse(plans=plans, founding=founding, provider=provider)
+
+
+async def _caller_id(request: Request) -> str | None:
+    """The signed-in caller of a public endpoint, or None (no credentials, or invalid ones: never an error)."""
+    if not (request.headers.get("Authorization") or request.headers.get("X-API-Key")):
+        return None
+    try:
+        user = await get_user_from_jwt_or_api_key(request, request.headers.get("X-API-Key"))
+    except HTTPException:
+        return None
+    return user.user_id if user else None
 
 
 async def _founding_seats(request: Request, config: Any) -> FoundingSeatsResponse:
@@ -439,11 +470,26 @@ async def create_checkout(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="User email not found. Please update your profile.",
             )
+        if founding and not user_data.get("email_verified"):
+            # A seat hold costs nothing, so unverified sign-ups could otherwise make the offer look sold out.
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Verify your email address to claim a Founding 100 seat: Settings, Profile, "
+                "Resend verification email, then open the link we send.",
+            )
 
         seat_hold = None
         if founding and meter is not None:
             # Taken before the buyer pays, so seat 101 is refused here, not after payment.
-            seat_hold = await meter.hold_founding_seat(current_user.user_id)
+            try:
+                seat_hold = await meter.hold_founding_seat(current_user.user_id)
+            except FoundingHoldLimitError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Your Founding 100 checkout from earlier today was not completed and its seat hold has "
+                    f"ended. You can start a new one after {e.retry_at.strftime('%Y-%m-%d %H:%M')} UTC, "
+                    "or email support@remembra.dev.",
+                ) from e
             if seat_hold is None:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
@@ -735,6 +781,14 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
     if plan is None:
         return "no_change"
 
+    if plan != PlanTier.FREE and await _account_deleted(request.app.state.db, user_id):
+        # A checkout opened before DELETE /auth/me and paid afterwards: the
+        # deletion cancelled only the subscriptions that existed then. Never
+        # give a deleted account a paid plan (the eraser would later drop the
+        # only record linking the subscription to it): cancel it now and tell
+        # the owner to refund the payment.
+        return await _refuse_payment_for_deleted_account(request, meter, user_id, result)
+
     # An event only changes the plan of the subscription the account holds.
     # Another subscription (a second purchase, or one bought by someone else
     # naming this account) must neither cancel nor re-plan it.
@@ -847,6 +901,51 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
         founding=result.founding,
     )
     return "applied"
+
+
+async def _account_deleted(db: Any, user_id: str) -> bool:
+    """Whether ``user_id`` asked for deletion (``users.deleted_at`` set; erasure pending)."""
+    try:
+        cursor = await db.conn.execute("SELECT deleted_at FROM users WHERE id = ?", (user_id,))
+        row = await cursor.fetchone()
+    except Exception:  # a database without the column predates self-serve deletion
+        return False
+    return bool(row and row[0])
+
+
+async def _refuse_payment_for_deleted_account(request: Request, meter: Any, user_id: str, result: Any) -> str:
+    """Cancel the paid subscription of a deleted account at once, flag it and alert the owner (refund by hand)."""
+    subscription_id = result.paddle_subscription_id
+    cancelled = await _cancel_refunded_subscription(subscription_id, user_id) if subscription_id else False
+    log.error(
+        "paddle_payment_for_deleted_account",
+        user_id=user_id,
+        transaction_id=result.transaction_id,
+        subscription_cancelled=cancelled,
+    )
+    if await meter.get_tenant(user_id) is None:
+        await meter.register_tenant(user_id, PlanTier.FREE)  # somewhere to keep the flag until the erasure
+    await _flag_account(
+        request,
+        meter,
+        user_id,
+        "paid_after_deletion",
+        "A Paddle payment arrived for an account that was already deleted (a checkout opened before the deletion). "
+        "No plan was applied. "
+        + (
+            "The subscription was cancelled so it never renews; refund the payment in Paddle."
+            if cancelled
+            else "The subscription could NOT be cancelled automatically: cancel it and refund the payment in Paddle."
+        ),
+        {
+            "transaction_id": result.transaction_id,
+            "subscription_id": subscription_id,
+            "customer_id": result.paddle_customer_id,
+            "subscription_cancelled": cancelled,
+        },
+        event=f"paddle_payment_after_deletion:{user_id}:{result.transaction_id or subscription_id}",
+    )
+    return "flagged"
 
 
 async def _notify_payment_failed(request: Request, meter: Any, result: Any) -> None:
