@@ -1079,3 +1079,24 @@ async def test_inbox_project_filter_edges():
     sql, args = _inbox_project_filter(["a", "b"])
     assert sql == " AND (CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.project_id') END) IN (?, ?)"
     assert args == ["a", "b"]
+
+
+async def test_mcp_endpoint_works_with_rate_limiting_on(h):
+    """Production runs with rate limiting on: slowapi needs the /mcp handler's name."""
+    from remembra.core.limiter import limiter
+
+    await _alice(h)
+    conn = await h.connect("alice@example.com", ["remembra"])
+    previous = limiter.enabled
+    limiter.enabled = True
+    limiter.reset()
+    try:
+        anonymous = await h.mcp_post(None, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        listed = await h.mcp_post(conn.access_token, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    finally:
+        limiter.reset()
+        limiter.enabled = previous
+    assert anonymous.status_code == 401, anonymous.text
+    assert "resource_metadata=" in anonymous.headers["www-authenticate"]
+    assert listed.status_code == 200, listed.text
+    assert {tool["name"] for tool in listed.json()["result"]["tools"]} >= {"session_brief"}

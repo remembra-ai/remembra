@@ -459,6 +459,10 @@ class ConnectorEndpoint:
     """ASGI app for ``/mcp``: OAuth bearer check, then the MCP SDK."""
 
     def __init__(self, mcp: FastMCP) -> None:
+        # slowapi's middleware names the matched route's endpoint as
+        # f"{endpoint.__module__}.{endpoint.__name__}"; an instance has no
+        # __name__, so without this every /mcp request 500s with rate limiting on.
+        self.__name__ = "connector_mcp"
         self.mcp = mcp
         mcp.streamable_http_app()  # creates the session manager (stateless, JSON responses)
         self.session_manager = mcp.session_manager
