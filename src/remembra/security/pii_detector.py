@@ -60,6 +60,49 @@ PII_PATTERNS: dict[str, re.Pattern[str]] = {
     "dob": re.compile(r"\b(?:0[1-9]|1[0-2])[-/](?:0[1-9]|[12]\d|3[01])[-/](?:19|20)\d{2}\b"),
 }
 
+# A hyphen/dot-joined identifier around a digit run: "629134551556-abc.apps.googleusercontent.com".
+_IDENTIFIER_CHARS = re.compile(r"[A-Za-z0-9._-]")
+_UUID = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
+_HAS_LETTER = re.compile(r"[A-Za-z]")
+
+
+def _token_around(content: str, start: int, end: int) -> tuple[str, int, int]:
+    """The run of identifier characters (letters, digits, ``.``, ``_``, ``-``) containing [start, end)."""
+    left = start
+    while left > 0 and _IDENTIFIER_CHARS.match(content[left - 1]):
+        left -= 1
+    right = end
+    while right < len(content) and _IDENTIFIER_CHARS.match(content[right]):
+        right += 1
+    return content[left:right], start - left, end - left
+
+
+def is_identifier_fragment(content: str, start: int, end: int) -> bool:
+    """True when the digits at [start, end) are one part of a hyphenated identifier, not a number on their own.
+
+    * a UUID (``12345678-1234-5678-1234-567812345678``);
+    * digits followed by ``-`` and a part with a letter: an OAuth client id
+      (``629134551556-abc123.apps.googleusercontent.com``), a build tag;
+    * digits between two hyphens after a part with a letter (``run-123456789-b``).
+
+    A bank account written alone, after a label (``acct 4000123456789``,
+    ``acct: 000123456789``) or split by digit-only groups (``0012-345678901``)
+    is not an identifier fragment.
+    """
+    token, s, e = _token_around(content, start, end)
+    if _UUID.fullmatch(token.strip("._-")):
+        return True
+    after = token[e:]
+    before = token[:s]
+    if after.startswith("-"):
+        following = re.split(r"[-]", after[1:], maxsplit=1)[0]
+        if _HAS_LETTER.search(following):
+            return True
+        if before.endswith("-") and _HAS_LETTER.search(before[:-1].rsplit("-", 1)[-1]):
+            return True
+    return False
+
+
 # Severity levels for PII types
 PII_SEVERITY: dict[str, str] = {
     "ssn": "critical",
@@ -182,6 +225,8 @@ class PIIDetector:
                 else:
                     original = match.group()
                     start, end = match.start(), match.end()
+                    if pii_type == "bank_account" and is_identifier_fragment(content, start, end):
+                        continue
 
                 severity = PII_SEVERITY.get(pii_type, "medium")
 

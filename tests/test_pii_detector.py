@@ -7,6 +7,8 @@ destroyed legitimate user-owned infra config (deploy IPs, server addresses)
 that Remembra must preserve verbatim for recall.
 """
 
+import pytest
+
 from remembra.security.pii_detector import PIIDetector, scan_for_pii, redact_pii
 
 
@@ -111,3 +113,35 @@ def test_compact_dates_are_not_bank_accounts():
 
 def test_long_account_numbers_still_redacted():
     assert "4000123456789" not in redact_pii("acct 4000123456789 on file")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Live 2026-09-26: a Google OAuth client id lost its project number.
+        "GOOGLE_CLIENT_ID=629134551556-8v3kq0abcdefghijklmnopq.apps.googleusercontent.com",
+        "client 629134551556-8v3kq0abcdefghij.apps.googleusercontent.com is the web one",
+        "request 123e4567-e89b-12d3-a456-426614174000 and 12345678-1234-5678-1234-567812345678",
+        "image tag 20260926123456-a1b2c3 and build-1234567890-rc1",
+    ],
+)
+def test_hyphenated_identifiers_are_not_bank_accounts(text):
+    assert not any(m.type == "bank_account" for m in scan_for_pii(text).matches)
+    if "googleusercontent" in text:
+        assert redact_pii(text) == text  # nothing else in a client id looks like PII either
+
+
+@pytest.mark.parametrize(
+    ("text", "number"),
+    [
+        ("acct 4000123456789 on file", "4000123456789"),
+        ("account number: 000123456789.", "000123456789"),
+        ("routing 021000021, account 12345678901234", "12345678901234"),
+        ("branch-split 0012-345678901", "345678901"),
+        ("acct-12345678 (checking)", "12345678"),
+        ("wire to 9876543210123-", "9876543210123"),
+    ],
+)
+def test_real_bank_account_numbers_are_still_redacted(text, number):
+    redacted = redact_pii(text)
+    assert number not in redacted and "[REDACTED_BANK_ACCOUNT]" in redacted
