@@ -6,6 +6,7 @@
 - ``PATCH  /api/v1/crews/{crew_id}``                    settings patch (H, step-up, If-Match)
 - ``GET    /api/v1/crews/{crew_id}/snapshot``           consistent snapshot (§4.4), 304 on If-None-Match
 - ``GET    /api/v1/crews/{crew_id}/events``             polling fallback since_seq (§4.4), 304 on If-None-Match
+- ``POST   /api/v1/crews/{crew_id}/events``             crewd's client events (§4.2 whitelist; session token)
 - ``GET    /api/v1/crews/{crew_id}/members``            members
 - ``POST   /api/v1/crews/{crew_id}/members``            add or change a member (H)
 - ``DELETE /api/v1/crews/{crew_id}/members/{user_id}``  remove a member (H)
@@ -414,6 +415,42 @@ async def crew_events(
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": page.etag})
     response.headers["ETag"] = page.etag
     return {"crew_id": access.crew_id, "events": page.events, "last_seq": page.last_seq, "has_more": page.has_more}
+
+
+SESSION_TOKEN_HEADER = "X-Remembra-Crew-Session"  # the one session-token header of every crew router
+
+
+@router.post("/crews/{crew_id}/events", summary="Submit client events (whitelist only; crew session token)")
+async def submit_crew_events(request: Request, access: CrewAccess = Depends(crew_access("crew:write"))) -> dict[str, Any]:
+    """crewd's client events (§4.2 whitelist: ``activity.*``, ``guard.blocked``, ``guard.tamper_blocked``,
+    ``gate.*``, ``githook.missing``). The actor is the session proven by the session token, never the body;
+    each item gets ``accepted``/``duplicate``/``coalesced``/``rejected`` (its ``id`` is the idempotency key)."""
+    from remembra.crew.events import EventValidationError, ingest_client_events
+    from remembra.crew.sessions import session_actor
+    from remembra.crew.tasks import session_for_token
+
+    token = (request.headers.get(SESSION_TOKEN_HEADER) or "").strip()
+    if not token:
+        raise crew_error(403, "session_required", f"Send the crew session token in {SESSION_TOKEN_HEADER}.")
+    events = _events(request)
+    session = await session_for_token(events.db.conn, access.crew_id, token)
+    if session is None or session["user_id"] != access.user.user_id or session["state"] == "ended":
+        raise crew_error(401, "invalid_session_token", "The crew session token is not valid for this crew.")
+    agent = getattr(access.user, "agent_id", None)
+    if agent and session["agent_id"] != agent:
+        raise crew_error(403, "agent_mismatch", "This agent-scoped key cannot act as another agent's session.")
+    enforce_rate_limit("events", user_id=access.user.user_id, session_token=token)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise crew_error(422, "invalid_body", "The body is not valid JSON.") from None
+    items = body.get("events") if isinstance(body, dict) else None
+    try:
+        results = await ingest_client_events(events, crew_id=access.crew_id, actor=session_actor(session), items=items)
+    except EventValidationError as e:
+        raise crew_error(422, "invalid_events", "; ".join(e.errors[:5])[:500], errors=list(e.errors[:10])) from e
+    seqs = [r.seq for r in results if r.seq is not None]
+    return {"results": [r.to_dict() for r in results], "seq": max(seqs) if seqs else None}
 
 
 # ---------------------------------------------------------------------------
