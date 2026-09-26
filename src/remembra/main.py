@@ -1,6 +1,5 @@
 """FastAPI application factory and entry point."""
 
-import asyncio
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -166,6 +165,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         cloud_rate_limiter = get_cloud_rate_limiter()
         if cloud_rate_limiter.backend != "memory":
+            import asyncio
+
             await asyncio.to_thread(cloud_rate_limiter.check_backend)
 
     # SQLite metadata database (first: it holds the active vector collection)
