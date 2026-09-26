@@ -26,7 +26,7 @@ import { api } from './lib/api';
 import { API_V1 } from './config';
 import { AuthFrame } from './brand/AuthFrame';
 import { appPath } from './lib/authProviders';
-import { checkoutMessage, isCheckoutReturn, waitForPaidPlan, withoutCheckoutParam } from './lib/paddle';
+import { confirmCheckout, isCheckoutReturn, sessionStore, takeCheckoutIntent, withoutCheckoutParam } from './lib/paddle';
 
 type AuthMode = 'login' | 'signup' | 'forgot-password' | 'reset-password' | 'api-key' | 'invite';
 /** Pages that handle a link from outside (provider redirect, email) whether or not signed in. */
@@ -495,19 +495,19 @@ function AuthenticatedShell({
 
 /**
  * Paddle sends a buyer to /?checkout=success after paying. Drop the flag from
- * the address bar (a reload must not announce it again), wait for the webhook
- * to move the account to the paid plan, then say which plan it is on and
- * refresh the plan everywhere it shows.
+ * the address bar (a reload must not announce it again). For a checkout
+ * started from Billing, wait for the webhook to move the account to the plan
+ * that was bought and say so; otherwise name no plan. Then refresh the plan
+ * everywhere it shows.
  */
 function useCheckoutReturn(refreshUsage: () => void) {
   useEffect(() => {
     if (!isCheckoutReturn(window.location.search)) return;
     window.history.replaceState(window.history.state, '', withoutCheckoutParam(window.location.href));
     let cancelled = false;
-    const pending = toast.loading('Payment received. Confirming your plan…');
-    waitForPaidPlan(() => api.getUsageSummary()).then((summary) => {
+    const pending = toast.loading('Checking your plan…');
+    confirmCheckout(() => api.getUsageSummary(), takeCheckoutIntent(sessionStore())).then((message) => {
       if (cancelled) return;
-      const message = checkoutMessage(summary);
       if (message.tone === 'success') toast.success(message.text, { id: pending });
       else toast.info(message.text, { id: pending, duration: 10000 });
       refreshUsage();

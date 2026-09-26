@@ -18,7 +18,7 @@ import { clampSeats, creditsView, formatUsd, parseSeatDraft, planLine, resetLabe
 import { useResource } from '../hooks/useResource';
 import { Card, CardHeader, ErrorNotice, Pill, Skeleton } from './relay/ui';
 import { DegradedNotice, PixelMeter } from './credits/Credits';
-import { initPaddle, paddleGlobal, successUrl } from '../lib/paddle';
+import { initPaddle, paddleGlobal, rememberCheckout, sessionStore, successUrl } from '../lib/paddle';
 
 function userEmail(): string | undefined {
   try {
@@ -32,9 +32,17 @@ function userEmail(): string | undefined {
 /**
  * Open Paddle checkout. Single-quantity plans can use a client price; per-seat
  * Team and Founding 100 always go through a server transaction, where the seat
- * minimum and the redemption cap are enforced.
+ * minimum and the redemption cap are enforced. Just before the checkout opens,
+ * the tab notes the plan it is on and the plan it is buying, so the return
+ * page waits for that plan instead of announcing the current one.
  */
-async function startCheckout(plan: string, cycle: BillingCycle, seats: number | undefined, perSeat: boolean): Promise<void> {
+async function startCheckout(
+  plan: string,
+  cycle: BillingCycle,
+  seats: number | undefined,
+  perSeat: boolean,
+  currentPlan: string,
+): Promise<void> {
   const config = await api.getBillingClientConfig().catch(() => null);
   const P = paddleGlobal();
   if (P) initPaddle(P, config, window.location.origin);
@@ -42,6 +50,7 @@ async function startCheckout(plan: string, cycle: BillingCycle, seats: number | 
   const clientPrice = !perSeat && plan !== 'founding' ? config?.prices?.[priceKey] : undefined;
   if (P && config?.provider === 'paddle' && clientPrice) {
     const email = userEmail();
+    rememberCheckout(sessionStore(), currentPlan, plan);
     P.Checkout.open({
       items: [{ priceId: clientPrice, quantity: 1 }],
       ...(email ? { customer: { email } } : {}),
@@ -52,8 +61,10 @@ async function startCheckout(plan: string, cycle: BillingCycle, seats: number | 
   }
   const response = await api.createCheckout(plan, cycle, perSeat ? seats : undefined);
   if (response.transaction_id && P) {
+    rememberCheckout(sessionStore(), currentPlan, plan);
     P.Checkout.open({ transactionId: response.transaction_id });
   } else if (response.checkout_url) {
+    rememberCheckout(sessionStore(), currentPlan, plan);
     window.location.href = response.checkout_url;
   } else {
     throw new Error('Checkout could not start: Paddle did not load in this browser. Disable blockers for paddle.com and try again.');
@@ -359,7 +370,7 @@ function PlansSection({
     setBusy(planId);
     onError(null);
     try {
-      await startCheckout(planId, forceCycle ?? cycle, seats, perSeat);
+      await startCheckout(planId, forceCycle ?? cycle, seats, perSeat, currentPlan);
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Checkout could not start.');
     } finally {
