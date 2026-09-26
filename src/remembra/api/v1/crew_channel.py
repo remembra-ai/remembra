@@ -123,6 +123,8 @@ class DecisionBody(BaseModel):
     alternatives: list[str] | None = Field(default=None, max_length=10)
     task_id: str | None = Field(default=None, max_length=80)
     zone_id: str | None = Field(default=None, max_length=80)
+    # Rider (gap analysis §7): what the decision rests on (commit shas, paths, test names, links).
+    evidence: list[str] | None = Field(default=None, max_length=10)
 
 
 class SupersedeBody(BaseModel):

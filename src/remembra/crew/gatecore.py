@@ -3919,6 +3919,18 @@ class SnapshotIndex:
         s = self.sessions.get(session_id or "")
         return str(s.get("callsign")) if s and s.get("callsign") else "another session"
 
+    def parent_of(self, session_id: str | None) -> str | None:
+        """The session a sub-agent session reports to (owner decision: a sub-agent is its own session)."""
+        s = self.sessions.get(session_id or "")
+        parent = s.get("parent_session_id") if s else None
+        return str(parent) if parent else None
+
+    def holder_label(self, session_id: str | None) -> str:
+        """``cc-2``, or ``cc-2 (sub-agent of cc-1)``: the claim is the sub-agent's, its parent answers for it."""
+        who = self.callsign(session_id)
+        parent = self.parent_of(session_id)
+        return f"{who} (sub-agent of {self.callsign(parent)})" if parent else who
+
     def is_live(self, session_id: str) -> bool:
         s = self.sessions.get(session_id)
         return s is not None and s.get("state") in S.LIVE_PRESENCE_STATES
@@ -5356,6 +5368,14 @@ def render_you_line(
         else:
             state = "lease ok"
         parts.append(f"{what} ({state})")
+    # the caller answers for its sub-agents' claims (they hold them in their own name)
+    for c in idx.claims:
+        holder = str(c.get("holder_session_id") or "")
+        if not holder or holder == caller or idx.parent_of(holder) != caller:
+            continue
+        z = idx.zones.by_id.get(str(c.get("zone_id") or ""))
+        what = f"zone {z.get('slug')}" if z else str(c.get("resource") or c.get("path_glob") or "claim")
+        parts.append(f"{what} (via sub-agent {idx.callsign(holder)})")
     you = " ".join(parts) if parts else "no claims"
     line = f"[crew {project} {clock}] YOU: {you}"
     if files_since_checkpoint:
@@ -5393,7 +5413,7 @@ def render_do_not_touch(snapshot: Mapping[str, Any], caller: str, *, human: str 
         if c.get("state") == "reserved":
             items.append(f"{what} → reserved" + (f" {task}" if task else ""))
         else:
-            holder = human if c.get("holder_kind") == "human" else idx.callsign(str(c.get("holder_session_id") or ""))
+            holder = human if c.get("holder_kind") == "human" else idx.holder_label(str(c.get("holder_session_id") or ""))
             items.append(f"{what} → {holder}" + (f" {task}" if task else ""))
     for z in idx.zones.user_zones:
         if z.get("frozen_by") and f"zone {z.get('slug')}" not in seen:

@@ -258,6 +258,8 @@ async def prune_crew_events(
                 seqs = [d[0] for d in doomed]
                 marks = ",".join("?" * len(seqs))
                 await conn.execute(f"DELETE FROM crew_events WHERE crew_id = ? AND seq IN ({marks})", (crew_id, *seqs))
+                # a pruned event's tombstone goes with it (the pruned range now vouches for its links)
+                await conn.execute(f"DELETE FROM crew_event_tombstones WHERE crew_id = ? AND seq IN ({marks})", (crew_id, *seqs))
                 await _record_pruned_runs(conn, crew_id, _runs(doomed))
                 pruned += len(doomed)
             done = len(rows) < batch or rows[-1][1] >= stop_ts

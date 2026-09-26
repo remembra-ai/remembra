@@ -154,6 +154,10 @@ def _conflict(code: str, message: str, **extra: Any) -> SessionError:
 # ---------------------------------------------------------------------------
 
 
+# end_reason of a sub-agent session its parent's end took with it (owner decision: sub-agents are sessions).
+SUB_AGENT_END_REASON: Final = "parent_ended"
+
+
 def new_session_token() -> str:
     return SESSION_TOKEN_PREFIX + secrets.token_urlsafe(32)
 
@@ -471,13 +475,7 @@ def offer_view(row: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def session_actor(row: Mapping[str, Any]) -> Actor:
-    return Actor.session(
-        row["id"],
-        callsign=row["callsign"],
-        agent_id=row["agent_id"],
-        user_id=row["user_id"],
-        verified=bool(row.get("agent_verified")),
-    )
+    return Actor.for_session_row(row)
 
 
 # ---------------------------------------------------------------------------
@@ -582,6 +580,8 @@ class JoinRequest:
     parent_session_id: str | None = None
     sub_agent_id: str | None = None
     capabilities: list[str] | None = None
+    run_id: str | None = None
+    context_window: int | None = None
 
 
 @dataclass
@@ -866,8 +866,8 @@ class CrewSessions:
             """INSERT INTO crew_sessions (id, crew_id, user_id, agent_id, session_id, host_id, member_key, callsign,
                    client_kind, adapter, adapter_enforcement, agent_verified, model, checkout_fp, worktree_id, branch,
                    head_commit, state, joined_at, last_seen_at, last_activity_at, last_heartbeat_at, token_hash,
-                   token_version, provider, parent_session_id, sub_agent_id, capabilities)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)""",
+                   token_version, provider, parent_session_id, sub_agent_id, capabilities, run_id, context_window)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id,
                 crew_id,
@@ -895,6 +895,8 @@ class CrewSessions:
                 req.parent_session_id,
                 req.sub_agent_id,
                 json.dumps(list(req.capabilities)) if req.capabilities is not None else None,
+                req.run_id,
+                req.context_window,
             ),
         )
         row = await get_session(tx.conn, session_id)
@@ -1769,15 +1771,16 @@ class CrewSessions:
                 continue
             await tx.conn.execute(
                 """INSERT INTO crew_footprints (crew_id, session_id, path, first_at, last_at, touches, state, attribution,
-                       claim_epoch, last_commit, worktree_id)
-                   VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+                       claim_epoch, last_commit, worktree_id, content_hash)
+                   VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(crew_id, session_id, path) DO UPDATE SET last_at = excluded.last_at,
                        touches = touches + 1, state = excluded.state,
                        attribution = CASE WHEN crew_footprints.attribution = 'certain' THEN 'certain'
                                           ELSE excluded.attribution END,
                        claim_epoch = COALESCE(excluded.claim_epoch, crew_footprints.claim_epoch),
                        last_commit = COALESCE(excluded.last_commit, crew_footprints.last_commit),
-                       worktree_id = COALESCE(excluded.worktree_id, crew_footprints.worktree_id)""",
+                       worktree_id = COALESCE(excluded.worktree_id, crew_footprints.worktree_id),
+                       content_hash = COALESCE(excluded.content_hash, crew_footprints.content_hash)""",
                 (
                     row["crew_id"],
                     row["id"],
@@ -1789,6 +1792,7 @@ class CrewSessions:
                     fp.get("claim_epoch"),
                     fp.get("last_commit"),
                     row.get("worktree_id"),
+                    fp.get("content_hash") if schemas.is_sha256_hex(fp.get("content_hash")) else None,
                 ),
             )
 
@@ -1813,7 +1817,7 @@ class CrewSessions:
         """Urgent server/human items for this session (session queue, §5.8), ids-only templates, ≤300 chars."""
         lines: list[str] = []
         if row["state"] == "paused":
-            lines.append("Crew: this session is PAUSED by Mani. Do not edit files until it is resumed.")
+            lines.append("Crew: this session is PAUSED by a human. Do not edit files until it is resumed.")
         items = await _all(
             conn,
             """SELECT kind, title FROM crew_inbox_items WHERE crew_id = ? AND audience = 'session' AND recipient = ?
@@ -2177,8 +2181,8 @@ class CrewSessions:
         ckp_id = new_id("checkpoint")
         await tx.conn.execute(
             """INSERT INTO crew_checkpoints (id, crew_id, session_id, task_id, trigger, facts, facts_hash, headline,
-                   facts_source, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   facts_source, created_at, run_id)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 ckp_id,
                 row["crew_id"],
@@ -2190,6 +2194,7 @@ class CrewSessions:
                 headline[:200],
                 facts_source,
                 format_ts(now),
+                row.get("run_id"),  # rider: a synthesized checkpoint belongs to the session's run
             ),
         )
         stored = await _one(tx.conn, "SELECT * FROM crew_checkpoints WHERE id = ?", (ckp_id,))
@@ -2916,6 +2921,28 @@ class CrewSessions:
             now=now,
         )
         await self._emit_mode_change(tx, row["crew_id"], live_before, actor, now)
+        await self.end_sub_agents(tx, row, now, actor=actor)
+
+    async def end_sub_agents(self, tx: EventTx, parent: Mapping[str, Any], now: datetime, *, actor: Actor) -> list[str]:
+        """A session that ends takes its running sub-agents with it (it is accountable for them).
+
+        Each live sub-agent session ends as if it left (``parent_ended``): its claims are released,
+        or reserved with a partial report when it has unfinished tasks, exactly as its own leave
+        would. Their sub-agents follow the same way. A lost sub-agent is left to the reaper,
+        which keeps a lane whose baton still waits. Returns the ended session ids.
+        """
+        ended: list[str] = []
+        children = await _all(
+            tx.conn,
+            "SELECT * FROM crew_sessions WHERE parent_session_id = ? AND crew_id = ? AND state NOT IN ('ended', 'lost')"
+            " ORDER BY joined_at, id",
+            (parent["id"], parent["crew_id"]),
+        )
+        for child in children:
+            effects = await self._end_work(tx, child, reason=SUB_AGENT_END_REASON, facts={}, baton=False, baton_ref=None, now=now)
+            await self._end_session(tx, child, SUB_AGENT_END_REASON, now, actor=actor, effects=effects)
+            ended.append(str(child["id"]))
+        return ended
 
     async def _emit_mode_change(self, tx: EventTx, crew_id: str, live_before: int, actor: Actor, now: datetime) -> None:
         live_after = await live_session_count(tx.conn, crew_id)
@@ -2974,7 +3001,7 @@ class CrewSessions:
                 audience="session",
                 recipient=row["id"],
                 kind="override_notice",
-                title="Mani paused this session. Stop editing and wait for resume.",
+                title="A human paused this session. Stop editing and wait for resume.",
                 ref_type="session",
                 ref_id=row["id"],
                 priority=0,
@@ -3046,7 +3073,7 @@ class CrewSessions:
                 audience="session",
                 recipient=row["id"],
                 kind="override_notice",
-                title="Mani asked for a checkpoint now: call crew_checkpoint or run remembra-crew checkpoint.",
+                title="A human asked for a checkpoint now: call crew_checkpoint or run remembra-crew checkpoint.",
                 ref_type="session",
                 ref_id=row["id"],
                 priority=1,
@@ -3093,7 +3120,7 @@ class CrewSessions:
                     audience="session",
                     recipient=row["id"],
                     kind="override_notice",
-                    title=f"Mani released all {len(released)} claims of this session. Claim again before editing.",
+                    title=f"A human released all {len(released)} claims of this session. Claim again before editing.",
                     ref_type="session",
                     ref_id=row["id"],
                     priority=0,

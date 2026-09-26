@@ -331,7 +331,7 @@ class CrewCore:
             "server_time": now_iso(now),
             "as_of_seq": int(crew["last_seq"] or 0),
             "etag": "",
-            "sessions": [views.session_view(s) for s in sessions],
+            "sessions": [views.session_view(s) for s in views.nest_sessions(sessions)],
             "claims": [views.claim_view(c, now) for c in claims],
             "zones": [views.zone_view(z) for z in zones],
             "commons": commons[: lim["commons"]],
@@ -443,7 +443,7 @@ class CrewCore:
                 }
                 for s in live_rows
             ],
-            "sessions": [views.session_view(s) for s in sessions],
+            "sessions": [views.session_view(s) for s in views.nest_sessions(sessions)],
             "checkpoints": [{**views.checkpoint_view(c), "created_at": c["created_at"]} for c in checkpoints],
             "batons_in": [
                 {**views.baton_row_view(b), "from_callsign": callsigns.get(b.get("from_session") or "")} for b in batons_in

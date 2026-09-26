@@ -272,6 +272,7 @@ class CheckpointService:
                 facts_source=session_channel_source(fresh),
                 decision_ids=decision_ids or None,
                 state_before=body.get("state_before"),
+                run_id=body.get("run_id"),
             )
             if result.created and fresh.get("client_kind") == "mcp":
                 await self._mcp_footprints(tx, crew_id, fresh, facts)
@@ -308,6 +309,7 @@ class CheckpointService:
         promote: bool = True,
         decision_ids: list[str] | None = None,
         state_before: str | None = None,
+        run_id: str | None = None,
     ) -> CheckpointResult:
         """Store one checkpoint (already-redacted ``facts``) inside the caller's transaction, emit
         ``checkpoint.created`` and queue its memory promotion when D15 allows it."""
@@ -333,7 +335,8 @@ class CheckpointService:
         text = headline(str(session["callsign"]), trigger, number, facts)
         await tx.conn.execute(
             """INSERT INTO crew_checkpoints (id, crew_id, session_id, task_id, trigger, facts, facts_hash, headline,
-                   facts_source, created_at, decision_ids, state_before_ref) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   facts_source, created_at, decision_ids, state_before_ref, run_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 checkpoint_id,
                 crew_id,
@@ -347,6 +350,7 @@ class CheckpointService:
                 now,
                 dumps(decision_ids) if decision_ids else None,
                 state_before,
+                run_id or session.get("run_id"),  # rider: the checkpoint's run, defaulting to the session's
             ),
         )
         settings = await crew_settings(tx.conn, crew_id)

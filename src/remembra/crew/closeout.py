@@ -148,13 +148,7 @@ async def on_relay_close(
             (crew_id, user_id, agent_id, client_session_id),
         )
         if session is not None:
-            actor = Actor.session(
-                session["id"],
-                callsign=session["callsign"],
-                agent_id=session["agent_id"],
-                user_id=session["user_id"],
-                verified=bool(session["agent_verified"]),
-            )
+            actor = Actor.for_session_row(session)
             who = session["callsign"]
             result["crew_session_id"] = session["id"]
         else:
@@ -432,6 +426,11 @@ async def _leave(
             now=now,
         )
         result["seqs"].append(ev.seq)
+
+    # its running sub-agents end with it (a parent is accountable for them)
+    first = len(tx.emitted)
+    await service.end_sub_agents(tx, session, now, actor=actor)
+    result["seqs"].extend(int(e["seq"]) for e in tx.emitted[first:])
 
 
 async def _ensure_report(

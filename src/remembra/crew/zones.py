@@ -117,13 +117,7 @@ class Principal:
 
     def actor(self) -> Actor:
         if self.session is not None:
-            return Actor.session(
-                str(self.session["id"]),
-                callsign=str(self.session["callsign"]),
-                agent_id=str(self.session["agent_id"]),
-                user_id=str(self.session["user_id"]),
-                verified=bool(self.session.get("agent_verified")),
-            )
+            return Actor.for_session_row(self.session)
         if self.is_human:
             return Actor.human(self.user_id)
         return Actor.system()

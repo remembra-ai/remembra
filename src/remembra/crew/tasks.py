@@ -48,7 +48,7 @@ from typing import Any, Final, Protocol
 from remembra.crew import schemas
 from remembra.crew.events import Actor, CrewEventLog, EventTx
 from remembra.crew.settings import load_settings
-from remembra.crew.store import dumps, loads, new_id, now_iso, parse_iso
+from remembra.crew.store import dumps, is_accountable_for, loads, new_id, now_iso, parse_iso
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -118,14 +118,7 @@ class Caller:
     @property
     def actor(self) -> Actor:
         if self.session is not None:
-            s = self.session
-            return Actor.session(
-                str(s["id"]),
-                callsign=str(s["callsign"]),
-                agent_id=str(s["agent_id"]),
-                user_id=str(s["user_id"]),
-                verified=bool(s.get("agent_verified")),
-            )
+            return Actor.for_session_row(self.session)
         if self.human:
             return Actor.human(self.user_id)
         return Actor.system()
@@ -587,13 +580,7 @@ async def record_baton_restore(
         await tx.conn.execute("UPDATE crew_batons SET restored = ? WHERE id = ?", (1 if restored else 0, baton_id))
         task = await fetchone(tx.conn, "SELECT * FROM crew_tasks WHERE id = ?", (row["task_id"],)) if row.get("task_id") else None
         label = task_ref(task) if task else "the baton"
-        actor = Actor.session(
-            str(session["id"]),
-            callsign=str(session["callsign"]),
-            agent_id=str(session["agent_id"]),
-            user_id=str(session["user_id"]),
-            verified=bool(session.get("agent_verified")),
-        )
+        actor = Actor.for_session_row(session)
         result = await tx.emit(
             crew_id=crew_id,
             type="baton.restored",
@@ -1383,11 +1370,16 @@ class TaskService:
                 out.append(str(t["id"]))
         return out
 
-    def _require_owner(self, task: Mapping[str, Any], caller: Caller) -> None:
+    async def _require_owner(self, conn: Any, task: Mapping[str, Any], caller: Caller) -> None:
+        """The owner session, or the session accountable for it (the owner is its sub-agent), or a human."""
         if caller.human or caller.system:
             return
-        if caller.session_id is None or task.get("owner_session_id") != caller.session_id:
-            raise _err(403, "not_task_owner", f"Only the session that owns {task_ref(task)} can do this.")
+        owner = task.get("owner_session_id")
+        if caller.session_id is not None and (
+            owner == caller.session_id or await is_accountable_for(conn, caller.session_id, owner)
+        ):
+            return
+        raise _err(403, "not_task_owner", f"Only the session that owns {task_ref(task)} (or its parent) can do this.")
 
     def _require_session(self, caller: Caller) -> Mapping[str, Any]:
         if caller.session is None:
@@ -1695,7 +1687,7 @@ class TaskService:
                 claims = await self._claim_in_tx(tx, crew_id, task, session)
                 await resolve_inbox_items(tx, crew_id, [f"task_ready:{task_id}"], resolved_by=str(session["id"]))
             elif task["status"] == "claimed":
-                self._require_owner(task, caller)
+                await self._require_owner(tx.conn, task, caller)
             else:
                 raise _err(409, "invalid_transition", f"{task_ref(task)} is {task['status']}; it cannot be started.")
             started_head = task.get("started_head") or head or session.get("head_commit")
@@ -1719,7 +1711,7 @@ class TaskService:
         text = _check_text(reason, "reason", 280, required=True)
         async with self.events.transaction() as tx:
             task = await load_task(tx.conn, crew_id, task_id)
-            self._require_owner(task, caller)
+            await self._require_owner(tx.conn, task, caller)
             if task["status"] != "in_progress":
                 raise _err(
                     409, "invalid_transition", f"{task_ref(task)} is {task['status']}; only an in-progress task can block."
@@ -1741,7 +1733,7 @@ class TaskService:
     async def unblock(self, crew_id: str, task_id: str, caller: Caller) -> TaskResult:
         async with self.events.transaction() as tx:
             task = await load_task(tx.conn, crew_id, task_id)
-            self._require_owner(task, caller)
+            await self._require_owner(tx.conn, task, caller)
             if task["status"] != "blocked":
                 raise _err(409, "invalid_transition", f"{task_ref(task)} is {task['status']}, not blocked.")
             detail, seq = await self._set_status(tx, crew_id, task, "in_progress", caller, sets={"blocked_reason": None})
@@ -1753,7 +1745,7 @@ class TaskService:
         ``stalled`` with a current stalled report; with ``baton`` (default) the claims stay reserved for pickup."""
         async with self.events.transaction() as tx:
             task = await load_task(tx.conn, crew_id, task_id)
-            self._require_owner(task, caller)
+            await self._require_owner(tx.conn, task, caller)
             owner = task.get("owner_session_id")
             if task["status"] == "claimed" and not task.get("started_at"):
                 await self.claims.release(

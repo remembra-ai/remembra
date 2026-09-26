@@ -41,7 +41,7 @@ import asyncio
 import hashlib
 import re
 import secrets
-from collections.abc import Iterable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -388,6 +388,10 @@ class ExtraDatabase:
     rules: tuple[TableRule, ...]
     exempt: Mapping[str, str] = field(default_factory=dict)
     exempt_prefixes: tuple[str, ...] = ("sqlite_",)
+    # Runs first, in the same transaction as the rules: work the rules cannot express (crew.db
+    # tombstones the account's events in other owners' hash-chained logs). ``(conn, user_id,
+    # email) -> {label: count}``; the counts go into the receipt as ``<name>:<label>``.
+    prepare: Callable[[Any, str, str | None], Awaitable[Mapping[str, int]]] | None = None
 
     def __post_init__(self) -> None:
         if not self.rules:
@@ -462,6 +466,10 @@ class AccountEraser:
             receipt.vectors = int(await self._qdrant.delete_by_user_everywhere(user_id, also=also))
         for extra in self._extra:
             async with extra.db.transaction():
+                if extra.prepare is not None:
+                    for label, n in (await extra.prepare(extra.db.conn, user_id, email)).items():
+                        if n:
+                            receipt.rows[f"{extra.name}:{label}"] = int(n)
                 rows, unregistered = await erase_rows(
                     extra.db.conn,
                     user_id,

@@ -365,10 +365,71 @@ const STATE_RANK: Record<string, number> = {
   ended: 7,
 };
 
+function byLane(a: SessionState, b: SessionState): number {
+  return (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9) || a.callsign.localeCompare(b.callsign, undefined, { numeric: true });
+}
+
+/**
+ * Lane order. A sub-agent is its own session (owner decision, gap analysis open question 1):
+ * its lane comes right after the lane of the session that started it, nested; a sub-agent
+ * whose parent is not shown keeps its own place.
+ */
 export function laneOrder(sessions: SessionState[]): SessionState[] {
-  return [...sessions].sort(
-    (a, b) => (STATE_RANK[a.state] ?? 9) - (STATE_RANK[b.state] ?? 9) || a.callsign.localeCompare(b.callsign, undefined, { numeric: true }),
-  );
+  const ids = new Set(sessions.map((s) => s.id));
+  const children = new Map<string, SessionState[]>();
+  const roots: SessionState[] = [];
+  for (const s of sessions) {
+    const parent = s.parent_session_id;
+    if (parent && parent !== s.id && ids.has(parent)) {
+      const list = children.get(parent) ?? [];
+      list.push(s);
+      children.set(parent, list);
+    } else {
+      roots.push(s);
+    }
+  }
+  const out: SessionState[] = [];
+  const seen = new Set<string>();
+  const visit = (s: SessionState) => {
+    if (seen.has(s.id)) return;
+    seen.add(s.id);
+    out.push(s);
+    for (const child of [...(children.get(s.id) ?? [])].sort(byLane)) visit(child);
+  };
+  for (const s of [...roots].sort(byLane)) visit(s);
+  for (const s of sessions) if (!seen.has(s.id)) out.push(s);
+  return out;
+}
+
+/** How deep a lane is nested: 0 for a session, 1 for its sub-agent, 2 for the sub-agent's own sub-agent. */
+export function laneDepth(state: CrewState, session: SessionState): number {
+  let depth = 0;
+  let parent = session.parent_session_id ?? null;
+  const seen = new Set<string>([session.id]);
+  while (parent && state.sessions[parent] && !seen.has(parent) && depth < 8) {
+    seen.add(parent);
+    depth += 1;
+    parent = state.sessions[parent].parent_session_id ?? null;
+  }
+  return depth;
+}
+
+export interface SubAgentView {
+  /** "sub-agent of cc-1": shown on a sub-agent's lane; the parent answers for its claims and tasks. */
+  parentLabel: string | null;
+  /** Callsigns of this session's running sub-agents: shown on the parent's lane. */
+  subAgents: string[];
+}
+
+export function subAgentView(state: CrewState, session: SessionState): SubAgentView {
+  const parentId = session.parent_session_id ?? null;
+  const parent = parentId ? (state.sessions[parentId] ?? null) : null;
+  const parentLabel = parentId ? `sub-agent of ${parent?.callsign ?? 'an ended session'}` : null;
+  const subAgents = Object.values(state.sessions)
+    .filter((s) => s.parent_session_id === session.id && s.id !== session.id && !['ended', 'lost'].includes(s.state))
+    .sort(byLane)
+    .map((s) => s.callsign);
+  return { parentLabel, subAgents };
 }
 
 /** The CLI line another agent runs to pick up a task's baton (D33). */

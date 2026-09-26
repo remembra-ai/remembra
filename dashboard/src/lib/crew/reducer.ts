@@ -172,7 +172,7 @@ export function applyEvent(state: CrewState, event: EventLike): CrewState {
   if (seq > state.last_seq + 1) return { ...state, needs_resync: true, resync_reason: 'gap' };
   const handler = Object.prototype.hasOwnProperty.call(HANDLERS, event.type) ? HANDLERS[event.type] : undefined;
   let next = state;
-  if (handler !== undefined && Math.trunc(Number(event.v ?? 1)) === 1) {
+  if (handler !== undefined && Math.trunc(Number(event.v ?? 1)) === 1 && !isErased(event)) {
     next = handler(state, event, (event.payload || {}) as Payload);
   }
   next = { ...next, last_seq: seq, crew: next.crew !== null ? { ...next.crew, last_seq: seq } : null };
@@ -186,6 +186,18 @@ export function applyEvent(state: CrewState, event: EventLike): CrewState {
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
+
+/**
+ * An event whose content account erasure replaced with the tombstone (`{"erased": true}` from the
+ * system actor `erased`): it keeps its seq, type and moment flag and changes no state.
+ */
+export function isErased(event: EventLike): boolean {
+  const payload = (event.payload ?? {}) as Record<string, unknown>;
+  const actor = event.actor ?? {};
+  return (
+    Object.keys(payload).length === 1 && payload.erased === true && actor.kind === 'system' && actor.id === 'erased'
+  );
+}
 
 function crewMatches(state: CrewState, crewId: unknown): boolean {
   return state.crew === null || state.crew.id === crewId;

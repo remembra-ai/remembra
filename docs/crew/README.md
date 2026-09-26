@@ -64,8 +64,9 @@ remembra-crew = "remembra.relay.crew.cli:entrypoint"
 remembra-crewd = "remembra.relay.crew.crewd:main"
 ```
 
-WP-9 owns those target modules. Until WP-9 lands they do not exist, so the two commands fail at
-import on an installed wheel; nothing else references them.
+WP-9 owns those target modules (`remembra/relay/crew/cli.py` and `crewd.py`).
+`tests/crew/test_crew_commands_exist.py` runs `remembra-crew <subcommand> --help` for every
+command line the agent-facing texts show, and checks every MCP tool they name is registered.
 
 ## Interpretations fixed by these contracts
 
@@ -113,8 +114,35 @@ quality, confidence, continuity_seq), `crew_decisions` (evidence,
 proposed_by_verified, decided_by_verified, intent_version) and
 `crew_footprints` (content_hash, artifact_id).
 
-Several riders are optional request fields: `provider`, `capabilities` and
-`sub_agent_id` on Join, and `decisions` and `state_before` on Checkpoint. The
-decision service records whether the proposer and the decider were verified.
-`failure.recorded`, `failure.resolved` and `artifact.recorded` are reserved
-L1 event names with no producer yet. A NULL rider changes no behaviour.
+Several riders are optional request fields: `provider`, `capabilities`,
+`sub_agent_id`, `run_id` and `context_window` on Join; `decisions`,
+`state_before` and `run_id` on Checkpoint (`run_id` defaults to the session's,
+and the server's own checkpoints carry the session's); `content_hash` (sha256)
+on a heartbeat footprint; `evidence` on a decision. The decision service records
+whether the proposer and the decider were verified. `env_fp_id`, `quality`,
+`confidence`, `continuity_seq`, `intent_version` and `artifact_id` have no
+writer yet. `failure.recorded`, `failure.resolved` and `artifact.recorded` are
+reserved L1 event names with no producer yet. A NULL rider changes no behaviour.
+
+The parent stays accountable for its sub-agent: the actor of every event a
+sub-agent causes carries `parent_session_id` (absent for every other actor, so
+their envelopes and hashes are unchanged); the parent may release the
+sub-agent's claims and block, unblock or release its tasks; a parent that ends
+takes its live sub-agents with it (`end_reason` `parent_ended`, their work
+released or reserved as their own leave would); snapshots list a sub-agent
+right after its parent; the YOU line shows the claims the caller answers for
+(`zone pos (via sub-agent cc-2)`) and DO NOT TOUCH names the parent
+(`zone pos → cc-2 (sub-agent of cc-1)`).
+
+## Account erasure and the hash chain
+
+`remembra.crew.erasure` holds the crew.db erasure rules (`CREW_ERASURE_RULES`)
+and, per table, what it holds for a user and which rows are the user's own and
+which are shared crew history (`CREW_TABLE_HOLDINGS`). In a crew the erased
+account does not own, every event carrying its identity is tombstoned
+(`remembra.crew.events.tombstone_events`): its actor, refs, summary and payload
+become the fixed tombstone, and `crew_event_tombstones` records the prev_hash
+and hash it had. `verify_crew_chain` accepts a tombstoned event only when its
+content is exactly the tombstone and its links equal the recorded ones. Both
+reducers skip a tombstoned event's handler (it only advances `last_seq`; a
+moment keeps its place). Retention deletes a tombstone with its event.

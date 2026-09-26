@@ -188,3 +188,139 @@ async def test_decisions_record_who_was_verified(tmp_path) -> None:
         assert row["decided_by_verified"] == 1
     finally:
         await env.db.close()
+
+
+async def test_join_passes_run_id_and_context_window_through(tmp_path) -> None:
+    async with crew_http(tmp_path) as (h, db):
+        _uid, key = await _owner(h)
+        res = await h.client.post(
+            "/api/v1/crews/join", headers=key, json=_join_body("r-1", run_id="run-2026-09-26-a", context_window=200000)
+        )
+        assert res.status_code == 201, res.text
+        row = await db.fetchone("SELECT run_id, context_window FROM crew_sessions WHERE id = ?", (res.json()["session_id"],))
+        assert row["run_id"] == "run-2026-09-26-a" and row["context_window"] == 200000
+        bad = await h.client.post("/api/v1/crews/join", headers=key, json=_join_body("r-2", context_window=0))
+        assert bad.status_code == 422, bad.text
+        plain = await h.client.post("/api/v1/crews/join", headers=key, json=_join_body("r-3"))
+        row = await db.fetchone("SELECT run_id, context_window FROM crew_sessions WHERE id = ?", (plain.json()["session_id"],))
+        assert row["run_id"] is None and row["context_window"] is None
+
+
+async def test_checkpoint_run_id_defaults_to_the_sessions_run(tmp_path) -> None:
+    from remembra.crew.checkpoints import CheckpointService
+    from remembra.crew.limits import SELF_HOSTED_CREW_LIMITS
+    from remembra.crew.tasks import Caller
+    from tests.crew.wp6_support import CREW, event_log, open_db, seed_crew, seed_session
+
+    db = await open_db(tmp_path)
+    try:
+        await seed_crew(db)
+
+        async def resolver(owner: str):  # noqa: ANN202
+            return SELF_HOSTED_CREW_LIMITS
+
+        svc = CheckpointService(event_log(db), limits_resolver=resolver)
+        s = await seed_session(db)
+        async with db.transaction():
+            await db.conn.execute("UPDATE crew_sessions SET run_id = 'run-a' WHERE id = ?", (s["id"],))
+        s = await db.fetchone("SELECT * FROM crew_sessions WHERE id = ?", (s["id"],))
+        inherited = await svc.ingest(CREW, Caller.for_session(s), {"session_id": s["id"], "trigger": "turn", "facts": {}})
+        explicit = await svc.ingest(
+            CREW, Caller.for_session(s), {"session_id": s["id"], "trigger": "turn", "facts": {"n": 1}, "run_id": "run-b"}
+        )
+        rows = {
+            r["id"]: r["run_id"]
+            for r in await db.fetchall("SELECT id, run_id FROM crew_checkpoints WHERE session_id = ?", (s["id"],))
+        }
+        assert rows[inherited.checkpoint["id"]] == "run-a" and rows[explicit.checkpoint["id"]] == "run-b"
+    finally:
+        await db.close()
+
+
+async def test_heartbeat_footprints_carry_the_content_hash(tmp_path) -> None:
+    from remembra.crew import collisions  # noqa: F401  (registers the heartbeat footprint sink)
+    from tests.crew.sessions_support import OWNER, hb_item, host, join_req, make_env
+
+    env = await make_env(tmp_path)
+    try:
+        hrow, htok = await host(env)
+        j = await env.svc.join(user_id=OWNER, req=join_req("s-1", host_id=hrow["id"]), host_token=htok, session_token=None)
+        digest = "ab" * 32
+        fps = [
+            {"path": "src/pos/cart.ts", "state": "dirty", "attribution": "certain", "content_hash": digest},
+            {"path": "src/pos/tax.ts", "state": "dirty", "attribution": "certain", "content_hash": "not-a-hash"},
+            {"path": "src/pos/till.ts", "state": "dirty", "attribution": "certain"},
+        ]
+        await env.svc.heartbeat(
+            user_id=OWNER, host=hrow, body={"batch_id": "b1", "sessions": [hb_item(j.session, j.session_token, footprints=fps)]}
+        )
+        rows = {
+            r["path"]: r["content_hash"]
+            for r in await env.all("SELECT path, content_hash FROM crew_footprints WHERE session_id = ?", (j.session["id"],))
+        }
+        assert rows == {"src/pos/cart.ts": digest, "src/pos/tax.ts": None, "src/pos/till.ts": None}
+        # a later heartbeat without a hash keeps the last one seen
+        again = [{"path": "src/pos/cart.ts", "state": "dirty", "attribution": "certain"}]
+        await env.svc.heartbeat(
+            user_id=OWNER, host=hrow, body={"batch_id": "b2", "sessions": [hb_item(j.session, j.session_token, footprints=again)]}
+        )
+        row = await env.one("SELECT content_hash FROM crew_footprints WHERE path = 'src/pos/cart.ts'")
+        assert row is not None and row["content_hash"] == digest
+        assert (
+            S.validate(
+                {"batch_id": "b", "sessions": [hb_item(j.session, "t", footprints=fps[:1])]}, S.REQUEST_SHAPES["Heartbeat"]
+            )
+            == []
+        )
+        assert (
+            S.validate(
+                {"batch_id": "b", "sessions": [hb_item(j.session, "t", footprints=fps[1:2])]}, S.REQUEST_SHAPES["Heartbeat"]
+            )
+            != []
+        )
+    finally:
+        await env.db.close()
+
+
+async def test_decisions_carry_evidence(tmp_path) -> None:
+    import pytest
+
+    from remembra.api.v1.crew_channel import DecisionBody
+    from remembra.crew.inbox import Author, ValidationFailed
+    from tests.crew.wp7_support import CREW_A, OWNER, add_session, make_env
+
+    env = await make_env(tmp_path)
+    try:
+        agent = await add_session(env.db, CREW_A, "cs_a", callsign="cc-1")
+        body = DecisionBody(title="Money is Decimal", decision="Use Decimal", evidence=["abc1234", "tests/test_money.py"])
+        out = await env.decisions.create(env.crew, agent, **body.model_dump())
+        assert out["evidence"] == ["abc1234", "tests/test_money.py"]
+        row = await env.db.fetchone("SELECT evidence FROM crew_decisions WHERE id = ?", (out["id"],))
+        assert json.loads(row["evidence"]) == ["abc1234", "tests/test_money.py"]
+        plain = await env.decisions.create(env.crew, Author.human(OWNER), title="GCT", decision="Round half-up")
+        assert plain["evidence"] == []
+        assert (await env.db.fetchone("SELECT evidence FROM crew_decisions WHERE id = ?", (plain["id"],)))["evidence"] is None
+        with pytest.raises(ValidationFailed):
+            await env.decisions.create(env.crew, agent, title="x", decision="y", evidence=["x" * 281])
+        with pytest.raises(ValidationFailed):
+            await env.decisions.create(env.crew, agent, title="x", decision="y", evidence="not a list")
+    finally:
+        await env.db.close()
+
+
+async def test_server_written_checkpoints_carry_the_sessions_run(tmp_path) -> None:
+    from tests.crew.sessions_support import OWNER, join_req, make_env
+
+    env = await make_env(tmp_path)
+    try:
+        req = join_req("s-1")
+        req.run_id = "run-close"
+        j = await env.svc.join(user_id=OWNER, req=req, host_token=None, session_token=None)
+        res = await env.svc.leave(
+            j.session, reason="logout", facts={"branch": "main", "head": "abc1234"}, summary=None, baton=False, baton_ref=None
+        )
+        assert res["checkpoint_id"]
+        row = await env.one("SELECT trigger, run_id FROM crew_checkpoints WHERE id = ?", (res["checkpoint_id"],))
+        assert row == {"trigger": "close", "run_id": "run-close"}
+    finally:
+        await env.db.close()

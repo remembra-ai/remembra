@@ -25,9 +25,11 @@ import {
   nowLine,
   pickupCommand,
   presenceView,
+  laneDepth,
   reportRing,
   sessionClaims,
   shortAge,
+  subAgentView,
   zoneChips,
 } from './model';
 import './lane.css';
@@ -73,6 +75,8 @@ export function CrewLane({
   const held = claims.filter((c) => c.state === 'active');
   const pickup = pickupCommand(line.task);
   const labelId = `lane-${session.id}`;
+  const family = subAgentView(state, session);
+  const depth = laneDepth(state, session);
 
   const targets = Object.values(state.sessions)
     .filter((s) => s.id !== session.id && !['ended', 'lost'].includes(s.state))
@@ -125,6 +129,7 @@ export function CrewLane({
 
   const accessibleName = [
     session.callsign,
+    ...(family.parentLabel ? [family.parentLabel] : []),
     meta.name,
     session.agent_verified ? 'key-verified' : 'self-declared',
     presence.label,
@@ -134,7 +139,9 @@ export function CrewLane({
   return (
     <article
       data-lane={session.id}
+      data-parent={session.parent_session_id ?? undefined}
       data-settled={presence.settled ? 'true' : undefined}
+      style={depth > 0 ? { marginLeft: `${Math.min(depth, 3) * 1.5}rem` } : undefined}
       aria-label={accessibleName}
       aria-describedby={labelId}
       tabIndex={0}
@@ -170,6 +177,20 @@ export function CrewLane({
             >
               {session.agent_verified ? 'key-verified' : 'self-declared'}
             </span>
+            {family.parentLabel && (
+              <span
+                data-testid="lane-parent"
+                className="rounded-[2px] border border-dashed border-rule px-1 font-mono text-[10px] leading-4 text-ink-2"
+                title="A sub-agent: its own session, and the session that started it answers for its claims and tasks"
+              >
+                {family.parentLabel}
+              </span>
+            )}
+            {family.subAgents.length > 0 && (
+              <span data-testid="lane-sub-agents" className="font-mono text-[10px] leading-4 text-ink-3">
+                sub-agents: {family.subAgents.join(', ')}
+              </span>
+            )}
           </div>
           <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5">
             <PresencePulse presence={presence} />

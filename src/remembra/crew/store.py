@@ -115,6 +115,33 @@ def dumps(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
+# Sub-agents of sub-agents are allowed; the chain is walked at most this deep (a cycle cannot form:
+# a parent must exist before its child joins, but the walk is bounded anyway).
+MAX_SUB_AGENT_DEPTH: Final = 8
+
+
+async def is_accountable_for(conn: Any, session_id: str | None, subject_session_id: str | None) -> bool:
+    """Is crew session ``session_id`` an ancestor of ``subject_session_id`` (it started that sub-agent, or one above it)?
+
+    Owner decision (gap analysis open question 1): a sub-agent is its own session linked by
+    ``parent_session_id``; what it holds is attributed to it, and its parent stays accountable,
+    so the parent may release its claims and act on its tasks.
+    """
+    if not session_id or not subject_session_id or session_id == subject_session_id:
+        return False
+    current = subject_session_id
+    for _ in range(MAX_SUB_AGENT_DEPTH):
+        async with conn.execute("SELECT parent_session_id FROM crew_sessions WHERE id = ?", (current,)) as cur:
+            row = await cur.fetchone()
+        parent = row[0] if row else None
+        if not parent:
+            return False
+        if parent == session_id:
+            return True
+        current = parent
+    return False
+
+
 def loads(value: str | None, default: Any = None) -> Any:
     if value is None or value == "":
         return default

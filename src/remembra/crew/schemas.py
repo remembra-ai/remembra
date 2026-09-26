@@ -705,6 +705,13 @@ def is_path_rel(value: Any) -> bool:
     return isinstance(value, str) and re.fullmatch(PATH_REL_PATTERN, value) is not None
 
 
+SHA256_HEX_PATTERN: Final = r"[0-9a-f]{64}"
+
+
+def is_sha256_hex(value: Any) -> bool:
+    return isinstance(value, str) and re.fullmatch(SHA256_HEX_PATTERN, value) is not None
+
+
 # ---------------------------------------------------------------------------
 # Entity views (what events and snapshots carry; never tokens, never raw commands)
 # ---------------------------------------------------------------------------
@@ -1061,6 +1068,8 @@ ACTOR = Shape(
         "agent_id": _opt(AGENT_ID),
         "user_id": _opt(_s(128)),
         "verified": _b(),
+        # a sub-agent's accountable parent session; absent for every other actor
+        "parent_session_id": _id("session", req=False),
     },
     description="Derived by the server from the credential (session token, JWT or system), never from the payload.",
 )
@@ -2959,6 +2968,8 @@ REQUEST_SHAPES: Final[Mapping[str, Shape]] = {
             "parent_session_id": _opt(_id("session")),
             "sub_agent_id": _opt(_s(128)),
             "capabilities": _opt(_l(_s(64), 32)),
+            "run_id": _opt(_s(64)),
+            "context_window": _opt(_i(1)),
         },
     ),
     "Heartbeat": Shape(
@@ -2988,6 +2999,8 @@ REQUEST_SHAPES: Final[Mapping[str, Shape]] = {
                                             "claim_epoch": _opt(_i(1)),
                                             "last_commit": _opt(SHA),
                                             "age_s": _i(0, req=False),
+                                            # Rider (gap analysis §7): sha256 of the file as last seen.
+                                            "content_hash": _opt(_s(64, pattern=SHA256_HEX_PATTERN)),
                                         },
                                     )
                                 ),
@@ -3115,6 +3128,7 @@ REQUEST_SHAPES: Final[Mapping[str, Shape]] = {
             # Riders (gap analysis §7): decisions this checkpoint acted on, and a ref to the state before it.
             "decisions": _opt(_l(_id("decision"), 20)),
             "state_before": _opt(_s(256)),
+            "run_id": _opt(_s(64, desc="defaults to the session's run_id")),
         },
     ),
     "Message": Shape(

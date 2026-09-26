@@ -46,6 +46,9 @@ MAX_DECISION: Final = 2000
 MAX_RATIONALE: Final = 2000
 MAX_ALTERNATIVES: Final = 10
 MAX_ALTERNATIVE: Final = 280
+# Rider (gap analysis §7): what the decision rests on (commit shas, file paths, test names, links).
+MAX_EVIDENCE: Final = 10
+MAX_EVIDENCE_ITEM: Final = 280
 NEEDS_YOU_KIND: Final = "decision_to_confirm"
 
 
@@ -119,6 +122,7 @@ def decision_api(row: Mapping[str, Any]) -> dict[str, Any]:
         confirmed_at=row["confirmed_at"],
         created_at=row["created_at"],
         memory_id=row["memory_id"],
+        evidence=json.loads(row["evidence"]) if row.get("evidence") else [],
     )
     return out
 
@@ -169,12 +173,14 @@ class CrewDecisions:
         zone_id: str | None = None,
         source: str = "direct",
         supersedes_id: str | None = None,
+        evidence: Any = None,
     ) -> dict[str, Any]:
         """Create ``D-n``: in force for a human author, proposed for an agent. Returns the API view with ``seq``."""
         clean_title = _flat(title, MAX_TITLE, "title")
         clean_decision = _flat(decision, MAX_DECISION, "decision")
         clean_rationale = _flat(rationale, MAX_RATIONALE, "rationale", required=False)
         alts = self._alternatives(alternatives)
+        proof = self._evidence(evidence)
         if source not in schemas.DECISION_SOURCES:
             raise ValidationFailed(f"source must be one of {schemas.DECISION_SOURCES}")
         async with self.log.transaction() as tx:
@@ -194,6 +200,7 @@ class CrewDecisions:
                 zone_id=zone_id,
                 source=source,
                 supersedes_id=supersedes_id,
+                evidence=proof,
             )
         out = decision_api(row)
         out["seq"] = seq
@@ -233,6 +240,7 @@ class CrewDecisions:
         zone_id: str | None,
         source: str,
         supersedes_id: str | None,
+        evidence: list[str] | None = None,
     ) -> tuple[dict[str, Any], int]:
         store = CrewStore(self.db)
         number = await store.next_number(crew.id, "crew_decisions")
@@ -243,8 +251,8 @@ class CrewDecisions:
             """
             INSERT INTO crew_decisions (id, crew_id, number, title, decision, rationale, alternatives, decided_by_kind,
                 decided_by, participants, source, task_id, zone_id, supersedes_id, state, confirmed_by, confirmed_at,
-                created_at, proposed_by_verified, decided_by_verified)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, proposed_by_verified, decided_by_verified, evidence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 decision_id,
@@ -269,6 +277,7 @@ class CrewDecisions:
                 # login, or a key-verified agent), and the decider's (only a human decides).
                 1 if author.verified else 0,
                 1 if human else None,
+                json.dumps(evidence) if evidence else None,
             ),
         )
         row = await self._get(tx, decision_id)
@@ -318,6 +327,14 @@ class CrewDecisions:
             text = _flat(item, MAX_ALTERNATIVE, "alternative")
             out.append(str(text))
         return out
+
+    @staticmethod
+    def _evidence(value: Any) -> list[str]:
+        if value is None:
+            return []
+        if not isinstance(value, list) or len(value) > MAX_EVIDENCE:
+            raise ValidationFailed(f"evidence must be a list of at most {MAX_EVIDENCE} strings")
+        return [str(_flat(item, MAX_EVIDENCE_ITEM, "evidence item")) for item in value]
 
     # -- human decisions -----------------------------------------------------------------------------
 

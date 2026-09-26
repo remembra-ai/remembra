@@ -89,6 +89,39 @@ def limit_view(row: Row) -> dict[str, Any] | None:
     return {"level": level, "pct": float(pct) if isinstance(pct, int | float) else None, "source": source}
 
 
+def nest_sessions(rows: Sequence[Row]) -> list[Row]:
+    """Sessions with every sub-agent right after the session that started it (depth first, stable).
+
+    Owner decision (gap analysis open question 1): a sub-agent is its own session linked by
+    ``parent_session_id``. Snapshots list it nested under its parent; a sub-agent whose parent is
+    not in ``rows`` keeps its own place.
+    """
+    ids = {str(r["id"]) for r in rows}
+    children: dict[str, list[Row]] = {}
+    roots: list[Row] = []
+    for r in rows:
+        parent = r.get("parent_session_id")
+        if parent and str(parent) in ids and str(parent) != str(r["id"]):
+            children.setdefault(str(parent), []).append(r)
+        else:
+            roots.append(r)
+    out: list[Row] = []
+    seen: set[str] = set()
+
+    def visit(r: Row) -> None:
+        if str(r["id"]) in seen:
+            return
+        seen.add(str(r["id"]))
+        out.append(r)
+        for child in children.get(str(r["id"]), ()):
+            visit(child)
+
+    for r in roots:
+        visit(r)
+    out.extend(r for r in rows if str(r["id"]) not in seen)  # a parent cycle (never written) keeps its rows
+    return out
+
+
 def session_view(row: Row) -> dict[str, Any]:
     client_kind = row.get("client_kind")
     githook = row.get("githook_state")

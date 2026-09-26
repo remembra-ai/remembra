@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - unreleased (date set when tagged) - Crew mode
+
+**Crew mode: several coding agents on one repository without stepping on each other.** It builds on
+Relay: every agent still starts with a brief and ends with a handoff, and Crew mode adds zones, claims,
+batons, tasks with reports, a crew channel and a live view in the dashboard. It is **off by default** on a
+server (`REMEMBRA_CREW_MODE`), and nothing on a machine changes until `remembra-crew connect --apply` is
+confirmed at a terminal. The guide is [Crew mode](docs/relay/crew.md).
+
+Crew mode's local parts (the Claude Code hooks, the git hooks, the `remembra-crewd` daemon, the read-only
+fence) coordinate cooperative agents: they stop honest mistakes, record every bypass, and cannot stop a
+determined or prompt-injected agent on the same machine. Human-only actions, tenancy and the protection of
+the crew policy are enforced on the server. A server-side required check on the git host is not in this
+release.
+
+### Added
+- **Zones and claims.** `.remembra/zones.yml` names the areas of a repository. The first agent to write in a
+  zone holds it; the others see it under DO NOT TOUCH and, where the agent's hooks enforce, their writes
+  there are refused. Claude Code's hooks enforce before a write; Codex, Gemini, Qwen and Kimi enforce where
+  `remembra-crew verify --agent <name>` has passed (Codex: shell commands only); Cursor, and those agents
+  unverified in their own worktree, get a read-only fence; MCP-only agents are advisory. The git hooks gate
+  commits and pushes.
+- **Batons.** When an agent stops (out of credits, crashed, closed), its claims are kept, its uncommitted
+  work is saved to `refs/remembra/baton/…`, its task is stalled with a report, and the next agent picks the
+  baton up (`remembra-crew adopt T-n`) or you hand it over from the dashboard.
+- **Tasks and reports.** A task links to zones and acceptance checks; "done" needs a completion report
+  (done / not done / failing / next).
+- **Crew channel and decisions.** Agents post with `remembra-crew say` or `crew_say`; a decision an agent
+  records stays proposed until a human confirms it.
+- **Dashboard Crews section**, over a live connection: lanes per agent session, claims, tasks, collisions,
+  what needs you, and the human-only controls (override, hand over, freeze, pause, waive, bypass codes).
+  Email and signed-webhook notifications.
+- **`remembra-crew`** (connect, verify, status, claim, release, adopt, task, checkpoint, report, say, watch,
+  zones, doctor) and the **`remembra-crewd`** daemon (launchd on macOS, systemd `--user` on Linux).
+  Windows is not supported.
+- **MCP crew tools:** `crew_status`, `crew_claim`, `crew_guard`, `crew_task`, `crew_say`, `crew_checkpoint`
+  and `crew_report`.
+- **Sub-agents are sessions of their own.** A client joins a sub-agent with `parent_session_id` naming the
+  live session of the same account in the same crew that started it. The sub-agent gets its own callsign,
+  heartbeats, claims, tasks and checkpoints, and the parent stays accountable: the actor of every event the
+  sub-agent causes names the parent, the parent may release the sub-agent's claims and block, unblock or
+  release its tasks, and a parent that ends takes its live sub-agents with it. The snapshot lists each
+  sub-agent right after its parent; the dashboard nests its lane under the parent's. The Claude Code hooks
+  start one crew session per Claude Code session, so edits made by its Task-tool sub-agents count as that
+  session's.
+- **An append-only, hash-chained crew event log** in its own SQLite file, `crew.db`, verified nightly.
+- Optional continuity fields for later releases: `provider`, `capabilities`, `sub_agent_id`, `run_id` and
+  `context_window` on join; `decisions`, `state_before` and `run_id` on checkpoints; a file's sha256 on
+  heartbeat footprints; `evidence` on decisions. Left out, they change nothing.
+
+### Changed
+- **Account erasure covers `crew.db`.** The crews an erased account owns are deleted with everything in
+  them. In a crew someone else owns, its sessions, messages, checkpoints, reports, claims and the
+  decisions no human adopted are deleted; tasks and decisions in force stay as that owner's history, with
+  the account's name removed. Events in that crew's log that carry the account's identity keep their
+  place and chain links and lose their content, so the chain still verifies.
+
+### Upgrading
+- The main database gets one additive migration, **v5** (project and crew columns on the agent inbox,
+  backfilled once), even with Crew mode off. A database at schema 9 applies only v5 on first boot, after
+  the pre-migration backup. `crew.db` is created only when Crew mode is on. See
+  [Deploying: Crew mode](docs/DEPLOYING.md#crew-mode).
+
 ## [0.16.0] - unreleased (date set when tagged) - Remembra Relay
 
 **Remembra Relay: one agent stops, the next one already knows.** When a session ends, `remembra-relay close`

@@ -303,6 +303,12 @@
             "maxLength": 64,
             "type": "string"
           },
+          "parent_session_id": {
+            "description": "session id",
+            "maxLength": 80,
+            "pattern": "cs_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+            "type": "string"
+          },
           "user_id": {
             "anyOf": [
               {
@@ -853,6 +859,18 @@
             ]
           },
           "facts": {},
+          "run_id": {
+            "anyOf": [
+              {
+                "description": "defaults to the session's run_id",
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "session_id": {
             "description": "session id",
             "maxLength": 80,
@@ -2779,6 +2797,18 @@
               }
             ]
           },
+          "content_hash": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "pattern": "[0-9a-f]{64}",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "last_commit": {
             "anyOf": [
               {
@@ -3832,6 +3862,17 @@
             "maxLength": 64,
             "type": "string"
           },
+          "context_window": {
+            "anyOf": [
+              {
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "head": {
             "anyOf": [
               {
@@ -3906,6 +3947,17 @@
                 "description": "session id",
                 "maxLength": 80,
                 "pattern": "cs_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
                 "type": "string"
               },
               {

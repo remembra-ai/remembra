@@ -48,7 +48,7 @@ from remembra.crew import policy as P
 from remembra.crew import schemas as S
 from remembra.crew.events import Actor, EventTx
 from remembra.crew.settings import load_settings
-from remembra.crew.store import dumps, loads, new_id, now_iso, parse_iso
+from remembra.crew.store import dumps, is_accountable_for, loads, new_id, now_iso, parse_iso
 from remembra.crew.zones import (
     CrewOpError,
     CrewOps,
@@ -968,8 +968,18 @@ async def release_claim(
     actor = principal.actor()
     async with ops.log.transaction() as tx:
         row = await _reload(tx.conn, str(claim["id"]))
-        if not _mine(row, principal):
-            raise CrewOpError(403, "not_holder", "Only the holder can release this claim; a human can override it.")
+        accountable = (
+            principal.kind == "session"
+            and row.get("holder_kind") == "session"
+            and await is_accountable_for(tx.conn, principal.session_id, row.get("holder_session_id"))
+        )
+        if not (_mine(row, principal) or accountable):
+            raise CrewOpError(
+                403,
+                "not_holder",
+                "Only the holder (or the session that started it, for a sub-agent) can release this claim;"
+                " a human can override it.",
+            )
         settings = load_settings((await crew_row(tx.conn, crew_id))["settings"])
         state = row["state"]
         label = await _target_label(tx.conn, row)
@@ -978,7 +988,9 @@ async def release_claim(
             baton = False
         elif state in LIVE_HOLD and baton:
             fresh = await _reserve(tx, row, "baton", reserved_for=None, settings=settings)
-        elif state in LIVE_HOLD or (state == "reserved" and row.get("reserved_for") in (None, principal.session_id)):
+        elif state in LIVE_HOLD or (
+            state == "reserved" and row.get("reserved_for") in (None, principal.session_id, row.get("holder_session_id"))
+        ):
             fresh = await _end(tx, row, "released", clip(note, 64) or "released")
             baton = False
         else:

@@ -827,6 +827,38 @@ def reducer_vectors() -> list[dict[str, Any]]:
             [length("moments", 50), eq("moments.0.seq", 21), eq("moments.49.seq", 70), eq("tamper_blocks.cs_b", 60)],
         )
     )
+
+    def erased(ev: dict[str, Any]) -> dict[str, Any]:
+        """The tombstone account erasure leaves in another owner's log (remembra.crew.events.tombstone_events)."""
+        ev = dict(ev)
+        ev.update(
+            actor={"kind": "system", "id": "erased", "callsign": None, "agent_id": None, "user_id": None, "verified": False},
+            refs={},
+            payload={"erased": True},
+            summary="erased (account deleted)",
+        )
+        return ev
+
+    gone = erased(E(11, "task.created", {"task": task("tsk_gone", 62)}))
+    gone_moment = erased(E(12, "guard.tamper_blocked", {"kind": "husky_off", "surface": "pretool"}, by=B, origin="client"))
+    gone_moment["moment"] = True
+    v.append(
+        vec(
+            "erased_events_advance_seq_only",
+            "An event tombstoned by account erasure changes no state; it advances last_seq, and a moment keeps its place.",
+            [frame(gone), frame(gone_moment), frame(E(13, "task.created", {"task": task("tsk_after", 63)}))],
+            [
+                eq("last_seq", 13),
+                absent("tasks.tsk_gone"),
+                eq("tasks.tsk_after.number", 63),
+                absent("tamper_blocks.cs_b"),
+                length("moments", 1),
+                eq("moments.0.seq", 12),
+                eq("moments.0.summary", "erased (account deleted)"),
+            ],
+            events_validate=False,
+        )
+    )
     unknown = E(11, "task.created", {"task": task("tsk_u", 60)})
     unknown["type"] = "crew.future_event"
     newer = E(12, "claim.granted", {"claim": claim("clm_v2", "cs_b", zone_id="zn_reports")}, by=B, v=2)

@@ -14,7 +14,7 @@ Spec: §4.1–§4.3.
 | `ts` | server receipt time, ISO-8601 UTC with `Z` |
 | `type`, `v` | a member of the closed set below; `v` = 1 for every L0 type |
 | `origin` | `server` or `client` (client only for the whitelisted types) |
-| `actor` | `{kind: session\|human\|system, id, callsign?, agent_id?, user_id?, verified}`, **derived from the credential**, never from the body |
+| `actor` | `{kind: session\|human\|system, id, callsign?, agent_id?, user_id?, verified, parent_session_id?}`, **derived from the credential**, never from the body. `parent_session_id` is present only when a sub-agent session acts: the session accountable for it |
 | `refs` | optional ids: `zone_id, task_id, claim_id, session_id, report_id, collision_id, message_id, decision_id, inbox_item_id, host_id` |
 | `severity` | `info \| notice \| low \| medium \| high \| critical` |
 | `moment` | set by the server from `is_moment` (`validate_envelope` rejects a wrong flag) |

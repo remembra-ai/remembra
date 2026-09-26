@@ -296,13 +296,14 @@ async def record_footprints(
         zone_ids = [str(z["id"]) for z in zones]
         await conn.execute(
             """INSERT INTO crew_footprints (crew_id, session_id, path, zone_ids, first_at, last_at, touches, state, attribution,
-                   claim_epoch, last_commit, worktree_id) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+                   claim_epoch, last_commit, worktree_id, content_hash) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(crew_id, session_id, path) DO UPDATE SET last_at = excluded.last_at, touches = touches + ?,
                    state = excluded.state, zone_ids = excluded.zone_ids,
                    attribution = CASE WHEN crew_footprints.attribution = 'certain' THEN 'certain' ELSE excluded.attribution END,
                    claim_epoch = COALESCE(excluded.claim_epoch, crew_footprints.claim_epoch),
                    last_commit = COALESCE(excluded.last_commit, crew_footprints.last_commit),
-                   worktree_id = COALESCE(excluded.worktree_id, crew_footprints.worktree_id)""",
+                   worktree_id = COALESCE(excluded.worktree_id, crew_footprints.worktree_id),
+                   content_hash = COALESCE(excluded.content_hash, crew_footprints.content_hash)""",
             (
                 crew_id,
                 session["id"],
@@ -315,6 +316,7 @@ async def record_footprints(
                 epoch,
                 fp.get("last_commit"),
                 wt,
+                fp.get("content_hash") if S.is_sha256_hex(fp.get("content_hash")) else None,  # rider (gap analysis §7)
                 1 if count_touch else 0,
             ),
         )
@@ -509,6 +511,7 @@ def heartbeat_footprints(footprints: Sequence[Mapping[str, Any]]) -> list[dict[s
                 "attribution": fp.get("attribution") if fp.get("attribution") in S.ATTRIBUTIONS else "probable",
                 "claim_epoch": epoch if isinstance(epoch, int) and not isinstance(epoch, bool) else None,
                 "last_commit": fp.get("last_commit") if isinstance(fp.get("last_commit"), str) else None,
+                "content_hash": fp.get("content_hash") if S.is_sha256_hex(fp.get("content_hash")) else None,
                 **({"age_s": fp["age_s"]} if isinstance(fp.get("age_s"), int) and not isinstance(fp.get("age_s"), bool) else {}),
             }
         )

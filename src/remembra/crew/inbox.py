@@ -100,6 +100,7 @@ class Author:
     agent_id: str | None = None
     callsign: str | None = None
     verified: bool = False
+    parent_session_id: str | None = None  # a sub-agent's accountable parent session
 
     @classmethod
     def human(cls, user_id: str) -> Author:
@@ -114,6 +115,7 @@ class Author:
             agent_id=str(row["agent_id"]),
             callsign=str(row["callsign"]),
             verified=bool(row["agent_verified"]),
+            parent_session_id=row.get("parent_session_id"),
         )
 
     @property
@@ -142,7 +144,12 @@ class Author:
             return Actor.human(self.user_id)
         assert self.session_id and self.callsign and self.agent_id
         return Actor.session(
-            self.session_id, callsign=self.callsign, agent_id=self.agent_id, user_id=self.user_id, verified=self.verified
+            self.session_id,
+            callsign=self.callsign,
+            agent_id=self.agent_id,
+            user_id=self.user_id,
+            verified=self.verified,
+            parent_session_id=self.parent_session_id,
         )
 
     def agent_origin(self) -> AgentOrigin:

@@ -211,6 +211,24 @@ MCP-only agents use the same actions as MCP tools: `crew_status`, `crew_claim`, 
 - **Coming back.** If the same session resumes before anyone adopted, it takes its claims back and the
   stall report is marked superseded.
 
+### Sub-agents
+
+A sub-agent can be a crew session of its own. A client joins it with `parent_session_id` set to the
+live session that started it (same account, same crew), and it gets its own callsign, heartbeats,
+claims, tasks and checkpoints: what it holds is in its own name. The session that started it stays
+accountable for it:
+
+- every event the sub-agent causes names that parent session (`actor.parent_session_id`);
+- the parent session may release the sub-agent's claims and block, unblock or release its tasks,
+  which no other agent session can;
+- when the parent session ends, its running sub-agents end with it: their claims are released, or
+  kept for pickup with a stall report when a task is unfinished, as their own exit would do;
+- the snapshot lists each sub-agent right after its parent, and the dashboard nests its lane under the
+  parent's lane (`sub-agent of cc-1`), while the parent's lane lists its running sub-agents.
+
+The Claude Code hooks start one crew session per Claude Code session. Its sub-agents (the Task tool)
+run inside that session's process, so the gate counts their edits as that session's.
+
 ## Your controls (dashboard only)
 
 Only a dashboard login can override or hand over a claim, freeze or protect a zone, pause an agent,
@@ -269,6 +287,13 @@ Crew state (crews, sessions, zones, claims, tasks, reports, messages, the event 
 **`crew.db`**, a separate SQLite file with its own connection, so crew writes never wait behind memory
 writes. The main database gains one additive migration (**v5**: project and crew columns on the agent
 inbox). Nothing existing is changed or removed, and older releases keep working on a v5 database.
+
+When an account is deleted, account erasure covers `crew.db` too. The crews it owns go with every
+row in them. In a crew someone else owns, its sessions, messages, checkpoints, reports, claims and
+decisions no human adopted are deleted. Tasks and decisions in force stay as that owner's history,
+with the account's name removed. That crew's event log keeps its hash chain: each event carrying the
+account's id, sessions, messages, hosts or email keeps its sequence number, type, time and chain
+links, and loses its actor, references, summary and payload. The nightly chain check still passes.
 
 ### Backups
 

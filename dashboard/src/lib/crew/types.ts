@@ -100,6 +100,14 @@ export interface SessionView {
   last_activity_at?: string | null;
   ended_at?: string | null;
   end_reason?: string | null;
+  /** Riders (gap analysis §7). */
+  provider?: string | null;
+  /**
+   * A sub-agent is its own session, started by (and accountable to) this session
+   * (owner decision, gap analysis open question 1).
+   */
+  parent_session_id?: string | null;
+  sub_agent_id?: string | null;
 }
 
 /** A presence lane (ephemeral, ≤1 per session per 5 s; §4.4). */
@@ -345,6 +353,8 @@ export interface Actor {
   agent_id?: string | null;
   user_id?: string | null;
   verified: boolean;
+  /** Present only when a sub-agent acted: the session accountable for it. */
+  parent_session_id?: string | null;
 }
 
 export interface EventRefs {

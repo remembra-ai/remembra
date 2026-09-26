@@ -256,6 +256,8 @@ async def join_crew(
         parent_session_id=body.get("parent_session_id"),
         sub_agent_id=body.get("sub_agent_id"),
         capabilities=body.get("capabilities"),
+        run_id=body.get("run_id"),
+        context_window=body.get("context_window"),
     )
     try:
         result = await _service(request).join(user_id=user.user_id, req=req, host_token=host_token, session_token=session_token)

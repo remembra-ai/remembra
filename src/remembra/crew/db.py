@@ -51,6 +51,8 @@ CREW_BUSY_TIMEOUT_MS = 5000
 # proposed_by_verified, decided_by_verified, intent_version) and crew_footprints
 # (content_hash, artifact_id). A sub-agent is its own session row linked to the
 # session that started it by parent_session_id (owner decision, open question 1).
+# Also before the first deploy: crew_event_tombstones, so account erasure can remove
+# an erased account's content from other owners' hash-chained logs (R-23).
 # From the first deploy on, any change is a new version.
 # ---------------------------------------------------------------------------
 
@@ -272,6 +274,11 @@ _V1_EVENTS = [
     # only when it matches one of these ranges exactly, so a deleted event is detectable (§4.1).
     """CREATE TABLE crew_pruned_ranges (crew_id TEXT NOT NULL, first_seq INTEGER NOT NULL, last_seq INTEGER NOT NULL,
       prev_hash TEXT NOT NULL, last_hash TEXT NOT NULL, pruned_at TEXT NOT NULL, PRIMARY KEY(crew_id, first_seq))""",
+    # Account erasure (R-23): an event whose content was replaced by the tombstone, with the chain links
+    # it had. verify_crew_chain accepts it only when the row still has those links and holds exactly the
+    # tombstone (remembra.crew.events.tombstone_events). Added to v1 before crew.db first deployed.
+    """CREATE TABLE crew_event_tombstones (crew_id TEXT NOT NULL, seq INTEGER NOT NULL, prev_hash TEXT NOT NULL,
+      hash TEXT NOT NULL, reason TEXT NOT NULL, tombstoned_at TEXT NOT NULL, PRIMARY KEY(crew_id, seq))""",
 ]
 
 _V1_OUTBOX_IDEMPOTENCY_NOTIFY = [
@@ -344,6 +351,7 @@ CREW_TABLES: tuple[str, ...] = (
     "crew_events",
     "crew_digests",
     "crew_pruned_ranges",
+    "crew_event_tombstones",
     "crew_outbox",
     "crew_idempotency",
     "crew_notification_rules",

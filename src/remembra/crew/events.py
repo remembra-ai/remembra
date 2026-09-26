@@ -157,6 +157,10 @@ class Actor:
     agent_id: str | None = None
     user_id: str | None = None
     verified: bool = False
+    # A sub-agent session acts for itself, and the session that started it stays accountable
+    # (owner decision, gap analysis open question 1): its events name that parent. Absent
+    # (not null) for every other actor, so their envelopes and hashes are unchanged.
+    parent_session_id: str | None = None
 
     @classmethod
     def system(cls) -> Actor:
@@ -168,7 +172,16 @@ class Actor:
         return cls(kind="human", id=user_id, user_id=user_id, verified=True)
 
     @classmethod
-    def session(cls, session_id: str, *, callsign: str, agent_id: str, user_id: str, verified: bool) -> Actor:
+    def session(
+        cls,
+        session_id: str,
+        *,
+        callsign: str,
+        agent_id: str,
+        user_id: str,
+        verified: bool,
+        parent_session_id: str | None = None,
+    ) -> Actor:
         return cls(
             kind="session",
             id=session_id,
@@ -176,10 +189,23 @@ class Actor:
             agent_id=agent_id,
             user_id=user_id,
             verified=bool(verified),
+            parent_session_id=parent_session_id if schemas.is_id("session", parent_session_id) else None,
+        )
+
+    @classmethod
+    def for_session_row(cls, row: Mapping[str, Any]) -> Actor:
+        """The actor of a ``crew_sessions`` row (a sub-agent's names its accountable parent)."""
+        return cls.session(
+            str(row["id"]),
+            callsign=str(row["callsign"]),
+            agent_id=str(row["agent_id"]),
+            user_id=str(row["user_id"]),
+            verified=bool(row.get("agent_verified")),
+            parent_session_id=row.get("parent_session_id"),
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "kind": self.kind,
             "id": self.id,
             "callsign": self.callsign,
@@ -187,18 +213,24 @@ class Actor:
             "user_id": self.user_id,
             "verified": self.verified,
         }
+        if self.parent_session_id:
+            out["parent_session_id"] = self.parent_session_id
+        return out
 
 
 async def load_session_actor(conn: aiosqlite.Connection, crew_id: str, session_id: str) -> Actor | None:
     """The actor for a crew session, read from ``crew_sessions`` (scoped by crew)."""
     async with conn.execute(
-        "SELECT id, callsign, agent_id, user_id, agent_verified FROM crew_sessions WHERE crew_id = ? AND id = ?",
+        "SELECT id, callsign, agent_id, user_id, agent_verified, parent_session_id FROM crew_sessions"
+        " WHERE crew_id = ? AND id = ?",
         (crew_id, session_id),
     ) as cur:
         row = await cur.fetchone()
     if row is None:
         return None
-    return Actor.session(row[0], callsign=row[1], agent_id=row[2], user_id=row[3], verified=bool(row[4]))
+    return Actor.session(
+        row[0], callsign=row[1], agent_id=row[2], user_id=row[3], verified=bool(row[4]), parent_session_id=row[5]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -590,11 +622,85 @@ async def events_page(
     return EventsPage(events, head.last_seq, etag, has_more=has_more, not_modified=False)
 
 
+# ---------------------------------------------------------------------------
+# Tombstones (account erasure, R-23)
+#
+# An erased account's content leaves every crew it worked in, including crews it
+# did not own, whose hash-chained log is their owner's record. Such an event keeps
+# its place in the chain: its seq, id, time, type, severity and moment flag, and its
+# stored prev_hash and hash. Its actor, refs, summary and payload are replaced by
+# the fixed tombstone below, and crew_event_tombstones records the (prev_hash, hash)
+# it had. verify_crew_chain accepts a tombstoned event only when its content is
+# exactly the tombstone and its links equal the recorded ones, so the chain still
+# links end to end and a tombstone can only remove content, never change it.
+# ---------------------------------------------------------------------------
+
+TOMBSTONE_ACTOR: Final[Mapping[str, Any]] = {
+    "kind": "system",
+    "id": "erased",
+    "callsign": None,
+    "agent_id": None,
+    "user_id": None,
+    "verified": False,
+}
+TOMBSTONE_PAYLOAD: Final[Mapping[str, Any]] = {"erased": True}
+TOMBSTONE_SUMMARY: Final = "erased (account deleted)"
+
+
+def is_tombstone(envelope: Mapping[str, Any]) -> bool:
+    """Is this envelope's content exactly the erasure tombstone?"""
+    return (
+        envelope.get("actor") == dict(TOMBSTONE_ACTOR)
+        and envelope.get("refs") == {}
+        and envelope.get("payload") == dict(TOMBSTONE_PAYLOAD)
+        and envelope.get("summary") == TOMBSTONE_SUMMARY
+    )
+
+
+async def tombstone_events(
+    conn: aiosqlite.Connection, crew_id: str, seqs: Sequence[int], *, reason: str, now: datetime | None = None
+) -> int:
+    """Replace the content of events ``seqs`` of one crew with the tombstone, keeping their chain links.
+
+    Runs inside the caller's transaction. Idempotent: an event already tombstoned is left as it is.
+    Returns the number of events tombstoned now.
+    """
+    stamp = format_ts(now or utc_now())
+    done = 0
+    for seq in sorted(set(int(s) for s in seqs)):
+        async with conn.execute("SELECT prev_hash, hash FROM crew_events WHERE crew_id = ? AND seq = ?", (crew_id, seq)) as cur:
+            row = await cur.fetchone()
+        if row is None:
+            continue
+        cur = await conn.execute(
+            "INSERT OR IGNORE INTO crew_event_tombstones (crew_id, seq, prev_hash, hash, reason, tombstoned_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (crew_id, seq, row[0] or "", row[1] or "", reason[:64], stamp),
+        )
+        if not cur.rowcount:
+            continue
+        await conn.execute(
+            """UPDATE crew_events SET actor = ?, refs = '{}', payload = ?, summary = ?, actor_kind = 'system',
+                   actor_id = 'erased', session_id = NULL, task_id = NULL, zone_id = NULL, ref_id = NULL, idem_key = NULL
+                WHERE crew_id = ? AND seq = ?""",
+            (_json_text(dict(TOMBSTONE_ACTOR)), _json_text(dict(TOMBSTONE_PAYLOAD)), TOMBSTONE_SUMMARY, crew_id, seq),
+        )
+        done += 1
+    return done
+
+
+async def _tombstones(conn: aiosqlite.Connection, crew_id: str) -> dict[int, tuple[str, str]]:
+    """``seq → (prev_hash, hash)`` the tombstoned events had."""
+    async with conn.execute("SELECT seq, prev_hash, hash FROM crew_event_tombstones WHERE crew_id = ?", (crew_id,)) as cur:
+        return {int(r[0]): (str(r[1]), str(r[2])) for r in await cur.fetchall()}
+
+
 @dataclass
 class ChainReport:
     crew_id: str
     checked: int = 0
     pruned_gaps: int = 0
+    tombstoned: int = 0
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -654,6 +760,7 @@ async def verify_crew_chain(conn: aiosqlite.Connection, crew_id: str, *, batch: 
     head = await crew_head(conn, crew_id)
     upto = head.last_seq if head is not None else None
     ranges = await _pruned_ranges(conn, crew_id)
+    tombs = await _tombstones(conn, crew_id)
     used: set[int] = set()
     expected = 1  # the next seq the chain needs
     link = schemas.GENESIS_HASH  # the hash that seq must name as prev_hash
@@ -694,7 +801,15 @@ async def verify_crew_chain(conn: aiosqlite.Connection, crew_id: str, *, batch: 
                     if seq == 1
                     else f"seq {seq}: prev_hash does not link to seq {seq - 1}"
                 )
-            if schemas.event_hash(stored_prev, ev.envelope) != ev.hash:
+            tomb = tombs.get(seq)
+            if tomb is not None:
+                # erased content: the links it had are recorded; the content must be the tombstone itself
+                report.tombstoned += 1
+                if (stored_prev, ev.hash or "") != tomb:
+                    report.errors.append(f"seq {seq}: tombstoned event's links differ from the recorded ones")
+                if not is_tombstone(ev.envelope):
+                    report.errors.append(f"seq {seq}: tombstoned event carries content")
+            elif schemas.event_hash(stored_prev, ev.envelope) != ev.hash:
                 report.errors.append(f"seq {seq}: hash mismatch")
             link = ev.hash or ""
             expected = seq + 1

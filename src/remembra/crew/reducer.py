@@ -151,7 +151,7 @@ def apply_event(state: State, event: Mapping[str, Any]) -> State:
         state["resync_reason"] = "gap"
         return state
     handler = _HANDLERS.get(str(event.get("type")))
-    if handler is not None and int(event.get("v", 1)) == 1:
+    if handler is not None and int(event.get("v", 1)) == 1 and not is_erased(event):
         handler(state, event, event.get("payload") or {})
     state["last_seq"] = seq
     if state["crew"] is not None:
@@ -165,6 +165,13 @@ def apply_event(state: State, event: Mapping[str, Any]) -> State:
 # ---------------------------------------------------------------------------
 # Handlers
 # ---------------------------------------------------------------------------
+
+
+def is_erased(event: Mapping[str, Any]) -> bool:
+    """An event whose content account erasure replaced with the tombstone: it keeps its seq, type and
+    moment flag and changes no state (``remembra.crew.events.tombstone_events``)."""
+    actor = event.get("actor") or {}
+    return event.get("payload") == {"erased": True} and actor.get("kind") == "system" and actor.get("id") == "erased"
 
 
 def _crew_matches(state: State, crew_id: Any) -> bool:
