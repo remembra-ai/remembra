@@ -148,8 +148,8 @@ PLAN_FEATURES: dict[PlanTier, list[str]] = {
     ],
     PlanTier.TEAM: [
         "Per seat: 2,200 smart credits, 50K memories, pooled",
-        "Shared projects and team inbox",
-        "Roles (owner, member, viewer)",
+        "Share notes with teammates through shared spaces",
+        "Owner and admins manage teammates and their roles",
         "Priority support",
     ],
 }
