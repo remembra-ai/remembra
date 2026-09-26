@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -114,6 +115,25 @@ def clean_text(text: str, limit: int = 160) -> str:
     redacted = redact_secrets(visible).text
     one = " ".join(redacted.split())
     return one if len(one) <= limit else one[: limit - 1] + "…"
+
+
+# Shown instead of a configured server URL that is not an http(s) URL with a host: whatever is there (a key
+# pasted into the URL field, for one) is never printed.
+NOT_A_URL = "(the server URL is not a URL)"
+
+
+def display_url(url: str | None) -> str:
+    """A server URL as a slip may show it: an http(s) URL with a host, without credentials, query or fragment,
+    and with anything key-shaped redacted; :data:`NOT_A_URL` for anything else."""
+    cleaned = outbox.clean_url(url) if url else None
+    if cleaned:
+        try:
+            parts = urlsplit(cleaned)
+        except ValueError:
+            return NOT_A_URL
+        if parts.scheme in ("http", "https") and parts.hostname:
+            return clean_text(cleaned, 200)
+    return NOT_A_URL
 
 
 def parse_time(value: Any) -> float | None:
@@ -220,8 +240,8 @@ class AgentSignals:
     present_events: tuple[str, ...]
     core_events: tuple[str, ...]
     outdated: bool  # every hook is there, but connect would still rewrite them (older connect)
-    relay_prefix: str | None
-    missing_binary: str | None  # the hooks call this, and it no longer exists
+    relay_prefix: str | None  # what the hooks run before `brief`/`close`: for planning only, never shown (it may hold a key)
+    missing_binary: str | None  # the hooks call this, and it no longer exists (cleaned for display)
     backup: str | None  # a *.bak-relay-* next to the config: connect --apply wrote here once
     mcp: str  # configured | missing | unknown
     mcp_path: str | None
@@ -509,7 +529,7 @@ def _agent_signals(
         core_events=core,
         outdated=outdated,
         relay_prefix=prefix,
-        missing_binary=_missing_binary(prefix),
+        missing_binary=clean_text(missing, 120) if (missing := _missing_binary(prefix)) else None,
         backup=_backup(path),
         mcp=mcp,
         mcp_path=tilde(mcp_path, home) if mcp_path else None,
@@ -565,7 +585,7 @@ def held_reason(entry: outbox.Entry, environ: Mapping[str, str], home: Path) -> 
     if not entry.url:
         return "it was queued without a server; it is only kept, never sent"
     if outbox.clean_url(config.url) != entry.url:
-        return f"it is for {entry.url}, and the key now points at {outbox.clean_url(config.url)}"
+        return f"it is for {display_url(entry.url)}, and the key now points at {display_url(config.url)}"
     return None
 
 
@@ -591,7 +611,7 @@ def _outbox(home: Path, environ: Mapping[str, str]) -> tuple[list[OutboxEntry], 
                 session=clean_text(entry.session_id, 24),
                 attempts=entry.attempts,
                 queued_ts=entry.queued_ts,
-                url=entry.url,
+                url=display_url(entry.url) if entry.url else None,
                 config_source=source_label(str(entry.data.get("config_source") or "none"), home),
                 last_error=clean_text(error),
                 http_status=status,
@@ -997,7 +1017,7 @@ def collect(
     summary_body: Any = None
     for index, (digest, (config, names)) in enumerate(groups.items()):
         source = _source(config, home)
-        host = outbox.clean_url(config.url) or config.url
+        host = display_url(config.url)
         recorded = recorded_keys.get(config.source) if isinstance(recorded_keys.get(config.source), dict) else None
         if not config.api_key:
             keys.append(KeyCheck(source=source, url=host, state="missing", agents=tuple(names), primary=index == 0))
@@ -1085,7 +1105,7 @@ def collect(
                 else:
                     reads.append(Read("trail", f"{name}: couldn't read its entries", answer.ms, ok=False))
         server = ServerSignals(
-            url=outbox.clean_url(primary_reader.url) or primary_reader.url,
+            url=display_url(primary_reader.url),
             entries_7d=entries_7d,
             handoffs_7d=handoffs_7d,
             last_active=last_active,
@@ -1135,7 +1155,7 @@ def collect(
         now=now,
         home=home,
         repo=_repo(cwd or Path(os.getcwd())),
-        config=primary.redacted() | {"url": outbox.clean_url(primary.url) or primary.url, "source": _source(primary, home)},
+        config=primary.redacted() | {"url": display_url(primary.url), "source": _source(primary, home)},
         wanted=wanted,
         keys=tuple(keys),
         outbox=tuple(entries),
@@ -1150,5 +1170,5 @@ def collect(
         check_server=check_server,
         reads=tuple(reads),
         unchecked=tuple(unchecked),
-        server_url=outbox.clean_url(primary.url) or primary.url,
+        server_url=display_url(primary.url),
     )

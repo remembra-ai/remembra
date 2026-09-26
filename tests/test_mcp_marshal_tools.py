@@ -157,6 +157,27 @@ def test_three_tools_over_stdio(tmp_path: Path) -> None:
     assert sorted(p.name for p in (fh.home / ".codex").iterdir()) == before
 
 
+def test_a_key_in_the_url_field_never_leaves_the_server(tmp_path: Path) -> None:
+    """URL and key swapped in ~/.remembra/credentials: every tool answers, and the key is in no answer."""
+    fh = FakeHome(tmp_path)
+    fh.credentials(url=KEY, key="https://api.remembra.dev")
+    fh.hooks("claude-code")
+    out = _stdio(
+        fh,
+        [
+            ("tools/call", {"name": "remembra_doctor", "arguments": {}}),
+            ("tools/call", {"name": "remembra_doctor", "arguments": {"check_server": False}}),
+            ("tools/call", {"name": "remembra_setup", "arguments": {}}),
+            ("tools/call", {"name": "remembra_help", "arguments": {"question": "my handoffs are queued and not sent"}}),
+        ],
+    )  # _stdio fails if KEY is anywhere in the server's output
+    doctor = _text(out[2])
+    assert doctor["status"] == "ok"
+    unreachable = next(f for f in doctor["findings"] if f["id"] == "SERVER_UNREACHABLE")
+    assert "is not a URL" in unreachable["what"] and unreachable["marker"] == "[!!]"
+    assert all(_text(out[n])["status"] == "ok" for n in (3, 4, 5))
+
+
 def test_remote_transport_answers_local_only(monkeypatch: pytest.MonkeyPatch) -> None:
     import remembra.mcp.server as server
 

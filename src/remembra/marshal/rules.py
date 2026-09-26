@@ -21,6 +21,7 @@ from typing import Any
 from remembra.marshal import codex_hooks, words
 from remembra.marshal import commands as cmd
 from remembra.marshal.signals import (
+    NOT_A_URL,
     TRAIL_WINDOW,
     AgentSignals,
     KeyCheck,
@@ -243,6 +244,25 @@ def rule_keys(sig: Signals) -> list[Finding]:
                         runs_where="none",
                     ),
                     then=cmd.doctor(),
+                )
+            )
+        elif key.state == "unchecked" and key.error and "read budget" not in key.error and key.url == NOT_A_URL:
+            seen.append(key.error)
+            out.append(
+                Finding(
+                    "SERVER_UNREACHABLE",
+                    BLOCKER,
+                    None,
+                    f"The server URL in {key.source} is not a URL, so nothing from this machine reaches Remembra.",
+                    tuple(seen),
+                    fix=Fix(
+                        kind="none",
+                        text=f"Set the server URL in {key.source} to your server's address ({cmd.CLOUD_URL} for"
+                        " Remembra Cloud). A key where the URL goes means the two are swapped: put each in its place.",
+                        runs_where="none",
+                    ),
+                    then=cmd.doctor(),
+                    doc=DOC_SETUP,
                 )
             )
         elif key.state == "unchecked" and key.error and "read budget" not in key.error:
@@ -601,7 +621,10 @@ def rule_hooks(sig: Signals) -> list[Finding]:
                     BLOCKER,
                     name,
                     f"{agent.display}: its hooks call {agent.missing_binary}, which no longer exists; every hook fails.",
-                    (f"{agent.config_path}: hooks run `{agent.relay_prefix}`",),
+                    (  # only the missing path: the rest of a hand-wrapped hook command may hold a key
+                        f"{agent.config_path}: the relay hooks call {agent.missing_binary}",
+                        f"{agent.missing_binary}: no such file",
+                    ),
                     fix=_connect_fix(agent),
                     then=cmd.doctor(name),
                     doc=DOC_SETUP,

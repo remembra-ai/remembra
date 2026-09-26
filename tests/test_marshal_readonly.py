@@ -132,3 +132,55 @@ def test_the_reader_refuses_anything_but_the_two_trail_gets() -> None:
     with pytest.raises(RuntimeError):
         reader.get("/api/v1/trail", {"limit": 100})
     assert [r.url.path for r in seen] == ["/api/v1/trail/summary", "/api/v1/trail"]
+
+
+# ---------------------------------------------------------------------------
+# A key where it doesn't belong never reaches any output
+# ---------------------------------------------------------------------------
+
+
+def _all_outputs(fh: FakeHome, check_server: bool = True) -> dict[str, str]:
+    """The slip, the CLI's JSON and the three MCP payloads, as text."""
+    report = doctor.run(fh.home, None, check_server, environ=fh.environ(), which=fh.which, now=NOW, cwd=fh.root)
+    return {
+        "text": report.text(),
+        "json": json.dumps(report.json()),
+        "remembra_doctor": json.dumps(
+            tools.doctor_payload(None, check_server, environ=fh.environ(), home=fh.home, which=fh.which, now=NOW)
+        ),
+        "remembra_setup": json.dumps(
+            tools.setup_payload(None, environ=fh.environ(), home=fh.home, which=fh.which, os_id="macos", shell="zsh")
+        ),
+        "remembra_help": json.dumps(tools.help_payload("my handoffs are queued and not sent")),
+    }
+
+
+@pytest.mark.parametrize("where", ["claude_mcp", "credentials"])
+def test_a_key_in_the_url_field_is_never_shown(tmp_path: Path, where: str) -> None:
+    """URL and key swapped by hand (the Qwen and Kimi docs ask for a hand-edited MCP block)."""
+    fh = FakeHome(tmp_path)
+    getattr(fh, where)(url=KEY, key="https://api.remembra.dev")
+    fh.hooks("claude-code")
+    fh.queue("claude-code", "s-1", url=KEY, error="ConnectError: refused")
+    for check_server in (True, False):
+        outputs = _all_outputs(fh, check_server)
+        for name, text in outputs.items():
+            assert KEY not in text, (name, check_server)
+    report = doctor.run(fh.home, None, True, environ=fh.environ(), which=fh.which, now=NOW, cwd=fh.root)
+    assert report.json()["config"]["url"] == signals.NOT_A_URL
+    f = next(f for f in report.findings if f.id == "SERVER_UNREACHABLE")
+    assert f.what.startswith("The server URL in ") and "is not a URL" in f.what
+    assert f.fix is not None and "swapped" in f.fix.text
+
+
+def test_an_inline_key_in_a_hook_command_is_never_shown(tmp_path: Path) -> None:
+    """A hand-wrapped hook (`env REMEMBRA_API_KEY=... remembra-relay`) whose first binary is gone."""
+    fh = FakeHome(tmp_path)
+    fh.credentials()
+    fh.hooks("claude-code", relay=f"/gone/bin/env REMEMBRA_API_KEY={KEY} remembra-relay")
+    report = doctor.run(fh.home, None, False, environ=fh.environ(), which=fh.which, now=NOW, cwd=fh.root)
+    f = next(f for f in report.findings if f.id == "HOOKS_STALE_COMMAND")
+    assert "/gone/bin/env" in f.what
+    assert f.evidence == ("~/.claude/settings.json: the relay hooks call /gone/bin/env", "/gone/bin/env: no such file")
+    for name, text in _all_outputs(fh, check_server=False).items():
+        assert KEY not in text, name
