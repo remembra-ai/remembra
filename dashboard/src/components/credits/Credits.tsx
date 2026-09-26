@@ -6,7 +6,7 @@ import { useId } from 'react';
 import clsx from 'clsx';
 import { AlertTriangle, ArrowRight } from 'lucide-react';
 import type { UsageSummaryResponse } from '../../lib/api';
-import { creditsView, degradedCopy, planLine, resetLabel } from '../../lib/credits';
+import { creditsView, degradedCopy, handoffsNote, planLine, resetLabel } from '../../lib/credits';
 import { hrefFor } from '../../lib/nav';
 import { Card, CardHeader } from '../relay/ui';
 
@@ -112,7 +112,11 @@ export function PlanMeter({ usage }: { usage: UsageSummaryResponse }) {
         <dl className="mt-3 divide-y divide-rule border-y border-rule">
           <Row label="Relay events" value={usage.relay_events.this_month.toLocaleString()} note="always free" />
           <Row label="Recalls" value={`${usage.recalls.this_month.toLocaleString()} / ${usage.recalls.limit.toLocaleString()}`} note="free" />
-          <Row label="Memories" value={`${usage.memories.stored.toLocaleString()} / ${usage.memories.cap.toLocaleString()}`} />
+          <Row
+            label="Memories"
+            value={`${usage.memories.stored.toLocaleString()} / ${usage.memories.cap.toLocaleString()}`}
+            note={handoffsNote(usage) ?? undefined}
+          />
         </dl>
         <p className="mt-2.5 text-xs text-ink-3">
           Relay is always free: handoffs, checkpoints, pickups, inbox and the trail never use credits. Credits pay for AI enrichment of

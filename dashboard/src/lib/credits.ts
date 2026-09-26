@@ -110,3 +110,10 @@ export function parseSeatDraft(text: string, minSeats: number, maxSeats = 1000):
   const n = Number(t);
   return n >= minSeats && n <= maxSeats ? n : null;
 }
+
+/** "12 handoffs (not counted)": session handoffs are kept free, outside the memory cap. Null on older servers. */
+export function handoffsNote(summary: Pick<UsageSummaryResponse, 'memories'>): string | null {
+  const count = summary.memories.handoffs;
+  if (count == null) return null;
+  return `${count.toLocaleString()} ${count === 1 ? 'handoff' : 'handoffs'} (not counted)`;
+}

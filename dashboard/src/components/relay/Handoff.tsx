@@ -4,7 +4,7 @@
 import { useId, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { ChevronDown, GitBranch } from 'lucide-react';
-import type { TrailDetail, TrailItem } from '../../lib/relay';
+import { healthBadge, pickupLine, type TrailDetail, type TrailItem } from '../../lib/relay';
 import { absoluteTime, relativeTime, shortSha, where } from '../../lib/time';
 import { agentMeta } from '../../lib/agents';
 import { AgentAvatar, AgentName, Pill } from './ui';
@@ -99,8 +99,14 @@ export function BranchLabel({ branch, sha, className }: { branch: string | null;
 }
 
 function CountPills({ item }: { item: TrailItem }) {
+  const health = healthBadge(item.health);
   return (
     <>
+      {health && (
+        <Pill tone={health.tone} title={health.title}>
+          {health.label}
+        </Pill>
+      )}
       {item.failing > 0 && <Pill tone="fail">{item.failing} failing</Pill>}
       {item.open > 0 && <Pill tone="open">{item.open} open</Pill>}
       {item.memory_type === 'checkpoint' && <Pill>checkpoint</Pill>}
@@ -124,8 +130,23 @@ export function HandoffDetail({ item }: { item: TrailItem }) {
     if (detail.grounding_status === 'consistent') facts.push('summary checked against the facts');
   }
   if (item.session_id) facts.push(`session ${item.session_id.slice(0, 40)}`);
+  const health = item.health;
   return (
     <div className="space-y-4">
+      {health && (health.missing.length > 0 || health.warnings.length > 0) && (
+        <div>
+          <h4 className="font-mono text-[11px] font-bold uppercase tracking-[0.08em] text-ink-3">
+            Health: {health.label} <span className="font-normal normal-case tracking-normal">(graded by the server from the facts)</span>
+          </h4>
+          <ul className="mt-1 space-y-0.5 text-sm text-ink-2">
+            {[...health.missing, ...health.warnings].map((line, index) => (
+              <li key={index} className="break-words [overflow-wrap:anywhere]">
+                {line}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <HandoffSections detail={detail} />
       {detail.structured && detail.commits.length > 0 && (
         <div>
@@ -173,6 +194,7 @@ export function TrailNode({
   const panelId = useId();
   const meta = agentMeta(item.agent_id);
   const checkpoint = item.memory_type === 'checkpoint';
+  const pickup = pickupLine(item.picked_up_by, (id) => agentMeta(id).name);
   return (
     <li id={`trail-${item.id}`} className="relative grid scroll-mt-12 grid-cols-[32px_minmax(0,1fr)] gap-x-3">
       <span className="relative flex justify-center pt-4" aria-hidden="true">
@@ -211,6 +233,7 @@ export function TrailNode({
             <span className="mt-0.5 block text-sm leading-snug text-ink-2 [overflow-wrap:anywhere]">
               {item.headline || (checkpoint ? 'Checkpoint' : 'Handoff')}
             </span>
+            {pickup && <span className="mt-0.5 block font-mono text-[11px] text-signal-ink">{pickup}</span>}
             <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
               <BranchLabel branch={item.branch} sha={item.head_commit} className="mr-1 max-w-full" />
               {showProject && item.project_id && <Pill>{item.project_id}</Pill>}

@@ -15,7 +15,7 @@ import {
   type UsageSummaryResponse,
 } from '../lib/api';
 import { checkoutRoute, planRowAction } from '../lib/checkout';
-import { clampSeats, creditsView, formatUsd, parseSeatDraft, planLine, resetLabel } from '../lib/credits';
+import { clampSeats, creditsView, formatUsd, handoffsNote, parseSeatDraft, planLine, resetLabel } from '../lib/credits';
 import { useResource } from '../hooks/useResource';
 import { Card, CardHeader, ErrorNotice, Pill, Skeleton } from './relay/ui';
 import { DegradedNotice, PixelMeter } from './credits/Credits';
@@ -165,7 +165,11 @@ function PeriodCard({ summary, onPortal, portalBusy }: { summary: UsageSummaryRe
             }
           />
           <Stat label="Recalls" value={summary.recalls.this_month.toLocaleString()} note={`of ${summary.recalls.limit.toLocaleString()} this month, free`} />
-          <Stat label="Memories" value={summary.memories.stored.toLocaleString()} note={`of ${summary.memories.cap.toLocaleString()} stored`} />
+          <Stat
+            label="Memories"
+            value={summary.memories.stored.toLocaleString()}
+            note={`of ${summary.memories.cap.toLocaleString()} stored${handoffsNote(summary) ? ` · ${handoffsNote(summary)}` : ''}`}
+          />
           <Stat
             label="Stores"
             value={summary.stores.this_month.toLocaleString()}
