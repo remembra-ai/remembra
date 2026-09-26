@@ -503,13 +503,18 @@ async def test_fencing_horizon_and_server_outage(tmp_path):
             if c["zone_id"] == pos["id"]:
                 c["lease_expires_at"] = format_ts(time.time() - snap["skew_s"] + 30)
         layout.snapshot_file(a["crew_id"]).write_text(json.dumps(snap))
+        await d.drain()  # nothing in flight may rewrite the status file below
         d.server_reachable, d.server_outage = False, False
         d.write_status()
         res = await arun_gate(layout, "pretool", write)
         out = json.loads(res.stdout)["hookSpecificOutput"]
         assert out["permissionDecision"] == "deny" and "reconnecting" in out["permissionDecisionReason"]
+        # the denied write sent crewd work (the gate's events, a refresh) that runs in this loop and
+        # records the server's reachability when it finishes: let it finish before setting the outage,
+        # or it overwrites the status file between the write below and the gate reading it
+        await d.drain()
         # a server outage (5xx and /health failing) keeps the holder's own claims writable
-        d.server_outage = True
+        d.server_reachable, d.server_outage = False, True
         d.write_status()
         assert (await arun_gate(layout, "pretool", write)).stdout == ""
 
