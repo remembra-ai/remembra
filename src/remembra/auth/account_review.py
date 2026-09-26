@@ -6,37 +6,47 @@ registered such an account with somebody else's address and a password, then
 added API keys, 2FA, app connections, webhooks and sign-in links to it
 ("email squatting"). So the first time somebody proves they own the mailbox:
 
-* Sign in with Google (Google asserts ``email_verified`` and is authoritative
-  for the address; see :mod:`remembra.auth.social`), or
+* Sign in with Google or GitHub with a verified email (see
+  :mod:`remembra.auth.social`), or
 * an emailed password reset,
 
-the account is NOT wiped. The email is marked verified, and a review opens.
-Everything keeps working (agents stay connected) until the owner either keeps
-it all with one click or revokes single items. The review lists every active
-API key, app connection and webhook, the sign-in links added before the email
-was verified, 2FA turned on before it, and the password when nobody has proven
-it belongs to the mailbox owner.
+the account is NOT wiped. The email is marked verified, every dashboard
+session issued before that ends (app connections and API keys keep working),
+and a review opens. Everything keeps working (agents stay connected) until the
+owner either keeps it all with one click or revokes single items. The review
+lists every active API key, app connection and webhook, every sign-in link
+except the one that proved the mailbox, 2FA turned on before it, and the
+password when nobody has proven it belongs to the mailbox owner. A review with
+nothing to list finishes by itself, without a screen or an email.
 
 Only a session that proved the mailbox can act on the review. Such sessions
 carry the review's id as the ``rvw`` JWT claim, which the server signs:
 
-* a sign-in with a provider identity linked at or after verification
-  (the Google link that opened the review, or one connected later from a
-  session that already had the claim), or
+* a sign-in with the exact provider account that opened the review, or one
+  the owner connected from such a session while the review was open
+  (``trusted_identities``, stored as ``provider:subject``), or
 * a password sign-in once the password was set through an emailed reset.
 
 Any other session (the squatter's password, a GitHub link the squatter added)
-still signs in, but sees no review, cannot connect new sign-in methods or turn
-on 2FA until the review is done, and gets no superadmin rights from an owner
-address. 2FA set up before verification does not stand between the mailbox
-owner and the account: it is one of the items under review.
+still signs in, but sees no review, cannot connect or disconnect sign-in
+methods, turn on 2FA, or create API keys and webhooks until the review is
+done, and gets no superadmin rights (or owner plan) from an owner address. A
+Settings connect started before the review opened never lands. 2FA set up
+before verification does not stand between the mailbox owner and the
+account: it is one of the items under review, and it is turned off when the
+review finishes unless the owner keeps it by entering a current code.
 
-Every revoke, deferral and completion is written to the audit log, and the
-finished review is emailed to the account address.
+"Keep all" keeps exactly the list the owner saw: the dashboard sends the
+list's ``version`` and a changed list is refused (409) and shown again.
+
+Every revoke, keep, deferral, completion, trust change and trusted session is
+written to the audit log, and the finished review is emailed to the account
+address (unless nothing was kept or removed).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 import sqlite3
@@ -55,8 +65,11 @@ log = structlog.get_logger(__name__)
 
 REVIEW_CLAIM = "rvw"
 ORIGIN_GOOGLE = "google"
+ORIGIN_GITHUB = "github"
 ORIGIN_PASSWORD_RESET = "password_reset"
-ORIGINS = frozenset({ORIGIN_GOOGLE, ORIGIN_PASSWORD_RESET})
+PROVIDER_ORIGINS = frozenset({ORIGIN_GOOGLE, ORIGIN_GITHUB})
+ORIGINS = PROVIDER_ORIGINS | {ORIGIN_PASSWORD_RESET}
+_ORIGIN_NAMES = {ORIGIN_GOOGLE: "Google", ORIGIN_GITHUB: "GitHub"}
 
 # password_status: whether the current password is known to be the mailbox owner's.
 PASSWORD_UNTRUSTED = "untrusted"  # set before verification, by whoever made the account
@@ -66,9 +79,12 @@ PASSWORD_REMOVED = "removed"  # removed in the review; only a reset sets a new o
 # totp_status: whether 2FA on the account predates verification.
 TOTP_NONE = "none"
 TOTP_PREDATES = "predates"
-TOTP_TRUSTED = "trusted"  # turned on by a session that proved the mailbox
+TOTP_TRUSTED = "trusted"  # turned on (or kept with a current code) by a session that proved the mailbox
 
 ITEM_KINDS = ("key", "connection", "webhook", "identity", "two_factor", "password")
+
+# Who closed a review that had nothing to list (no screen, no email).
+METHOD_NOTHING_TO_CHECK = "auto_nothing_to_check"
 
 
 class ReviewError(Exception):
@@ -91,17 +107,26 @@ class Review:
     totp_status: str
     created_at: str
     completed_at: str | None
+    # "provider:subject" of each provider account that proved the mailbox.
+    trusted_identities: tuple[str, ...] = ()
 
     @property
     def pending(self) -> bool:
         return self.completed_at is None
 
 
-_COLUMNS = "user_id, review_id, origin, verified_at, verified_at_ms, password_status, totp_status, created_at, completed_at"
+_COLUMNS = (
+    "user_id, review_id, origin, verified_at, verified_at_ms, password_status, totp_status, created_at, completed_at,"
+    " trusted_identities"
+)
 
 
 def _missing_table(error: Exception) -> bool:
     return "no such table" in str(error).lower()
+
+
+def identity_key(provider: str, subject: str | None) -> str:
+    return f"{provider}:{subject or ''}"
 
 
 def now_iso() -> str:
@@ -136,6 +161,36 @@ def _iso(value: Any) -> str | None:
     return datetime.fromtimestamp(ts, tz=UTC).isoformat() if ts is not None else None
 
 
+def _trusted_list(raw: Any) -> tuple[str, ...]:
+    try:
+        parsed = json.loads(raw or "[]")
+    except ValueError:
+        return ()
+    return tuple(str(v) for v in parsed if isinstance(v, str)) if isinstance(parsed, list) else ()
+
+
+# ---------------------------------------------------------------------------
+# Audit
+# ---------------------------------------------------------------------------
+
+
+async def audit(
+    db: Any, user_id: str, action: AuditAction, *, resource_id: str | None, ip: str | None, details: dict[str, Any]
+) -> None:
+    """One audit row; ``details`` (JSON) goes in ``error_message``. Never raises."""
+    try:
+        await AuditLogger(db).log(
+            user_id=user_id,
+            action=action,
+            resource_id=resource_id,
+            ip_address=ip,
+            success=True,
+            error_message=json.dumps(details, sort_keys=True),
+        )
+    except Exception as e:  # the audit trail never blocks the owner
+        log.error("account_review_audit_failed", user_id=user_id, action=action.value, error_type=type(e).__name__)
+
+
 # ---------------------------------------------------------------------------
 # Reading and opening
 # ---------------------------------------------------------------------------
@@ -161,6 +216,7 @@ async def get_review(db: Any, user_id: str) -> Review | None:
         totp_status=str(row[6]),
         created_at=str(row[7]),
         completed_at=str(row[8]) if row[8] else None,
+        trusted_identities=_trusted_list(row[9]),
     )
 
 
@@ -173,29 +229,53 @@ async def is_pending(db: Any, user_id: str) -> bool:
     return await pending_review(db, user_id) is not None
 
 
-async def open_review(db: Any, user_id: str, *, origin: str, verified_at: str, totp_enabled: bool) -> Review:
+async def open_review(
+    db: Any,
+    user_id: str,
+    *,
+    origin: str,
+    verified_at: str,
+    totp_enabled: bool,
+    proof_identity: tuple[str, str] | None = None,
+    ip: str | None = None,
+) -> Review:
     """Open (or update) the review for ``user_id``. Safe inside ``db.transaction()``.
 
-    ``verified_at`` is the moment the mailbox was proven; for a Google link it
-    is the link's ``created_at``, so that identity counts as proven. A reset
-    on an account that already has a pending review only marks the password
-    as the owner's. A finished review is never reopened.
+    ``proof_identity`` is ``(provider, subject)`` of the provider account that
+    proved the mailbox (required for a provider origin); only that exact
+    account is trusted, not any later link at the same provider. A reset on
+    an account that already has a pending review only marks the password as
+    the owner's (audited). A finished review is never reopened.
+
+    Callers cut off the account's dashboard sessions right after (which also
+    cancels Settings connects in flight), outside any transaction.
     """
     if origin not in ORIGINS:
         raise ValueError(f"unknown review origin {origin!r}")
+    if origin in PROVIDER_ORIGINS and (proof_identity is None or proof_identity[0] != origin):
+        raise ValueError("a provider review needs the provider account that proved the mailbox")
     existing = await get_review(db, user_id)
     if existing is not None:
-        if existing.pending and origin == ORIGIN_PASSWORD_RESET:
+        if existing.pending and origin == ORIGIN_PASSWORD_RESET and existing.password_status != PASSWORD_TRUSTED:
             await db.conn.execute("UPDATE account_reviews SET password_status = ? WHERE user_id = ?", (PASSWORD_TRUSTED, user_id))
             await db.conn.commit()
+            await audit(
+                db,
+                user_id,
+                AuditAction.ACCOUNT_REVIEW_UPDATED,
+                resource_id="password",
+                ip=ip,
+                details={"change": "password_trusted", "by": "password_reset"},
+            )
             refreshed = await get_review(db, user_id)
             assert refreshed is not None
             return refreshed
         return existing
     verified_ms = int((parse_ts(verified_at) or time.time()) * 1000)
     review_id = secrets.token_urlsafe(24)
+    trusted = [identity_key(*proof_identity)] if proof_identity else []
     await db.conn.execute(
-        f"INSERT INTO account_reviews ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)",
+        f"INSERT INTO account_reviews ({_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)",
         (
             user_id,
             review_id,
@@ -205,6 +285,7 @@ async def open_review(db: Any, user_id: str, *, origin: str, verified_at: str, t
             PASSWORD_TRUSTED if origin == ORIGIN_PASSWORD_RESET else PASSWORD_UNTRUSTED,
             TOTP_PREDATES if totp_enabled else TOTP_NONE,
             now_iso(),
+            json.dumps(trusted),
         ),
     )
     await db.conn.commit()
@@ -227,26 +308,13 @@ def session_is_trusted(review: Review | None, payload: dict[str, Any] | None) ->
     return isinstance(claim, str) and secrets.compare_digest(claim, review.review_id)
 
 
-async def _identity_proven(db: Any, review: Review, user_id: str, provider: str) -> bool:
-    try:
-        cursor = await db.conn.execute(
-            "SELECT created_at FROM user_identities WHERE user_id = ? AND provider = ?", (user_id, provider)
-        )
-    except sqlite3.OperationalError as e:
-        if _missing_table(e):
-            return False
-        raise
-    row = await cursor.fetchone()
-    created = parse_ts(row[0]) if row else None
-    return created is not None and created * 1000 >= review.verified_at_ms - 1
-
-
-async def login_claims(db: Any, user_id: str, *, provider: str | None) -> tuple[dict[str, Any], bool]:
+async def login_claims(db: Any, user_id: str, *, provider: str | None, subject: str | None = None) -> tuple[dict[str, Any], bool]:
     """Extra JWT claims for a new session, and whether a pre-verification 2FA is skipped.
 
-    ``provider`` is the social provider used, or None for a password sign-in.
-    Returns ``({}, False)`` when no review is pending or the sign-in method
-    does not prove the mailbox.
+    ``provider``/``subject`` identify the provider account used, or
+    ``provider=None`` for a password sign-in. Returns ``({}, False)`` when no
+    review is pending or the sign-in method does not prove the mailbox. Call
+    :func:`audit_session` once the session is actually issued.
     """
     review = await pending_review(db, user_id)
     if review is None:
@@ -254,15 +322,26 @@ async def login_claims(db: Any, user_id: str, *, provider: str | None) -> tuple[
     if provider is None:
         trusted = review.password_status == PASSWORD_TRUSTED
     else:
-        trusted = await _identity_proven(db, review, user_id, provider)
+        trusted = bool(subject) and identity_key(provider, subject) in review.trusted_identities
     if not trusted:
         return {}, False
     return {REVIEW_CLAIM: review.review_id}, review.totp_status == TOTP_PREDATES
 
 
+async def audit_session(
+    db: Any, user_id: str, claims: dict[str, Any], *, provider: str | None, subject: str | None, ip: str | None
+) -> None:
+    """Record which sign-in method gained review authority (a session with the ``rvw`` claim)."""
+    if not claims.get(REVIEW_CLAIM):
+        return
+    details: dict[str, Any] = {"method": "password_reset"} if provider is None else {"method": provider, "subject": subject}
+    await audit(db, user_id, AuditAction.ACCOUNT_REVIEW_SESSION, resource_id=str(details["method"]), ip=ip, details=details)
+
+
 def blocked_message(review: Review) -> str:
-    if review.origin == ORIGIN_GOOGLE:
-        return "Sign in with Google and finish checking your account first."
+    name = _ORIGIN_NAMES.get(review.origin)
+    if name:
+        return f"Sign in with {name} and finish checking your account first."
     return "Sign in with your password and finish checking your account first."
 
 
@@ -274,12 +353,61 @@ async def untrusted_block(db: Any, user_id: str, payload: dict[str, Any] | None)
     return blocked_message(review)
 
 
-async def note_totp_enabled(db: Any, user_id: str) -> None:
-    """2FA turned on by a trusted session during the review belongs to the owner."""
+async def password_sign_in_block(db: Any, user_id: str) -> str | None:
+    """For password sign-ins that add access (connecting an app): refused while a review is open
+    and the password has not been proven to be the mailbox owner's."""
+    review = await pending_review(db, user_id)
+    if review is None or review.password_status == PASSWORD_TRUSTED:
+        return None
+    return blocked_message(review)
+
+
+async def note_totp_enabled(db: Any, user_id: str, *, ip: str | None = None) -> None:
+    """2FA turned on by a trusted session during the review belongs to the owner (audited)."""
     review = await pending_review(db, user_id)
     if review is not None:
         await db.conn.execute("UPDATE account_reviews SET totp_status = ? WHERE user_id = ?", (TOTP_TRUSTED, user_id))
         await db.conn.commit()
+        await audit(
+            db,
+            user_id,
+            AuditAction.ACCOUNT_REVIEW_UPDATED,
+            resource_id="two_factor",
+            ip=ip,
+            details={"change": "two_factor_trusted", "by": "two_factor_setup"},
+        )
+
+
+async def trust_identity(db: Any, review: Review, provider: str, subject: str, *, ip: str | None = None) -> None:
+    """A provider account connected by the proven owner during the review also proves the mailbox (audited)."""
+    key = identity_key(provider, subject)
+    current = await get_review(db, review.user_id)
+    if current is None or not current.pending or key in current.trusted_identities:
+        return
+    await db.conn.execute(
+        "UPDATE account_reviews SET trusted_identities = ? WHERE user_id = ?",
+        (json.dumps([*current.trusted_identities, key]), review.user_id),
+    )
+    await db.conn.commit()
+    await audit(
+        db,
+        review.user_id,
+        AuditAction.ACCOUNT_REVIEW_UPDATED,
+        resource_id=f"identity:{provider}",
+        ip=ip,
+        details={"change": "identity_trusted", "provider": provider, "subject": subject},
+    )
+
+
+async def forget_trusted_identity(db: Any, user_id: str, provider: str, subject: str) -> None:
+    """A disconnected provider account no longer proves anything."""
+    review = await pending_review(db, user_id)
+    key = identity_key(provider, subject)
+    if review is None or key not in review.trusted_identities:
+        return
+    remaining = [k for k in review.trusted_identities if k != key]
+    await db.conn.execute("UPDATE account_reviews SET trusted_identities = ? WHERE user_id = ?", (json.dumps(remaining), user_id))
+    await db.conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -402,12 +530,13 @@ async def list_webhooks(db: Any, review: Review) -> list[dict[str, Any]]:
 
 
 async def list_identities(db: Any, review: Review) -> list[dict[str, Any]]:
-    """Sign-in links added before the email was verified (later ones were added by a proven session)."""
+    """Every sign-in link except the provider accounts that proved the mailbox."""
     from remembra.auth.social import PROVIDERS
 
     rows = await _rows(
         db,
-        "SELECT provider, email, created_at, last_login_at FROM user_identities WHERE user_id = ? ORDER BY provider",
+        "SELECT provider, email, created_at, last_login_at, provider_user_id FROM user_identities WHERE user_id = ?"
+        " ORDER BY provider",
         (review.user_id,),
     )
     return [
@@ -418,9 +547,10 @@ async def list_identities(db: Any, review: Review) -> list[dict[str, Any]]:
             "email": str(r[1]),
             "created_at": _iso(r[2]),
             "last_login_at": _iso(r[3]),
+            "subject": str(r[4]),
         }
         for r in rows
-        if _before(review, r[2])
+        if identity_key(str(r[0]), str(r[4])) not in review.trusted_identities
     ]
 
 
@@ -438,6 +568,32 @@ async def review_items(db: Any, review: Review) -> dict[str, Any]:
         "two_factor": review.totp_status == TOTP_PREDATES and await _totp_enabled(db, review.user_id),
         "password": review.password_status == PASSWORD_UNTRUSTED,
     }
+
+
+def _digest(*parts: Any) -> str:
+    return hashlib.sha256(json.dumps(parts, sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
+def item_ids(items: dict[str, Any]) -> list[str]:
+    """What is listed and what each item can reach (not how it is used: last-used times change all the time).
+
+    A key whose role or projects changed, or a webhook pointed elsewhere, is
+    a different item: "Keep all" must not keep what the owner did not see.
+    """
+    ids = [f"key:{k['id']}:{_digest(k['role'], k['scopes'], k['project_ids'], k['agent_id'])}" for k in items["keys"]]
+    ids += [f"connection:{c['id']}:{_digest(c['scopes'], c['project_ids'], c['agent_id'])}" for c in items["connections"]]
+    ids += [f"webhook:{w['id']}:{_digest(w['url'], w['events'])}" for w in items["webhooks"]]
+    ids += [f"identity:{i['id']}:{_digest(i['email'], i['subject'])}" for i in items["identities"]]
+    if items["two_factor"]:
+        ids.append("two_factor")
+    if items["password"]:
+        ids.append("password")
+    return sorted(ids)
+
+
+def items_version(items: dict[str, Any]) -> str:
+    """Fingerprint of the listed set; "Keep all" must send the one it was shown."""
+    return hashlib.sha256("\n".join(item_ids(items)).encode()).hexdigest()[:32]
 
 
 def _key_label(item: dict[str, Any]) -> str:
@@ -458,6 +614,9 @@ def _host(url: str) -> str:
         return url
 
 
+TWO_FACTOR_LABEL = "Two-factor sign-in"
+
+
 def item_labels(items: dict[str, Any]) -> list[str]:
     """One plain line per item, for the audit log and the notice email."""
     labels = [_key_label(k) for k in items["keys"]]
@@ -465,7 +624,7 @@ def item_labels(items: dict[str, Any]) -> list[str]:
     labels += [f"Webhook to {_host(w['url'])}" for w in items["webhooks"]]
     labels += [f"{i['name']} sign-in ({i['email']})" for i in items["identities"]]
     if items["two_factor"]:
-        labels.append("Two-factor sign-in")
+        labels.append(TWO_FACTOR_LABEL)
     if items["password"]:
         labels.append("Password")
     return labels
@@ -476,39 +635,31 @@ def item_labels(items: dict[str, Any]) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
-async def _audit(
-    db: Any, user_id: str, action: AuditAction, *, resource_id: str | None, ip: str | None, details: dict[str, Any]
-) -> None:
-    try:
-        await AuditLogger(db).log(
-            user_id=user_id,
-            action=action,
-            resource_id=resource_id,
-            ip_address=ip,
-            success=True,
-            error_message=json.dumps(details, sort_keys=True),
-        )
-    except Exception as e:  # the audit trail never blocks the owner
-        log.error("account_review_audit_failed", user_id=user_id, error_type=type(e).__name__)
-
-
 async def audit_opened(db: Any, review: Review, *, ip: str | None) -> None:
     items = await review_items(db, review)
-    await _audit(
+    await audit(
         db,
         review.user_id,
         AuditAction.ACCOUNT_REVIEW_OPENED,
         resource_id=review.origin,
         ip=ip,
-        details={"origin": review.origin, "items": item_labels(items)},
+        details={"origin": review.origin, "trusted": list(review.trusted_identities), "items": item_labels(items)},
     )
 
 
-async def revoke_item(db: Any, review: Review, kind: str, item_id: str | None, *, ip: str | None, method: str) -> dict[str, Any]:
-    """Revoke one listed item. Returns ``{"label": ..., "sessions_reset": bool}``.
+async def _turn_off_two_factor(db: Any, user_id: str) -> None:
+    await db.disable_totp(user_id)
+    await db.conn.execute("UPDATE account_reviews SET totp_status = ? WHERE user_id = ?", (TOTP_NONE, user_id))
+    await db.conn.commit()
 
-    Removing the password or a sign-in link signs out every session (the
-    caller gets a fresh one), so a squatter's open session ends with it.
+
+async def revoke_item(db: Any, review: Review, kind: str, item_id: str | None, *, ip: str | None, method: str) -> dict[str, Any]:
+    """Revoke one listed item. Returns ``{"label", "sessions_reset", "finished"}``.
+
+    Removing the password or a sign-in link signs out every dashboard session
+    (the caller gets a fresh one), so a squatter's open session ends with it.
+    App connections and API keys are not touched by that: each is its own
+    item. When nothing is left to check the review finishes (``finished``).
     """
     if not review.pending:
         raise ReviewError("This account check is already done.", 409)
@@ -551,17 +702,16 @@ async def revoke_item(db: Any, review: Review, kind: str, item_id: str | None, *
             await db.conn.commit()
             label = f"Webhook to {_host(match['url'])}"
         else:
-            await db.conn.execute("DELETE FROM user_identities WHERE user_id = ? AND provider = ?", (user_id, match["id"]))
-            await db.conn.commit()
+            from remembra.auth import social
+
+            await social.unlink_identity(db, user_id, match["id"], ip=ip, by="account_review")
             sessions_reset = True
             label = f"{match['name']} sign-in ({match['email']})"
     elif kind == "two_factor":
         if not items["two_factor"]:
             raise ReviewError("That item is not in this account check.", 404)
-        await db.disable_totp(user_id)
-        await db.conn.execute("UPDATE account_reviews SET totp_status = ? WHERE user_id = ?", (TOTP_NONE, user_id))
-        await db.conn.commit()
-        label = "Two-factor sign-in"
+        await _turn_off_two_factor(db, user_id)
+        label = TWO_FACTOR_LABEL
     else:
         if not items["password"]:
             raise ReviewError("That item is not in this account check.", 404)
@@ -578,8 +728,10 @@ async def revoke_item(db: Any, review: Review, kind: str, item_id: str | None, *
     if sessions_reset:
         from remembra.security import state as security_state
 
-        await security_state.invalidate_user_sessions(db, user_id)
-    await _audit(
+        # Dashboard sessions only: the owner's agents (app connections, keys)
+        # keep working; they are items of their own in this review.
+        await security_state.invalidate_user_sessions(db, user_id, keep_app_connections=True)
+    await audit(
         db,
         user_id,
         AuditAction.ACCOUNT_REVIEW_REVOKED,
@@ -588,20 +740,40 @@ async def revoke_item(db: Any, review: Review, kind: str, item_id: str | None, *
         details={"kind": kind, "label": label, "by": method},
     )
     log.info("account_review_item_revoked", user_id=user_id, kind=kind)
-    return {"label": label, "sessions_reset": sessions_reset}
+    finished = await finish_if_empty(db, review, ip=ip, method=method)
+    return {"label": label, "sessions_reset": sessions_reset, "finished": finished}
 
 
-async def defer(db: Any, review: Review, *, ip: str | None, method: str) -> None:
-    await _audit(
-        db, review.user_id, AuditAction.ACCOUNT_REVIEW_DEFERRED, resource_id=review.origin, ip=ip, details={"by": method}
+async def keep_two_factor(db: Any, review: Review, *, ip: str | None, method: str) -> None:
+    """The owner showed a current code from the authenticator: 2FA is theirs and stays on.
+
+    The caller verifies the code (``UserManager.verify_totp``) first.
+    """
+    if not review.pending:
+        raise ReviewError("This account check is already done.", 409)
+    if not (await review_items(db, review))["two_factor"]:
+        raise ReviewError("That item is not in this account check.", 404)
+    await db.conn.execute("UPDATE account_reviews SET totp_status = ? WHERE user_id = ?", (TOTP_TRUSTED, review.user_id))
+    await db.conn.commit()
+    await audit(
+        db,
+        review.user_id,
+        AuditAction.ACCOUNT_REVIEW_KEPT,
+        resource_id="two_factor",
+        ip=ip,
+        details={"kind": "two_factor", "label": TWO_FACTOR_LABEL, "by": method, "proof": "current_code"},
     )
 
 
-async def _removed_labels(db: Any, review: Review) -> list[str]:
+async def defer(db: Any, review: Review, *, ip: str | None, method: str) -> None:
+    await audit(db, review.user_id, AuditAction.ACCOUNT_REVIEW_DEFERRED, resource_id=review.origin, ip=ip, details={"by": method})
+
+
+async def _audit_labels(db: Any, review: Review, action: AuditAction) -> list[str]:
     rows = await _rows(
         db,
         "SELECT error_message FROM audit_log WHERE user_id = ? AND action = ? AND timestamp >= ? ORDER BY timestamp",
-        (review.user_id, AuditAction.ACCOUNT_REVIEW_REVOKED.value, review.created_at),
+        (review.user_id, action.value, review.created_at),
     )
     labels: list[str] = []
     for (raw,) in rows:
@@ -627,31 +799,75 @@ async def _send_review_notice(to: str, kept: list[str], removed: list[str]) -> N
 review_notifier: Callable[[str, list[str], list[str]], Awaitable[None]] = _send_review_notice
 
 
-async def complete(db: Any, review: Review, *, ip: str | None, method: str) -> dict[str, list[str]]:
-    """Keep everything still listed and close the review (single use). Emails the account address."""
+async def complete(db: Any, review: Review, *, version: str | None, ip: str | None, method: str) -> dict[str, list[str]]:
+    """Keep what the owner was shown and close the review (single use). Emails the account address.
+
+    ``version`` is :func:`items_version` of the list the owner saw; when the
+    list changed since (say a key was made meanwhile) nothing is kept and 409
+    is raised, so the owner sees the new list. ``None`` only for the automatic
+    finish of an empty review.
+
+    2FA set up before the email was confirmed is never kept by "Keep all": it
+    is turned off here unless the owner kept it with a current code
+    (:func:`keep_two_factor`), so an authenticator the owner may not hold
+    never locks them out after the review.
+    """
+    if not review.pending:
+        raise ReviewError("This account check is already done.", 409)
     items = await review_items(db, review)
-    kept = item_labels(items)
+    if version is not None and not secrets.compare_digest(version, items_version(items)):
+        raise ReviewError("The list changed. Check it again.", 409)
+    user_id = review.user_id
+    if items["two_factor"]:
+        await _turn_off_two_factor(db, user_id)
+        await audit(
+            db,
+            user_id,
+            AuditAction.ACCOUNT_REVIEW_REVOKED,
+            resource_id="two_factor",
+            ip=ip,
+            details={"kind": "two_factor", "label": TWO_FACTOR_LABEL, "by": method, "reason": "not_kept_with_code"},
+        )
+        items = {**items, "two_factor": False}
     cursor = await db.conn.execute(
         "UPDATE account_reviews SET completed_at = ?, completed_by = ? WHERE user_id = ? AND completed_at IS NULL",
-        (now_iso(), method, review.user_id),
+        (now_iso(), method, user_id),
     )
     await db.conn.commit()
     if (cursor.rowcount or 0) != 1:
         raise ReviewError("This account check is already done.", 409)
-    removed = await _removed_labels(db, review)
-    await _audit(
+    kept = item_labels(items) + await _audit_labels(db, review, AuditAction.ACCOUNT_REVIEW_KEPT)
+    removed = await _audit_labels(db, review, AuditAction.ACCOUNT_REVIEW_REVOKED)
+    await audit(
         db,
-        review.user_id,
+        user_id,
         AuditAction.ACCOUNT_REVIEW_COMPLETED,
         resource_id=review.origin,
         ip=ip,
         details={"kept": kept, "removed": removed, "by": method},
     )
-    log.info("account_review_completed", user_id=review.user_id, kept=len(kept), removed=len(removed))
-    user = await db.get_user_by_id(review.user_id)
-    if user and user.get("email"):
+    log.info("account_review_completed", user_id=user_id, kept=len(kept), removed=len(removed))
+    user = await db.get_user_by_id(user_id)
+    if (kept or removed) and user and user.get("email"):
         try:
             await review_notifier(str(user["email"]), kept, removed)
         except Exception as e:  # the notice never fails the review
-            log.warning("account_review_notice_failed", user_id=review.user_id, error_type=type(e).__name__)
+            log.warning("account_review_notice_failed", user_id=user_id, error_type=type(e).__name__)
     return {"kept": kept, "removed": removed}
+
+
+async def finish_if_empty(db: Any, review: Review, *, ip: str | None, method: str = METHOD_NOTHING_TO_CHECK) -> bool:
+    """Close a pending review that lists nothing (no screen). True when it is (now) finished.
+
+    Emails only when something was removed along the way.
+    """
+    current = await get_review(db, review.user_id)
+    if current is None or not current.pending:
+        return current is not None
+    if item_ids(await review_items(db, current)):
+        return False
+    try:
+        await complete(db, current, version=None, ip=ip, method=method)
+    except ReviewError:  # finished concurrently
+        pass
+    return True

@@ -290,6 +290,10 @@ async def create_api_key(
     if current_user:
         # JWT / API-key auth - create key for the authenticated user only
         user_id = current_user.user_id
+        # A session that did not prove the mailbox adds no keys during an account review.
+        from remembra.api.v1.auth import refuse_untrusted_session_during_review
+
+        await refuse_untrusted_session_during_review(request, current_user)
     elif body.user_id:
         # Master key auth - create a key on behalf of an arbitrary user_id.
         master_key = request.headers.get("X-API-Key")

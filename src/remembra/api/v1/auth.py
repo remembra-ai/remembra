@@ -303,6 +303,25 @@ async def refuse_until_review_done(user_manager: UserManager, current_user: dict
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=message)
 
 
+async def refuse_untrusted_session_during_review(request: Request, user: Any) -> None:
+    """For routes that take a dashboard session OR an API key and add access (API keys, webhooks).
+
+    While an account review is open, a dashboard session that did not prove
+    the mailbox (e.g. a squatter's password session) gets 403. API keys are
+    not affected (agents keep working); "Keep all" still only keeps the list
+    the owner was shown.
+    """
+    if getattr(user, "api_key_id", None) != "jwt_auth":
+        return
+    header = request.headers.get("Authorization", "")
+    token = header[7:].strip() if header[:7].lower() == "bearer " else ""
+    user_manager = await get_user_manager(request)
+    payload = user_manager.verify_jwt_token(token) if token else None
+    message = await account_review.untrusted_block(user_manager.db, user.user_id, payload)
+    if message:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=message)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -468,6 +487,7 @@ async def login(
     await security_state.clear_failures(db, lock_key)
     if review_claims:
         token = user_manager.create_jwt_token(user.id, user.email, extra_claims=review_claims)
+        await account_review.audit_session(db, user.id, review_claims, provider=None, subject=None, ip=get_client_ip(request))
 
     is_admin = await account_is_owner_now(db, await db.get_user_by_id(user.id))
 
@@ -1073,7 +1093,7 @@ async def enable_totp(
             detail=error or "Failed to enable 2FA",
         )
     # Turned on by the proven owner during a review: it is theirs, not an item to review.
-    await account_review.note_totp_enabled(user_manager.db, current_user["id"])
+    await account_review.note_totp_enabled(user_manager.db, current_user["id"], ip=get_client_ip(request))
 
     return TotpVerifyResponse()
 

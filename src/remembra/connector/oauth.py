@@ -135,7 +135,9 @@ async def account_allows_grant(db: Any, grant: Grant) -> bool:
 
     ``invalidate_user_sessions`` (password change or reset, deactivation) moves the
     user's cut-off forward; connections whose sign-in happened before it stop
-    working, the same rule dashboard JWTs follow. The sign-in time is used, not
+    working, the same rule dashboard JWTs follow. The dashboard-only cut-off
+    (``keep_app_connections=True``, used by the account review) is not read
+    here: the review lists each connection and revokes it on its own. The sign-in time is used, not
     the consent time, so a login made with the old password that finishes
     consent after the reset is dead too.
     """
@@ -467,6 +469,13 @@ async def authorize_login(request: Request, store: StoreDep) -> Response:
             await security_state.record_failure(db, lock_key)
             return _login_again(auth_req, client, "Invalid two-factor code.", email, 401)
     await security_state.clear_failures(db, lock_key)
+    # While the account check is open, only a password proven through the
+    # mailbox may connect a new app (a squatter's password may not).
+    from remembra.auth import account_review
+
+    blocked = await account_review.password_sign_in_block(db, user.id)
+    if blocked:
+        return _login_again(auth_req, client, blocked, email, 403)
 
     await store.set_auth_request_user(auth_req.request_id, user.id)
     log.info("oauth_login_ok", user_id=user.id, client_id=client["client_id"])
@@ -494,7 +503,8 @@ async def authorize_consent(request: Request, store: StoreDep) -> Response:
         return pages.error_page("This account can't be connected.", status_code=403)
     # A password change/reset (or deactivation) after this sign-in voids it:
     # whoever signed in with the old password must not finish connecting.
-    valid_after = await security_state.get_tokens_valid_after_ms(db, auth_req.user_id)
+    # A sign-in, like a dashboard session: any session cut-off voids it.
+    valid_after = await security_state.get_sessions_valid_after_ms(db, auth_req.user_id)
     if signed_in_before_cutoff(int(auth_req.authenticated_at * 1000), valid_after):
         await store.delete_auth_request(auth_req.request_id)
         log.warning("oauth_consent_after_session_invalidation", user_id=auth_req.user_id, client_id=auth_req.client_id)

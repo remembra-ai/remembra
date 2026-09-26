@@ -259,9 +259,11 @@ async def test_preregistered_account_reset_revokes_nothing_and_opens_a_review(tm
         claims = jwt.decode(r.json()["access_token"], JWT_SECRET, algorithms=["HS256"])
         assert claims.get("rvw")
 
-        # Google now links into the (verified) account.
+        # Google now links into the (verified) account. It proves the address again,
+        # so that Google account may act on the review too (the squatter's 2FA does not apply).
         body = (await exchange(h, (await sign_in(h, providers, "google"))["code"])).json()
-        assert body["user"]["id"] == uid
+        assert body["user"]["id"] == uid and body["requires_2fa"] is False
+        assert jwt.decode(body["access_token"], JWT_SECRET, algorithms=["HS256"]).get("rvw") == claims["rvw"]
 
 
 async def test_reset_of_a_verified_account_keeps_its_keys(tmp_path, providers) -> None:

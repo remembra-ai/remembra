@@ -43,6 +43,13 @@ class AuditAction(StrEnum):
     ACCOUNT_REVIEW_REVOKED = "account_review_revoked"
     ACCOUNT_REVIEW_DEFERRED = "account_review_deferred"
     ACCOUNT_REVIEW_COMPLETED = "account_review_completed"
+    ACCOUNT_REVIEW_KEPT = "account_review_kept"  # an item kept one by one (2FA, with a current code)
+    ACCOUNT_REVIEW_UPDATED = "account_review_updated"  # password / 2FA / a sign-in link became the owner's
+    ACCOUNT_REVIEW_SESSION = "account_review_session"  # a sign-in that may act on the review
+
+    # Sign-in methods (Sign in with Google / GitHub)
+    IDENTITY_LINKED = "identity_linked"
+    IDENTITY_UNLINKED = "identity_unlinked"
 
 
 @dataclass

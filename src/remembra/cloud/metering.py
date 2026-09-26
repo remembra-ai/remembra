@@ -577,10 +577,11 @@ class UsageMeter:
         # must not get Enterprise.
         settings = get_settings()
         if settings.owner_emails or settings.superadmin_user_ids:
-            from remembra.auth.superadmin import account_is_owner
+            from remembra.auth.superadmin import account_is_owner_now
 
+            # An owner address still under its account review is not the owner yet.
             user_row = await self._user_row(user_id)
-            if user_row is not None and account_is_owner(user_row):
+            if user_row is not None and await account_is_owner_now(self._db, user_row):
                 logger.debug("owner_plan_bypass user=%s", user_id)
                 return PlanTier.ENTERPRISE
 

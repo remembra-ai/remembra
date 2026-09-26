@@ -61,6 +61,8 @@ CREATE TABLE IF NOT EXISTS founding_holds (
 # One row per account whose mailbox was proven after credentials were set up
 # on it (migration 10). ``review_id`` is carried as the ``rvw`` claim of the
 # sessions that proved the mailbox; only those may finish the review.
+# ``trusted_identities`` is a JSON list of "provider:subject": the exact
+# provider accounts that proved the mailbox (never "any link at that provider").
 ACCOUNT_REVIEWS_DDL = """
 CREATE TABLE IF NOT EXISTS account_reviews (
     user_id TEXT PRIMARY KEY,
@@ -72,7 +74,8 @@ CREATE TABLE IF NOT EXISTS account_reviews (
     totp_status TEXT NOT NULL DEFAULT 'none',
     created_at TEXT NOT NULL,
     completed_at TEXT,
-    completed_by TEXT
+    completed_by TEXT,
+    trusted_identities TEXT NOT NULL DEFAULT '[]'
 )
 """
 

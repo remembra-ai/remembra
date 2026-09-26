@@ -137,13 +137,13 @@ async def oauth_start(request: Request, provider: str) -> RedirectResponse:
     if from_page not in social.FROM_PAGES or from_page == "settings":
         from_page = "login"
     db = _db(request)
-    link_user_id: str | None = None
+    link: social.LinkTicket | None = None
     linking = "link" in request.query_params
     if linking:
-        link_user_id = await social.consume_link_ticket(
+        link = await social.consume_link_ticket(
             db, provider, request.query_params.get("link"), request.cookies.get(social.link_cookie_name(provider))
         )
-        if link_user_id is None:
+        if link is None:
             # Unknown, spent, expired, or opened in a browser other than the
             # signed-in one that asked for it (account-link CSRF).
             log.warning("oauth_link_ticket_refused", provider=provider)
@@ -152,7 +152,7 @@ async def oauth_start(request: Request, provider: str) -> RedirectResponse:
             _delete_link_cookie(refused, provider)
             return refused
         from_page = "settings"
-    state, browser_secret, verifier, nonce = await social.create_login_state(db, provider, from_page, link_user_id=link_user_id)
+    state, browser_secret, verifier, nonce = await social.create_login_state(db, provider, from_page, link=link)
     response = RedirectResponse(social.authorize_url(provider, state, verifier, nonce), status_code=302, headers=_NO_STORE)
     if linking:
         _delete_link_cookie(response, provider)
@@ -188,11 +188,13 @@ async def oauth_callback(request: Request, provider: str) -> RedirectResponse:
         from_page = login_state.from_page
         identity = await social.fetch_identity(provider, params.get("code") or "", login_state)
         if login_state.link_user_id:
-            await social.link_identity(db, identity, login_state.link_user_id)
+            await social.link_identity(db, identity, login_state, ip=get_client_ip(request))
             target = social.dashboard_url("/oauth/callback", {"linked": "1", "provider": provider, "from": "settings"})
         else:
             user_id, created = await social.resolve_account(db, identity, get_client_ip(request))
-            code, browser_binding = await social.issue_login_code(db, user_id, provider, new_account=created)
+            code, browser_binding = await social.issue_login_code(
+                db, user_id, provider, new_account=created, provider_user_id=identity.subject
+            )
             if created:
                 notify.notify_welcome(request.app.state, user_id)
             target = social.dashboard_url("/oauth/callback", {"code": code, "provider": provider})
@@ -262,9 +264,13 @@ async def oauth_exchange(
             detail="Too many failed attempts. Try again later.",
             headers={"Retry-After": str(remaining)},
         )
-    # A provider identity linked when (or after) the mailbox was proven may
-    # finish a pending account review; 2FA set up before that does not apply.
-    review_claims, skip_old_totp = await account_review.login_claims(db, user_row["id"], provider=info["provider"])
+    # The provider account that proved the mailbox (or one the proven owner
+    # connected since) may finish a pending account review; 2FA set up before
+    # that does not stand in its way.
+    subject = info.get("provider_user_id")
+    review_claims, skip_old_totp = await account_review.login_claims(
+        db, user_row["id"], provider=info["provider"], subject=subject
+    )
     if not skip_old_totp and await user_manager.is_totp_enabled(user_row["id"]):
         if not body.totp_code:
             return OAuthExchangeResponse(requires_2fa=True, provider=info["provider"], message="2FA code required")
@@ -277,6 +283,9 @@ async def oauth_exchange(
     await security_state.clear_failures(db, lock_key)
     await db.update_user_last_login(user_row["id"])
     token = user_manager.create_jwt_token(user_row["id"], user_row["email"], extra_claims=review_claims)
+    await account_review.audit_session(
+        db, user_row["id"], review_claims, provider=info["provider"], subject=subject, ip=get_client_ip(request)
+    )
     response.delete_cookie(social.login_cookie_name(), path="/", secure=social.cookie_secure(), httponly=True, samesite="lax")
     log.info("oauth_session_issued", provider=info["provider"], user_id=user_row["id"], new_account=info["new_account"])
     return OAuthExchangeResponse(
@@ -307,8 +316,9 @@ async def oauth_exchange(
 async def oauth_link_start(request: Request, response: Response, provider: str, current_user: CurrentUser) -> LinkStartResponse:
     """Returns a single-use ``start_path`` (2 minutes). Needs a session from the last 15 minutes.
 
-    This is the only way to add GitHub to an account that already exists:
-    GitHub sign-in never links by email (see :mod:`remembra.auth.social`).
+    This is the only way to add GitHub to an account whose email is already
+    verified: GitHub sign-in links by email only into an account nobody has
+    proven the mailbox of (see :mod:`remembra.auth.social`).
     Call it with ``credentials: 'include'``: the HttpOnly cookie it sets binds
     the ticket to this browser, and ``/start`` refuses the ticket anywhere else.
     """
@@ -316,13 +326,23 @@ async def oauth_link_start(request: Request, response: Response, provider: str, 
     user_manager = await get_user_manager(request)
     await refuse_until_review_done(user_manager, current_user)
     payload = user_manager.verify_jwt_token(current_user["token"]) or {}
-    age_ms = time.time() * 1000 - security_state.token_issued_at_ms(payload)
+    issued_ms = security_state.token_issued_at_ms(payload)
+    age_ms = time.time() * 1000 - issued_ms
     if age_ms > social.LINK_REAUTH_SECONDS * 1000:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="For your security, sign in again to connect a sign-in method.",
         )
-    ticket, browser_secret = await social.create_link_ticket(user_manager.db, current_user["id"], provider)
+    # The callback checks both again: this session must still be valid, and
+    # (while an account review is open) still the one that proved the mailbox.
+    claim = payload.get(account_review.REVIEW_CLAIM)
+    ticket, browser_secret = await social.create_link_ticket(
+        user_manager.db,
+        current_user["id"],
+        provider,
+        review_id=claim if isinstance(claim, str) else None,
+        session_ms=issued_ms,
+    )
     response.headers.update(_NO_STORE)
     response.set_cookie(
         social.link_cookie_name(provider),
@@ -359,9 +379,15 @@ async def list_connected_identities(request: Request, current_user: CurrentUser)
 @router.delete("/identities/{provider}", summary="Disconnect a sign-in provider from this account")
 @limiter.limit("10/minute")
 async def disconnect_identity(request: Request, provider: str, current_user: CurrentUser) -> dict[str, bool]:
-    """The account keeps its email and password; "Forgot password" still works after this."""
+    """The account keeps its email and password; "Forgot password" still works after this.
+
+    While an account review is open only a session that proved the mailbox
+    may disconnect (a squatter's session must not remove the owner's sign-in).
+    """
     if provider not in social.PROVIDERS:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
-    if not await social.unlink_identity(_db(request), current_user["id"], provider):
+    user_manager = await get_user_manager(request)
+    await refuse_until_review_done(user_manager, current_user)
+    if not await social.unlink_identity(user_manager.db, current_user["id"], provider, ip=get_client_ip(request)):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="This sign-in method is not connected")
     return {"removed": True}

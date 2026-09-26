@@ -20,21 +20,30 @@ Flow (the API is the OAuth client; the dashboard never sees provider tokens):
      (``@gmail.com`` or a Workspace ``hd``), per Google's guidance.
 
 3. The identity is resolved to ONE account: an existing identity link signs
-   in; otherwise, for Google only, an existing account with that email is
-   linked. When that account's email was never verified, the link also
-   verifies it and opens a one-time review of the credentials set up before
-   (API keys keep working until the owner keeps or revokes them; see
-   :mod:`remembra.auth.account_review`), so a pre-registered account never
-   hands the mailbox owner's sign-in to whoever registered it. GitHub is never
-   linked by email: GitHub does not re-verify addresses, so a "verified"
-   primary can belong to a former owner of the mailbox. A GitHub account is
-   connected to an existing Remembra account only from a signed-in session
-   (Settings, ``POST /auth/oauth/{provider}/link``). Otherwise a new account
-   is created with ``email_verified = true`` under the normal signup limits,
-   unless another account (dashboard or API signup) already verified that
-   address. ``user_identities`` is unique on ``(provider, provider_user_id)``
-   and on ``(user_id, provider)``, and ``users.email`` is unique, so a
-   verified email or a provider account can back at most one account.
+   in. Otherwise, when an account with that email exists:
+
+   * its email was never verified: the identity is linked (Google or GitHub,
+     since the provider's verified email is the first proof anyone has of
+     that mailbox), the email is marked verified, the account's dashboard
+     sessions end, and a one-time review of the credentials set up before
+     opens (API keys and app connections keep working until the owner keeps
+     or revokes them; see :mod:`remembra.auth.account_review`). Only that
+     exact provider account may act on the review, so a pre-registered
+     account never hands the mailbox owner's sign-in to whoever registered
+     it, and the registrant never gets the owner's review;
+   * its email is verified: Google links (it is authoritative for the
+     addresses it accepts). GitHub does not: GitHub never re-verifies
+     addresses, so its "verified" primary can belong to a former owner of a
+     mailbox the account's owner has proven since. GitHub is connected to
+     such an account only from a signed-in session (Settings,
+     ``POST /auth/oauth/{provider}/link``).
+
+   With no account for the email a new one is created with
+   ``email_verified = true`` under the normal signup limits, unless another
+   account (dashboard or API signup) already verified that address.
+   ``user_identities`` is unique on ``(provider, provider_user_id)`` and on
+   ``(user_id, provider)``, and ``users.email`` is unique, so a verified
+   email or a provider account can back at most one account.
 4. The callback redirects to ``<public_dashboard_url>/oauth/callback`` with a
    single-use, 5-minute login code in the URL fragment, and sets a second
    HttpOnly cookie that binds the code to this browser. The dashboard trades
@@ -51,6 +60,10 @@ Flow (the API is the OAuth client; the dashboard never sees provider tokens):
    refuses (and burns) a ticket opened without that cookie, so an attacker
    cannot mint a ticket for their own account and have a victim's browser
    attach the victim's Google / GitHub identity to it (account-link CSRF).
+   The callback links only if the session that asked for the ticket is still
+   valid and, while an account review is open, is one that proved the
+   mailbox; connects in flight are cancelled whenever the account's sessions
+   are cut off or a review opens.
 
 Provider access tokens, codes, states, verifiers and nonces are never logged
 and never stored in plaintext beyond the few minutes a flow is open.
@@ -92,10 +105,15 @@ ID_TOKEN_LEEWAY_SECONDS = 60
 JWKS_TTL_SECONDS = 3600
 JWKS_MIN_REFRESH_SECONDS = 30
 FROM_PAGES = ("login", "signup", "settings")
-# Providers whose verified email may link into an existing verified account.
+# Providers whose verified email may link into an existing VERIFIED account.
 # Google is authoritative for the addresses it accepts (Gmail / Workspace);
 # GitHub is not (see _resolve_once).
 EMAIL_LINK_PROVIDERS = frozenset({"google"})
+# Providers whose verified email may link into an existing account whose email
+# was NEVER verified. Nobody has proven that mailbox yet, so the provider's
+# proof is the best there is; the link opens the one-time account review
+# (remembra.auth.account_review) instead of trusting what was set up before.
+UNVERIFIED_LINK_PROVIDERS = frozenset({"google", "github"})
 
 
 @dataclass(frozen=True)
@@ -168,6 +186,17 @@ class LoginState:
     from_page: str
     # Set when a signed-in user is connecting this provider from Settings.
     link_user_id: str | None = None
+    # The account review the connecting session could act on (its ``rvw``
+    # claim), and when that session was issued (epoch ms).
+    link_review_id: str | None = None
+    link_session_ms: int | None = None
+
+
+@dataclass(frozen=True)
+class LinkTicket:
+    user_id: str
+    review_id: str | None
+    session_ms: int | None
 
 
 def _default_http_client() -> httpx.AsyncClient:
@@ -271,7 +300,9 @@ CREATE TABLE IF NOT EXISTS oauth_login_states (
     nonce TEXT NOT NULL,
     from_page TEXT NOT NULL,
     expires_at REAL NOT NULL,
-    link_user_id TEXT
+    link_user_id TEXT,
+    link_review_id TEXT,
+    link_session_ms INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS oauth_login_codes (
@@ -280,7 +311,8 @@ CREATE TABLE IF NOT EXISTS oauth_login_codes (
     provider TEXT NOT NULL,
     new_account INTEGER NOT NULL DEFAULT 0,
     expires_at REAL NOT NULL,
-    browser_hash TEXT
+    browser_hash TEXT,
+    provider_user_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS oauth_link_tickets (
@@ -288,7 +320,9 @@ CREATE TABLE IF NOT EXISTS oauth_link_tickets (
     user_id TEXT NOT NULL,
     provider TEXT NOT NULL,
     expires_at REAL NOT NULL,
-    browser_hash TEXT
+    browser_hash TEXT,
+    review_id TEXT,
+    session_ms INTEGER
 );
 """
 
@@ -297,6 +331,11 @@ _ADDED_COLUMNS = (
     ("oauth_login_states", "link_user_id", "TEXT"),
     ("oauth_login_codes", "browser_hash", "TEXT"),
     ("oauth_link_tickets", "browser_hash", "TEXT"),
+    ("oauth_login_states", "link_review_id", "TEXT"),
+    ("oauth_login_states", "link_session_ms", "INTEGER"),
+    ("oauth_login_codes", "provider_user_id", "TEXT"),
+    ("oauth_link_tickets", "review_id", "TEXT"),
+    ("oauth_link_tickets", "session_ms", "INTEGER"),
 )
 
 _initialized: weakref.WeakSet[Any] = weakref.WeakSet()
@@ -331,7 +370,7 @@ def pkce_challenge(verifier: str) -> str:
 
 
 async def create_login_state(
-    db: Any, provider: str, from_page: str, *, link_user_id: str | None = None
+    db: Any, provider: str, from_page: str, *, link: LinkTicket | None = None
 ) -> tuple[str, str, str, str]:
     """New flow: returns ``(state, browser_secret, code_verifier, nonce)``; stores hashes."""
     await ensure_schema(db)
@@ -342,10 +381,20 @@ async def create_login_state(
     now = time.time()
     await db.conn.execute("DELETE FROM oauth_login_states WHERE expires_at < ?", (now,))
     await db.conn.execute(
-        "INSERT INTO oauth_login_states"
-        " (state_hash, provider, browser_hash, code_verifier, nonce, from_page, expires_at, link_user_id)"
-        " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (_hash(state), provider, _hash(browser_secret), verifier, nonce, from_page, now + STATE_TTL_SECONDS, link_user_id),
+        "INSERT INTO oauth_login_states (state_hash, provider, browser_hash, code_verifier, nonce, from_page,"
+        " expires_at, link_user_id, link_review_id, link_session_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            _hash(state),
+            provider,
+            _hash(browser_secret),
+            verifier,
+            nonce,
+            from_page,
+            now + STATE_TTL_SECONDS,
+            link.user_id if link else None,
+            link.review_id if link else None,
+            link.session_ms if link else None,
+        ),
     )
     await db.conn.commit()
     return state, browser_secret, verifier, nonce
@@ -358,8 +407,8 @@ async def consume_login_state(db: Any, provider: str, state: str | None, browser
         raise SocialLoginError("invalid_state")
     key = _hash(state)
     cursor = await db.conn.execute(
-        "SELECT provider, browser_hash, code_verifier, nonce, from_page, expires_at, link_user_id"
-        " FROM oauth_login_states WHERE state_hash = ?",
+        "SELECT provider, browser_hash, code_verifier, nonce, from_page, expires_at, link_user_id, link_review_id,"
+        " link_session_ms FROM oauth_login_states WHERE state_hash = ?",
         (key,),
     )
     row = await cursor.fetchone()
@@ -369,7 +418,7 @@ async def consume_login_state(db: Any, provider: str, state: str | None, browser
     await db.conn.commit()
     if (deleted.rowcount or 0) != 1:  # a concurrent callback already used it
         raise SocialLoginError("invalid_state")
-    row_provider, browser_hash, verifier, nonce, from_page, expires_at, link_user_id = row
+    row_provider, browser_hash, verifier, nonce, from_page, expires_at, link_user_id, link_review_id, link_session_ms = row
     if row_provider != provider or float(expires_at) < time.time():
         raise SocialLoginError("invalid_state")
     if not browser_secret or not secrets.compare_digest(str(browser_hash), _hash(browser_secret)):
@@ -381,6 +430,8 @@ async def consume_login_state(db: Any, provider: str, state: str | None, browser
         nonce=str(nonce),
         from_page=str(from_page),
         link_user_id=str(link_user_id) if link_user_id else None,
+        link_review_id=str(link_review_id) if link_review_id else None,
+        link_session_ms=int(link_session_ms) if link_session_ms is not None else None,
     )
 
 
@@ -405,10 +456,13 @@ async def discard_login_state(db: Any, state: str | None) -> None:
     await db.conn.commit()
 
 
-async def issue_login_code(db: Any, user_id: str, provider: str, *, new_account: bool) -> tuple[str, str]:
+async def issue_login_code(
+    db: Any, user_id: str, provider: str, *, new_account: bool, provider_user_id: str | None = None
+) -> tuple[str, str]:
     """Returns ``(code, browser_secret)``: the code goes in the redirect, the secret in a cookie.
 
-    Only hashes are stored. The exchange needs both, so a code that leaves the
+    ``provider_user_id`` is the provider account that signed in (the exchange
+    needs it to tell which linked identity was used). Only hashes are stored. The exchange needs both, so a code that leaves the
     browser it was issued to (or is planted in another one) is useless.
     """
     await ensure_schema(db)
@@ -417,9 +471,18 @@ async def issue_login_code(db: Any, user_id: str, provider: str, *, new_account:
     now = time.time()
     await db.conn.execute("DELETE FROM oauth_login_codes WHERE expires_at < ?", (now,))
     await db.conn.execute(
-        "INSERT INTO oauth_login_codes (code_hash, user_id, provider, new_account, expires_at, browser_hash)"
-        " VALUES (?, ?, ?, ?, ?, ?)",
-        (_hash(code), user_id, provider, int(new_account), now + LOGIN_CODE_TTL_SECONDS, _hash(browser_secret)),
+        "INSERT INTO oauth_login_codes"
+        " (code_hash, user_id, provider, new_account, expires_at, browser_hash, provider_user_id)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            _hash(code),
+            user_id,
+            provider,
+            int(new_account),
+            now + LOGIN_CODE_TTL_SECONDS,
+            _hash(browser_secret),
+            provider_user_id,
+        ),
     )
     await db.conn.commit()
     return code, browser_secret
@@ -428,7 +491,8 @@ async def issue_login_code(db: Any, user_id: str, provider: str, *, new_account:
 async def peek_login_code(db: Any, code: str) -> dict[str, Any] | None:
     await ensure_schema(db)
     cursor = await db.conn.execute(
-        "SELECT user_id, provider, new_account, expires_at, browser_hash FROM oauth_login_codes WHERE code_hash = ?",
+        "SELECT user_id, provider, new_account, expires_at, browser_hash, provider_user_id FROM oauth_login_codes"
+        " WHERE code_hash = ?",
         (_hash(code),),
     )
     row = await cursor.fetchone()
@@ -439,6 +503,7 @@ async def peek_login_code(db: Any, code: str) -> dict[str, Any] | None:
         "provider": str(row[1]),
         "new_account": bool(row[2]),
         "browser_hash": str(row[4]) if row[4] else None,
+        "provider_user_id": str(row[5]) if row[5] else None,
     }
 
 
@@ -467,17 +532,54 @@ async def list_identities(db: Any, user_id: str) -> list[dict[str, Any]]:
     return [dict(zip(("provider", "email", "created_at", "last_login_at"), row, strict=True)) for row in await cursor.fetchall()]
 
 
-async def unlink_identity(db: Any, user_id: str, provider: str) -> bool:
+async def unlink_identity(db: Any, user_id: str, provider: str, *, ip: str | None = None, by: str = "settings") -> bool:
+    """Remove the account's ``provider`` sign-in. Always audited (``identity_unlinked``)."""
+    from remembra.auth import account_review
+    from remembra.security.audit import AuditAction
+
     await ensure_schema(db)
+    cursor = await db.conn.execute(
+        "SELECT provider_user_id, email FROM user_identities WHERE user_id = ? AND provider = ?", (user_id, provider)
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        return False
     cursor = await db.conn.execute("DELETE FROM user_identities WHERE user_id = ? AND provider = ?", (user_id, provider))
     await db.conn.commit()
     removed = (cursor.rowcount or 0) > 0
     if removed:
+        await account_review.forget_trusted_identity(db, user_id, provider, str(row[0]))
+        await account_review.audit(
+            db,
+            user_id,
+            AuditAction.IDENTITY_UNLINKED,
+            resource_id=provider,
+            ip=ip,
+            details={"provider": provider, "subject": str(row[0]), "email": str(row[1]), "by": by},
+        )
         log.info("oauth_identity_unlinked", provider=provider, user_id=user_id)
     return removed
 
 
-async def create_link_ticket(db: Any, user_id: str, provider: str) -> tuple[str, str]:
+async def cancel_link_flows(db: Any, user_id: str) -> None:
+    """Drop every Settings connect flow (ticket or started state) in flight for ``user_id``.
+
+    Called when the account's sessions are cut off or an account review
+    opens: a connect started by a session that no longer counts must not
+    finish later (a squatter arming a GitHub connect before the owner signs in).
+    """
+    try:
+        await db.conn.execute("DELETE FROM oauth_link_tickets WHERE user_id = ?", (user_id,))
+        await db.conn.execute("DELETE FROM oauth_login_states WHERE link_user_id = ?", (user_id,))
+        await db.conn.commit()
+    except sqlite3.OperationalError as e:
+        if "no such table" not in str(e).lower() and "no such column" not in str(e).lower():
+            raise
+
+
+async def create_link_ticket(
+    db: Any, user_id: str, provider: str, *, review_id: str | None = None, session_ms: int | None = None
+) -> tuple[str, str]:
     """Single-use, short-lived ticket that lets ``/start`` begin a connect flow for ``user_id``.
 
     Returns ``(ticket, browser_secret)``: the ticket goes in the start path,
@@ -487,6 +589,10 @@ async def create_link_ticket(db: Any, user_id: str, provider: str) -> tuple[str,
     that browser by the state cookie, so a ticket seen later (browser
     history) is already spent and a ticket carried to another browser (an
     attacker's link opened by a victim) is refused.
+
+    ``review_id`` (the session's ``rvw`` claim while an account review is
+    open) and ``session_ms`` (when that session was issued) travel with the
+    flow; the callback refuses to link when either no longer holds.
     """
     await ensure_schema(db)
     ticket = secrets.token_urlsafe(32)
@@ -494,15 +600,16 @@ async def create_link_ticket(db: Any, user_id: str, provider: str) -> tuple[str,
     now = time.time()
     await db.conn.execute("DELETE FROM oauth_link_tickets WHERE expires_at < ?", (now,))
     await db.conn.execute(
-        "INSERT INTO oauth_link_tickets (ticket_hash, user_id, provider, expires_at, browser_hash) VALUES (?, ?, ?, ?, ?)",
-        (_hash(ticket), user_id, provider, now + LINK_TICKET_TTL_SECONDS, _hash(browser_secret)),
+        "INSERT INTO oauth_link_tickets (ticket_hash, user_id, provider, expires_at, browser_hash, review_id, session_ms)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (_hash(ticket), user_id, provider, now + LINK_TICKET_TTL_SECONDS, _hash(browser_secret), review_id, session_ms),
     )
     await db.conn.commit()
     return ticket, browser_secret
 
 
-async def consume_link_ticket(db: Any, provider: str, ticket: str | None, browser_secret: str | None) -> str | None:
-    """The user id the ticket was issued to, or None. Single use: deleted either way.
+async def consume_link_ticket(db: Any, provider: str, ticket: str | None, browser_secret: str | None) -> LinkTicket | None:
+    """The account (and session facts) the ticket was issued to, or None. Single use: deleted either way.
 
     None as well when the browser does not present the cookie set with the
     ticket (or the ticket predates browser binding): the ticket is burned.
@@ -512,7 +619,7 @@ async def consume_link_ticket(db: Any, provider: str, ticket: str | None, browse
     await ensure_schema(db)
     key = _hash(ticket)
     cursor = await db.conn.execute(
-        "SELECT user_id, provider, expires_at, browser_hash FROM oauth_link_tickets WHERE ticket_hash = ?",
+        "SELECT user_id, provider, expires_at, browser_hash, review_id, session_ms FROM oauth_link_tickets WHERE ticket_hash = ?",
         (key,),
     )
     row = await cursor.fetchone()
@@ -527,7 +634,9 @@ async def consume_link_ticket(db: Any, provider: str, ticket: str | None, browse
         return None
     if not secrets.compare_digest(str(expected), _hash(browser_secret)):
         return None
-    return str(row[0])
+    return LinkTicket(
+        user_id=str(row[0]), review_id=str(row[4]) if row[4] else None, session_ms=int(row[5]) if row[5] is not None else None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -803,18 +912,19 @@ async def _resolve_once(db: Any, identity: ProviderIdentity, client_ip: str) -> 
             # The account is already linked to a DIFFERENT account at this provider.
             log.warning("oauth_link_refused_other_identity", provider=identity.provider, user_id=existing["id"])
             raise SocialLoginError("identity_conflict")
+        if not existing.get("email_verified") and identity.provider in UNVERIFIED_LINK_PROVIDERS:
+            # The provider just vouched that this person owns the mailbox; nobody
+            # had before, and whoever created the account may not (a
+            # pre-registered address). Link, verify, and open a review of
+            # everything set up before now: nothing is revoked or trusted blindly.
+            return await _link_unverified_account(db, identity, existing, client_ip), False
         if identity.provider not in EMAIL_LINK_PROVIDERS:
-            # GitHub never re-verifies an address: its "verified" primary may be
-            # a mailbox that has since changed hands (a former employer's
-            # domain). It is connected only from the owner's signed-in session,
-            # whether or not the account's email is verified.
+            # The account's owner already proved this mailbox. GitHub never
+            # re-verifies an address, so its "verified" primary may be a
+            # mailbox that has since changed hands (a former employer's
+            # domain): it is connected only from the owner's signed-in session.
             log.warning("oauth_link_refused_needs_session", provider=identity.provider, user_id=existing["id"])
             raise SocialLoginError("account_exists_link_required")
-        if not existing.get("email_verified"):
-            # Google just proved this person owns the mailbox, but whoever
-            # created the account may not have (pre-registered address). Link,
-            # verify, and open a review of everything set up before now.
-            return await _link_unverified_account(db, identity, existing, client_ip), False
         now = _now_iso()
         await db.conn.execute(
             "INSERT INTO user_identities (provider, provider_user_id, user_id, email, created_at, last_login_at)"
@@ -823,6 +933,14 @@ async def _resolve_once(db: Any, identity: ProviderIdentity, client_ip: str) -> 
         )
         await db.conn.commit()
         log.info("oauth_identity_linked", provider=identity.provider, user_id=existing["id"])
+        from remembra.auth import account_review
+
+        review = await account_review.pending_review(db, str(existing["id"]))
+        if review is not None:
+            # Google just proved the account's own address again (e.g. after an
+            # emailed reset opened the review): this Google account is the owner's.
+            await account_review.trust_identity(db, review, identity.provider, identity.subject, ip=client_ip)
+        await _audit_linked(db, str(existing["id"]), identity, by="email_match", ip=client_ip)
         await _notify_linked(str(existing["email"]), identity)
         return str(existing["id"]), False
 
@@ -830,14 +948,18 @@ async def _resolve_once(db: Any, identity: ProviderIdentity, client_ip: str) -> 
 
 
 async def _link_unverified_account(db: Any, identity: ProviderIdentity, existing: dict[str, Any], client_ip: str) -> str:
-    """Google sign-in into an account whose email was never verified.
+    """Provider sign-in (verified email) into an account whose email was never verified.
 
     The identity is linked, the email marked verified and a review opened in
     one transaction. Nothing is revoked: API keys, connections and webhooks
     keep working until the owner reviews them (``remembra.auth.account_review``).
+    Every dashboard session issued before now ends (app connections keep
+    working), so a squatter's open session cannot act while the owner decides.
+    The review trusts exactly this provider account, nothing else.
     """
     from remembra.auth import account_review
     from remembra.auth.users import email_verified_on_another_account
+    from remembra.security import state as security_state
 
     user_id = str(existing["id"])
     # One free account per verified email: an API-signup tenant (or another
@@ -854,26 +976,53 @@ async def _link_unverified_account(db: Any, identity: ProviderIdentity, existing
         )
         await db.conn.execute("UPDATE users SET email_verified = ?, updated_at = ? WHERE id = ?", (True, now, user_id))
         review = await account_review.open_review(
-            db, user_id, origin=account_review.ORIGIN_GOOGLE, verified_at=now, totp_enabled=bool(existing.get("totp_enabled"))
+            db,
+            user_id,
+            origin=identity.provider,
+            verified_at=now,
+            totp_enabled=bool(existing.get("totp_enabled")),
+            proof_identity=(identity.provider, identity.subject),
         )
     log.info("oauth_identity_linked_unverified_account", provider=identity.provider, user_id=user_id)
+    await _audit_linked(db, user_id, identity, by="email_match_unverified_account", ip=client_ip)
+    await security_state.invalidate_user_sessions(db, user_id, keep_app_connections=True)
     await account_review.audit_opened(db, review, ip=client_ip)
+    await account_review.finish_if_empty(db, review, ip=client_ip)
     await _notify_linked(str(existing["email"]), identity)
     return user_id
 
 
-async def link_identity(db: Any, identity: ProviderIdentity, user_id: str) -> None:
-    """Connect ``identity`` to the signed-in account ``user_id`` (the Settings flow).
+async def link_identity(db: Any, identity: ProviderIdentity, state: LoginState, *, ip: str | None = None) -> None:
+    """Connect ``identity`` to the signed-in account ``state.link_user_id`` (the Settings flow).
 
     The provider email does not have to match the account email: the owner
     proved both sides (their session, and the provider's consent in the same
     browser). Refuses a provider account that already backs another Remembra
     account, and a second account at the same provider.
+
+    Checked again here, at the end of the flow (the provider consent can take
+    minutes): the session that started it must still be valid, and while an
+    account review is open it must be one that proved the mailbox (its
+    ``rvw`` claim). A connect armed before the review opened, or before the
+    account's sessions were cut off, never lands.
     """
+    from remembra.auth import account_review
+    from remembra.security import state as security_state
+
     await ensure_schema(db)
+    user_id = state.link_user_id
+    assert user_id, "link_identity is only for Settings connect flows"
     user = await db.get_user_by_id(user_id)
     if user is None or not user.get("is_active", True):
         raise SocialLoginError("account_disabled")
+    cutoff = await security_state.get_sessions_valid_after_ms(db, user_id)
+    if state.link_session_ms is None or (cutoff and state.link_session_ms < cutoff):
+        log.warning("oauth_connect_refused_stale_session", provider=identity.provider, user_id=user_id)
+        raise SocialLoginError("invalid_state")
+    review = await account_review.pending_review(db, user_id)
+    if review is not None and not (state.link_review_id and secrets.compare_digest(state.link_review_id, review.review_id)):
+        log.warning("oauth_connect_refused_review_pending", provider=identity.provider, user_id=user_id)
+        raise SocialLoginError("invalid_state")
     cursor = await db.conn.execute(
         "SELECT user_id FROM user_identities WHERE provider = ? AND provider_user_id = ?",
         (identity.provider, identity.subject),
@@ -900,8 +1049,26 @@ async def link_identity(db: Any, identity: ProviderIdentity, user_id: str) -> No
     except sqlite3.IntegrityError as e:  # lost a race with a concurrent connect / sign-up
         await db.conn.rollback()
         raise SocialLoginError("identity_in_use") from e
+    if review is not None:
+        # Connected by the proven owner during the review: it is theirs.
+        await account_review.trust_identity(db, review, identity.provider, identity.subject, ip=ip)
+    await _audit_linked(db, user_id, identity, by="settings", ip=ip)
     log.info("oauth_identity_connected", provider=identity.provider, user_id=user_id)
     await _notify_linked(str(user["email"]), identity)
+
+
+async def _audit_linked(db: Any, user_id: str, identity: ProviderIdentity, *, by: str, ip: str | None) -> None:
+    from remembra.auth import account_review
+    from remembra.security.audit import AuditAction
+
+    await account_review.audit(
+        db,
+        user_id,
+        AuditAction.IDENTITY_LINKED,
+        resource_id=identity.provider,
+        ip=ip,
+        details={"provider": identity.provider, "subject": identity.subject, "email": identity.email, "by": by},
+    )
 
 
 async def _send_link_notice(to: str, provider_name: str, provider_email: str) -> None:

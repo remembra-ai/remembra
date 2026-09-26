@@ -250,7 +250,7 @@ async def authenticate_jwt(request: Request, token: str) -> AuthenticatedUser | 
         if not user_row or not user_row.get("is_active", True):
             log.info("jwt_rejected_inactive_or_missing", user_id=sub)
             return None
-        valid_after = await security_state.get_tokens_valid_after_ms(db, sub)
+        valid_after = await security_state.get_sessions_valid_after_ms(db, sub)
         if valid_after and security_state.token_issued_at_ms(payload) < valid_after:
             log.info("jwt_rejected_invalidated_session", user_id=sub)
             return None

@@ -342,7 +342,11 @@ class UserManager:
                 verified_at=account_review.now_iso(),
                 totp_enabled=bool(user_data.get("totp_enabled")),
             )
+            # Every dashboard session ends; app connections keep working
+            # (they are listed in the review, like the API keys).
+            await security_state.invalidate_user_sessions(self.db, user_data["id"], keep_app_connections=True)
             await account_review.audit_opened(self.db, review, ip=None)
+            await account_review.finish_if_empty(self.db, review, ip=None)
         elif await account_review.is_pending(self.db, user_data["id"]):
             # A review still open (e.g. from Sign in with Google): the password
             # is now the mailbox owner's, so signing in with it may finish it.
@@ -353,9 +357,11 @@ class UserManager:
                 verified_at=account_review.now_iso(),
                 totp_enabled=False,
             )
-
-        # A reset means the old password may be compromised: kill every session.
-        await security_state.invalidate_user_sessions(self.db, user_data["id"])
+            await security_state.invalidate_user_sessions(self.db, user_data["id"], keep_app_connections=True)
+        else:
+            # A reset means the old password may be compromised: kill every
+            # session, app connections included.
+            await security_state.invalidate_user_sessions(self.db, user_data["id"])
 
         log.info("password_reset_successful", user_id=user_data["id"])
 

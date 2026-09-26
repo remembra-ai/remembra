@@ -623,7 +623,7 @@ def identity_linked(*, dashboard: str | None, provider_name: str, provider_email
 def account_review_done(*, dashboard: str | None, kept: Sequence[str], removed: Sequence[str]) -> RenderedEmail:
     """Sent when the owner finishes reviewing what was set up before their email was confirmed."""
     blocks: list[Block] = [
-        P("You finished checking your Remembra account. Here is what was set up before your email was confirmed."),
+        P("You finished checking your Remembra account. Here is what you kept and what was removed."),
     ]
     if kept:
         blocks.append(P("Kept: " + "; ".join(kept) + "."))

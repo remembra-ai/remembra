@@ -31,6 +31,15 @@ CREATE TABLE IF NOT EXISTS security_user_state (
     tokens_valid_after_ms INTEGER NOT NULL DEFAULT 0
 );
 
+-- Dashboard-session-only cut-off: JWTs issued before it are rejected, but app
+-- connections (connector grants) keep working. Used when every dashboard
+-- session must end while the account's agents stay connected (the one-time
+-- account review; see remembra.auth.account_review).
+CREATE TABLE IF NOT EXISTS security_session_state (
+    user_id TEXT PRIMARY KEY,
+    sessions_valid_after_ms INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS security_login_attempts (
     account_key TEXT PRIMARY KEY,
     failures INTEGER NOT NULL DEFAULT 0,
@@ -75,7 +84,7 @@ def _hash(value: str) -> str:
 
 
 async def get_tokens_valid_after_ms(db: Any, user_id: str) -> int:
-    """JWTs issued (iat) strictly before this epoch-ms are rejected for the user."""
+    """Everything signed in (dashboard JWTs AND app connections) before this epoch-ms is dead for the user."""
     await _ensure_schema(db)
     cursor = await db.conn.execute(
         "SELECT tokens_valid_after_ms FROM security_user_state WHERE user_id = ?",
@@ -85,19 +94,54 @@ async def get_tokens_valid_after_ms(db: Any, user_id: str) -> int:
     return int(row[0]) if row else 0
 
 
-async def invalidate_user_sessions(db: Any, user_id: str) -> int:
-    """Invalidate every JWT issued to ``user_id`` up to now. Returns the cutoff (epoch ms)."""
+async def get_sessions_valid_after_ms(db: Any, user_id: str) -> int:
+    """Dashboard JWTs issued (iat) strictly before this epoch-ms are rejected for the user.
+
+    The later of the full cut-off (:func:`get_tokens_valid_after_ms`) and the
+    session-only one set by ``invalidate_user_sessions(..., keep_app_connections=True)``.
+    """
+    await _ensure_schema(db)
+    cursor = await db.conn.execute(
+        "SELECT MAX(COALESCE((SELECT tokens_valid_after_ms FROM security_user_state WHERE user_id = ?), 0),"
+        " COALESCE((SELECT sessions_valid_after_ms FROM security_session_state WHERE user_id = ?), 0))",
+        (user_id, user_id),
+    )
+    row = await cursor.fetchone()
+    return int(row[0]) if row and row[0] else 0
+
+
+async def invalidate_user_sessions(db: Any, user_id: str, *, keep_app_connections: bool = False) -> int:
+    """Invalidate every JWT issued to ``user_id`` up to now. Returns the cutoff (epoch ms).
+
+    By default app connections (connector grants signed in before now) die
+    too: a password change or reset means the old password may be known to
+    someone else. ``keep_app_connections=True`` ends only dashboard sessions;
+    the account review uses it so that removing a password or a sign-in
+    method never silently disconnects the owner's agents (their grants are
+    listed in the review and revoked one by one).
+
+    Sign-in-method connects still in flight for the account are cancelled
+    either way (they were started by a session that no longer counts).
+    """
     await _ensure_schema(db)
     cutoff = int(time.time() * 1000)
+    table, column = (
+        ("security_session_state", "sessions_valid_after_ms")
+        if keep_app_connections
+        else ("security_user_state", "tokens_valid_after_ms")
+    )
     await db.conn.execute(
-        """
-        INSERT INTO security_user_state (user_id, tokens_valid_after_ms) VALUES (?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET tokens_valid_after_ms = excluded.tokens_valid_after_ms
+        f"""
+        INSERT INTO {table} (user_id, {column}) VALUES (?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET {column} = excluded.{column}
         """,
         (user_id, cutoff),
     )
     await db.conn.commit()
-    log.info("user_sessions_invalidated", user_id=user_id)
+    from remembra.auth import social
+
+    await social.cancel_link_flows(db, user_id)
+    log.info("user_sessions_invalidated", user_id=user_id, keep_app_connections=keep_app_connections)
     return cutoff
 
 

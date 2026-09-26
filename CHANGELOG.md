@@ -9,16 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **Sign in with Google on older accounts.** An account whose email was never verified (accounts made before
-  email verification existed) is now linked when Google confirms the address: the email becomes verified and
-  the user is signed in. A one-time account check then lists everything set up before (API keys, connected
-  apps, webhooks, sign-in links, 2FA, the password); **Keep all** is one click, and single items can be revoked.
-  Nothing stops working until then. Only the session that proved the email can act on it; every choice is
-  audit-logged and emailed. Schema migration 10 (`account_reviews`).
+- **Sign in with Google or GitHub on older accounts.** An account whose email was never verified (accounts
+  made before email verification existed) is now linked when Google, or GitHub with a verified primary email,
+  confirms the address: the email becomes verified and the user is signed in. A one-time account check then
+  lists everything on the account (API keys, connected apps, webhooks, other sign-in links, 2FA and the
+  password set before); **Keep all** is one click and keeps exactly the list shown, and single items can be
+  revoked. API keys and app connections keep working throughout; dashboard sessions opened before end. 2FA
+  from before verification stays on only if the owner enters a current code. A check with nothing to list
+  finishes silently. Only the sign-in that proved the email can act on it; every choice is audit-logged and
+  emailed. Schema migration 10 (`account_reviews`). GitHub still never links by email into an account whose
+  email is already verified.
 - **Forgot password** on such an account no longer revokes keys, 2FA, app connections, webhooks and sign-in
   links. The reset verifies the email and the next sign-in shows the same account check.
-- **PII redaction** no longer replaces the project number of a Google OAuth client id (and similar hyphenated
-  identifiers) with `[REDACTED_BANK_ACCOUNT]`.
+- **PII redaction** no longer replaces the project number of a Google OAuth client id (and UUIDs or
+  similar machine identifiers) with `[REDACTED_BANK_ACCOUNT]`. Account numbers written with a suffix
+  (`123456789012-checking`, `...-SAV`, `ACCT-...-01`) are still redacted.
 
 ## [0.16.0] - unreleased (date set when tagged) - Remembra Relay
 
