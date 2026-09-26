@@ -1,0 +1,162 @@
+name: Crew E2E
+
+# Spec §13.2–13.4 (WP-15): the model-free 3-agent end-to-end and its variants, the integration chain,
+# the load budgets and the soaks. Everything runs against a local server process and temp HOMEs;
+# nothing here talks to production or needs an API key.
+#
+# - push / pull request: the E2E suite (3-agent, variants incl. the slow orphan and fencing runs,
+#   integration chain, S0-shaped fake agent) plus the CI-scale load and soak tests.
+# - nightly and on demand: the full load (50 crews x 5 sessions, 1 h by default) and the crewd
+#   kill -9 soak (every 10 min for 2 h).
+
+on:
+  push:
+    branches: [main, "feat/**", "crew/**"]
+    paths:
+      - "src/remembra/crew/**"
+      - "src/remembra/relay/**"
+      - "src/remembra/api/**"
+      - "src/remembra/main.py"
+      - "dashboard/src/lib/crew/**"
+      - "dashboard/src/components/crew/**"
+      - "dashboard/src/pages/crew/**"
+      - "tests/crew/**"
+      - ".github/workflows/crew-e2e.yml"
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 7 * * *"  # 03:17 EDT
+  workflow_dispatch:
+    inputs:
+      load_duration_s:
+        description: "Full load: seconds of steady load (spec: 3600)"
+        default: "3600"
+      soak_duration_s:
+        description: "crewd kill -9 soak: total seconds (spec: 7200)"
+        default: "7200"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONUNBUFFERED: "1"
+  REMEMBRA_TYPESAFE_MODE: "off"
+
+jobs:
+  e2e:
+    name: E2E (${{ matrix.os }})
+    if: github.event_name != 'schedule'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install Python dependencies
+        run: pip install -e ".[server,cloud,dev,mcp,encryption]"
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: npm ci
+
+      - name: Type-check the dashboard E2E observer
+        run: dashboard/node_modules/.bin/tsc -p tests/crew/e2e/dashboard/tsconfig.json
+
+      - name: Git identity for the temp repositories
+        run: |
+          git config --global user.name "crew-e2e"
+          git config --global user.email "crew-e2e@example.invalid"
+
+      - name: E2E, variants, integration chain, load and soak (CI scale)
+        env:
+          REMEMBRA_CREW_SLOW: "1"
+        run: >
+          pytest tests/crew/e2e tests/crew/load -q -p no:cacheprovider --no-cov
+          --basetemp="${{ runner.temp }}/crew-e2e" -o junit_family=xunit2 --junitxml=crew-e2e.xml
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crew-e2e-${{ matrix.os }}
+          path: |
+            crew-e2e.xml
+            ${{ runner.temp }}/crew-e2e/**/server/server.log
+            ${{ runner.temp }}/crew-e2e/**/home/.remembra/crew/log/crewd.log
+            ${{ runner.temp }}/crew-e2e/**/dashboard/vitest.out
+          if-no-files-found: ignore
+
+  load-full:
+    name: Load 50x5 with memory ingestion
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python dependencies
+        run: pip install -e ".[server,cloud,dev,mcp,encryption]"
+      - name: Load (spec §13.4 budgets)
+        run: >
+          python -m tests.crew.load.loadgen --crews 50 --sessions 5
+          --duration "${{ github.event.inputs.load_duration_s || '3600' }}"
+          --ingest-rate 10 --workdir "${{ runner.temp }}/load" --out load-report.json
+      - name: Upload the load report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crew-load-report
+          path: |
+            load-report.json
+            ${{ runner.temp }}/load/server/server.log
+          if-no-files-found: ignore
+
+  soak-crewd-kill:
+    name: crewd kill -9 soak
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python dependencies
+        run: pip install -e ".[server,cloud,dev,mcp,encryption]"
+      - name: Git identity for the temp repositories
+        run: |
+          git config --global user.name "crew-soak"
+          git config --global user.email "crew-soak@example.invalid"
+      - name: Soak (a kill every 10 min)
+        env:
+          REMEMBRA_CREW_SLOW: "1"
+          REMEMBRA_SOAK_KILL_EVERY_S: "600"
+          REMEMBRA_SOAK_DURATION_S: ${{ github.event.inputs.soak_duration_s || '7200' }}
+        run: >
+          pytest tests/crew/load/test_soak_crewd_kill.py -q -p no:cacheprovider --no-cov
+          --basetemp="${{ runner.temp }}/soak"
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crew-soak-logs
+          path: |
+            ${{ runner.temp }}/soak/**/server/server.log
+            ${{ runner.temp }}/soak/**/home/.remembra/crew/log/crewd.log
+          if-no-files-found: ignore
