@@ -99,7 +99,8 @@ AUTO_CLAIM_TIMEOUT_S: Final = 0.7
 GIT_DELTA_TIMEOUT_S: Final = 0.8
 MAX_NEWS: Final = 30
 MAX_TOOL_WINDOWS: Final = 64
-WINDOW_SLACK_S: Final = 0.25  # mtime vs tool-window comparison slack (clock granularity, hook dispatch delay)
+WINDOW_SLACK_S: Final = 0.25
+OPEN_WINDOW_MAX_S: Final = 600.0  # mtime vs tool-window comparison slack (clock granularity, hook dispatch delay)
 LAUNCHD_LABEL: Final = "dev.remembra.crewd"
 SYSTEMD_UNIT: Final = "remembra-crewd.service"
 SHELL_NAMES: Final = frozenset(
@@ -919,6 +920,41 @@ class Crewd:
             raise CrewdError("project_unresolved", f"project resolution failed: HTTP {resp.status} {resp.error()}")
         return str(resp.body["project_id"])
 
+    async def crew_exists(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        """Read-only: does this checkout's project already have a crew (``POST /crews/resolve``, never creates)?"""
+        from remembra.relay import facts as factlib
+
+        adapter = str(args.get("adapter") or "claude-code")
+        cwd = str(args.get("cwd") or "")
+        if not cwd:
+            return {"ok": True, "exists": False}
+        cfg = self.config_loader(str(args.get("agent_id") or adapter), ADAPTER_CONFIG_SOURCE.get(adapter))
+        if not cfg.api_key:
+            return {"ok": True, "exists": False, "error": "no_api_key"}
+        info = await asyncio.to_thread(factlib.repo_info, Path(cwd), factlib.Deadline(3.0))
+        if not info.is_git:
+            return {"ok": True, "exists": False}
+        locator = info.locator(Path(cwd), self.hostname)
+        locator.pop("host", None)
+        try:
+            resp = await self.request(
+                self.api_for_cfg(cfg, str(args.get("agent_id") or adapter)),
+                "POST",
+                "/crews/resolve",
+                json_body=locator,
+                timeout=4.0,
+            )
+        except Unreachable:
+            return {"ok": False, "exists": False, "error": "unreachable"}
+        if resp.ok and isinstance(resp.body, dict):
+            return {
+                "ok": True,
+                "exists": True,
+                "crew_id": (resp.body.get("crew") or {}).get("id"),
+                "project_id": resp.body.get("project_id"),
+            }
+        return {"ok": True, "exists": False}
+
     async def brief(self, peer: Peer, args: Mapping[str, Any]) -> dict[str, Any]:
         sess = self.require(peer, args.get("key"))
         params = {
@@ -1191,6 +1227,8 @@ class Crewd:
             windows.append([at, 0.0])
             del windows[:-MAX_TOOL_WINDOWS]
             sess["calls_since_checkpoint"] = int(sess.get("calls_since_checkpoint") or 0) + 1
+        elif phase == "blocked":
+            pass  # a denied call never runs (no PostToolUse follows): activity only, no tool window
         else:
             for w in reversed(windows):
                 if w[1] == 0.0:
@@ -1297,7 +1335,9 @@ class Crewd:
             if mtime is not None:
                 for o in others:
                     for start, end in self.tool_windows.get(str(o["key"]), []):
-                        if start - WINDOW_SLACK_S <= mtime <= (end or self.clock()) + WINDOW_SLACK_S:
+                        # an open window closes itself after 10 minutes (a tool that died without PostToolUse)
+                        stop = end or min(self.clock(), start + OPEN_WINDOW_MAX_S)
+                        if start - WINDOW_SLACK_S <= mtime <= stop + WINDOW_SLACK_S:
                             in_window = True
                             break
                     if in_window:
@@ -1678,11 +1718,11 @@ class Crewd:
             res = await self.checkpoint(sess, str(entry.body.get("trigger") or "turn"))
             return "done" if res.get("ok") and not res.get("spooled") else "retry"
         if entry.kind in ("leave", "stall") and entry.body.get("op"):
-            if entry.kind == "leave":
-                await self.end(None, {"key": entry.session_key, **entry.body.get("args", {})}, grace=False)
-            else:
-                await self.stall(None, {"key": entry.session_key, **entry.body.get("args", {})})
-            return "done"
+            args = {"key": entry.session_key, **(entry.body.get("args") or {})}
+            res = await (self.end(None, args, grace=False) if entry.kind == "leave" else self.stall(None, args))
+            if res.get("error") in ("session_ended", "not_your_session"):
+                return "drop"
+            return "done" if res.get("ok") and not res.get("spooled") else "retry"
         method, path, body = entry.body.get("method"), entry.body.get("path"), entry.body.get("json")
         if not method or not path:
             return "drop"
@@ -1753,6 +1793,38 @@ class Crewd:
         # baton.ref_created is server-emitted (§4.2): the stall / leave call that carries baton_ref records it
         return baton
 
+    def _spool_fast(self, kind: str, sess: Mapping[str, Any], args: Mapping[str, Any]) -> Path:
+        """The outbox fast-path record of a stall or SessionEnd (replayed if crewd dies mid-way)."""
+        key = str(sess["key"])
+        return O.spool(
+            self.layout.outbox,
+            kind,
+            {"op": "end" if kind == "leave" else "stall", "args": dict(args)},
+            session_key=key,
+            crew_id=str(sess["crew_id"]),
+            name=f"{kind}-{key}",
+        )
+
+    @staticmethod
+    def _baton_from_args(sess: Mapping[str, Any], args: Mapping[str, Any]) -> B.BatonRef | None:
+        raw = args.get("baton")
+        if not isinstance(raw, dict) or not raw.get("ref"):
+            return None
+        if B.try_out(["rev-parse", "--verify", "--quiet", f"{raw['ref']}^{{commit}}"], str(sess["toplevel"])) is None:
+            return None
+        return B.BatonRef(
+            ref=str(raw["ref"]),
+            commit=str(raw.get("commit") or ""),
+            parent=str(raw.get("parent") or ""),
+            branch=raw.get("branch"),
+            label=str(raw.get("label") or ""),
+            seq=int(raw.get("seq") or 0),
+            dirty_files=list(raw.get("dirty_files") or []),
+            skipped=list(raw.get("skipped") or []),
+            unpushed=list(raw.get("unpushed") or []),
+            pushed=bool(raw.get("pushed")),
+        )
+
     # -- stall / end / orphan --------------------------------------------------------------------
     async def stall(self, peer: Peer | None, args: Mapping[str, Any]) -> dict[str, Any]:
         """StopFailure or a detected limit: baton ref first (D30), then ``POST /sessions/{sid}/stall``."""
@@ -1768,15 +1840,13 @@ class Crewd:
         async with self.lock(key):
             if sess.get("ended"):
                 return {"ok": False, "error": "session_ended"}
-            fast = O.spool(
-                self.layout.outbox,
-                "stall",
-                {"op": "stall", "args": {"error": error, "last_assistant_message": last_message}},
-                session_key=key,
-                crew_id=str(sess["crew_id"]),
-                name=f"stall-{key}",
-            )
-            baton = await self.make_baton(sess) if kind in ("quota", "auth") else None
+            fast_args: dict[str, Any] = {"error": error, "last_assistant_message": last_message}
+            fast = self._spool_fast("stall", sess, fast_args)
+            baton = None
+            if kind in ("quota", "auth"):
+                baton = self._baton_from_args(sess, args) or await self.make_baton(sess)
+                if baton is not None:  # a replay of this stall reuses the same baton ref
+                    fast = self._spool_fast("stall", sess, {**fast_args, "baton": baton.as_dict()})
             facts = await asyncio.to_thread(self.checkpoint_facts, sess)
             if baton is not None:
                 facts["baton_ref"] = baton.ref
@@ -1827,20 +1897,17 @@ class Crewd:
         async with self.lock(key):
             if sess.get("ended"):
                 return {"ok": True, "already": True}
-            fast = O.spool(
-                self.layout.outbox,
-                "leave",
-                {"op": "end", "args": {"reason": reason}},
-                session_key=key,
-                crew_id=str(sess["crew_id"]),
-                name=f"leave-{key}",
-            )
+            fast = self._spool_fast("leave", sess, {"reason": reason})
             top = str(sess["toplevel"])
             try:
                 dirty = not await asyncio.to_thread(B.is_clean, top)
             except B.GitError:
                 dirty = False
-            baton = await self.make_baton(sess) if (dirty or reason == "clear") else None
+            baton = self._baton_from_args(sess, args)
+            if baton is None and (dirty or reason == "clear"):
+                baton = await self.make_baton(sess)
+                if baton is not None:  # a replay of this SessionEnd reuses the same baton ref
+                    fast = self._spool_fast("leave", sess, {"reason": reason, "baton": baton.as_dict()})
             await self.relay_close(sess, reason, args.get("transcript_path"))
             facts = await asyncio.to_thread(self.checkpoint_facts, sess)
             if baton is not None:
@@ -2516,6 +2583,8 @@ class Crewd:
                 return await self.whoami(peer)
             if op == "join":
                 return await self.join(peer, args)
+            if op == "crew_exists":
+                return await self.crew_exists(args)
             if op == "brief":
                 return await self.brief(peer, args)
             if op == "activity":
@@ -2526,6 +2595,9 @@ class Crewd:
                 return await self.claim(peer, args)
             if op == "commons":
                 return await self.commons(peer, args)
+            if op == "flush":
+                self.spawn(self.flush_outbox())
+                return {"ok": True}
             if op == "refresh":
                 crew_id = str(args.get("crew_id") or "")
                 if args.get("sync"):

@@ -326,3 +326,58 @@ def test_live_cli_claims_zones_watch_and_stopfailure(tmp_path, live):
         status = read_json(layout.status_file) or {}
         if status.get("pid") and _alive(int(status["pid"])):
             os.kill(int(status["pid"]), signal.SIGTERM)
+
+
+def test_live_start_joins_only_crew_checkouts(tmp_path, live):
+    plain = make_repo(tmp_path / "plain", zones=None)
+    layout = Layout(tmp_path / "home")
+    vendor_gate(layout, crewd_argv=[PY, "-m", "remembra.relay.crew.crewd"])
+    me = str(os.getpid())
+    try:
+        # an unrelated repo (no .remembra/, no crew): the plain relay brief, nothing joined
+        res = cli(
+            layout,
+            live,
+            "start",
+            "--hook",
+            "claude-code",
+            "--agent-pid",
+            me,
+            stdin=json.dumps({"session_id": "p-1", "cwd": str(plain), "source": "startup"}),
+        )
+        assert res.returncode == 0 and S.validate_hook_stdout("SessionStart", res.stdout) == [], res.stdout + res.stderr
+        assert not layout.session_file(session_key("claude-code", "p-1")).exists()
+        brief = json.loads(res.stdout)["hookSpecificOutput"]["additionalContext"]
+        assert "unavailable" not in brief and "CREW" not in brief, brief
+        # opt in explicitly: the crew is created (no zones.yml: no-zone bootstrap is the server's job)
+        res = cli(
+            layout,
+            live,
+            "start",
+            "--hook",
+            "claude-code",
+            "--agent-pid",
+            me,
+            "--crew",
+            stdin=json.dumps({"session_id": "p-2", "cwd": str(plain), "source": "startup"}),
+        )
+        assert res.returncode == 0 and layout.session_file(session_key("claude-code", "p-2")).exists(), res.stdout + res.stderr
+        # now that a crew exists for the project, a later session joins it without any flag
+        res = cli(
+            layout,
+            live,
+            "start",
+            "--hook",
+            "claude-code",
+            "--agent-pid",
+            me,
+            stdin=json.dumps({"session_id": "p-3", "cwd": str(plain), "source": "startup"}),
+        )
+        assert res.returncode == 0 and layout.session_file(session_key("claude-code", "p-3")).exists(), res.stdout + res.stderr
+        p2 = read_json(layout.session_file(session_key("claude-code", "p-2")))
+        p3 = read_json(layout.session_file(session_key("claude-code", "p-3")))
+        assert p2["crew_id"] == p3["crew_id"]
+    finally:
+        status = read_json(layout.status_file) or {}
+        if status.get("pid") and _alive(int(status["pid"])):
+            os.kill(int(status["pid"]), signal.SIGTERM)

@@ -583,7 +583,13 @@ def _verdict_info(verdict: Any, snapshot: Mapping[str, Any]) -> dict[str, Any]:
         for s in snapshot.get("sessions") or ():
             if s.get("id") == holder:
                 callsign = s.get("callsign")
-    d["holder"] = callsign or ("human" if d.get("zone") and verdict.decision != "allow" and not holder else None)
+    if callsign is None and holder is None and verdict.decision in ("deny", "ask", "warn") and verdict.rule in (3, 9, 10):
+        for c in snapshot.get("claims") or ():  # a human hold (freeze): the event names "human", never a person
+            if c.get("holder_kind") == "human" and any(
+                z.get("slug") == d.get("zone") and z.get("id") == c.get("zone_id") for z in snapshot.get("zones") or ()
+            ):
+                callsign = "human"
+    d["holder"] = callsign
     return d
 
 
@@ -613,9 +619,11 @@ def _claim_fn(ctx: HookContext, key: str, budget_end: float) -> Any:
 def _spool_unconfirmed(ctx: HookContext, key: str, session: Mapping[str, Any], verdict: Any) -> None:
     from remembra.relay.crew import outbox
 
+    spooled = False
     for req, res in verdict.claims:
         if res.result not in ("timeout", "rate_limited"):
             continue
+        spooled = True
         body = {
             "zone_id": req.zone_id,
             "zone": req.zone_slug,
@@ -634,6 +642,8 @@ def _spool_unconfirmed(ctx: HookContext, key: str, session: Mapping[str, Any], v
             )
         except (OSError, ValueError):
             pass
+    if spooled:
+        rpc_send(ctx.layout, "flush")  # the confirmation normally lands within 2 s (D11)
 
 
 def evaluate_pretool(ctx: HookContext, session: dict[str, Any]) -> tuple[str, dict[str, Any] | None]:
@@ -741,7 +751,8 @@ def evaluate_pretool(ctx: HookContext, session: dict[str, Any]) -> tuple[str, di
                 except (ValueError, OSError):
                     out = ""
     paths = [_rel(str(tool_input.get(EDIT_TOOLS[tool]) or ""), cwd, session.get("toplevel"))] if tool in EDIT_TOOLS else []
-    _activity(ctx, session, "start", {"tool": tool, "paths": [p for p in paths if p], "verb": verb})
+    phase = "blocked" if verdict.decision == "deny" and not info.get("bypassed") else "start"
+    _activity(ctx, session, phase, {"tool": tool, "paths": [p for p in paths if p], "verb": verb})
     return out, info
 
 

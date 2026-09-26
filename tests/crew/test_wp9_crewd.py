@@ -345,3 +345,30 @@ async def test_join_refuses_an_agent_pid_outside_the_callers_tree(tmp_path):
             await d.join(peer(B_PID), _join_args("sess-a", repo, A_PID))
         assert e.value.code == "agent_pid_not_ancestor"
         assert os.listdir(layout.sessions) == []
+
+
+async def test_a_stall_replayed_from_the_outbox_reuses_its_baton_ref(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    layout = Layout(tmp_path / "home")
+    async with crew_server(tmp_path) as srv:
+        d = new_crewd(layout, srv, alive={A_PID})
+        a = await d.join(peer(A_PID), _join_args("sess-a", repo, A_PID))
+        (repo / "src/app/pos/tender.ts").write_text("wip\n")
+        real = d.request
+
+        async def down_for_stall(api, method, path, **kw):
+            if path.endswith("/stall"):
+                await d.note_result(api, None)
+                raise Unreachable("cut")
+            return await real(api, method, path, **kw)
+
+        d.request = down_for_stall  # type: ignore[method-assign]
+        res = await d.stall(peer(A_PID), {"key": a["key"], "error": "billing_error"})
+        assert res["spooled"] and res["baton_ref"]
+        assert [e.kind for e in O.read_entries(layout.outbox, ("stall",))] == ["stall"]
+        d.request = real  # type: ignore[method-assign]
+        await d.flush_outbox()
+        assert O.read_entries(layout.outbox, ("stall",)) == []
+        assert B.list_batons(repo) == [res["baton_ref"]]  # no second ref on replay
+        rows = await srv.rows("SELECT state FROM crew_sessions WHERE id = ?", (a["session_id"],))
+        assert rows[0]["state"] == "quota_blocked"

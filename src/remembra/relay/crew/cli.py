@@ -163,6 +163,50 @@ def _env_file(join: Mapping[str, Any]) -> None:
         _err(f"could not write CLAUDE_ENV_FILE ({e.__class__.__name__})")
 
 
+def _toplevel(cwd: str) -> str | None:
+    try:
+        res = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"], cwd=cwd, capture_output=True, text=True, timeout=3, check=False
+        )  # noqa: S603,S607
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return res.stdout.strip() or None if res.returncode == 0 else None
+
+
+def crew_enabled_locally(layout: Layout, toplevel: str) -> bool:
+    """Crew mode for this checkout without asking the server: a ``.remembra/`` directory, or the owner's config
+    (``~/.remembra/crew/config.json``: ``{"crew_all_repos": true}`` or ``{"crew_repos": ["/abs/path", …]}``)."""
+    if (Path(toplevel) / ".remembra").is_dir():
+        return True
+    config = read_json(layout.config_file) or {}
+    if config.get("crew_all_repos") is True:
+        return True
+    repos = config.get("crew_repos") or []
+    real = os.path.realpath(toplevel)
+    return any(isinstance(r, str) and os.path.realpath(os.path.expanduser(r)) == real for r in repos)
+
+
+def relay_brief_passthrough(adapter: str, agent: str, payload: Mapping[str, Any]) -> None:
+    """Not a crew checkout: the plain relay brief (the SessionStart hook replaces ``remembra-relay brief``, §8.2)."""
+    fmt = {"hook-json": "hook-json", "cursor-json": "cursor-json"}.get(HOOK_OUTPUT.get(adapter, "text"), "text")
+    try:
+        res = subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "remembra.relay.cli", "brief", "--hook", adapter, "--agent", agent, "--format", fmt],
+            input=json.dumps(dict(payload)),
+            capture_output=True,
+            text=True,
+            timeout=START_BUDGET_S,
+            check=False,
+        )
+        out = res.stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    if out.strip():
+        sys.stdout.write(out if out.endswith("\n") else out + "\n")
+    else:
+        _emit_start(adapter, "Remembra brief unavailable. Call the session_brief tool.")
+
+
 def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
     from remembra.relay.crew.crewd import find_agent_pid
 
@@ -176,6 +220,24 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
             _emit_start(adapter, "Remembra crew: no session id in the hook payload; crew rules are not active for this session.")
             return 0
         agent_pid = args.agent_pid or find_agent_pid(os.getpid(), adapter) or os.getppid()
+        top = _toplevel(str(cwd))
+        if top is None:
+            relay_brief_passthrough(adapter, args.agent or adapter, payload or {"session_id": sid, "cwd": str(cwd)})
+            return 0
+        enabled = bool(args.crew) or crew_enabled_locally(layout, top)
+        if not enabled:
+            # a crew may already exist for this project (created elsewhere): join it; otherwise the plain brief
+            exists = rpc(
+                layout, "crew_exists", {"cwd": str(cwd), "adapter": adapter, "agent_id": args.agent or adapter}, timeout=5.0
+            )
+            if exists is None and ensure_crewd(layout):
+                exists = rpc(
+                    layout, "crew_exists", {"cwd": str(cwd), "adapter": adapter, "agent_id": args.agent or adapter}, timeout=5.0
+                )
+            enabled = bool(exists and exists.get("exists"))
+        if not enabled:
+            relay_brief_passthrough(adapter, args.agent or adapter, payload or {"session_id": sid, "cwd": str(cwd)})
+            return 0
         if not ensure_crewd(layout):
             _emit_start(
                 adapter, "Remembra crew unavailable: crewd did not start (run remembra-crew doctor). Crew rules are not active."
@@ -831,6 +893,7 @@ def build_parser() -> argparse.ArgumentParser:
     hook_opts(sp)
     sp.add_argument("--source")
     sp.add_argument("--project")
+    sp.add_argument("--crew", action="store_true", help="join the crew even without .remembra/ in the repo")
     sp.add_argument("--agent-pid", dest="agent_pid", type=int, help=argparse.SUPPRESS)
     sp = sub.add_parser("end", help="SessionEnd hook")
     hook_opts(sp)

@@ -576,3 +576,125 @@ async def test_human_bypass_is_single_use_and_not_for_agents(tmp_path, sleeper, 
         assert json.loads(res.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
         audit = [json.loads(line) for line in (layout.log_dir / "audit.jsonl").read_text().splitlines()]
         assert [r["action"] for r in audit] == ["bypass_granted", "bypass_used"]
+
+
+async def test_auto_claim_timeout_allows_one_write_then_waits_for_confirmation(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    me = os.getpid()
+    async with crew_server(tmp_path) as srv:
+        layout, d = await _start_crewd(tmp_path, srv)
+        a = await d.join(peer(me), {"adapter": "claude-code", "client_session_id": "sess-a", "cwd": str(repo), "agent_pid": me})
+        real = d.request
+        slow = {"on": True}
+
+        async def slow_claims(api, method, path, **kw):
+            if slow["on"] and method == "POST" and path.endswith("/claims"):
+                await asyncio.sleep(1.5)  # D11: the gate gives up at 700 ms
+            return await real(api, method, path, **kw)
+
+        d.request = slow_claims  # type: ignore[method-assign]
+        d.flush_outbox = lambda: asyncio.sleep(0)  # type: ignore[method-assign]  # hold confirmation for the check below
+        write = pretool("sess-a", repo, "Write", {"file_path": str(repo / "src/app/reports/export.ts"), "content": "x"})
+        first = await arun_gate(layout, "pretool", write)
+        assert (first.returncode, first.stdout) == (0, "")  # that one write is allowed
+        assert O.pending_claims(layout.outbox, a["key"])  # spooled unconfirmed
+        second = await arun_gate(layout, "pretool", write)
+        assert json.loads(second.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"  # until confirmed
+        types = [e.body["type"] for e in O.read_entries(layout.outbox, ("event",))]
+        assert "gate.deadline" in types
+        # the outbox confirms the claim; the next write is the holder's own
+        slow["on"] = False
+        del d.flush_outbox
+        await d.drain()
+        await d.flush_outbox()
+        await d.sync_snapshot(a["crew_id"])
+        assert O.pending_claims(layout.outbox, a["key"]) == []
+        third = await arun_gate(layout, "pretool", write)
+        assert (third.returncode, third.stdout) == (0, "")
+
+
+async def test_a_denied_call_opens_no_attribution_window(tmp_path, sleeper):
+    repo = make_repo(tmp_path / "repo")
+    wt_b = add_worktree(repo, tmp_path / "wt-b", "b")
+    me = os.getpid()
+    async with crew_server(tmp_path) as srv:
+        layout, d = await _start_crewd(tmp_path, srv, alive={sleeper})
+        a = await d.join(
+            peer(sleeper), {"adapter": "claude-code", "client_session_id": "sess-a", "cwd": str(repo), "agent_pid": sleeper}
+        )
+        b = await d.join(peer(me), {"adapter": "claude-code", "client_session_id": "sess-b", "cwd": str(wt_b), "agent_pid": me})
+        pos = next(z for z in d.snapshots[a["crew_id"]]["zones"] if z["slug"] == "pos")
+        assert (await d.claim(peer(sleeper), {"key": a["key"], "zone_id": pos["id"]}))["result"] == "granted"
+        await d.sync_snapshot(a["crew_id"])
+        res = await arun_gate(
+            layout,
+            "pretool",
+            pretool("sess-b", wt_b, "Write", {"file_path": str(wt_b / "src/app/pos/x.ts"), "content": "x"}),
+            cwd=wt_b,
+        )
+        assert json.loads(res.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+        await d.drain()
+        assert d.tool_windows.get(b["key"], []) == []
+        assert d.sessions[b["key"]]["last_action"]["tool"] == "Write"
+
+
+CAPTURES = Path(__file__).parent / "fixtures" / "captures" / "claude-code-2.1.168" / "mock"
+
+
+def _capture(scenario: str, event: str, repo: Path) -> dict:
+    path = next((CAPTURES / scenario).glob(f"*-{event}.json"))
+    text = path.read_text().replace(f"<S0_TMP>/mock-{scenario.replace('_', '-')}/repo", str(repo))
+    text = text.replace(f"<S0_TMP>/mock-{scenario}/repo", str(repo))
+    return json.loads(text)["payload"]
+
+
+def run_cli(layout: Layout, *args: str, stdin: str = "") -> subprocess.CompletedProcess[str]:
+    root = Path(__file__).resolve().parents[2]
+    env = {k: v for k, v in os.environ.items() if not k.startswith("REMEMBRA_")}
+    env.update({"HOME": str(layout.home), "PYTHONPATH": f"{root / 'src'}{os.pathsep}{root}"})
+    return subprocess.run(
+        [PY, "-m", "remembra.relay.crew.cli", *args], input=stdin, capture_output=True, text=True, env=env, timeout=60
+    )
+
+
+async def test_s0_captured_payloads_drive_the_hooks(tmp_path, sleeper):
+    zones = "version: 1\nzones:\n  pos:\n    include: [pos/**]\n"
+    repo = make_repo(tmp_path / "repo", zones=zones)
+    (repo / "pos").mkdir()
+    (repo / "pos" / "cart.txt").write_text("cart\n")
+    git(repo, "add", "-A")
+    git(repo, "commit", "-qm", "pos")
+    other = add_worktree(repo, tmp_path / "wt-a", "a")
+    me = os.getpid()
+    deny = _capture("deny", "PreToolUse", repo)
+    sid = deny["session_id"]
+    async with crew_server(tmp_path) as srv:
+        layout, d = await _start_crewd(tmp_path, srv, alive={sleeper})
+        a = await d.join(
+            peer(sleeper), {"adapter": "claude-code", "client_session_id": "holder", "cwd": str(other), "agent_pid": sleeper}
+        )
+        b = await d.join(peer(me), {"adapter": "claude-code", "client_session_id": sid, "cwd": str(repo), "agent_pid": me})
+        pos = next(z for z in d.snapshots[a["crew_id"]]["zones"] if z["slug"] == "pos")
+        assert (await d.claim(peer(sleeper), {"key": a["key"], "zone_id": pos["id"]}))["result"] == "granted"
+        await d.sync_snapshot(a["crew_id"])
+        # the captured PreToolUse (Write pos/cart.txt, permission_mode acceptEdits) is denied, naming the holder
+        res = await arun_gate(layout, "pretool", deny, cwd=repo)
+        out = json.loads(res.stdout)["hookSpecificOutput"]
+        assert out["permissionDecision"] == "deny" and a["callsign"] in out["permissionDecisionReason"]
+        # the captured StopFailure (billing_error): the CLI hands off, crewd blocks the session with a baton
+        (repo / "pos" / "cart.txt").write_text("half\n")
+        stop = _capture("stopfailure_billing", "StopFailure", repo)
+        stop["session_id"] = sid
+        res = await asyncio.to_thread(run_cli, layout, "stall", "--hook", "claude-code", stdin=json.dumps(stop))
+        assert (res.returncode, res.stdout) == (0, ""), res.stderr
+        await d.drain()
+        rows = await srv.rows("SELECT state FROM crew_sessions WHERE id = ?", (b["session_id"],))
+        assert rows[0]["state"] == "quota_blocked"
+        # the captured SessionEnd: the fast path returns at once, crewd leaves
+        end = _capture("stopfailure_billing", "SessionEnd", repo)
+        end["session_id"] = sid
+        t = time.perf_counter()
+        res = await asyncio.to_thread(run_cli, layout, "end", "--hook", "claude-code", stdin=json.dumps(end))
+        assert res.returncode == 0 and time.perf_counter() - t < 3.0
+        await d.drain()
+        assert read_json(layout.session_file(b["key"]))["ended"] is True
