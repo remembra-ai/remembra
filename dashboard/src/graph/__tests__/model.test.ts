@@ -157,12 +157,12 @@ describe('events', () => {
   it('a handoff travels agent -> handoff -> project -> the next agent, and says who already knows', () => {
     const e = trailEvent(trail[0], summary)!;
     expect(e.path).toEqual(['a:claude-code', 'm:h1', 'p:invoices-api', 'a:codex']);
-    expect(e.text).toBe('claude-code stopped · handoff signed · 1 failing → codex already knows');
+    expect(e.text).toBe('claude-code stopped · handoff saved · 1 failing → codex already knows');
   });
 
   it('falls back to "the next agent" when nobody else works the project', () => {
     const e = trailEvent(trail[3], summary)!;
-    expect(e.text).toBe('cursor stopped · handoff signed → the next agent already knows');
+    expect(e.text).toBe('cursor stopped · handoff saved → the next agent already knows');
     expect(nextAgentIn(summary, 'landing-site', 'cursor')).toBeNull();
   });
 

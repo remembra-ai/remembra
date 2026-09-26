@@ -295,7 +295,7 @@ export function FirstHandoffCelebration({ item, onDismiss }: { item: TrailItem; 
       <PixelHandoff agentColor={meta.lane} className="block h-[60px] w-full text-head-ink" />
       <div className="flex flex-col gap-3 px-4 pb-4 sm:flex-row sm:items-end sm:justify-between sm:px-5">
         <div className="min-w-0">
-          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-signal">handoff.signed · your first one</p>
+          <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-signal">handoff.saved · your first one</p>
           <h2 id="first-handoff-title" className="font-display mt-1 text-2xl font-extrabold leading-tight tracking-tight">
             {meta.name} left its first trail.
           </h2>

@@ -6,7 +6,7 @@ import { BrandHero } from './BrandHero';
 
 const LOG_LINES: { who: string; what: string; tone?: 'signal' }[] = [
   { who: 'claude-code', what: 'stopped · trail written' },
-  { who: 'handoff', what: 'signed · 2 open, 0 failing', tone: 'signal' },
+  { who: 'handoff', what: 'saved · 2 open, 0 failing', tone: 'signal' },
   { who: 'cursor', what: 'started · already knows' },
 ];
 
