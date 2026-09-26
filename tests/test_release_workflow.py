@@ -99,6 +99,10 @@ def test_only_the_publish_jobs_hold_oidc_and_they_are_gated():
     assert jobs["publish-mcp-registry"]["needs"] == "publish-pypi"
     # Docker Hub still uses a token; it is only reachable after the same approval.
     assert jobs["docker"]["environment"]["name"] == "release"
+    # Every job that can mint an OIDC token waits for approval, as the header comment says.
+    for name in oidc:
+        assert jobs[name]["environment"]["name"] == "release", name
+    assert "only the two publish jobs" in RELEASE.read_text() and "each waits for a reviewer's approval" in RELEASE.read_text()
     writers = {name for name, job in jobs.items() if (job.get("permissions") or {}).get("contents") == "write"}
     assert writers == {"github-release"}
 
@@ -127,3 +131,16 @@ def test_docker_image_carries_provenance_and_sbom():
         if "docker/build-push-action" in str(step.get("uses")):
             assert step["with"]["provenance"] == "mode=max"
             assert step["with"]["sbom"] is True
+
+
+def test_the_build_job_installs_only_hash_pinned_tools():
+    """build and uv come from a hash-pinned file, never a bare `pip install build`/`pip install uv`."""
+    workflow = _load(RELEASE)
+    runs = [str(s.get("run", "")) for _, s in _steps({"jobs": {"b": workflow["jobs"]["build"]}})]
+    installs = [line.strip() for run in runs for line in run.splitlines() if "pip install" in line]
+    assert installs == ["python -m pip install --require-hashes --no-deps -r .github/release-requirements.txt"]
+    pins = (ROOT / ".github" / "release-requirements.txt").read_text()
+    requirements = re.findall(r"^([A-Za-z0-9_.-]+)==([^\s]+) \\\n\s+--hash=sha256:([0-9a-f]{64})$", pins, re.M)
+    assert {name for name, _, _ in requirements} == {"build", "packaging", "pyproject-hooks", "uv"}
+    config = yaml.safe_load((ROOT / ".github" / "dependabot.yml").read_text())
+    assert any(u["package-ecosystem"] == "pip" and u["directory"] == "/.github" for u in config["updates"])
