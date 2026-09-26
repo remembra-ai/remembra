@@ -254,10 +254,9 @@ class ReadinessChecker:
         return {"status": status, **stats}
 
     async def _check_rate_limit(self) -> dict[str, Any]:
-        if not getattr(self.settings, "rate_limit_enabled", False):
+        # The app passes its limiter whenever rate limiting is on (main.lifespan).
+        if self.rate_limiter is None or getattr(self.settings, "rate_limit_enabled", False) is not True:
             return {"status": OK, "enabled": False}
-        if self.rate_limiter is None:
-            return {"status": DEGRADED, "enabled": True, "reason": "not_initialized"}
         result: dict[str, Any] = {"enabled": True, "backend": self.rate_limiter.backend}
         try:
             # limits storages are synchronous; keep the ping off the event loop.

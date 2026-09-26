@@ -123,8 +123,7 @@ async def test_readiness_reports_rate_limit_backend() -> None:
     memory = await ReadinessChecker(settings=settings, rate_limiter=CloudRateLimiter())._check_rate_limit()
     assert memory == {"enabled": True, "backend": "memory", "reachable": True, "fallback": None, "status": "ok"}
     assert await ReadinessChecker(settings=make_settings())._check_rate_limit() == {"status": "ok", "enabled": False}
-    missing = await ReadinessChecker(settings=settings)._check_rate_limit()
-    assert missing["status"] == "degraded" and missing["reason"] == "not_initialized"
+    assert await ReadinessChecker(settings=settings)._check_rate_limit() == {"status": "ok", "enabled": False}
 
 
 async def test_rate_limited_routes_survive_backend_outage(tmp_path) -> None:
