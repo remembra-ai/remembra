@@ -13,7 +13,11 @@ Also covered live, in a pseudo-terminal: after ``/clear`` the new session's
 start output is dropped by Gemini, and the BeforeAgent hook (``brief
 --once``) gives it the brief with its first prompt; ``/quit`` fires SessionEnd
 two or three times, and exactly one close per session is posted. An untrusted
-folder runs no hook at all.
+folder runs no hook at all. ``--resume`` drops SessionStart's context, so the
+resumed start gives the brief again (headless and interactive); the UI does
+not wait for SessionStart, so a first prompt typed while the brief is slow,
+or given with ``-i``, still carries it exactly once, and a session whose brief
+came with a prompt keeps it when resumed without fetching another.
 
 ``REMEMBRA_RECORD_FIXTURES=1`` rewrites tests/fixtures/relay/gemini/ from the
 run (paths replaced); the replay tests in tests/test_relay_adapter_fixtures.py
@@ -277,6 +281,112 @@ def test_gemini_interactive_clear_and_quit(rig):
     assert "close: dropped a repeat sessionend of gemini session" in rig.relay_log()
     rig.record("session_start_clear.json", starts[1])
     rig.record("session_end_clear.json", next(e for e in ends if e.get("session_id") == old))
+
+
+def test_gemini_resumed_session_gets_the_brief_again(rig):
+    """`--resume` restores the prompts but not SessionStart's context: the resumed start prints the brief again."""
+    model: ModelStandIn = rig.model
+    _claude_closes(rig)
+    rig.connect()
+    first = rig.run("-p", PICK_UP, "--skip-trust")
+    assert first.returncode == 0, first.stdout + first.stderr
+    assert _briefs_in(model.turns()[0]) == 1
+    n = len(model.turns())
+    resumed = rig.run("--resume", "latest", "-p", "Second prompt.", "--skip-trust")
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    starts = by_event(rig.payloads)["SessionStart"]
+    assert [s["source"] for s in starts] == ["startup", "resume"] and starts[0]["session_id"] == starts[1]["session_id"]
+    turn = next(t for t in model.turns()[n:] if "Second prompt." in request_text(t))
+    assert _briefs_in(turn) == 1, request_text(turn)
+    assert [b["agent"] for b in rig.proxy.briefs()] == ["gemini", "gemini"]
+
+
+def test_gemini_interactive_resume_gets_the_brief_again(rig):
+    model: ModelStandIn = rig.model
+    _claude_closes(rig)
+    rig.connect()
+    term = Pty([rig.gemini, "--skip-trust"], rig.env, rig.repo)
+    try:
+        _ready(term)
+        term.type("First prompt.")
+        model.wait_for_turns(1)
+        term.wait_for("Stand-in reply", timeout=60)
+        assert _briefs_in(model.turns()[0]) == 1
+        term.type("/quit")
+        term.wait_exit(60)
+    finally:
+        term.close()
+    n = len(model.turns())
+    term = Pty([rig.gemini, "--skip-trust", "--resume", "latest"], rig.env, rig.repo)
+    try:
+        _ready(term)
+        term.wait_until(lambda: len(rig.proxy.briefs()) >= 2, what="the resumed session's brief")
+        time.sleep(2)  # the start hook's context is added to the chat when the hook returns
+        term.type("Second prompt.")
+        term.wait_until(lambda: any("Second prompt." in request_text(t) for t in model.turns()[n:]), what="the prompt")
+        term.type("/quit")
+        term.wait_exit(60)
+    finally:
+        term.close()
+    second = next(t for t in model.turns()[n:] if "Second prompt." in request_text(t))
+    assert "First prompt." in request_text(second)  # the conversation was restored, without the brief
+    assert _briefs_in(second) == 1, request_text(second)
+    assert [b["agent"] for b in rig.proxy.briefs()] == ["gemini", "gemini"]
+
+
+def test_gemini_slow_brief_reaches_the_first_prompt_once(rig):
+    """The UI does not wait for SessionStart. While its brief is slow to come, a first prompt typed at once
+    gets the brief from BeforeAgent, and SessionStart's late copy prints nothing. Resumed, the session keeps
+    that brief (BeforeAgent's context is part of the restored prompt) and fetches no other."""
+    model: ModelStandIn = rig.model
+    _claude_closes(rig)
+    rig.connect()
+    rig.proxy.brief_delays = [4.0]  # the first brief asked for: SessionStart's, the only hook before a prompt
+    term = Pty([rig.gemini, "--skip-trust"], rig.env, rig.repo)
+    try:
+        _ready(term)
+        term.wait_until(lambda: len(rig.proxy.briefs()) == 1, what="SessionStart's brief request")
+        asked = time.monotonic()
+        term.type("First prompt.")
+        model.wait_for_turns(1)
+        term.wait_for("Stand-in reply", timeout=60)
+        time.sleep(max(0.0, asked + 4.0 + 3.0 - time.monotonic()))  # SessionStart's brief has come back and gone
+        term.type("Second prompt.")
+        term.wait_until(lambda: any("Second prompt." in request_text(t) for t in model.turns()), what="the second prompt")
+        term.type("/quit")
+        term.wait_exit(60)
+    finally:
+        term.close()
+    first = next(t for t in model.turns() if "First prompt." in request_text(t))
+    second = next(t for t in model.turns() if "Second prompt." in request_text(t))
+    assert _briefs_in(first) == 1, request_text(first)
+    assert _briefs_in(second) == 1, request_text(second)  # the first prompt's copy, in the history: none added
+    assert [b["agent"] for b in rig.proxy.briefs()] == ["gemini", "gemini"]  # both hooks asked, one printed
+
+    n = len(model.turns())
+    resumed = rig.run("--resume", "latest", "-p", "Third prompt.", "--skip-trust")
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    third = next(t for t in model.turns()[n:] if "Third prompt." in request_text(t))
+    assert "First prompt." in request_text(third) and _briefs_in(third) == 1, request_text(third)
+    assert len(rig.proxy.briefs()) == 2  # nothing fetched for the resumed session
+
+
+def test_gemini_i_flag_first_prompt_carries_the_brief_once(rig):
+    """`gemini -i "<prompt>"` runs the first prompt's BeforeAgent alongside SessionStart: one of them prints it."""
+    model: ModelStandIn = rig.model
+    _claude_closes(rig)
+    rig.connect()
+    term = Pty([rig.gemini, "--skip-trust", "-i", "First prompt."], rig.env, rig.repo)
+    try:
+        model.wait_for_turns(1)
+        term.wait_for("Stand-in reply", timeout=60)
+        _ready(term)
+        term.type("/quit")
+        term.wait_exit(60)
+    finally:
+        term.close()
+    first = next(t for t in model.turns() if "First prompt." in request_text(t))
+    assert _briefs_in(first) == 1, request_text(first)
 
 
 def test_untrusted_folder_runs_no_hook(rig, tmp_path):

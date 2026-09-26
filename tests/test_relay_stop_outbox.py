@@ -903,6 +903,7 @@ def test_disconnect_without_apply_touches_no_file(home, tmp_path):
         *agents,
         "--apply",
         "--include-unverified",
+        "--force",  # an empty ~/.gemini is not Gemini CLI being installed (Antigravity uses it too)
         "--agents-md",
         str(md),
         "--relay-command",

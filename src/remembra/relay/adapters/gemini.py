@@ -27,6 +27,16 @@ What the run showed:
   (SessionStart, source clear) whose start output is thrown away. The
   BeforeAgent hook runs ``brief --once``, so the new session gets its brief
   with its first prompt; it prints nothing while a session has had one.
+- The interactive UI does not wait for SessionStart: its context is added to
+  the chat whenever the hook finishes, so a first prompt typed while the brief
+  is still being fetched, or given with ``gemini -i``, runs BeforeAgent at the
+  same time. Whichever of the two finishes first prints the brief and the
+  other prints nothing (``start_awaited``), so the first request carries it
+  exactly once.
+- ``--resume`` (same session id, SessionStart source resume) restores the
+  conversation without SessionStart's ``<hook_context>`` but with what
+  BeforeAgent added to a prompt. The resumed start prints the brief again when
+  SessionStart gave it before, and nothing when BeforeAgent did.
 - Interactive exit fires SessionEnd two or three times for one session, the
   last copy orphaned with empty stdin: repeats are dropped (the close dedupe)
   and so is the empty one. The CLI waits for SessionEnd, but ``close`` still
@@ -75,6 +85,11 @@ SPEC = AdapterSpec(
     hook_timeouts={"start": 15, "prompt": 15, "end": 15},
     timeout_unit="ms",
     start_sources_without_context=("clear",),
+    # Interactive Gemini runs SessionStart in the background: a first prompt typed while the brief
+    # is still being fetched (or given with `gemini -i`) runs BeforeAgent alongside it.
+    start_awaited=False,
+    # `--resume` restores the prompts, BeforeAgent's context with them, but drops SessionStart's.
+    resume_keeps_brief_from=("BeforeAgent",),
     detach_close=True,
     dedupe_close_seconds=60,
     # /quit fires SessionEnd three times, the third orphaned with empty stdin. The repeats are

@@ -6,9 +6,12 @@ Claude Code closes a session (the verified adapter's hook path), then the real
 (``brief --once``) prints the brief, which reaches the model; the second
 prompt fetches nothing; leaving the TUI (Ctrl-D twice) fires SessionEnd, whose
 close posts Kimi's handoff. ``kimi -c -p`` then resumes the session without
-fetching the brief again and without a close. ``kimi migrate`` copies the old
-adapter's hooks from ``~/.kimi/config.toml`` without their markers, and
-``connect`` / ``disconnect`` remove those copies.
+fetching the brief again and without a close. A session resumed in the TUI
+(``kimi -c``), given new work and left again within a minute posts a second
+close: Kimi sends no transcript, so only copies of the hook arriving together
+count as repeats. ``kimi migrate`` copies the old adapter's hooks from
+``~/.kimi/config.toml`` without their markers, and ``connect`` /
+``disconnect`` remove those copies (and the old block itself).
 
 The model is a local OpenAI-compatible stand-in (tests/agent_live_harness.py),
 the Remembra server is the local test server behind a recording proxy, and
@@ -274,6 +277,9 @@ def test_kimi_migrate_copies_are_removed_by_connect_and_disconnect(rig):
     connect = rig.connect()
     assert "remove 2 relay [[hooks]] tables outside the block (copied by `kimi migrate`)" in connect.stdout
     assert [h["event"] for h in rig.hooks()] == ["UserPromptSubmit", "SessionEnd"]
+    # The old block itself goes too (it held nothing else), so a later migrate has nothing of ours to copy.
+    assert f"also {legacy} (relay hooks an earlier release wrote here, removed" in connect.stdout
+    assert not legacy.exists()
     assert rig.doctor_ok()
     assert "stand-in-placeholder" in rig.config.read_text()  # the provider migrate/connect left alone
 
@@ -281,3 +287,44 @@ def test_kimi_migrate_copies_are_removed_by_connect_and_disconnect(rig):
     assert gone.returncode == 0, gone.stdout + gone.stderr
     assert rig.hooks() == [] and "[providers.local]" in rig.config.read_text()
     assert rig.doctor_ok()
+
+
+def _tui_session(rig: Rig, prompt: str, *, resume: bool) -> dict[str, Any]:
+    """One TUI session (``kimi -c`` with ``resume``): ask ``prompt``, then leave with Ctrl-D twice; its model turn."""
+    term = Pty([rig.kimi, *(["-c"] if resume else [])], rig.env, rig.repo)
+    try:
+        if resume:
+            term.wait_for("First prompt.", timeout=90)  # the restored conversation is on the screen
+        else:
+            term.wait_for("Trust this folder", timeout=90)
+            time.sleep(1)
+            term.write("\r")
+            term.wait_for("No session yet", timeout=60)
+        time.sleep(1.5)
+        turn = rig.ask(term, prompt)
+        term.write("\x04")
+        time.sleep(0.5)
+        term.write("\x04")
+        term.wait_exit(60)
+    finally:
+        term.close()
+    return turn
+
+
+def test_kimi_session_resumed_and_ended_again_within_a_minute_closes_again(rig):
+    """No transcript tells a resumed session's end from a repeat: only copies arriving together are dropped."""
+    rig.connect()
+    started = time.monotonic()
+    first = _tui_session(rig, "First prompt.", resume=False)
+    assert request_text(first).count(BRIEF) == 1
+    assert len(rig.proxy.wait_for_closes(1)) == 1
+    commit(rig.repo, "resumed.py", "X = 1\n", "feat: work done in the resumed session")
+    resumed = _tui_session(rig, "Resumed prompt.", resume=True)
+    assert time.monotonic() - started < 60  # inside the dedupe window a transcript-measured close would use
+    ends = by_event(rig.payloads)["SessionEnd"]
+    assert len(ends) == 2 and ends[0]["session_id"] == ends[1]["session_id"]
+    closes = rig.proxy.wait_for_closes(2, timeout=20)
+    assert [c["session_id"] for c in closes] == [ends[0]["session_id"]] * 2, closes
+    assert "feat: work done in the resumed session" in [x["subject"] for x in closes[1]["facts"].get("commits") or []]
+    # The resumed conversation holds the first prompt's brief; none was fetched for it.
+    assert request_text(resumed).count(BRIEF) == 1 and len(rig.proxy.briefs()) == 1

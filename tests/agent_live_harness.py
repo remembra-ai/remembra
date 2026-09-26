@@ -242,11 +242,16 @@ def request_text(body: dict[str, Any]) -> str:
 
 
 class RecordingProxy:
-    """Forwards to the local Remembra test server and keeps every request the hooks made."""
+    """Forwards to the local Remembra test server and keeps every request the hooks made.
+
+    ``brief_delays[n]`` holds the n-th brief request back that many seconds
+    before it is forwarded (a slow server, for that one brief only).
+    """
 
     def __init__(self, upstream: str) -> None:
         self.upstream = upstream
         self.requests: list[dict[str, Any]] = []
+        self.brief_delays: list[float] = []
         self.lock = threading.Lock()
         owner = self
 
@@ -263,8 +268,12 @@ class RecordingProxy:
                 except ValueError:
                     body = None
                 agent = self.headers.get("X-Remembra-Agent-Id")
+                brief = self.command == "GET" and self.path.startswith("/api/v1/session/brief")
                 with owner.lock:
+                    n = len(owner.briefs_locked()) if brief else -1
                     owner.requests.append({"method": self.command, "path": self.path, "agent": agent, "body": body})
+                if 0 <= n < len(owner.brief_delays):
+                    time.sleep(owner.brief_delays[n])
                 headers = {k: v for k, v in self.headers.items() if k.lower() not in ("host", "content-length")}
                 res = httpx.request(self.command, owner.upstream + self.path, content=raw, headers=headers, timeout=30)
                 self.send_response(res.status_code)
@@ -292,7 +301,11 @@ class RecordingProxy:
 
     def briefs(self) -> list[dict[str, Any]]:
         with self.lock:
-            return [r for r in self.requests if r["method"] == "GET" and r["path"].startswith("/api/v1/session/brief")]
+            return self.briefs_locked()
+
+    def briefs_locked(self) -> list[dict[str, Any]]:
+        """The brief requests so far (the caller holds :attr:`lock`)."""
+        return [r for r in self.requests if r["method"] == "GET" and r["path"].startswith("/api/v1/session/brief")]
 
     def closes(self) -> list[dict[str, Any]]:
         """The ``/session/close`` bodies posted, oldest first."""

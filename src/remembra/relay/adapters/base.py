@@ -133,6 +133,16 @@ class AdapterSpec:
     # Start ``source`` values whose output the agent throws away (Gemini CLI's /clear):
     # `brief` does nothing then, so the prompt event's `brief --once` delivers it.
     start_sources_without_context: tuple[str, ...] = ()
+    # Hook events whose brief a resumed session's restored history still holds. A start with
+    # source ``resume`` prints nothing when this session's brief came from one of them (Codex,
+    # Kimi Code), and prints it again when it came from another (Gemini CLI keeps what
+    # BeforeAgent added to a prompt, but not its SessionStart context; Claude Code: none).
+    resume_keeps_brief_from: tuple[str, ...] = ()
+    # False when the agent may send the first prompt, and run the prompt hook, before its start
+    # hook has finished (Gemini CLI's interactive UI runs SessionStart in the background, and
+    # ``gemini -i`` runs the first prompt's BeforeAgent alongside it). The start hook then skips a
+    # session whose brief was printed already, and of two hooks printing at once only the first does.
+    start_awaited: bool = True
     # `close` hands the work to a detached process and exits at once: for agents that
     # do not wait for the end hook or kill it after a short timeout.
     detach_close: bool = False
@@ -153,7 +163,8 @@ class AdapterSpec:
     skip_payload_keys: tuple[str, ...] = ()
     # A second close of the same session, event and end reason within this many seconds is
     # dropped (Gemini CLI fires SessionEnd 2-3 times on exit; a session can run several
-    # agents' copies of one hook). 0 turns it off.
+    # agents' copies of one hook). 0 turns it off. A close with no transcript to measure is
+    # dropped only within a few seconds (see ``remembra.relay.cli.claim_close``).
     dedupe_close_seconds: int = 60
     # A close hook with empty stdin does nothing: the agent also runs an orphaned copy of the
     # end hook without its payload (Gemini CLI's third SessionEnd on /quit).
@@ -208,6 +219,10 @@ class AdapterSpec:
             return Path(home) / default.relative_to(home).parts[0]
         except (ValueError, IndexError):
             return default.parent
+
+
+class RefusedEdit(ValueError):
+    """The edit would change more of the user's config than the relay's own entries: nothing is written."""
 
 
 @dataclass
@@ -278,35 +293,60 @@ def _backup(path: Path, stamp: str, label: str) -> Path:
     return backup
 
 
+def write_target(path: Path) -> Path:
+    """The file a write to ``path`` replaces: ``path``, or for a symbolic link the file it points to.
+
+    Replacing the link itself with a regular file would cut it from its target
+    (a dotfiles repository, say): the target would never get the change, and
+    edits made there later would no longer reach the agent. A link to a file
+    that does not exist (or a loop of links) raises ``OSError``: there is no
+    file to update, and creating one somewhere the link names is not ours to do.
+    """
+    if not path.is_symlink():
+        return path
+    try:
+        return Path(os.path.realpath(path, strict=True))
+    except OSError as e:
+        raise OSError(
+            f"{path} is a symbolic link to a file that does not exist ({e.__class__.__name__}); fix or remove the link"
+        ) from e
+
+
 def backup_and_write(change: Change, stamp: str | None = None, *, label: str = "relay", private: bool = False) -> Path | None:
     """Back up the current file (if any), then write atomically (or delete, for ``change.delete``).
 
     A new file is created 0600. An existing file keeps its mode, except with
     ``private`` (the file holds an API key), where group and other access is
     removed. Backups are always 0600. Returns the backup path, if any.
+
+    A symbolic link is written through (:func:`write_target`): the file it
+    points to is replaced and the link stays. It is never deleted either: for
+    ``change.delete`` the file it points to gets ``change.after`` (what is left).
+    The backup is kept next to the link.
     """
     path = change.path
+    target = write_target(path)
     stamp = stamp or datetime.now().strftime("%Y%m%d-%H%M%S")
     backup: Path | None = None
     mode: int | None = None
-    if path.exists():
+    if target.exists():
         backup = _backup(path, stamp, label)
-        mode = path.stat().st_mode & 0o777
+        mode = target.stat().st_mode & 0o777
         if private:
             mode &= 0o700
-    if change.delete:
+    if change.delete and target == path:
         if path.exists():
             path.unlink()
         return backup
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=f".{target.name}.", dir=str(target.parent))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(change.after)
             fh.flush()
             os.fsync(fh.fileno())
         os.chmod(tmp, mode if mode is not None else 0o600)
-        os.replace(tmp, path)
+        os.replace(tmp, target)
     except BaseException:
         if os.path.exists(tmp):
             os.unlink(tmp)
@@ -352,7 +392,10 @@ class Adapter:
         return [(key, event) for key, event, _ in self.hook_events()]
 
     def plan(self, home: Path, relay: str) -> Change:
-        path = self.spec.config_file(home)
+        """The agent's config (:meth:`AdapterSpec.config_file`) with the relay hooks written in."""
+        return self.plan_file(self.spec.config_file(home), relay)
+
+    def plan_file(self, path: Path, relay: str) -> Change:
         before = path.read_text(encoding="utf-8") if path.exists() else None
         after, summary = self.render(before, relay)
         return _note_dropped_comments(Change(path=path, before=before, after=after, summary=summary))
@@ -362,21 +405,56 @@ class Adapter:
 
     def plan_removal(self, home: Path) -> Change:
         """The config without any relay hook (``disconnect``); unchanged when there is none."""
-        path = self.spec.config_file(home)
+        return self.plan_file_removal(self.spec.config_file(home))
+
+    def plan_file_removal(self, path: Path) -> Change:
         before = path.read_text(encoding="utf-8") if path.exists() else None
         if before is None:
             return Change(path=path, before=None, after="", summary=[], delete=True)  # nothing to remove
         after, summary, empty = self.render_removal(before)
-        change = Change(path=path, before=before, after=after, summary=summary, delete=empty and bool(summary))
-        return _note_dropped_comments(change)
+        # A symbolic link is never removed (backup_and_write writes through it): what is left is written.
+        delete = empty and bool(summary) and not path.is_symlink()
+        return _note_dropped_comments(Change(path=path, before=before, after=after, summary=summary, delete=delete))
 
     def render_removal(self, before: str) -> tuple[str, list[str], bool]:
         """``(new text, summary, nothing else left)``."""
         raise NotImplementedError
 
+    def earlier_files(self, home: Path) -> list[Path]:
+        """Files besides :meth:`AdapterSpec.config_file` where an earlier ``connect`` may have written relay hooks.
+
+        The default path when ``$home_env`` moves the agent's directory: earlier
+        releases wrote there whatever the variable said, and the agent still reads
+        it in a session started without the variable. ``connect`` keeps relay
+        hooks found there current; ``disconnect`` removes them.
+        """
+        default = self.spec.config_path(Path(home))
+        return [default] if default != self.spec.config_file(home) else []
+
+    def retired_files(self, home: Path) -> list[Path]:
+        """Files an earlier release wrote relay hooks to that the agent no longer reads: ``connect`` and
+        ``disconnect`` both remove the relay hooks from them (none by default)."""
+        return []
+
+    def hook_files(self, home: Path) -> list[Path]:
+        """Every file that may hold this adapter's relay hooks: the config file, then
+        :meth:`earlier_files` and :meth:`retired_files`."""
+        return list(dict.fromkeys([self.spec.config_file(home), *self.earlier_files(home), *self.retired_files(home)]))
+
     def connected(self, home: Path) -> bool:
-        """True when the config file already holds relay hooks (``connect --apply`` keeps them current)."""
-        return self.plan_removal(home).changed
+        """True when a file the agent reads (the config file, :meth:`earlier_files`) already holds relay hooks.
+
+        ``connect --apply`` keeps those current. A retired file does not count:
+        its hooks say nothing about the agent being installed. A file that cannot
+        be read counts as holding none (``connect`` reports it).
+        """
+        for path in dict.fromkeys([self.spec.config_file(home), *self.earlier_files(home)]):
+            try:
+                if self.plan_file_removal(path).changed:
+                    return True
+            except (OSError, ValueError):  # UnicodeDecodeError and the JSON / TOML errors are ValueErrors
+                continue
+        return False
 
 
 def _note_dropped_comments(change: Change) -> Change:

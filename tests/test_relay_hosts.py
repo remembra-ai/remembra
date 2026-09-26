@@ -42,6 +42,7 @@ import pytest
 from remembra.relay import cli, hosts, outbox
 from remembra.relay import facts as factlib
 from remembra.relay.adapters import REGISTRY
+from remembra.relay.handoff import end_reason_note
 from tests.relay_fixtures import GIT_ENV, Transcript, commit, git, make_remote_and_clones
 from tests.test_relay_cli_e2e import SRC, _api, relay, server  # noqa: F401  (server is a fixture)
 
@@ -334,6 +335,34 @@ def test_cursor_close_lands_in_the_workspace_not_in_claude_s_directory(server, h
     assert payload["facts"]["facts_source"] == "relay-cli:git"  # a git project, not an agent-declared ~/.claude
 
 
+def test_cursor_running_claude_s_precompact_hook_files_a_close_saved_before_compaction(home, tmp_path):
+    """Cursor maps Claude's PreCompact to its preCompact and runs it with its own payload (``trigger``, no
+    ``reason``). Routed to the cursor adapter, that close says the session is still open, as Claude's own does."""
+    repo = _repo(tmp_path, "cursor-precompact")
+    fx = _host("cursor", repo, home)
+    claude_dir = home / ".claude"
+    claude_dir.mkdir()
+    end = fx["payloads"]["end"]
+    compact = {k: v for k, v in end.items() if k not in ("reason", "final_status", "duration_ms")}
+    compact.update(hook_event_name="preCompact", trigger="auto", context_usage_percent=85)
+    out = relay(home, "http://x", "close", *CLAUDE_HOOK, "--dry-run", stdin=json.dumps(compact), env=fx["env"], cwd=claude_dir)
+    assert out.returncode == 0, out.stderr
+    payload = json.loads(out.stdout)
+    assert (payload["agent_id"], payload["session_id"], payload["end_reason"]) == (
+        "cursor",
+        end["session_id"],
+        "pre-compact:auto",
+    )
+    assert end_reason_note(payload["end_reason"]) == "still open (saved before context compaction)"
+    own = json.loads(
+        relay(home, "http://x", "close", "--hook", "cursor", "--dry-run", stdin=json.dumps(compact), cwd=repo).stdout
+    )
+    assert own["end_reason"] == "pre-compact:auto"  # the same through Cursor's own hook file
+    manual = {**compact, "trigger": "manual"}
+    routed = relay(home, "http://x", "close", *CLAUDE_HOOK, "--dry-run", stdin=json.dumps(manual), env=fx["env"], cwd=claude_dir)
+    assert json.loads(routed.stdout)["end_reason"] == "pre-compact:manual"
+
+
 @pytest.mark.parametrize("name", DROPPED)
 def test_a_close_run_by_an_agent_without_an_adapter_does_nothing(name, home, tmp_path):
     repo = _repo(tmp_path, f"dropped-{name}")
@@ -500,6 +529,48 @@ def test_one_session_end_run_by_two_agents_copies_makes_one_post(home, tmp_path)
     assert [(c["agent_id"], c["session_id"]) for c in closes] == [("cursor", fx["payloads"]["end"]["session_id"])]
 
 
+def test_a_resumed_kimi_session_ended_again_with_new_work_closes_again(home, tmp_path):
+    """Kimi Code sends no transcript, so nothing measures a resumed session's new turns. A repeat is dropped only
+    while copies of the hook would arrive (seconds); `kimi -c`, a commit and an exit take longer than that."""
+    repo = _repo(tmp_path, "kimi-resumed")
+    fx = _host("kimi", repo, home)
+    end = json.dumps(fx["payloads"]["end"])
+    hook = ("close", "--hook", "kimi", "--agent", "kimi")
+    with recorder() as (url, requests):
+        first = relay(home, url, *hook, stdin=end, cwd=repo)
+        copy_ = relay(home, url, *hook, stdin=end, cwd=repo)  # a copy of the hook, run with it: dropped
+        assert first.returncode == copy_.returncode == 0 and len(_closes(requests)) == 1, requests
+        commit(repo, "resumed.py", "X = 1\n", "feat: work done in the resumed session")
+        claim = cli._close_claim_path(home, "kimi", fx["payloads"]["end"]["session_id"], "sessionend", "exit", "")
+        ago = time.time() - (cli.UNMEASURED_CLOSE_SECONDS + 5)  # the resumed session ends 10 s later: within 60 s
+        os.utime(claim, (ago, ago))
+        again = relay(home, url, *hook, stdin=end, cwd=repo)
+        assert again.returncode == 0, again.stderr
+    closes = _closes(requests)
+    assert len(closes) == 2, requests
+    assert [c["session_id"] for c in closes] == [fx["payloads"]["end"]["session_id"]] * 2
+    subjects = [c["subject"] for c in closes[1]["facts"].get("commits") or []]
+    assert "feat: work done in the resumed session" in subjects
+    log = (home / ".remembra" / "relay" / "relay.log").read_text()
+    assert f"within {cli.UNMEASURED_CLOSE_SECONDS}s" in log  # the copy, dropped
+
+
+def test_a_close_without_a_transcript_is_a_repeat_only_for_a_few_seconds(tmp_path):
+    args = ("kimi", "s1", "sessionend", "exit")
+    assert cli.claim_close(tmp_path, *args, 60)
+    assert not cli.claim_close(tmp_path, *args, 60)
+    marker = cli._close_claim_path(tmp_path, *args, "")
+    ago = time.time() - (cli.UNMEASURED_CLOSE_SECONDS + 1)
+    os.utime(marker, (ago, ago))
+    assert cli.claim_close(tmp_path, *args, 60)  # past the short window, though within 60 s
+    # Measured by its transcript, the same age is still a repeat.
+    assert cli.claim_close(tmp_path, *args, 60, transcript_size=10)
+    measured = cli._close_claim_path(tmp_path, *args, "10")
+    os.utime(measured, (ago, ago))
+    assert not cli.claim_close(tmp_path, *args, 60, transcript_size=10)
+    assert cli.claim_close(tmp_path, *args, 0) and cli.claim_close(tmp_path, *args, 0)  # 0 turns the dedupe off
+
+
 def test_the_close_claim_window_reason_and_transcript(tmp_path):
     home = tmp_path
     args = ("claude-code", "s1", "sessionend", "other")
@@ -546,6 +617,46 @@ def test_racing_closes_of_one_session_end_elect_exactly_one(tmp_path):
     for proc in procs:
         proc.join(30)
     assert sorted(outcomes) == [False] * 5 + [True]
+
+
+def _claim_brief_in_child(home: str, start: Any, results: Any, event: str) -> None:
+    start.wait(10)
+    results.put(cli.claim_brief(Path(home), "gemini", "race", event))
+
+
+def test_racing_brief_claims_of_one_session_elect_exactly_one(tmp_path):
+    ctx = multiprocessing.get_context("spawn")
+    start, results = ctx.Event(), ctx.Queue()
+    events = ["SessionStart", "BeforeAgent"] * 3
+    procs = [ctx.Process(target=_claim_brief_in_child, args=(str(tmp_path), start, results, e)) for e in events]
+    for proc in procs:
+        proc.start()
+    start.set()
+    outcomes = [results.get(timeout=60) for _ in procs]
+    for proc in procs:
+        proc.join(30)
+    assert sorted(outcomes) == [False] * 5 + [True]
+    record = cli.brief_record(tmp_path, "gemini", "race")
+    assert record is not None and record["event"] in ("SessionStart", "BeforeAgent")
+
+
+def test_a_brief_claim_is_taken_over_once_stale_and_fails_open(tmp_path):
+    assert cli.claim_brief(tmp_path, "gemini", "s1", "BeforeAgent")
+    assert not cli.claim_brief(tmp_path, "gemini", "s1", "SessionStart")
+    assert cli.brief_record(tmp_path, "gemini", "s1")["event"] == "BeforeAgent"
+    marker = cli._brief_marker_path(tmp_path, "gemini", "s1")
+    old = time.time() - cli.STATE_TTL_SECONDS - 60
+    os.utime(marker, (old, old))
+    assert cli.brief_record(tmp_path, "gemini", "s1") is None and not cli.brief_delivered(tmp_path, "gemini", "s1")
+    assert cli.claim_brief(tmp_path, "gemini", "s1", "SessionStart")  # a stale marker is a new session's to take
+    cli.forget_brief(tmp_path, "gemini", "s1")
+    assert not cli.brief_delivered(tmp_path, "gemini", "s1")
+    blocked = tmp_path / "blocked"
+    (blocked / ".remembra").mkdir(parents=True)
+    (blocked / ".remembra" / "relay").write_text("not a directory")
+    assert cli.claim_brief(blocked, "gemini", "s1", "BeforeAgent")  # cannot be recorded: printed (fail open)
+    marker.write_text("{not json")
+    assert cli.brief_record(tmp_path, "gemini", "s1") == {}  # there, but unreadable: still delivered
 
 
 def test_three_gemini_fires_spawn_one_detached_close(monkeypatch, home, tmp_path):

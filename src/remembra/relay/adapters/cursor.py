@@ -28,6 +28,9 @@ unverified. The payloads in tests/fixtures/relay/cursor/ are that run's.
 - Cursor also runs the user's Claude Code hooks (``~/.claude/settings.json``)
   with this same payload; the relay files those under ``cursor``, not
   ``claude-code`` (:mod:`remembra.relay.hosts`, marker ``cursor_version``).
+  Claude's SessionStart / SessionEnd / PreCompact run as Cursor's
+  sessionStart / sessionEnd / preCompact; preCompact carries ``trigger``
+  (auto / manual), so that close is filed as saved before a compaction.
 """
 
 from __future__ import annotations
@@ -52,6 +55,9 @@ SPEC = AdapterSpec(
         transcript=("transcript_path",),
         reason=("reason",),
         env_cwd=("CURSOR_PROJECT_DIR",),
+        # Cursor runs Claude Code's PreCompact hook as its preCompact (with ``trigger``): routed
+        # here, that close is filed as "pre-compact:<trigger>", a session still open.
+        compact_events=("preCompact", "PreCompact"),
     ),
     output="cursor-json",
     detect_bins=("cursor-agent", "cursor"),

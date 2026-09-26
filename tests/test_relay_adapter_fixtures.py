@@ -10,7 +10,12 @@ local test server:
 - ``brief --once`` (Codex's UserPromptSubmit hook) delivers a brief once per
   session, and a resumed Codex session does not get a second copy;
 - Gemini CLI's start after ``/clear`` fetches nothing, and its BeforeAgent
-  hook (``brief --once``) gives that session its brief instead;
+  hook (``brief --once``) gives that session its brief instead; a resumed
+  Gemini session gets the brief again unless a prompt brought it, and of a
+  start and a prompt hook running together (a slow brief, ``gemini -i``)
+  only the first to finish prints it;
+- Kimi Code's TOML is edited one table at a time, whatever its keys hold,
+  and only the relay's own ``[[hooks]]`` may change;
 - ``close`` for agents that may not wait for the end hook (Gemini CLI, Qwen
   Code, Cursor, Codex) detaches: the handoff arrives when the agent is killed
   100 ms after starting the hook, and when the hook's process group is killed
@@ -30,6 +35,7 @@ import io
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import socket
@@ -45,8 +51,10 @@ from typing import Any
 import httpx
 import pytest
 
+from remembra.relay import cli
 from remembra.relay import facts as factlib
 from remembra.relay.adapters import REGISTRY
+from remembra.relay.adapters.base import is_relay_command
 from remembra.relay.cli import main as relay_main
 from remembra.relay.handoff import end_reason_note
 from tests.agent_live_harness import RecordingProxy
@@ -736,6 +744,134 @@ def test_gemini_start_after_clear_fetches_nothing_and_the_prompt_hook_delivers_t
         assert len(proxy.briefs()) == 2  # a new session's start still gets it; its prompt hook then prints nothing
 
 
+def _context(out: subprocess.CompletedProcess[str]) -> str:
+    """The additionalContext a Gemini hook printed ("" when it printed nothing)."""
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)["hookSpecificOutput"]["additionalContext"] if out.stdout.strip() else ""
+
+
+def test_a_resumed_gemini_session_gets_the_brief_again_unless_a_prompt_brought_it(server, home, tmp_path):  # noqa: F811
+    """Gemini's --resume restores the prompts, BeforeAgent's context with them, but not SessionStart's (0.61.0)."""
+    repo = _repo(tmp_path)
+    hook = ("brief", "--hook", "gemini", "--agent", "gemini")
+    startup = {**_load("gemini", "session_start.json"), "cwd": str(repo)}
+    resumed = {**startup, "source": "resume"}
+    prompt = {**_load("gemini", "before_agent.json"), "cwd": str(repo), "session_id": startup["session_id"], "prompt": "hi"}
+    with RecordingProxy(server) as proxy:
+        assert _context(relay(home, proxy.url, *hook, stdin=json.dumps(startup))).startswith("# Remembra brief")
+        assert _context(relay(home, proxy.url, *hook, "--once", stdin=json.dumps(prompt))) == ""
+        again = _context(relay(home, proxy.url, *hook, stdin=json.dumps(resumed)))
+        assert again.startswith("# Remembra brief")  # SessionStart gave it: the resumed context lacks it
+        assert _context(relay(home, proxy.url, *hook, "--once", stdin=json.dumps(prompt))) == ""
+        assert len(proxy.briefs()) == 2
+
+        # A session whose brief came with a prompt (after /clear, a slow start, `gemini -i`) keeps it resumed.
+        other = {**prompt, "session_id": "resumed-by-prompt"}
+        assert _context(relay(home, proxy.url, *hook, "--once", stdin=json.dumps(other))).startswith("# Remembra brief")
+        its_resume = {**resumed, "session_id": "resumed-by-prompt"}
+        assert relay(home, proxy.url, *hook, stdin=json.dumps(its_resume)).stdout == ""
+        assert len(proxy.briefs()) == 3  # nothing fetched for that resume
+
+        # A marker an older release wrote has no event: it counts as the start's, so the brief comes again.
+        legacy = cli._brief_marker_path(home, "gemini", "legacy-1")
+        legacy.write_text(json.dumps({"at": "2026-09-01T00:00:00+00:00"}))
+        assert _context(relay(home, proxy.url, *hook, stdin=json.dumps({**resumed, "session_id": "legacy-1"}))) != ""
+        assert cli.brief_record(home, "gemini", "legacy-1")["event"] == "SessionStart"
+
+
+def test_a_resumed_codex_session_keeps_its_brief_even_from_an_older_marker(server, home, tmp_path):  # noqa: F811
+    repo = _repo(tmp_path)
+    legacy = cli._brief_marker_path(home, "codex", "old-1")
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_text(json.dumps({"at": "2026-09-01T00:00:00+00:00"}))  # no event: an older release's
+    resumed = {**_load("codex", "session_start_resume.json"), "cwd": str(repo), "session_id": "old-1"}
+    assert _brief(home, server, resumed) == ""
+    prompt = {**_load("codex", "user_prompt_submit.json"), "cwd": str(repo), "session_id": "by-prompt"}
+    assert _brief(home, server, prompt, "--once") != ""
+    assert _brief(home, server, {**resumed, "session_id": "by-prompt"}) == ""  # a prompt's brief is kept too
+
+
+def test_a_gemini_start_after_its_prompt_hook_prints_nothing(server, home, tmp_path):  # noqa: F811
+    """`gemini -i`, or a first prompt typed before SessionStart ran: the prompt hook printed the brief first."""
+    repo = _repo(tmp_path)
+    hook = ("brief", "--hook", "gemini", "--agent", "gemini")
+    startup = {**_load("gemini", "session_start.json"), "cwd": str(repo)}
+    prompt = {**_load("gemini", "before_agent.json"), "cwd": str(repo), "session_id": startup["session_id"], "prompt": "hi"}
+    with RecordingProxy(server) as proxy:
+        assert _context(relay(home, proxy.url, *hook, "--once", stdin=json.dumps(prompt))).startswith("# Remembra brief")
+        late = relay(home, proxy.url, *hook, stdin=json.dumps(startup))
+        assert late.returncode == 0 and late.stdout == "" and late.stderr == ""
+        assert len(proxy.briefs()) == 1  # and asked nothing
+
+        # Claude Code waits for its start hook: a start there always prints (a compaction may have dropped it).
+        claude = {"session_id": startup["session_id"], "cwd": str(repo), "hook_event_name": "SessionStart"}
+        for source in ("startup", "compact", "resume"):
+            out = relay(home, proxy.url, "brief", "--hook", "claude-code", stdin=json.dumps({**claude, "source": source}))
+            assert out.stdout.startswith("# Remembra brief"), (source, out.stdout, out.stderr)
+
+
+def _run(home: Path, url: str, payload: dict[str, Any], *extra: str) -> subprocess.Popen[str]:
+    """A Gemini brief hook started in the background (as Gemini runs SessionStart and BeforeAgent)."""
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home), "PYTHONPATH": SRC, "REMEMBRA_URL": url}
+    env.update(REMEMBRA_API_KEY="rem_test_key_for_e2e", **GIT_ENV)
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "remembra.relay.cli", "brief", "--hook", "gemini", "--agent", "gemini", *extra],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=str(home),
+        env=env,
+    )
+    assert proc.stdin is not None
+    proc.stdin.write(json.dumps(payload))
+    proc.stdin.close()
+    return proc
+
+
+def _finish(proc: subprocess.Popen[str]) -> subprocess.CompletedProcess[str]:
+    assert proc.stdout is not None and proc.stderr is not None
+    out, err = proc.stdout.read(), proc.stderr.read()  # a hook's output is small: no pipe fills up
+    proc.wait(60)
+    return subprocess.CompletedProcess(proc.args, proc.returncode, out, err)
+
+
+def test_a_slow_gemini_start_leaves_the_first_prompt_to_its_prompt_hook(server, home, tmp_path):  # noqa: F811
+    """Gemini's UI does not wait for SessionStart. While its brief is slow to come, the first prompt's
+    BeforeAgent delivers it, and the start's late copy prints nothing (seen live on 0.61.0 before the fix:
+    the first request had no brief, the second had SessionStart's)."""
+    repo = _repo(tmp_path)
+    startup = {**_load("gemini", "session_start.json"), "cwd": str(repo)}
+    prompt = {**_load("gemini", "before_agent.json"), "cwd": str(repo), "session_id": startup["session_id"], "prompt": "hi"}
+    with RecordingProxy(server) as proxy:
+        proxy.brief_delays = [3.0]  # the start's request
+        start = _run(home, proxy.url, startup)
+        deadline = time.monotonic() + 30
+        while not proxy.briefs() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert proxy.briefs(), "the start hook asked for no brief"
+        first_prompt = relay(
+            home, proxy.url, "brief", "--hook", "gemini", "--agent", "gemini", "--once", stdin=json.dumps(prompt)
+        )
+        assert _context(first_prompt).startswith("# Remembra brief")  # not held back by the start in flight
+        assert _context(_finish(start)) == ""  # its brief came back after the prompt's: printed nothing
+        assert len(proxy.briefs()) == 2
+        assert cli.brief_record(home, "gemini", startup["session_id"])["event"] == "BeforeAgent"
+
+
+def test_gemini_start_and_prompt_hooks_racing_print_the_brief_once(server, home, tmp_path):  # noqa: F811
+    """`gemini -i "<prompt>"` runs SessionStart and the first prompt's BeforeAgent at the same time."""
+    repo = _repo(tmp_path)
+    startup = {**_load("gemini", "session_start.json"), "cwd": str(repo)}
+    prompt = {**_load("gemini", "before_agent.json"), "cwd": str(repo), "session_id": startup["session_id"], "prompt": "hi"}
+    with RecordingProxy(server) as proxy:
+        proxy.brief_delays = [1.0, 1.0]  # both in flight together
+        procs = [_run(home, proxy.url, startup), _run(home, proxy.url, prompt, "--once")]
+        outputs = [_context(_finish(proc)) for proc in procs]
+    assert sorted(bool(o) for o in outputs) == [False, True], outputs
+    assert len(proxy.briefs()) == 2
+
+
 def test_gemini_is_detected_by_its_settings_file_not_the_directory_antigravity_shares(tmp_path):
     adapter, nothing = REGISTRY["gemini"], lambda binary: None
     (tmp_path / ".gemini" / "antigravity").mkdir(parents=True)  # only Antigravity's files
@@ -867,6 +1003,193 @@ def test_kimi_code_is_detected_by_its_own_directory_not_the_archived_kimi_clis(t
     assert not adapter.detect(tmp_path, which=nothing)
     (tmp_path / ".kimi-code").mkdir()
     assert adapter.detect(tmp_path, which=nothing)
+
+
+# Kimi Code itself writes tables whose quoted keys hold ":" and "/" (seen from `kimi login` and `kimi provider
+# add`), and `kimi migrate` puts copied relay hooks right before them.
+KIMI_MIGRATED = """default_model = "kimi-code/k3"
+
+[[hooks]]
+event = "SessionEnd"
+command = "/opt/remembra/bin/remembra-relay close --hook kimi --agent kimi"
+
+[providers."managed:kimi-code"]
+type = "kimi"
+base_url = "https://api.kimi.com/coding/v1"
+api_key = ""
+
+[models."kimi-code/k3"]
+provider = "managed:kimi-code"
+model = "k3"
+max_context_size = 1048576
+
+[[hooks]]
+event = "SessionStart"
+command = "/opt/remembra/bin/remembra-relay brief --hook kimi --agent kimi"
+[models.'localco/coder-1 (8k)']
+provider = "localco"
+"""
+
+# Brackets that are values, not headers: in a multi-line basic and literal string, in an array that spans
+# lines, in a one-line string; then a copied relay hook, and a table with quotes at the end of a string.
+KIMI_VALUES = (
+    'notes = """\n[[hooks]]\ncommand = "remembra-relay close --hook kimi --agent kimi"\n"""\n'
+    "raw = " + "'" * 3 + "\n[not.a.table]\n" + "'" * 3 + "\n"
+    'paths = [\n  "a",\n  ["b", "c"],\n]\n'
+    'tag = "[x] # not a comment"\n'
+    "\n[[hooks]]\n"
+    'event = "SessionEnd"\n'
+    'command = "/old/remembra-relay close --hook kimi --agent kimi"\n'
+    "\n[after]\n"
+    'quote = """ends with quotes"" """\n'
+    "k = 1\n"
+)
+
+
+def _without_relay(data: dict[str, Any]) -> dict[str, Any]:
+    hooks = [h for h in data.get("hooks", []) if not is_relay_command(h.get("command"))]
+    return {**{k: v for k, v in data.items() if k != "hooks"}, **({"hooks": hooks} if hooks else {})}
+
+
+def test_kimi_keeps_the_tables_after_a_migrated_relay_hook_whatever_their_keys_hold(tmp_path):
+    """The table scan once stopped only at headers of [A-Za-z0-9_-."' ]: a relay hook swallowed the
+    [providers."managed:kimi-code"] and [models."kimi-code/k3"] after it, and both were deleted with it."""
+    adapter = REGISTRY["kimi"]
+    path = _kimi(tmp_path)
+    path.write_text(KIMI_MIGRATED)
+    before = tomllib.loads(KIMI_MIGRATED)
+    change = adapter.plan(tmp_path, "/bin/relay")
+    assert change.summary[-1] == "remove 2 relay [[hooks]] tables outside the block (copied by `kimi migrate`)"
+    after = tomllib.loads(change.after)
+    assert _without_relay(after) == _without_relay(before)
+    assert set(after["providers"]) == {"managed:kimi-code"}
+    assert set(after["models"]) == {"kimi-code/k3", "localco/coder-1 (8k)"}
+    assert [h["event"] for h in after["hooks"]] == ["UserPromptSubmit", "SessionEnd"]
+    removal = adapter.plan_removal(tmp_path)
+    assert removal.summary == ["remove 2 relay [[hooks]] tables outside the block"] and not removal.delete
+    assert tomllib.loads(removal.after) == _without_relay(before)
+
+
+def test_kimi_table_scan_skips_brackets_inside_strings_and_values(tmp_path):
+    adapter = REGISTRY["kimi"]
+    path = _kimi(tmp_path)
+    path.write_text(KIMI_VALUES)
+    before = tomllib.loads(KIMI_VALUES)
+    change = adapter.plan(tmp_path, "/bin/relay")
+    assert change.summary[-1] == "remove 1 relay [[hooks]] table outside the block (copied by `kimi migrate`)"
+    after = tomllib.loads(change.after)
+    assert _without_relay(after) == _without_relay(before)
+    assert after["notes"] == before["notes"] and "[[hooks]]" in after["notes"]  # the string is kept as written
+    assert after["after"] == {"quote": 'ends with quotes"" ', "k": 1}
+    assert tomllib.loads(adapter.plan_removal(tmp_path).after) == _without_relay(before)
+
+
+def test_kimi_refuses_an_edit_that_would_change_more_than_the_relay_hooks(tmp_path):
+    """A hook of the user's own inside the managed block would go with it: nothing is written, the CLI says why."""
+    from remembra.relay.adapters.base import RefusedEdit
+    from remembra.relay.adapters.kimi import BEGIN, END
+
+    adapter = REGISTRY["kimi"]
+    path = _kimi(tmp_path)
+    mine = '[[hooks]]\nevent = "PreToolUse"\ncommand = "./audit.sh"\n'
+    ours = '[[hooks]]\nevent = "SessionEnd"\ncommand = "/r close --hook kimi --agent kimi"\n'
+    text = f'default_model = "k2"\n\n{BEGIN}\n{mine}\n{ours}{END}\n'
+    path.write_text(text)
+    with pytest.raises(RefusedEdit, match="would change more of the Kimi Code config"):
+        adapter.plan(tmp_path, "/bin/relay")
+    with pytest.raises(RefusedEdit):
+        adapter.plan_removal(tmp_path)
+    for args in (("connect", "--agent", "kimi", "--apply", "--relay-command", "/bin/relay"), ("disconnect", "--apply")):
+        out = relay(tmp_path, "http://x", *args)
+        assert out.returncode == 1 and f"not written: {path}: the edit would change more" in out.stdout, out.stdout
+        assert path.read_text() == text  # left as it was
+
+
+def test_kimi_writes_any_install_path_as_valid_toml(tmp_path):
+    """json.dumps wrote a character outside the BMP as a surrogate pair, which TOML rejects, and left DEL alone."""
+    from remembra.relay.adapters.kimi import toml_string
+
+    adapter = REGISTRY["kimi"]
+    for install in (
+        "/Users/me/\U0001f680 tools/venv/bin/remembra-relay",
+        '/Users/o\'brien/My "Tools"\\x/remembra-relay',
+        "/Users/josé/a\x7fb\tc/remembra-relay",
+    ):
+        relay_cmd = shlex.quote(install)
+        change = adapter.plan(tmp_path / "h", relay_cmd)
+        commands = [h["command"] for h in tomllib.loads(change.after)["hooks"]]
+        assert commands == [f"{relay_cmd} brief --hook kimi --agent kimi --once", f"{relay_cmd} close --hook kimi --agent kimi"]
+        assert tomllib.loads(f"v = {toml_string(install)}")["v"] == install
+    with pytest.raises(ValueError, match="not valid UTF-8"):
+        toml_string("/Users/me/\udcff/remembra-relay")  # a path byte that is not UTF-8
+
+
+def test_kimi_code_is_not_the_archived_kimi_cli_on_path(tmp_path):
+    """The archived kimi-cli also installs `kimi`: its Python entry point does not mean Kimi Code is here."""
+    from remembra.relay.adapters.kimi import archived_kimi_cli
+
+    adapter = REGISTRY["kimi"]
+    bins = tmp_path / "bin"
+    bins.mkdir()
+    legacy = bins / "kimi-legacy"
+    legacy.write_text("#!/opt/venv/bin/python3.13\nimport sys\nfrom kimi_cli.__main__ import main\nsys.exit(main())\n")
+    wrapper = bins / "kimi-wrapper"
+    wrapper.write_text('#!/bin/bash\nexec "/opt/homebrew/Cellar/kimi-cli/1.52.0/libexec/bin/kimi" "$@"\n')
+    node = bins / "kimi-code"
+    node.write_text("#!/usr/bin/env node\nimport { createRequire } from 'node:module';\n")
+    binary = bins / "kimi-native"
+    binary.write_bytes(b"\xcf\xfa\xed\xfe" + bytes(4000))  # a native build (install.sh)
+    assert archived_kimi_cli(str(legacy)) and archived_kimi_cli(str(wrapper))
+    assert not archived_kimi_cli(str(node)) and not archived_kimi_cli(str(binary))
+    assert not archived_kimi_cli(str(bins / "missing"))  # cannot tell: counted as Kimi Code
+    home = tmp_path / "home"
+    home.mkdir()
+    for found, installed in ((legacy, False), (wrapper, False), (node, True), (binary, True)):
+        assert adapter.detect(home, which=lambda name, f=found: str(f) if name == "kimi" else None) is installed, found
+    (home / ".kimi-code").mkdir()
+    assert adapter.detect(home, which=lambda name: str(legacy))  # Kimi Code's own directory still counts
+
+
+def test_connect_writes_nothing_for_kimi_when_only_the_archived_kimi_cli_is_installed(tmp_path):
+    bins = tmp_path / "bin"
+    bins.mkdir()
+    kimi = bins / "kimi"
+    kimi.write_text("#!/usr/bin/env python3\nfrom kimi_cli.__main__ import main\nmain()\n")
+    kimi.chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    out = relay(home, "http://x", "connect", "--apply", "--relay-command", "/bin/relay", env={"PATH": f"{bins}:/usr/bin:/bin"})
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "[kimi] Kimi Code CLI: not detected, skipped" in out.stdout
+    assert not (home / ".kimi-code").exists()
+
+
+def test_kimi_removes_the_block_an_earlier_release_wrote_to_the_archived_cli_s_config(tmp_path):
+    from remembra.relay.adapters.kimi import BEGIN, END
+
+    adapter = REGISTRY["kimi"]
+    legacy = tmp_path / ".kimi" / "config.toml"
+    legacy.parent.mkdir()
+    hook = '[[hooks]]\nevent = "SessionStart"\ncommand = "/old/remembra-relay brief --hook kimi --agent kimi"\n'
+    old_block = f"{BEGIN}\n{hook}{END}\n"
+    legacy.write_text('default_model = "old"\n\n[providers."managed:kimi-code"]\ntype = "kimi"\n\n' + old_block)
+    assert not adapter.detect(tmp_path, which=lambda name: None) and not adapter.connected(tmp_path)  # its hooks say nothing
+    assert adapter.retired_files(tmp_path) == [legacy] and legacy in adapter.hook_files(tmp_path)
+    removal = adapter.plan_file_removal(legacy)
+    assert removal.summary == ["remove the managed remembra-relay [[hooks]] block"]
+    assert tomllib.loads(removal.after) == {"default_model": "old", "providers": {"managed:kimi-code": {"type": "kimi"}}}
+
+    (tmp_path / ".kimi-code").mkdir()  # Kimi Code installed: connect writes its file and clears the old one
+    out = relay(tmp_path, "http://x", "connect", "--agent", "kimi", "--apply", "--relay-command", "/bin/relay")
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert f"also {legacy} (relay hooks an earlier release wrote here, removed" in out.stdout
+    assert "remembra-relay" not in legacy.read_text() and "managed:kimi-code" in legacy.read_text()
+    assert "/bin/relay close --hook kimi" in _kimi(tmp_path).read_text()
+    legacy.write_text(legacy.read_text() + "\n" + old_block)  # written again (an old install ran connect)
+    gone = relay(tmp_path, "http://x", "disconnect", "--apply")
+    assert gone.returncode == 0 and f"[kimi] Kimi Code CLI -> {legacy}" in gone.stdout
+    assert "remembra-relay" not in legacy.read_text() and "managed:kimi-code" in legacy.read_text()
+    assert not adapter.spec.config_file(tmp_path).exists()  # it held nothing but the relay's block
 
 
 # ---------------------------------------------------------------------------

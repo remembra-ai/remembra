@@ -57,6 +57,8 @@ SPEC = AdapterSpec(
     start_event="SessionStart",
     end_event="SessionEnd",
     prompt_event="UserPromptSubmit",
+    # A resumed thread replays its developer messages, the brief among them: resume does not refetch it.
+    resume_keeps_brief_from=("SessionStart", "UserPromptSubmit"),
     payload=PayloadMap(session_id=("session_id",), cwd=("cwd",), transcript=("transcript_path",), reason=("reason",)),
     output="text",
     transcript_format="codex-rollout-jsonl",
