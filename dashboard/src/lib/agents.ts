@@ -37,9 +37,6 @@ const EXTRA_LANES = ['#5f6c33', '#855b19', '#3f6f8f', '#8b5a4a', '#5f6b7a', '#7a
  */
 export const PIPX_INSTALL = "pipx install --force 'remembra[mcp]>=0.16'";
 
-/** Install, then a dry run of connect (which warns when no API key is set). */
-export const INSTALL_COMMAND = `${PIPX_INSTALL} && remembra-relay connect`;
-
 /**
  * Saves the key where the relay hooks read it (~/.remembra/credentials) and
  * adds the Remembra MCP server to the agents it finds. The key is never part

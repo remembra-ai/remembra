@@ -177,15 +177,21 @@ RELAY_GUIDE = "https://docs.remembra.dev/guides/relay/"
 # [mcp]: remembra-install points every agent at remembra-mcp, which needs the mcp package.
 INSTALL_STEP = "pipx install --force 'remembra[mcp]>=0.16'"
 # No key on the command line (shell history keeps it): remembra-install asks for it at a hidden prompt.
-KEY_STEP = "remembra-install --all"
+KEY_STEP = "remembra-install --all"  # Remembra Cloud by default; a re-run keeps a saved self-hosted server
+# The last step writes the hooks: a bare `connect` is a dry run and leaves a new user unconnected.
+CONNECT_STEP = "remembra-relay connect --apply"
 
 
-def _install_blocks(page_html: str) -> list[tuple[str, str, str]]:
-    """(comment line before, the command block, the meta line after) for every install block."""
+def _install_blocks(page_html: str) -> list[tuple[str, str, str, str]]:
+    """(comment line before, the key-first lead line, the command block, the meta line after) per install block."""
     out = []
-    block = re.compile(r'(?P<gate>[^\n]*)\n\s*<div class="cmd"(?P<body>.*?)</div>\s*<p class="cmd-meta">(?P<meta>.*?)</p>', re.S)
+    block = re.compile(
+        r'(?P<gate>[^\n]*)\n\s*<p class="cmd-meta cmd-lead">(?P<lead>.*?)</p>\s*'
+        r'<div class="cmd"(?P<body>.*?)</div>\s*<p class="cmd-meta">(?P<meta>.*?)</p>',
+        re.S,
+    )
     for m in block.finditer(page_html):
-        out.append((m.group("gate").strip(), m.group("body"), m.group("meta")))
+        out.append((m.group("gate").strip(), m.group("lead"), m.group("body"), m.group("meta")))
     return out
 
 
@@ -194,14 +200,16 @@ def test_every_install_block_has_the_key_step_the_setup_guide_and_the_release_ga
     blocks = _install_blocks(page_html)
     assert len(blocks) == 2  # the hero and the Start band
     assert len(re.findall(r'class="cmd[ "]', page_html)) == len(blocks)
-    for gate, body, meta in blocks:
+    for gate, lead, body, meta in blocks:
         assert gate == RELAY_GATE
+        # The key comes first, above the commands, then the commands save it and write the hooks.
+        assert 'href="https://app.remembra.dev/signup"' in lead
         copied = html.unescape(re.search(r'data-copy="([^"]*)"', body).group(1)).split("\n")
-        assert copied == [INSTALL_STEP, KEY_STEP, "remembra-relay connect"]
+        assert copied == [INSTALL_STEP, KEY_STEP, CONNECT_STEP]
         shown = _text(re.search(r"<code>.*?</code>", body, re.S).group(0))
-        assert shown == f"$ {INSTALL_STEP} $ {KEY_STEP} $ remembra-relay connect"
+        assert shown == f"$ {INSTALL_STEP} $ {KEY_STEP} $ {CONNECT_STEP}"
         assert f'href="{RELAY_GUIDE}"' in meta
-        assert 'href="https://app.remembra.dev/signup"' in meta
+        assert "hidden prompt" in meta
 
 
 def test_paid_prices_sit_behind_the_billing_gate() -> None:
@@ -1269,3 +1277,17 @@ def test_subprocessors_page_names_every_service_the_code_sends_data_to() -> None
         assert name in subs, name
     for name in ("Hetzner", "Paddle", "Formsubmit", "Google Fonts", "Google Workspace", "Namecheap"):
         assert name in subs, name
+
+
+def test_every_page_offers_sign_in_next_to_start_free() -> None:
+    """Returning users need a way back in: the header has Sign in beside Start free, and the phone menu (where
+    header links are hidden) lists it first. The dashboard opens on its sign-in screen for anyone signed out."""
+    pages = [p for p in LANDING.rglob("*.html") if "<!-- @header -->" in p.read_text()]
+    assert len(pages) >= 13
+    for page in pages:
+        head = re.search(r"<!-- @header -->(.*?)<!-- /@header -->", page.read_text(), re.S).group(1)
+        bar = re.search(r'<nav class="nav-links".*?</nav>', head, re.S).group(0)
+        signin = '<a class="nav-link nav-signin" href="https://app.remembra.dev/">Sign in</a>'
+        assert f'{signin}\n      <a class="btn-nav" href="https://app.remembra.dev/signup">Start free</a>' in bar, page.name
+        menu = re.search(r'<nav class="menu-panel".*?</nav>', head, re.S).group(0)
+        assert re.findall(r"<a [^>]*>([^<]+)</a>", menu)[0] == "Sign in", page.name

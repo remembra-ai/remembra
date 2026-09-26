@@ -10,7 +10,7 @@ and per-session isolation.
 pip install remembra langchain-core
 ```
 
-Point it at a running Remembra server (see [Deploying](../DEPLOYING.md) or use
+Point it at a running Remembra server (see [Docker](../getting-started/docker.md) to host your own, or use
 the managed cloud at `https://api.remembra.dev`).
 
 ## Chat message history

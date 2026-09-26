@@ -9,16 +9,19 @@ failing and the next step, read from git and (for Claude Code) the session's tes
 When the next session starts, in any tool, on any machine, that agent gets a **brief**: a short summary of
 where the work stands, led by the last handoff. Every handoff stays on the **trail**.
 
+First get a free key at [app.remembra.dev](https://app.remembra.dev/signup), then run:
+
 ```bash
 pipx install --force 'remembra[mcp]>=0.16'
 remembra-install --all
-remembra-relay connect
+remembra-relay connect --apply
 ```
 
-Get a free key at [app.remembra.dev](https://app.remembra.dev/signup), or [host the server yourself](getting-started/docker.md).
 `remembra-install` asks for the key at a hidden prompt, so it never goes on the command line or into your shell
-history. `connect` is a dry run that shows what it would change; add `--apply` to write the hooks. remembra 0.16.0 is the
-first release with `remembra-relay`.
+history. `connect --apply` writes the hooks and keeps a backup of each file; run `remembra-relay connect` alone first
+to see every change without writing. Codex runs the hooks only after you trust them: run `/hooks` in Codex once.
+[Hosting the server yourself](getting-started/docker.md)? Add `--url <your server>` to `remembra-install`. remembra 0.16.0 is the first
+release with `remembra-relay`.
 
 - [Relay guide](guides/relay.md): how handoffs, briefs and the trail work, and which agents are verified.
 - [Agent setup](getting-started/agent-setup.md): connect Claude Code, Codex, Cursor and other agents.

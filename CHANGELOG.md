@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PII redaction** no longer replaces the project number of a Google OAuth client id (and UUIDs or
   similar machine identifiers) with `[REDACTED_BANK_ACCOUNT]`. Account numbers written with a suffix
   (`123456789012-checking`, `...-SAV`, `ACCT-...-01`) are still redacted.
+- **The install line connects.** On remembra.dev, the README and the docs, the copyable install ended in a bare
+  `remembra-relay connect`, a dry run that writes nothing, so a new user following it stayed unconnected. Every
+  block now asks for the free key first and ends in `remembra-relay connect --apply`; the dashboard's empty
+  trail shows its full one-line install. The site header has **Sign in** next to **Start free** (first in
+  the phone menu).
+- **docs.remembra.dev no longer publishes repository notes** (the cloud runbook, an old self-host note, bug
+  write-ups, a feedback transcript and the competitor scan): `mkdocs.yml` excludes them and a test keeps the
+  list. The feedback transcript left the public repository.
 
 ## [0.16.0] - 2026-09-26 - Remembra Relay
 

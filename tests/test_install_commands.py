@@ -51,6 +51,48 @@ def test_landing_and_relay_guide_use_the_dashboard_package_spec() -> None:
     assert pipx == MCP_INSTALL  # the hint remembra-mcp prints when the extra is missing
 
 
+def _first_run() -> list[str]:
+    """The public pages' first run: save the key first, then write the hooks (never a dry run last).
+
+    Same steps as the dashboard's oneLineInstall(), without --url: remembra-install defaults to Remembra
+    Cloud for a new user and keeps a self-hoster's saved server on a re-run, which a hard-coded --url on a
+    marketing page would overwrite. The dashboard knows the user's server, so it passes --url."""
+    ts = AGENTS_TS.read_text()
+    assert "${saveKeyCommand(serverUrl)} && remembra-relay connect --apply" in ts
+    return [_dashboard_pipx(), "remembra-install --all", "remembra-relay connect --apply"]
+
+
+def test_every_copyable_install_block_is_key_first_and_applies() -> None:
+    """A new visitor who copies the block and runs it ends up connected: the key is saved at a hidden
+    prompt, then connect --apply writes the hooks. A bare `connect` last is a dry run that writes nothing,
+    and the dashboard would show every agent as waiting."""
+    expected = _first_run()
+    seen = 0
+    for page in ("index.html", "crew.html", "changelog.html"):
+        text = (ROOT / "landing" / page).read_text()
+        for m in re.finditer(r'<div class="cmd" role="group" aria-label="Install commands">(.*?)</div>', text, re.S):
+            seen += 1
+            block = m.group(1)
+            shown = [
+                " ".join(html.unescape(re.sub(r"<[^>]+>", " ", ln)).replace("$", "", 1).split())
+                for ln in re.findall(r'<span class="ln">(.*?)</span></span>', block)
+            ]
+            assert shown == expected, (page, shown)
+            copy = re.search(r'data-copy="([^"]*)"', block)
+            if copy:
+                assert html.unescape(copy.group(1)).split("\n") == expected, page
+            if page != "changelog.html":
+                # The key comes first: the signup link sits right above the block.
+                before = text[: m.start()]
+                lead = before[before.rfind("<p ") :]
+                assert 'class="cmd-meta cmd-lead"' in lead and "https://app.remembra.dev/signup" in lead, page
+    assert seen == 4  # index hero, index closing band, crew, changelog
+    docs_home = (ROOT / "docs" / "index.md").read_text()
+    block = re.search(r"```bash\n(.*?)```", docs_home, re.S)
+    assert block and block.group(1).strip().splitlines() == expected
+    assert docs_home.index("app.remembra.dev/signup") < docs_home.index("```bash")
+
+
 def _pages() -> list[Path]:
     """Every page a user copies an install line from: the landing site, the docs, README and CHANGELOG."""
     return [

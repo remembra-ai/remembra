@@ -87,6 +87,8 @@ CREW_META_OFF = (
 DOCS = "https://docs.remembra.dev"
 GITHUB = "https://github.com/remembra-ai/remembra"
 SIGNUP = "https://app.remembra.dev/signup"
+# The dashboard opens on its sign-in screen for anyone signed out (and on Home for anyone signed in).
+SIGNIN = "https://app.remembra.dev/"
 
 HEAD = """<script>
   /* Dark for every visitor unless they chose light. Storage may be unavailable; the page works without it. */
@@ -131,6 +133,7 @@ NAV = [
     ("github", "GitHub", GITHUB, " nav-hide-lg"),
 ]
 MENU = [
+    ("signin", "Sign in", SIGNIN),
     ("how", "How it works", "/#how"),
     ("crew", "Crew mode", "/crew"),
     ("pricing", "Pricing", "/pricing"),
@@ -182,6 +185,7 @@ def header(page: str) -> str:
       {links}
       <button class="icon-btn theme-btn" type="button" data-theme-toggle aria-label="Switch to light theme">{SUN}{MOON}</button>
       <button class="icon-btn menu-btn" type="button" data-menu-toggle aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">{BARS}{CROSS}</button>
+      <a class="nav-link nav-signin" href="{SIGNIN}">Sign in</a>
       <a class="btn-nav" href="{SIGNUP}">Start free</a>
     </nav>
   </div>

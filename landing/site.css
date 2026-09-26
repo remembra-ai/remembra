@@ -220,6 +220,9 @@ code, kbd, pre, samp {
 .cmd-meta b { color: var(--ink); font-weight: 600; }
 .cmd-meta a { color: var(--ink); text-decoration-color: var(--signal); text-underline-offset: 4px; text-decoration-thickness: 2px; }
 .cmd-meta .sep { width: 4px; height: 4px; background: var(--ink-3); flex: none; }
+.cmd-meta.cmd-lead { margin: 22px 0 0; }
+.cmd-meta.cmd-lead + .cmd { margin-top: 10px; }
+.cmd-meta code { font-family: var(--f-mono); font-size: .92em; }
 
 /* ------------------------------------------------------------------
    Retro pixel window (handoff.saved, blocked edits, product frames)

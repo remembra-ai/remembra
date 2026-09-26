@@ -5,6 +5,17 @@ repo_url: https://github.com/remembra-ai/remembra
 repo_name: remembra-ai/remembra
 edit_uri: edit/main/docs/
 
+# Repository notes that live under docs/ but are not documentation: the cloud
+# operator's runbook, an old self-host note, bug write-ups and the competitor
+# scan (linked from the README on GitHub). Never published on docs.remembra.dev;
+# tests/test_docs_exclusions.py checks the list and that no page links into it.
+exclude_docs: |
+  bugs/
+  feedback/
+  competitive-analysis-2026.md
+  DEPLOYING.md
+  DEPLOYMENT.md
+
 theme:
   name: material
   palette:

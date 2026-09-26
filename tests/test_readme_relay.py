@@ -25,7 +25,7 @@ MCP_SERVER = (ROOT / "src" / "remembra" / "mcp" / "server.py").read_text()
 INSTALL = [
     "pipx install --force 'remembra[mcp]>=0.16'",
     "remembra-install --all",  # asks for the key at a hidden prompt: never on the command line
-    "remembra-relay connect",
+    "remembra-relay connect --apply",  # writes the hooks: a bare `connect` is a dry run
 ]
 
 
@@ -36,9 +36,10 @@ def _first_screen() -> str:
 def test_first_screen_leads_with_relay_install_and_the_contradiction() -> None:
     first = _first_screen()
     assert '<h1 align="center">Remembra Relay</h1>' in first
-    block = re.search(r"## Install\n\n```bash\n(.*?)\n```", first, re.S)
+    block = re.search(r"## Install\n\n(?P<lead>[^\n]*)\n\n```bash\n(?P<cmds>.*?)\n```", first, re.S)
     assert block is not None
-    assert block.group(1).splitlines() == INSTALL
+    assert "app.remembra.dev/signup" in block.group("lead")  # the key comes first
+    assert block.group("cmds").splitlines() == INSTALL
     assert "the agent's summary contradicts these recorded facts" in first
 
 

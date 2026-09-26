@@ -8,12 +8,13 @@ When an agent's session ends, `remembra-relay close` saves a handoff built from 
 the session's test runs), and checks the agent's own summary against them. The next agent, in any tool or on any
 machine, starts from a short brief; every handoff stays on the trail. Agent-scoped keys mark handoffs
 key-verified. Claude Code's and Codex's hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease);
-Cursor, Gemini CLI, Qwen Code and Kimi hooks ship unverified. `remembra-install` asks for the key at a hidden prompt.
+Cursor, Gemini CLI, Qwen Code and Kimi hooks ship unverified. Get a free key at
+[app.remembra.dev](https://app.remembra.dev/signup), then run (`remembra-install` asks for it at a hidden prompt):
 
 ```bash
 pipx install --force 'remembra[mcp]>=0.16'
 remembra-install --all
-remembra-relay connect
+remembra-relay connect --apply
 ```
 
 Setup: [Relay guide](../guides/relay.md). The short version of every release: [remembra.dev/changelog](https://remembra.dev/changelog).

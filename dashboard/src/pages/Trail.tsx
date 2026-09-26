@@ -8,7 +8,8 @@ import { Loader2, RefreshCw } from 'lucide-react';
 import { useRelayData } from '../hooks/relayData';
 import { useNow, useResource } from '../hooks/useResource';
 import { mergeTrailPages, relay, type TrailItem } from '../lib/relay';
-import { INSTALL_COMMAND, agentMeta } from '../lib/agents';
+import { agentMeta, oneLineInstall } from '../lib/agents';
+import { api } from '../lib/api';
 import { hrefFor, navigate, useRoute } from '../lib/nav';
 import { dayLabel, relativeTime } from '../lib/time';
 import { AgentAvatar, CopyCommand, ErrorNotice, StaleNotice, TrailSkeleton } from '../components/relay/ui';
@@ -236,9 +237,9 @@ export function Trail() {
                   When an agent stops, <code className="font-mono text-[13px]">remembra-relay close</code> records what it did, what it
                   left open, what is failing and what comes next. Each one lands here, newest first.
                 </p>
-                <CopyCommand className="mx-auto mt-4 max-w-md text-left" command={INSTALL_COMMAND} label="Install command" />
+                <CopyCommand className="mx-auto mt-4 max-w-md text-left" command={oneLineInstall(api.getApiBaseUrl())} label="Install command" />
                 <p className="mx-auto mt-2 max-w-md text-xs text-ink-3">
-                  The relay also needs an API key.{' '}
+                  It asks for your API key at a hidden prompt.{' '}
                   <a href={hrefFor('home')} className="font-semibold text-ink underline decoration-signal decoration-2 underline-offset-4">
                     Follow the setup checklist on Home
                   </a>

@@ -31,15 +31,19 @@
 
 ## Install
 
+First get a free key at [app.remembra.dev](https://app.remembra.dev/signup), then run:
+
 ```bash
 pipx install --force 'remembra[mcp]>=0.16'
 remembra-install --all
-remembra-relay connect
+remembra-relay connect --apply
 ```
 
-Get a free key at [app.remembra.dev](https://app.remembra.dev/signup), or [host the server yourself](https://docs.remembra.dev/getting-started/docker/).
 `remembra-install` asks for the key at a hidden prompt (or reads `REMEMBRA_API_KEY`) and shows its changes before it writes.
-`connect` is a dry run that shows exactly what it would change; add `--apply` to write the hooks. `remembra-relay` ships in remembra 0.16.0.
+`connect --apply` writes the hooks and keeps a backup of each file; run `remembra-relay connect` alone first to see every
+change without writing. Codex runs the hooks only after you trust them: run `/hooks` in Codex once.
+[Hosting the server yourself](https://docs.remembra.dev/getting-started/docker/)? Add `--url <your server>` to `remembra-install`.
+`remembra-relay` ships in remembra 0.16.0.
 
 ## What the next agent sees
 
