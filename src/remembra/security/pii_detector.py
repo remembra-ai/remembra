@@ -63,7 +63,13 @@ PII_PATTERNS: dict[str, re.Pattern[str]] = {
 # A hyphen/dot-joined identifier around a digit run: "629134551556-abc.apps.googleusercontent.com".
 _IDENTIFIER_CHARS = re.compile(r"[A-Za-z0-9._-]")
 _UUID = re.compile(r"[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}")
-_HAS_LETTER = re.compile(r"[A-Za-z]")
+# A random-looking part: letters AND digits, at least 6 characters ("8v3kq0abcd", "a1b2c3").
+_MIXED_PART = re.compile(r"(?=[A-Za-z0-9]*[A-Za-z])(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{6,}")
+# "-<label>.<label>.<tld>...": the digits are the first label of a host name.
+_HOST_TAIL = re.compile(r"-[A-Za-z0-9]+(?:\.[A-Za-z0-9-]+){2,}")
+# An account label shortly before the number means it is one, whatever follows it.
+_ACCOUNT_LABEL = re.compile(r"(?i)(?:\b|_)(?:acct|account|a/c|iban|acc(?:t)?\s*(?:no|num|number|#))(?:\b|_)")
+_LABEL_WINDOW = 24
 
 
 def _token_around(content: str, start: int, end: int) -> tuple[str, int, int]:
@@ -78,29 +84,30 @@ def _token_around(content: str, start: int, end: int) -> tuple[str, int, int]:
 
 
 def is_identifier_fragment(content: str, start: int, end: int) -> bool:
-    """True when the digits at [start, end) are one part of a hyphenated identifier, not a number on their own.
+    """True when the digits at [start, end) are one part of a machine identifier, not a number on their own.
+
+    Only these shapes (the false positives seen), and never with an account
+    label (``acct``, ``account``, ``a/c``, ``iban``, ``acc no``) just before:
 
     * a UUID (``12345678-1234-5678-1234-567812345678``);
-    * digits followed by ``-`` and a part with a letter: an OAuth client id
-      (``629134551556-abc123.apps.googleusercontent.com``), a build tag;
-    * digits between two hyphens after a part with a letter (``run-123456789-b``).
+    * digits, ``-`` and a random-looking part of letters AND digits (6+):
+      ``20260926123456-a1b2c3``, an OAuth client id
+      ``629134551556-8v3kq0abc...``;
+    * digits that start a dotted host name: ``629134551556-x.apps.googleusercontent.com``.
 
-    A bank account written alone, after a label (``acct 4000123456789``,
-    ``acct: 000123456789``) or split by digit-only groups (``0012-345678901``)
-    is not an identifier fragment.
+    A plain word or code after the number (``-checking``, ``-SAV``, ``-JMD``,
+    ``-01``) does not make it an identifier: bank accounts are written that way.
     """
+    if _ACCOUNT_LABEL.search(content[max(0, start - _LABEL_WINDOW) : start]):
+        return False
     token, s, e = _token_around(content, start, end)
     if _UUID.fullmatch(token.strip("._-")):
         return True
     after = token[e:]
-    before = token[:s]
-    if after.startswith("-"):
-        following = re.split(r"[-]", after[1:], maxsplit=1)[0]
-        if _HAS_LETTER.search(following):
-            return True
-        if before.endswith("-") and _HAS_LETTER.search(before[:-1].rsplit("-", 1)[-1]):
-            return True
-    return False
+    if not after.startswith("-"):
+        return False
+    following = re.split(r"[-._]", after[1:], maxsplit=1)[0]
+    return bool(_MIXED_PART.fullmatch(following) or _HOST_TAIL.match(after))
 
 
 # Severity levels for PII types

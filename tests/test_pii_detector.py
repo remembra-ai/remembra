@@ -122,7 +122,9 @@ def test_long_account_numbers_still_redacted():
         "GOOGLE_CLIENT_ID=629134551556-8v3kq0abcdefghijklmnopq.apps.googleusercontent.com",
         "client 629134551556-8v3kq0abcdefghij.apps.googleusercontent.com is the web one",
         "request 123e4567-e89b-12d3-a456-426614174000 and 12345678-1234-5678-1234-567812345678",
-        "image tag 20260926123456-a1b2c3 and build-1234567890-rc1",
+        "image tag 20260926123456-a1b2c3 and digest 1234567890123-9f8e7d6c5b4a",
+        # A client id whose random part happens to have no digit: still the first label of a host name.
+        "629134551556-abcdefghijklmnopqrstuvwxyzabcdef.apps.googleusercontent.com",
     ],
 )
 def test_hyphenated_identifiers_are_not_bank_accounts(text):
@@ -140,6 +142,18 @@ def test_hyphenated_identifiers_are_not_bank_accounts(text):
         ("branch-split 0012-345678901", "345678901"),
         ("acct-12345678 (checking)", "12345678"),
         ("wire to 9876543210123-", "9876543210123"),
+        # A word, code or number after the digits does not make them an identifier.
+        ("acct 123456789012-checking", "123456789012"),
+        ("Chase account 000123456789-SAV", "000123456789"),
+        ("NCB acct 354012345678-JMD savings", "354012345678"),
+        ("ACCT-000123456789-01", "000123456789"),
+        ("wire ref acct-12345678901-x", "12345678901"),
+        ("GB-12345678901234-abc", "12345678901234"),
+        ("statement 123456789012-checking.pdf", "123456789012"),
+        ("paid from 000123456789-USD", "000123456789"),
+        # An account label wins over any shape that follows.
+        ("acct 629134551556-8v3kq0abcdefg.apps.googleusercontent.com", "629134551556"),
+        ("account 12345678901-a1b2c3d4", "12345678901"),
     ],
 )
 def test_real_bank_account_numbers_are_still_redacted(text, number):
