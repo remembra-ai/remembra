@@ -428,6 +428,8 @@ async def test_gate_latency_with_a_fresh_snapshot(tmp_path):
             assert (res.returncode, res.stdout) == (0, "")
         times.sort()
         p95 = times[int(len(times) * 0.95) - 1]
+        p50, worst = times[len(times) // 2], times[-1]
+        print(f"gate pretool subprocess: p50 {p50 * 1000:.0f} ms, p95 {p95 * 1000:.0f} ms, max {worst * 1000:.0f} ms")
         # whole subprocess including interpreter start; the spec's p95 ≤90 ms applies with a CI guard of 2x
         assert p95 <= 0.18, f"p95 {p95 * 1000:.0f} ms, cold {times[-1] * 1000:.0f} ms"
         assert read_json(layout.session_file(session_key("claude-code", "sess-a")))["session_id"] == a["session_id"]
