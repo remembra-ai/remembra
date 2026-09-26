@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Relay: Gemini CLI, Qwen Code and Kimi Code hooks are verified.** Each was run against the real tool
+  (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1) with a temp home and a local stand-in for the model:
+  the hooks `connect` writes put the brief in the model's request and posted the handoff. The payloads are
+  recorded under `tests/fixtures/relay/`, and `REMEMBRA_RELAY_LIVE=1` reruns the three live tests. A plain
+  `remembra-relay connect --apply`, the last step of the one-line install, now writes their hooks; Cursor is
+  the one adapter left unverified.
+- **Gemini CLI:** a BeforeAgent hook (`brief --once`) gives a session started by `/clear` its brief with the
+  first prompt (Gemini drops that start's output), and `connect` says that Gemini runs hooks only in trusted
+  folders. Gemini CLI is detected by its binary or `~/.gemini/settings.json`, not the `~/.gemini` directory
+  Antigravity shares, and `connect` follows `GEMINI_CLI_HOME`.
+- **Qwen Code:** a turn that stops on a rate limit or billing error (StopFailure) and `/compress` (PreCompact)
+  also write the handoff, as for Claude Code. One-shot `qwen -p` runs write none: Qwen never ends them.
+- **Kimi Code:** the adapter targeted the archived Python kimi-cli (`~/.kimi/config.toml`), which no longer
+  runs sessions, and put the brief on SessionStart, whose output Kimi throws away. It now writes
+  `~/.kimi-code/config.toml` (or `$KIMI_CODE_HOME`): the brief comes with the first prompt of a session
+  (UserPromptSubmit, `brief --once`) and the close on SessionEnd, with timeouts. Relay hooks `kimi migrate`
+  copied without their markers are removed, and a file Kimi would reject is never written. The dashboard calls
+  it Kimi Code.
+
 ### Fixed
 
 - **Sign in with Google or GitHub on older accounts.** An account whose email was never verified (accounts

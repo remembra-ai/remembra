@@ -16,7 +16,8 @@ git calls and HTTP bounded), never raise, always exit 0 and report problems
 on stderr. With ``--hook NAME`` the agent's hook payload is read from stdin
 (session id, cwd, transcript path, end reason) using that adapter's mapping.
 ``brief --once`` prints nothing when this session already had its brief (a
-per-prompt hook that covers a missed start hook). For adapters whose agent
+per-prompt hook that covers a missed start hook, or a start whose output the
+agent drops, such as Gemini CLI's after ``/clear``). For adapters whose agent
 does not wait for the end hook, ``close --hook`` re-runs itself in a detached
 process and returns at once.
 
@@ -706,6 +707,10 @@ def cmd_brief(args: argparse.Namespace) -> int:
             if routed is None:
                 _hook_ack(reader)
                 return 0
+        if adapter and not args.once and payload.get("source") in adapter.spec.start_sources_without_context:
+            # The agent throws this start's output away (Gemini CLI after /clear): nothing is
+            # fetched or marked, so the prompt hook's `brief --once` gives the new session its brief.
+            return 0
         fields = adapter.spec.payload.extract(payload) if adapter else {}
         event = fields.get("event") or event
         hook_session = fields.get("session_id") or args.session_id

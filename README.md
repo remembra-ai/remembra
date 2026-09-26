@@ -70,10 +70,13 @@ The same repository on a laptop, a server or in a worktree is one project, becau
 |---|---|---|
 | Claude Code | **verified** | Hooks: brief at start, close at end, with test results from the transcript |
 | Codex | **verified** (codex-cli 0.155.0-alpha.16.4, a prerelease) | Hooks: brief at start, close at end, with commands and test runs from the rollout; trust them once with `/hooks` in Codex |
-| Cursor, Gemini CLI, Qwen Code, Kimi | unverified | MCP tools (`session_brief`, `close_session`) |
+| Gemini CLI | **verified** (Gemini CLI 0.61.0) | Hooks: brief at start (after `/clear`, with the first prompt), close at end; they run only in folders you trust |
+| Qwen Code | **verified** (Qwen Code 0.24.6) | Hooks: brief at start, close at end, on a rate-limit or billing stop and before `/compress`; `qwen -p` writes no handoff |
+| Kimi Code | **verified** (Kimi Code 2.1.1) | Hooks: brief with the first prompt, close when the TUI exits; `kimi -p` writes no handoff |
+| Cursor | unverified | MCP tools (`session_brief`, `close_session`) |
 | Any other MCP agent | none | MCP tools |
 
-Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease; no stable Codex release has been run yet). The hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet. `connect` leaves them out unless you add `--include-unverified`. Until they are tested, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent.
+Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease; no stable Codex release has been run yet). The Gemini CLI, Qwen Code and Kimi Code hooks are verified too: each was run against the real tool at the version in the table, with a local stand-in for the model, and put the brief in the model's request and posted the handoff; other versions have not been run. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. `connect` leaves them out unless you add `--include-unverified`. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent.
 
 ## How it compares
 

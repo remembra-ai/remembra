@@ -1,0 +1,14 @@
+{
+  "gemini_cli": "0.61.0",
+  "recorded_by": "tests/test_relay_gemini_live.py",
+  "model": "local stand-in for the Gemini API (GOOGLE_GEMINI_BASE_URL, gateway auth)",
+  "hook_env": [
+    "GEMINI_CLI_NO_RELAUNCH",
+    "GEMINI_CLI_TRUST_WORKSPACE",
+    "GEMINI_CWD",
+    "GEMINI_FORCE_FILE_STORAGE",
+    "GEMINI_PLANS_DIR",
+    "GEMINI_PROJECT_DIR",
+    "GEMINI_SESSION_ID"
+  ]
+}

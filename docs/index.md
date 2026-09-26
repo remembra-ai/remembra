@@ -28,9 +28,10 @@ release with `remembra-relay`.
 - [Remembra and other handoff tools](comparisons/handoff-tools.md): how it compares with claude-mem, agentmemory and local tools.
 
 Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease;
-run `/hooks` in Codex once to trust them). The hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified:
-they follow each tool's docs but have not been run against it yet; those agents use the MCP tools `session_brief` and
-`close_session` until they are.
+run `/hooks` in Codex once to trust them). The Gemini CLI, Qwen Code and Kimi Code hooks are verified too (Gemini CLI
+0.61.0, Qwen Code 0.24.6 and Kimi Code 2.1.1, each run with a local stand-in for the model). The Cursor hooks are
+unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet; Cursor uses the MCP tools
+`session_brief` and `close_session` until it has.
 
 ---
 

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import tomllib
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -385,33 +386,50 @@ def test_connect_dry_run_then_apply_claude_code(home):
 
 def test_connect_unverified_adapters_need_explicit_opt_in(home):
     relay_cmd = "/opt/bin/remembra-relay"
-    for installed in (".gemini", ".kimi"):  # the agents' own directories: installed here
-        (home / installed).mkdir()
-    skipped = relay(home, "http://x", "connect", "--agent", "gemini", "--apply", "--relay-command", relay_cmd)
+    (home / ".cursor").mkdir()  # Cursor's own directory: installed here
+    skipped = relay(home, "http://x", "connect", "--agent", "cursor", "--apply", "--relay-command", relay_cmd)
     assert "UNVERIFIED" in skipped.stdout and "skipped: unverified adapter" in skipped.stdout
-    assert not (home / ".gemini" / "settings.json").exists()
+    assert not (home / ".cursor" / "hooks.json").exists()
 
-    written = relay(
-        home,
-        "http://x",
-        "connect",
-        "--agent",
-        "gemini",
-        "--agent",
-        "kimi",
-        "--apply",
-        "--include-unverified",
-        "--relay-command",
-        relay_cmd,
-    )
+    args = ("connect", "--agent", "cursor", "--apply", "--include-unverified", "--relay-command", relay_cmd)
+    written = relay(home, "http://x", *args)
     assert written.returncode == 0, written.stderr
-    gem = json.loads((home / ".gemini" / "settings.json").read_text())
-    assert gem["hooks"]["SessionEnd"][0]["hooks"][0]["command"] == f"{relay_cmd} close --hook gemini --agent gemini"
-    kimi = (home / ".kimi" / "config.toml").read_text()
-    assert kimi.count("[[hooks]]") == 2
-    rerun = relay(home, "http://x", "connect", "--agent", "kimi", "--apply", "--include-unverified", "--relay-command", relay_cmd)
+    hooks = json.loads((home / ".cursor" / "hooks.json").read_text())["hooks"]
+    assert hooks["sessionEnd"] == [{"command": f"{relay_cmd} close --hook cursor --agent cursor", "timeout": 15}]
+    text = (home / ".cursor" / "hooks.json").read_text()
+    rerun = relay(home, "http://x", *args)
     assert "already connected" in rerun.stdout
-    assert (home / ".kimi" / "config.toml").read_text() == kimi
+    assert (home / ".cursor" / "hooks.json").read_text() == text
+
+
+def test_connect_writes_the_verified_gemini_qwen_and_kimi_hooks_without_opt_in(home):
+    """Gemini CLI 0.61.0, Qwen Code 0.24.6 and Kimi Code 2.1.1 ran these hooks (tests/test_relay_*_live.py)."""
+    relay_cmd = "/opt/bin/remembra-relay"
+    (home / ".gemini").mkdir()
+    (home / ".gemini" / "settings.json").write_text("{}\n")  # Gemini CLI's own file (Antigravity shares ~/.gemini)
+    (home / ".qwen").mkdir()
+    (home / ".kimi-code").mkdir()
+    agents = ("--agent", "gemini", "--agent", "qwen", "--agent", "kimi")
+    written = relay(home, "http://x", "connect", *agents, "--apply", "--relay-command", relay_cmd, env=NO_AGENT_BINS)
+    assert written.returncode == 0, written.stdout + written.stderr
+    assert "UNVERIFIED" not in written.stdout and "Not written" not in written.stdout
+    gem = json.loads((home / ".gemini" / "settings.json").read_text())["hooks"]
+    assert [gem[e][0]["hooks"][0]["command"] for e in ("SessionStart", "BeforeAgent", "SessionEnd")] == [
+        f"{relay_cmd} brief --hook gemini --agent gemini",
+        f"{relay_cmd} brief --hook gemini --agent gemini --once",
+        f"{relay_cmd} close --hook gemini --agent gemini",
+    ]
+    qwen = json.loads((home / ".qwen" / "settings.json").read_text())["hooks"]
+    assert list(qwen) == ["SessionStart", "SessionEnd", "StopFailure", "PreCompact"]
+    kimi = (home / ".kimi-code" / "config.toml").read_text()
+    assert [(h["event"], h["command"]) for h in tomllib.loads(kimi)["hooks"]] == [
+        ("UserPromptSubmit", f"{relay_cmd} brief --hook kimi --agent kimi --once"),
+        ("SessionEnd", f"{relay_cmd} close --hook kimi --agent kimi"),
+    ]
+    rerun = relay(home, "http://x", "connect", "--agent", "kimi", "--apply", "--relay-command", relay_cmd, env=NO_AGENT_BINS)
+    assert "already connected" in rerun.stdout
+    assert (home / ".kimi-code" / "config.toml").read_text() == kimi
+    assert not (home / ".kimi").exists()  # the archived kimi-cli's directory is never created
 
 
 def test_connect_without_a_key_warns_once_and_still_writes_hooks(home):
@@ -461,13 +479,14 @@ def test_connect_without_a_key_warns_once_and_still_writes_hooks(home):
 
 def test_connect_apply_lists_the_unverified_adapters_it_skipped(home):
     relay_cmd = "/opt/bin/remembra-relay"
-    for installed in (".gemini", ".qwen"):
+    for installed in (".cursor", ".qwen"):
         (home / installed).mkdir()
-    out = relay(home, "http://x", "connect", "--agent", "qwen", "--agent", "gemini", "--apply", "--relay-command", relay_cmd)
+    out = relay(home, "http://x", "connect", "--agent", "qwen", "--agent", "cursor", "--apply", "--relay-command", relay_cmd)
     assert out.returncode == 0, out.stderr
-    assert "Not written (unverified adapters): gemini, qwen." in out.stdout
-    assert "remembra-relay connect --apply --include-unverified --agent gemini --agent qwen" in out.stdout
-    dry = relay(home, "http://x", "connect", "--agent", "qwen", "--relay-command", relay_cmd)
+    assert "Not written (unverified adapters): cursor." in out.stdout
+    assert "remembra-relay connect --apply --include-unverified --agent cursor" in out.stdout
+    assert (home / ".qwen" / "settings.json").exists()  # verified: written
+    dry = relay(home, "http://x", "connect", "--agent", "cursor", "--relay-command", relay_cmd)
     assert "Not written (unverified adapters)" not in dry.stdout  # a dry run writes nothing anyway
 
 
@@ -622,29 +641,36 @@ def test_connect_keeps_unverified_hooks_it_wrote_earlier_current(home):
     --include-unverified run wrote are still rewritten when the relay's path changes, instead of
     being left on a stale path (hooks fail silently)."""
     old, new = "/old/venv/bin/remembra-relay", "/new/pipx/bin/remembra-relay"
+    (home / ".cursor").mkdir()
     (home / ".qwen").mkdir()
-    (home / ".gemini").mkdir()
-    for agent in ("qwen", "gemini"):
+    for agent in ("cursor", "qwen"):
         out = relay(home, "http://x", "connect", "--agent", agent, "--apply", "--include-unverified", "--relay-command", old)
         assert out.returncode == 0, out.stderr
-    (home / ".cursor").mkdir()  # installed, never connected: stays unverified-skipped
 
     oneliner = relay(home, "http://x", "connect", "--apply", "--relay-command", new, env=NO_AGENT_BINS)
     assert oneliner.returncode == 0, oneliner.stdout + oneliner.stderr
-    assert oneliner.stdout.count("updating the relay hooks already in this file (written earlier with --include-unverified)") == 2
-    for agent in ("qwen", "gemini"):
-        text = (home / f".{agent}" / "settings.json").read_text()
+    # Cursor is unverified: its hooks are refreshed because they are already there. Qwen is verified.
+    assert oneliner.stdout.count("updating the relay hooks already in this file (written earlier with --include-unverified)") == 1
+    for path in (home / ".cursor" / "hooks.json", home / ".qwen" / "settings.json"):
+        text = path.read_text()
         assert new in text and old not in text
+    assert "Not written (unverified adapters)" not in oneliner.stdout
+
+
+def test_an_installed_unverified_agent_never_connected_stays_skipped(home):
+    (home / ".cursor").mkdir()
+    oneliner = relay(home, "http://x", "connect", "--apply", "--relay-command", "/r", env=NO_AGENT_BINS)
+    assert oneliner.returncode == 0, oneliner.stdout + oneliner.stderr
     assert not (home / ".cursor" / "hooks.json").exists()
     assert "Not written (unverified adapters): cursor." in oneliner.stdout
 
 
 def test_gemini_hooks_on_disk_count_as_installed_without_its_binary(home):
-    """Gemini is detected by its binary, which a hook's shell may not have on PATH: hooks already in its
-    settings are kept current anyway."""
+    """Gemini is detected by its binary or its settings file; a hook's shell may not have the binary on
+    PATH. Hooks already in its settings are kept current."""
     (home / ".gemini").mkdir()
-    first = relay(home, "http://x", "connect", "--agent", "gemini", "--apply", "--include-unverified", "--relay-command", "/a")
-    assert first.returncode == 0
+    first = relay(home, "http://x", "connect", "--agent", "gemini", "--apply", "--relay-command", "/a", env=NO_AGENT_BINS)
+    assert first.returncode == 0, first.stdout + first.stderr
     out = relay(home, "http://x", "connect", "--apply", "--relay-command", "/b", env=NO_AGENT_BINS)
     assert "[gemini] Gemini CLI: not detected" not in out.stdout
     assert "/b close --hook gemini" in (home / ".gemini" / "settings.json").read_text()

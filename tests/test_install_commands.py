@@ -139,14 +139,21 @@ def test_no_install_command_puts_the_key_on_the_command_line() -> None:
                 raise AssertionError(where)
 
 
+VERIFIED = ["claude-code", "codex", "gemini", "kimi", "qwen"]  # sorted; Cursor is the one unverified adapter
+
+
 def test_every_page_names_the_same_verified_agents() -> None:
-    """Claude Code and Codex are the verified adapters (relay/adapters); no page may still call Codex unverified."""
+    """The verified adapters (relay/adapters) are named the same on the dashboard and every current page.
+
+    Claude Code and Codex, then Gemini CLI, Qwen Code and Kimi Code once each was run against the real
+    tool; no page may still call one of those unverified. The changelogs keep what each release said.
+    """
     from remembra.relay.adapters import REGISTRY
 
-    assert sorted(a.spec.name for a in REGISTRY.values() if a.spec.verified) == ["claude-code", "codex"]
+    assert sorted(a.spec.name for a in REGISTRY.values() if a.spec.verified) == VERIFIED
     dashboard = AGENTS_TS.read_text()
     verified_ids = re.findall(r"'?([\w-]+)'?: \{[^}]*verified: true", dashboard)
-    assert sorted(verified_ids) == ["claude-code", "codex"]
+    assert sorted(verified_ids) == VERIFIED
     stale = [
         "hooks for Codex, Cursor",
         "Codex, Cursor, Gemini CLI, Qwen Code, Kimi | unverified",
@@ -154,11 +161,22 @@ def test_every_page_names_the_same_verified_agents() -> None:
         "Codex, Cursor, Gemini CLI, Qwen Code and Kimi shipped unverified",
         "Claude Code's session hooks are verified. The hooks for Codex",
     ]
+    current = [
+        "Cursor, Gemini CLI, Qwen Code, Kimi | unverified",
+        "The hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified",
+        "hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified",
+    ]
     for page in _pages():
         text = " ".join(html.unescape(page.read_text()).split())
-        for phrase in stale:
+        for phrase in stale + ([] if "changelog" in page.name.lower() else current):
             assert phrase not in text, f"{page.relative_to(ROOT)}: {phrase}"
     for page in ("README.md", "docs/index.md", "docs/reference/changelog.md", "CHANGELOG.md", "landing/changelog.html"):
         text = " ".join(html.unescape((ROOT / page).read_text()).split())
         assert "Codex" in text and "codex-cli 0.155.0-alpha.16.4" in text, page
+    for page in ("README.md", "docs/index.md", "landing/index.html", "docs/guides/relay.md"):
+        text = " ".join(html.unescape((ROOT / page).read_text()).split())
+        assert all(v in text for v in ("Gemini CLI 0.61.0", "Qwen Code 0.24.6", "Kimi Code 2.1.1")), page
+        assert "The Cursor hooks are unverified" in text or "| Cursor IDE |" in text, page
+    for page in ("docs/reference/changelog.md", "CHANGELOG.md", "landing/changelog.html"):  # the 0.16 notes, as released
+        text = " ".join(html.unescape((ROOT / page).read_text()).split())
         assert "Cursor, Gemini CLI, Qwen Code" in text and "unverified" in text, page

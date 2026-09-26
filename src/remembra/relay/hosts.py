@@ -95,7 +95,7 @@ def _own_dirs(adapter: Adapter, environ: Mapping[str, str], home: Path) -> list[
     dirs = [adapter.spec.config_home(home)]
     moved = (environ.get(adapter.spec.home_env) or "").strip() if adapter.spec.home_env else ""
     if moved:
-        dirs.append(Path(moved).expanduser())
+        dirs.append(adapter.spec.dir_from_env(moved))
     return dirs
 
 

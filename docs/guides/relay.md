@@ -78,9 +78,9 @@ config or credentials file with a key that other users on the machine can read.
 | Claude Code | `~/.claude/settings.json` SessionStart → `brief`; SessionEnd, StopFailure (usage or billing limit) and PreCompact → `close` (transcript parsed) | verified |
 | Codex CLI | `~/.codex/hooks.json` SessionStart → `brief`, UserPromptSubmit → `brief --once`, SessionEnd → `close` (rollout parsed) | verified (codex-cli 0.155.0-alpha.16.4, a prerelease) |
 | Cursor IDE | `~/.cursor/hooks.json` sessionStart / sessionEnd, IDE and cursor-agent (`additional_context` output) | unverified |
-| Gemini CLI | `~/.gemini/settings.json` SessionStart / SessionEnd (JSON-only stdout, timeouts in ms) | unverified |
-| Qwen Code | `~/.qwen/settings.json` SessionStart / SessionEnd (timeouts in seconds) | unverified |
-| Kimi Code | `~/.kimi/config.toml` `[[hooks]]` | unverified |
+| Gemini CLI | `~/.gemini/settings.json` SessionStart → `brief`, BeforeAgent → `brief --once`, SessionEnd → `close` (JSON-only stdout, timeouts in ms) | verified (Gemini CLI 0.61.0) |
+| Qwen Code | `~/.qwen/settings.json` SessionStart → `brief`; SessionEnd, StopFailure (rate limit or billing) and PreCompact → `close` (timeouts in seconds) | verified (Qwen Code 0.24.6) |
+| Kimi Code | `~/.kimi-code/config.toml` `[[hooks]]` UserPromptSubmit → `brief --once`, SessionEnd → `close` | verified (Kimi Code 2.1.1) |
 
 "Verified" means the hooks were run against the real tool: Claude Code against its hook docs and real
 transcripts; Codex in a round trip recorded under `tests/fixtures/relay/codex/`: a Claude Code close replayed
@@ -88,9 +88,11 @@ through its verified hook path (not a live Claude Code session), then a real `co
 ran commands and left its own handoff. That run used a local stand-in for the model, and recorded hook trust
 the way `/hooks` records it (the hash Codex's app server reports), not through the `/hooks` screen. Only the
 Codex version in the table has been run; it is a prerelease (the build bundled in ChatGPT.app), and no stable
-Codex release has been run yet. Gemini CLI and Qwen Code are built from their hook docs and tested
-against payloads written from those docs, not against the tools. Cursor's payloads were recorded from
-cursor-agent's own hook runner, driven outside a logged-in session, so it stays unverified too.
+Codex release has been run yet. Gemini CLI, Qwen Code and Kimi Code were each run the same way, at the version
+in the table, with a temp home and a local stand-in for the model (no login): the hooks `connect` writes put
+the brief in the model's request and posted the handoff at the end, and the payloads are recorded under
+`tests/fixtures/relay/<agent>/`. Other versions of those tools have not been run. Cursor's payloads were
+recorded from cursor-agent's own hook runner, driven outside a logged-in session, so it stays unverified.
 
 Unverified adapters are dry-run only unless you pass `--include-unverified`; `connect --apply` ends by
 listing the ones it skipped and the command that writes them. Hooks an earlier `--include-unverified` run
@@ -99,9 +101,32 @@ wrote are kept current by a plain `connect --apply` (after a reinstall moves `re
 `--force`: it would create the agent's directory, which then looks like an install to every detector.
 `disconnect --apply` removes the directories `connect` created once only its own backups are left in them.
 
-`connect` follows `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `QWEN_HOME` when they are set. Cursor, Gemini CLI and
-Qwen Code accept comments in their JSON config; `connect` reads such a file too, and when it rewrites it
-says so: the comments are not kept, the backup keeps them.
+`connect` follows `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `QWEN_HOME`, `KIMI_CODE_HOME` and `GEMINI_CLI_HOME` (the
+home Gemini CLI keeps `.gemini` in) when they are set. Cursor, Gemini CLI and Qwen Code accept comments in their
+JSON config; `connect` reads such a file too, and when it rewrites it says so: the comments are not kept, the
+backup keeps them. Kimi Code's TOML file is kept as you wrote it: `connect` rewrites only its own marked block,
+and refuses to write a result Kimi would reject.
+
+**Gemini CLI: trust the folder.** Gemini CLI runs hooks, the user-level ones `connect` writes included, only
+in folders you trust: choose "Trust folder" when it asks. In an untrusted folder no brief is loaded and no
+handoff is saved; headless `gemini -p` there stops before any hook (add `--skip-trust`, or set
+`GEMINI_CLI_TRUST_WORKSPACE=true`). After `/clear` Gemini drops the new session's start output, so the
+BeforeAgent hook gives that session its brief with its first prompt; on every other prompt it prints nothing.
+Gemini puts the brief in `<hook_context>` with `<` and `>` escaped. Gemini CLI is detected by its binary or
+`~/.gemini/settings.json`, not by `~/.gemini` alone, which Antigravity also uses.
+
+**Qwen Code.** A handoff is written when an interactive session ends (`/quit`, `/clear`, SIGTERM or SIGHUP),
+when a turn stops on a rate limit or billing error, and before `/compress`. One-shot `qwen -p` (or a prompt
+given as an argument) gets the brief but never fires SessionEnd, so it writes no handoff. A resumed session
+(`--continue`) gets a fresh brief: Qwen does not restore the old one.
+
+**Kimi Code.** Kimi Code (npm `@moonshot-ai/kimi-code`, command `kimi`) replaced the archived Python kimi-cli,
+which only prints a deprecation notice and never ran hooks. Kimi throws away SessionStart output, so the brief
+comes with the first prompt of a session (UserPromptSubmit), and a resumed session (`kimi -c`) does not fetch
+it again. Leaving the TUI (`/exit` or Ctrl-D twice) writes the handoff; `kimi -p` runs never end their session
+and write none. `kimi migrate` copies hooks from the old `~/.kimi/config.toml` without their markers; `connect`
+and `disconnect` find those copies by their command and remove them. A block an earlier release wrote to
+`~/.kimi/config.toml` can be deleted: nothing runs it.
 
 **Hooks other agents run.** Grok Build loads `~/.claude/settings.json` hooks and `~/.cursor/hooks.json`
 by default; Cursor (IDE and cursor-agent), Devin and Continue's `cn` load the Claude Code hooks too; and
@@ -120,9 +145,11 @@ Codex asks again whenever a hook's command changes (for example after `connect` 
 install path). The UserPromptSubmit hook covers sessions where SessionStart does not fire (Codex
 auto-restoring a thread): it prints the brief only if that session has not had one.
 
-**Agents that do not wait for the end hook.** Codex stops a SessionEnd hook after 1 to 3 seconds; Gemini CLI
-and Qwen Code do not wait for it, nor does the Cursor IDE by its docs. For these `close` hands the work to a detached background
-process and returns at once; that process logs to `~/.remembra/relay/last-detached-close.log`.
+**Agents that do not wait for the end hook.** Codex stops a SessionEnd hook after 1 to 3 seconds and Qwen Code
+after about 2; Gemini CLI's docs say it does not wait (0.61.0 waits on `/quit`, but a closing terminal still
+takes it down), nor does the Cursor IDE by its docs. For these `close` hands the work to a detached background
+process and returns at once; that process logs to `~/.remembra/relay/last-detached-close.log`. Kimi Code waits
+for SessionEnd, so its `close` runs in the hook itself.
 
 **Usage limits.** Codex has no hook for its usage limit. When a Codex session's last turn stopped on the
 limit, the handoff says `ended: usage_limit` (the brief and the trail show `stopped: usage_limit`, as for a
@@ -146,7 +173,7 @@ Windsurf is unverified and left out of `--all`: `remembra-install --agent windsu
 own **Open MCP config file** opens `~/.config/devin/mcp_config.json`; add the block there if Cascade does not
 list `remembra`).
 
-It does not write Qwen Code or Kimi yet. Add the server to them yourself. Qwen Code reads the same
+It does not write Qwen Code or Kimi Code yet. Add the server to them yourself. Qwen Code reads the same
 `mcpServers` block as Gemini CLI, in `~/.qwen/settings.json`:
 
 ```json
@@ -165,8 +192,9 @@ It does not write Qwen Code or Kimi yet. Add the server to them yourself. Qwen C
 }
 ```
 
-For Kimi, add a stdio MCP server named `remembra` with the same command and environment, as Kimi's own
-MCP docs describe. Both are untested with Remembra so far; tell us if either one balks.
+Kimi Code reads the same `mcpServers` block from `~/.kimi-code/mcp.json` (its MCP docs). Qwen Code 0.24.6
+listed the Qwen block as connected (`qwen mcp list`); the Kimi Code one has not been run with Remembra yet, so
+tell us if it balks.
 
 A Codex sandbox with no network cannot reach the URL directly. Use `remembra-install-codex --start-bridge`
 there instead (it asks for the key like `remembra-install`): it points Codex at a local bridge that holds the key.

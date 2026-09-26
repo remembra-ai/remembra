@@ -119,6 +119,9 @@ class AdapterSpec:
     transcript_format: str | None = None  # "claude-jsonl" | "codex-rollout-jsonl" (facts.TRANSCRIPT_FORMATS); None: not parsed
     detect_bins: tuple[str, ...] = ()
     detect_dirs: tuple[str, ...] = ()  # relative to home
+    # Files that mean "installed" (relative to home), where a directory alone would not: Gemini
+    # CLI's ~/.gemini is also Antigravity's, but only Gemini CLI writes ~/.gemini/settings.json.
+    detect_files: tuple[str, ...] = ()
     config_source: str | None = None  # prefer this config file for the API key ("claude" | "codex")
     # Per-hook timeouts in SECONDS, keyed "start" / "prompt" / "end"; written in the agent's
     # own unit (``timeout_unit``). Only set where the agent documents the field and unit.
@@ -127,6 +130,9 @@ class AdapterSpec:
     # A third event that runs `brief --once`: delivers the brief when the start event did
     # not fire (Codex does not fire SessionStart when it auto-restores a thread).
     prompt_event: str | None = None
+    # Start ``source`` values whose output the agent throws away (Gemini CLI's /clear):
+    # `brief` does nothing then, so the prompt event's `brief --once` delivers it.
+    start_sources_without_context: tuple[str, ...] = ()
     # `close` hands the work to a detached process and exits at once: for agents that
     # do not wait for the end hook or kill it after a short timeout.
     detach_close: bool = False
@@ -140,6 +146,9 @@ class AdapterSpec:
     # Environment variable that moves the agent's own directory (the first part of
     # ``config_path`` under home, e.g. ``~/.qwen``); see :meth:`config_file`.
     home_env: str | None = None
+    # ``$home_env`` names a replacement HOME that holds the agent's directory, not the directory
+    # itself (Gemini CLI reads ``$GEMINI_CLI_HOME/.gemini/settings.json``).
+    home_env_is_home: bool = False
     # Payload keys that mean "not a session of its own" (a subagent's end): the hook does nothing.
     skip_payload_keys: tuple[str, ...] = ()
     # A second close of the same session, event and end reason within this many seconds is
@@ -165,7 +174,17 @@ class AdapterSpec:
         if not self.home_env or Path(home) != Path.home():
             return None
         value = os.environ.get(self.home_env, "").strip()
-        return Path(value).expanduser() if value else None
+        return self.dir_from_env(value) if value else None
+
+    def dir_from_env(self, value: str) -> Path:
+        """The agent's own directory when ``$home_env`` is ``value`` (see ``home_env_is_home``)."""
+        path = Path(value).expanduser()
+        if not self.home_env_is_home:
+            return path
+        try:
+            return path / self.config_path(path).relative_to(path).parts[0]
+        except (ValueError, IndexError):
+            return path
 
     def config_file(self, home: Path) -> Path:
         """The config file the agent reads: ``config_path(home)``, inside ``$home_env`` when that is set."""
@@ -302,9 +321,12 @@ class Adapter:
         self.spec = spec
 
     def detect(self, home: Path, which: Callable[[str], str | None] = shutil.which) -> bool:
-        if any(which(b) for b in self.spec.detect_bins) or any((home / d).is_dir() for d in self.spec.detect_dirs):
+        spec = self.spec
+        if any(which(b) for b in spec.detect_bins) or any((home / d).is_dir() for d in spec.detect_dirs):
             return True
-        moved = self.spec.moved_home(home)
+        if any((home / f).is_file() for f in spec.detect_files):
+            return True
+        moved = spec.moved_home(home)
         return moved is not None and moved.is_dir()
 
     def commands(self, relay: str) -> dict[str, str]:

@@ -1,15 +1,17 @@
 """Adapters replayed against payload fixtures (tests/fixtures/relay/, see its README).
 
-Codex fixtures are recorded from a live run (tests/test_relay_codex_live.py);
-Cursor's from cursor-agent's own hook runner driven by a harness; Gemini CLI
-and Qwen Code fixtures are written from each tool's hook docs. Also here:
-config files with comments and a byte order mark (C3), config homes moved by
-an environment variable (C4) and the brief's output modes (C7). Against the
+Codex, Gemini CLI, Qwen Code and Kimi Code fixtures are recorded from live
+runs (tests/test_relay_{codex,gemini,qwen,kimi}_live.py); Cursor's from
+cursor-agent's own hook runner driven by a harness. Also here: config files
+with comments and a byte order mark (C3), config homes moved by an
+environment variable (C4) and the brief's output modes (C7). Against the
 local test server:
 
 - ``brief --once`` (Codex's UserPromptSubmit hook) delivers a brief once per
   session, and a resumed Codex session does not get a second copy;
-- ``close`` for agents that do not wait for the end hook (Gemini CLI, Qwen
+- Gemini CLI's start after ``/clear`` fetches nothing, and its BeforeAgent
+  hook (``brief --once``) gives that session its brief instead;
+- ``close`` for agents that may not wait for the end hook (Gemini CLI, Qwen
   Code, Cursor, Codex) detaches: the handoff arrives when the agent is killed
   100 ms after starting the hook, and when the hook's process group is killed
   after it returns;
@@ -36,6 +38,7 @@ import sys
 import textwrap
 import threading
 import time
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +49,7 @@ from remembra.relay import facts as factlib
 from remembra.relay.adapters import REGISTRY
 from remembra.relay.cli import main as relay_main
 from remembra.relay.handoff import end_reason_note
+from tests.agent_live_harness import RecordingProxy
 from tests.relay_fixtures import GIT_ENV, Transcript, commit, git, make_remote_and_clones
 from tests.test_relay_cli_e2e import SRC, _api, relay, server  # noqa: F401  (server is a fixture)
 
@@ -272,8 +276,9 @@ def dry_close(home, monkeypatch, capsys):
     def run(hook: str, payload: dict[str, Any]) -> dict[str, Any]:
         monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
         assert relay_main(["close", "--hook", hook, "--agent", hook, "--dry-run"]) == 0
-        out = capsys.readouterr().out
-        return dict(json.loads(out[out.index("{") :]))
+        captured = capsys.readouterr()
+        run.stderr = captured.err  # type: ignore[attr-defined]
+        return dict(json.loads(captured.out[captured.out.index("{") :]))
 
     return run
 
@@ -316,27 +321,113 @@ def test_gemini_transcript_is_not_parsed_but_close_still_works(tmp_path, dry_clo
 
 
 # ---------------------------------------------------------------------------
-# Gemini CLI, Qwen Code, Cursor: doc-derived payloads, config shape
+# Gemini CLI, Qwen Code, Kimi Code, Cursor: recorded payloads, config shape
 # ---------------------------------------------------------------------------
+
+LIVE_RECORDINGS = {  # adapter -> the version's key in its RECORDED.json
+    "gemini": "gemini_cli",
+    "qwen": "qwen_code",
+    "kimi": "kimi_code",
+}
+
+
+@pytest.mark.parametrize("agent", sorted(LIVE_RECORDINGS))
+def test_fixtures_are_a_recorded_run_of_the_version_the_notes_name(agent):
+    import importlib
+
+    recorded = json.loads((FIXTURES / agent / "RECORDED.json").read_text())
+    version = recorded[LIVE_RECORDINGS[agent]]
+    module = importlib.import_module(f"remembra.relay.adapters.{agent}")
+    assert (version,) == module.TESTED_VERSIONS
+    notes = REGISTRY[agent].spec.notes
+    assert f" {version}" in notes and "other versions have not been run" in notes
+    assert recorded["recorded_by"] == f"tests/test_relay_{agent}_live.py"
+    assert (Path(__file__).resolve().parent / f"test_relay_{agent}_live.py").exists()
+    for path in (FIXTURES / agent).glob("*.json"):
+        text = path.read_text()
+        assert "/private/" not in text and "/Users/" not in text and "-private-" not in text, path  # paths replaced
 
 
 @pytest.mark.parametrize(
-    ("agent", "reason"),
-    [("gemini", "exit"), ("qwen", "prompt_input_exit"), ("cursor", "aborted")],
+    ("agent", "name", "reason"),
+    [
+        ("gemini", "session_start.json", None),
+        ("gemini", "before_agent.json", None),
+        ("gemini", "session_end.json", "exit"),
+        ("gemini", "session_start_clear.json", None),
+        ("gemini", "session_end_clear.json", "clear"),
+        ("qwen", "session_start.json", None),
+        ("qwen", "session_end.json", "prompt_input_exit"),
+        ("qwen", "session_start_clear.json", None),
+        ("qwen", "session_end_clear.json", "clear"),
+        ("qwen", "session_start_resume.json", None),
+        ("qwen", "stop_failure.json", "billing_error"),  # StopFailure: the API error is the end reason
+        ("qwen", "pre_compact.json", "pre-compact:manual"),
+        ("cursor", "session_start.json", None),
+        ("cursor", "session_end.json", "aborted"),
+    ],
 )
-def test_doc_payloads_map_to_session_fields(agent, reason):
-    spec = REGISTRY[agent].spec
-    start, end = _load(agent, "session_start.json"), _load(agent, "session_end.json")
-    assert start["hook_event_name"] == spec.start_event and end["hook_event_name"] == spec.end_event
-    for payload, want_reason in ((start, None), (end, reason)):
-        fields = spec.payload.extract(payload, environ={})
-        assert fields == {
-            "session_id": payload["session_id"],
-            "cwd": FIXTURE_REPO,
-            "transcript": payload["transcript_path"],
-            "reason": want_reason,
-            "event": payload["hook_event_name"],
-        }
+def test_recorded_payloads_map_to_session_fields(agent, name, reason):
+    payload = _load(agent, name)
+    fields = REGISTRY[agent].spec.payload.extract(payload, environ={})
+    assert fields == {
+        "session_id": payload["session_id"],
+        "cwd": FIXTURE_REPO,
+        "transcript": payload["transcript_path"],
+        "reason": reason,
+        "event": payload["hook_event_name"],
+    }
+
+
+def test_recorded_start_payloads_name_the_events_the_adapters_install():
+    for agent in ("gemini", "qwen", "cursor"):
+        spec = REGISTRY[agent].spec
+        assert _load(agent, "session_start.json")["hook_event_name"] == spec.start_event
+        assert _load(agent, "session_end.json")["hook_event_name"] == spec.end_event
+    assert _load("gemini", "before_agent.json")["hook_event_name"] == REGISTRY["gemini"].spec.prompt_event
+    assert _load("gemini", "session_start_clear.json")["source"] in REGISTRY["gemini"].spec.start_sources_without_context
+    assert _load("qwen", "session_start_clear.json")["source"] not in REGISTRY["qwen"].spec.start_sources_without_context
+    qwen_extra = {(e.event, e.matcher) for e in REGISTRY["qwen"].spec.extra_close_events}
+    assert qwen_extra == {("StopFailure", "rate_limit|billing_error"), ("PreCompact", None)}
+    assert _load("qwen", "stop_failure.json")["error"] in ("rate_limit", "billing_error")
+
+
+@pytest.mark.parametrize(
+    ("name", "event", "reason"),
+    [("user_prompt_submit.json", "UserPromptSubmit", None), ("session_end.json", "SessionEnd", "exit")],
+)
+def test_kimi_recorded_payloads_map_to_session_fields(name, event, reason):
+    """Kimi Code sends no transcript path; its session ids are ``session_<uuid>``."""
+    payload = _load("kimi", name)
+    assert payload["hook_event_name"] == event and payload["client_type"] == "kimi_code_cli"
+    spec = REGISTRY["kimi"].spec
+    assert event in (spec.prompt_event, spec.end_event) and spec.start_event is None
+    assert spec.payload.extract(payload, environ={}) == {
+        "session_id": payload["session_id"],
+        "cwd": FIXTURE_REPO,
+        "transcript": None,
+        "reason": reason,
+        "event": event,
+    }
+
+
+def test_qwen_quota_stop_and_compaction_close_with_their_reasons(tmp_path, dry_close):
+    repo = _repo(tmp_path)
+    for name, reason in (("stop_failure.json", "billing_error"), ("pre_compact.json", "pre-compact:manual")):
+        payload = {**_load("qwen", name), "cwd": str(repo), "transcript_path": None}
+        body = dry_close("qwen", payload)
+        assert body["agent_id"] == "qwen" and body["session_id"] == payload["session_id"]
+        assert body["end_reason"] == reason and body["facts"]["facts_source"] == "relay-cli:git"
+
+
+def test_kimi_close_uses_git_facts(tmp_path, dry_close):
+    repo = _repo(tmp_path)
+    commit(repo, "totals.py", "def total(): ...\n", "feat: totals")
+    body = dry_close("kimi", {**_load("kimi", "session_end.json"), "cwd": str(repo)})
+    assert body["agent_id"] == "kimi" and body["end_reason"] == "exit"
+    assert body["session_id"] == _load("kimi", "session_end.json")["session_id"]
+    assert body["facts"]["facts_source"] == "relay-cli:git"
+    assert "transcript" not in dry_close.stderr  # Kimi sends none; nothing to complain about
 
 
 def test_env_fallbacks_when_the_payload_lacks_fields():
@@ -359,8 +450,10 @@ def test_timeouts_are_written_in_each_agents_unit(tmp_path):
             return {event: entries[0]["timeout"] for event, entries in after.items()}
         return {event: groups[0]["hooks"][0]["timeout"] for event, groups in after.items()}
 
-    assert timeouts("gemini") == {"SessionStart": 15000, "SessionEnd": 15000}  # milliseconds: 15 would be 15 ms
-    assert timeouts("qwen") == {"SessionStart": 15, "SessionEnd": 15}  # seconds (>= 1000 would be read as ms)
+    # Gemini: milliseconds (15 would be 15 ms); BeforeAgent runs `brief --once`.
+    assert timeouts("gemini") == {"SessionStart": 15000, "BeforeAgent": 15000, "SessionEnd": 15000}
+    # Qwen: seconds (>= 1000 would be read as ms); StopFailure and PreCompact close with the end hook's timeout.
+    assert timeouts("qwen") == {"SessionStart": 15, "SessionEnd": 15, "StopFailure": 15, "PreCompact": 15}
     assert timeouts("cursor") == {"sessionStart": 15, "sessionEnd": 15}
     assert timeouts("codex") == {"SessionStart": 15, "UserPromptSubmit": 15, "SessionEnd": 3}  # SessionEnd max is 3 s
     # StopFailure and PreCompact also run close, with the end hook's timeout.
@@ -391,7 +484,16 @@ def test_cursor_config_keeps_other_hooks_and_is_idempotent(tmp_path):
 
 def test_adapters_that_detach_close_are_the_ones_whose_agent_does_not_wait():
     assert {name for name, a in REGISTRY.items() if a.spec.detach_close} == {"codex", "gemini", "qwen", "cursor"}
-    assert {name for name, a in REGISTRY.items() if a.spec.verified} == {"claude-code", "codex"}
+    # Kimi Code waits for SessionEnd up to its timeout (seen on 2.1.1): the close runs inline.
+    assert not REGISTRY["kimi"].spec.detach_close
+
+
+def test_the_verified_adapters_are_the_ones_run_against_their_agent():
+    """Claude Code (the original verification) and every adapter with a recorded live run; Cursor stays Beta."""
+    verified = {name for name, a in REGISTRY.items() if a.spec.verified}
+    assert verified == {"claude-code", "codex", "gemini", "qwen", "kimi"}
+    for name in verified - {"claude-code"}:
+        assert (FIXTURES / name / "RECORDED.json").exists(), name
 
 
 # ---------------------------------------------------------------------------
@@ -518,8 +620,8 @@ def _gone(pid: int, timeout: float) -> bool:
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX signals")
 def test_gemini_close_survives_the_cli_being_killed_100ms_after_the_hook_starts(server, home, tmp_path):  # noqa: F811
-    """Gemini CLI does not wait for SessionEnd ("the CLI will not wait"): it may exit, and its
-    process group may be torn down, while the hook is still posting.
+    """Gemini CLI's docs say it does not wait for SessionEnd; 0.61.0 does wait on /quit, but fires it
+    two or three times, and a closing terminal can take the CLI down while the hook is still posting.
 
     The CLI (a stand-in process that runs the hook the way a CLI does, pipes and all) is
     killed 100 ms after it starts the hook. Then everything left in the CLI's process group
@@ -600,6 +702,171 @@ def test_dry_run_and_foreground_close_do_not_detach(server, home, tmp_path):  # 
     fg = relay(home, server, "close", "--hook", "codex", "--agent", "codex", "--foreground", stdin=payload)
     assert fg.returncode == 0 and fg.stderr == ""
     assert _wait_for_handoff(home, server, repo, "codex", timeout=1)  # posted before the command returned
+
+
+# ---------------------------------------------------------------------------
+# Gemini CLI: the start after /clear, detection
+# ---------------------------------------------------------------------------
+
+
+def test_gemini_start_after_clear_fetches_nothing_and_the_prompt_hook_delivers_the_brief(server, home, tmp_path):  # noqa: F811
+    """Gemini drops SessionStart's context after /clear (seen on 0.61.0). That start fetches nothing and
+    marks nothing, so BeforeAgent's `brief --once` gives the new session its brief, once."""
+    repo = _repo(tmp_path)
+    cleared = {**_load("gemini", "session_start_clear.json"), "cwd": str(repo)}
+    prompt = {**_load("gemini", "before_agent.json"), "cwd": str(repo), "session_id": cleared["session_id"], "prompt": "hi"}
+    hook = ("brief", "--hook", "gemini", "--agent", "gemini")
+    with RecordingProxy(server) as proxy:
+        start = relay(home, proxy.url, *hook, stdin=json.dumps(cleared))
+        assert start.returncode == 0 and start.stdout == "" and start.stderr == "", start.stderr
+        assert proxy.requests == []
+
+        first = relay(home, proxy.url, *hook, "--once", stdin=json.dumps(prompt))
+        output = json.loads(first.stdout)["hookSpecificOutput"]
+        assert output["hookEventName"] == "BeforeAgent"
+        assert output["additionalContext"].startswith("# Remembra brief") and "you are gemini" in output["additionalContext"]
+        again = relay(home, proxy.url, *hook, "--once", stdin=json.dumps(prompt))
+        assert again.returncode == 0 and again.stdout == ""  # the next prompt of that session
+        assert len(proxy.briefs()) == 1
+
+        startup = {**_load("gemini", "session_start.json"), "cwd": str(repo)}
+        assert "additionalContext" in relay(home, proxy.url, *hook, stdin=json.dumps(startup)).stdout
+        its_prompt = {**prompt, "session_id": startup["session_id"]}
+        assert relay(home, proxy.url, *hook, "--once", stdin=json.dumps(its_prompt)).stdout == ""
+        assert len(proxy.briefs()) == 2  # a new session's start still gets it; its prompt hook then prints nothing
+
+
+def test_gemini_is_detected_by_its_settings_file_not_the_directory_antigravity_shares(tmp_path):
+    adapter, nothing = REGISTRY["gemini"], lambda binary: None
+    (tmp_path / ".gemini" / "antigravity").mkdir(parents=True)  # only Antigravity's files
+    assert not adapter.detect(tmp_path, which=nothing)
+    (tmp_path / ".gemini" / "settings.json").write_text("{}")
+    assert adapter.detect(tmp_path, which=nothing)
+    assert adapter.detect(tmp_path / "elsewhere", which=lambda binary: "/usr/local/bin/gemini" if binary == "gemini" else None)
+
+
+# ---------------------------------------------------------------------------
+# Kimi Code: the [[hooks]] block in ~/.kimi-code/config.toml
+# ---------------------------------------------------------------------------
+
+KIMI_USER_CONFIG = """# my Kimi Code config
+default_model = "k2"
+
+[providers.moonshot]
+type = "kimi"
+base_url = "https://api.example.test/v1"
+
+# audit every tool call
+[[hooks]]
+event = "PreToolUse"
+command = "./audit.sh"
+"""
+
+
+def _kimi(home: Path) -> Path:
+    path = REGISTRY["kimi"].spec.config_file(home)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def test_kimi_block_is_added_after_the_users_config_and_kept_current(tmp_path):
+    from remembra.relay.adapters.kimi import BEGIN
+
+    adapter = REGISTRY["kimi"]
+    path = _kimi(tmp_path)
+    assert path == tmp_path / ".kimi-code" / "config.toml"
+    path.write_text(KIMI_USER_CONFIG)
+    change = adapter.plan(tmp_path, "/bin/relay")
+    assert change.after.startswith(KIMI_USER_CONFIG)  # the user's text, comments included, as written
+    assert change.summary == ["write the managed [[hooks]] block (UserPromptSubmit, SessionEnd)"]
+    assert tomllib.loads(change.after)["hooks"] == [
+        {"event": "PreToolUse", "command": "./audit.sh"},
+        {"event": "UserPromptSubmit", "command": "/bin/relay brief --hook kimi --agent kimi --once", "timeout": 15},
+        {"event": "SessionEnd", "command": "/bin/relay close --hook kimi --agent kimi", "timeout": 15},
+    ]
+    path.write_text(change.after)
+    assert not adapter.plan(tmp_path, "/bin/relay").changed and adapter.connected(tmp_path)
+    moved = adapter.plan(tmp_path, "/new/relay")  # a new install path: the block is rewritten in place
+    assert moved.after.count(BEGIN) == 1 and "/new/relay close" in moved.after and "/bin/relay" not in moved.after
+    removal = adapter.plan_removal(tmp_path)
+    assert removal.after == KIMI_USER_CONFIG and not removal.delete
+    assert removal.summary == ["remove the managed remembra-relay [[hooks]] block"]
+
+
+def test_kimi_removes_relay_hooks_kimi_migrate_copied_without_the_markers(tmp_path):
+    adapter = REGISTRY["kimi"]
+    path = _kimi(tmp_path)
+    user_hook = KIMI_USER_CONFIG[KIMI_USER_CONFIG.index("# audit every tool call") :]
+    head = KIMI_USER_CONFIG[: KIMI_USER_CONFIG.index("# audit every tool call")]
+    copies = (
+        '[[hooks]]\nevent = "SessionStart"\ncommand = "/old/remembra-relay brief --hook kimi --agent kimi"\n\n'
+        '[[hooks]]\nevent = "SessionEnd"\ncommand = "/old/remembra-relay close --hook claude-code --agent claude-code"\n\n'
+    )
+    path.write_text(head + copies + user_hook)
+    change = adapter.plan(tmp_path, "/bin/relay")
+    assert change.summary == [
+        "write the managed [[hooks]] block (UserPromptSubmit, SessionEnd)",
+        "remove 2 relay [[hooks]] tables outside the block (copied by `kimi migrate`)",
+    ]
+    assert "/old/remembra-relay" not in change.after and "# audit every tool call\n[[hooks]]" in change.after
+    assert [h["event"] for h in tomllib.loads(change.after)["hooks"]] == ["PreToolUse", "UserPromptSubmit", "SessionEnd"]
+    # disconnect takes the copies too, without a block of ours in the file
+    removal = adapter.plan_removal(tmp_path)
+    assert removal.summary == ["remove 2 relay [[hooks]] tables outside the block"]
+    assert [h["event"] for h in tomllib.loads(removal.after)["hooks"]] == ["PreToolUse"]
+
+
+def test_kimi_keeps_what_follows_the_block_as_written(tmp_path):
+    """Kimi (or the user) may add tables after our block; a new relay path rewrites only the block."""
+    from remembra.relay.adapters.kimi import BEGIN
+
+    adapter = REGISTRY["kimi"]
+    path = _kimi(tmp_path)
+    after = '\n\n# added later\n[providers.local]\ntype = "openai"\n'
+    path.write_text(adapter.plan(tmp_path, "/bin/relay").after + after)
+    assert not adapter.plan(tmp_path, "/bin/relay").changed
+    moved = adapter.plan(tmp_path, "/new/relay").after
+    assert moved.endswith("<<< remembra-relay (managed block) <<<\n" + after) and "/bin/relay" not in moved
+    path.write_text(moved.rstrip("\n").removesuffix(after.rstrip("\n")).rstrip("\n"))  # END at the end, no newline
+    assert not adapter.plan(tmp_path, "/new/relay").changed  # already current: left alone
+    # A BEGIN line whose END was deleted by hand: the user's table after it is kept, the block is ours.
+    path.write_text(BEGIN + "\n[user]\nk = 1\n\n" + adapter.plan(tmp_path / "x", "/new/relay").after)
+    kept = adapter.plan(tmp_path, "/bin/relay")
+    assert tomllib.loads(kept.after)["user"] == {"k": 1} and "/bin/relay close" in kept.after
+
+
+def test_kimi_never_writes_a_config_kimi_would_reject(tmp_path):
+    adapter = REGISTRY["kimi"]
+    path = _kimi(tmp_path)
+    path.write_text('default_model = "k2"\nhooks = []\n')  # an inline array: [[hooks]] cannot follow it
+    with pytest.raises(ValueError, match=r"with the relay's \[\[hooks\]\] added is not valid TOML"):
+        adapter.plan(tmp_path, "/bin/relay")
+    path.write_text("default_model = \n")
+    with pytest.raises(ValueError, match="the Kimi Code config is not valid TOML"):
+        adapter.plan(tmp_path, "/bin/relay")
+    with pytest.raises(ValueError, match="not valid TOML"):
+        adapter.plan_removal(tmp_path)
+    home = tmp_path
+    out = relay(home, "http://x", "connect", "--agent", "kimi", "--apply", "--relay-command", "/r")
+    assert out.returncode == 1 and f"cannot read {path}" in out.stdout
+    assert path.read_text() == "default_model = \n"  # left as it was
+
+
+def test_kimi_disconnect_deletes_a_file_that_held_only_the_block(tmp_path):
+    adapter = REGISTRY["kimi"]
+    change = adapter.plan(tmp_path, "/bin/relay")
+    assert change.before is None and change.after.startswith("# >>> remembra-relay")
+    _kimi(tmp_path).write_text(change.after)
+    removal = adapter.plan_removal(tmp_path)
+    assert removal.delete and removal.changed
+
+
+def test_kimi_code_is_detected_by_its_own_directory_not_the_archived_kimi_clis(tmp_path):
+    adapter, nothing = REGISTRY["kimi"], lambda binary: None
+    (tmp_path / ".kimi").mkdir()  # the archived Python kimi-cli: its hooks never run
+    assert not adapter.detect(tmp_path, which=nothing)
+    (tmp_path / ".kimi-code").mkdir()
+    assert adapter.detect(tmp_path, which=nothing)
 
 
 # ---------------------------------------------------------------------------
@@ -742,6 +1009,8 @@ def test_remembra_install_reads_a_commented_mcp_config(tmp_path):
         ("qwen", "QWEN_HOME", "settings.json"),
         ("codex", "CODEX_HOME", "hooks.json"),
         ("claude-code", "CLAUDE_CONFIG_DIR", "settings.json"),
+        ("kimi", "KIMI_CODE_HOME", "config.toml"),
+        ("gemini", "GEMINI_CLI_HOME", ".gemini/settings.json"),  # a replacement HOME that holds .gemini
     ],
 )
 def test_a_config_home_variable_moves_the_file_for_the_real_home_only(agent, variable, inside, tmp_path, monkeypatch):
@@ -752,15 +1021,26 @@ def test_a_config_home_variable_moves_the_file_for_the_real_home_only(agent, var
     default = spec.config_path(home)
     assert spec.config_file(home) == default  # not set: the usual place
     monkeypatch.setenv(variable, str(moved))
-    assert spec.config_file(home) == moved / inside and spec.config_home(home) == moved
+    agent_dir = (moved / inside).parent
+    assert spec.config_file(home) == moved / inside and spec.config_home(home) == agent_dir
     other = tmp_path / "test-home"
     assert spec.config_file(other) == spec.config_path(other)  # any other home: never the user's variable
     assert REGISTRY[agent].plan(home, "/bin/relay").path == moved / inside
     assert not REGISTRY[agent].detect(home, which=lambda b: None)
-    moved.mkdir(parents=True)
+    agent_dir.mkdir(parents=True)
     assert REGISTRY[agent].detect(home, which=lambda b: None)  # the moved home counts as installed
     monkeypatch.setenv(variable, "   ")
     assert spec.config_file(home) == default  # blank is unset
+
+
+def test_a_gemini_hook_whose_transcript_is_under_gemini_cli_home_is_geminis_own(tmp_path):
+    from remembra.relay.hosts import detect_host
+
+    moved = tmp_path / "gemini-home"
+    payload = {"session_id": "g", "transcript_path": str(moved / ".gemini" / "tmp" / "p" / "chats" / "s.jsonl")}
+    environ = {"GEMINI_CLI_HOME": str(moved), "QWEN_CODE_SESSION_ID": "from a Qwen shell"}
+    assert detect_host(REGISTRY["gemini"], payload, environ, tmp_path / "home") is None
+    assert detect_host(REGISTRY["gemini"], payload, {"QWEN_CODE_SESSION_ID": "q"}, tmp_path / "home") == "qwen"
 
 
 def test_connect_and_disconnect_follow_qwen_home(tmp_path):
