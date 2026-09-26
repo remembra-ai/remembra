@@ -6,6 +6,7 @@ Subcommands::
                            additional-context-json] [--once]
     remembra-relay close   [--agent X] [--session-id S] [--cwd DIR] [--transcript PATH] [--reason R] [--hook NAME]
     remembra-relay trail   [--cwd DIR] [--project P] [--limit N]
+    remembra-relay doctor  [--agent NAME ...] [--format text|json] [--no-server] [--color auto|always|never]
     remembra-relay resolve [--cwd DIR] [--project P] [--bind]
     remembra-relay connect [--apply] [--agent NAME ...] [--include-unverified] [--force] [--agents-md PATH]
     remembra-relay disconnect [--apply] [--agent NAME ...] [--agents-md PATH]
@@ -107,6 +108,7 @@ REPLAY_BUDGET_SECONDS = 3.5
 # Time a close keeps for sending its own handoff when it sends queued ones first.
 CLOSE_RESERVE_SECONDS = 4.0
 USAGE_LIMIT_REASON = "usage_limit"  # end_reason when the transcript shows a usage-limit stop
+DOCTOR_POINTER = " Ask your agent to run remembra_doctor, or run `remembra-relay doctor`."
 
 
 def _err(message: str) -> None:
@@ -687,7 +689,7 @@ def queue_notices(ctx: Context, replay: Replay, brief_status: int | None = None)
         notices.append(
             f"Remembra: your API key was rejected (HTTP 401; the key came from {source}), so handoffs are not being"
             " saved. Create a new key in the dashboard (API keys) and store it there, or run `remembra-install --all`;"
-            " `remembra-relay status` shows what is waiting."
+            " `remembra-relay status` shows what is waiting." + DOCTOR_POINTER
         )
     elif brief_status == 403 or replay.refused:
         notices.append(
@@ -710,7 +712,7 @@ def queue_notices(ctx: Context, replay: Replay, brief_status: int | None = None)
         notices.append(
             f"Remembra: {total} handoff{'s' if total != 1 else ''} ({who}) could not be sent yet and"
             f" {'are' if total != 1 else 'is'} queued on this machine; the next brief or close retries."
-            " The trail may be missing the newest session. `remembra-relay status` shows why."
+            " The trail may be missing the newest session. `remembra-relay status` shows why." + DOCTOR_POINTER
         )
     if elsewhere:
         servers = ", ".join(sorted({str(e.url) for e in elsewhere}))
@@ -1912,17 +1914,39 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 1 if attention else 0
 
 
+def _print_connect_todo(args: argparse.Namespace) -> None:
+    """End connect with what the user still has to do (nothing is printed when nothing is left)."""
+    try:
+        from remembra.marshal import todo
+
+        block = todo.format_todo(todo.after_connect(args))
+    except Exception as e:  # the hooks are written either way; never fail connect over its to-do list
+        _err(f"could not build the to-do list ({e.__class__.__name__})")
+        return
+    if block:
+        print(block)
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Marshal's rules over this machine and (unless --no-server) the trail: exit 0, or 1 when something needs you."""
+    from remembra.marshal import doctor
+
+    return doctor.main_args(args.agent, args.format, args.no_server, args.color)
+
+
 def _warn_missing_key() -> None:
     """Loud notice that the hooks cannot reach the server: they will do nothing."""
     red, reset = ("\033[31;1m", "\033[0m") if sys.stderr.isatty() else ("", "")
+    from remembra.marshal.todo import key_step_here, own_server_hint  # connect's to-do list and the doctor's step
+
     _err(
         f"{red}no Remembra API key found{reset}: the hooks will not load or save handoffs until one is set.\n"
         "  Checked: REMEMBRA_API_KEY, ~/.claude.json and ~/.codex/config.toml (remembra MCP server env),"
         " ~/.remembra/credentials.\n"
         "  Fix: create a key in the Remembra dashboard (Settings > API keys), then run\n"
-        "    remembra-install --all --url <your server URL>\n"
+        f"    {key_step_here()}\n"
         "  which asks for the key (it is never put on the command line), or export REMEMBRA_API_KEY\n"
-        "  and REMEMBRA_URL where your agents start."
+        "  and REMEMBRA_URL where your agents start." + own_server_hint()
     )
 
 
@@ -1979,6 +2003,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_trail.add_argument("--format", choices=["text", "json"], default="text")
     p_trail.set_defaults(func=cmd_trail)
 
+    p_doctor = sub.add_parser(
+        "doctor", help="Say why handoffs don't arrive, from this machine's files and your trail (reads only)"
+    )
+    p_doctor.add_argument("--agent", action="append", choices=list(REGISTRY), help=f"Only these agents ({hooks}); repeatable")
+    p_doctor.add_argument("--format", choices=["text", "json"], default="text")
+    p_doctor.add_argument("--no-server", action="store_true", help="Do not ask the server; read this machine only")
+    p_doctor.add_argument("--color", choices=["auto", "always", "never"], default="auto")
+    p_doctor.set_defaults(func=cmd_doctor)
+
     p_resolve = sub.add_parser("resolve", help="Show (or bind) the project id for this location")
     common(p_resolve)
     p_resolve.add_argument("--bind", action="store_true", help="Re-bind this location to --project")
@@ -2024,6 +2057,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:
         _err(f"{args.command} failed: {e.__class__.__name__}: {e}")
         code = 0 if args.command in ("brief", "close", "trail") else 1
+    if args.command == "connect":
+        _print_connect_todo(args)
     return code
 
 

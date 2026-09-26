@@ -13,14 +13,16 @@ export interface AgentMeta {
   /** The `remembra-relay connect --agent` name, when the relay has an adapter. */
   adapter?: string;
   verified?: boolean;
+  /** The agent stops its end hook within seconds, so `close` runs detached and logs to last-detached-close.log. */
+  detachClose?: boolean;
 }
 
 const KNOWN: Record<string, Omit<AgentMeta, 'id'>> = {
   'claude-code': { name: 'Claude Code', monogram: 'CC', lane: '#9a5530', adapter: 'claude-code', verified: true },
-  codex: { name: 'Codex', monogram: 'CX', lane: '#356b5d', adapter: 'codex', verified: true },
-  cursor: { name: 'Cursor', monogram: 'CU', lane: '#4a6096', adapter: 'cursor' },
-  gemini: { name: 'Gemini CLI', monogram: 'GE', lane: '#3d74a6', adapter: 'gemini', verified: true },
-  qwen: { name: 'Qwen Code', monogram: 'QW', lane: '#7a55a0', adapter: 'qwen', verified: true },
+  codex: { name: 'Codex', monogram: 'CX', lane: '#356b5d', adapter: 'codex', verified: true, detachClose: true },
+  cursor: { name: 'Cursor', monogram: 'CU', lane: '#4a6096', adapter: 'cursor', detachClose: true },
+  gemini: { name: 'Gemini CLI', monogram: 'GE', lane: '#3d74a6', adapter: 'gemini', verified: true, detachClose: true },
+  qwen: { name: 'Qwen Code', monogram: 'QW', lane: '#7a55a0', adapter: 'qwen', verified: true, detachClose: true },
   kimi: { name: 'Kimi Code', monogram: 'KI', lane: '#96465e', adapter: 'kimi', verified: true },
   dashboard: { name: 'You (dashboard)', monogram: 'YOU', lane: '#5f656b' },
 };
@@ -41,10 +43,13 @@ export const PIPX_INSTALL = "pipx install --force 'remembra[mcp]>=0.16'";
  * Saves the key where the relay hooks read it (~/.remembra/credentials) and
  * adds the Remembra MCP server to the agents it finds. The key is never part
  * of the command (shell history keeps commands): remembra-install asks for it
- * at a hidden prompt, shows each change and writes after a "y".
+ * at a hidden prompt, shows each change and writes after a "y". `serverUrl`
+ * is the server the key belongs to; the dashboard always passes its own.
+ * Without one, remembra-install keeps the server the machine already uses, or
+ * Remembra Cloud on a first install: the line remembra.dev and setup.md show.
  */
 export function saveKeyCommand(serverUrl: string): string {
-  return `remembra-install --all --url ${serverUrl || 'https://api.remembra.dev'}`;
+  return serverUrl ? `remembra-install --all --url ${serverUrl}` : 'remembra-install --all';
 }
 
 /**
@@ -65,6 +70,41 @@ export const UNINSTALL_STEPS: { command: string; what: string }[] = [
   { command: 'pipx uninstall remembra', what: 'removes the commands' },
   { command: 'rm -r ~/.remembra', what: 'deletes the saved key, the unsent-handoff queue and the log' },
 ];
+
+/**
+ * Writes one agent's session hooks. An unverified adapter (built from the
+ * tool's docs, never run against it) is written only with --include-unverified.
+ */
+export function agentConnectCommand(agentId: string): string {
+  const meta = agentMeta(agentId);
+  const adapter = meta.adapter ?? canonicalAgentId(agentId);
+  if (meta.verified) return `remembra-relay connect --apply --agent ${adapter}`;
+  return `remembra-relay connect --apply --agent ${adapter} --include-unverified`;
+}
+
+/** The first release with `remembra-relay doctor`: the pipx-run form below works on an older install. */
+export const DOCTOR_RELEASE = '0.16.1';
+
+/**
+ * Marshal's read-only check of this machine: the key, the unsent-handoff
+ * queue, each agent's hooks (and Codex's trust records) and the trail. It
+ * prints the one fix and changes nothing.
+ */
+export function doctorCommand(agentId?: string | null): string {
+  const adapter = agentId ? agentMeta(agentId).adapter ?? canonicalAgentId(agentId) : null;
+  return adapter ? `remembra-relay doctor --agent ${adapter}` : 'remembra-relay doctor';
+}
+
+/** The same check without upgrading first: pipx runs the newest release once, in a throwaway environment. */
+export function pipxRunDoctorCommand(agentId?: string | null): string {
+  return `pipx run --spec 'remembra>=${DOCTOR_RELEASE}' ${doctorCommand(agentId)}`;
+}
+
+/** What to ask an agent that has the Remembra MCP server: its remembra_doctor tool runs the same check. */
+export function askAgentDoctor(agentId?: string | null): string {
+  const adapter = agentId ? agentMeta(agentId).adapter ?? canonicalAgentId(agentId) : null;
+  return adapter ? `run remembra_doctor for ${adapter}` : 'run remembra_doctor';
+}
 
 /** The agents `remembra-relay connect` can wire up, in checklist order. */
 export const CONNECTABLE_AGENTS = ['claude-code', 'codex', 'cursor', 'gemini', 'qwen', 'kimi'];

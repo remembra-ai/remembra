@@ -1,0 +1,161 @@
+{
+  "about": "codex app-server hooks/list on hooks.json below, in a temp CODEX_HOME (no credentials, no model). 'untrusted_config' is an empty config.toml; 'mixed_config' is config_mixed.toml with @HOOKS@ replaced by the hooks.json path.",
+  "versions": {
+    "0.155.0-alpha.16.4": {
+      "mixed_config": {
+        "pre_tool_use:0:0": {
+          "currentHash": "sha256:3ce31b5295830c23543ff45c9ef9da786314c3c8ddef0ba2bead00ddd67870c2",
+          "enabled": true,
+          "eventName": "preToolUse",
+          "trustStatus": "untrusted"
+        },
+        "session_end:0:0": {
+          "currentHash": "sha256:6508d94a73366397571a73c75784b754262f9c1bba866f950830ad05e4cc213f",
+          "enabled": false,
+          "eventName": "sessionEnd",
+          "trustStatus": "trusted"
+        },
+        "session_end:0:1": {
+          "currentHash": "sha256:67585905a506a4879447d97ab72bc8d1f3b3f0abdc73d172fbb67bbb24d3ca9e",
+          "enabled": true,
+          "eventName": "sessionEnd",
+          "trustStatus": "untrusted"
+        },
+        "session_start:0:0": {
+          "currentHash": "sha256:9b7fe1c5d160d1a9d768bb1eaaf23814216b2c68bf516564e2ca24c547d8946b",
+          "enabled": true,
+          "eventName": "sessionStart",
+          "trustStatus": "trusted"
+        },
+        "session_start:1:0": {
+          "currentHash": "sha256:b70b0c829321a57329e614179a2d55c1401e3092b415304b99abd78b08a15cbb",
+          "enabled": true,
+          "eventName": "sessionStart",
+          "trustStatus": "untrusted"
+        },
+        "user_prompt_submit:0:0": {
+          "currentHash": "sha256:426d609280a5df974575bb8e2ca7470fa3614aa1815d5296ee8f7d270c78a6fc",
+          "enabled": true,
+          "eventName": "userPromptSubmit",
+          "trustStatus": "modified"
+        }
+      },
+      "untrusted_config": {
+        "pre_tool_use:0:0": {
+          "currentHash": "sha256:3ce31b5295830c23543ff45c9ef9da786314c3c8ddef0ba2bead00ddd67870c2",
+          "enabled": true,
+          "eventName": "preToolUse",
+          "trustStatus": "untrusted"
+        },
+        "session_end:0:0": {
+          "currentHash": "sha256:6508d94a73366397571a73c75784b754262f9c1bba866f950830ad05e4cc213f",
+          "enabled": true,
+          "eventName": "sessionEnd",
+          "trustStatus": "untrusted"
+        },
+        "session_end:0:1": {
+          "currentHash": "sha256:67585905a506a4879447d97ab72bc8d1f3b3f0abdc73d172fbb67bbb24d3ca9e",
+          "enabled": true,
+          "eventName": "sessionEnd",
+          "trustStatus": "untrusted"
+        },
+        "session_start:0:0": {
+          "currentHash": "sha256:9b7fe1c5d160d1a9d768bb1eaaf23814216b2c68bf516564e2ca24c547d8946b",
+          "enabled": true,
+          "eventName": "sessionStart",
+          "trustStatus": "untrusted"
+        },
+        "session_start:1:0": {
+          "currentHash": "sha256:b70b0c829321a57329e614179a2d55c1401e3092b415304b99abd78b08a15cbb",
+          "enabled": true,
+          "eventName": "sessionStart",
+          "trustStatus": "untrusted"
+        },
+        "user_prompt_submit:0:0": {
+          "currentHash": "sha256:426d609280a5df974575bb8e2ca7470fa3614aa1815d5296ee8f7d270c78a6fc",
+          "enabled": true,
+          "eventName": "userPromptSubmit",
+          "trustStatus": "untrusted"
+        }
+      }
+    },
+    "0.157.1": {
+      "mixed_config": {
+        "pre_tool_use:0:0": {
+          "currentHash": "sha256:3ce31b5295830c23543ff45c9ef9da786314c3c8ddef0ba2bead00ddd67870c2",
+          "enabled": true,
+          "eventName": "preToolUse",
+          "trustStatus": "untrusted"
+        },
+        "session_end:0:0": {
+          "currentHash": "sha256:6508d94a73366397571a73c75784b754262f9c1bba866f950830ad05e4cc213f",
+          "enabled": false,
+          "eventName": "sessionEnd",
+          "trustStatus": "trusted"
+        },
+        "session_end:0:1": {
+          "currentHash": "sha256:67585905a506a4879447d97ab72bc8d1f3b3f0abdc73d172fbb67bbb24d3ca9e",
+          "enabled": true,
+          "eventName": "sessionEnd",
+          "trustStatus": "untrusted"
+        },
+        "session_start:0:0": {
+          "currentHash": "sha256:9b7fe1c5d160d1a9d768bb1eaaf23814216b2c68bf516564e2ca24c547d8946b",
+          "enabled": true,
+          "eventName": "sessionStart",
+          "trustStatus": "trusted"
+        },
+        "session_start:1:0": {
+          "currentHash": "sha256:b70b0c829321a57329e614179a2d55c1401e3092b415304b99abd78b08a15cbb",
+          "enabled": true,
+          "eventName": "sessionStart",
+          "trustStatus": "untrusted"
+        },
+        "user_prompt_submit:0:0": {
+          "currentHash": "sha256:426d609280a5df974575bb8e2ca7470fa3614aa1815d5296ee8f7d270c78a6fc",
+          "enabled": true,
+          "eventName": "userPromptSubmit",
+          "trustStatus": "modified"
+        }
+      },
+      "untrusted_config": {
+        "pre_tool_use:0:0": {
+          "currentHash": "sha256:3ce31b5295830c23543ff45c9ef9da786314c3c8ddef0ba2bead00ddd67870c2",
+          "enabled": true,
+          "eventName": "preToolUse",
+          "trustStatus": "untrusted"
+        },
+        "session_end:0:0": {
+          "currentHash": "sha256:6508d94a73366397571a73c75784b754262f9c1bba866f950830ad05e4cc213f",
+          "enabled": true,
+          "eventName": "sessionEnd",
+          "trustStatus": "untrusted"
+        },
+        "session_end:0:1": {
+          "currentHash": "sha256:67585905a506a4879447d97ab72bc8d1f3b3f0abdc73d172fbb67bbb24d3ca9e",
+          "enabled": true,
+          "eventName": "sessionEnd",
+          "trustStatus": "untrusted"
+        },
+        "session_start:0:0": {
+          "currentHash": "sha256:9b7fe1c5d160d1a9d768bb1eaaf23814216b2c68bf516564e2ca24c547d8946b",
+          "enabled": true,
+          "eventName": "sessionStart",
+          "trustStatus": "untrusted"
+        },
+        "session_start:1:0": {
+          "currentHash": "sha256:b70b0c829321a57329e614179a2d55c1401e3092b415304b99abd78b08a15cbb",
+          "enabled": true,
+          "eventName": "sessionStart",
+          "trustStatus": "untrusted"
+        },
+        "user_prompt_submit:0:0": {
+          "currentHash": "sha256:426d609280a5df974575bb8e2ca7470fa3614aa1815d5296ee8f7d270c78a6fc",
+          "enabled": true,
+          "eventName": "userPromptSubmit",
+          "trustStatus": "untrusted"
+        }
+      }
+    }
+  }
+}

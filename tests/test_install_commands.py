@@ -93,10 +93,28 @@ def test_every_copyable_install_block_is_key_first_and_applies() -> None:
     assert docs_home.index("app.remembra.dev/signup") < docs_home.index("```bash")
 
 
+def test_the_agent_setup_guide_runs_the_same_first_run_key_first() -> None:
+    """remembra.dev/setup.md, which the hero's "your agent" prompt points at: the key step comes before any
+    install, each of the three lines is its own step (the user runs remembra-install, at its hidden prompt),
+    and its one-block summary is the same three lines as every other page."""
+    expected = _first_run()
+    setup = (ROOT / "landing" / "setup.md").read_text()
+    blocks = [b.strip().splitlines() for b in re.findall(r"```bash\n(.*?)```", setup, re.S)]
+    assert expected in blocks  # the summary block
+    for line in expected:
+        assert [line] in blocks, line  # and each line as its own step
+    at = [setup.index(f"\n{line}\n") for line in expected]  # each as a command line of its own step
+    assert setup.index("https://app.remembra.dev/signup") < at[0] < at[1] < at[2]
+    llms = (ROOT / "landing" / "llms.txt").read_text()
+    assert f"`{expected[0]}`" in llms and "`remembra-relay connect --apply`" in llms
+
+
 def _pages() -> list[Path]:
-    """Every page a user copies an install line from: the landing site, the docs, README and CHANGELOG."""
+    """Every page a user (or their agent) copies an install line from: the landing site and the files it serves
+    to agents, the docs, README and CHANGELOG."""
     return [
         *sorted((ROOT / "landing").glob("*.html")),
+        *(ROOT / "landing" / name for name in ("setup.md", "llms.txt", "llms-full.txt")),
         *sorted((ROOT / "docs").rglob("*.md")),
         ROOT / "README.md",
         ROOT / "CHANGELOG.md",
@@ -109,6 +127,9 @@ def _lines(page: Path) -> list[str]:
         # One line per rendered command line: tags stripped, entities decoded.
         text = re.sub(r"</span>\s*<span class=\"ln\">", "\n", text)
         text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    elif page.parent.name == "landing":
+        # Agent files: an inline `command` in prose is a line of its own too.
+        text += "\n" + "\n".join(re.findall(r"`([^`\n]+)`", text))
     return [" ".join(line.split()) for line in text.splitlines()]
 
 

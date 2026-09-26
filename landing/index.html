@@ -94,20 +94,41 @@
 
         <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
         <p class="cmd-meta cmd-lead"><a href="https://app.remembra.dev/signup"><b>1 · Get a free key</b></a><span class="sep" aria-hidden="true"></span><span>2 · then run:</span></p>
-        <div class="cmd" role="group" aria-label="Install commands">
-          <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install --force 'remembra[mcp]&gt;=0.16'</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect --apply</span></span></code>
-          <button class="copy" type="button" data-copy="pipx install --force 'remembra[mcp]&gt;=0.16'&#10;remembra-install --all&#10;remembra-relay connect --apply" aria-label="Copy install commands">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
-            <span class="copy-label">Copy</span>
-          </button>
-          <span class="sr-only" role="status" data-copy-status></span>
+        <div class="cmd-tabs" role="tablist" aria-label="Set up from" data-cmd-tabs>
+          <button class="tag solid" type="button" role="tab" id="cmd-tab-terminal" aria-selected="true" aria-controls="cmd-panel-terminal" tabindex="0"><span class="glyph" aria-hidden="true">$</span>terminal</button>
+          <button class="tag" type="button" role="tab" id="cmd-tab-agent" aria-selected="false" aria-controls="cmd-panel-agent" tabindex="-1"><span class="glyph" aria-hidden="true">&gt;</span>your agent</button>
         </div>
-        <p class="cmd-meta">
-          <span>Asks for your key at a hidden prompt</span><span class="sep" aria-hidden="true"></span>
-          <span>Codex: run <code>/hooks</code> once to trust the hooks</span><span class="sep" aria-hidden="true"></span>
-          <a href="https://docs.remembra.dev/guides/relay/">Setup guide</a><span class="sep" aria-hidden="true"></span>
-          <a href="https://github.com/remembra-ai/remembra">Open source</a>
-        </p>
+        <div class="cmd-panel" role="tabpanel" id="cmd-panel-terminal" aria-labelledby="cmd-tab-terminal">
+          <div class="cmd" role="group" aria-label="Install commands">
+            <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install --force 'remembra[mcp]&gt;=0.16'</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect --apply</span></span></code>
+            <button class="copy" type="button" data-copy="pipx install --force 'remembra[mcp]&gt;=0.16'&#10;remembra-install --all&#10;remembra-relay connect --apply" aria-label="Copy install commands">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
+              <span class="copy-label">Copy</span>
+            </button>
+            <span class="sr-only" role="status" data-copy-status></span>
+          </div>
+          <p class="cmd-meta">
+            <span>Asks for your key at a hidden prompt</span><span class="sep" aria-hidden="true"></span>
+            <span>Codex: run <code>/hooks</code> once to trust the hooks</span><span class="sep" aria-hidden="true"></span>
+            <a href="https://docs.remembra.dev/guides/relay/">Setup guide</a><span class="sep" aria-hidden="true"></span>
+            <a href="https://github.com/remembra-ai/remembra">Open source</a>
+          </p>
+        </div>
+        <div class="cmd-panel" role="tabpanel" id="cmd-panel-agent" aria-labelledby="cmd-tab-agent" hidden>
+          <div class="cmd cmd-prompt" role="group" aria-label="Setup prompt for your agent">
+            <code><span class="ln"><span class="ps" aria-hidden="true">&gt;</span><span>Set up Remembra Relay on this machine. Read https://remembra.dev/setup.md first and follow it. Ask me before each step that installs or writes anything. I will type my API key into remembra-install's hidden prompt myself; never ask me to paste a key into this chat.</span></span></code>
+            <button class="copy" type="button" data-copy="Set up Remembra Relay on this machine. Read https://remembra.dev/setup.md first and follow it. Ask me before each step that installs or writes anything. I will type my API key into remembra-install's hidden prompt myself; never ask me to paste a key into this chat." aria-label="Copy the setup prompt for your agent">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="1.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
+              <span class="copy-label">Copy</span>
+            </button>
+            <span class="sr-only" role="status" data-copy-status></span>
+          </div>
+          <p class="cmd-meta">
+            <span>Your agent reads <a href="/setup.md"><code>remembra.dev/setup.md</code></a> and asks before each step</span><span class="sep" aria-hidden="true"></span>
+            <a href="https://app.remembra.dev/signup">Get a free key</a><span class="sep" aria-hidden="true"></span>
+            <a href="https://docs.remembra.dev/guides/relay/">Setup guide</a>
+          </p>
+        </div>
       </div>
 
       <!-- The trail. One agent stops, the baton passes, the next one picks up. -->

@@ -153,6 +153,9 @@ EXPECTED = [
     ("/blog/remembra-vs-mem0-vs-zep", 200, "blog/remembra-vs-mem0-vs-zep.html"),
     ("/.well-known/security.txt", 200, ".well-known/security.txt"),
     ("/site.css", 200, "site.css"),
+    ("/llms.txt", 200, "llms.txt"),
+    ("/llms-full.txt", 200, "llms-full.txt"),
+    ("/setup.md", 200, "setup.md"),
     ("/pricing.html", 301, "/pricing"),
     ("/pricing/", 301, "/pricing"),
     ("/index.html", 301, "/"),
@@ -586,3 +589,51 @@ def test_the_404_page_is_not_indexed_and_links_home() -> None:
     page = (LANDING / "404.html").read_text()
     assert '<meta name="robots" content="noindex">' in page
     assert 'href="/"' in page and 'href="/site.css"' in page  # absolute: it is served at any path
+
+
+# ---------------------------------------------------------------------------
+# Content types: the files agents fetch (llms.txt, llms-full.txt, setup.md)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("path", "content_type"),
+    [
+        ("/llms.txt", "text/plain; charset=utf-8"),
+        ("/llms-full.txt", "text/plain; charset=utf-8"),
+        ("/setup.md", "text/markdown; charset=utf-8"),
+        ("/", "text/html; charset=utf-8"),
+        ("/pricing", "text/html; charset=utf-8"),
+        ("/site.css", "text/css; charset=utf-8"),
+        ("/site.js", "application/javascript; charset=utf-8"),
+        ("/favicon.ico", "image/x-icon"),
+        ("/.well-known/security.txt", "text/plain; charset=utf-8"),
+    ],
+)
+def test_each_file_goes_out_with_its_content_type(path: str, content_type: str) -> None:
+    assert nginx.content_type(path, CONF.read_text(), _web_root()) == content_type
+
+
+def test_markdown_needs_the_config_type_that_stock_nginx_lacks() -> None:
+    """Stock mime.types has no .md: without the types line and the location's default_type, setup.md would go
+    out as application/octet-stream, which browsers download instead of show."""
+    conf = CONF.read_text()
+    assert "md" not in nginx.STOCK_TYPES
+    assert nginx.config_types(conf)["md"] == "text/markdown"
+    bare = conf.replace("        text/markdown md;\n", "")
+    assert nginx.content_type("/setup.md", bare, _web_root()) == "text/markdown; charset=utf-8"  # the location's default_type
+    neither = bare.replace("            default_type text/markdown;\n", "")
+    assert nginx.content_type("/setup.md", neither, _web_root()) == "application/octet-stream"
+    for directive in ("charset_types", "gzip_types"):
+        assert "text/markdown" in (nginx.http_directive(conf, directive) or []), directive
+        assert "text/plain" in (nginx.http_directive(conf, directive) or []), directive
+
+
+def test_agent_files_are_indexable_cached_and_carry_the_security_headers() -> None:
+    locs = {loc.pattern: loc for loc in nginx.load(CONF) if loc.modifier == "="}
+    for path, mime in (("/llms.txt", "text/plain"), ("/llms-full.txt", "text/plain"), ("/setup.md", "text/markdown")):
+        loc = locs[path]
+        assert loc.directive("include") == ["/etc/nginx/remembra-headers.conf"], path
+        assert loc.directive("add_header") == ["Cache-Control", "public,", "max-age=3600", "always"], path
+        assert loc.directive("default_type") == [mime], path
+    assert "X-Robots-Tag" not in CONF.read_text()  # agents are meant to fetch these

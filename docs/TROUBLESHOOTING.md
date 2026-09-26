@@ -8,6 +8,21 @@ This guide helps you diagnose and fix common issues with Remembra. Each section 
 
 ---
 
+## Relay: no brief, or handoffs not arriving
+
+Run the relay's doctor on the machine where the agent runs:
+
+```bash
+remembra-relay doctor              # this machine and your trail
+remembra-relay doctor --agent codex
+```
+
+It reads the key, the unsent-handoff queue, each agent's hooks and Codex's hook trust, and prints each
+problem with its evidence and one fix. It changes nothing. Inside an agent, the MCP tool `remembra_doctor`
+returns the same report. See [Doctor](guides/relay.md#doctor) in the relay guide.
+
+---
+
 ## Quick Diagnostics with `remembra-doctor`
 
 **New in v0.10.0**: Run diagnostics automatically with one command:

@@ -224,6 +224,19 @@ code, kbd, pre, samp {
 .cmd-meta.cmd-lead + .cmd { margin-top: 10px; }
 .cmd-meta code { font-family: var(--f-mono); font-size: .92em; }
 
+/* terminal | your agent: two tabs on the install block's top edge. site.js switches them
+   (arrow keys, Home and End); the chosen one is .tag.solid, orange because you picked it. */
+.cmd-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.cmd-tabs .tag { background: none; cursor: pointer; padding: 5px 10px; min-height: 34px; gap: 7px; text-transform: none; letter-spacing: .02em; font-size: .75rem; }
+.cmd-tabs .tag.solid { background: var(--signal); }
+.cmd-tabs .tag:not(.solid):hover { color: var(--ink); }
+.cmd-tabs .glyph { color: var(--signal-ink); }
+.cmd-tabs .tag.solid .glyph { color: var(--on-signal); }
+.cmd-tabs ~ .cmd-panel > .cmd { margin-top: 10px; }
+/* The prompt is prose: it wraps inside the block instead of scrolling. */
+.cmd-prompt code span { white-space: normal; }
+.cmd-prompt code .ln > span:last-child { min-width: 0; }
+
 /* ------------------------------------------------------------------
    Retro pixel window (handoff.saved, blocked edits, product frames)
 ------------------------------------------------------------------- */
@@ -389,6 +402,7 @@ code, kbd, pre, samp {
     border-left: 0; border-top: 1px solid rgba(236,237,231,.16);
     border-radius: 0 0 var(--r) var(--r);
   }
+  .cmd-tabs .tag { min-height: 44px; flex: 1 1 0; justify-content: center; }
 }
 @media (max-width: 360px) {
   /* The smallest phones: the nav still fits on one row without a sideways scroll. */

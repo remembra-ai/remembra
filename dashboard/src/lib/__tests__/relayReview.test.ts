@@ -107,6 +107,7 @@ describe('install commands', () => {
 
   it('prefills the server URL and asks for the key instead of taking it on the command line', () => {
     expect(saveKeyCommand('https://api.example.test')).toBe('remembra-install --all --url https://api.example.test');
-    expect(saveKeyCommand('')).toContain('--url https://api.remembra.dev');
+    // No server known: remembra-install keeps the machine's own, or Remembra Cloud on a first install.
+    expect(saveKeyCommand('')).toBe('remembra-install --all');
   });
 });

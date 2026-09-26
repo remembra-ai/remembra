@@ -1756,17 +1756,19 @@ def recall_context_prompt() -> list[dict[str, str]]:
 @mcp.prompt(
     name="store-summary",
     title="Store Session Summary",
-    description="Store an end-of-session handoff so the next agent can continue.",
+    description="Leave the end-of-session handoff (close_session) so the next agent can continue.",
 )
 def store_summary_prompt(session_topic: str = "this conversation") -> list[dict[str, str]]:
-    """Prompt to store a session handoff."""
+    """Prompt to close the session with a structured handoff."""
     return [
         {
             "role": "user",
             "content": (
-                f"Write a handoff for {session_topic}: what was completed, what is next, key files, "
-                "and deploy status. Store it with store_memory(memory_type='handoff'). Update any "
-                "changed state with store_status."
+                f"Close {session_topic} with the close_session tool, passing the facts you know rather than a story: "
+                "facts.branch, facts.commits, facts.files_changed, facts.tests (each run and whether it passed), "
+                "errors that are still open, todos_open for unfinished work, and next_step for whoever picks up. "
+                "Add a short summary only if it helps; it is checked against the facts. Update changed state "
+                "with store_status."
             ),
         }
     ]
@@ -1775,7 +1777,7 @@ def store_summary_prompt(session_topic: str = "this conversation") -> list[dict[
 @mcp.prompt(
     name="setup-check",
     title="Verify Connection",
-    description="Verify Remembra connection and run health check.",
+    description="Verify the Remembra connection, then check this machine's relay setup.",
 )
 def setup_check_prompt() -> list[dict[str, str]]:
     """Prompt to verify Remembra setup."""
@@ -1783,11 +1785,22 @@ def setup_check_prompt() -> list[dict[str, str]]:
         {
             "role": "user",
             "content": (
-                "Run a health check on the Remembra memory server. Confirm the connection is working, "
-                "show the agent_id and project this client uses, and list any warnings."
+                "Run the health_check tool: confirm the connection works and show the agent_id and project this "
+                "client uses, with any warnings. Then call remembra_doctor and show its rendered slip verbatim in a "
+                "code block. Offer its fixes one at a time and run one only after I say yes."
             ),
         }
     ]
+
+
+def _register_marshal() -> None:
+    """Marshal's read-only tools (remembra_doctor, remembra_setup, remembra_help) and the doctor prompt."""
+    from remembra.marshal.mcp_tools import register
+
+    register(mcp, _is_remote_transport)
+
+
+_register_marshal()
 
 
 # ---------------------------------------------------------------------------

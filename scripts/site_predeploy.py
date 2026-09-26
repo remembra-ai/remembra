@@ -8,13 +8,16 @@ links to or promises exists. Run this before deploying it:
 
 It prints the owner actions the pages declare in their deploy-gate comments
 (<!-- requires ... -->) and the Crew mode switch, then checks every
-https://docs.remembra.dev/... link on the pages:
+https://docs.remembra.dev/... link on the pages and in the files served for
+agents (setup.md, llms.txt, llms-full.txt):
 
   * offline: the link maps to a page in docs/ that mkdocs.yml builds
   * online:  the live docs site answers it with HTTP 200
 
 Online, it also asks PyPI for the latest remembra release and holds it
-against the version the install gates name (remembra>=X).
+against the highest version the install gates or the agent files name
+(remembra>=X): setup.md's `pipx run --spec 'remembra>=0.16.1'` doctor line
+needs that release on PyPI before the site goes live.
 
 It exits 1 when a docs link has no source page or is not live yet, or when
 PyPI is behind the gate, so the site is not deployed ahead of the docs it
@@ -54,6 +57,9 @@ import site_partials  # noqa: E402  (the pages and the crew switch live there)
 
 GATE = re.compile(r"<!--\s*(requires\b.*?)\s*-->", re.S)
 DOCS_LINK = re.compile(r'href="(https://docs\.remembra\.dev[^"#]*)')
+# Plain-text and markdown files served to agents: their links are bare URLs or markdown links.
+AGENT_FILES = ["setup.md", "llms.txt", "llms-full.txt"]
+DOCS_URL = re.compile(r"(https://docs\.remembra\.dev/[^\s)\]>`'\"#]*)")
 PYPI_JSON = "https://pypi.org/pypi/remembra/json"
 NGINX_CONF = LANDING / "nginx.conf"
 NGINX_DOCS_TARGET = re.compile(r"(https://docs\.remembra\.dev/[^\s;\"$]*)")
@@ -89,7 +95,17 @@ def docs_links() -> dict[str, list[str]]:
         for url in DOCS_LINK.findall(page.read_text()):
             if page.name not in out.setdefault(url, []):
                 out[url].append(page.name)
+    for path in agent_files():
+        for found in DOCS_URL.findall(path.read_text()):
+            url = found.rstrip(".,;:")  # a URL that ends a sentence
+            if path.name not in out.setdefault(url, []):
+                out[url].append(path.name)
     return out
+
+
+def agent_files() -> list[Path]:
+    """The files served for agents (landing/setup.md, llms.txt, llms-full.txt) that exist."""
+    return [LANDING / name for name in AGENT_FILES if (LANDING / name).is_file()]
 
 
 def nginx_docs_targets() -> dict[str, list[str]]:
@@ -223,8 +239,9 @@ def source_for(url: str) -> str | None:
 
 
 def required_release() -> str | None:
-    """The highest remembra>=X any install gate asks for."""
+    """The highest remembra>=X any install gate, or any file served to agents, asks for."""
     found = [v for text in gates() for v in MIN_RELEASE.findall(text)]
+    found += [v for path in agent_files() for v in MIN_RELEASE.findall(path.read_text())]
     return max(found, key=_version_key) if found else None
 
 

@@ -271,6 +271,81 @@ so (`Remembra: 1 handoff (1 from claude-code) could not be sent yet …`, or `yo
 accepts the key (it asks the server; `--no-check` shows the last recorded answer). It exits 1 when
 something needs attention.
 
+## Doctor {#doctor}
+
+When a handoff doesn't arrive, or an agent never gets a brief, ask the doctor where the baton dropped:
+
+```bash
+remembra-relay doctor                  # this machine and your trail
+remembra-relay doctor --agent codex    # one agent (repeatable)
+remembra-relay doctor --no-server      # this machine only, no request at all
+remembra-relay doctor --format json    # the same findings as JSON
+```
+
+On an install older than the doctor: `pipx run --spec 'remembra>=0.16.1' remembra-relay doctor`.
+
+It prints an *exchange slip*: every agent is a station on a rail, `◆` marks the last handoff, each `›` line
+is something it read with its result, and each finding shows what it saw (`seen`), one fix (`fix →`) and the
+re-check (`then`). `[!!]` means proven from what it read, `[??]` inferred. It exits 0 when nothing is proven
+wrong and 1 when at least one `[!!]` finding needs you.
+
+**It only reads.** The relay config (keys are only ever shown as where they came from), the queue in
+`~/.remembra/relay/outbox`, `status.json`, the last background-close log (secrets redacted), each agent's
+hook file, the `remembra` MCP entries, Codex's hook trust in `~/.codex/config.toml` and the first line of
+recent Codex session files. With the server check it sends at most four GET requests with your own key
+to `/api/v1/trail/summary` and `/api/v1/trail`. It never asks for a brief (that records a pickup), never
+recalls, resolves or binds anything, never writes a file and never runs a fix. Every command it suggests is
+one of a fixed set of templates; a fix that involves your key says to run it in your own terminal.
+
+What it checks:
+
+| Finding | When |
+|---------|------|
+| `KEY_MISSING`, `KEY_REJECTED`, `KEY_REFUSED` | no key; the server answered 401 or 403 to it |
+| `KEY_FIREWALL` | a 403 came from the server's firewall (an HTML page), not from Remembra |
+| `SERVER_WRONG_URL` | the server URL answers with a redirect (the hooks don't follow one) or a web page, not Remembra's API |
+| `SERVER_UNREACHABLE` | no answer, or a 5xx; or the server URL is not a URL at all (a key in its place, for one) |
+| `OUTBOX_QUEUED`, `OUTBOX_HELD` | handoffs waiting on this machine, by cause; one that will never be sent from here |
+| `CLOSE_FAILING` | an agent's last close failed and nothing since shows one that worked (a close, or its handoff on your trail); the background-close log shows an error. After a later brief it is only inferred |
+| `HOOKS_NOT_WRITTEN`, `UNVERIFIED_NOT_WRITTEN` | an agent here has no relay hooks (and whether `connect --apply` ever wrote there); an unverified adapter `connect --apply` left out is only a note |
+| `HOOKS_INCOMPLETE`, `HOOKS_STALE_COMMAND`, `CONFIG_UNREADABLE` | hooks from an older connect; hooks that call a command that is gone; a config it can't parse |
+| `CODEX_TRUST_MISSING`, `CODEX_TRUST_STALE`, `CODEX_HOOK_DISABLED`, `CODEX_TRUST_UNCHECKED` | Codex has no trust record for a hook, one for an older version of it, the hook turned off, or `config.toml` could not be read (never counted as trusted) |
+| `CODEX_AUTOMATIONS` | Codex automation runs in the last 7 days, and whether this install skips them |
+| `LEGACY_NAMESPACE`, `MCP_PROJECT_SPLIT` | `REMEMBRA_PROJECT` sends every new repository to one project; agents' MCP servers use different projects |
+| `PICKS_UP_NEVER_CLOSES` | the agent reads briefs but no handoff from it has ever arrived |
+| `NOTHING_WAITING`, `HOOKS_NOT_FIRING` | hooks written but nothing from that agent yet, and no handoff was waiting for it; others handed off and nothing from it arrives (only a note when it handed off before: a quiet week is often a week it wasn't used) |
+| `STALE_CHECKPOINT` | its last session ended on a checkpoint more than an hour ago, with no handoff after it |
+| `NOT_DETECTED` | an agent named with `--agent` isn't on this machine |
+
+**On the dashboard.** Each agent still waiting on Home's setup checklist has a `why?` button. It reads your
+keys and your trail in the browser (three GET requests, nothing written) and prints the same kind of slip. Where
+it reaches a fault the doctor can also see (`KEY_MISSING`, `PICKS_UP_NEVER_CLOSES`, `CODEX_TRUST_MISSING`,
+`NOTHING_WAITING`, `HOOKS_NOT_FIRING`, `STALE_CHECKPOINT`) it uses the doctor's rule id, sentence and page; it
+also says when no key was ever used (`KEY_NEVER_USED`). It can't see your machine, so it ends with the doctor
+line to run there.
+
+**After `connect`.** When something is still left (saving a key, `--apply` after a dry run, unverified
+adapters it skipped, trusting the hooks in Codex), `connect` ends with a short **You still need to** list.
+When nothing is left it prints none.
+
+### Codex hook trust {#codex-trust}
+
+Codex runs a hook only after you trust it (Settings > Hooks in the app, `/hooks` in the CLI) and skips an
+untrusted hook without a message, so a Codex that never gets a brief usually has hooks nobody trusted.
+Codex stores each trust as `[hooks.state."<hooks.json path>:<event>:<n>:<n>"] trusted_hash` in
+`~/.codex/config.toml`, a hash of that hook's command, timeout and matcher; when `connect` rewrites a hook
+(a new install path, for example) the old record no longer matches and Codex asks again. The doctor
+compares those records with the hooks in `~/.codex/hooks.json`, hashed the way Codex does (checked against
+codex-cli 0.155.0-alpha.16.4 and 0.157.1): a missing record is `CODEX_TRUST_MISSING`, a record for an older
+version of the hook `CODEX_TRUST_STALE`, `enabled = false` `CODEX_HOOK_DISABLED`. A `config.toml` it
+can't read is reported as unchecked, never as trusted.
+
+**Inside your agent.** The local Remembra MCP server has the same doctor as the `remembra_doctor` tool (it
+returns the slip as `rendered` plus the findings), `remembra_setup` (the install and connect steps for this
+machine's OS and agents, with the ones already done marked) and `remembra_help` (answers quoted from this
+guide and the plans page, or "can't confirm"). In Claude Code the prompt `/mcp__remembra__doctor` runs it.
+None of them changes anything; your agent offers each fix and runs it only after you say yes.
+
 ## CLI
 
 ```text
@@ -279,6 +354,7 @@ remembra-relay brief   [--agent X] [--cwd DIR] [--hook NAME] [--once]
 remembra-relay close   [--agent X] [--session-id S] [--cwd DIR] [--transcript PATH] [--reason R]
                        [--summary S] [--notes N] [--next STEP] [--todo ITEM]... [--dry-run]
 remembra-relay trail   [--cwd DIR] [--project P] [--limit N] [--format text|json]
+remembra-relay doctor  [--agent NAME]... [--format text|json] [--no-server] [--color auto|always|never]
 remembra-relay resolve [--cwd DIR] [--project P] [--bind]
 remembra-relay connect [--apply] [--agent NAME]... [--include-unverified] [--force] [--agents-md PATH]
 remembra-relay disconnect [--apply] [--agent NAME]... [--agents-md PATH]
