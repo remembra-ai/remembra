@@ -31,7 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Code transcripts, and the pages say so. The Claude and ChatGPT connector and the hosted remote MCP are marked
   as coming (the connector is off at api.remembra.dev). The Team plan lists what the teams API enforces. The
   PyPI summary describes Remembra Relay, and the MCP Registry text names the agent its handoffs are recorded
-  under. `tests/test_site_truth_polish.py` scans every public file for these claims.
+  under. The DPA page says a deleted account is erased automatically after 7 days (backups age out), the plans
+  page says a new yearly bank unlocks after 14 days, and the durability page no longer promises atomic writes
+  across SQLite, Qdrant and the keyword index. The SDK and REST guides show the delete calls the client and
+  server have, the MCP pages count the 21 tools the server registers, and reconstructed blog examples say so.
+  `tests/test_site_truth_polish.py` scans every public file for these claims.
 - **The install line connects.** On remembra.dev, the README and the docs, the copyable install ended in a bare
   `remembra-relay connect`, a dry run that writes nothing, so a new user following it stayed unconnected. Every
   block now asks for the free key first and ends in `remembra-relay connect --apply`; the dashboard's empty

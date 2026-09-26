@@ -209,7 +209,9 @@ EVERY = re.compile(
     r"|\bevery agent leaves\b"
     r"|\bworks with every agent\b"
     r"|\bwhatever the tool\b"
-    r"|\bany agent on any machine\b",
+    r"|\bany agent on any machine\b"
+    r"|\bbehind every agent\b"
+    r"|\bmemory for all of them\b",
     re.I,
 )
 
@@ -355,3 +357,124 @@ async def test_team_viewer_has_the_same_access_as_a_member_and_admins_manage(tmp
         r = await h.client.delete(f"/api/v1/teams/{tid}/members/{users['extra']}", headers=auth("admin"))
         assert r.status_code == 204
         assert (await h.client.delete(f"/api/v1/teams/{tid}", headers=auth("owner"))).status_code == 204
+
+
+# Nothing is stored by itself over MCP (the agent calls store_memory) and recall returns ranked top matches
+# (mcp/server.py: limit 5, threshold 0.4), so no page promises total recall. A delete call is not a compliance
+# certificate: Remembra is not audited and deletion does not reach backups (security.html).
+TOTAL_RECALL = re.compile(
+    r"\bremembers everything\b|\bperfect recall\b|\bzero context loss\b|\bcollaborated seamlessly\b"
+    r"|\bautomatically stored as memories\b|\bGDPR[- ]compliant\b|\ball-or-nothing\b",
+    re.I,
+)
+
+
+def test_no_public_copy_promises_total_recall_atomic_writes_or_compliance() -> None:
+    past = {ROOT / "CHANGELOG.md", LANDING / "changelog.html", ROOT / "docs" / "reference" / "changelog.md"}
+    assert _hits(TOTAL_RECALL, [p for p in _public_files() if p not in past]) == []
+
+
+def test_erasure_is_described_as_automatic_and_not_reaching_backups_on_every_legal_page() -> None:
+    """Deletion is self-serve and run_erasure_loop erases a deleted account after account_erasure_grace_days;
+    backups age out instead. The DPA page may not contradict security.html."""
+    from remembra.config import Settings
+
+    days = Settings.model_fields["account_erasure_grace_days"].default
+    assert days == 7
+    dpa = _text((LANDING / "dpa.html").read_text())
+    security = _text((LANDING / "security.html").read_text())
+    assert f"a deleted account is erased automatically {days} days later" in dpa
+    assert f"A deleted account is erased automatically {days} days later" in security
+    assert "on request rather than automatically" not in dpa
+    assert "erasure does not reach backups" in dpa
+
+
+def test_the_plans_page_holds_a_new_yearly_bank_like_the_metering_code() -> None:
+    from remembra.config import Settings
+
+    fields = Settings.model_fields
+    unlock, initial = fields["annual_credit_unlock_days"].default, fields["annual_credit_initial_months"].default
+    assert (unlock, initial) == (14, 1)
+    doc = " ".join((ROOT / "docs" / "reference" / "plans-and-credits.md").read_text().split())
+    pricing = _text((LANDING / "pricing.html").read_text())
+    for text in (doc, pricing):
+        assert re.search(rf"full (?:credit )?bank {unlock} days after purchase; until then one month's credits are available", text)
+    assert "on day one" not in doc and "up front" not in doc
+    # Team pools the allowance for members without a paid plan of their own (metering.get_account), not notes.
+    assert "who has no paid plan of their own" in doc and "shared only through shared spaces" in doc
+
+
+def test_the_team_card_does_not_promise_pro_limits_or_a_shared_memory_pool() -> None:
+    """Team limits are per seat (plans.py): a 3-seat team gets fewer searches than Pro, so 'Everything in Pro' is
+    false until 5 seats; only the allowance is pooled."""
+    from remembra.cloud.plans import PLANS, PlanTier
+
+    pro, team = PLANS[PlanTier.PRO], PLANS[PlanTier.TEAM]
+    assert team.max_recalls_per_month * team.min_seats < pro.max_recalls_per_month
+    assert team.enrichment_concurrency == pro.enrichment_concurrency and team.has_priority_support
+    card = _text(re.search(r'<article class="plan" aria-labelledby="p-team">(.*?)</article>', (LANDING / "pricing.html").read_text(), re.S).group(1))
+    assert "Everything in Pro" not in card and "sharing one pool" not in card
+    assert "Agents and people on one pooled allowance." in card
+    assert "The trail of every session" not in _text((LANDING / "pricing.html").read_text())
+
+
+def test_team_role_labels_promise_no_access_the_teams_api_does_not_enforce() -> None:
+    teams_tsx = (ROOT / "dashboard" / "src" / "components" / "Teams.tsx").read_text()
+    labels = dict(re.findall(r'<option value="(viewer|member|admin)">[^<]*? — ([^<]+)</option>', teams_tsx))
+    assert labels["viewer"] == labels["member"] == "Can see the team and its members"
+    assert "Read-only" not in teams_tsx and "Can create and edit" not in teams_tsx
+
+
+def test_sdk_guides_document_the_forget_signature_the_client_has() -> None:
+    """client/memory.py: forget(memory_id, user_id, entity) and forget_project(project_id). The server has no
+    delete by entity yet, so no guide shows one."""
+    import inspect
+
+    from remembra.client.memory import Memory
+
+    assert list(inspect.signature(Memory.forget).parameters) == ["self", "memory_id", "user_id", "entity"]
+    assert hasattr(Memory, "forget_project")
+    py = (ROOT / "docs" / "guides" / "python-sdk.md").read_text()
+    js = (ROOT / "docs" / "guides" / "javascript-sdk.md").read_text()
+    assert "memory_ids" not in py and "all=True" not in py and 'memory.forget(memory_id="mem_abc123")' in py
+    assert 'memory.forget_project("my-project")' in py
+    assert "forget({ entity" not in js and "forget({ all" not in js
+    rest = (ROOT / "docs" / "guides" / "rest-api.md").read_text()
+    assert "memory_ids" not in rest and "DELETE /api/v1/memories?memory_id=" in rest
+    for guide in (py, js, rest):
+        assert "`entity` does not limit what is deleted, so do not pass it" in " ".join(guide.split())
+
+
+async def test_docs_state_the_mcp_tool_count_the_server_registers() -> None:
+    pytest.importorskip("mcp")
+    from remembra.mcp import server
+
+    tools, resources = await server.mcp.list_tools(), await server.mcp.list_resources()
+    count = re.compile(r"\ball (\d+) tools and (\d+) resources\b|\bhas (\d+) tools\b|\bserver with (\d+) tools\b|tools \((\d+)\)|the (\d+) tools\b")
+    stated = []
+    for path in _public_files():
+        if path.name in ("CHANGELOG.md", "changelog.md", "changelog.html"):
+            continue
+        for n, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in count.finditer(line):
+                numbers = [int(g) for g in m.groups() if g]
+                stated.append((f"{path.relative_to(ROOT)}:{n}", numbers))
+    assert len(stated) >= 10
+    assert [s for s in stated if s[1][0] != len(tools) or (len(s[1]) == 2 and s[1][1] != len(resources))] == []
+    reference = (ROOT / "docs" / "integrations" / "mcp-server.md").read_text()
+    assert [t.name for t in tools if f"`{t.name}" not in reference and f"### {t.name}" not in reference] == []
+
+
+def test_illustrative_examples_are_not_presented_as_real() -> None:
+    building = _text((LANDING / "blog" / "building-remembra-with-ai-agents.html").read_text())
+    patterns = _text((LANDING / "blog" / "multi-agent-orchestration-patterns.html").read_text())
+    assert "an actual exchange" not in building and "reconstructed for this post" in building
+    assert "Real-World Example" not in patterns and "#127" not in patterns and "(illustrative)" in patterns
+
+
+def test_the_changelog_states_the_0_16_1_project_rule() -> None:
+    """0.16.1 (fix/relay-projects-briefs): every git repository gets its own project; REMEMBRA_RELAY_PROJECT still
+    pools on purpose. The 0.16.0 entry may describe the old rule only as the old rule."""
+    page = _text((LANDING / "changelog.html").read_text())
+    assert "A repository the server has not seen joins the project you configured" not in page
+    assert "From 0.16.1 every git repository gets its own project" in page
