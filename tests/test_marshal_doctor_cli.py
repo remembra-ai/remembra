@@ -123,7 +123,7 @@ def test_doctor_reads_a_real_trail(server: str, tmp_path: Path) -> None:  # noqa
     _, clones = make_remote_and_clones(tmp_path, ("laptop",))
     repo = clones["laptop"]
 
-    closed = cli(fh, "close", "--agent", "claude-code", "--session-id", "cc-1", "--cwd", str(repo), env=env)
+    closed = cli(fh, "close", "--agent", "claude-code", "--session-id", "cc-1", "--cwd", str(repo), "--next", "ship it", env=env)
     assert closed.returncode == 0, closed.stderr
     brief = cli(fh, "brief", "--agent", "codex", "--session-id", "cx-1", "--cwd", str(repo), env=env)
     assert brief.returncode == 0 and "Last session: claude-code" in brief.stdout, brief.stdout
@@ -152,7 +152,7 @@ def test_doctor_reads_a_real_trail(server: str, tmp_path: Path) -> None:  # noqa
     assert "\033[38;2;255;107;43m" in truecolor.stdout
 
     # Codex closes too: nothing left to do, exit 0.
-    closed = cli(fh, "close", "--agent", "codex", "--session-id", "cx-1", "--cwd", str(repo), env=env)
+    closed = cli(fh, "close", "--agent", "codex", "--session-id", "cx-1", "--cwd", str(repo), "--next", "review it", env=env)
     assert closed.returncode == 0, closed.stderr
     clean = cli(fh, "doctor", "--agent", "claude-code", "--agent", "codex", env=env, cwd=repo)
     assert clean.returncode == 0, clean.stdout
