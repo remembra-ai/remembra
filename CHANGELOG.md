@@ -5,18 +5,27 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.16.1] - Unreleased
+## [0.16.1] - 2026-09-26
 
-Relay fixes, and three more agents verified. Every git repository now gets its own project, the brief skips
-sessions that did nothing, Codex automations and sub-agents stay out of the trail, a hook that another agent
-runs is filed under that agent, and the Gemini CLI, Qwen Code and Kimi Code hooks were run against the real
-tools. The public pages now say only what the code does.
+Relay fixes, three more agents verified, a doctor for when handoffs don't arrive, and a security sweep. Every
+git repository now gets its own project, the brief skips sessions that did nothing, Codex automations and
+sub-agents stay out of the trail, a hook that another agent runs is filed under that agent, and the Gemini
+CLI, Qwen Code and Kimi Code hooks were run against the real tools. `remembra-relay doctor` (and the
+`remembra_doctor`, `remembra_setup` and `remembra_help` MCP tools) says where a handoff went missing, and
+remembra.dev has a setup guide written for your agent. Deleting by entity no longer deletes the whole account,
+billing and plan limits are tighter, and the public pages now say only what the code does.
 
 **Upgrading.** Run `remembra-relay connect --apply` once after upgrading. For the agents it finds, it writes
 the Gemini CLI, Qwen Code and Kimi Code hooks (Kimi Code's go to `~/.kimi-code/config.toml`; the block an
 earlier release wrote to `~/.kimi/config.toml` is removed). If 0.16.0 put several of your repositories in one
 project, `remembra-relay projects split` shows how it would separate them; nothing changes until you add
-`--apply`.
+`--apply`. If handoffs still don't arrive, run `remembra-relay doctor`.
+
+**Running your own server.** The dashboard and docs images now run nginx as a non-root user on port 8080
+instead of 80: point your proxy or port mapping at 8080. The database stays at schema version 10 (migration 10,
+`account_reviews`, is listed below); the new billing and relay tables are created at start or on first use.
+After upgrading, back up the database and run `python scripts/maintenance/redact_stored_secrets.py --apply` to
+redact command-line credentials from handoffs stored before this release.
 
 ### Added
 
@@ -42,6 +51,43 @@ project, `remembra-relay projects split` shows how it would separate them; nothi
   is read or moved, and recorded paths, names and headlines in the output pass the brief's trust policy.
   API: `POST /api/v1/projects/split` and `POST /api/v1/projects/split/undo`. The log table (`relay_refiles`)
   is created on first use; no schema migration.
+- **`remembra-relay doctor`: where the baton dropped.** When a brief doesn't arrive or a handoff never reaches
+  the trail, the doctor reads this machine and your trail and prints an exchange slip: every agent as a station,
+  the last handoff, each read with its result, and for each problem the evidence, one fix and the re-check.
+  Each verdict is marked proven (`[!!]`) or inferred (`[??]`). It checks the key (and whether the server
+  accepts it, a firewall in front of it answered instead, or the URL redirects or serves a page instead of the
+  API), the unsent-handoff queue by cause, closes that keep failing (a close counts as working again once its
+  handoff is on your trail; the background-close log is shown with secrets redacted), each agent's hooks
+  (missing, from an older connect, calling a command that is gone, or never written because `connect` only
+  ran as a dry run; an unverified adapter `connect --apply` left out is only a note), Codex
+  hook trust (read from `~/.codex/config.toml` against the current hooks with the hash Codex computes; an
+  unreadable file is "unchecked", never trusted), Codex automation runs, a `REMEMBRA_PROJECT` that sends every
+  new repository to one project, and agents that picked up briefs but never handed off at all. It only reads:
+  at most four GET requests with your own key, never a brief, recall or write, and it never prints a key, even
+  one pasted into the server URL field or a hook command. `--agent`, `--no-server`, `--format json`; exit 1
+  when something proven needs you.
+- **MCP tools `remembra_doctor`, `remembra_setup` and `remembra_help`** (local MCP server): the same doctor
+  inside your agent, the exact install and connect steps for this machine's OS and agents (steps already done
+  are marked), and answers quoted from the relay guide and the plans page, or "can't confirm". Questions about
+  privacy, security, hosting, retention, deleting account data, training or money get the page that governs
+  them, never a quote. None of them changes anything; fixes that involve your key are for your own terminal.
+  Claude Code: `/mcp__remembra__doctor`.
+- **`remembra-relay connect` ends with "You still need to"** when something is left: saving a key, `--apply`
+  after a dry run, unverified adapters it skipped, and trusting the hooks in Codex (checked, not assumed). When
+  nothing is left it prints no list.
+- **`why?` on the dashboard's setup checklist.** Every agent still waiting on Home gets a `why?` button that
+  opens an exchange slip under its row: the three reads it made (your keys, the trail, the agent's own entries,
+  GET only), the call marked proven or inferred, the one fix, and the doctor lines to copy for that agent's
+  machine. Where it reaches a fault the doctor also sees, it uses the doctor's rule id, sentence and guide page
+  (`KEY_MISSING`, `PICKS_UP_NEVER_CLOSES`, `CODEX_TRUST_MISSING`, `NOTHING_WAITING`, `HOOKS_NOT_FIRING`,
+  `STALE_CHECKPOINT`). Until a Codex brief or close arrives, Codex's row carries a dim reminder of the hook
+  trust step (the dashboard can't see Codex, so it never says Codex needs you).
+- **remembra.dev for your agent.** The hero's install block has `terminal | your agent` tabs; the agent tab
+  copies a prompt that points the agent at `remembra.dev/setup.md`, a step-by-step runbook that stops for the
+  key and asks before each write, and runs `pipx ensurepath` even when pipx is already installed.
+  `remembra.dev/llms.txt` and `llms-full.txt` (generated from the pages) are
+  served too. setup.md, `remembra_setup` and the dashboard give the same commands in the same order, and a test
+  holds them to it.
 
 ### Changed
 
@@ -57,6 +103,13 @@ project, `remembra-relay projects split` shows how it would separate them; nothi
   (UserPromptSubmit, `brief --once`) and the close on SessionEnd, with timeouts. Relay hooks that `kimi migrate`
   copied without their markers are removed, and a file Kimi would reject is never written. The dashboard calls
   it Kimi Code.
+- The brief's queued-handoff and rejected-key notices end with "Ask your agent to run remembra_doctor, or run
+  `remembra-relay doctor`." `connect`'s no-key warning leads with the same key command as its to-do list.
+- The dashboard's install line without a known server is `remembra-install --all`, which keeps the server the
+  machine already uses (Remembra Cloud on a first install); with one, as on every dashboard page, it passes
+  `--url` as before.
+- The MCP `store-summary` prompt closes the session with `close_session` and facts (it used to ask for a
+  free-form `store_memory` handoff); `setup-check` also runs `remembra_doctor`.
 
 ### Fixed (Relay)
 
@@ -198,59 +251,44 @@ project, `remembra-relay projects split` shows how it would separate them; nothi
   page says a deleted account is erased automatically after 7 days (backups age out), the plans page says a
   new yearly bank unlocks after 14 days, and the durability page no longer promises atomic writes across
   SQLite, Qdrant and the keyword index. The SDK and REST guides show the delete calls the client and server
-  have, the MCP pages count the 21 tools the server registers, the site's changelog states the 0.16.1 project
-  rule, and reconstructed blog examples say so. `tests/test_site_truth_polish.py` scans every public file for
-  these claims.
+  have, the MCP pages count the 24 tools the server registers (21, and Marshal's three), the site's changelog
+  states the 0.16.1 project rule, and reconstructed blog examples say so. `tests/test_site_truth_polish.py`
+  scans every public file for these claims.
 
-### Added
+### Security
 
-- **`remembra-relay doctor`: where the baton dropped.** When a brief doesn't arrive or a handoff never reaches
-  the trail, the doctor reads this machine and your trail and prints an exchange slip: every agent as a station,
-  the last handoff, each read with its result, and for each problem the evidence, one fix and the re-check.
-  Each verdict is marked proven (`[!!]`) or inferred (`[??]`). It checks the key (and whether the server
-  accepts it, a firewall in front of it answered instead, or the URL redirects or serves a page instead of the
-  API), the unsent-handoff queue by cause, closes that keep failing (a close counts as working again once its
-  handoff is on your trail; the background-close log is shown with secrets redacted), each agent's hooks
-  (missing, from an older connect, calling a command that is gone, or never written because `connect` only
-  ran as a dry run; an unverified adapter `connect --apply` left out is only a note), Codex
-  hook trust (read from `~/.codex/config.toml` against the current hooks with the hash Codex computes; an
-  unreadable file is "unchecked", never trusted), Codex automation runs, a `REMEMBRA_PROJECT` that sends every
-  new repository to one project, and agents that picked up briefs but never handed off at all. It only reads:
-  at most four GET requests with your own key, never a brief, recall or write, and it never prints a key, even
-  one pasted into the server URL field or a hook command. `--agent`, `--no-server`, `--format json`; exit 1
-  when something proven needs you.
-- **MCP tools `remembra_doctor`, `remembra_setup` and `remembra_help`** (local MCP server): the same doctor
-  inside your agent, the exact install and connect steps for this machine's OS and agents (steps already done
-  are marked), and answers quoted from the relay guide and the plans page, or "can't confirm". Questions about
-  privacy, security, hosting, retention, deleting account data, training or money get the page that governs
-  them, never a quote. None of them changes anything; fixes that involve your key are for your own terminal.
-  Claude Code: `/mcp__remembra__doctor`.
-- **`remembra-relay connect` ends with "You still need to"** when something is left: saving a key, `--apply`
-  after a dry run, unverified adapters it skipped, and trusting the hooks in Codex (checked, not assumed). When
-  nothing is left it prints no list.
-- **`why?` on the dashboard's setup checklist.** Every agent still waiting on Home gets a `why?` button that
-  opens an exchange slip under its row: the three reads it made (your keys, the trail, the agent's own entries,
-  GET only), the call marked proven or inferred, the one fix, and the doctor lines to copy for that agent's
-  machine. Where it reaches a fault the doctor also sees, it uses the doctor's rule id, sentence and guide page
-  (`KEY_MISSING`, `PICKS_UP_NEVER_CLOSES`, `CODEX_TRUST_MISSING`, `NOTHING_WAITING`, `HOOKS_NOT_FIRING`,
-  `STALE_CHECKPOINT`). Until a Codex brief or close arrives, Codex's row carries a dim reminder of the hook
-  trust step (the dashboard can't see Codex, so it never says Codex needs you).
-- **remembra.dev for your agent.** The hero's install block has `terminal | your agent` tabs; the agent tab
-  copies a prompt that points the agent at `remembra.dev/setup.md`, a step-by-step runbook that stops for the
-  key and asks before each write, and runs `pipx ensurepath` even when pipx is already installed.
-  `remembra.dev/llms.txt` and `llms-full.txt` (generated from the pages) are
-  served too. setup.md, `remembra_setup` and the dashboard give the same commands in the same order, and a test
-  holds them to it.
-
-### Changed
-
-- The brief's queued-handoff and rejected-key notices end with "Ask your agent to run remembra_doctor, or run
-  `remembra-relay doctor`." `connect`'s no-key warning leads with the same key command as its to-do list.
-- The dashboard's install line without a known server is `remembra-install --all`, which keeps the server the
-  machine already uses (Remembra Cloud on a first install); with one, as on every dashboard page, it passes
-  `--url` as before.
-- The MCP `store-summary` prompt closes the session with `close_session` and facts (it used to ask for a
-  free-form `store_memory` handoff); `setup-check` also runs `remembra_doctor`.
+- **Billing.** The Paddle billing portal opens only for a Paddle customer whose email is the account's
+  verified email, and a customer id that another account already holds is never recorded (the account is
+  flagged instead). Checkout and the billing portal need a dashboard sign-in, not an API key; an API-key
+  session in the dashboard shows "Sign in with email" instead of the billing buttons. New purchases stay on
+  the account's own email. Paddle events are applied once each and in order, and a paid renewal that arrives
+  late still records the period it paid for. A yearly plan's next credit bank unlocks only once its renewal is
+  paid. A new purchase of the retired $49 and $199 prices grants nothing and is flagged. Trial codes are
+  refused for paying subscribers.
+- **Plan limits hold on every write path.** Superseding a memory counts as a store, restoring an archived
+  memory checks the memory cap, a conversation ingest that falls back to storing the raw messages counts every
+  message, and a session close counts toward the Free plan's daily cap on notes without enrichment. Memory-cap
+  slots are reserved atomically, so parallel writes can't go past the cap.
+- **Server.** Request bodies are capped before authentication, including under a path prefix, and the web
+  framework and form parser are upgraded (FastAPI 0.141.1, Starlette 1.7.0, python-multipart 0.0.32). `GET
+  /api/v1/admin/permissions` requires an admin, and the admin promo routes check the master key. While the
+  one-time account check after a sign-in that verified the email is open, changing the password, deleting the
+  account and turning 2FA off wait until it is done. Entity relationships and background entity merges stay
+  inside one project.
+- **Relay and agents.** Credentials typed on a command line (`curl -u`, `docker login -p`, `vercel -t`,
+  password variables and the like) are redacted from a handoff before it is stored, and ordinary values (test
+  counts, askpass helpers, paths) are left alone. Terminal control characters are stripped from handoff text
+  when it is stored and before the CLI prints it. The legacy Claude Code SessionStart script, the Clawdbot
+  hook, the Clawdbot plugin (2.1.0) and the dashboard's "Copy as a prompt" hand other agents' text to the
+  model inside the untrusted-data block. The server refuses a branch name git would refuse, and the
+  dashboard's "Continue" command never passes one that git would read as an option.
+- **Images, CI and the repository.** The Docker images use pinned, maintained base images; the dashboard and
+  docs images run nginx as a non-root user on port 8080, and docs.remembra.dev gets its own nginx config with
+  security headers. The docs workflow's OIDC and Pages write permissions sit on its deploy job only, and
+  workflow installs are hash-pinned. Dependabot watches `uv.lock` and the dashboard, and CI runs `pip-audit`.
+  CI and the git hooks refuse private notes, a built docs site, office documents, public IP addresses,
+  real-format API keys and personal details in test fixtures; internal runbooks left the repository and the
+  benchmark corpus is synthetic.
 
 ## [0.16.0] - 2026-09-26 - Remembra Relay
 

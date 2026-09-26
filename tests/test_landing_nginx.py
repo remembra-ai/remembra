@@ -356,11 +356,15 @@ def test_every_retired_release_page_has_its_anchor_on_the_changelog() -> None:
         assert f'id="{version}"' in changelog, version
 
 
-def test_changelog_leads_with_v0_16_0() -> None:
+def test_changelog_leads_with_the_latest_release_then_remembra_relay() -> None:
     changelog = (LANDING / "changelog.html").read_text()
-    first = re.search(r'<article class="rel[^"]*" id="([^"]+)"', changelog)
-    assert first is not None and first.group(1) == "v0.16.0"
-    assert "Remembra Relay" in changelog[first.start() : first.start() + 600]
+    releases = re.findall(r'<article class="(rel[^"]*)" id="([^"]+)"', changelog)
+    assert releases[:2] == [("rel now", "v0.16.1"), ("rel", "v0.16.0")]
+    assert changelog.count('<span class="tag signal">Latest</span>') == 1
+    first = changelog.index('id="v0.16.1"')
+    assert '<span class="ver">v0.16.1</span><span class="tag signal">Latest</span>' in changelog[first : first + 300]
+    relay = changelog.index('id="v0.16.0"')
+    assert "Remembra Relay" in changelog[relay : relay + 600]
     assert 'href="/site.css"' in changelog and "tailwindcss" not in changelog
 
 

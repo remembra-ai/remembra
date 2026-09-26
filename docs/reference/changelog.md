@@ -2,7 +2,27 @@
 
 See [CHANGELOG.md](https://github.com/remembra-ai/remembra/blob/main/CHANGELOG.md) for the full version history.
 
-## Latest: v0.16.0, Remembra Relay
+## Latest: v0.16.1 (September 26, 2026)
+
+Relay fixes, three more verified agents and a doctor. Run `remembra-relay connect --apply` once after upgrading.
+
+- **Gemini CLI, Qwen Code and Kimi Code verified.** Each one's hooks were run against the real tool (Gemini CLI
+  0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1), so `connect --apply` now writes them. Cursor is the one agent whose
+  hooks are still unverified.
+- **`remembra-relay doctor`** says where a brief or handoff went missing, from this machine's files and your trail,
+  with one fix for each problem; it only reads. The local MCP server has the same checks as `remembra_doctor`, with
+  `remembra_setup` and `remembra_help`. See [Doctor](../guides/relay.md#doctor).
+- **One project per repository.** Every git repository gets its own project, even with `REMEMBRA_PROJECT` set.
+  `remembra-relay projects split` separates repositories 0.16.0 put in one project (a dry run until `--apply`).
+- **Deleting by entity** (`DELETE /api/v1/memories?entity=…`, the SDKs' delete by entity) deleted every memory in
+  the account. It now deletes only the memories linked to that entity.
+- **Briefs** skip sessions that did nothing, list only this project's handoffs and checkpoints, and leave out Codex
+  automation runs and sub-agents; a hook that another agent runs is filed under that agent.
+- **Security.** Billing and plan limits hold on every path, request bodies are capped before sign-in, credentials
+  typed on a command line are redacted from handoffs, other agents' text reaches the model only as untrusted data,
+  and the dashboard and docs images run nginx as a non-root user on port 8080.
+
+## v0.16.0, Remembra Relay (September 26, 2026)
 
 When an agent's session ends, `remembra-relay close` saves a handoff built from git facts (and, for Claude Code and
 Codex, the session's commands and test runs), and checks the agent's own summary against them. The next agent, in

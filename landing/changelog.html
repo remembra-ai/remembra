@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Changelog · Remembra</title>
-<meta name="description" content="What changed in each Remembra release. v0.16.0 is Remembra Relay: a connected agent leaves a handoff when it stops, and the next one, in another tool or on another machine, starts from it.">
+<meta name="description" content="What changed in each Remembra release. v0.16.1 verifies three more agents and adds remembra-relay doctor. v0.16.0 is Remembra Relay: a connected agent leaves a handoff when it stops, and the next one, in another tool or on another machine, starts from it.">
 <meta property="og:title" content="Changelog · Remembra">
-<meta property="og:description" content="v0.16.0: Remembra Relay. Handoffs, briefs and the trail, across agents and machines.">
+<meta property="og:description" content="v0.16.1: three more verified agents and remembra-relay doctor. v0.16.0: Remembra Relay, handoffs, briefs and the trail across agents and machines.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://remembra.dev/changelog">
 <meta property="og:image" content="https://remembra.dev/social-preview.png">
@@ -95,8 +95,30 @@
   <div class="wrap" style="padding-bottom:clamp(56px,8vw,104px)">
     <!-- requires the PyPI release with remembra-relay (remembra>=0.16) and docs.remembra.dev deployed with guides/relay.md -->
     <div class="releases">
-      <article class="rel now" id="v0.16.0" aria-labelledby="v0-16-0-t">
-        <p class="when"><span class="ver">v0.16.0</span><span class="tag signal">Latest</span></p>
+      <article class="rel now" id="v0.16.1" aria-labelledby="v0-16-1-t">
+        <p class="when"><span class="ver">v0.16.1</span><span class="tag signal">Latest</span><time>September 26, 2026</time></p>
+        <div>
+          <h2 id="v0-16-1-t">Three more agents, one project per repository, and a doctor</h2>
+          <p><b>Relay fixes, and a way to see where a handoff went missing.</b> Run <code>remembra-relay connect --apply</code> once after upgrading: it writes the hooks for the agents this release verified. If 0.16.0 put several repositories in one project, <code>remembra-relay projects split</code> shows how it would separate them and changes nothing until you add <code>--apply</code>.</p>
+
+          <p class="k">What is new</p>
+          <ul>
+            <li><strong>Gemini CLI, Qwen Code and Kimi Code verified.</strong> Each one's hooks were run against the real tool (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1), so <code>connect --apply</code> now writes them. Cursor is the one agent whose hooks are still unverified.</li>
+            <li><strong><code>remembra-relay doctor</code>.</strong> When a brief doesn't arrive or a handoff never reaches the trail, the doctor reads this machine and your trail, says where it went missing and gives one fix for each problem. It only reads. Inside your agent, the local MCP server has the same checks as <code>remembra_doctor</code>, with <code>remembra_setup</code> and <code>remembra_help</code>. <a href="https://docs.remembra.dev/guides/relay/#doctor">Doctor</a></li>
+            <li><strong>Setup your agent can follow.</strong> <a href="/setup.md">remembra.dev/setup.md</a> takes an agent through the install step by step: it stops for your key and asks before each write. On the dashboard, every agent still waiting on the setup checklist has a <b>why?</b> that shows what it checked and the one fix.</li>
+            <li><strong>One project per repository.</strong> Every git repository gets its own project, even with <code>REMEMBRA_PROJECT</code> set; the configured project names only folders that are not repositories.</li>
+          </ul>
+
+          <p class="k">Fixed</p>
+          <ul>
+            <li><strong>Deleting by entity.</strong> <code>DELETE /api/v1/memories?entity=…</code>, which the SDKs' delete by entity sends, deleted every memory in the account. It now deletes only the memories linked to that entity, and the SDKs send it only to a server that has the fix.</li>
+            <li><strong>Briefs.</strong> "Last session" is the last session that did something, Recent lists only this project's handoffs and checkpoints, Codex automation runs and sub-agents stay out of the trail, and a hook that another agent runs is filed under that agent.</li>
+            <li><strong>Security.</strong> Billing and plan limits hold on every path, request bodies are capped before sign-in, credentials typed on a command line are redacted from handoffs, other agents' text reaches the model only as untrusted data, and the dashboard and docs images run nginx as a non-root user.</li>
+          </ul>
+        </div>
+      </article>
+      <article class="rel" id="v0.16.0" aria-labelledby="v0-16-0-t">
+        <p class="when"><span class="ver">v0.16.0</span><time>September 26, 2026</time></p>
         <div>
           <h2 id="v0-16-0-t">Remembra Relay</h2>
           <p><b>One agent stops, the next one already knows.</b> When a session ends, Remembra Relay saves a handoff built from facts it reads from git. When the next session starts, in another tool or on another machine, that agent gets a short brief of where the work stands. Every handoff stays on the trail.</p>
