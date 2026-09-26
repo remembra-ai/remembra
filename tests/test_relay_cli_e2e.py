@@ -232,7 +232,7 @@ def test_close_dry_run_shows_payload_without_raw_transcript(server, home, tmp_pa
 def test_close_never_blocks_when_server_is_down(home, tmp_path):
     _, clones = make_remote_and_clones(tmp_path)
     dead = f"http://127.0.0.1:{_free_port()}"
-    proc = relay(home, dead, "close", "--agent", "claude-code", "--cwd", str(clones["laptop"]))
+    proc = relay(home, dead, "close", "--agent", "claude-code", "--cwd", str(clones["laptop"]), "--todo", "wire it")
     assert proc.returncode == 0
     assert proc.stdout == ""
     assert "close failed" in proc.stderr
@@ -241,7 +241,7 @@ def test_close_never_blocks_when_server_is_down(home, tmp_path):
     brief = relay(home, dead, "brief", "--hook", "claude-code", stdin="{}")
     assert brief.returncode == 0 and "Remembra brief unavailable" in brief.stdout
 
-    no_key = relay(home, dead, "close", "--agent", "x", env={"REMEMBRA_API_KEY": ""})
+    no_key = relay(home, dead, "close", "--agent", "x", "--todo", "wire it", env={"REMEMBRA_API_KEY": ""})
     assert no_key.returncode == 0 and "no API key" in no_key.stderr
 
     bad_args = relay(home, dead, "close", "--no-such-flag")

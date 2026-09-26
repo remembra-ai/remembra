@@ -195,6 +195,7 @@ ERASURE_RULES: tuple[TableRule, ...] = (
     _by_user("project_fingerprints"),
     _by_user("project_links"),
     _by_user("relay_pickups"),
+    _by_user("relay_refiles"),
     _by_user("agent_inbox", "owner_user_id"),
     TableRule("webhook_deliveries", deletes=(f"webhook_id IN ({_WEBHOOKS})",)),
     _by_user("webhooks"),

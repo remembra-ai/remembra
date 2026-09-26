@@ -223,14 +223,15 @@ async def session_brief(
     agent_id: str | None = None,
     recent_n: int = 10,
 ) -> str:
-    """Where work stands: the latest handoff an agent left, current status values,
-    the most recent memories by time, and this connection's unread inbox.
+    """Where work stands: the latest handoff an agent left that recorded any work,
+    current status values, the project's latest handoffs and checkpoints by
+    time, and this connection's unread inbox.
 
     Args:
         project_id: One of this connection's projects (default: the first one).
         agent_id: This connection's agent (the default). A connection reads only
             its own agent's inbox; another agent id is refused.
-        recent_n: Recent memories to include (0-50, default 10).
+        recent_n: Recent handoffs and checkpoints to include (0-50, default 10; at most 5 are listed).
     """
 
     async def body(call: ConnectorCall) -> dict[str, Any]:

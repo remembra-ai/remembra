@@ -33,6 +33,7 @@ from remembra.relay.handoff import (
     check_summary_grounding,
     handoff_ended_at,
     handoff_headline,
+    handoff_location,
     handoff_stored_trust,
     handoff_verdict,
     police_brief,
@@ -41,7 +42,15 @@ from remembra.relay.handoff import (
     render_handoff,
     stored_health,
 )
-from remembra.relay.identity import KIND_GIT, KIND_PATH, KIND_ROOT, Fingerprint, ProjectLocator, slugify_project
+from remembra.relay.identity import (
+    HINT_SCOPE_FOLDERS,
+    KIND_GIT,
+    KIND_PATH,
+    KIND_ROOT,
+    Fingerprint,
+    ProjectLocator,
+    slugify_project,
+)
 from remembra.security.untrusted import repo_url_prefixes
 from remembra.services.agent_session import HANDOFF_ENDED_JD, AgentSessionService, _parse_metadata
 
@@ -234,6 +243,8 @@ class ProjectRegistry:
         bind: bool = False,
         create: bool = True,
         allowed_projects: list[str] | None = None,
+        hint_scope: str | None = None,
+        git_repo: bool | None = None,
     ) -> dict[str, Any]:
         """Resolve a location to a stable project id.
 
@@ -244,6 +255,10 @@ class ProjectRegistry:
         ``hint_project`` names the project for a location seen for the first
         time (a hint for an already-bound location is reported in
         ``warnings``, never applied); ``bind=True`` re-binds a known location.
+        With ``hint_scope="folders"`` (0.16.1+ clients) the hint names only a
+        location that is not a git repository (no remote, no root commit and
+        not ``git_repo``): a new repository gets its own project. Without it
+        (``all``, 0.16.0 clients) the hint names any new location, as before.
         ``create=False`` computes the answer without writing anything.
 
         ``allowed_projects`` (a project-restricted key) restricts the result
@@ -279,6 +294,9 @@ class ProjectRegistry:
         known = await self._lookup(user_id, fingerprints)
         by_kind = {fp.kind: fp for fp in fingerprints}
         warnings: list[str] = []
+        # A configured project names a new git repository only for clients that keep one namespace.
+        folders_only = hint_scope == HINT_SCOPE_FOLDERS and locator.is_repository(git_repo)
+        new_hint = None if folders_only else hint
 
         project_id: str | None = None
         created = False
@@ -292,14 +310,14 @@ class ProjectRegistry:
             project_id = await self._adopt(user_id, primary, by_kind, known)
             source = "adopted"
         if project_id is None:
-            if hint:
-                project_id, source = hint, "hint"
+            if new_hint:
+                project_id, source = new_hint, "hint"
             elif restricted and allowed_projects and len(allowed_projects) == 1:
                 project_id, source = allowed_projects[0], "key-project"
             else:
                 project_id, source = await self._derive_new_id(user_id, locator, primary), "derived"
             created = not await self._project_known(user_id, project_id)
-        elif hint and hint != project_id and not bind:
+        elif new_hint and new_hint != project_id and not bind:
             warnings.append(
                 f"hint_project '{hint}' was not applied: this location is already bound to project '{project_id}'. "
                 f"To move it run `remembra-relay resolve --project {hint} --bind` (or resolve with bind=true)."
@@ -446,8 +464,14 @@ class RelayService:
         screen: Any | None = None,
         scrub: Callable[[str], str] | None = None,
         closed_at: datetime | None = None,
+        location: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Store (or update) the ONE handoff for ``(agent_id, session_id)``.
+
+        ``location`` (see :func:`location_record`) is where the session worked,
+        from the locator the close was resolved with. It is kept in the relay
+        block, so the brief can name it and ``projects split`` can re-file the
+        handoff by it.
 
         ``closed_at`` is when the session ended on the client (a close sent late
         from its offline queue carries the original time; see :func:`close_time`).
@@ -471,6 +495,12 @@ class RelayService:
         counts: dict[str, int] = {}
         facts = redact(dict(facts), counts, scrub)
         summary = redact(summary, counts, scrub) if summary else None
+        if location:
+            # Shown strings pass the same policy; fingerprint keys are identifiers, as in project_fingerprints.
+            location = {
+                **location,
+                **{k: redact(location.get(k), counts, scrub) for k in ("name", "root_path", "host") if location.get(k)},
+            }
         end_reason = redact(end_reason, counts, scrub) if end_reason else None
 
         received_at = datetime.now(UTC)
@@ -536,6 +566,8 @@ class RelayService:
             "closed_at": closed_at.isoformat(),
             "received_at": received_at.isoformat(),
         }
+        if location:
+            relay_meta["location"] = location
         metadata = {
             RELAY_KEY_FIELD: key,
             "agent_id": agent_id,
@@ -895,7 +927,7 @@ class RelayService:
         }
 
     async def _latest_summary(self, user_id: str, project_id: str) -> dict[str, Any] | None:
-        latest = await self.sessions.latest_handoff(user_id, project_id)
+        latest, _skipped = await self.sessions.pickup_handoff(user_id, project_id)
         if not latest:
             return None
         return {
@@ -924,6 +956,11 @@ class RelayService:
                 break
         return linked
 
+    async def shared_repositories(self, user_id: str, project_id: str) -> list[str]:
+        """The distinct repositories (``owner/repo`` of each git remote) bound to a project."""
+        remotes = (await self.registry.fingerprint_values(user_id, project_id)).get(KIND_GIT, [])
+        return sorted({_repo_path(remote) for remote in remotes})
+
     async def brief(
         self,
         user_id: str,
@@ -935,6 +972,8 @@ class RelayService:
         configured_project: str | None = None,
         checkout: dict[str, Any] | None = None,
         extra_warnings: list[str] | None = None,
+        reader: dict[str, Any] | None = None,
+        hint_scope: str | None = None,
     ) -> dict[str, Any]:
         """The session brief plus linked projects and a compact rendered text.
 
@@ -944,6 +983,11 @@ class RelayService:
         handoff, so memories stored there are not silently out of view.
         ``checkout`` (``{branch, head_commit}`` of the reader) marks the
         handoff's failing/next items as possibly stale when it differs.
+        ``reader`` (``{git_repo, fingerprints}`` of the reader's location) lets
+        the brief say when the reader is not in a git repository, or the last
+        session worked in another repository. With ``hint_scope="folders"`` (a
+        0.16.1+ client) a repository in a project that several repositories
+        share gets a note on how to split it.
         """
         brief = await self.sessions.brief(
             user_id=user_id,
@@ -979,9 +1023,22 @@ class RelayService:
                         "latest_handoff": await self._latest_summary(user_id, configured_project),
                     },
                 )
+        in_repository = bool((reader or {}).get("git_repo"))
+        if project_id and hint_scope == HINT_SCOPE_FOLDERS and in_repository:
+            shared = await self.shared_repositories(user_id, project_id)
+            if len(shared) > 1:
+                # First: the brief shows only a few notes, and this one explains everything below it.
+                warnings.insert(
+                    0,
+                    f"Project '{project_id}' holds {len(shared)} repositories (bound before Remembra 0.16.1), so their "
+                    "handoffs share one trail. Run `remembra-relay projects split` to see how each would get its own "
+                    "project; nothing moves without --apply.",
+                )
         brief["warnings"] = warnings
         brief["linked_projects"] = linked
         brief["checkout"] = checkout
+        brief["reader"] = reader
+        brief["handoff_location"] = handoff_location(brief.get("handoff"))
         # URLs into the project's own repository are not flagged in the brief.
         remotes = (await self.registry.fingerprint_values(user_id, project_id)).get(KIND_GIT, []) if project_id else []
         brief["repo_url_prefixes"] = list(repo_url_prefixes(remotes))

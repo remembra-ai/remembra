@@ -52,6 +52,7 @@ async def init_every_schema(db: Any) -> None:
     from remembra.connector.store import ConnectorStore
     from remembra.extraction.conflicts import ConflictManager
     from remembra.inbox.manager import InboxManager
+    from remembra.services import relay_split
     from remembra.spaces.manager import SpaceManager
     from remembra.storage.reindex import ReindexManager, _ensure_state_table
     from remembra.teams.manager import TeamManager
@@ -73,6 +74,7 @@ async def init_every_schema(db: Any) -> None:
     await social.ensure_schema(db)
     await security_state._ensure_schema(db)
     await PromoCodeManager(db)._ensure_schema()
+    await relay_split.ensure_schema(db)
     await db.conn.commit()
 
 

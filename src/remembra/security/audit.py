@@ -47,6 +47,10 @@ class AuditAction(StrEnum):
     ACCOUNT_REVIEW_UPDATED = "account_review_updated"  # password / 2FA / a sign-in link became the owner's
     ACCOUNT_REVIEW_SESSION = "account_review_session"  # a sign-in that may act on the review
 
+    # Relay: a shared project split into one project per repository, and its undo
+    RELAY_PROJECT_SPLIT = "relay_project_split"  # resource_id: the split batch id (details in relay_refiles)
+    RELAY_PROJECT_SPLIT_UNDONE = "relay_project_split_undone"
+
     # Sign-in methods (Sign in with Google / GitHub)
     IDENTITY_LINKED = "identity_linked"
     IDENTITY_UNLINKED = "identity_unlinked"

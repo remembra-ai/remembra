@@ -7,8 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`remembra-relay projects split`** gives each repository its own project again when 0.16.0 put them all in
+  one (see Fixed). It is a dry run by default: it lists every repository bound to your configured project,
+  the project each would get, every handoff that would move with it and the evidence, and everything that
+  stays and why. A handoff moves only on evidence: the location the server recorded with it, or, for one
+  closed before 0.16.1, a commit it recorded that `split` finds with git in exactly one checkout on this
+  machine. Folder sessions, checkpoints and anything unmatched stay. `--apply` carries it out and logs each
+  change under a batch id (and one audit event); running it again moves only what is left.
+  `remembra-relay projects undo --apply` moves a batch back. Nothing is ever deleted, and only your own
+  account's data is read or moved. API: `POST /api/v1/projects/split` and `POST /api/v1/projects/split/undo`.
+  The log table (`relay_refiles`) is created on first use; no schema migration.
+
 ### Fixed
 
+- **Relay: every repository gets its own project, even with `REMEMBRA_PROJECT` set.** In 0.16.0 a configured
+  project (for example an old `REMEMBRA_PROJECT=clawdbot` namespace in an MCP config) named every repository
+  the server had not seen, so all of them shared one trail and a brief in one repository handed over another
+  repository's work. Now a git repository always gets its own project; the configured project names only
+  folders that are not repositories. `REMEMBRA_RELAY_PROJECT` keeps everything in one project on purpose.
+  New installs (`REMEMBRA_PROJECT=default`) were not affected. Older clients keep their behaviour: the new
+  client says which rule it follows (`hint_scope`, `git_repo`), and the server records where each session
+  worked with its handoff. Use `projects split` (above) for repositories already bound together.
+- **Relay brief: "Last session" is the last session that did something.** A handoff that recorded nothing
+  (no commits, changes, tests, errors, todos, next step, summary or notes: an idle or automated session) no
+  longer buries the one before it; the brief skips it and says how many it skipped. "Recent" lists only this
+  project's handoffs and checkpoints (at most five), never the namespace's other memories, which an agent
+  could read as this project's status. In a folder that is not a git repository the brief says so in one
+  line and names where the last session worked (repository and path), instead of asking the agent to check
+  "the repository"; in a repository it says so when the last session worked in a different one. Recorded
+  text stays inside the untrusted-data block.
+- **Relay: an empty session leaves no handoff.** `close` sends nothing for a session that recorded nothing
+  and writes one line to `relay.log`; `close --summary …` by hand still sends.
 - **Relay: Codex automation runs and sub-agents no longer fill the trail.** Codex Desktop runs the relay hooks
   for every run of a scheduled automation that starts its own thread (dozens a day), and sub-agent threads run
   them too, so each one got a project brief in its prompt and left a handoff that buried the sessions people

@@ -33,6 +33,7 @@ from remembra.security.untrusted import (
     DATA_CLOSE,
     DATA_OPEN,
     DATA_PREAMBLE,
+    DATA_PREAMBLE_NO_REPO,
     HIDDEN_FLAG,
     defang_markdown_images,
     detect_actionable,
@@ -41,6 +42,7 @@ from remembra.security.untrusted import (
 )
 
 HANDOFF_FORMAT_VERSION = 1
+NOTES_LINE_PREFIX = "Notes (agent): "  # render_handoff's line for facts.notes
 MAX_BRIEF_CHARS = 6000  # ~1500 tokens
 _SHA_TOKEN_RE = re.compile(r"(?<![0-9A-Za-z])([0-9a-f]{7,40})(?![0-9A-Za-z])")
 _PATH_TOKEN_RE = re.compile(
@@ -427,7 +429,7 @@ def render_handoff(
     lines.append(f"Facts: {facts_source_label(facts.get('facts_source'))}.")
     notes = facts.get("notes")
     if notes and str(notes).strip():
-        lines.append(f"Notes (agent): {clip(notes, 1500)}")
+        lines.append(f"{NOTES_LINE_PREFIX}{clip(notes, 1500)}")
     if summary and summary.strip():
         verdict = grounding.get("status")
         if verdict == "contradicted":
@@ -472,6 +474,9 @@ def _relay_meta(handoff: dict[str, Any] | None) -> dict[str, Any] | None:
     return relay if isinstance(relay, dict) else None
 
 
+relay_block = _relay_meta  # public name: the relay block of a handoff the relay itself wrote, else None
+
+
 def handoff_ended_at(handoff: dict[str, Any]) -> Any:
     """When the handoff's session ended: the relay's recorded close time, else the stored time."""
     relay = _relay_meta(handoff) or {}
@@ -510,6 +515,46 @@ def end_reason_note(reason: Any) -> str | None:
     if value == PRE_COMPACT_REASON or value.startswith(PRE_COMPACT_REASON + ":"):
         return "still open (saved before context compaction)"
     return None
+
+
+def sections_have_substance(sections: dict[str, Any], *, summary: Any = None, notes: Any = None) -> bool:
+    """True when a handoff records anything for the next agent.
+
+    Anything in Done (commits, passing tests, changed files), Not done (todos,
+    uncommitted files, unpushed commits), Failing (failed tests or commands,
+    errors) or Next, or an agent summary or notes. A session that recorded none
+    of these (an idle or automated run) left nothing to pick up.
+    """
+    if any(sections.get(name) for name in ("done", "not_done", "failing")):
+        return True
+    if str(sections.get("next") or "").strip():
+        return True
+    return bool(str(summary or "").strip() or str(notes or "").strip())
+
+
+def handoff_has_substance(memory: dict[str, Any] | None) -> bool:
+    """Whether a stored handoff is worth showing as "Last session" (see :func:`sections_have_substance`).
+
+    A relay handoff is judged by its recorded sections, whether a summary was
+    given (its grounding verdict) and its notes line. A free-form handoff
+    (stored through the generic memory API) counts when it has any text.
+    """
+    if not memory:
+        return False
+    relay = _relay_meta(memory)
+    content = str(memory.get("content") or "")
+    if relay is None:
+        return bool(content.strip())
+    summary_given = (relay.get("grounding") or {}).get("status") not in (None, "none")
+    notes = any(line.startswith(NOTES_LINE_PREFIX) for line in content.splitlines())
+    return sections_have_substance(relay, summary=summary_given or None, notes=notes or None)
+
+
+def handoff_location(memory: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Where a relay handoff was recorded (``relay.location``), or None (free-form, or closed before 0.16.1)."""
+    relay = _relay_meta(memory)
+    location = (relay or {}).get("location")
+    return location if isinstance(location, dict) else None
 
 
 def handoff_headline(memory: dict[str, Any]) -> str:
@@ -911,7 +956,7 @@ def render_last_session(
 ) -> str:
     """``Last session: <agent> (key-verified|self-declared), <when>, on <branch>@<sha>: done… / NOT done… / failing… / next…``."""
     if not handoff:
-        return "Last session: none recorded for this project."
+        return "Last session: none recorded for this project."  # (the brief adds how many empty ones it skipped)
     relay = _relay_meta(handoff)
     when = relative_time(handoff.get("created_at"), now)
     verdict = handoff_verdict(handoff, allowed_urls)
@@ -1015,12 +1060,93 @@ def _recent_line(mem: dict[str, Any], now: datetime, allowed: tuple[str, ...]) -
     who = f" [{show_text(mem.get('agent_id'), limit=60)}]" if mem.get("agent_id") else ""
     kind = f" ({mem.get('memory_type')})" if mem.get("memory_type") else ""
     verdict = _verdict_for_item([mem.get("content")], mem, allowed)
-    text = withheld_note(verdict, mem.get("id")) if verdict.withheld else show_text(mem.get("content"), verdict, 160)
+    if verdict.withheld:
+        text = withheld_note(verdict, mem.get("id"))
+    elif mem.get("memory_type") == "handoff":
+        text = show_text(handoff_headline(mem), verdict, 160)  # the handoff's one-line headline, not its header
+    else:
+        text = show_text(mem.get("content"), verdict, 160)
     return f"- {relative_time(mem.get('created_at'), now)}{who}{kind}: {text}"
 
 
+def _repository_keys(keys: Any) -> dict[str, set[str]]:
+    """``{"git": {owner/repo, ...}, "root": {sha, ...}}`` from fingerprint keys."""
+    out: dict[str, set[str]] = {"git": set(), "root": set()}
+    for key in keys if isinstance(keys, list | tuple | set) else []:
+        kind, _, value = str(key).partition(":")
+        if kind == "git" and value:
+            out["git"].add(value.split("/", 1)[1] if "/" in value else value)
+        elif kind == "root" and value:
+            out["root"].add(value)
+    return out
+
+
+def same_repository(a: Any, b: Any) -> bool | None:
+    """Whether two fingerprint key lists name one repository: by remote (``owner/repo``) when both have
+    one, else by root commit; None when that cannot be told (a folder, or nothing to compare)."""
+    left, right = _repository_keys(a), _repository_keys(b)
+    for kind in ("git", "root"):
+        if left[kind] and right[kind]:
+            return bool(left[kind] & right[kind])
+    return None
+
+
+def describe_location(location: dict[str, Any], reader_host: Any = None) -> str:
+    """``widget at /Users/me/widget`` (``on host h`` when another machine), or ``the folder /x``."""
+    path = str(location.get("root_path") or "").strip()
+    name = str(location.get("name") or "").strip()
+    if location.get("git_repo"):
+        text = f"{name} at {path}" if name and path else (name or path or "a repository")
+    else:
+        text = f"the folder {path} (not a git repository)" if path else "a folder (not a git repository)"
+    host = str(location.get("host") or "").strip()
+    if host and reader_host and host != str(reader_host).strip().lower():
+        text += f" on host {host}"
+    return text
+
+
+def location_line(handoff: dict[str, Any] | None, reader: dict[str, Any] | None, allowed: tuple[str, ...] = ()) -> str | None:
+    """Where the last session worked, when the reader needs to know.
+
+    A reader outside a git repository always gets one line: that this is not a
+    repository and where the last session worked (repository name and path it
+    recorded). A reader in a repository gets a line only when the last session
+    recorded another repository. None otherwise, or for a withheld handoff.
+    """
+    reader = reader or {}
+    outside = reader.get("git_repo") is False
+    location = handoff_location(handoff) if handoff else None
+    where: str | None = None
+    if location is not None and handoff is not None and not handoff_verdict(handoff, allowed).withheld:
+        # The recorded name and path pass the same policy as every recorded line.
+        verdict = assess_text(location.get("name"), location.get("root_path"), location.get("host"), allowed_urls=allowed)
+        if not verdict.withheld:
+            where = show_text(describe_location(location, reader.get("host")), verdict, 400)
+    if outside:
+        if not handoff:
+            return "This working directory is not a git repository."
+        if where is None and location is not None:
+            return "This working directory is not a git repository; where the last session worked is withheld (low trust)."
+        if where is None:
+            return (
+                "This working directory is not a git repository; where the last session worked was not recorded "
+                "(its handoff was written before Remembra 0.16.1)."
+            )
+        return f"This working directory is not a git repository; the last session worked in {where}."
+    if where and location and same_repository(location.get("fingerprints"), reader.get("fingerprints")) is False:
+        return f"The last session worked in {where}, not in this repository."
+    return None
+
+
 def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: int = MAX_BRIEF_CHARS) -> str:
-    """Compact text brief: handoff health, last session, inbox, status, linked projects, recent memories.
+    """Compact text brief: handoff health, last session, inbox, status, linked projects, the recent trail.
+
+    "Last session" is the newest handoff that recorded any work (the service
+    skips empty ones and the brief says how many, ``handoffs_skipped``). A
+    reader outside a git repository (``reader.git_repo`` false) gets one line
+    saying so and naming where the last session worked, and a preamble that
+    does not point at a repository; a reader in another repository than the
+    one the last session recorded gets a line naming that one.
 
     Everything recorded by agents or tools (the handoff, inbox subjects,
     status values, linked headlines, recent memories) sits inside ONE
@@ -1040,7 +1166,19 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
     )
     handoff = brief.get("handoff")
     health = health_line(handoff, handoff_verdict(handoff, allowed) if handoff else None)
-    data: list[str] = render_last_session(handoff, now, brief.get("checkout"), allowed).split("\n")
+    reader = brief.get("reader") or {}
+    where = location_line(handoff, reader, allowed)
+    data: list[str] = [where] if where else []
+    skipped = brief.get("handoffs_skipped")
+    if handoff is None and isinstance(skipped, int) and skipped > 0:
+        data.append("Last session: none that recorded any work in this project.")
+    else:
+        data.extend(render_last_session(handoff, now, brief.get("checkout"), allowed).split("\n"))
+    if isinstance(skipped, int) and skipped > 0:
+        data.append(
+            f"Skipped {skipped} newer session{'s' if skipped != 1 else ''} that recorded nothing (no commits, changes,"
+            " tests, errors, todos, next step or summary: idle or automated runs)."
+        )
 
     inbox = brief.get("inbox")
     if inbox and inbox.get("available", True) and inbox.get("unread_count"):
@@ -1065,8 +1203,10 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
         lines = data + (["Recent (newest first):", *recent] if recent else [])
         return neutralize("\n".join(lines))
 
+    preamble = DATA_PREAMBLE_NO_REPO if reader.get("git_repo") is False else DATA_PREAMBLE
+
     def assemble(body: str) -> str:
-        return "\n".join([*top, DATA_OPEN, DATA_PREAMBLE, body, DATA_CLOSE, *tail])
+        return "\n".join([*top, DATA_OPEN, preamble, body, DATA_CLOSE, *tail])
 
     text = assemble(data_body(recent_lines))
     while len(text) > max_chars and recent_lines:
@@ -1107,6 +1247,12 @@ def police_brief(brief: dict[str, Any]) -> None:
     """
     allowed = tuple(brief.get("repo_url_prefixes") or ())
     handoff = brief.get("handoff")
+    location = brief.get("handoff_location")
+    if isinstance(location, dict):
+        withheld = isinstance(handoff, dict) and handoff_verdict(handoff, allowed).withheld
+        verdict = assess_text(location.get("name"), location.get("root_path"), location.get("host"), allowed_urls=allowed)
+        withheld = withheld or verdict.withheld
+        brief["handoff_location"] = None if withheld else {**_strip_hidden_deep(location), **verdict.as_dict()}
     if "handoff_health" in brief:
         brief["handoff_health"] = police_health(
             brief.get("handoff_health"), handoff_verdict(handoff, allowed) if handoff else None, allowed

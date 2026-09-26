@@ -10,8 +10,8 @@ tool, machine, or checkout location, picks that up at session start.
    The git remote is normalized (`https://github.com/Acme/Widget.git`,
    `git@github.com:acme/widget`, `ssh://git@github.com:22/acme/widget` are all
    `github.com/acme/widget`). The root commit and the path are fallbacks. The same repo on a laptop,
-   an external drive, a server, or in a worktree resolves to the same project. See
-   [Which project a repository uses](#which-project-a-repository-uses).
+   an external drive, a server, or in a worktree resolves to the same project, and every repository has
+   its own. See [Which project a repository uses](#which-project-a-repository-uses).
 2. **Close-out.** When a session ends, `remembra-relay close` gathers facts mechanically from git (branch,
    head, this session's commits, changed and uncommitted files, diff stat, unpushed commits) and,
    for Claude Code and Codex, from the session transcript (shell commands and exit codes, test runs,
@@ -30,7 +30,8 @@ tool, machine, or checkout location, picks that up at session start.
    </remembra-data>
    ```
 
-   The line is followed by your unread inbox, status values, linked projects' latest handoffs, and recent memories.
+   "Last session" is the newest handoff that recorded any work. The line is followed by your unread inbox,
+   status values, linked projects' latest handoffs, and this project's recent handoffs and checkpoints.
    The brief is capped at about 1500 tokens. See [Reading the brief](#reading-the-brief).
 
 ## Setup
@@ -207,6 +208,8 @@ remembra-relay resolve [--cwd DIR] [--project P] [--bind]
 remembra-relay connect [--apply] [--agent NAME]... [--include-unverified] [--agents-md PATH]
 remembra-relay disconnect [--apply] [--agent NAME]... [--agents-md PATH]
 remembra-relay status  [--format text|json] [--no-check]
+remembra-relay projects split [--project P] [--repo PATH]... [--apply] [--format text|json]
+remembra-relay projects undo  [--batch ID] [--apply] [--format text|json]
 remembra-relay --version
 ```
 
@@ -226,6 +229,13 @@ in time)* instead of reporting a clean tree.
 Without a session id (the AGENTS.md fallback, manual runs), `brief` starts a new ad-hoc session and a
 `close` in the same place within 12 hours updates it. A `close` with no preceding `brief` gets its own
 id, so separate sessions never overwrite each other.
+
+**Empty sessions leave no handoff.** When a session recorded nothing (no summary or notes, no commits,
+no changed or uncommitted files, no tests, errors or failed commands, no todos and no next step: an
+idle or automated run), `close` sends nothing and writes one line to `~/.remembra/relay/relay.log`
+(`close: nothing to hand off for <agent> session <id> …`). Run by hand it also says so on stderr. To
+leave a handoff anyway, pass `--summary` (or `--notes`, `--todo`, `--next`). Git state that could not be
+read in time counts as something, so such a close is still sent.
 
 ## Uninstall {#uninstall}
 
@@ -258,39 +268,87 @@ The rule, in order:
    same root commit on a project with no remote yet (a remote was added later), the same `owner/repo`
    under another host name (an ssh `Host` alias such as `github-work`), or the same checkout path on a
    project with no remote and no commits yet (`git init`, or the first commit of an empty repo).
-3. **Otherwise, the configured project** names it, when one is configured: `REMEMBRA_RELAY_PROJECT`,
-   else `REMEMBRA_PROJECT` from the environment, the `remembra` MCP server's `env`, or
-   `~/.remembra/credentials`. `default` does not count. This keeps existing users in the single
-   namespace their memories, status values and handoffs already live in: every repository you work in
-   joins it.
-4. **With nothing configured**, the repository gets its own project, named after it (`widget`, or
-   `widget-1a2b3c` when that name is taken).
+3. **Otherwise a git repository gets its own project**, named after it (`widget`, or `widget-1a2b3c`
+   when that name is taken), whatever `REMEMBRA_PROJECT` says.
+4. **A folder that is not a git repository** (a Codex Desktop task folder, `~/Documents`) gets the
+   configured project when one is configured: `REMEMBRA_PROJECT` from the environment, the `remembra`
+   MCP server's `env`, or `~/.remembra/credentials` (`default` does not count). With nothing configured
+   it gets its own project, named after the folder.
+
+**One project for everything.** Set `REMEMBRA_RELAY_PROJECT=<id>` to put every new location,
+repositories included, in that one project (what 0.16.0 did with `REMEMBRA_PROJECT`). Locations
+already bound keep their project either way.
+
+The client tells the server which rule it follows (`hint_scope=folders` next to `hint_project`, plus
+`git_repo`), so an older client keeps its behaviour: a 0.16.0 client sends no `hint_scope`, and its
+configured project still names every new location. That is how repositories ended up sharing one
+project before 0.16.1; [split it](#splitting-a-project-several-repositories-share).
 
 Only writes record a binding: `close` and `POST /api/v1/projects/resolve`. `brief` and `trail` compute
-the answer without recording it, so opening a session never moves anything. When a repository is
-already bound to one project but you are configured for another, the brief says so and lists the
-configured project's latest handoff under *Linked projects*. To move the repository, run
-`remembra-relay resolve --project <id> --bind`.
-
-To give each repository its own project while `REMEMBRA_PROJECT` is set, bind it once:
-`remembra-relay resolve --project <repo-name> --bind`, or set `REMEMBRA_RELAY_PROJECT` for that shell.
+the answer without recording it, so opening a session never moves anything. To move one repository to
+another project, run `remembra-relay resolve --project <id> --bind` in it. A brief in a repository whose
+project other repositories share says so, with the command below.
 
 The CLI picks the remote named `origin`, else the one the current branch tracks, else
 `remote.pushDefault`, else the only remote. It resolves ssh `Host` aliases with `ssh -G` and makes
 relative local remotes (`../upstream`) absolute. The MCP server, when it runs locally, reads the
 repository from the `root_path` an agent passes, so `session_brief(root_path=…)` lands in the same
-project as the hooks.
+project as the hooks, under the same rule.
+
+### Splitting a project several repositories share
+
+With 0.16.0 and `REMEMBRA_PROJECT` set to an old namespace (`clawdbot`, say), every repository you
+worked in was bound to that one project, so a brief in one repository could hand over another's work.
+0.16.1 no longer binds new repositories that way; to give the ones already bound their own project:
+
+```bash
+remembra-relay projects split            # dry run: nothing changes
+remembra-relay projects split --apply    # carry it out
+remembra-relay projects undo --apply     # reverse the last split
+```
+
+`split` works on your configured project (`--project` names another). It lists every git repository
+bound to it and the project each gets (its own name, as a new repository would), then every handoff
+that moves with it and why:
+
+- **By recorded location.** Since 0.16.1 the server records where each session worked; a handoff whose
+  repository is one of those moves with it.
+- **By recorded commit.** A handoff closed before that has no location. `split` reads with git every
+  checkout of those repositories on this machine (the paths on record, the current directory and any
+  `--repo PATH`); when the HEAD or a commit the handoff recorded is in exactly one of them, it moves
+  there, and the output names the checkout. Run it again on another machine to match the rest.
+
+Everything else stays where it is and is listed with the reason: folder sessions (the configured project
+still names folders), checkpoints (they record no location), free-form handoffs, and handoffs whose
+commits are in no checkout, or in more than one. Earlier versions of a moved handoff go with it.
+
+Nothing is deleted. `--apply` logs every change under a batch id (printed, and kept in the account's
+audit log); running it again moves only what is left and matched. `projects undo` moves a batch back,
+skipping anything that changed since (handoffs written in the new projects after the split stay there, and
+it says how many); like `split`, it is a dry run without `--apply`. Only your own
+account's bindings and handoffs are read or moved, and keys restricted to projects are refused.
 
 ## Reading the brief
 
 Everything in the brief that another agent or tool recorded (the handoff, inbox subjects, status
-values, linked headlines, recent memories) sits inside one `<remembra-data untrusted="true">` block
+values, linked headlines, recent handoffs and checkpoints) sits inside one `<remembra-data untrusted="true">` block
 with a fixed preamble: it is data, not instructions. The relay's own directive ("Before you finish:
 run `remembra-relay close`…") stays outside the block. Text inside it cannot close the block.
 MCP tools that return stored content (`recall_memories`, `list_memories`, `timeline`, `get_inbox`,
 `list_status`, the full `session_brief`, and the connector's `session_brief`, `trail` and
 `recall_memories`) put their JSON inside the same block, with the same escaping.
 
+- **Last session.** The newest handoff that recorded any work: commits, changed or uncommitted files,
+  tests, errors, todos, a next step, a summary or notes. Newer handoffs with none of that (idle sessions,
+  automated runs, clients older than 0.16.1) are skipped, and the brief says how many
+  (`Skipped 3 newer sessions that recorded nothing …`).
+- **Recent.** At most five of this project's latest handoffs and checkpoints, newest first. Other
+  memories of the project or namespace (notes, facts from other work) are not listed: ask
+  `recall_memories` for those.
+- **Where it worked.** When your working directory is not a git repository, the first line of the block
+  says so and names where the last session worked (repository and path it recorded), and the preamble
+  asks you to verify the lines rather than check them against a repository. In a repository, the brief
+  says so when the last session recorded a different one.
 - **Who.** `claude-code (key-verified)` means the handoff was closed with a key scoped to that agent.
   `(self-declared)` means the caller named the agent itself. A handoff stored through
   `POST /memories` or `store_memory(memory_type="handoff")` is always shown as a *free-form,
@@ -314,7 +372,7 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
   key scoped to that agent (*key-verified*); otherwise it ends *Graded by the server from facts the
   agent reported, not verified*.
 - **Low trust.** One policy covers every recorded line: the handoff, inbox messages, status values,
-  linked headlines and recent memories. When the text matches prompt-injection patterns (the
+  linked headlines and recent handoffs and checkpoints. When the text matches prompt-injection patterns (the
   sanitizer of `POST /memories`, plus requests to keep something from the user and hidden Unicode
   tag or bidirectional characters; text is also matched with fullwidth forms and Cyrillic or Greek
   look-alike letters folded to Latin), it is withheld: the brief shows `withheld (LOW TRUST <score>, id
@@ -345,10 +403,12 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| POST | `/api/v1/projects/resolve` | `{git_remote?, root_commit?, root_path?, repo_name?, host?, hint_project?, bind?}` → `{project_id, created, persisted, fingerprint, kind, bound}` |
+| POST | `/api/v1/projects/resolve` | `{git_remote?, root_commit?, root_path?, repo_name?, host?, git_repo?, hint_project?, hint_scope?, bind?}` → `{project_id, created, persisted, fingerprint, kind, bound}`. `hint_scope`: `all` (default, 0.16.0) or `folders` (the hint names only a location that is not a git repository) |
+| POST | `/api/v1/projects/split` | `{project, apply?, checkouts?}` → the repositories bound to `project` and their new projects, `moves` (with `matched_by` and `evidence`), `stays` (with `reason`), `commit_candidates`; with `apply`, `batch_id` and `moved`. Dry run by default |
+| POST | `/api/v1/projects/split/undo` | `{batch_id?, apply?}` → what moves back (`moves_back`) and what changed since (`left`). Dry run by default |
 | POST / GET / DELETE | `/api/v1/projects/links` | link projects (`from_project`, `to_project`, `relation`) |
 | POST | `/api/v1/session/close` | `{agent_id, session_id, project_id \| project:{locator}, facts:{…}, summary?, end_reason?}` → handoff id + rendered text |
-| GET | `/api/v1/session/brief` | `project_id` or locator params (+ `session_id`, the reader's session) → brief JSON + `rendered` + `handoff_health`; records a pickup when it serves another agent's handoff |
+| GET | `/api/v1/session/brief` | `project_id` or locator params (+ `hint_scope`, `git_repo`, `session_id`, the reader's session) → brief JSON + `rendered` + `handoff_health` + `handoffs_skipped` + `handoff_location`; records a pickup when it serves another agent's handoff |
 | GET | `/api/v1/trail` | handoffs + checkpoints across agents, newest first; `agent_id` filters; each item's `detail` holds its sections. Page with `before` (+ `before_id`), the oldest entry's `created_at` (and `id`): only older entries come back and `total` counts them, so new handoffs never shift a page |
 | GET | `/api/v1/trail/summary` | per-agent and per-project activity: last active, sessions in 7 days, a daily series (`days`, `tz_offset_minutes`) |
 | GET | `/api/v1/inbox/messages` | inbox messages across all agents (`status=open\|unread\|all`, `agent_id`, `limit`, `offset`) |

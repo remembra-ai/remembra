@@ -13,7 +13,7 @@ Makes session-start context automatic instead of an instruction the model may sk
 1. Listens for `agent:bootstrap`.
 2. Calls `GET /api/v1/session/brief?project_id=<project>&agent_id=<agent>` on Remembra.
 3. Prepends `_SESSION_BRIEF.md` to the bootstrap files: latest handoff, this agent's
-   unread inbox (with inbox ids to ack), current status values, recent memories by time.
+   unread inbox (with inbox ids to ack), current status values, the project's recent handoffs and checkpoints.
 4. If Remembra is unreachable, prepends a short note telling the agent to call
    `remembra_session_brief` itself. It never blocks bootstrap.
 

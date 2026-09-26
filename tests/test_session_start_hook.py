@@ -83,7 +83,14 @@ def _populate(api: dict[str, Any]) -> None:
         memory_type="handoff",
         metadata={"agent_id": "codex"},
     )
-    seed(api, "r1", "Decided to keep status upserts in SQLite", datetime(2026, 9, 25, 9, 0), project_id="clawbot")
+    seed(
+        api,
+        "r1",
+        "Decided to keep status upserts in SQLite",
+        datetime(2026, 9, 25, 9, 0),
+        project_id="clawbot",
+        memory_type="checkpoint",  # the brief's recent block lists the project's handoffs and checkpoints
+    )
     seed(api, "h2", "[SESSION END] clawbot handoff", datetime(2026, 9, 25, 10, 0), project_id="clawbot", memory_type="handoff")
     codex = api["make_client"](project="clawbot", agent_id="codex")
     codex.send_to_inbox(to_agent="claude-code", subject="Review the brief endpoint", body="Please review PR 12. " * 30)

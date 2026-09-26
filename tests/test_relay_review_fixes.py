@@ -120,7 +120,8 @@ def test_existing_namespace_survives_upgrade_to_location_briefs(api):
     brief = _get(api, "/session/brief", {"git_remote": remote, "hint_project": "clawdbot"})
     assert brief["project_id"] == "clawdbot"
     assert brief["handoff"]["id"] == handoff["handoff_id"]
-    assert len(brief["recent"]) == 1 and [s["key"] for s in brief["status_items"]][0] == "branch:clawdbot"
+    # The namespace's general memories are never listed as recent: only this project's handoffs and checkpoints.
+    assert brief["recent"] == [] and [s["key"] for s in brief["status_items"]][0] == "branch:clawdbot"
     assert "TODO: tier pricing" in _last_session(brief["rendered"])
 
     closed = _close(api, project={"git_remote": remote, "hint_project": "clawdbot"}, project_id=None, session_id="new-1")
@@ -265,12 +266,12 @@ def test_patch_cannot_rewrite_a_relay_handoff(api):
 
 def test_key_verified_versus_self_declared(api):
     _as(api, agent_id="codex")
-    _close(api, agent_id=None, session_id="k1")
+    _close(api, agent_id=None, session_id="k1", facts={"branch": "main", "next_step": "n"})
     assert _last_session(_get(api, "/session/brief", {"project_id": "widget"})["rendered"]).startswith(
         "Last session: codex (key-verified)"
     )
     _owner(api)
-    _close(api, agent_id="codex", session_id="k2")  # an unscoped caller naming the same agent
+    _close(api, agent_id="codex", session_id="k2", facts={"branch": "main", "next_step": "n"})  # an unscoped caller
     assert _last_session(_get(api, "/session/brief", {"project_id": "widget"})["rendered"]).startswith(
         "Last session: codex (self-declared)"
     )
@@ -298,7 +299,7 @@ def test_brief_marks_a_handoff_from_another_checkout_as_stale(api):
 
 
 def test_facts_source_is_recorded_and_shown(api):
-    out = _close(api, facts={"branch": "main", "facts_source": "relay-cli:git+transcript"})
+    out = _close(api, facts={"branch": "main", "facts_source": "relay-cli:git+transcript", "next_step": "n"})
     assert "Facts: collected by remembra-relay from git and the session transcript." in out["rendered"]
     assert "(facts collected by remembra-relay from git and the session transcript)" in _last_session(
         _get(api, "/session/brief", {"project_id": "widget"})["rendered"]

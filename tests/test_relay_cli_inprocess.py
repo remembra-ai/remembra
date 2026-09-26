@@ -306,26 +306,38 @@ def test_a_queued_close_never_takes_the_place_of_a_newer_one(wired, monkeypatch,
     assert status.startswith("- last_agent:queued: claude-code (session B-new)")
 
 
-def test_configured_project_names_an_unseen_repository(wired, monkeypatch, capsys, tmp_path):
+def test_configured_project_names_folders_and_each_repository_gets_its_own(wired, monkeypatch, capsys, tmp_path):
+    """REMEMBRA_PROJECT=clawdbot (a namespace from before Relay): two new repositories get two projects, a folder
+    that is not a repository joins clawdbot, and REMEMBRA_RELAY_PROJECT keeps the one-namespace opt-in."""
     api = wired["api"]
     api["http"].post("/api/v1/memories", json={"content": "pos cache decision", "project_id": "clawdbot"})
-    _, clones = make_remote_and_clones(tmp_path, ("a", "b"))
+    _, clones = make_remote_and_clones(tmp_path, ("a", "b", "c"))
     git(clones["a"], "remote", "set-url", "origin", "git@github.com:freshvybz/clawbot.git")
     git(clones["b"], "remote", "set-url", "origin", "https://github.com/acme/newthing.git")
+    git(clones["c"], "remote", "set-url", "origin", "https://github.com/acme/together.git")
+    folder = tmp_path / "Codex" / "2026-09-26" / "task"
+    folder.mkdir(parents=True)
 
     monkeypatch.setenv("REMEMBRA_PROJECT", "clawdbot")
     _, out, _ = _run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(clones["a"]), "--format", "json"])
     brief = json.loads(out.splitlines()[-1])
-    assert brief["project_id"] == "clawdbot" and [m["content"] for m in brief["recent"]] == ["pos cache decision"]
+    assert brief["project_id"] == "clawbot" and brief["recent"] == []  # the namespace's memories are not this repo's
+    assert not any("configured for" in w for w in brief["warnings"]) and brief["linked_projects"] == []
     _, out, _ = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(clones["a"]), "--next", "n"])
-    assert "project clawdbot" in out
-
-    monkeypatch.setenv("REMEMBRA_PROJECT", "default")  # nothing configured: per-repository project
-    _, out, _ = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(clones["b"])])
+    assert "project clawbot" in out
+    _, out, _ = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(clones["b"]), "--next", "n"])
     assert "project newthing" in out
+    _, out, _ = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(folder), "--next", "n"])
+    assert "project clawdbot" in out  # not a repository: the configured project names it
+
+    monkeypatch.setenv("REMEMBRA_RELAY_PROJECT", "clawdbot")  # the explicit single-namespace opt-in
+    _, out, _ = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(clones["c"]), "--next", "n"])
+    assert "project clawdbot" in out
+    monkeypatch.delenv("REMEMBRA_RELAY_PROJECT")
     monkeypatch.delenv("REMEMBRA_PROJECT")
-    _, out, _ = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(clones["a"])])
-    assert "project clawdbot" in out  # the binding was recorded by the first close
+    for repo, project in (("a", "clawbot"), ("b", "newthing"), ("c", "clawdbot")):  # bindings recorded by the closes
+        _, out, _ = _run(monkeypatch, capsys, ["close", "--agent", "codex", "--cwd", str(clones[repo]), "--next", "m"])
+        assert f"project {project}" in out, repo
 
 
 class _DripServer:

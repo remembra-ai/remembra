@@ -93,23 +93,29 @@ def test_mcp_close_then_compact_brief_for_hookless_agent(mcp_env, monkeypatch):
     assert "suggested next step (from kimi, unverified): port the tokenizer" in lines[4]
 
 
-def test_mcp_repo_binds_to_configured_project_and_close_follows_the_brief(mcp_env):
-    """REMEMBRA_PROJECT=alpha: an unseen repo joins alpha (one namespace for existing users), and
-    close_session / store_memory without a locator land where session_brief resolved."""
+def test_mcp_repo_gets_its_own_project_and_close_follows_the_brief(mcp_env):
+    """REMEMBRA_PROJECT=alpha: an unseen repository still gets its own project (the configured project names
+    only folders), and close_session / store_memory without a locator land where session_brief resolved."""
     server.store_memory("existing fact in alpha")
     brief = _j(server.session_brief(git_remote="https://github.com/freshvybz/clawbot.git"))
-    assert brief["project_id"] == "alpha"
+    assert brief["project_id"] == "clawbot"
     assert brief["resolution"]["persisted"] is False  # a brief never writes a binding
-    assert [m["content"] for m in brief["recent"]] == ["existing fact in alpha"]
+    assert brief["recent"] == [] and brief["linked_projects"] == []  # alpha's memories are not this repository's
 
     closed = _j(server.close_session(next_step="ship it", facts={"branch": "main"}))  # no locator, no project
-    assert closed["project_id"] == "alpha"
+    assert closed["project_id"] == "clawbot"
     resolved = mcp_env["http"].post("/api/v1/projects/resolve", json={"git_remote": "git@github.com:freshvybz/clawbot"}).json()
-    assert resolved["project_id"] == "alpha" and resolved["created"] is False  # the close recorded the binding
+    assert resolved["project_id"] == "clawbot" and resolved["created"] is False  # the close recorded the binding
 
     again = _j(server.session_brief(git_remote="git@github.com:freshvybz/clawbot"))
     assert again["handoff_id"] == closed["handoff_id"]
     assert "suggested next step (from kimi, unverified): ship it" in again["brief"]
+
+
+def test_mcp_single_namespace_opt_in_keeps_repositories_in_the_configured_project(mcp_env, monkeypatch):
+    monkeypatch.setenv("REMEMBRA_RELAY_PROJECT", "alpha")
+    closed = _j(server.close_session(next_step="n", facts={"branch": "main"}, git_remote="https://github.com/acme/one.git"))
+    assert closed["project_id"] == "alpha"
 
 
 def test_mcp_brief_project_is_the_default_for_close_and_store(mcp_env, monkeypatch):
@@ -119,7 +125,8 @@ def test_mcp_brief_project_is_the_default_for_close_and_store(mcp_env, monkeypat
     )
     brief = _j(server.session_brief(git_remote="git@github.com:acme/other.git"))
     assert brief["project_id"] == "other"
-    assert any("configured for 'alpha'" in w for w in brief["warnings"])
+    # The configured project names folders only: it is not offered for a repository.
+    assert not any("configured for 'alpha'" in w for w in brief["warnings"])
     closed = _j(server.close_session(next_step="n", facts={"branch": "main"}))
     assert closed["project_id"] == "other"
     stored = _j(server.store_memory("decision: use sqlite"))

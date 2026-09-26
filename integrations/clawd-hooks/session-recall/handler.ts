@@ -5,7 +5,7 @@
  * remembra_recall first"), which the model could ignore and which returned
  * semantic noise. This one calls GET /api/v1/session/brief and prepends the
  * result as `_SESSION_BRIEF.md`, so the agent starts with the latest handoff,
- * its unread inbox, current status values and recent memories by time.
+ * its unread inbox, current status values and the project's recent handoffs and checkpoints.
  *
  * Never blocks bootstrap: on any failure it prepends a short fallback note.
  */
@@ -125,7 +125,7 @@ export function formatBrief(brief: Json): string {
   }
   const recent = brief.recent ?? [];
   if (recent.length) {
-    lines.push("", "## Recent memories (newest first)");
+    lines.push("", "## Recent handoffs and checkpoints (newest first)");
     for (const m of recent) {
       const who = m.agent_id ? ` [${m.agent_id}]` : "";
       const kind = m.memory_type ? ` (${m.memory_type})` : "";

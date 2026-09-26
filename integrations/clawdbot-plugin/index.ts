@@ -125,10 +125,10 @@ export default function register(api: PluginApi) {
   tool({
     name: "remembra_session_brief",
     description:
-      "Call FIRST at session start: latest handoff for the project, your unread inbox, current status values, and the most recent memories by time.",
+      "Call FIRST at session start: latest handoff for the project, your unread inbox, current status values, and the project's recent handoffs and checkpoints.",
     parameters: Type.Object({
       project_id: Type.Optional(Type.String({ description: "Project (default: configured projectId)." })),
-      recent_n: Type.Optional(Type.Number({ description: "Recent memories to include (0-50, default 10)." })),
+      recent_n: Type.Optional(Type.Number({ description: "Recent handoffs and checkpoints to include (0-50, default 10; at most 5 are listed)." })),
     }),
     async run(p) {
       const q = new URLSearchParams({ project_id: projectOf(p.project_id), agent_id: agentId, recent_n: String(p.recent_n ?? 10) });

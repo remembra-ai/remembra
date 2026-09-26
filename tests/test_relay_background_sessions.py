@@ -375,7 +375,8 @@ def _transcript(kind: str, tmp_path: Path) -> Path:
 
 
 BRIEF = ["brief", "--hook", "codex", "--agent", "codex"]
-CLOSE = ["close", "--hook", "codex", "--agent", "codex"]
+# --next: the session hands something off (a close with nothing recorded sends nothing at all).
+CLOSE = ["close", "--hook", "codex", "--agent", "codex", "--next", "carry on"]
 
 
 @pytest.mark.parametrize(("kind", "reason"), list(SKIPPED.items()))
@@ -503,7 +504,7 @@ def test_a_sub_agent_sharing_its_parent_session_id_leaves_the_parent_alone(relay
 def test_manual_close_without_a_hook_is_unaffected(relay_env, monkeypatch, capsys):
     """``remembra-relay close`` typed by hand (no --hook) sends, even given an automation's rollout."""
     work = str(relay_env["work"])
-    argv = ["close", "--agent", "codex", "--cwd", work, "--transcript", str(THREADS / "automation.jsonl")]
+    argv = ["close", "--agent", "codex", "--cwd", work, "--transcript", str(THREADS / "automation.jsonl"), "--next", "n"]
     code, out, _ = _main(monkeypatch, capsys, argv, "")
     assert code == 0 and "Remembra handoff h-1" in out
     assert relay_env["http"].calls() == [("POST", "/api/v1/session/close")]

@@ -9,6 +9,8 @@ Subcommands::
     remembra-relay connect [--apply] [--agent NAME ...] [--include-unverified] [--agents-md PATH]
     remembra-relay disconnect [--apply] [--agent NAME ...] [--agents-md PATH]
     remembra-relay status  [--format text|json] [--no-check]
+    remembra-relay projects split [--project P] [--repo PATH ...] [--apply] [--format text|json]
+    remembra-relay projects undo  [--batch ID] [--apply] [--format text|json]
 
 ``brief``/``close``/``trail`` are hook-safe: they never block (≤10 s total,
 git calls and HTTP bounded), never raise, always exit 0 and report problems
@@ -26,11 +28,13 @@ key was rejected, and ``status`` shows the queue and the last result per agent.
 
 The project is resolved from the git repository in ``--cwd`` (remote URL,
 root commit), so every checkout of the same repo — any machine, drive or
-worktree — shares one trail. Outside git the working directory is used. A
-configured project (``REMEMBRA_RELAY_PROJECT``, else ``REMEMBRA_PROJECT`` /
-the MCP env / credentials, unless it is ``default``) names a location the
-server has not seen yet, so existing users keep their one namespace; with
-nothing configured each repository gets its own project.
+worktree — shares one trail, and a repository the server has not seen gets
+its own project. Outside git the working directory is used, and a configured
+project (``REMEMBRA_PROJECT`` / the MCP env / credentials, unless it is
+``default``) names such a folder. ``REMEMBRA_RELAY_PROJECT`` opts into one
+project for everything, repositories included (the 0.16.0 behaviour). Before
+0.16.1 a configured project named every new repository; ``projects split``
+gives each of those its own project again (see :mod:`remembra.relay.projects`).
 
 The whole run is bounded by ``TOTAL_BUDGET_SECONDS``: HTTP runs in a worker
 thread that is abandoned (the fallback text is printed) when the budget runs
@@ -58,10 +62,12 @@ from typing import Any
 import httpx
 
 from remembra.client.project import normalize_project_id, parse_project_aliases
-from remembra.relay import background, outbox
+from remembra.relay import background, outbox, projects
 from remembra.relay import facts as factlib
 from remembra.relay.adapters import REGISTRY, Adapter, agents_md, backup_and_write, get_adapter, relay_command
 from remembra.relay.config import RelayConfig, load_config, load_config_from_source
+from remembra.relay.handoff import build_sections, sections_have_substance
+from remembra.relay.identity import HINT_SCOPE_ALL, HINT_SCOPE_FOLDERS
 
 TOTAL_BUDGET_SECONDS = 9.5
 GIT_BUDGET_SECONDS = 4.0
@@ -234,6 +240,7 @@ class Context:
     def __init__(self, args: argparse.Namespace, payload: dict[str, Any] | None = None) -> None:
         self.args = args
         self.deadline = factlib.Deadline(TOTAL_BUDGET_SECONDS)
+        self.http_timeout = HTTP_TIMEOUT_SECONDS  # per request; commands that are not hooks may raise both
         self.adapter: Adapter | None = get_adapter(getattr(args, "hook", None))
         self.payload = payload if payload is not None else (read_hook_payload() if self.adapter else {})
         mapped = self.adapter.spec.payload.extract(self.payload) if self.adapter else {}
@@ -250,26 +257,51 @@ class Context:
         self.repo = factlib.repo_info(self.cwd, git_deadline)
 
     def configured_project(self) -> str | None:
-        """The project this client is configured for, used to name a location
-        the server has not seen yet (``default`` does not count)."""
-        aliases = parse_project_aliases(self.config.project_aliases)
-        for value in (os.environ.get("REMEMBRA_RELAY_PROJECT"), self.config.project):
-            if value and value.strip():
-                project = normalize_project_id(value, aliases)
-                if project and project != "default":
-                    return project
-        return None
+        """The project this client is configured for (``default`` does not count):
+        ``REMEMBRA_RELAY_PROJECT``, else ``REMEMBRA_PROJECT`` / the MCP env / credentials."""
+        return self.single_namespace() or self.normalize_project(self.config.project)
+
+    def single_namespace(self) -> str | None:
+        """``REMEMBRA_RELAY_PROJECT``, when set: the explicit opt-in to keep every location,
+        git repositories included, in that one project (the 0.16.0 behaviour)."""
+        return self.normalize_project(os.environ.get("REMEMBRA_RELAY_PROJECT"))
+
+    def normalize_project(self, value: str | None) -> str | None:
+        """``value`` as a project id (aliases applied); None when empty or ``default``."""
+        if not value or not value.strip():
+            return None
+        project = normalize_project_id(value, parse_project_aliases(self.config.project_aliases))
+        return project if project and project != "default" else None
+
+    def hint_fields(self) -> dict[str, Any]:
+        """How the server may name this location when it has not seen it (see "Which project a repository uses").
+
+        A git repository always gets its own project: the configured project is
+        sent as ``hint_project`` only for a folder that is not a repository,
+        with ``hint_scope=folders`` so the server never applies it to a
+        repository. ``REMEMBRA_RELAY_PROJECT`` opts into one namespace for
+        everything (``hint_scope=all``). ``git_repo`` tells the server whether
+        this is a repository (a new one may have no commit or remote yet).
+        """
+        fields: dict[str, Any] = {"git_repo": self.repo.is_git}
+        single = self.single_namespace()
+        if single:
+            fields.update(hint_project=single, hint_scope=HINT_SCOPE_ALL)
+            return fields
+        fields["hint_scope"] = HINT_SCOPE_FOLDERS
+        configured = self.configured_project()
+        if configured and not self.repo.is_git:
+            fields["hint_project"] = configured
+        return fields
 
     def project_params(self) -> dict[str, Any]:
-        """Either ``project_id`` or a location to resolve server-side (+ the configured project as hint)."""
+        """Either ``project_id`` or a location to resolve server-side (see :meth:`hint_fields`)."""
         aliases = parse_project_aliases(self.config.project_aliases)
         explicit = getattr(self.args, "project", None)
         if explicit:
             return {"project_id": normalize_project_id(explicit, aliases)}
         locator = self.repo.locator(self.cwd, self.host)
-        hint = self.configured_project()
-        if hint:
-            locator["hint_project"] = hint
+        locator.update(self.hint_fields())
         return locator
 
     def client(self, config: RelayConfig | None = None, agent: str | None = None, budget: float | None = None) -> httpx.Client:
@@ -281,7 +313,7 @@ class Context:
         if agent:
             headers["X-Remembra-Agent-Id"] = agent
         remaining = self.deadline.end - time.monotonic()
-        timeout = max(0.5, min(HTTP_TIMEOUT_SECONDS, remaining, budget if budget is not None else remaining))
+        timeout = max(0.5, min(self.http_timeout, remaining, budget if budget is not None else remaining))
         return httpx.Client(base_url=config.url, headers=headers, timeout=httpx.Timeout(timeout, connect=min(4.0, timeout)))
 
     def request(
@@ -752,6 +784,30 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
     return payload
 
 
+EMPTY_CLOSE_REASON = "the session recorded no summary, notes, commits, file changes, tests, errors, todos or next step"
+
+
+def nothing_to_hand_off(payload: dict[str, Any]) -> bool:
+    """True when a close would store an empty handoff (an idle or automated session).
+
+    The same rule the brief uses to skip empty handoffs
+    (:func:`~remembra.relay.handoff.sections_have_substance`): nothing in Done,
+    Not done, Failing or Next, and no summary or notes. Unknown git state (a
+    probe that timed out) counts as something, so such a close is still sent.
+    """
+    facts = payload.get("facts") or {}
+    sections = build_sections(facts, facts.get("next_step"))
+    return not sections_have_substance(sections, summary=payload.get("summary"), notes=facts.get("notes"))
+
+
+def _skip_empty_close(ctx: Context, payload: dict[str, Any]) -> None:
+    """Send nothing for an empty session: one line in relay.log (and on stderr when run by hand)."""
+    agent, session = str(payload.get("agent_id") or ""), str(payload.get("session_id") or "")
+    outbox.log(ctx.home, f"close: nothing to hand off for {agent} session {session[:40]} ({EMPTY_CLOSE_REASON}); not sent")
+    if not ctx.adapter:
+        _err(f"nothing to hand off: {EMPTY_CLOSE_REASON}, so nothing was sent. Add --summary to send a handoff anyway.")
+
+
 def health_summary(health: Any) -> str | None:
     """``Handoff: Ready with warnings - tests not run; 2 commit(s) not pushed`` (None without a grade)."""
     if not isinstance(health, dict) or not health.get("label"):
@@ -840,8 +896,14 @@ def cmd_close(args: argparse.Namespace) -> int:
                 return 0
         ctx = Context(args, payload=hook_payload)
         payload = build_close_payload(ctx, args)
+        empty = nothing_to_hand_off(payload)
         if args.dry_run:
             print(json.dumps(payload, indent=2))
+            if empty:
+                _err(f"close would send nothing: {EMPTY_CLOSE_REASON}")
+            return 0
+        if empty:
+            _skip_empty_close(ctx, payload)
             return 0
         if not ctx.config.api_key:
             _err("close skipped: no API key (set REMEMBRA_API_KEY or configure the remembra MCP server)")
@@ -934,10 +996,11 @@ def cmd_resolve(args: argparse.Namespace) -> int:
             _err("resolve failed: no API key")
             return 1
         locator = ctx.repo.locator(ctx.cwd, ctx.host)
-        if args.project:
+        if args.project:  # a name given here applies to this location, repository or not
             locator["hint_project"] = normalize_project_id(args.project, parse_project_aliases(ctx.config.project_aliases))
-        elif not args.bind and ctx.configured_project():
-            locator["hint_project"] = ctx.configured_project()
+            locator.update(git_repo=ctx.repo.is_git, hint_scope=HINT_SCOPE_ALL)
+        elif not args.bind:
+            locator.update(ctx.hint_fields())
         locator["bind"] = bool(args.bind)
         response = ctx.request("POST", "/api/v1/projects/resolve", json=locator)
         if response.status_code >= 400:
@@ -1268,7 +1331,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_brief = sub.add_parser("brief", help="Print the pickup brief for this project")
     common(p_brief)
     p_brief.add_argument("--format", choices=["text", "json", "hook-json", "cursor-json"], help="Output format")
-    p_brief.add_argument("--recent", type=int, default=8, help="Recent memories to include (default 8)")
+    p_brief.add_argument(
+        "--recent",
+        type=int,
+        default=8,
+        help="Recent handoffs and checkpoints of this project to list (default 8; at most 5 are shown)",
+    )
     p_brief.add_argument(
         "--once", action="store_true", help="Print nothing if this session already had its brief (for per-prompt hooks)"
     )
@@ -1319,6 +1387,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("--format", choices=["text", "json"], default="text")
     p_status.add_argument("--no-check", action="store_true", help="Do not ask the server; show the last recorded key state")
     p_status.set_defaults(func=cmd_status)
+    projects.add_parser(sub)
     return parser
 
 

@@ -3,8 +3,8 @@
 
 Claude Code runs this at session start and adds whatever it prints on stdout
 to the model's context. It calls ``GET /api/v1/session/brief`` and prints the
-latest handoff, this agent's unread inbox, current status values and the most
-recent memories (by time), so the session starts with context instead of
+latest handoff, this agent's unread inbox, current status values and the
+project's recent handoffs and checkpoints, so the session starts with context instead of
 relying on the model to remember to call a recall tool.
 
 Standard library only — runs with any python3, no venv needed.
@@ -153,7 +153,7 @@ def format_brief(brief: dict[str, Any]) -> str:
     recent = brief.get("recent") or []
     if recent:
         lines.append("")
-        lines.append("## Recent memories (newest first)")
+        lines.append("## Recent handoffs and checkpoints (newest first)")
         for mem in recent:
             who = f" [{mem['agent_id']}]" if mem.get("agent_id") else ""
             kind = f" ({mem['memory_type']})" if mem.get("memory_type") else ""

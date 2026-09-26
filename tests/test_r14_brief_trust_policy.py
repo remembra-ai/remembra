@@ -141,7 +141,8 @@ def test_payload_is_withheld_or_flagged_on_every_brief_surface(api, name, payloa
     http = api["http"]
     project = f"p-{name}".replace("_", "-")
     reader = f"reader-{name}".replace("_", "-")
-    _ok(http.post("/api/v1/memories", json={"content": payload, "project_id": project}), 201)
+    # A checkpoint: the brief's recent block lists only the project's handoffs and checkpoints.
+    _ok(http.post("/api/v1/memories", json={"content": payload, "project_id": project, "memory_type": "checkpoint"}), 201)
     note = _ok(http.post("/api/v1/session/status", json={"key": "note", "value": payload, "project_id": project}))
     sent = _ok(
         http.post(
@@ -180,8 +181,8 @@ def test_the_curl_bash_payload_that_scored_one_is_caught(api):
     assert detect_actionable(bare) == ["pipe_to_shell", "url"]  # ...so the detector is what catches it
 
     http = api["http"]
-    _ok(http.post("/api/v1/memories", json={"content": evidence, "project_id": "ev"}), 201)
-    _ok(http.post("/api/v1/memories", json={"content": bare, "project_id": "ev"}), 201)
+    _ok(http.post("/api/v1/memories", json={"content": evidence, "project_id": "ev", "memory_type": "checkpoint"}), 201)
+    _ok(http.post("/api/v1/memories", json={"content": bare, "project_id": "ev", "memory_type": "checkpoint"}), 201)
     rendered = _ok(http.get("/api/v1/session/brief", params={"project_id": "ev", "agent_id": "codex"}))["rendered"]
     bare_lines = [ln for ln in rendered.splitlines() if bare in ln and "do not mention" not in ln]
     assert len(bare_lines) == 1 and bare_lines[0].endswith(COMMAND_FLAG)
@@ -196,7 +197,7 @@ def test_url_into_the_projects_own_repository_is_not_flagged(api):
     own = "Review https://github.com/acme/widget/pull/42 before merging"
     foreign = "Review https://github.com/someone-else/widget/pull/42 before merging"
     for content in (own, foreign):
-        _ok(http.post("/api/v1/memories", json={"content": content, "project_id": "widget"}), 201)
+        _ok(http.post("/api/v1/memories", json={"content": content, "project_id": "widget", "memory_type": "checkpoint"}), 201)
     brief = _ok(http.get("/api/v1/session/brief", params={"project_id": "widget", "agent_id": "codex"}))
     assert brief["repo_url_prefixes"] == ["github.com/acme/widget"]
     lines = brief["rendered"].splitlines()
@@ -248,6 +249,7 @@ def test_legacy_rows_without_a_stored_score_are_scored_when_shown(api):
             metadata={},
             created_at=datetime(2026, 9, 20, 10, 0),
             trust_score=1.0,
+            memory_type="checkpoint",
         )
         await db.conn.commit()
 

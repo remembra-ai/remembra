@@ -187,9 +187,10 @@ def test_session_brief_and_status_tools(mcp_env):
 
 def test_session_brief_project_alias_resolves(mcp_env):
     server.store_memory("fact in alpha")
+    server.store_memory("parser half done", memory_type="checkpoint")
     brief = _j(server.session_brief(project_id="ALPHA-OLD"))
     assert brief["project_id"] == "alpha"
-    assert len(brief["recent"]) == 1
+    assert [m["content"] for m in brief["recent"]] == ["parser half done"]  # the project's trail, not its facts
 
 
 # ---------------------------------------------------------------------------
