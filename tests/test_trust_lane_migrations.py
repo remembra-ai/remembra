@@ -87,7 +87,7 @@ async def test_applies_after_crew_version_5(tmp_path, monkeypatch):
     try:
         assert {"project_id", "crew_id", "kind", "trust_score"} <= _columns(conn, "agent_inbox")
         applied = sorted(r[0] for r in conn.execute("SELECT version FROM schema_version"))
-        assert applied == sorted({5} | {v for v, _, _ in VERSIONED_MIGRATIONS}) == [1, 2, 3, 4, 5, 6, 7, 8]
+        assert applied == sorted({5} | {v for v, _, _ in VERSIONED_MIGRATIONS}) == [1, 2, 3, 4, 5, 6, 7, 8, 9]
     finally:
         conn.close()
 

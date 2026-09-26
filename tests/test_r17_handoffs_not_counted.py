@@ -80,12 +80,12 @@ async def test_free_account_with_10k_handoff_rows_can_still_store_a_note(tmp_pat
 
         before = await _usage(c, hdr)
         assert before["handoffs"] == 10_000 and before["cap"] == 10_000
-        assert before["stored"] == 2  # the close's two status values (last_agent, branch), not the handoffs
+        assert before["stored"] == 0  # neither the handoffs nor the close's status values (last_agent, branch)
 
         r = await c.h.client.post("/api/v1/memories", json={"content": "note: invoices round half-up"}, headers=hdr)
         assert r.status_code in (200, 201), r.text
         after = await _usage(c, hdr)
-        assert after["stored"] == 3 and after["handoffs"] == 10_000
+        assert after["stored"] == 1 and after["handoffs"] == 10_000
 
 
 async def test_twenty_thousand_closes_never_block_a_note_but_notes_still_hit_the_cap(tmp_path) -> None:
@@ -137,3 +137,66 @@ async def test_a_handoff_typed_note_without_the_server_relay_block_is_counted(tm
         assert r.status_code in (200, 201), r.text
         usage = await _usage(c, hdr)
         assert usage["stored"] == 1 and usage["handoffs"] == 0
+
+
+async def test_closes_with_new_sessions_leave_the_notes_count_unchanged(tmp_path) -> None:
+    """Launch review: each close wrote two status values (a new last_agent value per session) that counted."""
+    async with cost_app(tmp_path, **CAP_ON) as c:
+        uid, hdr = await c.account("closer@example.com")
+        assert (await _usage(c, hdr))["stored"] == 0
+        for n in range(5):
+            await _close(c, hdr, f"session-{n}", f"todo {n}")
+        usage = await _usage(c, hdr)
+        assert usage["stored"] == 0 and usage["handoffs"] == 5
+        cursor = await c.h.db.conn.execute("SELECT COUNT(*) FROM memories WHERE user_id = ? AND memory_type = 'status'", (uid,))
+        assert (await cursor.fetchone())[0] == 6  # a last_agent value per session + one branch value: kept, not counted
+        # A status value a client writes is a note like any other, even if it claims the relay as its source.
+        r = await c.h.client.post(
+            "/api/v1/session/status",
+            json={"key": "deploy", "value": "green", "project_id": "invoices", "metadata": {"source": "relay"}},
+            headers=hdr,
+        )
+        assert r.status_code == 200, r.text
+        assert (await _usage(c, hdr))["stored"] == 1
+
+
+async def test_projects_holding_only_handoffs_do_not_use_free_project_slots(tmp_path) -> None:
+    async with cost_app(tmp_path, **CAP_ON) as c:
+        _, hdr = await c.account("projects@example.com")
+        for n in range(5):
+            r = await c.h.client.post(
+                "/api/v1/session/close",
+                json={"agent_id": "claude-code", "session_id": f"s{n}", "project_id": f"relay-{n}", "facts": {"branch": "main"}},
+                headers=hdr,
+            )
+            assert r.status_code == 200, r.text
+        # Three note projects fit, including one that already holds handoffs; the fourth does not.
+        for project in ("relay-0", "notes-a", "notes-b"):
+            r = await c.h.client.post(
+                "/api/v1/memories", json={"content": f"note in {project}", "project_id": project}, headers=hdr
+            )
+            assert r.status_code in (200, 201), (project, r.text)
+        r = await c.h.client.post(
+            "/api/v1/memories", json={"content": "one project too many", "project_id": "relay-1"}, headers=hdr
+        )
+        assert r.status_code == 403 and "Project limit reached (3 projects" in r.json()["detail"]
+
+
+async def test_the_cap_count_reads_relay_rows_through_the_type_index(tmp_path) -> None:
+    """The store-path count used to read every row of the account; it now counts from indexes."""
+    from remembra.storage.database import RELAY_WRITTEN_SQL, RELAY_WRITTEN_TYPES
+
+    async with cost_app(tmp_path, **CAP_ON) as c:
+        uid, hdr = await c.account("plan@example.com")
+        await _close(c, hdr, "s1", "todo")
+        marks = ",".join("?" for _ in RELAY_WRITTEN_TYPES)
+        cursor = await c.h.db.conn.execute(
+            f"EXPLAIN QUERY PLAN SELECT COUNT(*) FROM memories WHERE user_id IN (?) AND memory_type IN ({marks})"  # noqa: S608
+            f" AND {RELAY_WRITTEN_SQL}",
+            (uid, *RELAY_WRITTEN_TYPES),
+        )
+        plan = " ".join(str(r[3]) for r in await cursor.fetchall())
+        assert "idx_memories_user_type" in plan, plan
+        cursor = await c.h.db.conn.execute("EXPLAIN QUERY PLAN SELECT COUNT(*) FROM memories WHERE user_id IN (?)", (uid,))
+        plan = " ".join(str(r[3]) for r in await cursor.fetchall())
+        assert "COVERING INDEX" in plan, plan

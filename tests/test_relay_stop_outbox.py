@@ -516,6 +516,27 @@ def test_a_body_the_server_rejects_is_not_queued_forever(tmp_path, home):
     assert "not queued, the server rejected the body" in (home / ".remembra" / "relay" / "relay.log").read_text()
 
 
+def test_a_close_to_a_server_without_the_route_is_queued_for_the_roll_forward(tmp_path, home):
+    """An API rolled back to a build without /session/close answers the framework's bare 404:
+    the handoff waits in the outbox (also through the next brief's replay) instead of being lost."""
+    laptop, _ = _repo(tmp_path, "rolled-back")
+    with fixed_status_server(404, "Not Found") as url:
+        close = relay(home, url, "close", "--agent", "claude-code", "--session-id", "RB", "--cwd", str(laptop))
+        assert close.returncode == 0 and "HTTP 404" in close.stderr and "queued" in close.stderr
+        relay(home, url, "brief", "--agent", "codex", "--cwd", str(laptop))
+    [entry] = list((home / ".remembra" / "relay" / "outbox").glob("*.json"))
+    assert json.loads(entry.read_text())["session_id"] == "RB"
+    assert "dropped" not in (home / ".remembra" / "relay" / "relay.log").read_text()
+
+
+def test_a_404_the_route_itself_answers_is_not_queued(tmp_path, home):
+    laptop, _ = _repo(tmp_path, "route-404")
+    with fixed_status_server(404, "Project not found") as url:
+        close = relay(home, url, "close", "--agent", "claude-code", "--session-id", "P4", "--cwd", str(laptop))
+        assert close.returncode == 0 and "HTTP 404" in close.stderr and "queued" not in close.stderr
+    assert not list((home / ".remembra" / "relay" / "outbox").glob("*.json"))
+
+
 class _ScopedKey(http.server.BaseHTTPRequestHandler):
     """A key scoped to claude-code: closes written as codex are refused (403), the rest accepted."""
 

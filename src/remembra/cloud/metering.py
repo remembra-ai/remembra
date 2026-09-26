@@ -41,7 +41,7 @@ from remembra.cloud.plans import (
     get_plan,
 )
 from remembra.config import get_settings
-from remembra.storage.database import FOUNDING_HOLDS_DDL, RELAY_RECORD_SQL
+from remembra.storage.database import FOUNDING_HOLDS_DDL, RELAY_RECORD_SQL, RELAY_WRITTEN_SQL, RELAY_WRITTEN_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -1425,39 +1425,60 @@ class UsageMeter:
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
-    async def _count_pool(self, pool: list[str], relay: bool) -> int:
-        marks = ",".join("?" for _ in pool)
-        cursor = await self._db.conn.execute(
-            f"SELECT COUNT(*) FROM memories WHERE user_id IN ({marks}) AND {'' if relay else 'NOT '}{RELAY_RECORD_SQL}",  # noqa: S608
-            pool,
-        )
+    async def _count(self, sql: str, params: list[Any]) -> int:
+        cursor = await self._db.conn.execute(sql, params)
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
 
     async def count_pool_memories(self, account: AccountState) -> int:
         """Memories counted toward the account's memory cap, over every user sharing it (a team pool).
 
-        Relay handoffs and checkpoints (server-written continuity records,
-        superseded versions included) are not counted: handoffs are free on
-        every plan, so closing sessions must never fill the cap and block a
-        note. See :meth:`count_pool_relay_records` for their number.
+        Everything a session close writes is left out, superseded versions
+        included: relay handoffs and checkpoints, and the relay's own
+        ``last_agent:`` / ``branch:`` status values (a new value per close).
+        Handoffs are free on every plan, so closing sessions must never fill the
+        cap and block a note. See :meth:`count_pool_relay_records`.
+
+        Runs on every store: all rows are counted from ``idx_memories_user``
+        and the relay-written ones, reached through ``idx_memories_user_type``,
+        are subtracted, so only those rows are read.
         """
-        return await self._count_pool(list(account.pool), relay=False)
+        pool = list(account.pool)
+        marks = ",".join("?" for _ in pool)
+        types = ",".join("?" for _ in RELAY_WRITTEN_TYPES)
+        total = await self._count(f"SELECT COUNT(*) FROM memories WHERE user_id IN ({marks})", pool)  # noqa: S608
+        relay = await self._count(
+            f"SELECT COUNT(*) FROM memories WHERE user_id IN ({marks}) AND memory_type IN ({types})"  # noqa: S608
+            f" AND {RELAY_WRITTEN_SQL}",
+            [*pool, *RELAY_WRITTEN_TYPES],
+        )
+        return total - relay
 
     async def count_pool_relay_records(self, account: AccountState) -> int:
         """Relay handoffs and checkpoints stored by the account's pool (not counted toward the cap)."""
-        return await self._count_pool(list(account.pool), relay=True)
+        pool = list(account.pool)
+        marks = ",".join("?" for _ in pool)
+        return await self._count(
+            f"SELECT COUNT(*) FROM memories WHERE user_id IN ({marks}) AND memory_type IN ('handoff', 'checkpoint')"  # noqa: S608
+            f" AND {RELAY_RECORD_SQL}",
+            pool,
+        )
 
     async def project_exists(self, user_id: str, project_id: str) -> bool:
+        """Whether ``project_id`` already counts toward the project limit (see :meth:`count_projects`)."""
         cursor = await self._db.conn.execute(
-            "SELECT 1 FROM memories WHERE user_id = ? AND project_id = ? LIMIT 1", (user_id, project_id)
+            f"SELECT 1 FROM memories WHERE user_id = ? AND project_id = ? AND NOT {RELAY_WRITTEN_SQL} LIMIT 1",  # noqa: S608
+            (user_id, project_id),
         )
         return await cursor.fetchone() is not None
 
     async def count_projects(self, user_id: str) -> int:
-        cursor = await self._db.conn.execute("SELECT COUNT(DISTINCT project_id) FROM memories WHERE user_id = ?", (user_id,))
-        row = await cursor.fetchone()
-        return int(row[0]) if row else 0
+        """Projects counted toward the plan's project limit: those holding anything besides what
+        session closes write (a project with only handoffs and relay status is free, like handoffs)."""
+        return await self._count(
+            f"SELECT COUNT(DISTINCT project_id) FROM memories WHERE user_id = ? AND NOT {RELAY_WRITTEN_SQL}",  # noqa: S608
+            [user_id],
+        )
 
     async def get_period_counters(
         self, user_id: str | tuple[str, ...], start: datetime, end: datetime | None = None

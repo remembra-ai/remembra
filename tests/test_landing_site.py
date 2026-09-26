@@ -947,7 +947,7 @@ def test_pricing_names_every_limit_that_refuses_a_save() -> None:
     assert "Running out of credits never blocks a save." in faq
     assert f"({free.max_content_chars:,} characters on Free, {solo.max_content_chars:,} on paid plans)" in refused
     assert pro.max_content_chars == team.max_content_chars == solo.max_content_chars
-    assert f"the project count ({free.max_projects} on Free)" in refused
+    assert f"the project count ({free.max_projects} on Free; projects with only handoffs are not counted)" in refused
     assert f"the notes per request ({free.max_batch_items} on Free, {solo.max_batch_items} on paid plans)" in refused
     assert f"{free.max_unenriched_writes_per_day} unenriched saves a day" in refused
     assert "notes-kept cap" in refused

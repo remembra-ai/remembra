@@ -59,6 +59,22 @@ def is_retryable_status(status: int) -> bool:
     return status in RETRY_STATUS or status >= 500
 
 
+def route_missing(status: int, body: Any) -> bool:
+    """A 404 from a server that has no such route (the framework's bare ``{"detail": "Not Found"}``).
+
+    That is an older server build, for example an API rolled back to a release
+    without ``/session/close``: the handoff is queued and sent once the server
+    is rolled forward. A 404 the route itself answers carries its own detail
+    and is not retried.
+    """
+    return status == 404 and isinstance(body, dict) and body.get("detail") == "Not Found"
+
+
+def is_retryable_response(status: int, body: Any) -> bool:
+    """:func:`is_retryable_status`, plus a 404 for a route the server does not have (:func:`route_missing`)."""
+    return is_retryable_status(status) or route_missing(status, body)
+
+
 def relay_dir(home: Path) -> Path:
     return home / ".remembra" / "relay"
 

@@ -93,7 +93,7 @@ this boots the real app three ways on throw-away SQLite files (no network, no
 keys): on a fresh database, on a database created by the deployed commit and
 filled with rows (it checks the pre-migration backup, that no row, column or
 value is lost apart from the intended legacy-tier rename, and that a second
-boot changes nothing), and with Crew mode's version 5 applied after 6 to 8:
+boot changes nothing), and with Crew mode's version 5 applied after 6 to 9:
 
 ```bash
 python scripts/maintenance/verify_release_migrations.py --prod <deployed-commit> --this HEAD --crew feat/crew

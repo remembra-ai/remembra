@@ -15,7 +15,7 @@ lives in a temporary directory.
    every old row keeps every old value (nothing deleted, no column dropped,
    nothing rewritten); a second boot changes nothing and writes no new backup.
 3. Crew: ``--crew`` boots a copy of the upgraded database. Its version 5
-   (``crew_agent_inbox_scoping``) must apply after 6-8, keep every row, and
+   (``crew_agent_inbox_scoping``) must apply after 6-9, keep every row, and
    leave a database ``--this`` boots again without change.
 
     python scripts/maintenance/verify_release_migrations.py --prod b034314 --this HEAD --crew feat/crew
@@ -446,7 +446,7 @@ def main() -> int:
         if len(sorted((db.parent / "backups").glob("*"))) != 1:
             failures.append("second boot: wrote another pre-migration backup")
 
-        # (c) feat/crew's version 5 after 6-8
+        # (c) feat/crew's version 5 after 6-9
         crew_dir = base / "db_crew"
         crew_dir.mkdir()
         crew_db = crew_dir / "remembra.db"

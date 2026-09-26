@@ -329,10 +329,14 @@ remembra-relay connect            # dry run; add --apply to write the hooks
 - Social sign-in's callback is `/api/v1/auth/oauth/{provider}/callback` on the API host; an unchanged
   `/session/status` re-send is not charged; decay cleanup never archives relay handoffs or pinned rows; CI
   builds `Dockerfile.cloud` and boots it.
-- Main-DB migration version 5 is left free for Crew mode (`crew_agent_inbox_scoping`); 6 to 8 apply before or
-  after it.
+- Main-DB migration version 5 is left free for Crew mode (`crew_agent_inbox_scoping`); 6 to 9 apply before or
+  after it (9 adds the `idx_memories_user_type` index the cap count uses).
 
-## [0.16.0] - 2026-07-16
+## Remembra Cloud - 2026-07-16 (server release; the package carries it from 0.16.0)
+
+These changes went live on Remembra Cloud on 2026-07-16. They were never published as a package of their
+own: PyPI went from 0.13.2 to 0.16.0, the Relay release above, which includes all of them. (This section
+was labelled 0.16.0 before the Relay release took that number.)
 
 **Lossless memory + production reliability.** The theme of this release: what you
 store is exactly what you can get back, and when something fails you can see why.

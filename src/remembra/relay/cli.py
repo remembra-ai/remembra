@@ -329,6 +329,13 @@ class Context:
         return response
 
 
+def _json_body(response: httpx.Response) -> Any:
+    try:
+        return response.json()
+    except Exception:
+        return None
+
+
 def _http_error(response: httpx.Response) -> str:
     try:
         detail = response.json().get("detail", response.text)
@@ -471,7 +478,7 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: fl
             error=detail,
             http_status=status,
         )
-        if status is not None and not outbox.is_retryable_status(status):
+        if status is not None and response is not None and not outbox.is_retryable_response(status, _json_body(response)):
             outbox.finish(entry, claimed, sent=True)  # resending the same body cannot succeed
             outbox.log(ctx.home, f"outbox: dropped {entry.agent_id} session {entry.session_id[:40]}: {detail}")
             continue
@@ -843,7 +850,7 @@ def cmd_close(args: argparse.Namespace) -> int:
         if response.status_code >= 400:
             detail = _http_error(response)
             _err(f"close failed: {detail}")
-            if outbox.is_retryable_status(response.status_code):
+            if outbox.is_retryable_response(response.status_code, _json_body(response)):
                 _queue_close(ctx, payload, detail, response.status_code)
             else:
                 outbox.record(

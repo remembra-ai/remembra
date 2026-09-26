@@ -206,6 +206,16 @@ VERSIONED_MIGRATIONS: list[tuple[int, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_founding_holds_until ON founding_holds(until)",
         ],
     ),
+    (
+        9,
+        "memories_user_type_index",
+        [
+            # R-17: the notes-kept cap is checked on every store. It counts the
+            # pool's rows from idx_memories_user and subtracts the relay-written
+            # ones, found through this index instead of reading every row.
+            "CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories(user_id, memory_type)",
+        ],
+    ),
 ]
 
 
@@ -406,6 +416,18 @@ RELAY_RECORD_SQL = (
     "(CASE WHEN memory_type IN ('handoff', 'checkpoint') AND json_valid(metadata)"
     " THEN COALESCE(json_type(metadata, '$.relay'), '') = 'object' ELSE 0 END)"
 )
+
+# Status values the relay itself writes when a session closes (``last_agent:<project>``,
+# ``branch:<project>``): server-sourced rows (``source = 'agent_generated'``, which no
+# client write path sets) marked ``metadata.source = 'relay'``. Always 0 or 1.
+RELAY_STATUS_SQL = (
+    "(CASE WHEN memory_type = 'status' AND source = 'agent_generated' AND json_valid(metadata)"
+    " THEN COALESCE(json_extract(metadata, '$.source'), '') = 'relay' ELSE 0 END)"
+)
+# Everything a session close writes, which never counts toward the notes-kept cap.
+RELAY_WRITTEN_SQL = f"({RELAY_RECORD_SQL} OR {RELAY_STATUS_SQL})"
+# The memory types those rows can have (lets the cap count use idx_memories_user_type).
+RELAY_WRITTEN_TYPES = ("handoff", "checkpoint", "status")
 
 # SQL schemas
 SCHEMA_SQL = """
