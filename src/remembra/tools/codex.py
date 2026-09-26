@@ -12,6 +12,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from remembra.relay.adapters.base import Change, backup_and_write
 from remembra.tools.bridge import (
     DEFAULT_BRIDGE_HOST,
     DEFAULT_BRIDGE_PORT,
@@ -26,6 +27,7 @@ from remembra.tools.bridge import (
     stop_bridge,
     wait_for_healthy,
 )
+from remembra.tools.keyinput import mask_key, resolve_api_key
 
 DEFAULT_CODEX_CONFIG = Path.home() / ".codex" / "config.toml"
 DEFAULT_REMEMBRA_URL = "https://api.remembra.dev"
@@ -59,6 +61,7 @@ def build_codex_mcp_block(
     api_key: str | None,
     project: str,
     user_id: str,
+    agent_id: str | None = "codex",
 ) -> str:
     """Build a TOML block for the Remembra Codex MCP server."""
     if not project:
@@ -82,6 +85,8 @@ def build_codex_mcp_block(
             f"REMEMBRA_USER_ID = {json.dumps(user_id)}",
         ]
     )
+    if agent_id:
+        lines.append(f"REMEMBRA_AGENT_ID = {json.dumps(agent_id)}")
     return "\n".join(lines)
 
 
@@ -96,29 +101,55 @@ def _is_remembra_table(line: str) -> bool:
 
 
 def upsert_codex_mcp_block(content: str, block: str) -> str:
-    """Insert or replace the Remembra MCP block in a Codex TOML config."""
-    if not content.strip():
-        return block.strip() + "\n"
+    """Insert or replace the Remembra MCP block in a Codex TOML config (idempotent)."""
+    rest = remove_codex_mcp_block(content).rstrip()
+    return (rest + "\n\n" if rest else "") + block.strip() + "\n"
 
-    new_lines: list[str] = []
+
+CODEX_BLOCK_COMMENT = "# MCP Servers - Remembra Shared Memory"
+
+
+def remove_codex_mcp_block(content: str) -> str:
+    """``content`` without the ``[mcp_servers.remembra*]`` tables (and the comment this installer puts above them)."""
+    lines = content.splitlines()
+    kept: list[str] = []
     skipping = False
-
-    for line in content.splitlines():
+    for line in lines:
         if _is_table_header(line):
-            if _is_remembra_table(line):
-                skipping = True
-                continue
+            skipping = _is_remembra_table(line)
             if skipping:
-                skipping = False
-
+                while kept and kept[-1].strip() in ("", CODEX_BLOCK_COMMENT):
+                    if kept[-1].strip() == CODEX_BLOCK_COMMENT:
+                        kept.pop()
+                        break
+                    kept.pop()
+                continue
         if not skipping:
-            new_lines.append(line)
+            kept.append(line)
+    text = "\n".join(kept).rstrip()
+    return text + "\n" if text else ""
 
-    updated = "\n".join(new_lines).rstrip()
-    if updated:
-        updated += "\n\n"
-    updated += block.strip() + "\n"
-    return updated
+
+def plan_codex_config(
+    config_path: Path,
+    *,
+    api_key: str | None,
+    project: str,
+    user_id: str,
+    url: str,
+    command: str,
+    agent_id: str | None = "codex",
+) -> Change:
+    """The Codex config with the Remembra block written (not yet saved)."""
+    before = config_path.read_text() if config_path.exists() else None
+    block = build_codex_mcp_block(command=command, url=url, api_key=api_key, project=project, user_id=user_id, agent_id=agent_id)
+    after = upsert_codex_mcp_block(before or "", block)
+    summary = (
+        []
+        if after == before
+        else [f"{'update' if before and '[mcp_servers.remembra]' in before else 'add'} [mcp_servers.remembra]"]
+    )
+    return Change(path=config_path, before=before, after=after, summary=summary)
 
 
 def install_codex_config(
@@ -134,23 +165,20 @@ def install_codex_config(
     bridge_port: int = DEFAULT_BRIDGE_PORT,
     environ: Mapping[str, str] | None = None,
 ) -> CodexInstallResult:
-    """Create or update the Codex config file with Remembra MCP settings."""
-    config_path.parent.mkdir(parents=True, exist_ok=True)
+    """Create or update the Codex config file with Remembra MCP settings.
 
+    The file is written atomically after a backup of the old one, and owner-only
+    (0600) because it holds the API key.
+    """
     created = not config_path.exists()
-    existing = config_path.read_text() if config_path.exists() else ""
     bridge_enabled = use_bridge if use_bridge is not None else is_sandboxed_codex(environ)
     target_url = build_bridge_url(bridge_host, bridge_port) if bridge_enabled else url
     mcp_api_key = None if bridge_enabled else api_key
-    block = build_codex_mcp_block(
-        command=command,
-        url=target_url,
-        api_key=mcp_api_key,
-        project=project,
-        user_id=user_id,
+    change = plan_codex_config(
+        config_path, api_key=mcp_api_key, project=project, user_id=user_id, url=target_url, command=command
     )
-    updated = upsert_codex_mcp_block(existing, block)
-    config_path.write_text(updated)
+    if change.changed:
+        backup_and_write(change, label="remembra", private=True)
 
     return CodexInstallResult(
         config_path=config_path,
@@ -264,7 +292,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Install or update the Remembra MCP server for Codex.",
     )
-    parser.add_argument("--api-key", required=True, help="Remembra API key")
+    parser.add_argument("--api-key", help=argparse.SUPPRESS)  # deprecated: visible in shell history
+    parser.add_argument(
+        "--api-key-stdin",
+        action="store_true",
+        help="Read the API key from stdin (default: REMEMBRA_API_KEY, a prompt, or ~/.remembra/credentials)",
+    )
     parser.add_argument(
         "--project",
         default="default",
@@ -326,10 +359,21 @@ def main() -> None:
     """CLI entry point for the Codex installer."""
     parser = build_parser()
     args = parser.parse_args()
+    api_key, source = resolve_api_key(
+        cli_key=args.api_key,
+        from_stdin=args.api_key_stdin,
+        credentials=Path.home() / ".remembra" / "credentials",
+        environ=os.environ,
+    )
+    if not api_key:
+        parser.error(
+            f"no API key ({source}). Set REMEMBRA_API_KEY, pipe it with --api-key-stdin, or run in a terminal to be asked."
+        )
+    print(f"Key: {mask_key(api_key)} (from {source})")
 
     result = install_codex_config(
         args.config_path,
-        api_key=args.api_key,
+        api_key=api_key,
         project=args.project,
         user_id=args.user_id,
         url=args.upstream_url,
@@ -344,7 +388,7 @@ def main() -> None:
             result.bridge_pid = start_bridge_background(
                 upstream=args.upstream_url,
                 port=args.bridge_port,
-                api_key=args.api_key,
+                api_key=api_key,
                 host=args.bridge_host,
                 command=args.bridge_command,
             )

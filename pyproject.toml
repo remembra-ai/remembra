@@ -165,7 +165,7 @@ remembra-server = "remembra._launch:server"
 remembra-mcp = "remembra._launch:mcp"
 remembra-bridge = "remembra.tools.bridge:main"
 remembra-install-codex = "remembra.tools.codex:main"
-remembra-install = "remembra.tools.agents:main"
+remembra-install = "remembra.tools.agents:entrypoint"
 remembra-doctor = "remembra.tools.doctor:main"
 remembra-relay = "remembra.relay.cli:entrypoint"
 

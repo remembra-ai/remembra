@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 import tomllib
 from collections.abc import Callable
@@ -20,6 +21,7 @@ DEFAULT_CLAUDE_CODE_CONFIG = Path.home() / ".claude" / "settings.json"
 DEFAULT_GEMINI_CONFIG = Path.home() / ".gemini" / "settings.json"
 DEFAULT_CURSOR_CONFIG = Path.home() / ".cursor" / "mcp.json"
 DEFAULT_WINDSURF_CONFIG = Path.home() / ".windsurf" / "mcp_config.json"
+DEFAULT_CREDENTIALS = Path.home() / ".remembra" / "credentials"
 
 
 @dataclass(slots=True)
@@ -255,6 +257,31 @@ def run_remote_checks(
         return [CheckResult("remote", "fail", classify_http_error(exc))]
 
 
+_KEY_IN_FILE_RE = re.compile(r"""\brem_[A-Za-z0-9_\-]{8,}|(?:REMEMBRA_API_KEY|"api_key")["']?\s*[:=]\s*["']?[^"'\s,]{8,}""")
+
+
+def check_key_file_permissions(path: Path) -> CheckResult | None:
+    """A ``warn`` when ``path`` holds a Remembra API key and group or others can read it; else None.
+
+    Malware that harvests AI tool configs reads exactly these files, so a
+    file with a key in it should be owner-only (0600).
+    """
+    try:
+        mode = path.stat().st_mode & 0o777
+        if not mode & 0o077:
+            return None
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return None
+    if not _KEY_IN_FILE_RE.search(text):
+        return None
+    return CheckResult(
+        "permissions",
+        "warn",
+        f"{path} holds a Remembra API key and other users can read it (mode {mode:o}); run: chmod 600 {path}",
+    )
+
+
 def _run_doctor(
     agent: str,
     config_path: Path,
@@ -271,14 +298,19 @@ def _run_doctor(
         results.append(CheckResult("config", "fail", str(exc)))
         return results
 
+    permissions = check_key_file_permissions(config_path)
     command_path = resolve_command(target.command)
     if command_path:
         results.append(CheckResult("command", "pass", f"resolved {command_path}"))
     else:
         results.append(CheckResult("command", "fail", f"command_missing:{target.command}"))
+        if permissions:
+            results.append(permissions)
         return results
 
     results.extend(run_remote_checks(target, timeout=timeout))
+    if permissions:
+        results.append(permissions)
     return results
 
 
@@ -328,6 +360,9 @@ def doctor_all(*, timeout: float = 5.0) -> dict[str, list[CheckResult]]:
         if config_path.exists():
             results[agent] = doctor_fn(config_path, timeout=timeout)
 
+    credentials = check_key_file_permissions(DEFAULT_CREDENTIALS)
+    if credentials:
+        results["credentials"] = [credentials]
     return results
 
 
