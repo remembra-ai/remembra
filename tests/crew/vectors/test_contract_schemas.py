@@ -122,7 +122,7 @@ def test_ids_have_type_prefixes() -> None:
 
 
 def test_closed_event_set_matches_the_spec() -> None:
-    assert len(S.EVENT_SPECS) == 100
+    assert len(S.EVENT_SPECS) == 101  # the spec's 100 plus baton.restored (§13.3 step 7 restore outcome)
     assert {t for t, s in S.EVENT_SPECS.items() if s.release == "L1"} == {
         "proposal.opened",
         "proposal.resolved",
@@ -413,8 +413,11 @@ def test_request_shapes_enforce_caps_and_never_accept_tokens_in_join() -> None:
     msg = {"kind": "chat", "body": "x" * (S.MAX_MESSAGE_BYTES + 1), "client_msg_id": "m1"}
     assert S.validate(msg, S.REQUEST_SHAPES["Message"]) != []
     assert S.validate({**msg, "kind": "proposal", "body": "x"}, S.REQUEST_SHAPES["Message"]) != []  # L1 kind
-    assert S.validate({"code": "RCB-7K3QW-9ZX2M", "session_id": "cs_a"}, S.REQUEST_SHAPES["BypassRedeem"]) == []
-    assert S.validate({"code": "RCB-7K3QW-9ZX2O", "session_id": "cs_a"}, S.REQUEST_SHAPES["BypassRedeem"]) != []
+    redeem = {"code": "RCB-7K3QW-9ZX2M", "session_id": "cs_a", "surface": "prepush"}
+    assert S.validate(redeem, S.REQUEST_SHAPES["BypassRedeem"]) == []
+    assert S.validate({**redeem, "code": "RCB-7K3QW-9ZX2O"}, S.REQUEST_SHAPES["BypassRedeem"]) != []
+    assert S.validate({**redeem, "surface": "anything"}, S.REQUEST_SHAPES["BypassRedeem"]) != []  # scope is enforced per surface
+    assert S.validate({"code": "RCB-7K3QW-9ZX2M", "session_id": "cs_a"}, S.REQUEST_SHAPES["BypassRedeem"]) != []
     assert S.validate({"session_id": "cs_a", "scope": "push", "minutes": 16}, S.REQUEST_SHAPES["BypassIssue"]) != []
 
 

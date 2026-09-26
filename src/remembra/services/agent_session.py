@@ -23,12 +23,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 
 from remembra.core.time import utcnow
+from remembra.inbox.manager import sender_label
 from remembra.models.memory import StoreRequest
 
 log = structlog.get_logger(__name__)
@@ -393,16 +395,18 @@ class AgentSessionService:
                 (user_id, agent_id, now_iso, *project_args),
             )
             count_row = await cursor.fetchone()
-            cursor = await self.db.conn.execute(
-                f"""
-                SELECT inbox_id, from_agent, subject, body, created_at FROM agent_inbox
+            query = f"""
+                SELECT inbox_id, from_agent, subject, body, created_at{{provenance}} FROM agent_inbox
                 WHERE owner_user_id = ? AND to_agent = ? AND status = 'unread'
                   AND (expires_at IS NULL OR expires_at > ?){project_sql}
                 ORDER BY julianday(created_at) DESC, inbox_id DESC
                 LIMIT ?
-                """,  # noqa: S608 - placeholders only; values are bound
-                (user_id, agent_id, now_iso, *project_args, limit),
-            )
+                """  # noqa: S608 - placeholders only; values are bound
+            args = (user_id, agent_id, now_iso, *project_args, limit)
+            try:  # sender provenance (main v5); an older table has no such columns
+                cursor = await self.db.conn.execute(query.replace("{provenance}", ", sender_kind, sender_verified"), args)
+            except sqlite3.OperationalError:
+                cursor = await self.db.conn.execute(query.replace("{provenance}", ""), args)
             rows = await cursor.fetchall()
         except Exception as e:  # agent_inbox table absent (inbox disabled)
             log.warning("session_brief_inbox_unavailable", error=str(e))
@@ -415,6 +419,13 @@ class AgentSessionService:
                 {
                     "inbox_id": r["inbox_id"],
                     "from_agent": r["from_agent"],
+                    "sender_label": sender_label(
+                        {
+                            "from_agent": r["from_agent"],
+                            "sender_kind": r["sender_kind"] if "sender_kind" in r.keys() else "agent",  # noqa: SIM118 - sqlite Row
+                            "sender_verified": r["sender_verified"] if "sender_verified" in r.keys() else 0,  # noqa: SIM118 - sqlite Row
+                        }
+                    ),
                     "subject": r["subject"],
                     "created_at": r["created_at"],
                     "body_preview": body[:INBOX_PREVIEW_CHARS] + ("..." if len(body) > INBOX_PREVIEW_CHARS else ""),

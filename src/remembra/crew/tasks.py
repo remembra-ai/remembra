@@ -549,6 +549,89 @@ async def resolve_inbox_items(
     return out
 
 
+class BatonRestoreError(Exception):
+    def __init__(self, status: int, code: str, message: str) -> None:
+        super().__init__(message)
+        self.status, self.code, self.message = status, code, message
+
+
+async def record_baton_restore(
+    events: CrewEventLog,
+    crew_id: str,
+    session: Mapping[str, Any],
+    baton_id: str,
+    *,
+    restored: bool,
+    status: str,
+    files: int,
+) -> dict[str, Any]:
+    """crewd's outcome of restoring a baton ref into the adopter's checkout (D30, §13.3 step 7).
+
+    Only the session the baton passed to may report it, once: sets ``crew_batons.restored`` and
+    emits ``baton.restored``. A failed restore (dirty tree, missing ref, git error) is a Needs-you
+    safety item on the task, so the owner never takes a failed restore for a successful one.
+    A repeated report returns the recorded outcome unchanged (crewd may retry after a timeout).
+    """
+    if status not in schemas.BATON_RESTORE_STATUSES:
+        raise BatonRestoreError(422, "invalid_status", f"status must be one of {', '.join(schemas.BATON_RESTORE_STATUSES)}")
+    if bool(restored) != (status == "restored"):
+        raise BatonRestoreError(422, "invalid_status", "restored is true exactly when status is 'restored'")
+    async with events.transaction() as tx:
+        row = await fetchone(tx.conn, "SELECT * FROM crew_batons WHERE id = ? AND crew_id = ?", (baton_id, crew_id))
+        if row is None or row["to_session"] != session["id"]:
+            raise BatonRestoreError(404, "not_found", "Not found.")
+        before = row.get("restored")
+        if before is not None and (bool(before) or not restored):
+            # recorded already; only a successful retry (`adopt --restore-only`) replaces a failed restore
+            return {"baton_id": baton_id, "restored": bool(before), "duplicate": True, "seq": None}
+        await tx.conn.execute("UPDATE crew_batons SET restored = ? WHERE id = ?", (1 if restored else 0, baton_id))
+        task = await fetchone(tx.conn, "SELECT * FROM crew_tasks WHERE id = ?", (row["task_id"],)) if row.get("task_id") else None
+        label = task_ref(task) if task else "the baton"
+        actor = Actor.session(
+            str(session["id"]),
+            callsign=str(session["callsign"]),
+            agent_id=str(session["agent_id"]),
+            user_id=str(session["user_id"]),
+            verified=bool(session.get("agent_verified")),
+        )
+        result = await tx.emit(
+            crew_id=crew_id,
+            type="baton.restored",
+            actor=actor,
+            payload={
+                "baton_id": baton_id,
+                "task_id": row.get("task_id"),
+                "to_session": row["to_session"],
+                "baton_ref": row.get("baton_ref"),
+                "restored": bool(restored),
+                "status": status,
+                "files": max(0, int(files)),
+            },
+            summary=(
+                f"{session.get('callsign')} restored the saved work of {label} ({int(files)} files)"
+                if restored
+                else f"{session.get('callsign')} could not restore the saved work of {label} ({status})"
+            ),
+            refs={"task_id": row.get("task_id"), "session_id": row["to_session"]},
+        )
+        if restored and before is not None:
+            await resolve_inbox_items(tx, crew_id, [f"baton_restore:{baton_id}"], resolved_by=str(session["id"]))
+        if not restored:
+            await open_inbox_item(
+                tx,
+                crew_id,
+                audience="project",
+                kind="baton_restore_failed",
+                title=f"{session.get('callsign')} could not restore the saved work of {label} ({status})",
+                dedupe_key=f"baton_restore:{baton_id}",
+                ref_type="task" if row.get("task_id") else "session",
+                ref_id=str(row.get("task_id") or row["to_session"]),
+                priority=1,
+                primary_action="review",
+            )
+    return {"baton_id": baton_id, "restored": bool(restored), "duplicate": False, "seq": result.seq}
+
+
 def baton_inbox_keys(task_id: str) -> list[str]:
     """The dedupe keys of a task baton's items: this module's ``baton:`` item and the Needs-you
     ``baton_available`` / crew ``baton_reserved`` items the session stall path raises (sessions.py)."""

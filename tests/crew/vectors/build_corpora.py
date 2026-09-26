@@ -185,6 +185,19 @@ def _sample_payloads() -> dict[str, tuple[dict[str, Any], tuple[str, str], str]]
             C,
             "server",
         ),
+        "baton.restored": (
+            {
+                "baton_id": "bat_1",
+                "task_id": "tsk_14",
+                "to_session": "cs_c",
+                "baton_ref": REF,
+                "restored": True,
+                "status": "restored",
+                "files": 3,
+            },
+            C,
+            "server",
+        ),
         "baton.ref_created": (
             {"ref": REF, "task_id": "tsk_14", "dirty_files": 3, "unpushed": 0, "skipped_files": 1},
             A,

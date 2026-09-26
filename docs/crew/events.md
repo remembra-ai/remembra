@@ -96,6 +96,7 @@ action is a moment); client-submittable types never count as human actions.
 | `claim.fenced` | `claim_id`, `horizon_at` |  | if human | L0 |
 | `claim.unconfirmed` | `claim` |  | if human | L0 |
 | `baton.passed` | `baton_id`, `task_id`?, `from_session`?, `to_session`, `kind`, `handoff_id`?, `zones`, `baton_ref`?, `restored`? |  | always | L0 |
+| `baton.restored` | `baton_id`, `task_id`?, `to_session`, `baton_ref`?, `restored`, `status`, `files` |  | if not restored | L0 |
 | `baton.ref_created` | `ref`, `task_id`?, `dirty_files`, `unpushed`, `skipped_files`? |  | if human | L0 |
 | `guard.blocked` | `path_rel`?, `zone`?, `holder`?, `rule`, `op`, `decision`, `surface`, `coalesced` | yes | no | L0 |
 | `guard.bypass_used` | `code_id`, `scope` |  | always | L0 |

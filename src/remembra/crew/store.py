@@ -465,6 +465,13 @@ class CrewStore:
             (error[:500], now_iso(), outbox_id),
         )
 
+    async def defer_outbox(self, outbox_id: str, reason: str, next_attempt_at: str) -> bool:
+        """Push a pending item to a later time without counting an attempt (a plan cap, not a failure)."""
+        return await self._outbox_update(
+            "UPDATE crew_outbox SET last_error = ?, next_attempt_at = ?, updated_at = ? WHERE id = ? AND state = 'pending'",
+            (reason[:500], next_attempt_at, now_iso(), outbox_id),
+        )
+
     async def requeue_outbox(self, outbox_id: str) -> bool:
         """Put a ``failed`` item back in the queue (operator action after fixing the cause)."""
         return await self._outbox_update(

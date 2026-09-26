@@ -624,6 +624,9 @@ class BashParse:
     git_tree_op_cwd: str | None = None  # cwd (relative to the start) of the first tree-wide git op
     argvs: list[tuple[str | None, list[str]]] = field(default_factory=list)  # (cwd, normalised argv) per command
     scanned: list[str] = field(default_factory=list)  # raw text of opaque code that was tamper-scanned
+    # literal process ids a ``kill`` targets (process groups as their positive id; ``-1`` = every process):
+    # :func:`evaluate` makes one naming crewd's pid a ``crewd_kill`` tamper (the gate passes crewd's pid)
+    kill_pids: set[int] = field(default_factory=set)
     # targets relative to the checkout's top level (git ``:/`` and ``:(top)`` pathspecs):
     # (cwd of the command, path from the top level, remove, restore, is_dir)
     top_writes: list[tuple[str, str, bool, bool, bool]] = field(default_factory=list)
@@ -2073,11 +2076,47 @@ def _h_unset(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: s
             p.res.tamper.add("env_crew_var")
 
 
+# the names crewd runs under (console script and module): a pkill/killall pattern that is part of one of
+# them (``pkill -f remembra``, ``killall remembra-crew``) stops crewd as surely as naming it in full
+_CREWD_PROCESS_NAMES: Final = ("remembra-crewd", "remembra.relay.crew.crewd")
+
+
+def _kill_targets(args: list[Word]) -> set[int]:
+    """Literal pids a ``kill`` sends to (``kill [-s SIG | -SIG | -n N] [--] pid|-pgid …``)."""
+    out: set[int] = set()
+    vals = [w.value for w in args if not w.dynamic]
+    i, options = 0, True
+    while i < len(vals):
+        v = vals[i]
+        i += 1
+        if options and v == "--":
+            options = False
+            continue
+        if options and v in ("-s", "-n"):
+            i += 1  # the signal
+            continue
+        if options and v.startswith("-") and not out and (not v[1:].lstrip("-").isdigit() or i == 1):
+            continue  # -9, -KILL, -SIGTERM, -l: an option (a leading -N is always the signal)
+        options = False
+        if re.fullmatch(r"-?\d{1,10}", v):
+            n = int(v)
+            out.add(-1 if n == -1 else abs(n))
+    return out
+
+
 def _h_kill(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str | None) -> None:
     if any("crewd" in w.value for w in args):
         p.res.tamper.add("crewd_kill")
         p.all_read_only = False
         return
+    if name in ("pkill", "killall"):
+        patterns = [w.value for w in args if not w.dynamic and w.value and not w.value.startswith("-")]
+        if any(len(v) >= 4 and any(v.lower() in n for n in _CREWD_PROCESS_NAMES) for v in patterns):
+            p.res.tamper.add("crewd_kill")
+            p.all_read_only = False
+            return
+    elif name == "kill":
+        p.res.kill_pids |= _kill_targets(args)
     p._mark_opaque(seg)
 
 
@@ -4128,6 +4167,7 @@ def evaluate(
     github_repos: Iterable[str] = (),
     human: str = "the owner",
     tz: tzinfo | None = None,
+    protected_pids: Iterable[int] = (),
 ) -> Verdict:
     """Decide one tool call (§5.2, §8.2).
 
@@ -4136,6 +4176,8 @@ def evaluate(
     with ``undeclared_policy = file_claim``); it returns a result in ``AUTO_CLAIM_RESULTS`` (or a
     :class:`ClaimResult`). Without a callback an auto-claim counts as ``timeout`` (D11: that one
     write is allowed and spooled ``unconfirmed``; the next is denied until confirmed).
+    ``protected_pids`` are crewd's pid(s): a ``kill`` naming one of them (or ``-1``) is a
+    ``crewd_kill`` tamper (row 2), like ``pkill -f remembra-crewd``.
 
     Rule 0 (fast exit before the table): read-only Bash, read-like MCP tools, paths outside every
     known checkout that are not crew policy, and opaque Bash with nothing else to check.
@@ -4147,6 +4189,9 @@ def evaluate(
         parsed = parse_bash_full(str(tool_input.get("command") or ""))
         if parsed.read_only:
             return Verdict(0, "allow", "read_only")  # no snapshot read at all (§8.2 read-only fast exit)
+        guarded = {int(x) for x in protected_pids if isinstance(x, int) and x > 1}
+        if guarded and parsed.kill_pids and (parsed.kill_pids & guarded or -1 in parsed.kill_pids):
+            parsed.tamper.add("crewd_kill")  # `kill -9 <crewd pid>` (or every process) stops crewd (§5.2 row 2)
     elif _fast_read(tool_name, tool_input):
         return Verdict(0, "allow", "read_only")
     idx = SnapshotIndex(snapshot)

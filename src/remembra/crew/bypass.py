@@ -87,10 +87,20 @@ async def issue_code(
         return {"code_id": code_id, "code": code, "session_id": session_id, "scope": scope, "expires_at": expires}
 
 
-async def redeem_code(ops: CrewOps, session: Mapping[str, Any], code: str) -> dict[str, Any]:
-    """Validate and consume a code for ``session`` (its token was already checked). 403 ``invalid_code`` otherwise."""
+async def redeem_code(
+    ops: CrewOps, session: Mapping[str, Any], code: str, *, surface: str, zone: str | None = None
+) -> dict[str, Any]:
+    """Validate and consume a code for ``session`` (its token was already checked). 403 ``invalid_code`` otherwise.
+
+    The code's scope must cover ``surface`` (and ``zone`` for ``write:<zone>``): a code issued for
+    ``push`` never opens a commit or a pre-write deny. A mismatch is refused without consuming the
+    code. ``surface = tty`` (a human typing it into ``remembra-crew bypass``) redeems it into crewd,
+    which then applies the returned scope and expiry at use.
+    """
     if not isinstance(code, str) or not _CODE_RE.fullmatch(code.strip().upper()):
         raise CrewOpError(403, "invalid_code", INVALID)
+    if surface not in S.BYPASS_SURFACES:
+        raise CrewOpError(422, "invalid_bypass", f"surface must be one of {', '.join(S.BYPASS_SURFACES)}.")
     crew_id = str(session["crew_id"])
     principal = Principal.for_session(session)
     async with ops.log.transaction() as tx:
@@ -105,6 +115,10 @@ async def redeem_code(ops: CrewOps, session: Mapping[str, Any], code: str) -> di
             or parse_iso(str(row["expires_at"])) <= now
         ):
             raise CrewOpError(403, "invalid_code", INVALID)
+        if not S.bypass_scope_matches(str(row["scope"]), surface, zone):
+            raise CrewOpError(
+                403, "bypass_scope_mismatch", f"This bypass code was issued for {row['scope']}, not for this {surface}."
+            )
         cur = await tx.conn.execute(
             "UPDATE crew_bypass_codes SET used_at = ? WHERE id = ? AND used_at IS NULL", (now_iso(now), row["id"])
         )
@@ -114,7 +128,7 @@ async def redeem_code(ops: CrewOps, session: Mapping[str, Any], code: str) -> di
             crew_id=crew_id,
             type="guard.bypass_used",
             actor=principal.actor(),
-            payload={"code_id": row["id"], "scope": row["scope"]},
+            payload={"code_id": row["id"], "scope": row["scope"]},  # surface: in the audit row
             summary=f"{principal.name} used a human bypass code ({row['scope']})",
             severity="high",
             refs={"session_id": session["id"]},
@@ -130,5 +144,10 @@ async def redeem_code(ops: CrewOps, session: Mapping[str, Any], code: str) -> di
             ref_id=str(row["id"]),
             actor=principal.actor(),
         )
-        ops.audit(str(session["user_id"]), "crew.bypass_used", str(row["id"]), {"session": session["id"], "scope": row["scope"]})
+        ops.audit(
+            str(session["user_id"]),
+            "crew.bypass_used",
+            str(row["id"]),
+            {"session": session["id"], "scope": row["scope"], "surface": surface, "zone": zone},
+        )
         return {"ok": True, "code_id": row["id"], "scope": row["scope"], "expires_at": row["expires_at"], "seq": res.seq}

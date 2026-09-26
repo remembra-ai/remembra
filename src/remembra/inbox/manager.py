@@ -51,8 +51,53 @@ class ReservedSenderError(ValueError):
     """An agent tried to send as a reserved sender name or with a server-only kind."""
 
 
+# Latin look-alikes of the letters in the reserved names (Cyrillic, Greek, Armenian, Cherokee, Latin
+# small caps …): a confusables skeleton for exactly what the check needs, applied after NFKC.
+_CONFUSABLES: dict[str, str] = {
+    **dict.fromkeys("аɑαа", "a"),
+    **dict.fromkeys("еєеёεҽ", "e"),
+    **dict.fromkeys("іıɩιӏ¡", "i"),
+    **dict.fromkeys("ⅼӀ", "l"),
+    **dict.fromkeys("мʍ", "m"),
+    **dict.fromkeys("пոɴη", "n"),
+    **dict.fromkeys("оοσօ", "o"),
+    **dict.fromkeys("ѕʂ", "s"),
+    **dict.fromkeys("тτ", "t"),
+    **dict.fromkeys("уүγ", "y"),
+    **dict.fromkeys("һհ", "h"),
+    **dict.fromkeys("υս", "u"),
+    **dict.fromkeys("гꭇ", "r"),
+    **dict.fromkeys("ьЬ", "b"),
+}
+_NAME_SPLIT_RE = re.compile(r"[^a-z0-9]+")
+
+
+def sender_skeleton(name: str) -> str:
+    """``name`` reduced for comparison: NFKC, case-folded, format characters (zero-width) removed and
+    look-alike letters mapped to Latin. Separators and punctuation are kept (for tokenizing)."""
+    import unicodedata
+
+    text = unicodedata.normalize("NFKC", str(name)).casefold()
+    text = "".join(ch for ch in text if unicodedata.category(ch) not in ("Cf", "Mn", "Me", "Cc"))
+    return "".join(_CONFUSABLES.get(ch, ch) for ch in text)
+
+
 def is_reserved_sender(name: str | None) -> bool:
-    return bool(name) and str(name).strip().lower() in RESERVED_SENDER_NAMES
+    """Whether ``name`` is, or passes for, a server-set sender (``mani``, ``human``, ``system``, ``remembra``).
+
+    Caught: case, whitespace, zero-width and other format characters, fullwidth and other NFKC forms,
+    Cyrillic/Greek look-alikes, punctuation around the name (``mani.``, ``Mani (owner)``, ``@mani``),
+    and a reserved name as any word of the sender (``system-bot``, ``mani_owner``).
+    """
+    if not name:
+        return False
+    skeleton = sender_skeleton(name)
+    if not skeleton.strip():
+        return False
+    squashed = _NAME_SPLIT_RE.sub("", skeleton)
+    if squashed in RESERVED_SENDER_NAMES:
+        return True
+    return any(token in RESERVED_SENDER_NAMES for token in _NAME_SPLIT_RE.split(skeleton) if token)
 
 
 def sender_label(row: dict[str, Any]) -> str:

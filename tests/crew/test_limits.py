@@ -60,6 +60,8 @@ def test_bucket_table_matches_the_spec():
         "messages": ("20/minute", "60/minute", None),
         "needs_you": ("6/hour", "30/hour", None),
         "tasks": ("60/minute", "120/minute", None),
+        "checkpoints": ("12/minute", "60/minute", None),  # review fix: POST /checkpoints had no limit
+        "notify_confirm": (None, "10/hour", None),  # review fix: email targets need a mailed code
         "snapshot": ("1 per 10 seconds", None, None),
         "events_poll": ("20/minute", None, None),
         "join": (None, "30/minute", None),

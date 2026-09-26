@@ -334,6 +334,12 @@ async def test_inbox_reserved_senders_and_provenance(tmp_path):
             {"from_agent": "mani"},
             {"from_agent": " System "},
             {"from_agent": "remembra"},
+            # look-alikes (review finding): zero-width, Cyrillic a, punctuation, a qualifier, fullwidth
+            {"from_agent": "Mani\u200b"},
+            {"from_agent": "M\u0430ni"},
+            {"from_agent": "mani."},
+            {"from_agent": "Mani (owner)"},
+            {"from_agent": "\uff4d\uff41\uff4e\uff49"},
             {"kind": "override"},
             {"kind": "pause"},
         ):
@@ -389,3 +395,39 @@ async def test_inbox_project_scoping_for_restricted_keys(tmp_path):
         assert (
             await h.client.post(f"/api/v1/inbox/{auto['inbox_id']}/ack", json={"result": "done"}, headers=p1)
         ).status_code == 200
+
+
+async def test_email_targets_are_confirmed_by_a_mailed_code_over_http(tmp_path):
+    """Review fix: an email target other than the account's own verified address is saved unverified and a
+    fixed-template code is mailed to it; ``POST /notifications/targets/{id}/confirm`` (human only) verifies it."""
+    import re
+
+    from remembra.cloud.email import EmailResult
+
+    class Mail:
+        sent: list[Any] = []
+
+        async def send(self, message: Any) -> EmailResult:
+            self.sent.append(message)
+            return EmailResult(success=True, message_id="m")
+
+    async with api(tmp_path) as h:
+        owner = h.created["owner"]
+        human = h.jwt(owner, "owner@example.com")
+        admin = await agent_key(h, owner, None, role="admin")
+        mail = Mail()
+        h.app.state.crew_email_backend = mail
+        res = await h.client.post(
+            "/api/v1/notifications/targets", json={"kind": "email", "target": "x@third.example"}, headers=human
+        )
+        assert res.status_code == 201, res.text
+        target = res.json()
+        assert target["verified_at"] is None and target["confirmation"] == "sent"
+        code = re.search(r"<strong>(\w+)</strong>", mail.sent[0].html).group(1)
+        url = f"/api/v1/notifications/targets/{target['id']}/confirm"
+        assert (await h.client.post(url, json={"code": code}, headers=admin)).status_code == 403  # human only
+        assert (await h.client.post(url, json={"code": "ZZZZZZZZ"}, headers=human)).status_code == 422
+        ok = await h.client.post(url, json={"code": code}, headers=human)
+        assert ok.status_code == 200 and ok.json()["verified_at"], ok.text
+        rules = (await h.client.get("/api/v1/notifications/rules", headers=human)).json()
+        assert [t["verified_at"] is not None for t in rules["targets"]] == [True]

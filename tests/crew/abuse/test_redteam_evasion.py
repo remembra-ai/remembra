@@ -23,9 +23,10 @@ Results the suite pins:
 * **Git gates** (``test_git_gates_…``): commits and pushes of POS changes are refused, a
   ``--no-verify`` commit hidden from the gate is caught at push, and only a human-issued
   bypass code lets one push through, recorded and alerted.
-* **Findings** (strict xfail, flip to pass when fixed): F1 local denies and tamper attempts
-  never reach the server (missing client-events route); F3 killing crewd by its pid opens
-  commit and push with nothing recorded.
+* **Fixed findings**: F1 (local denies and tamper attempts reach the server through
+  ``POST /crews/{id}/events`` and alert the human) and F3 (``kill -9 <crewd pid>`` is a tamper
+  deny; with crewd dead the git gates still resolve the agent from its process tree and refuse
+  commit and push; a human commit into a held zone becomes an ``unattributed_change`` notice).
 """
 
 from __future__ import annotations
@@ -388,21 +389,10 @@ def test_git_gates_refuse_pos_commits_and_pushes_and_only_a_human_code_lets_one_
 
 
 # ---------------------------------------------------------------------------
-# Findings (strict xfail: each flips to a pass when fixed, and then must be un-marked)
+# Fixed findings (formerly strict xfail): F1 local denies reach the server; F3 killing crewd
 # ---------------------------------------------------------------------------
 
-F1 = (
-    "WP-17 finding F1: POST /crews/{crew_id}/events is not mounted (405), so crewd never delivers the gate's "
-    "guard.blocked / guard.tamper_blocked events: local denies and tamper attempts are not recorded or alerted."
-)
-F3 = (
-    "WP-17 finding F3: `kill -9 <crewd pid>` is not recognised as a tamper command (only name/pidfile forms are), and "
-    "while crewd is down the git gates treat the agent as a human (gate.git_gate_precommit/_prepush: whoami None → "
-    "allowed); record_unattributed_change is never called, so the POS commit and push are neither denied nor detected."
-)
 
-
-@pytest.mark.xfail(strict=True, reason=F1)
 def test_denied_and_tamper_attempts_are_recorded_and_the_human_alerted(machine: Machine) -> None:
     m = machine
     assert m.b.pretool("Write", {"file_path": str(m.wb / "src/app/pos/split.ts"), "content": "x"}).denied
@@ -422,15 +412,23 @@ def test_denied_and_tamper_attempts_are_recorded_and_the_human_alerted(machine: 
         lambda: [i for _, i in m.server.alerts.items() if i.get("event_type") == "guard.tamper_blocked"], timeout=60
     )
     assert alerts
+    # and a Needs-you safety item for the human (§5.8), from the client event
+    items = m.server.rows(
+        "SELECT kind, audience, ref_id, state FROM crew_inbox_items WHERE crew_id = ? AND kind = 'tamper_blocked'",
+        (m.crew_id,),
+    )
+    b_sid = str(m.b.session()["session_id"])
+    assert items and all(i["audience"] == "project" and i["ref_id"] == b_sid and i["state"] == "open" for i in items), items
 
 
-@pytest.mark.xfail(strict=True, reason=F3)
 def test_killing_crewd_by_pid_does_not_open_commit_and_push(machine: Machine) -> None:
     m = machine
     pid = m.host.crewd_pid()
     assert pid is not None
     kill_pre, kill = m.b.bash(f"kill -9 {pid}")
     t0 = time.time()
+    assert kill_pre.denied and "crew daemon" in kill_pre.reason, kill_pre  # §5.2 row 2: crewd_kill by pid
+    assert pid_alive(pid)
     if not kill_pre.denied:
         assert wait_for(lambda: not pid_alive(pid), timeout=10)
         (m.wb / "src/app/pos/split.ts").write_text("while crewd was down\n")
@@ -449,3 +447,85 @@ def test_killing_crewd_by_pid_does_not_open_commit_and_push(machine: Machine) ->
             assert wait_for(detected, timeout=max(1.0, DETECT_BUDGET_S - (time.time() - t0))), (
                 "pushed POS change, nothing recorded"
             )
+
+
+def _crewd_down_for_good(m: Machine) -> None:
+    """crewd is killed out of band (a way the gate cannot parse) and cannot be respawned by a hook."""
+    import os
+    import signal
+
+    pid = m.host.crewd_pid()
+    assert pid is not None
+    m.host.layout.crewd_cmd.rename(m.host.layout.crewd_cmd.with_suffix(".off"))  # no respawn by the hooks
+    os.kill(pid, signal.SIGKILL)
+    assert wait_for(lambda: not pid_alive(pid), timeout=10)
+
+
+def _crewd_back(m: Machine) -> None:
+    m.host.layout.crewd_cmd.with_suffix(".off").rename(m.host.layout.crewd_cmd)
+    m.b.cli("status")  # any crew command respawns crewd
+    assert wait_for(lambda: m.host.crewd_pid() is not None, timeout=20)
+
+
+def test_with_crewd_dead_the_git_gates_still_know_the_agent(machine: Machine) -> None:
+    """F3 part 2: while crewd is down the git gates resolve the committing agent from the process tree
+    and the local session files; commit and push into another agent's zone stay refused (fail closed)."""
+    m = machine
+    _crewd_down_for_good(m)
+    try:
+        (m.wb / "src/app/pos/split.ts").write_text("while crewd was down\n")
+        commit = m.b.shell("git commit -qam pos-while-down")
+        assert commit.rc != 0 and "BLOCKED by Remembra Crew" in commit.stderr + commit.stdout, commit
+        # a commit made without any hook (as an unparseable command would) is still refused at push
+        hidden = m.b.shell("C='git commit --no-verify -qam pos-while-down'; bash -c \"$C\"")
+        assert hidden.rc == 0, hidden
+        push = m.b.shell("git push -q origin HEAD")
+        assert push.rc != 0 and "BLOCKED by Remembra Crew" in push.stderr + push.stdout, push
+        assert not _origin_has(m, "while crewd was down")
+        # the refusals are spooled for crewd and reach the server once it is back
+        spooled = [json.loads(p.read_text()) for p in m.host.layout.outbox.glob("*-event-*.json")]
+        assert any(e["body"]["type"] == "guard.blocked" for e in spooled), spooled
+    finally:
+        _crewd_back(m)
+    assert wait_for(
+        lambda: [
+            e
+            for e in m.server.events(m.crew_id, types=("guard.blocked",))
+            if (e.get("payload") or {}).get("surface") in ("precommit", "prepush")
+        ],
+        timeout=DETECT_BUDGET_S,
+    )
+
+
+def test_a_human_commit_into_a_held_zone_is_an_unattributed_change_notice(machine: Machine) -> None:
+    """§8.4: a commit with no crew session behind it (a human at a terminal) is allowed; crewd reports its
+    missing trailer with the next heartbeat and the server files an ``unattributed_change`` notice."""
+    from tests.crew.wp9_support import git
+
+    m = machine
+    _crewd_down_for_good(m)  # even the commits made while crewd was down are found afterwards
+    try:
+        (m.wb / "src/app/pos/cart.ts").write_text("export const cart = 'by hand';\n")
+        git(m.wb, "commit", "-qam", "hand edit")  # this test process is no agent: allowed, no trailer
+        sha = git(m.wb, "rev-parse", "HEAD")
+        assert "Remembra-Member" not in git(m.wb, "log", "-1", "--format=%B")
+    finally:
+        _crewd_back(m)
+    assert m.b.cli("renew").rc == 0  # one heartbeat
+
+    def notice() -> list[dict[str, Any]]:
+        return m.server.rows(
+            "SELECT kind, severity, subject, session_a, session_b, evidence FROM crew_collisions WHERE crew_id = ?"
+            " AND kind = 'unattributed_change'",
+            (m.crew_id,),
+        )
+
+    rows = wait_for(notice, timeout=DETECT_BUDGET_S)
+    assert len(rows) == 1, rows
+    row = rows[0]
+    assert (row["subject"], row["severity"], row["session_a"]) == ("src/app/pos/cart.ts", "notice", None), row
+    assert row["session_b"] == str(m.a.session()["session_id"])  # POS holder
+    assert json.loads(row["evidence"])["commit"] == sha
+    # reported once: the next heartbeat does not file it again
+    assert m.b.cli("renew").rc == 0
+    assert len(notice()) == 1

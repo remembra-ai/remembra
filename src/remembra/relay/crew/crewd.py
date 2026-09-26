@@ -55,6 +55,7 @@ import sys
 import time
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -576,6 +577,9 @@ class Crewd:
         self.zones_uploaded: dict[str, str] = {}
         self.tree_sent: dict[str, float] = {}
         self.batons: dict[str, dict[str, Any]] = {}
+        # last HEAD scanned for commits without a crew trailer, per checkout (persisted: a crewd that was
+        # killed scans what was committed while it was down on its first heartbeat back)
+        self.commits_seen: dict[str, str] = {}
         self.test_verdicts: dict[str, dict[str, dict[str, Any]]] = {}
         self.background: set[asyncio.Task[Any]] = set()
         self.server: asyncio.AbstractServer | None = None
@@ -598,6 +602,7 @@ class Crewd:
         self.zones_uploaded = (read_json(self.layout.run / "zones.json") or {}).get("uploaded", {})
         self.tree_sent = (read_json(self.layout.run / "tree.json") or {}).get("sent", {})
         self.batons = (read_json(self.layout.run / "batons.json") or {}).get("refs", {})
+        self.commits_seen = (read_json(self.layout.run / "commits.json") or {}).get("seen", {})
         for path in self.layout.sessions.glob("*.json"):
             if path.name.endswith(".turn.json"):
                 continue
@@ -908,6 +913,9 @@ class Crewd:
         self.sessions[key] = sess
         self.detector_states.setdefault(key, D.TailState())
         self.persist(key)
+        if facts.head and facts.toplevel not in self.commits_seen:
+            self.commits_seen[facts.toplevel] = facts.head  # commits after the join are scanned for trailers
+            self.save_commits_seen()
         crew_id = str(data["crew_id"])
         if plan.upload:
             with contextlib.suppress(Exception):
@@ -1159,6 +1167,52 @@ class Crewd:
         write_json(self.layout.run / "batons.json", {"refs": self.batons})
 
     # -- heartbeat -----------------------------------------------------------------------
+    async def scan_unattributed(self, sessions: Sequence[Mapping[str, Any]]) -> dict[str, tuple[str, list[dict[str, Any]]]]:
+        """New commits without a ``Remembra-Member`` trailer in each live session's checkout (§8.4).
+
+        Returns ``{session key: (head, commits)}`` for one reporting session per checkout; the
+        checkout's scan mark moves to ``head`` only after the server took the heartbeat. The first
+        scan of a checkout only records its HEAD (history before crew mode is never reported).
+        """
+        out: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+        done: set[str] = set()
+        for sess in sessions:
+            top = str(sess.get("toplevel") or "")
+            if not top or top in done or sess.get("ended"):
+                continue
+            done.add(top)
+            try:
+                head = await asyncio.wait_for(
+                    asyncio.to_thread(B.try_out, ["rev-parse", "--verify", "-q", "HEAD"], top), timeout=GIT_DELTA_TIMEOUT_S
+                )
+            except (TimeoutError, OSError):
+                continue
+            if not head:
+                continue
+            seen = self.commits_seen.get(top)
+            if seen is None:
+                self.commits_seen[top] = head
+                self.save_commits_seen()
+                continue
+            if seen == head:
+                continue
+            try:
+                found = await asyncio.wait_for(
+                    asyncio.to_thread(B.unattributed_commits, top, seen, head), timeout=GIT_DELTA_TIMEOUT_S * 4
+                )
+            except (TimeoutError, OSError, B.GitError):
+                continue
+            rels = []
+            for c in found:
+                files = [f for f in c["files"] if S.is_path_rel(f)]
+                if files:
+                    rels.append({"sha": c["sha"], "files": files[:100]})
+            out[str(sess["key"])] = (head, rels[:20])
+        return out
+
+    def save_commits_seen(self) -> None:
+        write_json(self.layout.run / "commits.json", {"seen": self.commits_seen})
+
     async def heartbeat(self) -> dict[str, Any]:
         groups: dict[str, list[dict[str, Any]]] = {}
         for sess in self.sessions.values():
@@ -1166,6 +1220,7 @@ class Crewd:
                 groups.setdefault(str(sess["host_fp"]), []).append(sess)
         results: dict[str, Any] = {}
         crews_to_sync: set[str] = set()
+        scans = await self.scan_unattributed([s for members in groups.values() for s in members if str(s["key"]) in self.tokens])
         for fp, members in groups.items():
             host = self.hosts[fp]
             api = self.api_for(members[0])
@@ -1177,7 +1232,11 @@ class Crewd:
                     continue
                 alive = self.is_alive(sess.get("agent_pid"))
                 age = max(0, int(self.clock() - float(sess.get("last_activity_at") or sess.get("joined_at") or self.clock())))
-                fps = list(self.pending_footprints.get(key, {}).values())[:500]
+                now = self.clock()
+                fps = [
+                    {**{k: v for k, v in f.items() if k != "at"}, "age_s": max(0, int(now - float(f.get("at") or now)))}
+                    for f in list(self.pending_footprints.get(key, {}).values())[:500]
+                ]
                 sent_fp[key] = [f["path"] for f in fps]
                 item: dict[str, Any] = {
                     "session_id": sess["session_id"],
@@ -1192,6 +1251,8 @@ class Crewd:
                 }
                 if sess.get("limit"):
                     item["limit"] = sess["limit"]
+                if key in scans and scans[key][1]:
+                    item["unattributed_commits"] = scans[key][1]
                 items.append(item)
             if not items:
                 continue
@@ -1222,6 +1283,9 @@ class Crewd:
                     continue
                 for path in sent_fp.get(key, []):
                     self.pending_footprints.get(key, {}).pop(path, None)
+                if key in scans and sess.get("toplevel"):
+                    self.commits_seen[str(sess["toplevel"])] = scans[key][0]
+                    self.save_commits_seen()
                 self.apply_heartbeat(sess, got)
                 crews_to_sync.add(str(got.get("crew_id") or sess["crew_id"]))
         for crew_id in crews_to_sync:
@@ -1313,7 +1377,9 @@ class Crewd:
         key = str(sess["key"])
         rec = self.pending_footprints.setdefault(key, {}).get(path)
         attr = "certain" if (rec and rec.get("attribution") == "certain") or attribution == "certain" else "probable"
-        entry: dict[str, Any] = {"path": path, "state": state, "attribution": attr}
+        # "at": when the write was seen (local clock); the heartbeat sends it as an age, so a write made
+        # before this holder's lease horizon is never taken for a stale-epoch write when it arrives late
+        entry: dict[str, Any] = {"path": path, "state": state, "attribution": attr, "at": self.clock()}
         epoch = self._epoch_for(sess, path)
         if epoch:
             entry["claim_epoch"] = epoch
@@ -2377,6 +2443,7 @@ class Crewd:
         task = await self.find_task(sess, ref_arg)
         key = str(sess["key"])
         baton_ref = None
+        baton_id: str | None = None
         adopted: dict[str, Any] = {}
         async with self.lock(key):
             if not args.get("restore_only"):
@@ -2386,16 +2453,23 @@ class Crewd:
                 if not resp.ok:
                     return {"ok": False, "status": resp.status, "error": resp.error(), "message": resp.detail().get("message")}
                 adopted = resp.body or {}
-                baton_ref = ((adopted.get("baton") or {}) if isinstance(adopted, dict) else {}).get("baton_ref")
+                baton = (adopted.get("baton") or {}) if isinstance(adopted, dict) else {}
+                baton_ref = baton.get("baton_ref")
+                baton_id = baton.get("baton_id") if baton_ref else None
             if not baton_ref:
                 resp = await self.request(
                     self.api_for(sess), "GET", f"/crews/{sess['crew_id']}/batons", params={"task_id": task["id"]}
                 )
                 if resp.ok:
                     items = (resp.body or {}).get("batons") or (resp.body or {}).get("items") or []
-                    baton_ref = next(
-                        (b.get("baton_ref") for b in reversed(items) if isinstance(b, dict) and b.get("baton_ref")), None
-                    )
+                    # newest first: the latest pass to this session that carries a ref
+                    mine = [
+                        b
+                        for b in items
+                        if isinstance(b, dict) and b.get("baton_ref") and b.get("to_session") in (None, sess.get("session_id"))
+                    ]
+                    if mine:
+                        baton_ref, baton_id = mine[0].get("baton_ref"), mine[0].get("id")
             restore: dict[str, Any] | None = None
             if baton_ref:
                 label = f"T-{task.get('number')}"
@@ -2410,6 +2484,8 @@ class Crewd:
                 except B.GitError as e:  # git itself failed before anything was changed (a timeout, git missing)
                     result = B.RestoreResult(False, "restore_failed", str(baton_ref), next_command=retry, error=str(e)[:300])
                 restore = result.as_dict()
+                if baton_id:
+                    restore["reported"] = await self.report_restore(sess, str(baton_id), result)
                 if result.restored:
                     rec = self.batons.setdefault(str(baton_ref), {"crew_id": sess["crew_id"], "toplevel": str(sess["toplevel"])})
                     rec["closed_at"] = self.clock()
@@ -2428,6 +2504,31 @@ class Crewd:
             if isinstance(adopted, dict)
             else [],
         }
+
+    async def report_restore(self, sess: Mapping[str, Any], baton_id: str, result: B.RestoreResult) -> bool:
+        """Tell the server how the baton restore went (``baton.restored``, ``crew_batons.restored``); a
+        failed restore becomes a Needs-you item there. Spooled for the outbox when the server is away."""
+        key = str(sess["key"])
+        body = {"restored": bool(result.restored), "status": result.reason, "files": len(result.files or [])}
+        path = f"/crews/{sess['crew_id']}/batons/{baton_id}/restore"
+        try:
+            resp = await self.request(self.api_for(sess), "POST", path, json_body=body, session_token=self.tokens.get(key))
+        except Unreachable:
+            resp = None
+        if resp is not None and (resp.ok or resp.status in (404, 422)):
+            return bool(resp.ok)
+        with contextlib.suppress(OSError, ValueError):
+            self.spool_restore(sess, path, body)
+        return False
+
+    def spool_restore(self, sess: Mapping[str, Any], path: str, body: Mapping[str, Any]) -> None:
+        O.spool(
+            self.layout.outbox,
+            "baton_restore",
+            {"method": "POST", "path": path, "json": dict(body)},
+            session_key=str(sess["key"]),
+            crew_id=str(sess["crew_id"]),
+        )
 
     async def api_op(self, peer: Peer, args: Mapping[str, Any]) -> dict[str, Any]:
         """A session-authenticated server call for the CLI (claim, release, task, report, say, checkpoint)."""
@@ -2517,17 +2618,23 @@ class Crewd:
                 self.api_for(sess),
                 "POST",
                 "/bypass-codes/redeem",
-                json_body={"code": code, "session_id": sess["session_id"]},
+                json_body={"code": code, "session_id": sess["session_id"], "surface": "tty"},
                 session_token=self.tokens.get(str(sess["key"])),
             )
             if not resp.ok:
                 return {"ok": False, "status": resp.status, "error": resp.error()}
-            grant = {
-                "scope": "all",
-                "expires_at": self.clock() + minutes * 60,
+            body = resp.body or {}
+            # the code's own scope and remaining lifetime, never a wider local grant
+            left = minutes * 60
+            with contextlib.suppress(TypeError, ValueError):
+                expires = datetime.fromisoformat(str(body.get("expires_at")).replace("Z", "+00:00"))
+                left = int(min(left, max(0.0, expires.timestamp() - time.time())))
+            grant: dict[str, Any] = {
+                "scope": str(body.get("scope") or "none"),
+                "expires_at": self.clock() + left,
                 "used": False,
                 "via": "code",
-                "code_id": (resp.body or {}).get("code_id"),
+                "code_id": body.get("code_id"),
             }
         else:
             if self.server_reachable:
@@ -2535,11 +2642,18 @@ class Crewd:
             grant = {"scope": "all", "expires_at": self.clock() + minutes * 60, "used": False, "via": "offline_tty"}
         sess["bypass"] = grant
         self.persist(str(sess["key"]))
+        expires_at = float(grant["expires_at"])
         self.events_log.append(
             {"type": "bypass.granted", "session": sess.get("callsign"), "via": grant["via"], "at": self.clock()}
         )
         self._audit_local({"action": "bypass_granted", "session_id": sess["session_id"], "via": grant["via"]})
-        return {"ok": True, "callsign": sess.get("callsign"), "expires_in_s": minutes * 60, "via": grant["via"]}
+        return {
+            "ok": True,
+            "callsign": sess.get("callsign"),
+            "expires_in_s": int(expires_at - self.clock()),
+            "via": grant["via"],
+            "scope": grant["scope"],
+        }
 
     async def bypass_redeem(self, peer: Peer, args: Mapping[str, Any]) -> dict[str, Any]:
         """``REMEMBRA_BYPASS=<code> git …``: the server validates and consumes the human-issued code."""
@@ -2548,11 +2662,13 @@ class Crewd:
         if not re.fullmatch(S.BYPASS_CODE_PATTERN, code):
             return {"ok": False, "error": "bad_code"}
         try:
+            surface = str(args.get("surface") or "")
+            zone = args.get("zone") if isinstance(args.get("zone"), str) else None
             resp = await self.request(
                 self.api_for(sess),
                 "POST",
                 "/bypass-codes/redeem",
-                json_body={"code": code, "session_id": sess["session_id"]},
+                json_body={"code": code, "session_id": sess["session_id"], "surface": surface, "zone": zone},
                 session_token=self.tokens.get(str(sess["key"])),
             )
         except Unreachable:
@@ -2560,7 +2676,13 @@ class Crewd:
         self._audit_local(
             {"action": "bypass_redeemed", "session_id": sess["session_id"], "ok": resp.ok, "surface": args.get("surface")}
         )
-        return {"ok": resp.ok, "status": resp.status, "error": None if resp.ok else resp.error()}
+        body = resp.body if resp.ok and isinstance(resp.body, dict) else {}
+        return {
+            "ok": resp.ok,
+            "status": resp.status,
+            "error": None if resp.ok else resp.error(),
+            "scope": body.get("scope"),
+        }
 
     def bypass_consume(self, peer: Peer, args: Mapping[str, Any]) -> dict[str, Any]:
         sess = self.resolve_peer(peer, str(args.get("key") or ""))
@@ -2569,6 +2691,9 @@ class Crewd:
         grant = sess.get("bypass")
         if not isinstance(grant, dict) or grant.get("used") or float(grant.get("expires_at") or 0) <= self.clock():
             return {"ok": False, "error": "no_grant"}
+        zone = args.get("zone") if isinstance(args.get("zone"), str) else None
+        if not S.bypass_scope_matches(str(grant.get("scope") or ""), str(args.get("surface") or ""), zone):
+            return {"ok": False, "error": "scope_mismatch", "scope": grant.get("scope")}
         grant["used"] = True
         grant["used_at"] = self.clock()
         grant["surface"] = args.get("surface")

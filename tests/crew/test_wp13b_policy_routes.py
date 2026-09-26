@@ -66,7 +66,9 @@ async def test_bypass_code_listing_is_human_only_and_never_shows_the_code(tmp_pa
             issued.append(res.json())
         # use the push code, expire the commit code
         used = await c.post(
-            "/api/v1/bypass-codes/redeem", json={"code": issued[0]["code"], "session_id": "cs_b"}, headers=ctx["b"]
+            "/api/v1/bypass-codes/redeem",
+            json={"code": issued[0]["code"], "session_id": "cs_b", "surface": "prepush"},
+            headers=ctx["b"],
         )
         assert used.status_code == 200, used.text
         async with db.transaction():

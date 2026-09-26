@@ -385,6 +385,7 @@ async def list_reports(request: Request, ent: CrewEntity = Depends(crew_entity("
 async def submit_checkpoint(
     request: Request, response: Response, access: CrewAccess = Depends(crew_access(PW))
 ) -> dict[str, Any]:
+    _rate(request, "checkpoints", access)  # per session and per user (§11 limits; promotions are bounded too)
     body = await _json_body(request, required=True)
     caller = await resolve_caller(request, access, mutation=True)
 

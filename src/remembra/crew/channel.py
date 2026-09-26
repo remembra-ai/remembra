@@ -104,7 +104,10 @@ class ReservedSender(InboxError):
 
 
 def is_reserved_sender(name: str | None) -> bool:
-    return bool(name) and str(name).strip().lower() in RESERVED_SENDER_NAMES
+    """The agent-inbox rule (look-alikes, zero-width characters and punctuation included, §5.8)."""
+    from remembra.inbox.manager import is_reserved_sender as _reserved
+
+    return _reserved(name)
 
 
 def token_hash(token: str) -> str:

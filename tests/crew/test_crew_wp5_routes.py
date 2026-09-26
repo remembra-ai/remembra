@@ -207,11 +207,17 @@ async def test_pending_change_approval_and_bypass_codes_over_http(tmp_path):
         )
         assert issued.status_code == 201 and issued.json()["code"].startswith("RCB-")
         code = issued.json()["code"]
-        wrong = await c.post("/api/v1/bypass-codes/redeem", json={"code": code, "session_id": "cs_b"}, headers=ctx["a"])
+        wrong = await c.post(
+            "/api/v1/bypass-codes/redeem", json={"code": code, "session_id": "cs_b", "surface": "prepush"}, headers=ctx["a"]
+        )
         assert wrong.status_code == 401  # token of cs_a does not name cs_b
-        ok = await c.post("/api/v1/bypass-codes/redeem", json={"code": code, "session_id": "cs_b"}, headers=ctx["b"])
+        ok = await c.post(
+            "/api/v1/bypass-codes/redeem", json={"code": code, "session_id": "cs_b", "surface": "prepush"}, headers=ctx["b"]
+        )
         assert ok.status_code == 200 and ok.json()["scope"] == "push"
-        again = await c.post("/api/v1/bypass-codes/redeem", json={"code": code, "session_id": "cs_b"}, headers=ctx["b"])
+        again = await c.post(
+            "/api/v1/bypass-codes/redeem", json={"code": code, "session_id": "cs_b", "surface": "prepush"}, headers=ctx["b"]
+        )
         assert again.status_code == 403 and again.json()["detail"]["error"] == "invalid_code"
 
 

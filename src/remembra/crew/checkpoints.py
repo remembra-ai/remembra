@@ -17,9 +17,9 @@ Facts vocabulary the report gate reads (the relay close-out keys, crew form):
 * ``todos_open``, ``errors``, ``diff_stat``, ``baton_ref``.
 
 Who may submit which trigger: sessions submit ``turn, commit, push, test,
-interval, precompact, quota, close``; ``task`` and ``claim`` checkpoints are
-recorded by the server on transitions and ``lost`` by the reaper (WP-4) through
-:meth:`CheckpointService.record_in_tx`. The facts source is decided by the
+interval, precompact, close``; ``task`` and ``claim`` checkpoints are
+recorded by the server on transitions, ``quota`` by the stall flow and ``lost``
+by the reaper (WP-4) through :meth:`CheckpointService.record_in_tx`. The facts source is decided by the
 server, never by the body: hook and CLI sessions are ``relay-cli``, MCP sessions
 ``agent-declared``, server-recorded ones ``server-inferred``.
 
@@ -30,8 +30,9 @@ Promotion to memory (D15), through the crew outbox (D35):
 * ``task`` promotes on transitions that finish work (review, done, stalled);
 * every other trigger promotes at most once per session per 60 min;
 * every promotion counts against ``crew_memory_promotions_per_day`` of the crew
-  owner's plan; over the cap it is queued for the next UTC day
-  (``remembra.crew.limits.promotion_decision``).
+  owner's plan, across all of the owner's crews; over the cap it is queued for the
+  next UTC day (``remembra.crew.limits.promotion_decision``), and the outbox checks
+  the cap again when a deferred row comes due.
 """
 
 from __future__ import annotations
@@ -50,7 +51,10 @@ from remembra.crew.redact import outbound
 from remembra.crew.store import CrewStore, dumps, loads, new_id, now_iso, parse_iso
 from remembra.crew.tasks import Caller, CrewServiceError, crew_row, crew_settings, fetchall, fetchone, session_channel_source
 
-CLIENT_TRIGGERS: Final = ("turn", "commit", "push", "test", "interval", "precompact", "quota", "close")
+# ``quota`` is not a client trigger: its checkpoint comes only from the stall flow (StopFailure or the
+# transcript detector), which blocks the session and creates the baton; a session that could post a
+# ``quota`` checkpoint while active would promote without the daily cap or the spacing.
+CLIENT_TRIGGERS: Final = ("turn", "commit", "push", "test", "interval", "precompact", "close")
 SERVER_TRIGGERS: Final = ("task", "claim", "lost")
 ALWAYS_ELIGIBLE: Final = frozenset({"quota", "lost", "close", "task"})
 PROMOTION_SPACING_S: Final = 3600
@@ -374,11 +378,12 @@ class CheckpointService:
         crew = await crew_row(tx.conn, crew_id)
         limits = await self.limits_for(str(crew["owner_user_id"]))
         today = now_dt.date().isoformat()
+        # the cap is the owner's (plan-bound): promotions of every crew they own count, not just this one
         used = await fetchone(
             tx.conn,
-            "SELECT COUNT(*) AS n FROM crew_outbox WHERE crew_id = ? AND kind = 'memory_promotion'"
-            " AND json_extract(payload, '$.metadata.promotion_day') = ?",
-            (crew_id, today),
+            "SELECT COUNT(*) AS n FROM crew_outbox WHERE kind = 'memory_promotion'"
+            " AND json_extract(payload, '$.user_id') = ? AND json_extract(payload, '$.metadata.promotion_day') = ?",
+            (str(crew["owner_user_id"]), today),
         )
         decision = promotion_decision(int(used["n"]) if used else 0, trigger, limits)
         day = today if decision.promote else (now_dt.date() + timedelta(days=1)).isoformat()

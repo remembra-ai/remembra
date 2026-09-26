@@ -351,10 +351,16 @@ def test_e2e_f_fencing_when_the_network_is_cut(world: World) -> None:
 
     assert wait_for(reserved_for_a, timeout=120, interval=2), [c for c in world.snapshot(crew)["claims"]]
     held = next(c for c in world.snapshot(crew)["claims"] if c["id"] == claim["id"])
-    # KNOWN GAP (reported by WP-15): with the shortest lease the settings allow (120 s, below the reaper's 180 s
-    # host-silence threshold) the reaper marks the session lost (lease_expired) before the host counts as
-    # unreachable, so the reservation reads "lost" instead of "offline". With the default 600 s lease it is offline.
-    assert held["reserve_reason"] in ("offline", "lost"), held
+    # host-wide silence is not a stall (§10.1), even with a lease (120 s) shorter than the 180 s host-silence
+    # threshold: the claim is reserved offline for A, never lost
+    assert held["reserve_reason"] == "offline", held
+    import sqlite3
+
+    with sqlite3.connect(f"file:{world.tmp / 'server' / 'crew' / 'crew.db'}?mode=ro", uri=True) as db:
+        a_state = db.execute("SELECT state, quiet_reason FROM crew_sessions WHERE id = ?", (a_sid,)).fetchone()
+        stalled = db.execute("SELECT COUNT(*) FROM crew_tasks WHERE status = 'stalled'").fetchone()[0]
+    assert a_state == ("quiet", "host_unreachable"), a_state
+    assert stalled == 0  # no task stalls on a network blip
 
     # C works on another machine (its own host and crewd; here its API calls are made directly)
     assert world.server is not None
@@ -392,17 +398,20 @@ def test_e2e_f_fencing_when_the_network_is_cut(world: World) -> None:
     assert again["denied"], again  # denied at once: C holds POS now (epoch moved on)
     with world.human() as h:
         collisions = h.get(f"/crews/{crew}/collisions").json()["collisions"]
-    # A was fenced: every write after the horizon was denied (above), so nothing A wrote carries a fenced lease.
-    # KNOWN GAP (reported by WP-15; spec: "no stale_epoch_write exists"): the edits A made *before* the horizon
-    # were still pending in crewd when the link dropped; they arrive with claim_epoch 1 after the transfer to C
-    # (epoch 2) and, as footprints carry no write time, the server files them as stale_epoch_write.
-    stale = [c for c in collisions if c["kind"] == "stale_epoch_write"]
-    assert all(c["session_a"] == a_sid and c["subject"] == "src/app/pos/split.ts" for c in stale), stale
+    # §13.3 E2E-f: "no stale_epoch_write exists because A was fenced". Every write after the horizon was denied
+    # (above); the edits A made before it were still pending in crewd when the link dropped and arrive with
+    # claim_epoch 1 after the transfer to C (epoch 2). Each carries its write age, so the server sees they were
+    # written while A held POS, before its horizon: A did nothing wrong and has no collision of any kind.
+    assert edits >= 1  # A really did edit POS before the horizon
+    assert not [c for c in collisions if a_sid in (c["session_a"], c["session_b"])], collisions
     import sqlite3
 
     with sqlite3.connect(f"file:{world.tmp / 'server' / 'crew' / 'crew.db'}?mode=ro", uri=True) as db:
-        evidence = [
-            json.loads(r[0] or "{}") for r in db.execute("SELECT evidence FROM crew_collisions WHERE kind = 'stale_epoch_write'")
-        ]
-    assert len(evidence) == len(stale)
-    assert all(e.get("reported_epoch") == 1 and not e.get("fenced") for e in evidence), evidence  # pre-horizon, epoch 1
+        rows = db.execute(
+            "SELECT kind, state FROM crew_collisions WHERE session_a = ? OR session_b = ?", (a_sid, a_sid)
+        ).fetchall()
+        footprints = db.execute(
+            "SELECT claim_epoch FROM crew_footprints WHERE session_id = ? AND path = 'src/app/pos/split.ts'", (a_sid,)
+        ).fetchall()
+    assert rows == [], rows  # none ever opened (not merely resolved)
+    assert footprints and footprints[0][0] == 1, footprints  # the late footprints did arrive, under epoch 1

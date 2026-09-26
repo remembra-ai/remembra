@@ -13,6 +13,7 @@
 - ``GET    /api/v1/crews/{crew_id}/agents/{agent_id}``  per-agent page data (§9.10, L0 minimal)
 - ``GET    /api/v1/crews/{crew_id}/agents/{agent_id}/timeline``  last 20 sessions in a window (L0)
 - ``GET    /api/v1/crews/{crew_id}/batons``             baton passes (?task_id=)
+- ``POST   /api/v1/crews/{crew_id}/batons/{id}/restore`` the adopter's crewd reports the baton restore (session token)
 
 Every crew route resolves its crew through ``crew_access`` (``load_crew``): 404
 for anything the caller cannot see, 403 for a missing permission, and (H)
@@ -453,6 +454,56 @@ async def submit_crew_events(request: Request, access: CrewAccess = Depends(crew
         raise crew_error(422, "invalid_events", "; ".join(e.errors[:5])[:500], errors=list(e.errors[:10])) from e
     seqs = [r.seq for r in results if r.seq is not None]
     return {"results": [r.to_dict() for r in results], "seq": max(seqs) if seqs else None}
+
+
+async def _token_session(request: Request, access: CrewAccess) -> dict[str, Any]:
+    """The crew session proven by the ``X-Remembra-Crew-Session`` token (same rules as client events)."""
+    from remembra.crew.tasks import session_for_token
+
+    token = (request.headers.get(SESSION_TOKEN_HEADER) or "").strip()
+    if not token:
+        raise crew_error(403, "session_required", f"Send the crew session token in {SESSION_TOKEN_HEADER}.")
+    session = await session_for_token(_crew_db(request).conn, access.crew_id, token)
+    if session is None or session["user_id"] != access.user.user_id or session["state"] == "ended":
+        raise crew_error(401, "invalid_session_token", "The crew session token is not valid for this crew.")
+    agent = getattr(access.user, "agent_id", None)
+    if agent and session["agent_id"] != agent:
+        raise crew_error(403, "agent_mismatch", "This agent-scoped key cannot act as another agent's session.")
+    enforce_rate_limit("events", user_id=access.user.user_id, session_token=token)
+    return session
+
+
+@router.post("/crews/{crew_id}/batons/{baton_id}/restore", summary="Report the baton restore (adopter's crew session token)")
+async def report_baton_restore(
+    request: Request, baton_id: str, access: CrewAccess = Depends(crew_access("crew:write"))
+) -> dict[str, Any]:
+    """crewd of the session the baton passed to reports restoring its ref into the checkout (D30, §13.3
+    step 7): sets ``crew_batons.restored`` and emits ``baton.restored``; a failed restore opens a
+    Needs-you item. Only the adopting session may report, once (a repeat returns the recorded outcome)."""
+    from remembra.crew.tasks import BatonRestoreError, record_baton_restore
+
+    session = await _token_session(request, access)
+    try:
+        body = await request.json()
+    except ValueError:
+        raise crew_error(422, "invalid_body", "The body is not valid JSON.") from None
+    errors = schemas.validate(body, schemas.REQUEST_SHAPES["BatonRestore"])
+    if errors:
+        raise crew_error(422, "invalid_body", "; ".join(errors[:5])[:500])
+    try:
+        return await record_baton_restore(
+            _events(request),
+            access.crew_id,
+            session,
+            baton_id,
+            restored=bool(body["restored"]),
+            status=str(body["status"]),
+            files=int(body["files"]),
+        )
+    except BatonRestoreError as e:
+        if e.status == 404:
+            raise not_found() from None
+        raise crew_error(e.status, e.code, e.message) from None
 
 
 # ---------------------------------------------------------------------------

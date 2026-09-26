@@ -599,8 +599,10 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
         data.append(f"Inbox: {inbox['unread_count']} unread (get_inbox for bodies, ack_inbox when done)")
         for item in (inbox.get("items") or [])[:5]:
             sent = relative_time(item.get("created_at"), now)
+            # the provenance label, never the bare sender name: "agent X (self-declared)" can't pass for Mani
+            sender = item.get("sender_label") or f"agent {item.get('from_agent')} (self-declared)"
             data.append(
-                f"- [{item.get('inbox_id')}] from {clip(item.get('from_agent'), 60)}, {sent}: "
+                f"- [{item.get('inbox_id')}] from {clip(sender, 90)}, {sent}: "
                 f"{clip(item.get('subject'), 80)} — {clip(item.get('body_preview'), 120)}"
             )
     status_items = brief.get("status_items") or []

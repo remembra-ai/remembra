@@ -341,6 +341,37 @@ def _trailer(message: str, name: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+UNATTRIBUTED_SCAN_MAX: Final = 50
+MEMBER_TRAILER: Final = "Remembra-Member"
+
+
+def unattributed_commits(toplevel: str | Path, since: str, head: str, *, limit: int = 20) -> list[dict[str, Any]]:
+    """Commits in ``since..head`` with no ``Remembra-Member`` trailer, each with the files it changed (§8.4).
+
+    A commit made outside every crew session (a human at a terminal, or an agent whose hooks
+    could not identify it) carries no trailer. The server turns the ones touching a held zone
+    into ``unattributed_change`` notices. Merge commits are skipped (their first-parent diff is
+    other people's landed work). Returns ``[{"sha", "files"}]``, oldest first.
+    """
+    revs = try_out(
+        ["rev-list", "--no-merges", f"--max-count={UNATTRIBUTED_SCAN_MAX}", "--reverse", head, "--not", since], toplevel
+    )
+    if not revs:
+        return []
+    found: list[dict[str, Any]] = []
+    for sha in revs.split():
+        message = try_out(["log", "-1", "--format=%B", sha], toplevel)
+        if message is None or _trailer(message, MEMBER_TRAILER):
+            continue
+        names = try_out(["diff-tree", "--no-commit-id", "--name-only", "-r", "--no-renames", sha], toplevel)
+        files = [f for f in (names or "").splitlines() if f][:100]
+        if files:
+            found.append({"sha": sha, "files": files})
+        if len(found) >= limit:
+            break
+    return found
+
+
 def _checked_out_branches(toplevel: str) -> set[str]:
     text = try_out(["worktree", "list", "--porcelain"], toplevel) or ""
     return {line.split(" ", 1)[1].removeprefix("refs/heads/") for line in text.splitlines() if line.startswith("branch ")}

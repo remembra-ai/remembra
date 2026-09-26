@@ -908,7 +908,10 @@ def cmd_bypass(args: argparse.Namespace, layout: Layout) -> int:
     res = _call(layout, "bypass", {"session": args.session, "code": args.code, "minutes": args.minutes}, timeout=15.0)
     if not res.get("ok"):
         return _fail(res)
-    print(f"Bypass granted to {res.get('callsign')} for {int(res.get('expires_in_s') or 0) // 60} min (single use, recorded).")
+    print(
+        f"Bypass granted to {res.get('callsign')} for {int(res.get('expires_in_s') or 0) // 60} min,"
+        f" scope {res.get('scope') or 'all'} (single use, recorded)."
+    )
     return 0
 
 

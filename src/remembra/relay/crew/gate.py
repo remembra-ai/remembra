@@ -620,8 +620,13 @@ def _unconfirmed(layout: Layout, key: str, session: Mapping[str, Any]) -> set[st
     return ids | outbox.pending_claim_zone_ids(layout.outbox, key)
 
 
-def _bypass_ok(ctx: HookContext, session: Mapping[str, Any], surface: str) -> bool:
-    """A human-issued single-use bypass (D34), consumed through crewd so it is used once."""
+def _bypass_ok(ctx: HookContext, session: Mapping[str, Any], surface: str, zone: str | None = None) -> bool:
+    """A human-issued single-use bypass (D34), consumed through crewd so it is used once.
+
+    Only when its scope covers this use: ``write:<zone>`` for a pre-write deny in that zone
+    (``commit`` and ``push`` codes never open a pre-write deny)."""
+    from remembra.crew import schemas as S
+
     grant = session.get("bypass")
     if not isinstance(grant, dict) or grant.get("used"):
         return False
@@ -630,10 +635,9 @@ def _bypass_ok(ctx: HookContext, session: Mapping[str, Any], surface: str) -> bo
             return False
     except (TypeError, ValueError):
         return False
-    scope = str(grant.get("scope") or "all")
-    if scope not in ("all", "*", surface, "gate"):
+    if not S.bypass_scope_matches(str(grant.get("scope") or ""), surface, zone):
         return False
-    res = rpc(ctx.layout, "bypass_consume", {"key": ctx.key, "surface": surface}, timeout=0.3)
+    res = rpc(ctx.layout, "bypass_consume", {"key": ctx.key, "surface": surface, "zone": zone}, timeout=0.3)
     return bool(res and res.get("ok"))
 
 
@@ -749,6 +753,7 @@ def evaluate_pretool(ctx: HookContext, session: dict[str, Any]) -> tuple[str, di
     outage = bool(status.get("server_outage")) and status.get("running")
     human = str(session.get("human_name") or "the owner")
     age = age_s(snap, ctx.local_now)
+    guarded_pids = crewd_pids(ctx.layout) if tool == "Bash" else set()
 
     def run(snapshot: Mapping[str, Any]) -> Any:
         return G.evaluate(
@@ -765,6 +770,7 @@ def evaluate_pretool(ctx: HookContext, session: dict[str, Any]) -> tuple[str, di
             server_outage=bool(outage),
             unconfirmed_zone_ids=_unconfirmed(ctx.layout, key, session),
             human=human,
+            protected_pids=guarded_pids,
         )
 
     if age is not None and FRESH_S < age <= ASYNC_REFRESH_S:
@@ -797,7 +803,7 @@ def evaluate_pretool(ctx: HookContext, session: dict[str, Any]) -> tuple[str, di
     if micro and verdict.decision in ("allow", "warn") and info.get("path_rel"):
         rpc_send(ctx.layout, "commons", {"key": key, "effects": micro, "path_rel": info["path_rel"]})
     out = verdict.hook_stdout()
-    if verdict.decision in ("deny", "ask") and _bypass_ok(ctx, session, "pretool"):
+    if verdict.decision in ("deny", "ask") and _bypass_ok(ctx, session, "mcp" if op == "mcp" else "pretool", verdict.zone_slug):
         events = [e for e in events if e["type"] != "guard.blocked"]
         out = ""
         info["bypassed"] = True
@@ -1259,11 +1265,102 @@ def _git(args: Sequence[str], cwd: str, timeout: float = 2.0) -> subprocess.Comp
 
 
 def _whoami(layout: Layout) -> dict[str, Any] | None:
+    """The crew session committing or pushing, resolved from the parent process chain (§8.4).
+
+    crewd answers when it runs. When it does not (killed, crashed, too slow) the gate does not
+    take the committer for a human: it walks its own process ancestry and matches the agent pids
+    recorded in ``sessions/*.json`` (crew-policy files agents cannot write), so killing crewd never
+    opens commit and push for an agent (WP-17 finding F3). Only a process with no crew agent
+    among its ancestors is a human.
+    """
     res = rpc(layout, "whoami", {}, timeout=0.6)
-    if res is None:
-        respawn_crewd(layout)
+    if res is not None:
+        return res if res.get("ok") and res.get("key") else None
+    respawn_crewd(layout)
+    return local_whoami(layout)
+
+
+def process_ancestry(pid: int) -> list[int]:
+    """``pid`` and its ancestors, nearest first (stdlib: ``/proc`` on Linux, ``ps`` elsewhere)."""
+    table: dict[int, int] = {}
+    if sys.platform.startswith("linux") and os.path.isdir("/proc"):
+        cur = pid
+        chain: list[int] = []
+        while cur > 1 and cur not in chain and len(chain) < 64:
+            chain.append(cur)
+            try:
+                with open(f"/proc/{cur}/stat", encoding="utf-8", errors="replace") as fh:
+                    stat = fh.read()
+                cur = int(stat[stat.rfind(")") + 2 :].split()[1])
+            except (OSError, ValueError, IndexError):
+                break
+        return chain
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, timeout=2.0, check=False)  # noqa: S603,S607
+    except (OSError, subprocess.SubprocessError):
+        return [pid]
+    for line in out.stdout.decode("utf-8", "replace").splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            table[int(parts[0])] = int(parts[1])
+    chain = []  # type: list[int]
+    cur = pid
+    while cur > 1 and cur not in chain and len(chain) < 64:
+        chain.append(cur)
+        cur = table.get(cur, 0)
+    return chain
+
+
+def local_whoami(layout: Layout, pid: int | None = None) -> dict[str, Any] | None:
+    """crewd's ``whoami`` answered from the local session files (crewd unreachable): the nearest
+    live session whose recorded agent pid is an ancestor of this process, else ``None``."""
+    try:
+        files = [p for p in layout.sessions.glob("*.json") if not p.name.endswith(".turn.json")]
+    except OSError:
         return None
-    return res if res.get("ok") and res.get("key") else None
+    sessions = []
+    for path in files:
+        sess = read_json(path)
+        if not isinstance(sess, dict) or sess.get("ended") or not sess.get("session_id") or not sess.get("crew_id"):
+            continue
+        agent_pid = sess.get("agent_pid")
+        if isinstance(agent_pid, int) and agent_pid > 1:
+            sessions.append((agent_pid, path.stem, sess))
+    if not sessions:
+        return None
+    chain = process_ancestry(pid or os.getpid())
+    best: tuple[int, str, dict[str, Any]] | None = None
+    for agent_pid, key, sess in sessions:
+        if agent_pid in chain and (best is None or chain.index(agent_pid) < chain.index(best[0])):
+            best = (agent_pid, key, sess)
+    if best is None:
+        return None
+    _, key, sess = best
+    return {
+        "ok": True,
+        "key": str(sess.get("key") or key),
+        "session_id": sess["session_id"],
+        "crew_id": sess["crew_id"],
+        "callsign": sess.get("callsign"),
+        "member_key": sess.get("member_key"),
+        "adapter": sess.get("adapter"),
+        "client_session_id": sess.get("client_session_id"),
+        "task_ref": sess.get("task_ref"),
+        "toplevel": sess.get("toplevel"),
+        "project_id": sess.get("project_id"),
+        "resolved_by": "local",
+    }
+
+
+def crewd_pids(layout: Layout) -> set[int]:
+    """crewd's live pid(s), from its pidfile and status file: a ``kill`` of one is tamper (§5.2 row 2)."""
+    out: set[int] = set()
+    for path in (layout.pidfile, layout.status_file):
+        data = read_json(path)
+        pid = data.get("pid") if isinstance(data, dict) else None
+        if isinstance(pid, int) and pid > 1 and pid != os.getpid() and pid_alive(pid):
+            out.add(pid)
+    return out
 
 
 _MARKER_NAMES: Final = re.compile(r"(?:^|/)(?:\.claude/settings[^/]*\.json|\.husky/[^/]+|lefthook[^/]*|\.lefthook[^/]*)$")
@@ -1377,7 +1474,8 @@ def _bypass_code_ok(layout: Layout, who: Mapping[str, Any], surface: str) -> boo
     if not code or not re.fullmatch(S.BYPASS_CODE_PATTERN, code):
         return False
     res = rpc(layout, "bypass_redeem", {"key": who.get("key"), "code": code, "surface": surface}, timeout=3.0)
-    return bool(res and res.get("ok"))
+    # the server refuses a code whose scope does not cover this surface; check the scope it returns too
+    return bool(res and res.get("ok") and S.bypass_scope_matches(str(res.get("scope") or ""), surface))
 
 
 def git_gate_precommit(layout: Layout, cwd: str) -> GitGateResult:

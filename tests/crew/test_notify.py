@@ -82,7 +82,7 @@ async def _setup(tmp_path, *, channels=("email", "webhook")):
     await set_realtime(env.db, CREW_A, list(channels))
     receiver = Receiver()
     sender = WebhookSender(resolver=public_resolver, transport=receiver.transport())
-    targets = NotifyTargets(env.db, webhooks=sender)
+    targets = NotifyTargets(env.db, webhooks=sender, account_email="mani@example.com")  # the owner's own address
     hook = await targets.add(OWNER, "webhook", HOOK_URL)
     mail = await targets.add(OWNER, "email", "Mani@Example.com")
     return env, author.actor(), receiver, sender, hook, mail
@@ -139,8 +139,9 @@ async def test_webhook_target_needs_https_ssrf_safety_and_a_signed_challenge(tmp
     assert len(await targets.list(OWNER)) == 1  # the failed one was not stored
     with pytest.raises(NotifyError):
         await targets.add(OWNER, "email", "not-an-email")
-    mail = await targets.add(OWNER, "email", "Mani@Example.com")
-    assert mail["target"] == "mani@example.com" and "signing_secret" not in mail
+    own = NotifyTargets(env.db, webhooks=targets.webhooks, account_email="mani@example.com")
+    mail = await own.add(OWNER, "email", "Mani@Example.com")
+    assert mail["target"] == "mani@example.com" and "signing_secret" not in mail and mail["verified_at"]
 
 
 async def test_quota_stop_reaches_webhook_and_email_with_signed_copy(tmp_path):
@@ -162,7 +163,9 @@ async def test_quota_stop_reaches_webhook_and_email_with_signed_copy(tmp_path):
     assert body["items"][0]["link"].endswith(f"/#/crew?project=yaadbooks&view=feed&seq={body['items'][0]['seq']}")
     assert delivery.headers["X-Remembra-Delivery"] == body["id"]
     [mail] = email.sent
-    assert mail.to == "mani@example.com" and expected in mail.html and "yaadbooks" in mail.subject
+    assert mail.to == "mani@example.com" and expected in mail.html and "yaadbooks" in mail.html
+    # the subject is a server template: no project name or agent-authored text (review finding)
+    assert mail.subject == "[Remembra crew] 1 handoff alert"
 
 
 async def test_channels_follow_crew_settings_and_rules(tmp_path):

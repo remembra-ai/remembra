@@ -1657,6 +1657,11 @@ class CrewSessions:
                 ),
             )
             await self._signal(tx, row, alive=alive, activity_at=activity_at, now=now)
+            if item.get("githook_state") in ("ok", "chained") and row.get("githook_state") == "missing":
+                from remembra.crew.zones import resolve_inbox_items
+
+                # the commit gate is reachable again: the "git gate missing" Needs-you item resolves
+                await resolve_inbox_items(tx, crew_id, ref_ids=[row["id"]], kinds=["githook_missing"], actor=Actor.system())
             row = await get_session(tx.conn, row["id"]) or row
             if limit is not None:
                 row = await self._apply_limit(tx, row, limit, now)
@@ -1665,6 +1670,9 @@ class CrewSessions:
                 await self._upsert_footprints(tx, row, footprints, now)
                 for sink in list(FOOTPRINT_SINKS):
                     await sink(tx, row, footprints)
+            commits = [c for c in item.get("unattributed_commits") or [] if isinstance(c, dict)]
+            if commits:
+                await self._unattributed_commits(tx, row, commits)
             claims = await _all(
                 tx.conn,
                 "SELECT id, epoch, state, lease_expires_at FROM crew_claims"
@@ -1687,6 +1695,19 @@ class CrewSessions:
             "inject_text": inject,
             "crew_last_seq": int(head["last_seq"]) if head else 0,
         }
+
+    async def _unattributed_commits(self, tx: EventTx, row: Mapping[str, Any], commits: Sequence[Mapping[str, Any]]) -> None:
+        """Commits crewd found in this session's checkout with no crew trailer (§8.4): the ones touching a
+        held zone become ``unattributed_change`` notices (a human at a terminal, or an agent the git
+        gates could not identify)."""
+        from remembra.crew.collisions import record_unattributed_change
+        from remembra.crew.zones import CrewOps
+
+        ops = CrewOps(tx._log)
+        for c in commits[:20]:
+            files = [f for f in c.get("files") or [] if schemas.is_path_rel(f)][:100]
+            if files:
+                await record_unattributed_change(ops, tx, row["crew_id"], files, commit=str(c.get("sha") or "")[:40] or None)
 
     async def _apply_limit(self, tx: EventTx, row: dict[str, Any], limit: Mapping[str, Any], now: datetime) -> dict[str, Any]:
         level = limit.get("level")
