@@ -97,22 +97,35 @@ recorded from cursor-agent's own hook runner, driven outside a logged-in session
 Unverified adapters are dry-run only unless you pass `--include-unverified`; `connect --apply` ends by
 listing the ones it skipped and the command that writes them. Hooks an earlier `--include-unverified` run
 wrote are kept current by a plain `connect --apply` (after a reinstall moves `remembra-relay`, for example).
-`connect --agent NAME --apply` for an agent that is not installed here writes nothing unless you add
-`--force`: it would create the agent's directory, which then looks like an install to every detector.
-`disconnect --apply` removes the directories `connect` created once only its own backups are left in them.
+`connect --agent NAME --apply` for an agent that is not detected here writes nothing unless you add
+`--force`: it would create the agent's directory or config file, which then looks like an install to every
+detector. `disconnect --apply` removes the directories `connect` created once only its own backups are left in
+them. `connect` exits 0 when every write it was asked for succeeded; an unverified adapter it skips anyway
+(not named with `--agent`, never connected) does not fail the run when its config cannot be read, it is only
+noted.
 
 `connect` follows `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `QWEN_HOME`, `KIMI_CODE_HOME` and `GEMINI_CLI_HOME` (the
-home Gemini CLI keeps `.gemini` in) when they are set. Cursor, Gemini CLI and Qwen Code accept comments in their
-JSON config; `connect` reads such a file too, and when it rewrites it says so: the comments are not kept, the
-backup keeps them. Kimi Code's TOML file is kept as you wrote it: `connect` rewrites only its own marked block,
-and refuses to write a result Kimi would reject.
+home Gemini CLI keeps `.gemini` in) when they are set. Relay hooks an earlier `connect` wrote to the default
+place (`~/.claude/settings.json` while `CLAUDE_CONFIG_DIR` is set, say) are kept current, since the agent still
+reads that file in a session started without the variable, and `disconnect` removes them from both places.
+A config file that is a symbolic link (into a dotfiles repository, say) is written through: the file it points
+to gets the change and the link stays; the backup is kept next to the link. Cursor, Gemini CLI and Qwen Code
+accept comments in their JSON config; `connect` reads such a file too, and when it rewrites it says so: the
+comments are not kept, the backup keeps them. Kimi Code's TOML file is kept as you wrote it: `connect` rewrites
+only its own marked block, refuses to write a result Kimi would reject, and writes nothing when the edit would
+change anything in the file besides the relay's own `[[hooks]]` tables.
 
 **Gemini CLI: trust the folder.** Gemini CLI runs hooks, the user-level ones `connect` writes included, only
 in folders you trust: choose "Trust folder" when it asks. In an untrusted folder no brief is loaded and no
 handoff is saved; headless `gemini -p` there stops before any hook (add `--skip-trust`, or set
 `GEMINI_CLI_TRUST_WORKSPACE=true`). After `/clear` Gemini drops the new session's start output, so the
 BeforeAgent hook gives that session its brief with its first prompt; on every other prompt it prints nothing.
-Gemini puts the brief in `<hook_context>` with `<` and `>` escaped. Gemini CLI is detected by its binary or
+The interactive UI does not wait for SessionStart: when the brief is slow to come, or with `gemini -i "…"`, the
+first prompt's BeforeAgent hook runs alongside it, and whichever finishes first gives the brief (once). A
+session resumed with `--resume` gets the brief again, because Gemini restores the conversation without
+SessionStart's context (when the brief came with a prompt instead, the restored prompt still holds it and
+nothing is fetched). Gemini puts the brief in `<hook_context>` with `<` and `>` escaped, and the relay keeps
+recorded text from spelling the data block's close tag that way. Gemini CLI is detected by its binary or
 `~/.gemini/settings.json`, not by `~/.gemini` alone, which Antigravity also uses.
 
 **Qwen Code.** A handoff is written when an interactive session ends (`/quit`, `/clear`, SIGTERM or SIGHUP),
@@ -121,12 +134,13 @@ given as an argument) gets the brief but never fires SessionEnd, so it writes no
 (`--continue`) gets a fresh brief: Qwen does not restore the old one.
 
 **Kimi Code.** Kimi Code (npm `@moonshot-ai/kimi-code`, command `kimi`) replaced the archived Python kimi-cli,
-which only prints a deprecation notice and never ran hooks. Kimi throws away SessionStart output, so the brief
-comes with the first prompt of a session (UserPromptSubmit), and a resumed session (`kimi -c`) does not fetch
-it again. Leaving the TUI (`/exit` or Ctrl-D twice) writes the handoff; `kimi -p` runs never end their session
-and write none. `kimi migrate` copies hooks from the old `~/.kimi/config.toml` without their markers; `connect`
-and `disconnect` find those copies by their command and remove them. A block an earlier release wrote to
-`~/.kimi/config.toml` can be deleted: nothing runs it.
+which only prints a deprecation notice and never ran hooks; that kimi-cli's own `kimi` command does not count
+as Kimi Code being installed. Kimi throws away SessionStart output, so the brief comes with the first prompt of
+a session (UserPromptSubmit), and a resumed session (`kimi -c`) does not fetch it again. Leaving the TUI
+(`/exit` or Ctrl-D twice) writes the handoff, again after the session was resumed; `kimi -p` runs never end
+their session and write none. `kimi migrate` copies hooks from the old `~/.kimi/config.toml` without their
+markers; `connect` and `disconnect` find those copies by their command and remove them, and remove the block an
+earlier release wrote to `~/.kimi/config.toml` itself (nothing runs it there).
 
 **Hooks other agents run.** Grok Build loads `~/.claude/settings.json` hooks and `~/.cursor/hooks.json`
 by default; Cursor (IDE and cursor-agent), Devin and Continue's `cn` load the Claude Code hooks too; and
@@ -136,8 +150,11 @@ Continue by variables only they set, Codex by its rollout path) and never files 
 Code: `brief` prints nothing, and `close` saves the handoff under that agent (Cursor, Codex, Gemini CLI,
 Qwen Code, Kimi) or, for an agent the relay has no adapter for yet, does nothing. A session whose transcript is
 under `~/.claude/projects` is always Claude Code's. `connect` points out relay hooks an import copied into
-another agent's config; they can be deleted there. The same end of a session is saved once: Gemini CLI
-fires SessionEnd two or three times on exit, and a session can run several agents' copies of one hook.
+another agent's config; they can be deleted there. Cursor runs Claude Code's PreCompact hook as its
+preCompact: that handoff is saved as the session still open, before a compaction. The same end of a session is
+saved once: Gemini CLI fires SessionEnd two or three times on exit, and a session can run several agents' copies
+of one hook. A session resumed and ended again is saved again: its transcript has grown, and for Kimi Code and
+cursor-agent, which send no transcript, only copies arriving within a few seconds count as the same end.
 
 **Codex: trust the hooks.** Codex runs a hook only after you trust it, and skips untrusted hooks without a
 message. After `connect --apply`, open Codex, run `/hooks` and trust the three `remembra-relay` hooks.
@@ -327,7 +344,9 @@ project as the hooks.
 Everything in the brief that another agent or tool recorded (the handoff, inbox subjects, status
 values, linked headlines, recent memories) sits inside one `<remembra-data untrusted="true">` block
 with a fixed preamble: it is data, not instructions. The relay's own directive ("Before you finish:
-run `remembra-relay close`…") stays outside the block. Text inside it cannot close the block.
+run `remembra-relay close`…") stays outside the block. Text inside it cannot close the block, also not by
+spelling the tag with HTML character references (`&lt;/remembra-data&gt;`), which is how the real tag reaches
+the model in agents that escape `<` and `>` in hook output (Gemini CLI, Qwen Code).
 MCP tools that return stored content (`recall_memories`, `list_memories`, `timeline`, `get_inbox`,
 `list_status`, the full `session_brief`, and the connector's `session_brief`, `trail` and
 `recall_memories`) put their JSON inside the same block, with the same escaping.
