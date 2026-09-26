@@ -53,6 +53,7 @@ from remembra.crew.hosts import HOST_SILENT_AFTER_S
 from remembra.crew.sessions import (
     ACTIVE_WINDOW_S,
     BATON_WAITING_LEVELS,
+    HEARTBEAT_INTERVAL_S,
     LOST_SESSION_CLOSE_AFTER_S,
     MCP_LOST_AFTER_S,
     MCP_QUIET_AFTER_S,
@@ -105,6 +106,11 @@ def presence_target(
         if host_age > HOST_SILENT_AFTER_S:
             return Presence("quiet", quiet_reason="host_unreachable", reason="host_silent")
         if session_age > int(settings["lease_ttl_s"]):
+            # §10.1 host-wide silence is not a stall: when the host went quiet with the session (its last
+            # heartbeat is no newer than one interval after the session's), the host is unreachable, even
+            # before HOST_SILENT_AFTER_S when the crew's lease is shorter than that (lease_ttl_s ≥ 120)
+            if host_age + HEARTBEAT_INTERVAL_S >= session_age:
+                return Presence("quiet", quiet_reason="host_unreachable", reason="host_silent")
             return Presence("lost", lost_reason="lease_expired", reason="lease_expired")
         if session_age > SESSION_SILENT_S:
             return Presence("quiet", quiet_reason="host_unreachable", reason="session_silent")
@@ -130,6 +136,8 @@ class SweepReport:
     reservations_expired: int = 0
     baton_notices: int = 0
     lost_closed: int = 0
+    stuck: int = 0
+    contested: int = 0
     errors: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -158,13 +166,32 @@ class CrewReaper:
         self._settings_cache = {}
         now = self.sessions.now()
         report = SweepReport()
-        for step in (self._hosts, self._presence, self._leases, self._idle_park, self._reservations, self._close_lost):
+        for step in (
+            self._hosts,
+            self._presence,
+            self._leases,
+            self._idle_park,
+            self._reservations,
+            self._close_lost,
+            self._alarms,
+        ):
             try:
                 await step(now, report)
             except Exception as e:  # one failing step must not stop the others
                 log.error("crew_reaper_step_failed", step=step.__name__, error_type=type(e).__name__, error=str(e))
                 report.errors.append(f"{step.__name__}: {type(e).__name__}: {e}")
         return report
+
+    # -- health alarms (stuck agents, contested zones; §5.8, §9.11) -------------------------
+
+    async def _alarms(self, now: datetime, report: SweepReport) -> None:
+        from remembra.crew import alarms
+
+        if self.boot_at > now - timedelta(seconds=HOST_SILENT_AFTER_S):
+            return  # boot grace: nobody could check in while the server was down
+        got = await alarms.sweep(self.sessions.log, now, self._settings)
+        report.stuck += got["stuck"]
+        report.contested += got["contested"]
 
     # -- hosts ------------------------------------------------------------------------
 

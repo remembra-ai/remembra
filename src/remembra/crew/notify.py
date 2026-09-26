@@ -103,6 +103,11 @@ LOSS_QUIET_S: Final = 20 * 60
 MAX_REALTIME_EVENT_AGE_S: Final = 3600
 MAX_ITEMS_PER_DELIVERY: Final = 20
 MAX_TARGETS_PER_USER: Final = 10
+# An email target is used only after its owner proves they read it (a code mailed to it), unless it is
+# the account's own verified address: the server never mails arbitrary third parties (review finding).
+EMAIL_CONFIRM_TTL_S: Final = 24 * 3600
+EMAIL_CODE_ALPHABET: Final = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+MAX_EMAILS_PER_USER_PER_DAY: Final = 200
 WEBHOOK_TIMEOUT_S: Final = 5.0
 DEFAULT_QUIET_TZ: Final = "America/New_York"
 DASHBOARD_URL_ENV: Final = "REMEMBRA_DASHBOARD_URL"
@@ -158,6 +163,11 @@ TAMPER_TEXT: Final[Mapping[str, str]] = {
 class NotifyError(InboxError):
     status = 422
     error = "notify_target"
+
+
+class NotifyTargetNotFound(InboxError):
+    status = 404
+    error = "not_found"
 
 
 # ---------------------------------------------------------------------------
@@ -494,12 +504,43 @@ def email_backend_from_env() -> EmailBackend | None:
     return None
 
 
-class NotifyTargets:
-    """Human-configured targets (``crew_notify_targets``)."""
+def email_code_hash(target_id: str, code: str) -> str:
+    return hashlib.sha256(f"{target_id}\x1f{code.strip().upper()}".encode()).hexdigest()
 
-    def __init__(self, db: Any, *, webhooks: WebhookSender | None = None) -> None:
+
+def confirmation_email(code: str) -> tuple[str, str]:
+    """The confirmation mail: a fixed server template (no user, project or agent text)."""
+    subject = "Confirm this address for Remembra crew alerts"
+    page = (
+        "<html><body><h2>Remembra crew alerts</h2>"
+        "<p>Someone asked to send Remembra crew alerts (agents stopping, collisions, tamper attempts) to this address.</p>"
+        f"<p>Your confirmation code: <strong>{html.escape(code)}</strong> (valid 24 hours).</p>"
+        "<p>If this was not you, ignore this message: no alert is sent to an unconfirmed address.</p>"
+        "</body></html>"
+    )
+    return subject, page
+
+
+class NotifyTargets:
+    """Human-configured targets (``crew_notify_targets``).
+
+    Webhooks answer a signed challenge before they are saved. Email targets are saved unverified and
+    get a confirmation code by mail (a fixed template), except the account's own verified address,
+    which is verified at once; only verified targets ever receive alerts.
+    """
+
+    def __init__(
+        self,
+        db: Any,
+        *,
+        webhooks: WebhookSender | None = None,
+        email_backend: EmailBackend | None = None,
+        account_email: str | None = None,
+    ) -> None:
         self.db = db
         self.webhooks = webhooks or WebhookSender()
+        self.email_backend = email_backend
+        self.account_email = (account_email or "").strip().lower() or None
 
     async def list(self, user_id: str) -> list[dict[str, Any]]:
         rows = await self.db.fetchall("SELECT * FROM crew_notify_targets WHERE user_id = ? ORDER BY created_at, id", (user_id,))
@@ -526,29 +567,79 @@ class NotifyTargets:
         target_id = str(existing["id"]) if existing else "ntt_" + secrets.token_hex(12)
         out_secret: str | None = None
         hashed: str | None = None
+        now = now_iso()
+        verified: str | None = now
+        code: str | None = None
         if kind == "webhook":
             out_secret = target_secret(target_id)
             hashed = secret_hash(out_secret)
             await self._challenge(target, target_id, out_secret)
-        now = now_iso()
+        elif existing is not None and existing["verified_at"] is not None:
+            verified = str(existing["verified_at"])  # already confirmed: nothing to send
+        elif target != self.account_email:
+            verified = None
+            code = "".join(secrets.choice(EMAIL_CODE_ALPHABET) for _ in range(8))
+            hashed = email_code_hash(target_id, code)
         async with self.db.transaction():
             if existing is None:
                 await self.db.conn.execute(
                     "INSERT INTO crew_notify_targets (id, user_id, kind, target, secret_hash, verified_at, created_at)"
                     " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (target_id, user_id, kind, target, hashed, now, now),
+                    (target_id, user_id, kind, target, hashed, verified, now),
+                )
+            elif code is not None:  # a new code; the 24 h validity counts from this send
+                await self.db.conn.execute(
+                    "UPDATE crew_notify_targets SET secret_hash = ?, verified_at = NULL, created_at = ? WHERE id = ?",
+                    (hashed, now, target_id),
                 )
             else:
                 await self.db.conn.execute(
-                    "UPDATE crew_notify_targets SET secret_hash = ?, verified_at = ? WHERE id = ?", (hashed, now, target_id)
+                    "UPDATE crew_notify_targets SET secret_hash = ?, verified_at = ? WHERE id = ?", (hashed, verified, target_id)
                 )
             row = await self.db.fetchone("SELECT * FROM crew_notify_targets WHERE id = ?", (target_id,))
         assert row is not None
+        if code is not None:
+            await self._send_code(target, code)
         out = target_view(row)
         if out_secret is not None:
             out["signing_secret"] = out_secret
             out["signature_header"] = SIGNATURE_HEADER
+        if kind == "email":
+            out["confirmation"] = "sent" if code is not None else "not_needed"
         return out
+
+    async def _send_code(self, address: str, code: str) -> None:
+        from remembra.cloud.email import EmailMessage
+
+        backend = self.email_backend or email_backend_from_env()
+        if backend is None:
+            raise NotifyError("email delivery is not configured on this server (RESEND_API_KEY or SMTP_*)")
+        subject, page = confirmation_email(code)
+        result = await backend.send(EmailMessage(to=address, subject=subject, html=page, tags={"kind": "crew_confirm"}))
+        if not result.success:
+            raise NotifyError(f"the confirmation email could not be sent ({result.error})")
+
+    async def confirm(self, user_id: str, target_id: str, code: str) -> dict[str, Any]:
+        """Confirm an email target with the code mailed to it (valid 24 h). 404 for another user's target."""
+        row = await self.db.fetchone("SELECT * FROM crew_notify_targets WHERE id = ? AND user_id = ?", (target_id, user_id))
+        if row is None or row["kind"] != "email":
+            raise NotifyTargetNotFound("Not found.")
+        if row["verified_at"] is not None:
+            return target_view(row)
+        created = parse_ts(str(row["created_at"]))
+        fresh = (datetime.now(UTC) - created).total_seconds() <= EMAIL_CONFIRM_TTL_S
+        expected = str(row["secret_hash"] or "")
+        if not fresh or not expected or not hmac.compare_digest(expected, email_code_hash(target_id, str(code or ""))):
+            raise NotifyError("that confirmation code is wrong or expired; add the address again for a new code")
+        now = now_iso()
+        async with self.db.transaction():
+            await self.db.conn.execute(
+                "UPDATE crew_notify_targets SET verified_at = ?, secret_hash = NULL WHERE id = ? AND verified_at IS NULL",
+                (now, target_id),
+            )
+            fresh_row = await self.db.fetchone("SELECT * FROM crew_notify_targets WHERE id = ?", (target_id,))
+        assert fresh_row is not None
+        return target_view(fresh_row)
 
     async def _challenge(self, url: str, target_id: str, secret: str) -> None:
         nonce = secrets.token_urlsafe(24)
@@ -805,8 +896,10 @@ def delivery_body(item_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
 
 def email_parts(body: Mapping[str, Any]) -> tuple[str, str]:
     items = list(body.get("items") or [])
-    first = str(items[0]["text"]) if items else "Crew notification"
-    subject = f"[Remembra crew · {body.get('project_id')}] " + (first if len(items) == 1 else f"{len(items)} updates")
+    # the subject is a server template only: no project name, decision title or other agent/user text
+    kinds = sorted({str(i.get("kind")) for i in items if i.get("kind") in DEFAULT_RULES})
+    label = ", ".join(k.replace("_", " ") for k in kinds[:3]) or "update"
+    subject = "[Remembra crew] " + (f"1 {label} alert" if len(items) == 1 else f"{len(items)} alerts: {label}")
     rows = "".join(
         f'<li><p>{html.escape(str(i.get("text")))}</p><p><a href="{html.escape(str(i.get("link")))}">Open</a></p></li>'
         for i in items
@@ -849,6 +942,14 @@ def notify_handler(
         backend = email_backend or email_backend_from_env()
         if backend is None:
             raise OutboxPermanentError("email delivery is not configured (RESEND_API_KEY or SMTP_*)")
+        day_start = datetime.combine(datetime.now(UTC).date(), time.min, tzinfo=UTC)
+        sent = await db.fetchone(
+            "SELECT COUNT(*) AS n FROM crew_outbox WHERE kind = ? AND state = 'done' AND result_id LIKE 'email:%'"
+            " AND json_extract(payload, '$.user_id') = ? AND updated_at >= ?",
+            (KIND_CREW_NOTIFY, payload.get("user_id"), now_iso(day_start)),
+        )
+        if sent is not None and int(sent["n"]) >= MAX_EMAILS_PER_USER_PER_DAY:
+            raise OutboxPermanentError(f"daily email cap reached ({MAX_EMAILS_PER_USER_PER_DAY} per user per day)")
         subject, page = email_parts(body)
         result = await backend.send(EmailMessage(to=str(target["target"]), subject=subject, html=page, tags={"kind": "crew"}))
         if not result.success:

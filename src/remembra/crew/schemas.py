@@ -356,6 +356,7 @@ INBOX_KINDS: Final = (
     "collision_escalated",
     "baton_available",
     "baton_waiting",
+    "baton_restore_failed",
     "zone_change_pending",
     "zone_hoarding",
     "zone_contested",
@@ -384,6 +385,7 @@ SAFETY_INBOX_KINDS: Final = (
     "collision_escalated",
     "baton_available",
     "baton_waiting",
+    "baton_restore_failed",
     "stuck_agent",
     "tamper_blocked",
     "bypass_used",
@@ -391,6 +393,8 @@ SAFETY_INBOX_KINDS: Final = (
     "false_deny_alarm",
 )
 BATON_KINDS: Final = ("adopt", "handover", "same_checkout", "human_assign", "reserved_for", "first_write")
+# crewd's outcome of restoring a baton ref into the adopter's checkout (D30), reported after ``adopt``
+BATON_RESTORE_STATUSES: Final = ("restored", "ref_missing", "dirty_tree", "restore_failed")
 OFFER_VIA: Final = ("brief", "human", "reserved_for")
 ACTOR_KINDS: Final = ("session", "human", "system")
 EVENT_ORIGINS: Final = ("server", "client")
@@ -655,6 +659,32 @@ AGENT_ID_PATTERN: Final = r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}"
 MEMBER_KEY_PATTERN: Final = r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}:[a-z0-9]{2,32}:[0-9a-f]{8}"
 # Human-issued bypass code (D34): RCB-XXXXX-XXXXX, Crockford base32.
 BYPASS_CODE_PATTERN: Final = r"RCB-[0-9A-HJKMNP-TV-Z]{5}-[0-9A-HJKMNP-TV-Z]{5}"
+# Where a bypass is used: the git gates, the pre-write gate (Claude Code hook or MCP), or a human
+# typing the code into `remembra-crew bypass` at a TTY (crewd keeps it and the gate checks the scope).
+BYPASS_SURFACES: Final = ("precommit", "prepush", "pretool", "mcp", "tty")
+
+
+def bypass_scope_matches(scope: str, surface: str, zone: str | None = None) -> bool:
+    """Does a bypass issued for ``scope`` cover this use (§8.4, D34)?
+
+    ``commit`` covers the pre-commit gate, ``push`` the pre-push gate, ``write:<zone>`` a
+    pre-write deny (hook or MCP) in that zone only. ``all`` is the offline TTY grant (no code,
+    server unreachable). A ``tty`` redemption stores the code in crewd; its scope is checked
+    at use.
+    """
+    if scope in ("all", "*"):
+        return True
+    if surface == "tty":
+        return True
+    if scope == "commit":
+        return surface == "precommit"
+    if scope == "push":
+        return surface == "prepush"
+    if scope.startswith("write:"):
+        return surface in ("pretool", "mcp") and bool(zone) and scope[len("write:") :] == zone
+    return False
+
+
 CRITERION_ID_PATTERN: Final = r"[A-Za-z0-9][A-Za-z0-9_-]{0,31}"
 RESOURCE_PATTERN: Final = r"(?:schema|deploy|service|supabase|mcp):[A-Za-z0-9._/-]{1,64}"
 # Repo-relative POSIX path: what leaves the host (§11 redaction). No leading '/', '~', '..' segment or backslash.
@@ -1237,6 +1267,19 @@ _EVENT_SPECS: tuple[EventSpec, ...] = (
         },
     ),
     _spec(
+        "baton.restored",
+        {
+            "baton_id": _id("baton"),
+            "task_id": _opt(_id("task")),
+            "to_session": _id("session"),
+            "baton_ref": _opt(BATON_REF),
+            "restored": _b(),
+            "status": _e(BATON_RESTORE_STATUSES),
+            "files": _i(0),
+        },
+        desc="crewd restored (or failed to restore) the baton ref into the adopter's checkout; sets crew_batons.restored",
+    ),
+    _spec(
         "baton.ref_created",
         {
             "ref": BATON_REF,
@@ -1381,6 +1424,8 @@ def is_moment(event_type: str, payload: Mapping[str, Any], actor_kind: str) -> b
         return bool(payload.get("default_branch"))
     if event_type == "claim.adopted":
         return bool(payload.get("cross_checkout"))
+    if event_type == "baton.restored":
+        return payload.get("restored") is False  # the adopter's checkout did not get the saved work
     if event_type == "zone.synced":
         return bool(payload.get("policy_changed"))
     if event_type == "crew.mode_changed":
@@ -2781,7 +2826,16 @@ ROUTES: Final[tuple[Route, ...]] = (
     _R("GET", "/tasks/{task_id}/reports", "WP-6", "entity", PR, "List a task's reports", entity="task"),
     _R("POST", "/crews/{crew_id}/tasks/from-handoff", "WP-6", "crew", PW, "Create a task from a handoff", release="L1"),
     # Checkpoints
-    _R("POST", "/crews/{crew_id}/checkpoints", "WP-6", "crew", PW, "Submit a checkpoint", request="Checkpoint"),
+    _R(
+        "POST",
+        "/crews/{crew_id}/checkpoints",
+        "WP-6",
+        "crew",
+        PW,
+        "Submit a checkpoint",
+        request="Checkpoint",
+        bucket="checkpoints",
+    ),
     _R("GET", "/crews/{crew_id}/checkpoints", "WP-6", "crew", PR, "List checkpoints (?session_id=&task_id=)"),
     # Channel
     _R("GET", "/crews/{crew_id}/messages", "WP-7", "crew", PR, "List messages (?thread=&since_seq=&before=)"),
@@ -2829,6 +2883,16 @@ ROUTES: Final[tuple[Route, ...]] = (
     _R("POST", "/crews/{crew_id}/read", "WP-7", "crew", PR, "Advance a read cursor"),
     # Timeline and batons
     _R("GET", "/crews/{crew_id}/batons", "WP-8", "crew", PR, "Baton passes (?task_id=)"),
+    _R(
+        "POST",
+        "/crews/{crew_id}/batons/{baton_id}/restore",
+        "WP-8",
+        "crew",
+        PW,
+        "The adopter's crewd reports restoring the baton ref (crew session token; once)",
+        request="BatonRestore",
+        bucket="events",
+    ),
     _R("GET", "/crews/{crew_id}/agents/{agent_id}/timeline", "WP-8", "crew", PR, "Agent timeline (L0: last 20 sessions)"),
     # Notifications
     _R("GET", "/notifications", "WP-7", "user", PR, "List notifications"),
@@ -2836,6 +2900,16 @@ ROUTES: Final[tuple[Route, ...]] = (
     _R("GET", "/notifications/rules", "WP-7", "user", PR, "Notification rules (L0 defaults)"),
     _R("PUT", "/notifications/rules", "WP-7", "user", PR, "Set notification rules", release="L1"),
     _R("POST", "/notifications/targets", "WP-7", "user", PA, "Add an email or signed-webhook target", human=True),
+    _R(
+        "POST",
+        "/notifications/targets/{target_id}/confirm",
+        "WP-7",
+        "user",
+        PA,
+        "Confirm an email target with the mailed code",
+        human=True,
+        bucket="notify_confirm",
+    ),
     # Existing relay routes that gain crew behaviour
     _R("GET", "/session/brief", "WP-8", "existing", "memory:recall", "Brief gains the crew block (read-only)"),
     _R("GET", "/trail", "WP-8", "existing", "memory:recall", "Trail includes crew checkpoints, reports and batons"),
@@ -2893,6 +2967,7 @@ REQUEST_SHAPES: Final[Mapping[str, Shape]] = {
                                             "attribution": _e(ATTRIBUTIONS),
                                             "claim_epoch": _opt(_i(1)),
                                             "last_commit": _opt(SHA),
+                                            "age_s": _i(0, req=False),
                                         },
                                     )
                                 ),
@@ -2900,6 +2975,9 @@ REQUEST_SHAPES: Final[Mapping[str, Shape]] = {
                             ),
                             "cursor": _i(0),
                             "githook_state": _e(GITHOOK_STATES),
+                            "unattributed_commits": _l(
+                                _o(_p("UnattributedCommit", {"sha": SHA, "files": _l(PATH_REL, 100)})), 20, req=False
+                            ),
                         },
                     )
                 ),
@@ -2908,6 +2986,10 @@ REQUEST_SHAPES: Final[Mapping[str, Shape]] = {
         },
     ),
     "ClientEvents": Shape("ClientEventsRequest", {"events": _l(_o(CLIENT_EVENT), MAX_EVENTS_PER_POST)}),
+    "BatonRestore": Shape(
+        "BatonRestoreRequest",
+        {"restored": _b(), "status": _e(BATON_RESTORE_STATUSES), "files": _i(0, 100000)},
+    ),
     "Leave": Shape(
         "LeaveRequest",
         {
@@ -2969,7 +3051,15 @@ REQUEST_SHAPES: Final[Mapping[str, Shape]] = {
         "BypassIssueRequest",
         {"session_id": _id("session"), "scope": _s(64), "minutes": _i(1, BYPASS_CODE_MAX_MINUTES)},
     ),
-    "BypassRedeem": Shape("BypassRedeemRequest", {"code": _s(20, pattern=BYPASS_CODE_PATTERN), "session_id": _id("session")}),
+    "BypassRedeem": Shape(
+        "BypassRedeemRequest",
+        {
+            "code": _s(20, pattern=BYPASS_CODE_PATTERN),
+            "session_id": _id("session"),
+            "surface": _e(BYPASS_SURFACES),
+            "zone": _opt(SLUG),
+        },
+    ),
     "TaskCreate": Shape(
         "TaskCreateRequest",
         {

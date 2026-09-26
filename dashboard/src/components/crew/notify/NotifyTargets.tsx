@@ -48,6 +48,52 @@ function TurnOn({ crewId, project, kind, onDone }: { crewId: string; project: st
   );
 }
 
+/** An email target waiting for the code we mailed to it: alerts go only to confirmed addresses. */
+function ConfirmEmail({ targetId, onDone }: { targetId: string; onDone: () => void }) {
+  const [code, setCode] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const id = useId();
+  const confirm = (e: FormEvent) => {
+    e.preventDefault();
+    if (!code.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    crewApi
+      .confirmNotifyTarget(targetId, code.trim())
+      .then(() => {
+        toast.success('Email confirmed. Alerts will reach it.');
+        onDone();
+      })
+      .catch((err: unknown) => setError(actionError(err)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <form onSubmit={confirm} className="flex basis-full flex-wrap items-center gap-2" noValidate>
+      <label htmlFor={id} className="text-xs text-ink-2">
+        Enter the code we emailed to this address:
+      </label>
+      <input
+        id={id}
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+        autoComplete="one-time-code"
+        spellCheck={false}
+        maxLength={32}
+        className="rr-input w-32 px-2 py-1 font-mono text-[12px] uppercase"
+      />
+      <button type="submit" disabled={busy || !code.trim()} className="rr-btn-ghost inline-flex items-center gap-1.5 px-2.5 py-1 text-xs">
+        {busy && <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />} Confirm
+      </button>
+      {error && (
+        <span role="alert" className="basis-full text-xs text-fail">
+          {error}
+        </span>
+      )}
+    </form>
+  );
+}
+
 export function NotifyTargets({ highlight = false }: { highlight?: boolean }) {
   const rules = useResource('crew-notify-rules', () => crewApi.notificationRules() as Promise<unknown> as Promise<NotificationRules>);
   const crews = useCrewList();
@@ -76,7 +122,8 @@ export function NotifyTargets({ highlight = false }: { highlight?: boolean }) {
         setTouched(false);
         setTurnedOn([]);
         rules.refresh();
-        toast.success(kind === 'webhook' ? 'Webhook verified and saved.' : 'Email saved.');
+        const sent = (out as { confirmation?: string }).confirmation === 'sent';
+        toast.success(kind === 'webhook' ? 'Webhook verified and saved.' : sent ? 'Check that inbox for a confirmation code.' : 'Email saved.');
       })
       .catch((err: unknown) => setError(actionError(err)))
       .finally(() => setBusy(false));
@@ -115,7 +162,10 @@ export function NotifyTargets({ highlight = false }: { highlight?: boolean }) {
               <li key={t.id} className="flex flex-wrap items-center gap-2 py-2">
                 <PixelGlyph name={t.kind === 'email' ? 'mail' : 'wire'} size={13} className="text-ink-2" />
                 <span className="min-w-0 truncate font-mono text-[12px] text-ink">{t.target}</span>
-                <Pill tone={t.verified_at ? 'ok' : 'neutral'}>{t.verified_at ? (t.kind === 'webhook' ? 'signed · verified' : 'saved') : 'not verified'}</Pill>
+                <Pill tone={t.verified_at ? 'ok' : 'neutral'}>
+                  {t.verified_at ? (t.kind === 'webhook' ? 'signed · verified' : 'confirmed') : 'waiting for the code'}
+                </Pill>
+                {!t.verified_at && t.kind === 'email' && <ConfirmEmail targetId={t.id} onDone={rules.refresh} />}
                 {t.verified_at && (
                   <span className="ml-auto font-mono text-[11px] text-ink-3" title={absoluteTime(t.verified_at)}>
                     since {absoluteTime(t.verified_at)}
@@ -180,7 +230,7 @@ export function NotifyTargets({ highlight = false }: { highlight?: boolean }) {
               ? problem
               : kind === 'webhook'
                 ? 'We POST a signed challenge first; your endpoint must echo it back. Only then is it saved.'
-                : 'Alerts go out the moment they happen (batched within 2 minutes).'}
+                : 'We email a confirmation code first (your own login email needs none). Alerts go out the moment they happen.'}
           </p>
           {error && (
             <p role="alert" className="border-l-[3px] border-fail bg-fail-wash px-3 py-2 text-sm text-ink">

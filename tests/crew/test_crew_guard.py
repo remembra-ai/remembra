@@ -173,15 +173,15 @@ async def test_issue_and_redeem_bypass_code_once(env):
     stored = await db.fetchone("SELECT * FROM crew_bypass_codes WHERE id = ?", (issued["code_id"],))
     assert stored is not None and issued["code"] not in str(stored) and stored["code_hash"] == B.hash_code(issued["code"])
     with pytest.raises(Z.CrewOpError) as err:
-        await B.redeem_code(ops, a.session, issued["code"])  # wrong session
+        await B.redeem_code(ops, a.session, issued["code"], surface="prepush")  # wrong session
     assert err.value.status == 403 and err.value.error == "invalid_code"
-    used = await B.redeem_code(ops, b.session, issued["code"].lower())
+    used = await B.redeem_code(ops, b.session, issued["code"].lower(), surface="prepush")
     assert used["ok"] and used["scope"] == "push"
     ev = (await events(db, type_prefix="guard.bypass_used"))[0]
     assert ev["moment"] == 1 and ev["payload"]["code_id"] == issued["code_id"]
     assert await inbox(db, kind="bypass_used")
     with pytest.raises(Z.CrewOpError):
-        await B.redeem_code(ops, b.session, issued["code"])  # single use
+        await B.redeem_code(ops, b.session, issued["code"], surface="prepush")  # single use
     assert {"crew.bypass_issued", "crew.bypass_used"} <= set(audit.actions())
 
 
@@ -205,6 +205,6 @@ async def test_bypass_code_validation_and_expiry(env):
     )
     await db.conn.commit()
     with pytest.raises(Z.CrewOpError):
-        await B.redeem_code(ops, b.session, issued["code"])
+        await B.redeem_code(ops, b.session, issued["code"], surface="precommit")
     with pytest.raises(Z.CrewOpError):
-        await B.redeem_code(ops, b.session, "not-a-code")
+        await B.redeem_code(ops, b.session, "not-a-code", surface="precommit")

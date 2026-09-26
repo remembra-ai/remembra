@@ -1953,6 +1953,11 @@ async def _guard_blocked_event(tx: EventTx, crew_id: str, caller: Principal, ver
         (crew_id, caller.session_id, since),
     )
     zone = verdict.zone_slug
+    if decision == "deny" and caller.session_id:
+        from remembra.crew.alarms import note_guard_block
+
+        # §10.3 false-deny storm: every deny counts, including the ones coalesced into an earlier event
+        await note_guard_block(tx, crew_id, caller.session_id, caller.name, now=utcnow())
     if any(loads(r["payload"], {}).get("zone") == zone for r in rows):
         return
     target = verdict.target

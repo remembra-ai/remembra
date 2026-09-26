@@ -79,6 +79,10 @@ CREW_RATE_BUCKETS: Final[Mapping[str, BucketSpec]] = {
     # Agent-originated Needs-you items (WP-7 applies it when an agent raises one).
     "needs_you": BucketSpec(per_session="6/hour", per_user="30/hour"),
     "tasks": BucketSpec(per_session="60/minute", per_user="120/minute"),
+    # POST /checkpoints: turn/commit/push/test checkpoints (each may queue a memory promotion)
+    "checkpoints": BucketSpec(per_session="12/minute", per_user="60/minute"),
+    # email notification targets: confirmation mails sent and codes tried (a human action)
+    "notify_confirm": BucketSpec(per_user="10/hour"),
     "snapshot": BucketSpec(per_session="1 per 10 seconds"),
     "events_poll": BucketSpec(per_session="20/minute"),
     "join": BucketSpec(per_user="30/minute"),  # join and leave (and host registration)

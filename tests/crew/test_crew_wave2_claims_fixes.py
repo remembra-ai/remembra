@@ -250,7 +250,9 @@ async def test_an_agent_scoped_key_cannot_act_as_another_agents_session(tmp_path
         r = await h.client.post(f"{base}/zones", headers=hdr, json={"slug": "tools", "include": ["tools/**"]})
         assert r.status_code == 401, r.text
         r = await h.client.post(
-            "/api/v1/bypass-codes/redeem", headers=hdr, json={"session_id": "cs_a", "code": "RCB-AAAAA-BBBBB"}
+            "/api/v1/bypass-codes/redeem",
+            headers=hdr,
+            json={"session_id": "cs_a", "code": "RCB-AAAAA-BBBBB", "surface": "prepush"},
         )
         assert r.status_code == 401, r.text
         assert await db.fetchone("SELECT id FROM crew_claims WHERE path_glob = 'scripts/x.sh'") is None

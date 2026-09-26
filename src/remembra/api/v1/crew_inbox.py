@@ -37,6 +37,7 @@ from remembra.crew.access import (
 from remembra.crew.channel import SESSION_HEADER, authenticate_session
 from remembra.crew.events import CrewEventLog
 from remembra.crew.inbox import Author, CrewInbox, InboxError
+from remembra.crew.limits import enforce_rate_limit
 from remembra.crew.notify import (
     INAPP_STREAM,
     NotifyTargets,
@@ -303,13 +304,53 @@ def webhook_sender(request: Request) -> WebhookSender:
     return sender or WebhookSender()
 
 
+async def _verified_account_email(request: Request, user: AuthenticatedUser) -> str | None:
+    """The caller's own login email when it is verified (such a target needs no confirmation code)."""
+    db = getattr(request.app.state, "db", None)
+    if db is None or not hasattr(db, "get_user_by_id"):
+        return None
+    row = await db.get_user_by_id(user.user_id)
+    if not row or not row.get("email") or not row.get("email_verified"):
+        return None
+    return str(row["email"])
+
+
+class ConfirmBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(..., min_length=4, max_length=32)
+
+
+@router.post("/notifications/targets/{target_id}/confirm", summary="Confirm an email target with the mailed code")
+async def confirm_notification_target(
+    request: Request,
+    target_id: str,
+    payload: Annotated[ConfirmBody, Body(...)],
+    user: Annotated[AuthenticatedUser, Depends(human_principal())],
+) -> dict[str, Any]:
+    enforce_rate_limit("notify_confirm", user_id=user.user_id)  # also bounds guessing the code
+    targets = NotifyTargets(event_log(request).db)
+    try:
+        return await targets.confirm(user.user_id, target_id, payload.code)
+    except InboxError as e:
+        raise as_http(e) from e
+
+
 @router.post("/notifications/targets", status_code=status.HTTP_201_CREATED, summary="Add an email or signed-webhook target")
 async def add_notification_target(
     request: Request,
     payload: Annotated[TargetBody, Body(...)],
     user: Annotated[AuthenticatedUser, Depends(human_principal())],
 ) -> dict[str, Any]:
-    targets = NotifyTargets(event_log(request).db, webhooks=webhook_sender(request))
+    if payload.kind == "email":
+        # each unconfirmed address gets a mailed code: bounded per user (a confirmation is still a mail)
+        enforce_rate_limit("notify_confirm", user_id=user.user_id)
+    targets = NotifyTargets(
+        event_log(request).db,
+        webhooks=webhook_sender(request),
+        email_backend=getattr(request.app.state, "crew_email_backend", None),
+        account_email=await _verified_account_email(request, user),
+    )
     try:
         out = await targets.add(user.user_id, payload.kind, payload.target)
     except InboxError as e:

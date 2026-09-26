@@ -223,6 +223,52 @@ def reducer_vectors() -> list[dict[str, Any]]:
         )
     )
 
+    passed = {
+        "baton_id": "bat_1",
+        "task_id": "tsk_14",
+        "from_session": "cs_a",
+        "to_session": "cs_c",
+        "kind": "adopt",
+        "handoff_id": "mem_42",
+        "zones": ["zn_pos"],
+        "baton_ref": REF,
+        "restored": None,
+    }
+    restore_frames = [
+        *offer_frames,
+        E(17, "claim.adopted", {"claim": adopted, "cross_checkout": True, "from_session": "cs_a"}, by=C),
+        E(18, "baton.passed", passed, by=C),
+        E(
+            19,
+            "baton.restored",
+            {
+                "baton_id": "bat_1",
+                "task_id": "tsk_14",
+                "to_session": "cs_c",
+                "baton_ref": REF,
+                "restored": False,
+                "status": "dirty_tree",
+                "files": 0,
+            },
+            by=C,
+        ),
+    ]
+    v.append(
+        vec(
+            "baton_restore_outcome_lands_on_its_pass",
+            "crewd reports the restore after the pass: a failed restore (moment) marks the baton, not a new pass.",
+            [frame(e) for e in restore_frames],
+            [
+                length("batons", 1),
+                eq("batons.0.baton_id", "bat_1"),
+                eq("batons.0.restored", False),
+                eq("batons.0.restore_status", "dirty_tree"),
+                eq("moments.3.type", "baton.restored"),
+                eq("last_seq", 19),
+            ],
+        )
+    )
+
     granted = claim("clm_rep", "cs_b", zone_id="zn_reports")
     v.append(
         vec(

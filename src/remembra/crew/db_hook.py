@@ -83,17 +83,27 @@ async def _start_outbox(app: FastAPI, rt: startup.CrewRuntime) -> None:
             "crew mode: the outbox worker needs app.state.db and app.state.memory_service (set by the main lifespan)"
         )
     screen, scrub = _relay_filters(app)
+    crew = startup.crew_db(app)
+    if not isinstance(crew, CrewDatabase):
+        raise RuntimeError("crew mode: app.state.crew_db must be a remembra.crew.db.CrewDatabase for the outbox worker")
+    from remembra.crew.limits import SELF_HOSTED_CREW_LIMITS, crew_limits_for_owner
+
+    async def limits_for(owner_user_id: str) -> Any:
+        meter = getattr(app.state, "usage_meter", None)
+        return await crew_limits_for_owner(meter, owner_user_id) if meter is not None else SELF_HOSTED_CREW_LIMITS
+
+    store = CrewStore(crew)
     handlers = default_handlers(
         main_db=main_db,
         memory_service=memory_service,
         relay_service=RelayService(db=main_db, memory_service=memory_service),
         screen=screen,
         scrub=scrub,
+        crew_store=store,
+        limits_for=limits_for,
+        app=app,
     )
-    crew = startup.crew_db(app)
-    if not isinstance(crew, CrewDatabase):
-        raise RuntimeError("crew mode: app.state.crew_db must be a remembra.crew.db.CrewDatabase for the outbox worker")
-    worker = CrewOutboxWorker(CrewStore(crew), handlers)
+    worker = CrewOutboxWorker(store, handlers)
     worker.start()
     rt.extras[_WORKER] = worker
     app.state.crew_outbox = worker

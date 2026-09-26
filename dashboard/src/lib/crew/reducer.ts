@@ -360,6 +360,15 @@ const batonPassed: Handler = (state, event, p) => {
   return { ...state, batons: [...state.batons, entry].slice(-BATONS_KEEP) };
 };
 
+/** crewd's restore outcome lands on the baton pass it belongs to (`restored`, `restore_status`). */
+const batonRestored: Handler = (state, _event, p) => {
+  if (!state.batons.some((b) => b.baton_id === p.baton_id)) return state;
+  const batons = state.batons.map((b) =>
+    b.baton_id === p.baton_id ? { ...b, restored: Boolean(p.restored), restore_status: p.status } : b,
+  );
+  return { ...state, batons };
+};
+
 const batonRef: Handler = (state, event, p) => {
   const refs: Record<string, BatonRefEntry> = { ...state.baton_refs };
   refs[p.ref as string] = {
@@ -519,6 +528,7 @@ const HANDLERS: Record<string, Handler> = {
   'claim.fenced': claimFenced,
   'claim.unconfirmed': claim,
   'baton.passed': batonPassed,
+  'baton.restored': batonRestored,
   'baton.ref_created': batonRef,
   'guard.blocked': guard,
   'guard.bypass_used': noop,

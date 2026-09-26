@@ -1881,6 +1881,39 @@
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
    "ts": "2026-09-25T20:00:51.000Z",
+   "type": "baton.restored",
+   "v": 1,
+   "origin": "server",
+   "actor": {
+    "kind": "session",
+    "id": "cs_c",
+    "callsign": "cc-2",
+    "agent_id": "claude-code",
+    "user_id": "u_mani",
+    "verified": true
+   },
+   "refs": {
+    "session_id": "cs_c"
+   },
+   "severity": "info",
+   "moment": false,
+   "summary": "baton.restored #51",
+   "payload": {
+    "baton_id": "bat_1",
+    "task_id": "tsk_14",
+    "to_session": "cs_c",
+    "baton_ref": "refs/remembra/baton/T-14/7",
+    "restored": true,
+    "status": "restored",
+    "files": 3
+   }
+  },
+  {
+   "seq": 52,
+   "id": "evt_00000052",
+   "crew_id": "crw_0a1b2c3d4e5f6a7b",
+   "project_id": "yaadbooks",
+   "ts": "2026-09-25T20:00:52.000Z",
    "type": "baton.ref_created",
    "v": 1,
    "origin": "server",
@@ -1897,7 +1930,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "baton.ref_created #51",
+   "summary": "baton.ref_created #52",
    "payload": {
     "ref": "refs/remembra/baton/T-14/7",
     "task_id": "tsk_14",
@@ -1907,11 +1940,11 @@
    }
   },
   {
-   "seq": 52,
-   "id": "evt_00000052",
+   "seq": 53,
+   "id": "evt_00000053",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:00:52.000Z",
+   "ts": "2026-09-25T20:00:53.000Z",
    "type": "guard.blocked",
    "v": 1,
    "origin": "client",
@@ -1928,7 +1961,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "guard.blocked #52",
+   "summary": "guard.blocked #53",
    "payload": {
     "path_rel": "src/app/pos/cart.ts",
     "zone": "pos",
@@ -1941,11 +1974,11 @@
    }
   },
   {
-   "seq": 53,
-   "id": "evt_00000053",
+   "seq": 54,
+   "id": "evt_00000054",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:00:53.000Z",
+   "ts": "2026-09-25T20:00:54.000Z",
    "type": "guard.bypass_used",
    "v": 1,
    "origin": "server",
@@ -1962,18 +1995,18 @@
    },
    "severity": "info",
    "moment": true,
-   "summary": "guard.bypass_used #53",
+   "summary": "guard.bypass_used #54",
    "payload": {
     "code_id": "byp_1",
     "scope": "push"
    }
   },
   {
-   "seq": 54,
-   "id": "evt_00000054",
+   "seq": 55,
+   "id": "evt_00000055",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:00:54.000Z",
+   "ts": "2026-09-25T20:00:55.000Z",
    "type": "guard.tamper_blocked",
    "v": 1,
    "origin": "client",
@@ -1990,18 +2023,18 @@
    },
    "severity": "info",
    "moment": true,
-   "summary": "guard.tamper_blocked #54",
+   "summary": "guard.tamper_blocked #55",
    "payload": {
     "kind": "crew_policy_write",
     "surface": "pretool"
    }
   },
   {
-   "seq": 55,
-   "id": "evt_00000055",
+   "seq": 56,
+   "id": "evt_00000056",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:00:55.000Z",
+   "ts": "2026-09-25T20:00:56.000Z",
    "type": "gate.error",
    "v": 1,
    "origin": "client",
@@ -2018,18 +2051,18 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "gate.error #55",
+   "summary": "gate.error #56",
    "payload": {
     "stage": "pretool",
     "error_class": "JSONDecodeError"
    }
   },
   {
-   "seq": 56,
-   "id": "evt_00000056",
+   "seq": 57,
+   "id": "evt_00000057",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:00:56.000Z",
+   "ts": "2026-09-25T20:00:57.000Z",
    "type": "gate.deadline",
    "v": 1,
    "origin": "client",
@@ -2046,7 +2079,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "gate.deadline #56",
+   "summary": "gate.deadline #57",
    "payload": {
     "stage": "auto_claim",
     "elapsed_ms": 910,
@@ -2054,11 +2087,11 @@
    }
   },
   {
-   "seq": 57,
-   "id": "evt_00000057",
+   "seq": 58,
+   "id": "evt_00000058",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:00:57.000Z",
+   "ts": "2026-09-25T20:00:58.000Z",
    "type": "gate.tampered",
    "v": 1,
    "origin": "server",
@@ -2073,7 +2106,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "gate.tampered #57",
+   "summary": "gate.tampered #58",
    "payload": {
     "expected_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "actual_sha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
@@ -2081,11 +2114,11 @@
    }
   },
   {
-   "seq": 58,
-   "id": "evt_00000058",
+   "seq": 59,
+   "id": "evt_00000059",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:00:58.000Z",
+   "ts": "2026-09-25T20:00:59.000Z",
    "type": "githook.missing",
    "v": 1,
    "origin": "client",
@@ -2102,7 +2135,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "githook.missing #58",
+   "summary": "githook.missing #59",
    "payload": {
     "hook": "pre-commit",
     "state": "missing",
@@ -2110,11 +2143,11 @@
    }
   },
   {
-   "seq": 59,
-   "id": "evt_00000059",
+   "seq": 60,
+   "id": "evt_00000060",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:00:59.000Z",
+   "ts": "2026-09-25T20:01:00.000Z",
    "type": "collision.detected",
    "v": 1,
    "origin": "server",
@@ -2129,7 +2162,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "collision.detected #59",
+   "summary": "collision.detected #60",
    "payload": {
     "collision": {
      "id": "col_1",
@@ -2148,11 +2181,11 @@
    }
   },
   {
-   "seq": 60,
-   "id": "evt_00000060",
+   "seq": 61,
+   "id": "evt_00000061",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:00.000Z",
+   "ts": "2026-09-25T20:01:01.000Z",
    "type": "collision.acknowledged",
    "v": 1,
    "origin": "server",
@@ -2169,7 +2202,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "collision.acknowledged #60",
+   "summary": "collision.acknowledged #61",
    "payload": {
     "collision": {
      "id": "col_1",
@@ -2188,11 +2221,11 @@
    }
   },
   {
-   "seq": 61,
-   "id": "evt_00000061",
+   "seq": 62,
+   "id": "evt_00000062",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:01.000Z",
+   "ts": "2026-09-25T20:01:02.000Z",
    "type": "collision.resolved",
    "v": 1,
    "origin": "server",
@@ -2207,7 +2240,7 @@
    "refs": {},
    "severity": "info",
    "moment": false,
-   "summary": "collision.resolved #61",
+   "summary": "collision.resolved #62",
    "payload": {
     "collision": {
      "id": "col_1",
@@ -2226,11 +2259,11 @@
    }
   },
   {
-   "seq": 62,
-   "id": "evt_00000062",
+   "seq": 63,
+   "id": "evt_00000063",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:02.000Z",
+   "ts": "2026-09-25T20:01:03.000Z",
    "type": "collision.dismissed",
    "v": 1,
    "origin": "server",
@@ -2245,7 +2278,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "collision.dismissed #62",
+   "summary": "collision.dismissed #63",
    "payload": {
     "collision": {
      "id": "col_1",
@@ -2264,11 +2297,11 @@
    }
   },
   {
-   "seq": 63,
-   "id": "evt_00000063",
+   "seq": 64,
+   "id": "evt_00000064",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:03.000Z",
+   "ts": "2026-09-25T20:01:04.000Z",
    "type": "collision.escalated",
    "v": 1,
    "origin": "server",
@@ -2283,7 +2316,7 @@
    "refs": {},
    "severity": "info",
    "moment": false,
-   "summary": "collision.escalated #63",
+   "summary": "collision.escalated #64",
    "payload": {
     "collision": {
      "id": "col_1",
@@ -2302,11 +2335,11 @@
    }
   },
   {
-   "seq": 64,
-   "id": "evt_00000064",
+   "seq": 65,
+   "id": "evt_00000065",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:04.000Z",
+   "ts": "2026-09-25T20:01:05.000Z",
    "type": "task.created",
    "v": 1,
    "origin": "server",
@@ -2323,7 +2356,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "task.created #64",
+   "summary": "task.created #65",
    "payload": {
     "task": {
      "id": "tsk_2",
@@ -2348,11 +2381,11 @@
    }
   },
   {
-   "seq": 65,
-   "id": "evt_00000065",
+   "seq": 66,
+   "id": "evt_00000066",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:05.000Z",
+   "ts": "2026-09-25T20:01:06.000Z",
    "type": "task.updated",
    "v": 1,
    "origin": "server",
@@ -2369,7 +2402,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "task.updated #65",
+   "summary": "task.updated #66",
    "payload": {
     "task": {
      "id": "tsk_14",
@@ -2399,11 +2432,11 @@
    }
   },
   {
-   "seq": 66,
-   "id": "evt_00000066",
+   "seq": 67,
+   "id": "evt_00000067",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:06.000Z",
+   "ts": "2026-09-25T20:01:07.000Z",
    "type": "task.status_changed",
    "v": 1,
    "origin": "server",
@@ -2420,7 +2453,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "task.status_changed #66",
+   "summary": "task.status_changed #67",
    "payload": {
     "task": {
      "id": "tsk_14",
@@ -2449,11 +2482,11 @@
    }
   },
   {
-   "seq": 67,
-   "id": "evt_00000067",
+   "seq": 68,
+   "id": "evt_00000068",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:07.000Z",
+   "ts": "2026-09-25T20:01:08.000Z",
    "type": "task.assigned",
    "v": 1,
    "origin": "server",
@@ -2468,7 +2501,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "task.assigned #67",
+   "summary": "task.assigned #68",
    "payload": {
     "task": {
      "id": "tsk_14",
@@ -2496,11 +2529,11 @@
    }
   },
   {
-   "seq": 68,
-   "id": "evt_00000068",
+   "seq": 69,
+   "id": "evt_00000069",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:08.000Z",
+   "ts": "2026-09-25T20:01:09.000Z",
    "type": "task.stalled",
    "v": 1,
    "origin": "server",
@@ -2515,7 +2548,7 @@
    "refs": {},
    "severity": "info",
    "moment": false,
-   "summary": "task.stalled #68",
+   "summary": "task.stalled #69",
    "payload": {
     "task": {
      "id": "tsk_14",
@@ -2543,11 +2576,11 @@
    }
   },
   {
-   "seq": 69,
-   "id": "evt_00000069",
+   "seq": 70,
+   "id": "evt_00000070",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:09.000Z",
+   "ts": "2026-09-25T20:01:10.000Z",
    "type": "task.recovered",
    "v": 1,
    "origin": "server",
@@ -2562,7 +2595,7 @@
    "refs": {},
    "severity": "info",
    "moment": false,
-   "summary": "task.recovered #69",
+   "summary": "task.recovered #70",
    "payload": {
     "task": {
      "id": "tsk_14",
@@ -2589,11 +2622,11 @@
    }
   },
   {
-   "seq": 70,
-   "id": "evt_00000070",
+   "seq": 71,
+   "id": "evt_00000071",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:10.000Z",
+   "ts": "2026-09-25T20:01:11.000Z",
    "type": "task.review_requested",
    "v": 1,
    "origin": "server",
@@ -2608,7 +2641,7 @@
    "refs": {},
    "severity": "info",
    "moment": false,
-   "summary": "task.review_requested #70",
+   "summary": "task.review_requested #71",
    "payload": {
     "task": {
      "id": "tsk_14",
@@ -2636,11 +2669,11 @@
    }
   },
   {
-   "seq": 71,
-   "id": "evt_00000071",
+   "seq": 72,
+   "id": "evt_00000072",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:11.000Z",
+   "ts": "2026-09-25T20:01:12.000Z",
    "type": "task.review_decided",
    "v": 1,
    "origin": "server",
@@ -2655,7 +2688,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "task.review_decided #71",
+   "summary": "task.review_decided #72",
    "payload": {
     "task": {
      "id": "tsk_14",
@@ -2684,11 +2717,11 @@
    }
   },
   {
-   "seq": 72,
-   "id": "evt_00000072",
+   "seq": 73,
+   "id": "evt_00000073",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:12.000Z",
+   "ts": "2026-09-25T20:01:13.000Z",
    "type": "task.done",
    "v": 1,
    "origin": "server",
@@ -2703,7 +2736,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "task.done #72",
+   "summary": "task.done #73",
    "payload": {
     "task": {
      "id": "tsk_14",
@@ -2731,11 +2764,11 @@
    }
   },
   {
-   "seq": 73,
-   "id": "evt_00000073",
+   "seq": 74,
+   "id": "evt_00000074",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:13.000Z",
+   "ts": "2026-09-25T20:01:14.000Z",
    "type": "task.reopened",
    "v": 1,
    "origin": "server",
@@ -2752,7 +2785,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "task.reopened #73",
+   "summary": "task.reopened #74",
    "payload": {
     "task": {
      "id": "tsk_14",
@@ -2779,11 +2812,11 @@
    }
   },
   {
-   "seq": 74,
-   "id": "evt_00000074",
+   "seq": 75,
+   "id": "evt_00000075",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:14.000Z",
+   "ts": "2026-09-25T20:01:15.000Z",
    "type": "task.deps_changed",
    "v": 1,
    "origin": "server",
@@ -2800,7 +2833,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "task.deps_changed #74",
+   "summary": "task.deps_changed #75",
    "payload": {
     "task": {
      "id": "tsk_14",
@@ -2829,11 +2862,11 @@
    }
   },
   {
-   "seq": 75,
-   "id": "evt_00000075",
+   "seq": 76,
+   "id": "evt_00000076",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:15.000Z",
+   "ts": "2026-09-25T20:01:16.000Z",
    "type": "task.acceptance_changed",
    "v": 1,
    "origin": "server",
@@ -2848,7 +2881,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "task.acceptance_changed #75",
+   "summary": "task.acceptance_changed #76",
    "payload": {
     "task": {
      "id": "tsk_14",
@@ -2876,11 +2909,11 @@
    }
   },
   {
-   "seq": 76,
-   "id": "evt_00000076",
+   "seq": 77,
+   "id": "evt_00000077",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:16.000Z",
+   "ts": "2026-09-25T20:01:17.000Z",
    "type": "checkpoint.created",
    "v": 1,
    "origin": "server",
@@ -2897,7 +2930,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "checkpoint.created #76",
+   "summary": "checkpoint.created #77",
    "payload": {
     "checkpoint": {
      "id": "ckp_1",
@@ -2910,11 +2943,11 @@
    }
   },
   {
-   "seq": 77,
-   "id": "evt_00000077",
+   "seq": 78,
+   "id": "evt_00000078",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:17.000Z",
+   "ts": "2026-09-25T20:01:18.000Z",
    "type": "checkpoint.missed",
    "v": 1,
    "origin": "server",
@@ -2929,18 +2962,18 @@
    "refs": {},
    "severity": "info",
    "moment": false,
-   "summary": "checkpoint.missed #77",
+   "summary": "checkpoint.missed #78",
    "payload": {
     "overdue_s": 1300,
     "nudge": true
    }
   },
   {
-   "seq": 78,
-   "id": "evt_00000078",
+   "seq": 79,
+   "id": "evt_00000079",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:18.000Z",
+   "ts": "2026-09-25T20:01:19.000Z",
    "type": "report.submitted",
    "v": 1,
    "origin": "server",
@@ -2957,7 +2990,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "report.submitted #78",
+   "summary": "report.submitted #79",
    "payload": {
     "report": {
      "id": "rpt_1",
@@ -2976,11 +3009,11 @@
    }
   },
   {
-   "seq": 79,
-   "id": "evt_00000079",
+   "seq": 80,
+   "id": "evt_00000080",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:19.000Z",
+   "ts": "2026-09-25T20:01:20.000Z",
    "type": "report.accepted",
    "v": 1,
    "origin": "server",
@@ -2995,7 +3028,7 @@
    "refs": {},
    "severity": "info",
    "moment": false,
-   "summary": "report.accepted #79",
+   "summary": "report.accepted #80",
    "payload": {
     "report": {
      "id": "rpt_1",
@@ -3014,11 +3047,11 @@
    }
   },
   {
-   "seq": 80,
-   "id": "evt_00000080",
+   "seq": 81,
+   "id": "evt_00000081",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:20.000Z",
+   "ts": "2026-09-25T20:01:21.000Z",
    "type": "report.rejected",
    "v": 1,
    "origin": "server",
@@ -3033,7 +3066,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "report.rejected #80",
+   "summary": "report.rejected #81",
    "payload": {
     "report": {
      "id": "rpt_1",
@@ -3052,11 +3085,11 @@
    }
   },
   {
-   "seq": 81,
-   "id": "evt_00000081",
+   "seq": 82,
+   "id": "evt_00000082",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:21.000Z",
+   "ts": "2026-09-25T20:01:22.000Z",
    "type": "report.waived",
    "v": 1,
    "origin": "server",
@@ -3071,7 +3104,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "report.waived #81",
+   "summary": "report.waived #82",
    "payload": {
     "report": {
      "id": "rpt_1",
@@ -3090,11 +3123,11 @@
    }
   },
   {
-   "seq": 82,
-   "id": "evt_00000082",
+   "seq": 83,
+   "id": "evt_00000083",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:22.000Z",
+   "ts": "2026-09-25T20:01:23.000Z",
    "type": "report.superseded",
    "v": 1,
    "origin": "server",
@@ -3109,7 +3142,7 @@
    "refs": {},
    "severity": "info",
    "moment": false,
-   "summary": "report.superseded #82",
+   "summary": "report.superseded #83",
    "payload": {
     "report": {
      "id": "rpt_1",
@@ -3128,11 +3161,11 @@
    }
   },
   {
-   "seq": 83,
-   "id": "evt_00000083",
+   "seq": 84,
+   "id": "evt_00000084",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:23.000Z",
+   "ts": "2026-09-25T20:01:24.000Z",
    "type": "handoff.created",
    "v": 1,
    "origin": "server",
@@ -3149,7 +3182,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "handoff.created #83",
+   "summary": "handoff.created #84",
    "payload": {
     "handoff_id": "mem_42",
     "end_reason": "stalled:billing_error",
@@ -3158,11 +3191,11 @@
    }
   },
   {
-   "seq": 84,
-   "id": "evt_00000084",
+   "seq": 85,
+   "id": "evt_00000085",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:24.000Z",
+   "ts": "2026-09-25T20:01:25.000Z",
    "type": "message.posted",
    "v": 1,
    "origin": "server",
@@ -3179,7 +3212,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "message.posted #84",
+   "summary": "message.posted #85",
    "payload": {
     "message": {
      "id": "msg_1",
@@ -3202,11 +3235,11 @@
    }
   },
   {
-   "seq": 85,
-   "id": "evt_00000085",
+   "seq": 86,
+   "id": "evt_00000086",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:25.000Z",
+   "ts": "2026-09-25T20:01:26.000Z",
    "type": "message.edited",
    "v": 1,
    "origin": "server",
@@ -3223,7 +3256,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "message.edited #85",
+   "summary": "message.edited #86",
    "payload": {
     "message": {
      "id": "msg_1",
@@ -3247,11 +3280,11 @@
    }
   },
   {
-   "seq": 86,
-   "id": "evt_00000086",
+   "seq": 87,
+   "id": "evt_00000087",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:26.000Z",
+   "ts": "2026-09-25T20:01:27.000Z",
    "type": "message.redacted",
    "v": 1,
    "origin": "server",
@@ -3266,17 +3299,17 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "message.redacted #86",
+   "summary": "message.redacted #87",
    "payload": {
     "message_id": "msg_1"
    }
   },
   {
-   "seq": 87,
-   "id": "evt_00000087",
+   "seq": 88,
+   "id": "evt_00000088",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:27.000Z",
+   "ts": "2026-09-25T20:01:28.000Z",
    "type": "decision.proposed",
    "v": 1,
    "origin": "server",
@@ -3293,7 +3326,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "decision.proposed #87",
+   "summary": "decision.proposed #88",
    "payload": {
     "decision": {
      "id": "dec_2",
@@ -3312,11 +3345,11 @@
    }
   },
   {
-   "seq": 88,
-   "id": "evt_00000088",
+   "seq": 89,
+   "id": "evt_00000089",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:28.000Z",
+   "ts": "2026-09-25T20:01:29.000Z",
    "type": "decision.confirmed",
    "v": 1,
    "origin": "server",
@@ -3331,7 +3364,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "decision.confirmed #88",
+   "summary": "decision.confirmed #89",
    "payload": {
     "decision": {
      "id": "dec_1",
@@ -3350,11 +3383,11 @@
    }
   },
   {
-   "seq": 89,
-   "id": "evt_00000089",
+   "seq": 90,
+   "id": "evt_00000090",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:29.000Z",
+   "ts": "2026-09-25T20:01:30.000Z",
    "type": "decision.rejected",
    "v": 1,
    "origin": "server",
@@ -3369,7 +3402,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "decision.rejected #89",
+   "summary": "decision.rejected #90",
    "payload": {
     "decision": {
      "id": "dec_2",
@@ -3388,11 +3421,11 @@
    }
   },
   {
-   "seq": 90,
-   "id": "evt_00000090",
+   "seq": 91,
+   "id": "evt_00000091",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:30.000Z",
+   "ts": "2026-09-25T20:01:31.000Z",
    "type": "decision.superseded",
    "v": 1,
    "origin": "server",
@@ -3407,7 +3440,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "decision.superseded #90",
+   "summary": "decision.superseded #91",
    "payload": {
     "decision": {
      "id": "dec_1",
@@ -3426,11 +3459,11 @@
    }
   },
   {
-   "seq": 91,
-   "id": "evt_00000091",
+   "seq": 92,
+   "id": "evt_00000092",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:31.000Z",
+   "ts": "2026-09-25T20:01:32.000Z",
    "type": "inbox.item_created",
    "v": 1,
    "origin": "server",
@@ -3445,7 +3478,7 @@
    "refs": {},
    "severity": "info",
    "moment": false,
-   "summary": "inbox.item_created #91",
+   "summary": "inbox.item_created #92",
    "payload": {
     "item": {
      "id": "inb_1",
@@ -3465,11 +3498,11 @@
    }
   },
   {
-   "seq": 92,
-   "id": "evt_00000092",
+   "seq": 93,
+   "id": "evt_00000093",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:32.000Z",
+   "ts": "2026-09-25T20:01:33.000Z",
    "type": "inbox.item_claimed",
    "v": 1,
    "origin": "server",
@@ -3486,7 +3519,7 @@
    },
    "severity": "info",
    "moment": false,
-   "summary": "inbox.item_claimed #92",
+   "summary": "inbox.item_claimed #93",
    "payload": {
     "item": {
      "id": "inb_1",
@@ -3506,11 +3539,11 @@
    }
   },
   {
-   "seq": 93,
-   "id": "evt_00000093",
+   "seq": 94,
+   "id": "evt_00000094",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:33.000Z",
+   "ts": "2026-09-25T20:01:34.000Z",
    "type": "inbox.item_resolved",
    "v": 1,
    "origin": "server",
@@ -3525,7 +3558,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "inbox.item_resolved #93",
+   "summary": "inbox.item_resolved #94",
    "payload": {
     "item": {
      "id": "inb_1",
@@ -3545,11 +3578,11 @@
    }
   },
   {
-   "seq": 94,
-   "id": "evt_00000094",
+   "seq": 95,
+   "id": "evt_00000095",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:34.000Z",
+   "ts": "2026-09-25T20:01:35.000Z",
    "type": "human.override",
    "v": 1,
    "origin": "server",
@@ -3564,7 +3597,7 @@
    "refs": {},
    "severity": "info",
    "moment": true,
-   "summary": "human.override #94",
+   "summary": "human.override #95",
    "payload": {
     "action": "revoke",
     "reason": "Mani took POS",
@@ -3573,11 +3606,11 @@
    }
   },
   {
-   "seq": 95,
-   "id": "evt_00000095",
+   "seq": 96,
+   "id": "evt_00000096",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:35.000Z",
+   "ts": "2026-09-25T20:01:36.000Z",
    "type": "budget.warning",
    "v": 1,
    "origin": "server",
@@ -3592,7 +3625,7 @@
    "refs": {},
    "severity": "info",
    "moment": false,
-   "summary": "budget.warning #95",
+   "summary": "budget.warning #96",
    "payload": {
     "metric": "events_per_day",
     "used": 4000,
@@ -3600,11 +3633,11 @@
    }
   },
   {
-   "seq": 96,
-   "id": "evt_00000096",
+   "seq": 97,
+   "id": "evt_00000097",
    "crew_id": "crw_0a1b2c3d4e5f6a7b",
    "project_id": "yaadbooks",
-   "ts": "2026-09-25T20:01:36.000Z",
+   "ts": "2026-09-25T20:01:37.000Z",
    "type": "budget.cap_reached",
    "v": 1,
    "origin": "server",
@@ -3619,7 +3652,7 @@
    "refs": {},
    "severity": "info",
    "moment": false,
-   "summary": "budget.cap_reached #96",
+   "summary": "budget.cap_reached #97",
    "payload": {
     "metric": "events_per_day",
     "used": 5000,

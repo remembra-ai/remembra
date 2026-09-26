@@ -34,13 +34,13 @@ or close transaction (the heartbeat does it through :func:`heartbeat_sink`, regi
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Final
 
 import aiosqlite
 
 from remembra.crew import schemas as S
-from remembra.crew.claims import is_fenced
+from remembra.crew.claims import FENCE_MARGIN_S, is_fenced
 from remembra.crew.events import Actor, EventTx
 from remembra.crew.gatecore import normalize_rel
 from remembra.crew.store import dumps, loads, new_id, now_iso
@@ -60,6 +60,7 @@ from remembra.crew.zones import (
 MATCH_ENDED_WITHIN: Final = timedelta(hours=24)
 ESCALATED: Final = frozenset({"high", "critical"})
 MAX_FOOTPRINTS_PER_CALL: Final = 500
+MAX_WRITE_AGE_S: Final = 7 * 24 * 3600
 SYMMETRIC: Final = frozenset({"same_file", "same_worktree_file"})
 
 
@@ -284,6 +285,13 @@ async def record_footprints(
             raise CrewOpError(422, "invalid_footprint", "Footprints need a repo-relative path, a state and an attribution.")
         wt = fp.get("worktree_id") or session.get("worktree_id")
         epoch = fp.get("claim_epoch")
+        age = fp.get("age_s")
+        # when the write happened (server clock), from the age crewd measured; None when not reported
+        written_at = (
+            utcnow() - timedelta(seconds=min(int(age), MAX_WRITE_AGE_S))
+            if isinstance(age, int) and not isinstance(age, bool) and age >= 0
+            else None
+        )
         zones = idx.match(path, False)
         zone_ids = [str(z["id"]) for z in zones]
         await conn.execute(
@@ -319,7 +327,7 @@ async def record_footprints(
             (crew_id, session["id"], path),
         )
         attr = str(stored["attribution"]) if stored else attribution
-        opened.extend(await _detect(ops, tx, crew_id, session, path, state, attr, wt, epoch, zones))
+        opened.extend(await _detect(ops, tx, crew_id, session, path, state, attr, wt, epoch, zones, written_at=written_at))
     await auto_resolve(ops, tx, crew_id, paths=touched)
     return opened
 
@@ -335,6 +343,8 @@ async def _detect(
     wt: str | None,
     epoch: Any,
     zones: Sequence[Mapping[str, Any]],
+    *,
+    written_at: datetime | None = None,
 ) -> list[dict[str, Any]]:
     conn = tx.conn
     me = str(session["id"])
@@ -383,6 +393,15 @@ async def _detect(
     for c in claims:
         if c in mine:
             continue
+        if (
+            c["mode"] == "exclusive"
+            and isinstance(epoch, int)
+            and written_at is not None
+            and await _written_while_held(conn, crew_id, str(c["zone_id"]), me, epoch, written_at)
+        ):
+            # E2E-f: this session held the zone at that epoch and wrote before its own lease horizon; the
+            # footprint only reached the server after the zone moved on (crewd was cut off). Not a breach.
+            continue
         if c["mode"] == "exclusive":
             await add(
                 kind="exclusive_breach",
@@ -413,6 +432,63 @@ async def _detect(
     return out
 
 
+# holding windows are read from the claim events of the zone (lease renewals are never events, so the
+# window of a session that stopped renewing ends at its reservation: lease_expires_at − 60 s)
+_HOLD_EVENT_TYPES: Final = (
+    "claim.granted",
+    "claim.adopted",
+    "claim.transferred",
+    "claim.handover_accepted",
+    "claim.reserved",
+    "claim.released",
+    "claim.revoked",
+    "claim.expired",
+    "claim.fenced",
+)
+
+
+async def _written_while_held(
+    conn: aiosqlite.Connection, crew_id: str, zone_id: str, session_id: str, epoch: int, written_at: datetime
+) -> bool:
+    """Whether ``session_id`` held ``zone_id`` exclusively at claim ``epoch`` when it wrote at ``written_at``.
+
+    The window opens at the event that made the session the active holder at that epoch and
+    closes at the first event after which it no longer was (another holder, another epoch, or no
+    longer active), and never later than the lease horizon (``lease_expires_at − 60 s``) of the
+    last view of the claim it held.
+    """
+    from remembra.crew.store import parse_iso
+
+    rows = await fetchall(
+        conn,
+        f"SELECT ts, payload FROM crew_events WHERE crew_id = ? AND zone_id = ? AND type IN"
+        f" ({','.join('?' for _ in _HOLD_EVENT_TYPES)}) ORDER BY seq DESC LIMIT 500",
+        (crew_id, zone_id, *_HOLD_EVENT_TYPES),
+    )
+    windows: list[tuple[datetime, datetime | None]] = []
+    start: datetime | None = None
+    for row in reversed(rows):
+        claim = (loads(row["payload"]) or {}).get("claim")
+        if not isinstance(claim, dict) or claim.get("mode") != "exclusive":
+            continue
+        ts = parse_iso(str(row["ts"]))
+        mine = claim.get("holder_session_id") == session_id and int(claim.get("epoch") or 0) == epoch
+        if mine and claim.get("state") in ("active", "offered"):
+            start = start or ts
+            continue
+        if start is None:
+            continue
+        end = ts
+        lease = claim.get("lease_expires_at") if mine else None
+        if lease:  # the holder stopped renewing: its own writes stopped at the horizon (D31)
+            end = min(end, parse_iso(str(lease)) - timedelta(seconds=FENCE_MARGIN_S))
+        windows.append((start, end))
+        start = None
+    if start is not None:
+        windows.append((start, None))
+    return any(s <= written_at and (e is None or written_at < e) for s, e in windows)
+
+
 def heartbeat_footprints(footprints: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     """Heartbeat footprints in the shape :func:`record_footprints` accepts (the WP-4 upsert's defaults).
 
@@ -433,6 +509,7 @@ def heartbeat_footprints(footprints: Sequence[Mapping[str, Any]]) -> list[dict[s
                 "attribution": fp.get("attribution") if fp.get("attribution") in S.ATTRIBUTIONS else "probable",
                 "claim_epoch": epoch if isinstance(epoch, int) and not isinstance(epoch, bool) else None,
                 "last_commit": fp.get("last_commit") if isinstance(fp.get("last_commit"), str) else None,
+                **({"age_s": fp["age_s"]} if isinstance(fp.get("age_s"), int) and not isinstance(fp.get("age_s"), bool) else {}),
             }
         )
     return out

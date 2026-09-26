@@ -140,13 +140,29 @@ async def _promotions(db):
     return [(json.loads(r["payload"]), r["next_attempt_at"]) for r in rows]
 
 
+async def _server_quota(svc, db, s, facts):
+    """A ``quota`` checkpoint as the stall flow records it (never from ``POST /checkpoints``)."""
+    async with svc.events.transaction() as tx:
+        fresh = await db.fetchone("SELECT * FROM crew_sessions WHERE id = ?", (s["id"],))
+        return await svc.record_in_tx(tx, CREW, fresh, trigger="quota", facts=facts, task_id=None, facts_source="relay-cli")
+
+
+async def test_a_session_cannot_submit_a_quota_checkpoint(env):
+    """quota promotes without the cap or spacing, so only the stall flow records it (review finding)."""
+    db, svc = env
+    s = await seed_session(db)
+    with pytest.raises(CrewServiceError) as e:
+        await svc.ingest(CREW, Caller.for_session(s), body(s, "quota"))
+    assert (e.value.status, e.value.error) == (422, "server_trigger")
+
+
 async def test_promotion_spacing_always_triggers_and_close_coalescing(env):
     db, svc = env
     s = await seed_session(db)
     c = Caller.for_session(s)
     r1 = await svc.ingest(CREW, c, body(s, facts={**FACTS, "n": 1}))
     r2 = await svc.ingest(CREW, c, body(s, "commit", facts={**FACTS, "n": 2}))
-    r3 = await svc.ingest(CREW, c, body(s, "quota", facts={**FACTS, "n": 3}))
+    r3 = await _server_quota(svc, db, s, {**FACTS, "n": 3})
     r4 = await svc.ingest(CREW, c, body(s, "close", facts={**FACTS, "commits": []}))
     r5 = await svc.ingest(CREW, c, body(s, "close", facts={**FACTS, "n": 5}))
     assert [r.promotion for r in (r1, r2, r3, r4, r5)] == [
@@ -174,7 +190,7 @@ async def test_daily_cap_defers_to_the_next_day_except_quota_and_lost(env):
     b = await seed_session(db, callsign="cc-2")
     first = await svc.ingest(CREW, Caller.for_session(a), body(a))
     second = await svc.ingest(CREW, Caller.for_session(b), body(b))
-    quota = await svc.ingest(CREW, Caller.for_session(b), body(b, "quota", facts={**FACTS, "x": 1}))
+    quota = await _server_quota(svc, db, b, {**FACTS, "x": 1})
     assert (first.promotion, second.promotion, quota.promotion) == ("promoted", "deferred", "promoted")
     promos = await _promotions(db)
     today = datetime.now(UTC).date()

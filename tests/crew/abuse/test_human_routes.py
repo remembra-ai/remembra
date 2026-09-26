@@ -27,7 +27,6 @@ from dataclasses import dataclass
 from typing import Any
 
 import jwt
-import pytest
 
 from remembra.crew.access import _walk_routes, audit_crew_routes
 from remembra.crew.schemas import ROUTES
@@ -107,6 +106,12 @@ class Matrix:
         c.task("t3", "b", "Payroll ledger", ["payroll"])
         self.other_user = server.call(self._other_user())
         self.members_added: list[str] = []
+
+    def email_confirmation(self, address: str) -> Call:
+        """A third-party email target a human added (unverified) and the code mailed to it."""
+        res = self.s.http.post(f"{API}/notifications/targets", json={"kind": "email", "target": address}, headers=self.human)
+        assert res.status_code == 201 and res.json()["verified_at"] is None, res.text
+        return Call(f"/notifications/targets/{res.json()['id']}/confirm", {"code": self.s.mail.last_code(address)})
 
     async def _other_user(self) -> str:
         user, error = await self.s.app.state.users.create_user(email="teammate@example.com", password="Str0ng!Passw0rd")
@@ -279,6 +284,7 @@ def _cases(m: Matrix) -> dict[tuple[str, str], Callable[[], Call]]:
         ("POST", "/notifications/targets"): lambda: Call(
             "/notifications/targets", {"kind": "email", "target": "alerts@example.com"}
         ),
+        ("POST", "/notifications/targets/{target_id}/confirm"): lambda: m.email_confirmation("pager@example.com"),
     }
 
 
@@ -400,15 +406,6 @@ def test_human_only_actions_behind_agent_routes(server: RedTeamServer) -> None:
         assert res.status_code == 422 and res.json()["detail"]["error"] == "reserved_sender", (kind, res.status_code, res.text)
 
 
-F1 = (
-    "WP-17 finding F1: POST /crews/{crew_id}/events (client events, §6; WP-2's ingest_client_events) is not "
-    "mounted by any router, so the server answers 405 and crewd keeps every guard.blocked, guard.tamper_blocked, "
-    "gate.error and gate.deadline event in its outbox forever: local denies and tamper attempts are never recorded "
-    "or alerted. Owner: WP-2/WP-8 (router)."
-)
-
-
-@pytest.mark.xfail(strict=True, reason=F1)
 def test_every_l0_contract_route_is_mounted_by_the_real_app(server: RedTeamServer) -> None:
     """The route table of the running app covers the whole L0 contract, each with its access dependency."""
     assert audit_crew_routes(server.app.routes, require_all=True) == []

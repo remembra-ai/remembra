@@ -313,6 +313,14 @@ def _baton_passed(state: State, event: Mapping[str, Any], p: Mapping[str, Any]) 
     del state["batons"][:-BATONS_KEEP]
 
 
+def _baton_restored(state: State, event: Mapping[str, Any], p: Mapping[str, Any]) -> None:
+    """crewd's restore outcome lands on the baton pass it belongs to (``restored``, ``restore_status``)."""
+    for entry in state["batons"]:
+        if entry.get("baton_id") == p["baton_id"]:
+            entry["restored"] = bool(p["restored"])
+            entry["restore_status"] = p["status"]
+
+
 def _baton_ref(state: State, event: Mapping[str, Any], p: Mapping[str, Any]) -> None:
     refs = state["baton_refs"]
     refs[p["ref"]] = {
@@ -475,6 +483,7 @@ _HANDLERS: Final = {
     "claim.fenced": _claim_fenced,
     "claim.unconfirmed": _claim,
     "baton.passed": _baton_passed,
+    "baton.restored": _baton_restored,
     "baton.ref_created": _baton_ref,
     "guard.blocked": _guard,
     "guard.bypass_used": _noop,

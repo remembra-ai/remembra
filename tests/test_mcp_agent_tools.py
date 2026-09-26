@@ -290,6 +290,9 @@ def test_get_inbox_summary_mode(mcp_env):
     assert len(item["body_preview"]) == 203 and "body" not in item and "metadata" not in item
     full = _j(server.get_inbox())
     assert len(full["items"][0]["body"]) == 1000 and full["items"][0]["metadata"] == {"k": "v"}
+    # §5.8 provenance, set by the server: the agent reading its inbox sees who really sent it
+    assert item["sender"].startswith("agent codex (") and item["sender"].endswith(")")
+    assert full["items"][0]["sender"] == item["sender"]
 
 
 def test_spaces_list_create_and_share(mcp_env):

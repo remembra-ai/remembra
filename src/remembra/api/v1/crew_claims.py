@@ -275,7 +275,7 @@ async def redeem_bypass_code(request: Request, user: AuthenticatedUser = Depends
     enforce_rate_limit("claims", user_id=user.user_id, session_token=request.headers.get(C.SESSION_HEADER))
     ops = crew_ops(request)
     async with crew_errors():
-        return await B.redeem_code(ops, session, body["code"])
+        return await B.redeem_code(ops, session, body["code"], surface=str(body["surface"]), zone=body.get("zone"))
 
 
 # ---------------------------------------------------------------------------

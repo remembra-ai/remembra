@@ -115,6 +115,27 @@ async def _public_resolver(url: str) -> ResolvedTarget:
     return ResolvedTarget(url=url, scheme=parsed.scheme, hostname=parsed.hostname or "", port=443, ips=("93.184.216.34",))
 
 
+class Mailbox:
+    """The server's email backend in the red-team runs: keeps every message (no mail leaves the machine)."""
+
+    def __init__(self) -> None:
+        self.sent: list[Any] = []
+
+    async def send(self, message: Any) -> Any:
+        from remembra.cloud.email import EmailResult
+
+        self.sent.append(message)
+        return EmailResult(success=True, message_id=f"redteam-{len(self.sent)}")
+
+    def last_code(self, to: str) -> str:
+        import re
+
+        mail = next(m for m in reversed(self.sent) if m.to == to.lower())
+        found = re.search(r"<strong>([0-9A-Z]+)</strong>", mail.html)
+        assert found, mail.html
+        return found.group(1)
+
+
 class RedTeamServer:
     """uvicorn + the full app in a background thread; ``call`` runs a coroutine on the server loop."""
 
@@ -124,6 +145,7 @@ class RedTeamServer:
         self.port = free_port()
         self.loop: asyncio.AbstractEventLoop | None = None
         self.alerts = Alerts()
+        self.mail = Mailbox()
         self.app = self._build_app()
         self.server = uvicorn.Server(
             uvicorn.Config(self.app, host="127.0.0.1", port=self.port, log_level="warning", lifespan="on")
@@ -179,6 +201,7 @@ class RedTeamServer:
         app.state.limiter = limiter
         app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # type: ignore[arg-type]
         app.state.crew_webhook_sender = WebhookSender(resolver=_public_resolver, transport=self.alerts.transport())
+        app.state.crew_email_backend = self.mail
         app.include_router(api_router)
         main_module.install_crew(app)
         app.include_router(websocket.router)

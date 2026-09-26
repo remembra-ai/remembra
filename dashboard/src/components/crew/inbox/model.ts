@@ -29,6 +29,7 @@ export const SAFETY_KINDS = new Set([
   'collision_escalated',
   'baton_available',
   'baton_waiting',
+  'baton_restore_failed',
   'stuck_agent',
   'tamper_blocked',
   'bypass_used',
@@ -142,6 +143,10 @@ export function primaryAction(item: InboxItem, project: string | null): ItemActi
     case 'approve':
       if (project) return { type: 'link', label: 'Review zone change', href: crewHref(project, 'policy') };
       break;
+    case 'bypass':
+      // false-deny storm (§10.3): a one-time bypass code or observe mode, both on the policy page
+      if (project) return { type: 'link', label: 'Bypass code or observe', href: crewHref(project, 'policy') };
+      break;
     default:
       break;
   }
@@ -184,6 +189,7 @@ export const KIND_LABEL: Record<string, string> = {
   collision_escalated: 'collision',
   baton_available: 'baton waiting',
   baton_waiting: 'baton still waiting',
+  baton_restore_failed: 'saved work not restored',
   zone_change_pending: 'zone change',
   zone_hoarding: 'zone hoarding',
   zone_contested: 'contested zone',

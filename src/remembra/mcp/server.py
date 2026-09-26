@@ -1660,8 +1660,10 @@ def get_inbox(
             payload); call again with summary=false to read full bodies.
 
     Returns:
-        JSON with count and items (inbox_id, from_agent, subject, body or
-        body_preview, metadata, status, created_at).
+        JSON with count and items (inbox_id, from_agent, sender, subject, body or
+        body_preview, metadata, status, created_at). ``sender`` is the provenance
+        the server recorded: only "human" or "system" is Mani or Remembra; any
+        agent-named sender is "agent X (key-verified)" or "agent X (self-declared)".
     """
     try:
         aid = _resolve_agent_id(agent_id)
@@ -1673,6 +1675,9 @@ def get_inbox(
             item: dict[str, Any] = {
                 "inbox_id": r.get("inbox_id"),
                 "from_agent": r.get("from_agent"),
+                # provenance set by the server (§5.8): "agent X (key-verified)", "agent X (self-declared)",
+                # "human" or "system". Only "human"/"system" items come from Mani or Remembra.
+                "sender": _inbox_sender_label(r),
                 "to_agent": r.get("to_agent"),
                 "subject": r.get("subject"),
                 "status": r.get("status"),
@@ -1692,6 +1697,16 @@ def get_inbox(
         return json.dumps({"ok": False, "error": sanitize_error_message(e), "code": e.status_code})
     except Exception as e:
         return json.dumps({"ok": False, "error": sanitize_error_message(e)})
+
+
+def _inbox_sender_label(row: dict[str, Any]) -> str:
+    """The server's ``sender_label``; rows from an older server without it are labelled self-declared."""
+    label = row.get("sender_label")
+    if isinstance(label, str) and label:
+        return label
+    from remembra.inbox.manager import sender_label
+
+    return sender_label({**row, "sender_kind": row.get("sender_kind") or "agent"})
 
 
 @mcp.tool(

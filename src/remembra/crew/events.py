@@ -844,6 +844,8 @@ async def ingest_client_events(
         raise EventValidationError(["$.events: must be a list"])
     if len(items) > schemas.MAX_EVENTS_PER_POST:
         raise EventValidationError([f"$.events: at most {schemas.MAX_EVENTS_PER_POST} per call"])
+    from remembra.crew import alarms  # the inbox layer builds on this module
+
     stamp = now or utc_now()
     results: list[ClientEventResult] = []
     seen: dict[str, int | None] = {}
@@ -876,6 +878,7 @@ async def ingest_client_events(
             if target is not None:
                 seen[item_id] = target
                 results.append(ClientEventResult(item_id, "coalesced", seq=target))
+                await alarms.on_client_event(tx, crew_id, actor, etype, payload, now=stamp)
                 continue
             try:
                 res = await tx.emit(
@@ -896,6 +899,8 @@ async def ingest_client_events(
                 continue
             seen[item_id] = res.seq
             results.append(ClientEventResult(item_id, "accepted", seq=res.seq))
+            # Needs-you safety items for tamper attempts, missing git gates and false-deny storms (§5.8, §10.3)
+            await alarms.on_client_event(tx, crew_id, actor, etype, payload, now=stamp)
     return results
 
 

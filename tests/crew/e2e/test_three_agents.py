@@ -306,9 +306,16 @@ def test_three_agents_end_to_end(world: World) -> None:
     assert passed, [e["type"] for e in ev]
     bp = passed[-1]["payload"]
     assert (bp["from_session"], bp["to_session"], bp["kind"], bp["baton_ref"]) == (a_sid, c_sid, "adopt", baton_ref), bp
-    # KNOWN GAP (reported by WP-15): the server emits baton.passed when it authorises the adopt, before crewd
-    # restores the ref, and nothing reports the restore back, so ``restored`` stays null (spec: true). The
-    # restore itself is proven above (crewd's "Work restored from" and A's tender.ts in wt-c).
+    # baton.passed is emitted when the server authorises the adopt, before crewd restores the ref; crewd then
+    # reports the outcome: baton.restored{restored: true} for that pass, and crew_batons.restored = 1 (§13.3 step 7)
+    restored_ev = of_type(ev, "baton.restored")
+    assert restored_ev, [e["type"] for e in ev]
+    rp = restored_ev[-1]["payload"]
+    assert (rp["baton_id"], rp["restored"], rp["status"], rp["to_session"]) == (bp["baton_id"], True, "restored", c_sid), rp
+    assert rp["files"] >= 1 and rp["baton_ref"] == baton_ref, rp
+    with world.human() as h:
+        batons = h.get(f"/crews/{crew}/batons").json()["batons"]
+    assert next(b for b in batons if b["id"] == bp["baton_id"])["restored"] is True, batons
     adopted_ev = of_type(ev, "claim.adopted", **{"payload.claim.zone_id": pos})
     assert adopted_ev and adopted_ev[-1]["payload"]["claim"]["epoch"] == 2, adopted_ev
     assert not of_type(ev, "guard.blocked", **{"actor.id": c_sid})

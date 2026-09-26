@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Final
 
 OUTBOX_VERSION: Final = 1
-KINDS: Final = ("event", "claim", "checkpoint", "activity", "posttool", "stall", "leave", "close")
+KINDS: Final = ("event", "claim", "checkpoint", "activity", "posttool", "stall", "leave", "close", "baton_restore")
 MAX_AGE_S: Final = 72 * 3600  # an undeliverable record is dropped after the idempotency window (§4.3)
 MAX_ATTEMPTS: Final = 500
 BACKOFF_BASE_S: Final = 5.0

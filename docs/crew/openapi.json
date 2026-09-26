@@ -474,6 +474,104 @@
         "title": "BatonRefCreatedPayload",
         "type": "object"
       },
+      "BatonRestoreRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "maximum": 100000,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "restored": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "restored",
+              "ref_missing",
+              "dirty_tree",
+              "restore_failed"
+            ],
+            "maxLength": 64,
+            "type": "string"
+          }
+        },
+        "required": [
+          "restored",
+          "status",
+          "files"
+        ],
+        "title": "BatonRestoreRequest",
+        "type": "object"
+      },
+      "BatonRestoredPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "baton_id": {
+            "description": "baton id",
+            "maxLength": 80,
+            "pattern": "bat_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+            "type": "string"
+          },
+          "baton_ref": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "pattern": "refs/remembra/baton/(?:T-[1-9][0-9]{0,6}|cs_[A-Za-z0-9_-]{1,64})/[0-9]{1,9}",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "files": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "restored": {
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "restored",
+              "ref_missing",
+              "dirty_tree",
+              "restore_failed"
+            ],
+            "maxLength": 64,
+            "type": "string"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "description": "task id",
+                "maxLength": 80,
+                "pattern": "tsk_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_session": {
+            "description": "session id",
+            "maxLength": 80,
+            "pattern": "cs_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
+            "type": "string"
+          }
+        },
+        "required": [
+          "baton_id",
+          "to_session",
+          "restored",
+          "status",
+          "files"
+        ],
+        "title": "BatonRestoredPayload",
+        "type": "object"
+      },
       "Blocker": {
         "additionalProperties": false,
         "properties": {
@@ -640,11 +738,35 @@
             "maxLength": 80,
             "pattern": "cs_[A-Za-z0-9][A-Za-z0-9_-]{0,63}",
             "type": "string"
+          },
+          "surface": {
+            "enum": [
+              "precommit",
+              "prepush",
+              "pretool",
+              "mcp",
+              "tty"
+            ],
+            "maxLength": 64,
+            "type": "string"
+          },
+          "zone": {
+            "anyOf": [
+              {
+                "maxLength": 48,
+                "pattern": "[a-z0-9][a-z0-9_-]{0,47}",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
           "code",
-          "session_id"
+          "session_id",
+          "surface"
         ],
         "title": "BypassRedeemRequest",
         "type": "object"
@@ -2519,6 +2641,10 @@
       "Footprint": {
         "additionalProperties": false,
         "properties": {
+          "age_s": {
+            "minimum": 0,
+            "type": "integer"
+          },
           "attribution": {
             "enum": [
               "certain",
@@ -3107,6 +3233,13 @@
           "token": {
             "maxLength": 256,
             "type": "string"
+          },
+          "unattributed_commits": {
+            "items": {
+              "$ref": "#/components/schemas/UnattributedCommit"
+            },
+            "maxItems": 20,
+            "type": "array"
           }
         },
         "required": [
@@ -3414,6 +3547,7 @@
               "collision_escalated",
               "baton_available",
               "baton_waiting",
+              "baton_restore_failed",
               "zone_change_pending",
               "zone_hoarding",
               "zone_contested",
@@ -6378,6 +6512,32 @@
         "title": "TreeRequest",
         "type": "object"
       },
+      "UnattributedCommit": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "description": "repo-relative POSIX path",
+              "maxLength": 1024,
+              "pattern": "(?!/)(?!~)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\x00-\\x1f\\\\]{1,1024}",
+              "type": "string"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
+          "sha": {
+            "maxLength": 40,
+            "pattern": "[0-9a-f]{7,40}",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha",
+          "files"
+        ],
+        "title": "UnattributedCommit",
+        "type": "object"
+      },
       "VoteCastPayload": {
         "additionalProperties": false,
         "properties": {
@@ -8143,6 +8303,75 @@
         "x-step-up": false
       }
     },
+    "/api/v1/crews/{crew_id}/batons/{baton_id}/restore": {
+      "post": {
+        "operationId": "postCrewsByCrewBatonsByBatonRestore",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crew_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "baton_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatonRestoreRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK; mutation responses carry seq"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "412": {
+            "$ref": "#/components/responses/E412"
+          },
+          "422": {
+            "$ref": "#/components/responses/E422"
+          },
+          "423": {
+            "$ref": "#/components/responses/E423"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        },
+        "summary": "The adopter's crewd reports restoring the baton ref (crew session token; once)",
+        "tags": [
+          "WP-8"
+        ],
+        "x-access": "crew",
+        "x-human-only": false,
+        "x-permission": "crew:write",
+        "x-rate-bucket": "events",
+        "x-release": "L0",
+        "x-step-up": false
+      }
+    },
     "/api/v1/crews/{crew_id}/bypass-codes": {
       "get": {
         "operationId": "getCrewsByCrewBypassCodes",
@@ -8352,7 +8581,7 @@
         "x-access": "crew",
         "x-human-only": false,
         "x-permission": "crew:write",
-        "x-rate-bucket": "default",
+        "x-rate-bucket": "checkpoints",
         "x-release": "L0",
         "x-step-up": false
       }
@@ -10597,6 +10826,57 @@
         "x-human-only": true,
         "x-permission": "crew:admin",
         "x-rate-bucket": "default",
+        "x-release": "L0",
+        "x-step-up": false
+      }
+    },
+    "/api/v1/notifications/targets/{target_id}/confirm": {
+      "post": {
+        "operationId": "postNotificationsTargetsByTargetConfirm",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "target_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK; mutation responses carry seq"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "412": {
+            "$ref": "#/components/responses/E412"
+          },
+          "422": {
+            "$ref": "#/components/responses/E422"
+          },
+          "423": {
+            "$ref": "#/components/responses/E423"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        },
+        "summary": "Confirm an email target with the mailed code",
+        "tags": [
+          "WP-7"
+        ],
+        "x-access": "user",
+        "x-human-only": true,
+        "x-permission": "crew:admin",
+        "x-rate-bucket": "notify_confirm",
         "x-release": "L0",
         "x-step-up": false
       }

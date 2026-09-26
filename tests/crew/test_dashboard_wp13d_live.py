@@ -59,6 +59,8 @@ async def _seed(app: FastAPI, receiver: Receiver) -> dict[str, str]:
     users: UserManager = app.state.users
     user, error = await users.create_user(email="mani@example.com", password="Str0ng!Passw0rd")
     assert user is not None, error
+    # Mani's own login email is verified, so it is an alert target without a mailed confirmation code
+    await app.state.db.update_user_email_verified(user.id, True)
     token = users.create_jwt_token(user.id, "mani@example.com")
     key = await app.state.api_key_manager.create_key(user_id=user.id, name="agent-admin")
     await app.state.role_manager.assign_role(key.id, Role.ADMIN)

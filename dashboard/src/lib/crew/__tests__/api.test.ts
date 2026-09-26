@@ -119,6 +119,7 @@ const INVOCATIONS: Invocation[] = [
   ['markNotificationsRead', (a) => a.markNotificationsRead({ all: true })],
   ['notificationRules', (a) => a.notificationRules()],
   ['addNotifyTarget', (a) => a.addNotifyTarget('webhook', 'https://hooks.example/crew')],
+  ['confirmNotifyTarget', (a) => a.confirmNotifyTarget('ntt_1', 'ABCD1234')],
 ];
 
 describe('crew API client contract (docs/crew/openapi.json)', () => {

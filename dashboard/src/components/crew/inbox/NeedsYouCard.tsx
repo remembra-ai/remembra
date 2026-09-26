@@ -28,6 +28,7 @@ const GLYPH: Record<string, GlyphName> = {
   collision_open: 'collision',
   baton_available: 'baton',
   baton_waiting: 'baton',
+  baton_restore_failed: 'baton',
   baton_reserved: 'baton',
   zone_change_pending: 'zone',
   zone_hoarding: 'zone',
