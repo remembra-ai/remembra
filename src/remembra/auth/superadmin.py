@@ -9,6 +9,12 @@ per-tenant ``admin`` key role. A caller is superadmin only when:
   claims an owner address gets nothing), and
 * the request is a dashboard session (JWT), or an API key whose role is
   ``admin`` — ordinary editor/viewer keys never inherit superadmin.
+
+Actions that create a credential or return a secret (``reset-password``) need
+:data:`RequireSuperadminSession`: a dashboard login, never an API key. An agent
+holding the owner's admin key could otherwise reset the owner's password, log
+in and hold a human (JWT) session, which Crew mode trusts for human-only
+actions (spec D27).
 """
 
 from __future__ import annotations
@@ -63,3 +69,24 @@ async def require_superadmin(request: Request, current_user: CurrentUser) -> Non
 
 
 RequireSuperadmin = Annotated[None, Depends(require_superadmin)]
+
+SESSION_CREDENTIAL_ID = "jwt_auth"
+
+
+def credential_is_session(user: AuthenticatedUser) -> bool:
+    """True for a dashboard login (JWT); False for every API key, whatever its role."""
+    return user.api_key_id == SESSION_CREDENTIAL_ID
+
+
+async def require_superadmin_session(request: Request, current_user: CurrentUser) -> None:
+    """Dependency: superadmin through a dashboard login only (for actions that mint credentials)."""
+    if not credential_is_session(current_user):
+        log.warning("superadmin_session_required", user_id=current_user.user_id, api_key_id=current_user.api_key_id)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action needs a dashboard login; API keys cannot perform it.",
+        )
+    await require_superadmin(request, current_user)
+
+
+RequireSuperadminSession = Annotated[None, Depends(require_superadmin_session)]
