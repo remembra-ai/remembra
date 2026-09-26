@@ -1,13 +1,18 @@
-# Connect Remembra to any AI client
+# Connect Remembra to an MCP client
 
 Remembra speaks the **Model Context Protocol (MCP)**, so it plugs into Cursor,
-Windsurf, Claude Desktop, Claude Code, Cline, Continue, VS Code, Zed, and anything
-else that speaks MCP. There are two ways to connect — pick one.
+Windsurf, Claude Desktop, Claude Code, Cline, Continue, VS Code, Zed, and other
+clients that speak MCP. Today that means the local stdio server (Option B).
 
-## Option A — Remote (recommended): one URL, no install
+## Option A — Remote: one URL, no install (coming, not live)
 
-The hosted Remembra MCP runs on our infrastructure. You connect with a **URL + your
-API key** — no binary to install, no PATH to configure, nothing to keep updated.
+!!! warning "Not live yet"
+    There is no hosted remote MCP endpoint today: `mcp.remembra.dev` is not running, and
+    `https://api.remembra.dev/mcp` answers 405. Use [Option B](#option-b-local-stdio-binary-works-today)
+    until this is switched on, or run the remote transport yourself (below).
+
+Once it is live, you connect with a **URL + your API key**: no binary to install, no
+PATH to configure, nothing to keep updated.
 
 ```jsonc
 {
@@ -36,7 +41,7 @@ to your account — your memories are never visible to another caller.
 - **Cline / Continue / VS Code / Zed** — add the same `remembra` server object to the
   client's MCP settings.
 
-## Option B — Local stdio binary (self-host / offline)
+## Option B — Local stdio binary (works today)
 
 For self-hosting or fully-local setups, run the stdio binary. Note: GUI apps don't
 inherit your shell `PATH`, so use the **absolute path** to the binary.

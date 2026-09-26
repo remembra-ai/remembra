@@ -1,10 +1,17 @@
-# Claude & ChatGPT apps (pick up from anywhere)
+# Claude & ChatGPT apps (coming, not live)
 
-Connect Remembra to the **Claude apps** (claude.ai, Claude Desktop, and the Claude
-iPhone/Android apps) and to **ChatGPT**, so you can check on your agents' work from
-your phone and leave them instructions.
+!!! warning "Coming: not live on Remembra Cloud yet"
+    The connector is built and tested against Remembra's own server, but it is switched off
+    at `api.remembra.dev`: `POST https://api.remembra.dev/mcp` answers 405 today, so the steps
+    below do not work against the hosted service yet. It has also not been verified inside the
+    live Claude and ChatGPT apps. On a server you host yourself you can switch it on (see
+    [For the server owner](#for-the-server-owner-production-setup)).
 
-From a chat on your phone you can:
+Once it is switched on, you connect Remembra to the **Claude apps** (claude.ai, Claude
+Desktop, and the Claude iPhone/Android apps) and to **ChatGPT**, so you can check on your
+agents' work from your phone and leave them instructions.
+
+From a chat on your phone you will be able to:
 
 | Ask for | Tool | What it does |
 |---|---|---|
@@ -29,7 +36,7 @@ shows up in `/mcp` as `claude.ai Remembra`, next to Claude Code's own Remembra s
 API-key setup that runs as `claude-code`). Both offer `session_brief`, `recall_memories`,
 `store_memory` and `send_to_inbox`, and if Claude Code picks the connector's copy it acts as
 `claude-app`: its brief shows `claude-app`'s inbox (so it never sees the phone's
-instruction), its notes and replies are signed `claude-app`, and it can only use the
+instruction), its notes and replies are recorded as `claude-app`, and it can only use the
 connection's projects. Keep the connector for the phone and turn it off in Claude Code with
 any one of these:
 
