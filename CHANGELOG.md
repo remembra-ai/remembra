@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Codex hooks verified.** `remembra-relay connect` now writes Codex's SessionStart, UserPromptSubmit and
+  SessionEnd hooks by default, after a live round trip with codex-cli 0.155.0-alpha.16.4 (a Claude Code
+  close, then a real `codex exec` that received the brief and left its own handoff; recorded under
+  `tests/fixtures/relay/codex/`). `connect` tells you to trust the hooks in Codex's `/hooks`, since Codex
+  skips untrusted hooks without a message. Codex rollouts are parsed for commands, exit codes, test runs,
+  edited files and plan steps. A session whose last turn stopped on Codex's usage limit is handed off as
+  `ended: usage_limit`, with Codex's message first under the errors.
+- `brief --once`: the UserPromptSubmit hook delivers the brief when SessionStart did not fire (Codex
+  auto-restoring a thread), once per session; a resumed Codex session does not get a second copy.
+- `close` detaches for agents that do not wait for the end hook (Codex, Gemini CLI, Qwen Code, Cursor): it
+  returns at once and posts from a background process (log: `~/.remembra/relay/last-detached-close.log`).
+- **MCP Registry entry that starts the MCP server.** `server.json` now names the `remembra-mcp` launcher
+  package (`uvx remembra-mcp`), declares `REMEMBRA_API_KEY` as a secret, and describes Remembra as
+  cross-agent handoff. The previous entry ran the `remembra` web server. The release workflow publishes
+  PyPI and the MCP Registry from one tag.
+
+### Changed
+- Gemini CLI hook timeouts are written in milliseconds (15000), Qwen Code's and Cursor's in seconds; the
+  Cursor adapter prefers `session_id`, reads `transcript_path` and `CURSOR_PROJECT_DIR`. All three remain
+  unverified: their payload fixtures are written from the docs, not recorded.
+- Releases: every GitHub Action is pinned to a commit SHA, PyPI uses trusted publishing with attestations,
+  and the publish jobs wait for approval in the `release` environment.
+
 - **Sign in with GitHub and Google.** "Continue with Google" / "Continue with GitHub" on the dashboard's
   Sign in and Sign up pages (authorization code + PKCE; Google ID tokens verified against the JWKS with
   nonce). Only verified provider emails are accepted, and one account backs each verified email and provider
