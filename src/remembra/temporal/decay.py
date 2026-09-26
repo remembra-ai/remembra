@@ -291,6 +291,8 @@ def calculate_memory_decay_info(memory_data: dict[str, Any], config: DecayConfig
         importance = memory_data.get("importance_score", 0.5)
     importance = importance if importance is not None else 0.5
     pinned = bool(memory_data.get("pinned", False))
+    # Relay handoffs/checkpoints are the continuity record: never pruned for decay.
+    relay_record = bool(memory_data.get("relay_record", False))
 
     # Calculate metrics
     relevance = calculate_relevance_score(
@@ -315,8 +317,8 @@ def calculate_memory_decay_info(memory_data: dict[str, Any], config: DecayConfig
         config=cfg,
     )
 
-    # Pinned memories are explicitly protected — never pruned or treated as expired.
-    if pinned:
+    # Pinned memories and relay records are explicitly protected — never pruned.
+    if pinned or relay_record:
         prune = False
 
     # Time until expiration (if TTL set)
