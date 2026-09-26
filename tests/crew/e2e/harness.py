@@ -22,9 +22,11 @@ import copy
 import json
 import os
 import pty
+import shlex
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -167,10 +169,11 @@ class Payloads:
 
 
 class ServerProc:
-    def __init__(self, workdir: Path, *, webhook_forward: str | None = None) -> None:
+    def __init__(self, workdir: Path, *, webhook_forward: str | None = None, seed_users: int = 0) -> None:
         self.workdir = workdir
         self.port = free_port()
         self.webhook_forward = webhook_forward
+        self.seed_users = seed_users
         self.proc: subprocess.Popen[str] | None = None
         self.info: dict[str, Any] = {}
         self.log_path = workdir / "server.log"
@@ -187,6 +190,8 @@ class ServerProc:
         argv = [PY, "-m", "tests.crew.e2e.server", "--workdir", str(self.workdir), "--port", str(self.port)]
         if self.webhook_forward:
             argv += ["--webhook-forward", self.webhook_forward]
+        if self.seed_users:
+            argv += ["--seed-users", str(self.seed_users)]
         self.proc = subprocess.Popen(argv, cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=env)
         log = self.log_path.open("w", encoding="utf-8")
         deadline = time.monotonic() + 90
@@ -291,6 +296,130 @@ class WebhookReceiver:
         self.server.server_close()
 
 
+class TcpProxy:
+    """A local TCP forwarder in front of the server: :meth:`cut` drops the link (a network cut), :meth:`restore` heals it."""
+
+    def __init__(self, target_port: int) -> None:
+        self.target_port = target_port
+        self.listener = socket.socket()
+        self.listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.listener.bind(("127.0.0.1", 0))
+        self.listener.listen(64)
+        self.port = int(self.listener.getsockname()[1])
+        self.up = threading.Event()
+        self.up.set()
+        self.conns: list[socket.socket] = []
+        self.lock = threading.Lock()
+        threading.Thread(target=self._accept, daemon=True).start()
+
+    @property
+    def url(self) -> str:
+        return f"http://127.0.0.1:{self.port}"
+
+    def _accept(self) -> None:
+        while True:
+            try:
+                client, _ = self.listener.accept()
+            except OSError:
+                return
+            if not self.up.is_set():
+                client.close()  # refused while cut
+                continue
+            try:
+                upstream = socket.create_connection(("127.0.0.1", self.target_port), timeout=5)
+            except OSError:
+                client.close()
+                continue
+            with self.lock:
+                self.conns += [client, upstream]
+            for a, b in ((client, upstream), (upstream, client)):
+                threading.Thread(target=self._pipe, args=(a, b), daemon=True).start()
+
+    @staticmethod
+    def _pipe(src: socket.socket, dst: socket.socket) -> None:
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                dst.sendall(data)
+        except OSError:
+            pass
+        finally:
+            for s in (src, dst):
+                try:
+                    s.close()
+                except OSError:
+                    pass
+
+    def cut(self) -> None:
+        self.up.clear()
+        with self.lock:
+            conns, self.conns = self.conns, []
+        for c in conns:
+            try:
+                c.shutdown(socket.SHUT_RDWR)
+                c.close()
+            except OSError:
+                pass
+
+    def restore(self) -> None:
+        self.up.set()
+
+    def close(self) -> None:
+        self.cut()
+        self.listener.close()
+
+
+class CrewdSupervisor:
+    """What the LaunchAgent (``KeepAlive``) or systemd unit does: keep ``remembra-crewd --wait-lock`` running.
+
+    ``restart_delay_s`` stands in for launchd's throttle. :meth:`kill9` is the soak's ``kill -9``.
+    """
+
+    def __init__(self, world: World, *, restart_delay_s: float = 1.0) -> None:
+        self.world = world
+        self.restart_delay_s = restart_delay_s
+        self.stop_flag = threading.Event()
+        self.proc: subprocess.Popen[bytes] | None = None
+        self.starts = 0
+        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.thread.start()
+        if not wait_for(lambda: world.crewd_pid() is not None, timeout=30):
+            raise RuntimeError("supervised crewd did not start")
+
+    def _run(self) -> None:
+        while not self.stop_flag.is_set():
+            self.proc = subprocess.Popen(  # noqa: S603
+                [PY, "-m", "remembra.relay.crew.crewd", "--wait-lock"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                env=self.world.agent_env(),
+                start_new_session=True,
+            )
+            self.starts += 1
+            self.proc.wait()
+            if self.stop_flag.wait(self.restart_delay_s):
+                return
+
+    def kill9(self) -> int | None:
+        pid = self.world.crewd_pid()
+        if pid is not None:
+            os.kill(pid, signal.SIGKILL)
+        return pid
+
+    def close(self) -> None:
+        self.stop_flag.set()
+        if self.proc is not None and self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+        self.thread.join(timeout=15)
+
+
 # ---------------------------------------------------------------------------
 # Dashboard-style feed on the real /ws
 # ---------------------------------------------------------------------------
@@ -338,7 +467,10 @@ class CrewFeed:
                         raw = await asyncio.wait_for(ws.recv(), timeout=0.5)
                     except TimeoutError:
                         continue
-                    msg = json.loads(raw)
+                    try:
+                        msg = json.loads(raw)
+                    except ValueError:  # the server's keep-alive "ping" after 60 s without client frames
+                        continue
                     now = time.time()
                     if not isinstance(msg, dict):
                         continue
@@ -422,10 +554,13 @@ class DashboardObserver:
 class FakeAgent:
     """One model-free Claude Code session in one checkout (see :mod:`tests.crew.e2e.fake_claude`)."""
 
-    def __init__(self, world: World, name: str, cwd: Path, *, session_id: str | None = None) -> None:
+    def __init__(
+        self, world: World, name: str, cwd: Path, *, session_id: str | None = None, adapter: str = "claude-code"
+    ) -> None:
         self.world = world
         self.name = name
         self.cwd = cwd
+        self.adapter = adapter
         self.session_id = session_id or str(uuid.uuid4())
         self.transcript = world.tmp / "transcripts" / f"{self.session_id}.jsonl"
         self.transcript.parent.mkdir(parents=True, exist_ok=True)
@@ -434,12 +569,13 @@ class FakeAgent:
         self.env_file.parent.mkdir(parents=True, exist_ok=True)
         self.env_file.write_text("")
         self.p = Payloads(self.session_id, cwd, self.transcript)
+        binary, settings = world.agent_binary(adapter)
         self.proc = subprocess.Popen(
             [
-                str(world.claude_bin),
+                str(binary),
                 str(FAKE_CLAUDE),
                 "--settings",
-                str(world.settings_file),
+                str(settings),
                 "--cwd",
                 str(cwd),
                 "--env-file",
@@ -459,7 +595,7 @@ class FakeAgent:
 
     @property
     def key(self) -> str:
-        return session_key("claude-code", self.session_id)
+        return session_key(self.adapter, self.session_id)
 
     def local_session(self) -> dict[str, Any]:
         return read_json(self.world.layout.session_file(self.key)) or {}
@@ -485,9 +621,24 @@ class FakeAgent:
         hooks = self.hook("SessionStart", self.p.session_start(source))
         [h] = hooks
         assert h["exit"] == 0, h
-        assert S.validate_hook_stdout("SessionStart", h["stdout"]) == [], h["stdout"]
-        self.brief = json.loads(h["stdout"])["hookSpecificOutput"]["additionalContext"]
+        if self.adapter == "claude-code":
+            assert S.validate_hook_stdout("SessionStart", h["stdout"]) == [], h["stdout"]
+            self.brief = json.loads(h["stdout"])["hookSpecificOutput"]["additionalContext"]
+        else:  # text-output adapters (Codex) print the brief as plain text
+            self.brief = h["stdout"]
         return self.brief
+
+    def cli(self, *args: str) -> subprocess.CompletedProcess[str]:
+        """``remembra-crew …`` inside this agent's process tree, without hooks (the user's own shell in it)."""
+        return self.run("remembra-crew " + " ".join(shlex.quote(a) for a in args))
+
+    def run(self, command: str) -> subprocess.CompletedProcess[str]:
+        out = self.request("run", command=command)
+        return subprocess.CompletedProcess(command, int(out["exit"]), out["stdout"], out["stderr"])
+
+    def write_raw(self, path: Path, content: str) -> dict[str, Any]:
+        """A write the agent's hooks never see (Codex ``apply_patch``, §8.3): only the read-only fence stops it."""
+        return self.request("write_raw", path=str(path), content=content)
 
     def prompt(self, text: str) -> list[dict[str, Any]]:
         return self.hook("UserPromptSubmit", self.p.prompt(text))
@@ -590,6 +741,7 @@ class World:
         self.agents: list[FakeAgent] = []
         self.feeds: list[CrewFeed] = []
         self.closers: list[Callable[[], None]] = []
+        self.proxy: TcpProxy | None = None
         self.zones = zones
         self.origin = tmp / "remotes" / "yaadbooks-e2e.git"
         self.repo = tmp / "yaadbooks-e2e"
@@ -614,8 +766,16 @@ class World:
     def agent_env(self) -> dict[str, str]:
         env = self.base_env()
         assert self.server is not None
-        env.update({"REMEMBRA_URL": self.server.url, "REMEMBRA_API_KEY": self.server.key})
+        url = self.proxy.url if self.proxy is not None else self.server.url
+        env.update({"REMEMBRA_URL": url, "REMEMBRA_API_KEY": self.server.key})
         return env
+
+    def through_proxy(self) -> TcpProxy:
+        """Route this machine's agents (and so its crewd) through a proxy the test can cut."""
+        assert self.server is not None and not self.agents, "set the proxy before the first agent starts"
+        self.proxy = TcpProxy(self.server.port)
+        self.closers.append(self.proxy.close)
+        return self.proxy
 
     # -- repos -------------------------------------------------------------------------------
     def make_repos(self, worktrees: tuple[str, ...] = ("wt-a", "wt-b", "wt-c")) -> dict[str, Path]:
@@ -650,13 +810,20 @@ class World:
             out[name] = path.resolve()
         return out
 
+    def setup(self, worktrees: tuple[str, ...] = ("wt-a", "wt-b", "wt-c"), *connect_args: str) -> dict[str, Path]:
+        """Repos, server and ``connect``: the world every scenario starts from."""
+        wts = self.make_repos(worktrees)
+        self.start_server()
+        self.connect(*connect_args)
+        return wts
+
     # -- services ----------------------------------------------------------------------------
     def start_server(self) -> ServerProc:
         self.receiver = WebhookReceiver()
         self.server = ServerProc(self.tmp / "server", webhook_forward=self.receiver.url).start()
         return self.server
 
-    def connect(self, *extra: str) -> str:
+    def connect(self, *extra: str, global_settings: bool = True) -> str:
         """``remembra-crew connect --apply --yes`` on a pseudo-terminal, HOME = the temp home."""
         argv = [
             PY,
@@ -686,8 +853,18 @@ class World:
             os.close(slave)
             os.close(master)
         assert res.returncode == 0, res.stdout + res.stderr
-        assert self.settings_file.exists(), res.stdout
+        assert self.settings_file.exists() or not global_settings, res.stdout
         return res.stdout
+
+    def agent_binary(self, adapter: str) -> tuple[Path, Path]:
+        """The symlink an agent of ``adapter`` runs as (crewd finds it by name) and its hooks file."""
+        if adapter == "claude-code":
+            return self.claude_bin, self.settings_file
+        name = {"codex": "codex"}[adapter]
+        link = self.bin / name
+        if not link.exists():
+            link.symlink_to(os.path.realpath(self.claude_bin))
+        return link, self.home / f".{name}" / "hooks.json"
 
     def agent(self, name: str, cwd: Path, **kw: Any) -> FakeAgent:
         a = FakeAgent(self, name, cwd, **kw)
@@ -753,3 +930,12 @@ class World:
             self.server.stop()
         if self.receiver is not None:
             self.receiver.close()
+        # a read-only fence left by a failed run must not break the temp-dir cleanup
+        for root, dirs, files in os.walk(self.tmp):
+            for name in dirs + files:
+                path = os.path.join(root, name)
+                try:
+                    if not os.path.islink(path):
+                        os.chmod(path, os.stat(path).st_mode | stat.S_IWUSR)
+                except OSError:
+                    pass

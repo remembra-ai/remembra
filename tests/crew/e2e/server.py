@@ -66,6 +66,7 @@ from remembra.crew import startup
 from remembra.crew.notify import WebhookSender
 from remembra.inbox.manager import InboxManager
 from remembra.security.audit import AuditLogger
+from remembra.security.sanitizer import ContentSanitizer
 from remembra.services.memory import MemoryService
 from remembra.storage.database import Database
 from remembra.webhooks.manager import ResolvedTarget, resolve_webhook_target
@@ -242,6 +243,7 @@ class TimingMiddleware:
         try:
             await self.app(scope, receive, wrapped_send)
         except Exception as e:
+            status["code"] = status["code"] or 500  # an unhandled error is a 500 to the client
             METRICS.errors.append(f"{route_key(scope)}: {type(e).__name__}: {e}"[:300])
             if "database is locked" in str(e):
                 METRICS.locked.count += 1
@@ -312,7 +314,7 @@ def build_app(workdir: Path, *, webhook_forward: str | None = None) -> FastAPI:
         app.state.role_manager = roles
         app.state.audit_logger = AuditLogger(db)
         app.state.memory_service = await memory_backend(settings, db)
-        app.state.sanitizer = None
+        app.state.sanitizer = ContentSanitizer()
         app.state.pii_detector = None
         app.state.users = UserManager(db, settings.jwt_secret)
         app.state.inbox_manager = inbox
@@ -357,15 +359,16 @@ def build_app(workdir: Path, *, webhook_forward: str | None = None) -> FastAPI:
     async def retention(request: Request) -> dict[str, Any]:
         """A retention pass as if ``?days=N`` had passed; every transaction it opens is timed."""
         from remembra.crew.events import utc_now
-        from remembra.crew.retention import SELF_HOSTED_POLICY, run_retention
+        from remembra.crew.retention import policy_for_tier, run_retention
 
         days = float(request.query_params.get("days") or 400)
+        policy_ = policy_for_tier(request.query_params.get("tier") or "free")  # a plan that prunes raw events
         token = _TAG.set("retention")
         started = time.perf_counter()
         try:
 
             async def policy(_owner: str) -> Any:
-                return SELF_HOSTED_POLICY
+                return policy_
 
             report = await run_retention(app.state.crew_db, resolve_policy=policy, now=utc_now() + timedelta(days=days))
         finally:
@@ -393,7 +396,20 @@ async def seed_owner(app: FastAPI) -> dict[str, str]:
     return {"key": created.key, "jwt": users.create_jwt_token(user.id, OWNER_EMAIL), "user_id": user.id}
 
 
-async def serve(workdir: Path, port: int, webhook_forward: str | None) -> None:
+async def seed_users(app: FastAPI, count: int) -> list[str]:
+    """``count`` more owners, one admin API key each (load: every crew belongs to its own user)."""
+    keys: list[str] = []
+    users: UserManager = app.state.users
+    for i in range(count):
+        user, error = await users.create_user(email=f"load{i}@example.com", password=OWNER_PASSWORD)
+        assert user is not None, error
+        created = await app.state.api_key_manager.create_key(user_id=user.id, name=f"load-{i}")
+        await app.state.role_manager.assign_role(created.id, Role.ADMIN)
+        keys.append(created.key)
+    return keys
+
+
+async def serve(workdir: Path, port: int, webhook_forward: str | None, users: int = 0) -> None:
     app = build_app(workdir, webhook_forward=webhook_forward)
     logging.getLogger().addHandler(METRICS.locked)
     config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", lifespan="on", ws_ping_interval=None)
@@ -407,7 +423,8 @@ async def serve(workdir: Path, port: int, webhook_forward: str | None) -> None:
     instrument_transactions(app.state.crew_db)
     instrument_reaper(app)
     creds = await seed_owner(app)
-    print(json.dumps({"port": port, **creds}), flush=True)
+    extra = await seed_users(app, users) if users else []
+    print(json.dumps({"port": port, **creds, "keys": extra}), flush=True)
     with contextlib.suppress(asyncio.CancelledError):
         await task
 
@@ -417,8 +434,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--workdir", required=True)
     p.add_argument("--port", type=int, required=True)
     p.add_argument("--webhook-forward")
+    p.add_argument("--seed-users", type=int, default=0, help="extra owners with one admin key each (load tests)")
     args = p.parse_args(argv)
-    asyncio.run(serve(Path(args.workdir), args.port, args.webhook_forward))
+    asyncio.run(serve(Path(args.workdir), args.port, args.webhook_forward, args.seed_users))
     return 0
 
 

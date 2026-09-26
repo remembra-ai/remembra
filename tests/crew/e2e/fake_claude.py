@@ -166,6 +166,8 @@ class Agent:
                 "interrupted": False,
                 "isImage": False,
             }
+            if done.returncode != 0:
+                response["exit_code"] = done.returncode
             return response, done.returncode == 0
         return {"error": f"fake_claude cannot run {tool}"}, False
 
@@ -187,9 +189,19 @@ class Agent:
         started = time.perf_counter()
         response, ok = self.execute(str(pre.get("tool_name")), dict(pre.get("tool_input") or {}))
         post = dict(post)
-        post["tool_response"] = response
         post["duration_ms"] = int((time.perf_counter() - started) * 1000)
-        post_hooks = self.run_hooks("PostToolUse" if ok else "PostToolUseFailure", post)
+        if ok:
+            post["tool_response"] = response
+            post_hooks = self.run_hooks("PostToolUse", post)
+        else:
+            # Claude Code 2.1.168 (recorded against the real binary, fixtures/bash_fail): a failed tool, including a
+            # Bash command that exits non-zero, fires PostToolUseFailure with ``error`` and no ``tool_response``.
+            post.pop("tool_response", None)
+            post["hook_event_name"] = "PostToolUseFailure"
+            text = "\n".join(t for t in (response.get("stdout"), response.get("stderr"), response.get("error")) if t)
+            post["error"] = f"Exit code {response.get('exit_code', 1)}\n{text}".rstrip()
+            post["is_interrupt"] = False
+            post_hooks = self.run_hooks("PostToolUseFailure", post)
         return {"denied": False, "ok": ok, "response": response, "hooks": hooks, "post_hooks": post_hooks}
 
 
@@ -211,6 +223,20 @@ def main() -> int:
                 out: dict[str, Any] = {"pid": os.getpid()}
             elif op == "hook":
                 out = {"hooks": agent.run_hooks(str(req["event"]), dict(req.get("payload") or {}))}
+            elif op == "run":  # a command inside this process tree without hooks (a user's own shell)
+                env = dict(os.environ)
+                env.update(agent.env_exports())
+                done = subprocess.run(  # noqa: S603
+                    ["/bin/sh", "-c", str(req["command"])], capture_output=True, cwd=agent.cwd, env=env, timeout=120
+                )
+                out = {"exit": done.returncode, "stdout": done.stdout.decode(), "stderr": done.stderr.decode()}
+            elif op == "write_raw":  # a tool the agent's hooks never see (Codex apply_patch, §8.3)
+                try:
+                    with open(str(req["path"]), "w", encoding="utf-8") as fh:
+                        fh.write(str(req.get("content") or ""))
+                    out = {"written": True}
+                except OSError as e:
+                    out = {"written": False, "errno": e.errno, "exception": type(e).__name__}
             elif op == "tool":
                 out = agent.tool(dict(req["pre"]), dict(req.get("post") or {}))
             elif op == "exit":
