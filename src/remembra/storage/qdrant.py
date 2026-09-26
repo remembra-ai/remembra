@@ -1,6 +1,8 @@
 """Qdrant vector store integration."""
 
 import asyncio
+import re
+from collections.abc import Iterable
 from typing import Any
 
 import structlog
@@ -34,6 +36,15 @@ FIELD_VALID_TO = "valid_to"
 # Fields ``search(must_match=...)`` may filter on server-side. Anything else
 # (notably metadata values, which are encrypted when encryption is on) must
 # be filtered by the caller after retrieval.
+# A rebuild reindex names its new collection ``<base>__rb_<model>_<id>`` (storage/reindex.py).
+REBUILD_MARKER = "__rb_"
+
+
+def rebuild_base(collection: str) -> str:
+    """``memories__rb_openai_ab12`` -> ``memories``: the family a rebuild collection belongs to."""
+    return re.sub(rf"{REBUILD_MARKER}.*$", "", collection)
+
+
 PLAIN_FILTER_FIELDS = frozenset({FIELD_MEMORY_TYPE, FIELD_SCOPE, FIELD_SCOPE_PREFIXES, FIELD_PROJECT_ID})
 
 
@@ -538,40 +549,51 @@ class QdrantStore:
         log.debug("qdrant_deleted", memory_id=memory_id, status=result.status)
         return result.status == qmodels.UpdateStatus.COMPLETED
 
+    async def _delete_user_points(self, client: AsyncQdrantClient, collection: str, user_id: str) -> int:
+        user_filter = qmodels.Filter(must=[qmodels.FieldCondition(key=FIELD_USER_ID, match=qmodels.MatchValue(value=user_id))])
+        count_result = await client.count(collection_name=collection, count_filter=user_filter)
+        await client.delete(collection_name=collection, points_selector=qmodels.FilterSelector(filter=user_filter))
+        return int(count_result.count)
+
     async def delete_by_user(self, user_id: str) -> int:
-        """Delete all memories for a user. Returns count deleted."""
+        """Delete all memories for a user in the active collection. Returns count deleted."""
         client = await self._get_client()
+        count = await self._delete_user_points(client, self.collection_name, user_id)
+        log.info("qdrant_deleted_user_memories", user_id=user_id, count=count)
+        return count
 
-        # First count how many we're deleting
-        count_result = await client.count(
-            collection_name=self.collection_name,
-            count_filter=qmodels.Filter(
-                must=[
-                    qmodels.FieldCondition(
-                        key=FIELD_USER_ID,
-                        match=qmodels.MatchValue(value=user_id),
-                    )
-                ]
-            ),
-        )
+    def collection_family(self) -> tuple[str, ...]:
+        """Base names whose collections hold this app's memories: the configured one and the active one's base.
 
-        # Delete by filter
-        await client.delete(
-            collection_name=self.collection_name,
-            points_selector=qmodels.FilterSelector(
-                filter=qmodels.Filter(
-                    must=[
-                        qmodels.FieldCondition(
-                            key=FIELD_USER_ID,
-                            match=qmodels.MatchValue(value=user_id),
-                        )
-                    ]
-                )
-            ),
-        )
+        A rebuild reindex writes ``<base>__rb_<model>_<id>`` and keeps the
+        collection it replaced for rollback, so the family is ``<base>`` plus
+        every ``<base>__rb_*``.
+        """
+        bases = {rebuild_base(self.settings.qdrant_collection), rebuild_base(self.collection_name)}
+        return tuple(sorted(bases))
 
-        log.info("qdrant_deleted_user_memories", user_id=user_id, count=count_result.count)
-        return count_result.count
+    async def delete_by_user_everywhere(self, user_id: str, also: Iterable[str] = ()) -> int:
+        """Delete a user's points from the active collection AND every rollback copy (account erasure).
+
+        Covers every existing collection of :meth:`collection_family` plus
+        ``also`` (collection names recorded by reindex jobs). Collections of
+        other applications on the same Qdrant server are never touched.
+        Returns the number of points deleted across all of them.
+        """
+        client = await self._get_client()
+        existing = {c.name for c in (await client.get_collections()).collections}
+        bases = self.collection_family()
+        wanted = {self.collection_name, *(n for n in also if n)}
+        wanted |= {n for n in existing if any(n == b or n.startswith(b + REBUILD_MARKER) for b in bases)}
+        total = 0
+        for name in sorted(wanted):
+            if name != self.collection_name and name not in existing:
+                continue
+            count = await self._delete_user_points(client, name, user_id)
+            total += count
+            if count:
+                log.info("qdrant_deleted_user_memories", user_id=user_id, collection=name, count=count)
+        return total
 
     async def delete_by_project(self, user_id: str, project_id: str) -> int:
         """Delete all memories for a user within a specific project. Returns count deleted.

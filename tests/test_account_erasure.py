@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -21,13 +22,15 @@ import pytest
 from qdrant_client import AsyncQdrantClient
 
 from remembra.account.erasure import (
-    ACTOR_COLUMNS,
     ERASURE_RULES,
+    EXEMPT_PREFIXES,
     EXEMPT_TABLES,
     AccountEraser,
+    ExtraDatabase,
+    TableRule,
     erasure_digest,
     is_exempt,
-    is_user_key_column,
+    registry_problems,
 )
 from remembra.config import Settings
 from remembra.models.memory import Memory
@@ -84,22 +87,8 @@ async def table_columns(conn: Any) -> dict[str, list[tuple[str, str, int]]]:
 
 def coverage_problems(schema: dict[str, list[tuple[str, str, int]]]) -> list[str]:
     """Why the erasure registry does not cover ``schema`` (empty = fully covered)."""
-    rules = {rule.table: rule for rule in ERASURE_RULES}
-    problems: list[str] = []
-    for table, columns in schema.items():
-        keyed = {c for c, _t, _n in columns if is_user_key_column(c) or c in ACTOR_COLUMNS}
-        if is_exempt(table):
-            if keyed and not table.startswith("memories_fts_"):
-                problems.append(f"{table}: exempt but has user columns {sorted(keyed)}")
-            continue
-        rule = rules.get(table)
-        if rule is None:
-            problems.append(f"{table}: not in ERASURE_RULES or EXEMPT_TABLES")
-            continue
-        missing = keyed - rule.columns()
-        if missing:
-            problems.append(f"{table}: rule does not match user columns {sorted(missing)}")
-    return problems
+    names = {table: [c for c, _t, _n in columns] for table, columns in schema.items()}
+    return registry_problems(names, ERASURE_RULES, EXEMPT_TABLES, EXEMPT_PREFIXES)
 
 
 def declared_tables() -> set[str]:
@@ -167,7 +156,7 @@ async def test_a_new_table_with_a_user_column_fails_coverage_and_is_still_erased
         )
         await db.conn.commit()
         problems = coverage_problems(await table_columns(db.conn))
-        assert problems == ["feature_x: not in ERASURE_RULES or EXEMPT_TABLES"]
+        assert problems == ["feature_x: no erasure rule and no exemption"]
 
         receipt = await AccountEraser(db, None).erase("u_victim")
         assert receipt.unregistered_tables == ["feature_x"]
@@ -350,7 +339,7 @@ async def test_a_vector_store_failure_erases_nothing_and_the_next_run_retries(tm
     class Down:
         calls = 0
 
-        async def delete_by_user(self, user_id: str) -> int:
+        async def delete_by_user_everywhere(self, user_id: str, also: Any = ()) -> int:
             self.calls += 1
             if self.calls == 1:
                 raise ConnectionError("qdrant unreachable")
@@ -391,3 +380,156 @@ async def test_a_vector_store_failure_erases_nothing_and_the_next_run_retries(tm
 @pytest.mark.parametrize("table", sorted(EXEMPT_TABLES))
 def test_exempt_tables_have_a_reason(table: str) -> None:
     assert len(EXEMPT_TABLES[table]) > 10
+
+
+# ---------------------------------------------------------------------------
+# Rollback collections left by a rebuild reindex
+# ---------------------------------------------------------------------------
+
+
+async def _count_in(client: AsyncQdrantClient, collection: str, user_id: str) -> int:
+    from qdrant_client.http import models as qm
+
+    result = await client.count(
+        collection_name=collection,
+        count_filter=qm.Filter(must=[qm.FieldCondition(key="user_id", match=qm.MatchValue(value=user_id))]),
+    )
+    return int(result.count)
+
+
+async def test_erasure_reaches_the_rollback_collection_a_rebuild_kept(tmp_path) -> None:
+    """A rebuild swaps to a new collection and keeps the old one: both lose the account's points."""
+    from qdrant_client.http import models as qm
+
+    from remembra.core.time import utcnow
+    from remembra.storage.reindex import ReindexManager
+    from tests.test_rel_reindex_reconcile import FakeEmbedder
+
+    db = Database(str(tmp_path / "rb.db"))
+    await db.connect()
+    await db.init_schema()
+    await init_every_schema(db)
+    settings = Settings(openai_api_key="t", embedding_dimensions=4, qdrant_collection="memories")
+    store = QdrantStore(settings)
+    client = AsyncQdrantClient(location=":memory:")
+    store._client = client
+    await store.init_collection(4)
+    try:
+        embedder = FakeEmbedder(4)
+        for owner, n in ((VICTIM, 3), (BYSTANDER, 2)):
+            for i in range(n):
+                memory = Memory(user_id=owner, content=f"{owner} secret {i}", embedding=await embedder.embed(f"{owner}{i}"))
+                await db.save_memory_metadata(
+                    memory_id=memory.id,
+                    user_id=owner,
+                    project_id="default",
+                    content=memory.content,
+                    extracted_facts=[memory.content],
+                    metadata={},
+                    created_at=utcnow(),
+                )
+                await store.upsert(memory)
+
+        manager = ReindexManager(db=db, qdrant=store, embeddings=embedder)
+        await manager.init_schema()
+        job = await manager.start_reindex("openai", "m", "openai", "m2")
+        await manager.wait()
+        assert job.status == "completed", job.error
+        new, old = job.target_collection, "memories"
+        assert store.collection_name == new and new.startswith("memories__rb_")
+        assert await _count_in(client, old, VICTIM) == 3 and await _count_in(client, new, VICTIM) == 3
+
+        # A collection only a reindex job names (the config was renamed since), and another app's collection.
+        for name in ("renamed_src", "other_app"):
+            await client.create_collection(name, vectors_config=qm.VectorParams(size=4, distance=qm.Distance.COSINE))
+            await client.upsert(
+                name, points=[qm.PointStruct(id=str(uuid.uuid4()), vector=[0.1] * 4, payload={"user_id": VICTIM})]
+            )
+        await db.conn.execute("UPDATE reindex_jobs SET source_collection = 'renamed_src' WHERE id = ?", (job.id,))
+        await db.conn.commit()
+
+        receipt = await AccountEraser(db, store).erase(VICTIM)
+
+        for name in (old, new, "renamed_src"):
+            assert await _count_in(client, name, VICTIM) == 0, name
+        for name in (old, new):
+            assert await _count_in(client, name, BYSTANDER) == 2, name
+        assert await _count_in(client, "other_app", VICTIM) == 1  # not this app's collection
+        assert receipt.vectors == 3 + 3 + 1
+        cursor = await db.conn.execute("SELECT COUNT(*) FROM memories WHERE user_id = ?", (VICTIM,))
+        assert (await cursor.fetchone())[0] == 0
+    finally:
+        await store.close()
+        await db.close()
+
+
+async def test_erasure_without_any_rebuild_touches_only_the_active_collection(tmp_path) -> None:
+    db = Database(str(tmp_path / "plain.db"))
+    await db.connect()
+    await db.init_schema()
+    store = await _qdrant(tmp_path)
+    try:
+        await store.upsert(Memory(user_id=VICTIM, content="only copy", embedding=[0.2] * DIM))
+        receipt = await AccountEraser(db, store).erase(VICTIM)  # no reindex_jobs table at all
+        assert receipt.vectors == 1 and await _points(store, VICTIM) == 0
+    finally:
+        await store.close()
+        await db.close()
+
+
+# ---------------------------------------------------------------------------
+# Actor columns and other databases
+# ---------------------------------------------------------------------------
+
+
+async def test_the_safety_net_clears_actor_columns_instead_of_deleting_rows(tmp_path) -> None:
+    db = Database(str(tmp_path / "actor.db"))
+    await db.connect()
+    await db.init_schema()
+    try:
+        await db.conn.executescript(
+            "CREATE TABLE feature_members (group_id TEXT, member_id TEXT, added_by TEXT, owner_user_id TEXT);"
+            "CREATE TABLE feature_log (id TEXT, created_by TEXT NOT NULL);"
+        )
+        await db.conn.executemany(
+            "INSERT INTO feature_members VALUES (?, ?, ?, ?)",
+            [
+                ("g_by", "m_by", VICTIM, BYSTANDER),  # the victim added someone to the bystander's group
+                ("g_v", "m_v", VICTIM, VICTIM),  # the victim's own group
+            ],
+        )
+        await db.conn.execute("INSERT INTO feature_log VALUES ('l1', ?)", (VICTIM,))
+        await db.conn.commit()
+
+        receipt = await AccountEraser(db, None).erase(VICTIM)
+
+        cursor = await db.conn.execute("SELECT group_id, member_id, added_by, owner_user_id FROM feature_members")
+        assert [tuple(r) for r in await cursor.fetchall()] == [("g_by", "m_by", None, BYSTANDER)]
+        cursor = await db.conn.execute("SELECT COUNT(*) FROM feature_log")
+        assert (await cursor.fetchone())[0] == 1  # NOT NULL actor column: left (logged), never a failed erasure
+        assert sorted(receipt.unregistered_tables) == ["feature_log", "feature_members"]
+        assert receipt.rows["feature_members"] == 1
+    finally:
+        await db.close()
+
+
+async def test_an_extra_database_is_only_accepted_with_explicit_rules(tmp_path) -> None:
+    other = Database(str(tmp_path / "other.db"))
+    with pytest.raises(ValueError):
+        ExtraDatabase("crew", other, rules=())
+    with pytest.raises(TypeError):
+        AccountEraser(other, None, extra_databases=[other])  # type: ignore[list-item]
+
+
+def test_registry_problems_reports_uncovered_tables_and_columns() -> None:
+    rules = (TableRule("crews", deletes=("owner_user_id = :uid",)),)
+    schema = {
+        "crews": ["id", "owner_user_id", "created_by"],
+        "crew_votes": ["proposal_id", "voter_id"],
+        "crew_meta": ["key"],
+        "sqlite_sequence": ["name", "seq"],
+    }
+    assert registry_problems(schema, rules, {"crew_meta": "one row of settings"}, ("sqlite_",)) == [
+        "crews: rule does not match user columns ['created_by']",
+        "crew_votes: no erasure rule and no exemption",
+    ]

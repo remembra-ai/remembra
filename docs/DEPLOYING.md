@@ -210,9 +210,28 @@ stop at once) and `users.deleted_at` is set.
 The `account-erasure-loop` task (every `REMEMBRA_ACCOUNT_ERASURE_INTERVAL_SECONDS`,
 default 3600) erases accounts deleted more than `REMEMBRA_ACCOUNT_ERASURE_GRACE_DAYS`
 ago (default 7, max 30; the privacy page and dashboard say 7): Qdrant points by
-`user_id` filter first, then every SQLite row the account owns in one
-transaction (`remembra.account.erasure.ERASURE_RULES`, plus any table found with
-a user-keyed column). It keeps one `account_erased` audit row holding a SHA-256
+`user_id` filter first, in the active collection AND every rollback copy a
+rebuild reindex kept (`<base>__rb_*` collections and any collection a
+`reindex_jobs` row names; other applications' collections are never touched),
+then every SQLite row the account owns in one transaction
+(`remembra.account.erasure.ERASURE_RULES`, plus any table found with a
+user-keyed column; actor columns such as `added_by` are cleared, never used to
+delete).
+
+Crew mode (`crew.db`, feat/crew) is NOT covered yet. Do not pass `crew.db` to
+`AccountEraser` bare (it refuses): it takes
+`ExtraDatabase("crew", crew_db, rules=CREW_ERASURE_RULES, exempt=...)`, and
+feat/crew must first ship those rules with a coverage test that runs
+`registry_problems` over the real `CREW_MIGRATIONS` schema. The rules must
+delete children before parents; reach session-keyed rows (checkpoints, reports,
+batons, footprints, claims) through `crew_sessions.user_id`, message edit
+history through `crew_messages.author_user_id`, and votes through `voter_id`;
+delete the crews the account owns with all their child rows; clear (NULL) actor
+columns (`added_by`, `created_by`, `shared_by`, ...) in other people's crews;
+and deal with the `crew_events` hash chain (record erased seqs in
+`crew_pruned_ranges`, or redact payloads in place). Until then an account that
+used Crew mode keeps its crew rows after erasure, so Crew mode must stay off in
+production. It keeps one `account_erased` audit row holding a SHA-256
 of the account id and row counts, nothing else. To undo a deletion inside the
 grace period: `POST /api/v1/admin/users/{id}/activate?active=true` (the user
 then buys again if they had a plan; the cancelled subscription stays cancelled).

@@ -26,7 +26,7 @@ import httpx
 import pytest
 from qdrant_client import AsyncQdrantClient
 
-from remembra.account.erasure import AccountEraser, erasure_digest
+from remembra.account.erasure import AccountEraser, ExtraDatabase, TableRule, erasure_digest
 from remembra.api.v1 import admin
 from remembra.cloud.email import EmailResult, ResendBackend
 from remembra.config import Settings
@@ -47,6 +47,27 @@ from tests.test_social_login import ROUTERS as SOCIAL_ROUTERS
 from tests.test_social_login import exchange, oauth_settings, providers, sign_in  # noqa: F401 (fixture)
 
 PASSWORD = "Str0ng!Passw0rd"
+
+# A crew-style second database and the explicit rules it must come with: the
+# account's own crews go with every child row; in anyone else's crew only its
+# own rows go (membership, messages and their edit history), and rows it merely
+# acted on (added a member, created a task) stay with the actor cleared.
+_OWN_CREWS = "SELECT id FROM crews WHERE owner_user_id = :uid"
+_OWN_MESSAGES = "SELECT id FROM crew_messages WHERE author_user_id = :uid"
+CREW_TOY_RULES = (
+    TableRule(
+        "crew_message_edits",
+        deletes=(f"crew_id IN ({_OWN_CREWS})", f"message_id IN ({_OWN_MESSAGES})"),
+    ),
+    TableRule("crew_messages", deletes=(f"crew_id IN ({_OWN_CREWS})", "author_user_id = :uid")),
+    TableRule("crew_tasks", deletes=(f"crew_id IN ({_OWN_CREWS})",), nulls=(("created_by", "created_by = :uid"),)),
+    TableRule(
+        "crew_members",
+        deletes=(f"crew_id IN ({_OWN_CREWS})", "user_id = :uid"),
+        nulls=(("added_by", "added_by = :uid"),),
+    ),
+    TableRule("crews", deletes=("owner_user_id = :uid",)),
+)
 
 
 class Outbox:
@@ -176,6 +197,8 @@ async def test_deletion_cancels_billing_and_the_job_erases_every_row_and_vector(
         "CREATE TABLE crews (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL, project_id TEXT);"
         "CREATE TABLE crew_members (crew_id TEXT, user_id TEXT, added_by TEXT, PRIMARY KEY (crew_id, user_id));"
         "CREATE TABLE crew_messages (id TEXT PRIMARY KEY, crew_id TEXT, author_user_id TEXT, body TEXT);"
+        "CREATE TABLE crew_message_edits (message_id TEXT, crew_id TEXT, prev_body TEXT);"
+        "CREATE TABLE crew_tasks (id TEXT PRIMARY KEY, crew_id TEXT, title TEXT, created_by TEXT);"
     )
     store = await _qdrant()
     try:
@@ -187,7 +210,9 @@ async def test_deletion_cancels_billing_and_the_job_erases_every_row_and_vector(
             c.h.app.state.qdrant = store
             db = c.h.db
             await init_every_schema(db)
-            c.h.app.state.account_eraser = AccountEraser(db, store, extra_databases=[crew_db])
+            c.h.app.state.account_eraser = AccountEraser(
+                db, store, extra_databases=[ExtraDatabase("crew", crew_db, rules=CREW_TOY_RULES)]
+            )
 
             victim, vkey = await c.account("victim@example.com")
             bystander, bkey = await c.account("bystander@example.com")
@@ -211,6 +236,20 @@ async def test_deletion_cancels_billing_and_the_job_erases_every_row_and_vector(
                 await crew_db.conn.execute(
                     "INSERT INTO crew_messages VALUES (?, ?, ?, 'hello')", (f"msg_{tag}", f"crew_{tag}", uid)
                 )
+                await crew_db.conn.execute(
+                    "INSERT INTO crew_message_edits VALUES (?, ?, 'first draft')", (f"msg_{tag}", f"crew_{tag}")
+                )
+            # In the bystander's crew the victim added a member, created a task and
+            # wrote (then edited) a message; a bystander message in the victim's crew.
+            await crew_db.conn.execute("INSERT INTO crew_members VALUES ('crew_bystander', 'u_mate', ?)", (victim,))
+            await crew_db.conn.execute("INSERT INTO crew_tasks VALUES ('task_b', 'crew_bystander', 'ship it', ?)", (victim,))
+            await crew_db.conn.execute(
+                "INSERT INTO crew_messages VALUES ('msg_vb', 'crew_bystander', ?, 'victim words')", (victim,)
+            )
+            await crew_db.conn.execute("INSERT INTO crew_message_edits VALUES ('msg_vb', 'crew_bystander', 'victim draft')")
+            await crew_db.conn.execute(
+                "INSERT INTO crew_messages VALUES ('msg_bv', 'crew_victim', ?, 'hi in your crew')", (bystander,)
+            )
             await crew_db.conn.commit()
             teams = TeamManager(db)
             team = await teams.create_team("Victim team", owner_id=victim)
@@ -254,6 +293,8 @@ async def test_deletion_cancels_billing_and_the_job_erases_every_row_and_vector(
             assert [r.digest for r in receipts] == [erasure_digest(victim)]
             assert await _cells(db.conn, [victim, "victim@example.com"]) == {}
             assert await _cells(crew_db.conn, [victim]) == {}
+            cursor = await crew_db.conn.execute("SELECT COUNT(*) FROM crew_message_edits WHERE prev_body LIKE 'victim%'")
+            assert (await cursor.fetchone())[0] == 0  # edit history keyed by message id only
             assert await _points(store, victim) == 0
             # Everyone else keeps everything.
             kept = await _cells(db.conn, [bystander])
@@ -267,7 +308,16 @@ async def test_deletion_cancels_billing_and_the_job_erases_every_row_and_vector(
             assert "team_members" not in kept  # the victim's team, and the bystander's seat in it, are gone
             assert await _points(store, bystander) > 0
             assert await _cells(crew_db.conn, [bystander]) == {"crew_members": 1, "crews": 1, "crew_messages": 1}
-            assert receipts[0].rows["extra:crew_messages"] == 1
+            # The bystander's crew keeps the member and the task the victim added, actor cleared.
+            cursor = await crew_db.conn.execute("SELECT user_id, added_by FROM crew_members WHERE user_id = 'u_mate'")
+            assert [tuple(r) for r in await cursor.fetchall()] == [("u_mate", None)]
+            cursor = await crew_db.conn.execute("SELECT id, created_by FROM crew_tasks")
+            assert [tuple(r) for r in await cursor.fetchall()] == [("task_b", None)]
+            cursor = await crew_db.conn.execute("SELECT message_id FROM crew_message_edits")
+            assert [r[0] for r in await cursor.fetchall()] == ["msg_bystander"]
+            rows = receipts[0].rows
+            assert rows["crew:crew_messages"] == 3 and rows["crew:crew_message_edits"] == 2
+            assert receipts[0].unregistered_tables == []
 
             # A late Paddle event for the erased subscription matches nothing and changes nothing.
             late = await _hook(c, "subscription.canceled", {"id": "sub_v", "customer_id": "ctm_v", "status": "canceled"})

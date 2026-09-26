@@ -5,14 +5,23 @@ Once the grace period (``account_erasure_grace_days``) has passed, the erasure
 job deletes, for that account:
 
 * its Qdrant points (delete-by-filter on the ``user_id`` payload), first, so a
-  failure leaves the SQL rows in place and the next run retries;
+  failure leaves the SQL rows in place and the next run retries. Every
+  collection of the app is swept, not only the active one: a rebuild reindex
+  keeps the collection it replaced for rollback, and that copy holds the same
+  content (``QdrantStore.delete_by_user_everywhere``);
 * every SQLite row it owns, in one transaction, following :data:`ERASURE_RULES`
   (rows keyed by the user id, plus rows that hang off its memories, entities,
   teams, spaces, webhooks, API keys and OAuth grants);
 * any other table found at runtime with a user-keyed column (``user_id``,
   ``*_user_id``, ``owner_id``): the schema is read from ``sqlite_master`` each
   run, so a table added later is erased even before it is registered (and the
-  schema test fails until it is).
+  schema test fails until it is). Actor columns (``invited_by``, ``added_by``,
+  ...) of such a table are set to NULL, never used to delete: a row the account
+  merely acted on belongs to someone else.
+
+Another SQLite database (for example Crew mode's ``crew.db``) is erased only
+through an :class:`ExtraDatabase` that carries its own explicit rules; the
+generic scan alone cannot tell whose row a crew table holds.
 
 What remains is one audit row, ``account_erased``, holding only a SHA-256 of
 the account id and row counts: no email, no content. Support can confirm an
@@ -29,6 +38,7 @@ import asyncio
 import hashlib
 import re
 import secrets
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -190,17 +200,49 @@ def is_exempt(table: str) -> bool:
     return table in EXEMPT_TABLES or table.startswith(EXEMPT_PREFIXES)
 
 
+def registry_problems(
+    schema: Mapping[str, Iterable[str]],
+    rules: tuple[TableRule, ...],
+    exempt: Mapping[str, str],
+    exempt_prefixes: tuple[str, ...] = (),
+) -> list[str]:
+    """Why ``rules`` do not cover ``schema`` ({table: column names}); empty means fully covered.
+
+    Every table must have a rule or an exemption, and every user-keyed or
+    actor column of a ruled table must be matched by its rule. The coverage
+    test of any database the eraser touches (the main one here, ``crew.db`` on
+    its own branch) runs this against the real migrated schema.
+    """
+    by_table = {rule.table: rule for rule in rules}
+    problems: list[str] = []
+    for table, columns in schema.items():
+        keyed = {c for c in columns if is_user_key_column(c) or c in ACTOR_COLUMNS}
+        if table in exempt or table.startswith(exempt_prefixes):
+            if keyed and table in exempt:
+                problems.append(f"{table}: exempt but has user columns {sorted(keyed)}")
+            continue
+        rule = by_table.get(table)
+        if rule is None:
+            problems.append(f"{table}: no erasure rule and no exemption")
+            continue
+        missing = keyed - rule.columns()
+        if missing:
+            problems.append(f"{table}: rule does not match user columns {sorted(missing)}")
+    return problems
+
+
 def _tables_in(clause: str) -> set[str]:
     return set(re.findall(r"FROM (\w+)", clause))
 
 
-async def _schema(conn: Any) -> dict[str, list[str]]:
+async def _schema(conn: Any) -> dict[str, dict[str, bool]]:
+    """{table: {column: NOT NULL}} read from the live database."""
     cursor = await conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
     tables = [str(row[0]) for row in await cursor.fetchall()]
-    out: dict[str, list[str]] = {}
+    out: dict[str, dict[str, bool]] = {}
     for table in tables:
         info = await conn.execute(f'PRAGMA table_info("{table}")')
-        out[table] = [str(row[1]) for row in await info.fetchall()]
+        out[table] = {str(row[1]): bool(row[3]) for row in await info.fetchall()}
     return out
 
 
@@ -218,12 +260,21 @@ class ErasureReceipt:
 
 
 async def erase_rows(
-    conn: Any, user_id: str, email: str | None, *, rules: tuple[TableRule, ...] = ERASURE_RULES
+    conn: Any,
+    user_id: str,
+    email: str | None,
+    *,
+    rules: tuple[TableRule, ...] = ERASURE_RULES,
+    exempt: Mapping[str, str] = EXEMPT_TABLES,
+    exempt_prefixes: tuple[str, ...] = EXEMPT_PREFIXES,
 ) -> tuple[dict[str, int], list[str]]:
     """Delete every row ``user_id`` owns on ``conn`` (caller holds the transaction).
 
-    Returns (rows deleted per table, tables erased by the safety net because no
-    rule names them).
+    Tables no rule names go through the safety net: rows whose user-keyed
+    column is the account are deleted, and actor columns pointing at it are
+    set to NULL (a NOT NULL actor column is left and logged; the coverage test
+    fails until the table has a rule). Returns (rows deleted per table, tables
+    the safety net touched because no rule names them).
     """
     params = {
         "uid": user_id,
@@ -248,32 +299,75 @@ async def erase_rows(
                 counts[rule.table] = counts.get(rule.table, 0) + cursor.rowcount
     unregistered: list[str] = []
     for table, columns in schema.items():
-        if table in ruled or is_exempt(table):
+        if table in ruled or table in exempt or table.startswith(exempt_prefixes):
             continue
-        keys = [c for c in columns if is_user_key_column(c) or c in ACTOR_COLUMNS]
-        if not keys:
+        keys = [c for c in columns if is_user_key_column(c)]
+        actors = [c for c in columns if c in ACTOR_COLUMNS and c not in keys]
+        if not keys and not actors:
             continue
         unregistered.append(table)
-        where = " OR ".join(f'"{c}" = :uid' for c in keys)
-        cursor = await conn.execute(f'DELETE FROM "{table}" WHERE {where}', params)
-        if cursor.rowcount and cursor.rowcount > 0:
-            counts[table] = counts.get(table, 0) + cursor.rowcount
+        if keys:
+            where = " OR ".join(f'"{c}" = :uid' for c in keys)
+            cursor = await conn.execute(f'DELETE FROM "{table}" WHERE {where}', params)
+            if cursor.rowcount and cursor.rowcount > 0:
+                counts[table] = counts.get(table, 0) + cursor.rowcount
+        for column in actors:
+            if columns[column]:
+                log.warning("erasure_actor_column_not_nullable", table=table, column=column)
+                continue
+            await conn.execute(f'UPDATE "{table}" SET "{column}" = NULL WHERE "{column}" = :uid', params)
     if unregistered:
         log.warning("erasure_unregistered_tables", tables=sorted(unregistered))
     return counts, unregistered
 
 
+@dataclass(frozen=True)
+class ExtraDatabase:
+    """Another SQLite database the eraser covers, with its own explicit rules.
+
+    ``db`` has ``.conn`` and ``.transaction()``. ``rules`` must name every
+    table that can hold an account's rows (children before parents), and
+    ``exempt`` every other table with the reason; the database's own coverage
+    test runs :func:`registry_problems` over its real migrated schema. There is
+    no rule-less mode: the generic scan cannot tell a row the account owns from
+    a row it only acted on (``added_by``) in someone else's crew, nor find
+    content keyed by a session or message id.
+    """
+
+    name: str
+    db: Any
+    rules: tuple[TableRule, ...]
+    exempt: Mapping[str, str] = field(default_factory=dict)
+    exempt_prefixes: tuple[str, ...] = ("sqlite_",)
+
+    def __post_init__(self) -> None:
+        if not self.rules:
+            raise ValueError(f"extra database {self.name!r} needs explicit erasure rules")
+
+
 class AccountEraser:
     """Erases accounts: Qdrant points, then every SQLite row, then a content-free receipt.
 
-    ``extra_databases`` are further SQLite databases (``.conn`` + ``.transaction()``)
-    whose user-keyed rows are erased by the schema scan (e.g. a separate crew database).
+    ``extra_databases`` are further SQLite databases, each an :class:`ExtraDatabase`
+    carrying its own erasure rules (e.g. Crew mode's ``crew.db``).
     """
 
-    def __init__(self, db: Any, qdrant: Any | None, *, extra_databases: list[Any] | None = None) -> None:
+    def __init__(self, db: Any, qdrant: Any | None, *, extra_databases: list[ExtraDatabase] | None = None) -> None:
         self._db = db
         self._qdrant = qdrant
         self._extra = [d for d in (extra_databases or []) if d is not None]
+        for extra in self._extra:
+            if not isinstance(extra, ExtraDatabase):
+                raise TypeError("extra_databases takes ExtraDatabase entries (a database plus its erasure rules)")
+
+    async def _reindex_collections(self) -> set[str]:
+        """Collections recorded by reindex jobs (rollback copies may have been renamed by config since)."""
+        try:
+            cursor = await self._db.conn.execute("SELECT source_collection, target_collection FROM reindex_jobs")
+            rows = await cursor.fetchall()
+        except Exception:  # no reindex has ever run on this database
+            return set()
+        return {str(name) for row in rows for name in row if name}
 
     async def _email_of(self, user_id: str) -> str | None:
         for query in ("SELECT email FROM users WHERE id = ?", "SELECT email FROM cloud_tenants WHERE user_id = ?"):
@@ -296,13 +390,21 @@ class AccountEraser:
         email = await self._email_of(user_id)
         receipt = ErasureReceipt(user_id=user_id, digest=erasure_digest(user_id))
         if self._qdrant is not None:
-            receipt.vectors = int(await self._qdrant.delete_by_user(user_id))
+            also = await self._reindex_collections()
+            receipt.vectors = int(await self._qdrant.delete_by_user_everywhere(user_id, also=also))
         for extra in self._extra:
-            async with extra.transaction():
-                rows, unregistered = await erase_rows(extra.conn, user_id, email, rules=())
+            async with extra.db.transaction():
+                rows, unregistered = await erase_rows(
+                    extra.db.conn,
+                    user_id,
+                    email,
+                    rules=extra.rules,
+                    exempt=extra.exempt,
+                    exempt_prefixes=extra.exempt_prefixes,
+                )
             for table, n in rows.items():
-                receipt.rows[f"extra:{table}"] = n
-            receipt.unregistered_tables.extend(f"extra:{t}" for t in unregistered if rows.get(t))
+                receipt.rows[f"{extra.name}:{table}"] = n
+            receipt.unregistered_tables.extend(f"{extra.name}:{t}" for t in unregistered)
         async with self._db.transaction():
             rows, unregistered = await erase_rows(self._db.conn, user_id, email)
             receipt.rows.update(rows)
