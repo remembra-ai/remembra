@@ -5,10 +5,27 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.16.1] - Unreleased
+
+Relay fixes, and three more agents verified. Every git repository now gets its own project, the brief skips
+sessions that did nothing, Codex automations and sub-agents stay out of the trail, a hook that another agent
+runs is filed under that agent, and the Gemini CLI, Qwen Code and Kimi Code hooks were run against the real
+tools. The public pages now say only what the code does.
+
+**Upgrading.** Run `remembra-relay connect --apply` once after upgrading. For the agents it finds, it writes
+the Gemini CLI, Qwen Code and Kimi Code hooks (Kimi Code's go to `~/.kimi-code/config.toml`; the block an
+earlier release wrote to `~/.kimi/config.toml` is removed). If 0.16.0 put several of your repositories in one
+project, `remembra-relay projects split` shows how it would separate them; nothing changes until you add
+`--apply`.
 
 ### Added
 
+- **Verified hooks for Gemini CLI, Qwen Code and Kimi Code.** Each was run against the real tool (Gemini CLI
+  0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1) with a temporary home and a local stand-in for the model: the
+  hooks `connect` writes put the brief in the model's request and saved the handoff. The payloads are recorded
+  under `tests/fixtures/relay/`, and `REMEMBRA_RELAY_LIVE=1` runs the three live tests again. A plain
+  `remembra-relay connect --apply`, the last step of the one-line install, now writes their hooks. Cursor is
+  the one adapter left unverified.
 - **`remembra-relay projects split`** gives each repository its own project again when 0.16.0 put them all in
   one (see Fixed). It is a dry run by default: it lists every repository bound to your configured project,
   the project each would get, every handoff that would move with it and the evidence, and everything that
@@ -28,28 +45,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Relay: Gemini CLI, Qwen Code and Kimi Code hooks are verified.** Each was run against the real tool
-  (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1) with a temp home and a local stand-in for the model:
-  the hooks `connect` writes put the brief in the model's request and posted the handoff. The payloads are
-  recorded under `tests/fixtures/relay/`, and `REMEMBRA_RELAY_LIVE=1` reruns the three live tests. A plain
-  `remembra-relay connect --apply`, the last step of the one-line install, now writes their hooks; Cursor is
-  the one adapter left unverified.
 - **Gemini CLI:** a BeforeAgent hook (`brief --once`) gives a session started by `/clear` its brief with the
   first prompt (Gemini drops that start's output), and `connect` says that Gemini runs hooks only in trusted
-  folders. Gemini CLI is detected by its binary or `~/.gemini/settings.json`, not the `~/.gemini` directory
-  Antigravity shares, and `connect` follows `GEMINI_CLI_HOME`.
+  folders. Gemini CLI is detected by its binary or `~/.gemini/settings.json`, not by the `~/.gemini` directory
+  it shares with Antigravity, and `connect` follows `GEMINI_CLI_HOME`.
 - **Qwen Code:** a turn that stops on a rate limit or billing error (StopFailure) and `/compress` (PreCompact)
   also write the handoff, as for Claude Code. One-shot `qwen -p` runs write none: Qwen never ends them.
 - **Kimi Code:** the adapter targeted the archived Python kimi-cli (`~/.kimi/config.toml`), which no longer
   runs sessions, and put the brief on SessionStart, whose output Kimi throws away. It now writes
   `~/.kimi-code/config.toml` (or `$KIMI_CODE_HOME`): the brief comes with the first prompt of a session
-  (UserPromptSubmit, `brief --once`) and the close on SessionEnd, with timeouts. Relay hooks `kimi migrate`
+  (UserPromptSubmit, `brief --once`) and the close on SessionEnd, with timeouts. Relay hooks that `kimi migrate`
   copied without their markers are removed, and a file Kimi would reject is never written. The dashboard calls
   it Kimi Code.
 
-### Fixed
+### Fixed (Relay)
 
-- **Relay: every repository gets its own project, even with `REMEMBRA_PROJECT` set.** In 0.16.0 a configured
+- **Every repository gets its own project, even with `REMEMBRA_PROJECT` set.** In 0.16.0 a configured
   project (for example an old `REMEMBRA_PROJECT=clawdbot` namespace in an MCP config) named every repository
   the server had not seen, so all of them shared one trail and a brief in one repository handed over another
   repository's work. Now a git repository always gets its own project; the configured project names only
@@ -61,7 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repository (it records nothing). When git does not answer in time, the client says it does not know
   instead of "not a repository", sends no configured project, and still sends the close (`repo` in
   `incomplete`). Use `projects split` (above) for repositories already bound together.
-- **Relay brief: "Last session" is the last session that did something.** A handoff that recorded nothing
+- **The brief's "Last session" is the last session that did something.** A handoff that recorded nothing
   (no commits, changes, tests, errors, todos, next step, summary or notes: an idle or automated session) no
   longer buries the one before it; the brief skips it and says how many it skipped. "Recent" lists only this
   project's handoffs and checkpoints (at most five), never the namespace's other memories, which an agent
@@ -72,20 +83,72 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and every Recent handoff pass the same trust policy as the handoff text, in the text and the JSON, and the
   JSON no longer returns the location's fingerprint keys (a path key is scrubbed like the path under the
   account's PII policy). Recorded text stays inside the untrusted-data block.
-- **Relay: an empty session leaves no handoff.** `close` sends nothing for a session that recorded nothing
-  and writes one line to `relay.log`; `close --summary …` by hand still sends. A close that stopped on a
-  usage or billing limit, or was written before context compaction, is sent and shown ("stopped:
-  rate_limit"). A later empty close of a session that already sent one is sent, so it retires the earlier
-  handoff instead of leaving it as the session's last word.
-- **Relay: Codex automation runs and sub-agents no longer fill the trail.** Codex Desktop runs the relay hooks
-  for every run of a scheduled automation that starts its own thread (dozens a day), and sub-agent threads run
+- **An empty session leaves no handoff.** `close` sends nothing for a session that recorded nothing and
+  writes one line to `relay.log`; `close --summary …` by hand still sends. A close that stopped on a usage or
+  billing limit, or was written before context compaction, is sent and shown ("stopped: rate_limit"). A later
+  empty close of a session that already sent one is sent, so it retires the earlier handoff instead of leaving
+  it as the session's last word.
+- **Codex automation runs and sub-agents no longer fill the trail.** Codex Desktop runs the relay hooks for
+  every run of a scheduled automation that starts its own thread (dozens a day), and sub-agent threads run
   them too, so each one got a project brief in its prompt and left a handoff that buried the sessions people
   work in, and the next brief pointed at an automation run. The relay now reads the kind of thread from the
   first line of the Codex session file: for an automation run in its own thread or a sub-agent, `brief` and
-  `close` do nothing (nothing sent, nothing queued) and write one line to `relay.log`. Threads you start, voice
-  chats included, and `remembra-relay close` typed by hand work as before. A heartbeat automation, which posts
-  into a thread that already exists, is not skipped: its turns share that thread's brief and handoff. Set
-  `REMEMBRA_RELAY_INCLUDE_AUTOMATIONS=1` to keep automation handoffs.
+  `close` do nothing (nothing sent, nothing queued) and write one line to `relay.log`. This also holds when
+  Codex runs a copy of Claude Code's hooks. Threads you start, voice chats included, and `remembra-relay close`
+  typed by hand work as before. A heartbeat automation, which posts into a thread that already exists, is not
+  skipped: its turns share that thread's brief and handoff. Set `REMEMBRA_RELAY_INCLUDE_AUTOMATIONS=1` to keep
+  automation handoffs.
+- **Other agents' sessions are no longer filed as Claude Code.** Grok Build, Cursor (IDE and cursor-agent),
+  Devin and Continue run the Claude Code hooks in `~/.claude/settings.json`, and `gemini hooks migrate`,
+  `kimi migrate` and Grok's `/import-claude` copy them. Each such session wrote a `claude-code` handoff (a
+  Cursor one under a project named after `~/.claude`), and a Grok session was read as a Claude transcript. The
+  relay now names the agent running a hook from fields or variables only that agent sets: the brief does
+  nothing there, and the close is saved under that agent, or not at all when the relay has no adapter for it
+  yet. A session with its transcript under `~/.claude/projects` is always Claude Code's. `connect` points out
+  relay hooks an import copied into another agent's config.
+- **One handoff per session end.** Gemini CLI fires SessionEnd two or three times on exit, the last with empty
+  stdin; a repeat of the same close within a minute is dropped, and Gemini's empty one too. Claude Code's
+  StopFailure followed by its SessionEnd still writes both (the later one replaces the first). A skipped
+  automation or sub-agent is never counted as a repeat, and a repeat is dropped before the empty-session check
+  runs.
+- **`remembra-relay connect`** exits 0 when every write succeeded and warns about a missing key once, at the
+  end (it exited 1 and warned twice), and says "server: not configured" instead of `http://localhost:8787`
+  when nothing is set up. It reads configs with comments or a byte order mark (Cursor, Gemini CLI and Qwen
+  Code accept them; it said "cannot read" and exited 1), follows `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
+  `QWEN_HOME`, and keeps hooks an earlier `--include-unverified` run wrote on the current relay path. For an
+  agent named with `--agent` that is not installed it writes nothing without `--force`, since the directory
+  it created looked like an install; `disconnect --apply` removes the directories `connect` created. Cursor's
+  `close` prints `{}` (Cursor logs empty output as a failed hook), `hook-json` is labelled with the hook's own
+  event, and `brief --format additional-context-json` prints `{"additionalContext": ...}`.
+- **Found while reviewing the above:**
+  - Gemini CLI: a session resumed with `--resume` got no brief (Gemini restores the conversation without
+    SessionStart's context, and the relay took the session for one that had it); it gets it again now, and
+    nothing is fetched when the brief came with a prompt, which Gemini does restore. The interactive UI does
+    not wait for SessionStart: a first prompt typed while the brief was slow went without it, and
+    `gemini -i "…"` got it twice. The first hook to finish gives it, once.
+  - A Kimi Code (or cursor-agent) session resumed and ended again within a minute lost its second handoff:
+    with no transcript to measure, a repeat is now only a copy of the hook arriving within a few seconds.
+  - Cursor running Claude Code's PreCompact hook saved an ordinary end; it is now saved as the session still
+    open, before a compaction.
+  - Kimi Code: `connect` and `disconnect` deleted the tables after a relay hook `kimi migrate` had copied, when
+    their keys held `:` or `/` (`[providers."managed:kimi-code"]`, `[models."kimi-code/k3"]`), so Kimi lost its
+    providers and models. Tables are now found the way TOML defines them, and nothing is written unless the
+    only change is the relay's own `[[hooks]]`. An install path with an emoji (or DEL) no longer makes the
+    TOML invalid. The archived kimi-cli's `kimi` no longer counts as Kimi Code being installed.
+  - A config file that is a symbolic link (into a dotfiles repository) was replaced by a regular file; it is
+    written through now, and never unlinked.
+  - With `CLAUDE_CONFIG_DIR` (or `CODEX_HOME`, `QWEN_HOME`, `KIMI_CODE_HOME`, `GEMINI_CLI_HOME`) set,
+    `disconnect` missed the hooks an earlier release had written to the default place; it removes them, and
+    `connect` keeps them current.
+  - `connect --agent gemini` wrote `~/.gemini/settings.json` into Antigravity's `~/.gemini` without `--force`;
+    an agent that is not detected is written only with `--force`. An unverified adapter that `connect` skips
+    anyway no longer fails the run when its config cannot be read.
+  - Recorded text could close the brief's untrusted-data block in Gemini CLI and Qwen Code by writing the close
+    tag as `&lt;/remembra-data&gt;`, which is what those agents turn the real tag into. The server and the relay
+    now neutralize the tag in that form (and its other character-reference spellings) too.
+
+### Fixed (accounts, privacy and the site)
+
 - **Sign in with Google or GitHub on older accounts.** An account whose email was never verified (accounts
   made before email verification existed) is now linked when Google, or GitHub with a verified primary email,
   confirms the address: the email becomes verified and the user is signed in. A one-time account check then
@@ -101,18 +164,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PII redaction** no longer replaces the project number of a Google OAuth client id (and UUIDs or
   similar machine identifiers) with `[REDACTED_BANK_ACCOUNT]`. Account numbers written with a suffix
   (`123456789012-checking`, `...-SAV`, `ACCT-...-01`) are still redacted.
-- **Public copy says what the code does.** The Founding 100 price holds while the subscription stays active,
-  and 14 days after it ends (as the Terms say), with no lifetime promise. Pages no longer claim that every agent
-  or tool is covered: the session hooks are verified for Claude Code and Codex (a prerelease), and any MCP agent
-  can call `session_brief` and `close_session`. Transcript facts are read from Codex rollouts as well as Claude
-  Code transcripts, and the pages say so. The Claude and ChatGPT connector and the hosted remote MCP are marked
-  as coming (the connector is off at api.remembra.dev). The Team plan lists what the teams API enforces. The
-  PyPI summary describes Remembra Relay, and the MCP Registry text names the agent its handoffs are recorded
-  under. The DPA page says a deleted account is erased automatically after 7 days (backups age out), the plans
-  page says a new yearly bank unlocks after 14 days, and the durability page no longer promises atomic writes
-  across SQLite, Qdrant and the keyword index. The SDK and REST guides show the delete calls the client and
-  server have, the MCP pages count the 21 tools the server registers, and reconstructed blog examples say so.
-  `tests/test_site_truth_polish.py` scans every public file for these claims.
 - **The install line connects.** On remembra.dev, the README and the docs, the copyable install ended in a bare
   `remembra-relay connect`, a dry run that writes nothing, so a new user following it stayed unconnected. Every
   block now asks for the free key first and ends in `remembra-relay connect --apply`; the dashboard's empty
@@ -121,53 +172,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **docs.remembra.dev no longer publishes repository notes** (the cloud runbook, an old self-host note, bug
   write-ups, a feedback transcript and the competitor scan): `mkdocs.yml` excludes them and a test keeps the
   list. The feedback transcript left the public repository.
-- **Relay: other agents' sessions are no longer filed as Claude Code.** Grok Build, Cursor (IDE and
-  cursor-agent), Devin and Continue run the Claude Code hooks in `~/.claude/settings.json`, and
-  `gemini hooks migrate`, `kimi migrate` and Grok's `/import-claude` copy them. Each such session wrote a
-  `claude-code` handoff (a Cursor one under a project named after `~/.claude`), and a Grok session was read as
-  a Claude transcript. The relay now names the agent running a hook from fields or variables only that agent
-  sets: the brief does nothing there, and the close is saved under that agent, or not at all when the relay
-  has no adapter for it yet. A session with its transcript under `~/.claude/projects` is always Claude Code's.
-  `connect` points out relay hooks an import copied into another agent's config.
-- **Relay: one handoff per session end.** Gemini CLI fires SessionEnd two or three times on exit, the last
-  with empty stdin; a repeat of the same close within a minute is dropped, and Gemini's empty one too.
-  Claude Code's StopFailure followed by its SessionEnd still writes both (the later supersedes).
-- **Relay `connect`:** exits 0 when every write succeeded and warns about a missing key once, at the end
-  (it exited 1 and warned twice), and says "server: not configured" instead of `http://localhost:8787`
-  when nothing is set up. It reads configs with comments or a byte order mark (Cursor, Gemini CLI and Qwen
-  Code accept them; it said "cannot read" and exited 1), follows `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
-  `QWEN_HOME`, and keeps hooks an earlier `--include-unverified` run wrote on the current relay path. For an
-  agent named with `--agent` that is not installed it writes nothing without `--force`, since the directory
-  it created looked like an install; `disconnect --apply` removes the directories `connect` created. Cursor's
-  `close` prints `{}` (Cursor logs empty output as a failed hook), `hook-json` is labelled with the hook's own
-  event, and `brief --format additional-context-json` prints `{"additionalContext": ...}`.
-- **Relay, found in review of the above:**
-  - Gemini CLI: a session resumed with `--resume` got no brief (Gemini restores the conversation without
-    SessionStart's context, and the relay took the session for one that had it); it gets it again now, and
-    nothing is fetched when the brief came with a prompt, which Gemini does restore. The interactive UI does
-    not wait for SessionStart: a first prompt typed while the brief was slow went without it, and
-    `gemini -i "…"` got it twice. The first hook to finish gives it, once.
-  - A Kimi Code (or cursor-agent) session resumed and ended again within a minute lost its second handoff:
-    with no transcript to measure, a repeat is now only a copy of the hook arriving within a few seconds.
-  - Cursor running Claude Code's PreCompact hook saved an ordinary end; it is now saved as the session still
-    open, before a compaction.
-  - Kimi Code: `connect` and `disconnect` deleted the tables after a relay hook `kimi migrate` had copied, when
-    their keys held `:` or `/` (`[providers."managed:kimi-code"]`, `[models."kimi-code/k3"]`), so Kimi lost its
-    providers and models. Tables are now found the way TOML defines them, and nothing is written unless the
-    only change is the relay's own `[[hooks]]`. An install path with an emoji (or DEL) no longer makes the
-    TOML invalid. The archived kimi-cli's `kimi` no longer counts as Kimi Code being installed, and the block an
-    earlier release wrote to its `~/.kimi/config.toml` is removed.
-  - A config file that is a symbolic link (into a dotfiles repository) was replaced by a regular file; it is
-    written through now, and never unlinked.
-  - With `CLAUDE_CONFIG_DIR` (or `CODEX_HOME`, `QWEN_HOME`, `KIMI_CODE_HOME`, `GEMINI_CLI_HOME`) set,
-    `disconnect` missed the hooks an earlier release had written to the default place; it removes them, and
-    `connect` keeps them current.
-  - `connect --agent gemini` wrote `~/.gemini/settings.json` into Antigravity's `~/.gemini` without `--force`;
-    an agent that is not detected is written only with `--force`. An unverified adapter `connect` skips anyway
-    no longer fails the run when its config cannot be read.
-  - Recorded text could close the brief's untrusted-data block in Gemini CLI and Qwen Code by writing the close
-    tag as `&lt;/remembra-data&gt;`, which is what those agents turn the real tag into. The server and the relay
-    now neutralize the tag in that form (and its other character-reference spellings) too.
+- **Public copy says what the code does.** The Founding 100 price holds while the subscription stays active,
+  and 14 days after it ends (as the Terms say), with no lifetime promise. Pages no longer claim that every agent
+  or tool is covered: the session hooks are verified for Claude Code, Codex (a prerelease), Gemini CLI, Qwen
+  Code and Kimi Code, Cursor's are not yet, and any MCP agent can call `session_brief` and `close_session`.
+  Transcript facts are read from Codex rollouts as well as Claude Code transcripts, and the pages say so. The
+  Claude and ChatGPT connector and the hosted remote MCP are marked as coming (the connector is off at
+  api.remembra.dev). The Team plan lists what the teams API enforces (one pooled allowance, not a shared
+  memory pool), and the dashboard's team role labels say what each role can do today. The PyPI summary
+  describes Remembra Relay, and the MCP Registry text names the agent its handoffs are recorded under. The DPA
+  page says a deleted account is erased automatically after 7 days (backups age out), the plans page says a
+  new yearly bank unlocks after 14 days, and the durability page no longer promises atomic writes across
+  SQLite, Qdrant and the keyword index. The SDK and REST guides show the delete calls the client and server
+  have, the MCP pages count the 21 tools the server registers, the site's changelog states the 0.16.1 project
+  rule, and reconstructed blog examples say so. `tests/test_site_truth_polish.py` scans every public file for
+  these claims.
 
 ## [0.16.0] - 2026-09-26 - Remembra Relay
 
