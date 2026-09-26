@@ -28,6 +28,7 @@ ids and times of a handoff served to a different agent, never its content.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import uuid
 from collections.abc import Callable
@@ -379,6 +380,13 @@ class SplitRequest(BaseModel):
     project: str = Field(..., min_length=1, max_length=128, description="The project several repositories share")
     apply: bool = Field(default=False, description="Carry it out (default: dry run, nothing changes)")
     checkouts: list[CheckoutIn] = Field(default_factory=list, max_length=200)
+    restricted_keys_lose_access: bool = Field(
+        default=False,
+        description=(
+            "Confirm that API keys and connections restricted to the project (listed in restricted_credentials) "
+            "lose the split repositories; without it, applying such a split is refused (409)"
+        ),
+    )
 
 
 class UndoSplitRequest(BaseModel):
@@ -481,7 +489,11 @@ async def split_project(request: Request, body: SplitRequest, current_user: Curr
     moves only what is left and matched. Nothing is deleted;
     ``POST /projects/split/undo`` reverses a batch. Only the caller's own
     bindings and memories are read or changed; project-restricted keys are
-    refused."""
+    refused. ``restricted_credentials`` lists the account's API keys and
+    connections restricted to ``project``, which would be refused in the split
+    repositories: applying then needs ``restricted_keys_lose_access`` (else
+    409, nothing changes). Recorded text in the result (paths, names,
+    headlines, branches) passes the brief's trust policy."""
     _split_allowed(current_user, write=body.apply)
     project = normalize_project_id(body.project)
     checkouts = relay_split.checkouts_from([c.model_dump() for c in body.checkouts])
@@ -491,7 +503,20 @@ async def split_project(request: Request, body: SplitRequest, current_user: Curr
         result.pop("_repos", None)
         return result
     memory_service = getattr(request.app.state, "memory_service", None)
-    result = await relay_split.apply(db, current_user.user_id, project, checkouts, qdrant=getattr(memory_service, "qdrant", None))
+    try:
+        # No close of this account runs meanwhile: one resolved before the split would store its
+        # handoff in the old project after it (see relay_split.UserGate).
+        async with relay_split.user_gate(current_user.user_id).exclusive():
+            result = await relay_split.apply(
+                db,
+                current_user.user_id,
+                project,
+                checkouts,
+                qdrant=getattr(memory_service, "qdrant", None),
+                restricted_keys_lose_access=body.restricted_keys_lose_access,
+            )
+    except relay_split.SplitNeedsConfirmation as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
     if result["applied"]:
         await _audit(request, current_user, AuditAction.RELAY_PROJECT_SPLIT, result["batch_id"])
     return result
@@ -505,14 +530,16 @@ async def undo_split(request: Request, body: UndoSplitRequest, current_user: Cur
     listed and left alone. ``apply`` carries it out (one audit event)."""
     _split_allowed(current_user, write=body.apply)
     memory_service = getattr(request.app.state, "memory_service", None)
+    gate = relay_split.user_gate(current_user.user_id).exclusive() if body.apply else contextlib.nullcontext()
     try:
-        result = await relay_split.undo(
-            request.app.state.db,
-            current_user.user_id,
-            (body.batch_id or "").strip() or None,
-            apply_it=body.apply,
-            qdrant=getattr(memory_service, "qdrant", None),
-        )
+        async with gate:
+            result = await relay_split.undo(
+                request.app.state.db,
+                current_user.user_id,
+                (body.batch_id or "").strip() or None,
+                apply_it=body.apply,
+                qdrant=getattr(memory_service, "qdrant", None),
+            )
     except relay_split.SplitRefused as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
     if result["applied"]:
@@ -614,40 +641,43 @@ async def close_session(
     elif not _SESSION_RE.match(session_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid session_id characters")
 
-    resolution: dict[str, Any] | None = None
-    requested: str | None
-    location: dict[str, Any] | None = None
-    if isinstance(body.project, ResolveRequest):
-        resolution = await _resolve(
-            request,
-            current_user,
-            body.project,
-            body.project.hint_project,
-            body.project.bind,
-            create=True,
-            hint_scope=body.project.hint_scope,
-        )
-        requested = resolution["project_id"]
-        location = location_record(body.project.locator(), body.project.git_repo)
-    else:
-        raw = body.project if isinstance(body.project, str) else body.project_id
-        requested = normalize_project_id(raw) if raw and raw.strip() else None
-    project = resolve_project_access(current_user, requested) or "default"
+    # Resolve and store under the account's gate: a `projects split` waits for this close, so it never
+    # re-files the session's earlier handoff while this one is stored in the old project.
+    async with relay_split.user_gate(current_user.user_id).shared():
+        resolution: dict[str, Any] | None = None
+        requested: str | None
+        location: dict[str, Any] | None = None
+        if isinstance(body.project, ResolveRequest):
+            resolution = await _resolve(
+                request,
+                current_user,
+                body.project,
+                body.project.hint_project,
+                body.project.bind,
+                create=True,
+                hint_scope=body.project.hint_scope,
+            )
+            requested = resolution["project_id"]
+            location = location_record(body.project.locator(), body.project.git_repo)
+        else:
+            raw = body.project if isinstance(body.project, str) else body.project_id
+            requested = normalize_project_id(raw) if raw and raw.strip() else None
+        project = resolve_project_access(current_user, requested) or "default"
 
-    result = await _service(request).close_session(
-        user_id=current_user.user_id,
-        project_id=project,
-        agent_id=agent,
-        session_id=session_id,
-        facts=body.facts.model_dump(),
-        summary=body.summary,
-        end_reason=body.end_reason,
-        agent_verified=verified,
-        screen=lambda text: screen_text(request, text, apply_pii=False),
-        scrub=pii_scrubber(request),
-        closed_at=body.closed_at,
-        location=location,
-    )
+        result = await _service(request).close_session(
+            user_id=current_user.user_id,
+            project_id=project,
+            agent_id=agent,
+            session_id=session_id,
+            facts=body.facts.model_dump(),
+            summary=body.summary,
+            end_reason=body.end_reason,
+            agent_verified=verified,
+            screen=lambda text: screen_text(request, text, apply_pii=False),
+            scrub=pii_scrubber(request),
+            closed_at=body.closed_at,
+            location=location,
+        )
     if result["changed"]:
         await record_relay_usage(request, current_user.user_id)
     return {

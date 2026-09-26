@@ -797,6 +797,7 @@ def _locator(
     locator: dict[str, Any] = {"git_remote": git_remote, "root_path": root_path, "root_commit": root_commit}
     checkout: dict[str, Any] | None = None
     git_repo: bool | None = True if (git_remote or root_commit) else None
+    timed_out = False  # git was asked and did not answer in time: repository or not is unknown
     if root_path and not _is_remote_transport():
         from pathlib import Path
 
@@ -814,15 +815,18 @@ def _locator(
             checkout = {"branch": info.branch, "head_commit": info.head_commit}
             git_repo = True
         elif info is not None and git_repo is None:
-            git_repo = False
+            timed_out = info.unknown
+            git_repo = None if timed_out else False
     if locator.get("root_path"):
         locator["host"] = _hostname()
-    # Same rule as the hooks: a git repository gets its own project; the configured
-    # project names only a folder, unless REMEMBRA_RELAY_PROJECT keeps one namespace.
+    # Same rule as the hooks: a git repository gets its own project; the configured project
+    # names only a folder (the server applies it to nothing else, except for a key restricted
+    # to it), unless REMEMBRA_RELAY_PROJECT keeps one namespace. Not sent when git timed out:
+    # the directory may be a repository, which the configured project must not name.
     single = _single_namespace()
     hint = single or _configured_hint()
     locator["hint_scope"] = "all" if single else "folders"
-    if hint and (single or git_repo is not True):
+    if hint and (single or not timed_out):
         locator["hint_project"] = hint
     locator["git_repo"] = git_repo
     return {k: v for k, v in locator.items() if v is not None and v != ""}, checkout

@@ -36,6 +36,7 @@ from remembra.relay.handoff import (
     handoff_location,
     handoff_stored_trust,
     handoff_verdict,
+    location_texts,
     police_brief,
     redact,
     render_brief,
@@ -132,6 +133,18 @@ class BindingNotAllowed(Exception):
         )
 
 
+def _hashed_id(base: str, primary: Fingerprint) -> str:
+    """``<base>-<hash>``: the id a new location gets when ``base`` is taken."""
+    return f"{base[:57]}-{hashlib.sha256(primary.key.encode()).hexdigest()[:6]}"
+
+
+def _folder_ids(path: Fingerprint, root_path: str | None) -> set[str]:
+    """The ids a folder at ``root_path`` gets as a project of its own (see ``_derive_new_id``)."""
+    tail = (root_path or "").strip().replace("\\", "/").rstrip("/").rsplit("/", 1)[-1]
+    base = slugify_project(tail or None)
+    return {base, _hashed_id(base, path)}
+
+
 def _repo_path(git_value: str) -> str:
     """``owner/repo`` part of a normalized ``host/owner/repo`` remote."""
     return git_value.split("/", 1)[1] if "/" in git_value else git_value
@@ -205,11 +218,16 @@ class ProjectRegistry:
         base = slugify_project(locator.display_name())
         if not await self._project_known(user_id, base):
             return base
-        suffix = hashlib.sha256(primary.key.encode()).hexdigest()[:6]
-        return f"{base[:57]}-{suffix}"
+        return _hashed_id(base, primary)
 
     async def _adopt(
-        self, user_id: str, primary: Fingerprint, by_kind: dict[str, Fingerprint], known: dict[str, str]
+        self,
+        user_id: str,
+        primary: Fingerprint,
+        by_kind: dict[str, Fingerprint],
+        known: dict[str, str],
+        own_project: bool = False,
+        root_path: str | None = None,
     ) -> str | None:
         """An existing project a weaker fingerprint already names, when it is safe to join.
 
@@ -219,7 +237,12 @@ class ProjectRegistry:
           (same root, different owner) does not join.
         * path known, remote/root new: join when that project has no remote and
           no root commit yet (``git init`` in a folder seen before, or the
-          first commit of an empty repository).
+          first commit of an empty repository). With ``own_project`` (a 0.16.1+
+          client in a repository: a repository gets its own project) only the
+          folder's own project is joined: the id the folder got for itself
+          (its name, or ``<name>-<hash>``) with this path as its only binding.
+          The configured project's folder namespace is not, so the new
+          repository gets its own project.
         """
         root = by_kind.get(KIND_ROOT)
         if primary.kind == KIND_GIT and root is not None and root.key in known:
@@ -232,7 +255,8 @@ class ProjectRegistry:
             candidate = known[path.key]
             kinds = await self._kinds_of(user_id, candidate)
             if KIND_GIT not in kinds and KIND_ROOT not in kinds:
-                return candidate
+                if not own_project or (kinds == {KIND_PATH: [path.value]} and candidate in _folder_ids(path, root_path)):
+                    return candidate
         return None
 
     async def resolve(
@@ -257,16 +281,19 @@ class ProjectRegistry:
         ``warnings``, never applied); ``bind=True`` re-binds a known location.
         With ``hint_scope="folders"`` (0.16.1+ clients) the hint names only a
         location that is not a git repository (no remote, no root commit and
-        not ``git_repo``): a new repository gets its own project. Without it
-        (``all``, 0.16.0 clients) the hint names any new location, as before.
-        ``create=False`` computes the answer without writing anything.
+        not ``git_repo``): a new repository gets its own project, and does not
+        join a folder namespace it was seen in before (see :meth:`_adopt`).
+        Without it (``all``, 0.16.0 clients) the hint names any new location,
+        as before. ``create=False`` computes the answer without writing anything.
 
         ``allowed_projects`` (a project-restricted key) restricts the result
         AND makes the call read-only: bindings are per user, so a restricted
         key must not be able to claim or move a location for every other key
         of the account. Such a key cannot bind at all
-        (:class:`BindingNotAllowed`); a new location resolves to the hint, or
-        to the key's only project, without being recorded.
+        (:class:`BindingNotAllowed`); a new location resolves to the hint when
+        the key may use it (a new repository too: nothing is recorded, and a
+        project of its own would be one the key cannot use), or to the key's
+        only project, without being recorded.
         """
         restricted = bool(allowed_projects)
         if bind and restricted:
@@ -294,9 +321,12 @@ class ProjectRegistry:
         known = await self._lookup(user_id, fingerprints)
         by_kind = {fp.kind: fp for fp in fingerprints}
         warnings: list[str] = []
-        # A configured project names a new git repository only for clients that keep one namespace.
-        folders_only = hint_scope == HINT_SCOPE_FOLDERS and locator.is_repository(git_repo)
-        new_hint = None if folders_only else hint
+        # A configured project names a new git repository only for clients that keep one namespace...
+        own_project = hint_scope == HINT_SCOPE_FOLDERS and locator.is_repository(git_repo)
+        # ...or for a project-restricted key that may use it (it records nothing, and a derived project
+        # would be one it cannot use).
+        key_hint = restricted and hint is not None and hint in (allowed_projects or [])
+        new_hint = None if own_project and not key_hint else hint
 
         project_id: str | None = None
         created = False
@@ -307,7 +337,7 @@ class ProjectRegistry:
         elif primary.key in known:
             project_id = known[primary.key]
         else:
-            project_id = await self._adopt(user_id, primary, by_kind, known)
+            project_id = await self._adopt(user_id, primary, by_kind, known, own_project=own_project, root_path=locator.root_path)
             source = "adopted"
         if project_id is None:
             if new_hint:
@@ -496,10 +526,14 @@ class RelayService:
         facts = redact(dict(facts), counts, scrub)
         summary = redact(summary, counts, scrub) if summary else None
         if location:
-            # Shown strings pass the same policy; fingerprint keys are identifiers, as in project_fingerprints.
+            # Shown strings pass the same policy. Remote and root-commit keys are identifiers (as in
+            # project_fingerprints); a path key repeats the host and path, so it is scrubbed like them (a key
+            # the policy changed no longer matches its binding, which only costs the split that one link).
+            keys = [str(k) for k in location.get("fingerprints") or []]
             location = {
                 **location,
                 **{k: redact(location.get(k), counts, scrub) for k in ("name", "root_path", "host") if location.get(k)},
+                "fingerprints": [redact(k, {}, scrub) if k.startswith(f"{KIND_PATH}:") else k for k in keys],
             }
         end_reason = redact(end_reason, counts, scrub) if end_reason else None
 
@@ -523,11 +557,11 @@ class RelayService:
             text, trust_score, checksum = screen(text)
         # The grade uses the same trust the brief will apply to this handoff
         # (handoff_verdict): the sanitizer's score of the stored text, lowered by
-        # hidden tag/bidi characters, and the upstream name, which the text only
-        # carries when commits are unpushed but the relay block always keeps.
+        # hidden tag/bidi characters, and the upstream name and recorded location,
+        # which the relay block keeps whether or not the text quotes them.
         # Otherwise the close response and the trail could say Ready while the
         # brief withholds the same handoff as Blocked.
-        policy_trust = assess_text(text, facts.get("upstream"), stored_trust=trust_score).trust
+        policy_trust = assess_text(text, facts.get("upstream"), *location_texts(location), stored_trust=trust_score).trust
 
         health = assess_handoff(facts, grounding, trust=policy_trust)
         key = relay_key(agent_id, session_id)
@@ -1031,8 +1065,8 @@ class RelayService:
                 warnings.insert(
                     0,
                     f"Project '{project_id}' holds {len(shared)} repositories (bound before Remembra 0.16.1), so their "
-                    "handoffs share one trail. Run `remembra-relay projects split` to see how each would get its own "
-                    "project; nothing moves without --apply.",
+                    "handoffs share one trail. Tell the user: `remembra-relay projects split` shows how each would get "
+                    "its own project; nothing moves without --apply.",
                 )
         brief["warnings"] = warnings
         brief["linked_projects"] = linked

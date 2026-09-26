@@ -235,7 +235,11 @@ no changed or uncommitted files, no tests, errors or failed commands, no todos a
 idle or automated run), `close` sends nothing and writes one line to `~/.remembra/relay/relay.log`
 (`close: nothing to hand off for <agent> session <id> …`). Run by hand it also says so on stderr. To
 leave a handoff anyway, pass `--summary` (or `--notes`, `--todo`, `--next`). Git state that could not be
-read in time counts as something, so such a close is still sent.
+read in time counts as something, so such a close is still sent. So does a close that stopped rather than
+finished (a usage or billing limit, Claude Code's StopFailure; a close written before context compaction):
+that notice is the handoff, and the brief shows it (`stopped: rate_limit`). Once a session has sent a
+handoff, its later closes are always sent, even empty ones: the last close of a session replaces the
+earlier one, which would otherwise keep describing work that no longer exists.
 
 ## Uninstall {#uninstall}
 
@@ -267,7 +271,9 @@ The rule, in order:
 2. **A new repository** joins an existing project when a weaker fingerprint already names it: the
    same root commit on a project with no remote yet (a remote was added later), the same `owner/repo`
    under another host name (an ssh `Host` alias such as `github-work`), or the same checkout path on a
-   project with no remote and no commits yet (`git init`, or the first commit of an empty repo).
+   project with no remote and no commits yet (`git init`, or the first commit of an empty repo) when that
+   project is the folder's own (named after it, with no other location). A folder the configured project
+   named (rule 4) is not its own: after `git init` there it gets a project of its own (rule 3).
 3. **Otherwise a git repository gets its own project**, named after it (`widget`, or `widget-1a2b3c`
    when that name is taken), whatever `REMEMBRA_PROJECT` says.
 4. **A folder that is not a git repository** (a Codex Desktop task folder, `~/Documents`) gets the
@@ -282,7 +288,13 @@ already bound keep their project either way.
 The client tells the server which rule it follows (`hint_scope=folders` next to `hint_project`, plus
 `git_repo`), so an older client keeps its behaviour: a 0.16.0 client sends no `hint_scope`, and its
 configured project still names every new location. That is how repositories ended up sharing one
-project before 0.16.1; [split it](#splitting-a-project-several-repositories-share).
+project before 0.16.1; [split it](#splitting-a-project-several-repositories-share). When git does not
+answer in time the client sends neither `git_repo` nor the configured project (a repository must not
+land in the folder namespace) and says so in the handoff (`repo` in `incomplete`).
+
+A key restricted to projects never records a binding, so every new repository is new to it: with
+`hint_scope=folders` it still gets its configured project there when the key may use that project (a
+project of the repository's own would be one it cannot use).
 
 Only writes record a binding: `close` and `POST /api/v1/projects/resolve`. `brief` and `trail` compute
 the answer without recording it, so opening a session never moves anything. To move one repository to
@@ -315,18 +327,34 @@ that moves with it and why:
   repository is one of those moves with it.
 - **By recorded commit.** A handoff closed before that has no location. `split` reads with git every
   checkout of those repositories on this machine (the paths on record, the current directory and any
-  `--repo PATH`); when the HEAD or a commit the handoff recorded is in exactly one of them, it moves
-  there, and the output names the checkout. Run it again on another machine to match the rest.
+  `--repo PATH`); when a commit the handoff recorded (its session's own commits, else its HEAD) is in
+  exactly one of them, it moves there, and the output names the checkout. A fork or clone shares its
+  upstream's commits, so the match counts only when every other repository that may share them (the
+  same root commit, or one whose root commit is not on record) was read too. Run it again on another
+  machine, or pass `--repo`, to match the rest.
 
 Everything else stays where it is and is listed with the reason: folder sessions (the configured project
 still names folders), checkpoints (they record no location), free-form handoffs, and handoffs whose
-commits are in no checkout, or in more than one. Earlier versions of a moved handoff go with it.
+commits are in no checkout, in more than one, or possibly in a repository not read here. Earlier versions
+of a moved handoff go with it; a session left with two current handoffs in one project keeps its newest
+(after an undo too).
 
-Nothing is deleted. `--apply` logs every change under a batch id (printed, and kept in the account's
-audit log); running it again moves only what is left and matched. `projects undo` moves a batch back,
-skipping anything that changed since (handoffs written in the new projects after the split stay there, and
-it says how many); like `split`, it is a dry run without `--apply`. Only your own
-account's bindings and handoffs are read or moved, and keys restricted to projects are refused.
+**Keys restricted to the project.** A key (or connection) restricted to `clawdbot` could brief and close
+in every repository while they were in `clawdbot`; after the split they are in their own projects, which
+it cannot use. The dry run lists such keys and what each would lose. Add the new projects to them in the
+dashboard first, or confirm with `--apply --keys-lose-access`; without either, applying is refused and
+nothing changes.
+
+Nothing is deleted. `--apply` plans and moves in one transaction (a close of your account arriving
+meanwhile waits for it) and logs every change under a batch id (printed, and kept in the account's audit
+log); running it again moves only what is left and matched. `projects undo` moves a batch back, skipping
+anything that changed since. A project the split created goes back whole: locations of that repository
+bound there since (another checkout or worktree) and the handoffs recorded in them move back too, so the
+repository resolves to one project again; checkpoints and handoffs with no recorded location written there
+stay, and it says how many. Like `split`, it is a dry run without `--apply`. Only your own account's
+bindings and handoffs are read or moved, and keys restricted to projects are refused. What agents and
+tools recorded (paths, names, headlines, branches) is shown under the brief's trust policy (low trust:
+withheld) and printed inside an untrusted-data block.
 
 ## Reading the brief
 
@@ -339,16 +367,18 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
 `recall_memories`) put their JSON inside the same block, with the same escaping.
 
 - **Last session.** The newest handoff that recorded any work: commits, changed or uncommitted files,
-  tests, errors, todos, a next step, a summary or notes. Newer handoffs with none of that (idle sessions,
-  automated runs, clients older than 0.16.1) are skipped, and the brief says how many
-  (`Skipped 3 newer sessions that recorded nothing …`).
+  tests, errors, todos, a next step, a summary or notes, or a stop (`stopped: rate_limit`). Newer
+  handoffs with none of that (idle sessions, automated runs, clients older than 0.16.1) are skipped, and
+  the brief says how many (`Skipped 3 newer sessions that recorded nothing …`). The agent's notes and
+  summary follow on their own lines (`Notes from codex (unverified): …`, `Summary from codex
+  [unverified narrative; …]: …`).
 - **Recent.** At most five of this project's latest handoffs and checkpoints, newest first. Other
   memories of the project or namespace (notes, facts from other work) are not listed: ask
   `recall_memories` for those.
 - **Where it worked.** When your working directory is not a git repository, the first line of the block
   says so and names where the last session worked (repository and path it recorded), and the preamble
   asks you to verify the lines rather than check them against a repository. In a repository, the brief
-  says so when the last session recorded a different one.
+  says so when the last session recorded a different one, or a folder that is not a git repository.
 - **Who.** `claude-code (key-verified)` means the handoff was closed with a key scoped to that agent.
   `(self-declared)` means the caller named the agent itself. A handoff stored through
   `POST /memories` or `store_memory(memory_type="handoff")` is always shown as a *free-form,
@@ -404,8 +434,8 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
 | Method | Path | Purpose |
 |--------|------|---------|
 | POST | `/api/v1/projects/resolve` | `{git_remote?, root_commit?, root_path?, repo_name?, host?, git_repo?, hint_project?, hint_scope?, bind?}` → `{project_id, created, persisted, fingerprint, kind, bound}`. `hint_scope`: `all` (default, 0.16.0) or `folders` (the hint names only a location that is not a git repository) |
-| POST | `/api/v1/projects/split` | `{project, apply?, checkouts?}` → the repositories bound to `project` and their new projects, `moves` (with `matched_by` and `evidence`), `stays` (with `reason`), `commit_candidates`; with `apply`, `batch_id` and `moved`. Dry run by default |
-| POST | `/api/v1/projects/split/undo` | `{batch_id?, apply?}` → what moves back (`moves_back`) and what changed since (`left`). Dry run by default |
+| POST | `/api/v1/projects/split` | `{project, apply?, checkouts?, restricted_keys_lose_access?}` → the repositories bound to `project` and their new projects, `moves` (with `matched_by` and `evidence`), `stays` (with `reason`), `commit_candidates`, `restricted_credentials` (keys and connections restricted to `project` that would lose repositories: applying needs `restricted_keys_lose_access`, else 409); with `apply`, `batch_id` and `moved`. Dry run by default |
+| POST | `/api/v1/projects/split/undo` | `{batch_id?, apply?}` → what moves back (`moves_back`; `since_split` marks what the repository wrote in its new project after the split), what changed since (`left`) and what stays in the new projects (`written_since`). Dry run by default |
 | POST / GET / DELETE | `/api/v1/projects/links` | link projects (`from_project`, `to_project`, `relation`) |
 | POST | `/api/v1/session/close` | `{agent_id, session_id, project_id \| project:{locator}, facts:{…}, summary?, end_reason?}` → handoff id + rendered text |
 | GET | `/api/v1/session/brief` | `project_id` or locator params (+ `hint_scope`, `git_repo`, `session_id`, the reader's session) → brief JSON + `rendered` + `handoff_health` + `handoffs_skipped` + `handoff_location`; records a pickup when it serves another agent's handoff |
@@ -429,8 +459,10 @@ to look up the inbox, as before).
 **Project-restricted keys** can only resolve into, close, brief and see links for their own projects,
 and they never record or move a binding: bindings are per account, so a restricted key (CI, a
 contractor) must not be able to pull another project's repository into its own. `bind` needs an
-unrestricted key; a new location resolves to the hint, or to the key's only project, without being
-recorded.
+unrestricted key; a new location resolves to the hint (a new repository too, when the key may use it),
+or to the key's only project, without being recorded.
 
 Every stored string passes secret redaction and the server's PII policy, value by value (a blocked
-value becomes `[REDACTED:pii]`; a close is never rejected for PII).
+value becomes `[REDACTED:pii]`; a close is never rejected for PII). The location recorded with a handoff
+is covered too: its name, path and host, and the path fingerprint key, which repeats the path. The brief
+returns the location's repository key, never its fingerprint keys.

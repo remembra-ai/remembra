@@ -13,12 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   one (see Fixed). It is a dry run by default: it lists every repository bound to your configured project,
   the project each would get, every handoff that would move with it and the evidence, and everything that
   stays and why. A handoff moves only on evidence: the location the server recorded with it, or, for one
-  closed before 0.16.1, a commit it recorded that `split` finds with git in exactly one checkout on this
-  machine. Folder sessions, checkpoints and anything unmatched stay. `--apply` carries it out and logs each
-  change under a batch id (and one audit event); running it again moves only what is left.
-  `remembra-relay projects undo --apply` moves a batch back. Nothing is ever deleted, and only your own
-  account's data is read or moved. API: `POST /api/v1/projects/split` and `POST /api/v1/projects/split/undo`.
-  The log table (`relay_refiles`) is created on first use; no schema migration.
+  closed before 0.16.1, a commit it recorded (its own commits, else its HEAD) that `split` finds with git in
+  exactly one checkout on this machine, when every other repository that may share that history (a fork or
+  clone) was read too. Folder sessions, checkpoints and anything unmatched stay. `--apply` carries it out in
+  one transaction, never while a close of the account is in flight, and logs each change under a batch id (and
+  one audit event); running it again moves only what is left. API keys and connections restricted to the
+  project would be refused in the split repositories: they are listed, and applying needs
+  `--keys-lose-access` (or add the new projects to them first). `remembra-relay projects undo --apply` moves
+  a batch back, including what the repository wrote in its new project since (another checkout's location,
+  its handoffs), so it resolves to one project again. Nothing is ever deleted, only your own account's data
+  is read or moved, and recorded paths, names and headlines in the output pass the brief's trust policy.
+  API: `POST /api/v1/projects/split` and `POST /api/v1/projects/split/undo`. The log table (`relay_refiles`)
+  is created on first use; no schema migration.
 
 ### Fixed
 
@@ -29,17 +35,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folders that are not repositories. `REMEMBRA_RELAY_PROJECT` keeps everything in one project on purpose.
   New installs (`REMEMBRA_PROJECT=default`) were not affected. Older clients keep their behaviour: the new
   client says which rule it follows (`hint_scope`, `git_repo`), and the server records where each session
-  worked with its handoff. Use `projects split` (above) for repositories already bound together.
+  worked with its handoff. A folder under the configured project that later becomes a repository (`git init`)
+  gets its own project too. A key restricted to projects keeps using its configured project for a new
+  repository (it records nothing). When git does not answer in time, the client says it does not know
+  instead of "not a repository", sends no configured project, and still sends the close (`repo` in
+  `incomplete`). Use `projects split` (above) for repositories already bound together.
 - **Relay brief: "Last session" is the last session that did something.** A handoff that recorded nothing
   (no commits, changes, tests, errors, todos, next step, summary or notes: an idle or automated session) no
   longer buries the one before it; the brief skips it and says how many it skipped. "Recent" lists only this
   project's handoffs and checkpoints (at most five), never the namespace's other memories, which an agent
   could read as this project's status. In a folder that is not a git repository the brief says so in one
   line and names where the last session worked (repository and path), instead of asking the agent to check
-  "the repository"; in a repository it says so when the last session worked in a different one. Recorded
-  text stays inside the untrusted-data block.
+  "the repository"; in a repository it says so when the last session worked in a different one or in a
+  folder. The agent's notes and summary are shown under "Last session". A recorded location, upstream name
+  and every Recent handoff pass the same trust policy as the handoff text, in the text and the JSON, and the
+  JSON no longer returns the location's fingerprint keys (a path key is scrubbed like the path under the
+  account's PII policy). Recorded text stays inside the untrusted-data block.
 - **Relay: an empty session leaves no handoff.** `close` sends nothing for a session that recorded nothing
-  and writes one line to `relay.log`; `close --summary …` by hand still sends.
+  and writes one line to `relay.log`; `close --summary …` by hand still sends. A close that stopped on a
+  usage or billing limit, or was written before context compaction, is sent and shown ("stopped:
+  rate_limit"). A later empty close of a session that already sent one is sent, so it retires the earlier
+  handoff instead of leaving it as the session's last word.
 - **Relay: Codex automation runs and sub-agents no longer fill the trail.** Codex Desktop runs the relay hooks
   for every run of a scheduled automation that starts its own thread (dozens a day), and sub-agent threads run
   them too, so each one got a project brief in its prompt and left a handoff that buried the sessions people

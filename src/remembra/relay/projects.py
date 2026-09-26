@@ -14,7 +14,11 @@ the server has on record for this host, the current directory and ``--repo``)
 to find which of them holds each commit an older handoff recorded, and shows
 the result: every repository and the project it gets, every handoff that moves
 and the evidence, and what stays with the reason. Nothing changes without
-``--apply``; nothing is ever deleted. ``undo`` reverses a split.
+``--apply``; nothing is ever deleted. ``undo`` reverses a split. What agents and
+tools recorded (paths, names, headlines) is printed inside one untrusted-data
+block, after the server's trust policy. API keys and connections restricted to
+the project lose the split repositories; they are listed, and ``--apply`` then
+needs ``--keys-lose-access`` (or add the new projects to them first).
 
 These are not hooks: they may take longer than a hook's budget, and exit 1 on
 failure (2 when there is nothing to split).
@@ -30,6 +34,7 @@ from pathlib import Path
 from typing import Any
 
 from remembra.relay import facts as factlib
+from remembra.security.untrusted import TOOL_PREAMBLE, wrap_untrusted
 
 SPLIT_BUDGET_SECONDS = 300.0
 SPLIT_HTTP_TIMEOUT_SECONDS = 120.0
@@ -52,6 +57,11 @@ def add_parser(sub: Any) -> None:
         "--repo", action="append", default=[], help="Also read this checkout with git to match older handoffs (repeatable)"
     )
     split.add_argument("--apply", action="store_true", help="Carry it out (logged; `projects undo` reverses it)")
+    split.add_argument(
+        "--keys-lose-access",
+        action="store_true",
+        help="Confirm that API keys/connections restricted to the project lose the split repositories",
+    )
     split.add_argument("--format", choices=["text", "json"], default="text")
     split.add_argument("--cwd", help=argparse.SUPPRESS)
     split.set_defaults(func=cmd_split)
@@ -180,17 +190,19 @@ def _move_line(move: dict[str, Any]) -> str:
 
 
 def render_split(result: dict[str, Any]) -> str:
+    """The split as text: the server's own lines outside, everything recorded (repository names and paths,
+    handoff headlines, key names) inside one untrusted-data block."""
     project = result.get("project")
     applied = bool(result.get("applied"))
-    lines: list[str] = []
     mode = "carried out" if applied else "dry run: nothing changes until you add --apply"
-    lines.append(f"Split project '{project}' ({mode})")
+    head = f"Split project '{project}' ({mode})"
+    lines: list[str] = []
     repos = result.get("repositories") or []
     moving = [r for r in repos if not r.get("keeps_project") and (r.get("bindings") or not r.get("already_split"))]
     if not repos:
-        lines.append(f"\nNo git repository is bound to '{project}': there is nothing to split.")
+        lines.append(f"No git repository is bound to '{project}': there is nothing to split.")
     else:
-        lines.append(f"\nRepositories bound to '{project}' and the project each gets:")
+        lines.append(f"Repositories bound to '{project}' and the project each gets:")
         for repo in repos:
             name = repo.get("name") or repo.get("key")
             note = ""
@@ -241,28 +253,47 @@ def render_split(result: dict[str, Any]) -> str:
     if checkouts:
         read = ", ".join(f"{c.get('root_path')} ({c.get('matched') or 'not bound here'})" for c in checkouts)
         lines.append(f"\nCheckouts read with git on this machine: {read}")
-    else:
-        lines.append(
-            "\nNo checkout of these repositories was found on this machine, so older handoffs (no recorded location)"
+
+    credentials = result.get("restricted_credentials") or []
+    if credentials:
+        lines.append(f"\nRestricted to '{project}', refused in the split repositories {'now' if applied else 'afterwards'}:")
+        for cred in credentials:
+            kind = "API key" if cred.get("kind") == "api_key" else "connection"
+            lines.append(
+                f"  {kind} {cred.get('name') or '(no name)'} (id {cred.get('id')}): loses {', '.join(cred.get('loses') or [])}"
+            )
+
+    tail: list[str] = []
+    if not checkouts:
+        tail.append(
+            "No checkout of these repositories was found on this machine, so older handoffs (no recorded location)"
             " could not be matched by commit. Pass --repo PATH, or run this where they are checked out."
         )
-
+    if credentials and applied:
+        tail.append(
+            f"{len(credentials)} API key(s) or connection(s) restricted to '{project}' are now refused in the split"
+            " repositories (listed above). Add the new projects to them in the dashboard to give that access back."
+        )
+    elif credentials:
+        tail.append(
+            f"{len(credentials)} API key(s) or connection(s) restricted to '{project}' would be refused in the split"
+            " repositories (listed above). Add the new projects to them in the dashboard, or apply with"
+            " --keys-lose-access to confirm they lose them."
+        )
     if applied:
         moved = result.get("moved") or {}
-        lines.append(
-            f"\nDone: {moved.get('bindings', 0)} location binding(s) and {moved.get('memories', 0)} handoff record(s)"
+        tail.append(
+            f"Done: {moved.get('bindings', 0)} location binding(s) and {moved.get('memories', 0)} handoff record(s)"
             f" moved (batch {result.get('batch_id')}). Nothing was deleted."
         )
         if moved.get("vector_payload_errors"):
-            lines.append(f"  {moved['vector_payload_errors']} search-index update(s) failed; the server log has details.")
-        lines.append(f"To reverse it: remembra-relay projects undo --batch {result.get('batch_id')} --apply")
+            tail.append(f"  {moved['vector_payload_errors']} search-index update(s) failed; the server log has details.")
+        tail.append(f"To reverse it: remembra-relay projects undo --batch {result.get('batch_id')} --apply")
     elif moving or moves:
-        lines.append(
-            "\nNothing is deleted. Run again with --apply to carry this out; `remembra-relay projects undo` reverses it."
-        )
+        tail.append("Nothing is deleted. Run again with --apply to carry this out; `remembra-relay projects undo` reverses it.")
     else:
-        lines.append("\nNothing to move.")
-    return "\n".join(lines)
+        tail.append("Nothing to move.")
+    return "\n".join([head, wrap_untrusted("\n".join(lines), TOOL_PREAMBLE), *tail])
 
 
 def render_undo(result: dict[str, Any]) -> str:
@@ -275,13 +306,17 @@ def render_undo(result: dict[str, Any]) -> str:
     head = f"Undo split {batch} ({'carried out' if applied else 'dry run: nothing changes until you add --apply'})"
     lines = [head, f"{'Moved back' if applied else 'Would move back'}: {len(back)}"]
     for item in back:
-        lines.append(f"  {item['kind']:<8} {item['ref']}  {item['from_project']} -> {item['to_project']}")
+        since = "  (written since the split)" if item.get("since_split") else ""
+        lines.append(f"  {item['kind']:<8} {item['ref']}  {item['from_project']} -> {item['to_project']}{since}")
     if left:
         lines.append(f"Left alone (changed since the split): {len(left)}")
         for item in left:
             lines.append(f"  {item['kind']:<8} {item['ref']}  {item.get('reason')}")
     for project, count in sorted((result.get("written_since") or {}).items()):
-        lines.append(f"{count} handoff(s) or checkpoint(s) written in '{project}' since the split stay there.")
+        lines.append(
+            f"{count} handoff(s) or checkpoint(s) written in '{project}' since the split stay there"
+            " (no location of the repository recorded with them)."
+        )
     if not applied and back:
         lines.append(f"Run again with --apply to move them back: remembra-relay projects undo --batch {batch} --apply")
     return "\n".join(lines)
@@ -314,7 +349,10 @@ def cmd_split(args: argparse.Namespace) -> int:
             )
         first = _post(ctx, "/api/v1/projects/split", {"project": project, "apply": False})
         checkouts = find_checkouts(ctx, first, list(args.repo or []))
-        result = _post(ctx, "/api/v1/projects/split", {"project": project, "apply": bool(args.apply), "checkouts": checkouts})
+        body = {"project": project, "apply": bool(args.apply), "checkouts": checkouts}
+        if args.keys_lose_access:
+            body["restricted_keys_lose_access"] = True
+        result = _post(ctx, "/api/v1/projects/split", body)
     except SplitFailed as e:
         cli._err(f"projects split failed: {e}")
         return 1

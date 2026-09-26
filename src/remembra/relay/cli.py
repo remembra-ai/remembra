@@ -277,20 +277,26 @@ class Context:
         """How the server may name this location when it has not seen it (see "Which project a repository uses").
 
         A git repository always gets its own project: the configured project is
-        sent as ``hint_project`` only for a folder that is not a repository,
-        with ``hint_scope=folders`` so the server never applies it to a
-        repository. ``REMEMBRA_RELAY_PROJECT`` opts into one namespace for
-        everything (``hint_scope=all``). ``git_repo`` tells the server whether
-        this is a repository (a new one may have no commit or remote yet).
+        sent as ``hint_project`` with ``hint_scope=folders``, so the server
+        applies it only to a folder that is not a repository (and, for a key
+        restricted to projects, to a repository it may not otherwise use).
+        ``REMEMBRA_RELAY_PROJECT`` opts into one namespace for everything
+        (``hint_scope=all``). ``git_repo`` tells the server whether this is a
+        repository (a new one may have no commit or remote yet). When git did
+        not answer in time, neither is sent: whether this is a repository is
+        unknown, and the configured project must not name a repository.
         """
-        fields: dict[str, Any] = {"git_repo": self.repo.is_git}
+        fields: dict[str, Any] = {}
+        git_repo = self.repo.git_repo
+        if git_repo is not None:
+            fields["git_repo"] = git_repo
         single = self.single_namespace()
         if single:
             fields.update(hint_project=single, hint_scope=HINT_SCOPE_ALL)
             return fields
         fields["hint_scope"] = HINT_SCOPE_FOLDERS
         configured = self.configured_project()
-        if configured and not self.repo.is_git:
+        if configured and git_repo is not None:
             fields["hint_project"] = configured
         return fields
 
@@ -784,7 +790,10 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
     return payload
 
 
-EMPTY_CLOSE_REASON = "the session recorded no summary, notes, commits, file changes, tests, errors, todos or next step"
+EMPTY_CLOSE_REASON = (
+    "the session recorded no summary, notes, commits, file changes, tests, errors, todos or next step, "
+    "and it did not stop on a limit"
+)
 
 
 def nothing_to_hand_off(payload: dict[str, Any]) -> bool:
@@ -792,12 +801,45 @@ def nothing_to_hand_off(payload: dict[str, Any]) -> bool:
 
     The same rule the brief uses to skip empty handoffs
     (:func:`~remembra.relay.handoff.sections_have_substance`): nothing in Done,
-    Not done, Failing or Next, and no summary or notes. Unknown git state (a
-    probe that timed out) counts as something, so such a close is still sent.
+    Not done, Failing or Next, no summary or notes, and an end reason that is
+    not a stop (a usage or billing limit, a close before context compaction:
+    that notice is the handoff). Unknown git state (a probe that timed out)
+    counts as something, so such a close is still sent.
     """
     facts = payload.get("facts") or {}
     sections = build_sections(facts, facts.get("next_step"))
-    return not sections_have_substance(sections, summary=payload.get("summary"), notes=facts.get("notes"))
+    return not sections_have_substance(
+        sections, summary=payload.get("summary"), notes=facts.get("notes"), end_reason=payload.get("end_reason")
+    )
+
+
+def _sent_marker_path(home: Path, agent: str, session_id: str) -> Path:
+    digest = hashlib.sha256(f"sent\x1f{agent}\x1f{session_id}".encode()).hexdigest()[:24]
+    return _state_dir(home) / f"sent-{digest}.json"
+
+
+def mark_close_sent(home: Path, agent: str, session_id: str) -> None:
+    """Record that this session has a handoff on the server (or queued for it)."""
+    path = _sent_marker_path(home, agent, session_id)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": datetime.now(UTC).isoformat()}))
+        os.chmod(path, 0o600)
+    except OSError as e:
+        _err(f"could not record the close ({e.__class__.__name__})")
+
+
+def close_sent(home: Path, agent: str, session_id: str) -> bool:
+    """True when an earlier close of this session was sent or queued (within the state TTL).
+
+    Such a session's later close is sent even when it records nothing: it
+    supersedes the earlier handoff, which would otherwise keep describing work
+    that no longer exists (a file since discarded, a "still open" note).
+    """
+    try:
+        return time.time() - _sent_marker_path(home, agent, session_id).stat().st_mtime <= STATE_TTL_SECONDS
+    except OSError:
+        return False
 
 
 def _skip_empty_close(ctx: Context, payload: dict[str, Any]) -> None:
@@ -823,6 +865,8 @@ def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status:
     path = outbox.enqueue(
         ctx.home, payload, url=ctx.config.url, config_source=ctx.config.source, error=error, http_status=http_status
     )
+    if path is not None:  # the session has a handoff on its way: a later empty close must retire it
+        mark_close_sent(ctx.home, str(payload.get("agent_id") or ""), str(payload.get("session_id") or ""))
     outbox.record(
         ctx.home,
         agent_id=str(payload.get("agent_id") or ctx.agent or ""),
@@ -896,11 +940,16 @@ def cmd_close(args: argparse.Namespace) -> int:
                 return 0
         ctx = Context(args, payload=hook_payload)
         payload = build_close_payload(ctx, args)
-        empty = nothing_to_hand_off(payload)
+        own = (str(payload.get("agent_id")), str(payload.get("session_id")))
+        # An empty close is skipped only while this session has nothing on the server to retire.
+        nothing = nothing_to_hand_off(payload)
+        empty = nothing and not close_sent(ctx.home, *own)
         if args.dry_run:
             print(json.dumps(payload, indent=2))
             if empty:
                 _err(f"close would send nothing: {EMPTY_CLOSE_REASON}")
+            elif nothing:
+                _err("close would send an empty handoff: it retires the one this session sent earlier")
             return 0
         if empty:
             _skip_empty_close(ctx, payload)
@@ -909,7 +958,6 @@ def cmd_close(args: argparse.Namespace) -> int:
             _err("close skipped: no API key (set REMEMBRA_API_KEY or configure the remembra MCP server)")
             _queue_close(ctx, payload, "no API key configured")
             return 0
-        own = (str(payload.get("agent_id")), str(payload.get("session_id")))
         # Older queued handoffs go first, while that leaves this close enough time; the rest follow it.
         replay_outbox(ctx, skip=own, reserve=CLOSE_RESERVE_SECONDS, drop_skipped=False)
         try:
@@ -936,6 +984,7 @@ def cmd_close(args: argparse.Namespace) -> int:
                 outbox.log(ctx.home, f"close: not queued, the server rejected the body ({detail})")
             return 0
         result = response.json()
+        mark_close_sent(ctx.home, *own)
         outbox.record(ctx.home, agent_id=str(payload.get("agent_id")), command="close", ok=True, config_source=ctx.config.source)
         # This close supersedes a queued copy of the same session; then send what is still waiting.
         replay_outbox(ctx, skip=own)
@@ -998,7 +1047,9 @@ def cmd_resolve(args: argparse.Namespace) -> int:
         locator = ctx.repo.locator(ctx.cwd, ctx.host)
         if args.project:  # a name given here applies to this location, repository or not
             locator["hint_project"] = normalize_project_id(args.project, parse_project_aliases(ctx.config.project_aliases))
-            locator.update(git_repo=ctx.repo.is_git, hint_scope=HINT_SCOPE_ALL)
+            locator["hint_scope"] = HINT_SCOPE_ALL
+            if ctx.repo.git_repo is not None:
+                locator["git_repo"] = ctx.repo.git_repo
         elif not args.bind:
             locator.update(ctx.hint_fields())
         locator["bind"] = bool(args.bind)

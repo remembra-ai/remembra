@@ -186,18 +186,21 @@ def location_record(locator: ProjectLocator, git_repo: bool | None = None) -> di
     ``fingerprints`` are the keys ``project_fingerprints`` uses, so a handoff can
     be matched to a binding exactly; ``repository`` is the one naming the
     repository (None for a folder); ``name``, ``root_path`` and ``host`` are
-    for people reading the brief.
+    for people reading the brief. ``git_repo`` is True for a repository, False
+    for a folder the client said is not one, and None when that is unknown (a
+    path alone from a client that did not say, or whose git timed out).
     """
     keys = [fp.key for fp in locator.fingerprints()]
     if not keys:
         return None
+    repo: bool | None = True if locator.is_repository(git_repo) else (False if git_repo is False else None)
     return {
         "fingerprints": keys,
         "repository": repository_key(keys),
         "name": locator.display_name(),
         "root_path": (locator.root_path or "").strip() or None,
         "host": (locator.host or "").strip().lower() or None,
-        "git_repo": locator.is_repository(git_repo),
+        "git_repo": repo,
     }
 
 

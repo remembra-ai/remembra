@@ -19,15 +19,27 @@ that project its own project again and re-files the handoffs recorded there:
 * **Handoffs move only on evidence.** (1) The location recorded with the
   handoff (the server records it at close since 0.16.1) is one of the
   repositories; or (2) for a handoff closed before that, the client read with
-  git that the HEAD or a commit the handoff recorded exists in a checkout of
-  exactly one of the repositories. Earlier versions of a moved handoff (same
-  agent and session) go with it. Everything else stays where it is and is
-  listed with the reason; checkpoints record no location and stay.
-* **Safe.** Dry run by default. Applying records every change in
-  ``relay_refiles`` (batch, kind, what, from, to, evidence) and one audit
-  event, and :func:`undo` reverses a batch. Applying again moves only what is
-  still there and matched, so it is idempotent. Nothing is deleted. Every
-  query is scoped to the caller's user id.
+  git that a commit the handoff recorded (its session commits, else its HEAD)
+  exists in a checkout of exactly one of the repositories, and every other
+  repository that may share that history (the same root commit, or one not
+  on record) was read too: a fork or mirror that is not checked out here
+  could hold the same commit. Earlier versions of a moved handoff (same agent
+  and session) go with it. Everything else stays where it is and is listed
+  with the reason; checkpoints record no location and stay.
+* **Safe.** Dry run by default. Applying plans and moves in one transaction,
+  records every change in ``relay_refiles`` (batch, kind, what, from, to,
+  evidence) and one audit event, and :func:`undo` reverses a batch. Applying
+  again moves only what is still there and matched, so it is idempotent.
+  Nothing is deleted. Every query is scoped to the caller's user id. A split
+  never runs while a close of the same account is in flight
+  (:func:`user_gate`), so a session's handoff is never left behind in the old
+  project. API keys and connections restricted to the project would lose the
+  split repositories: they are listed, and applying needs the caller's
+  confirmation (``restricted_keys_lose_access``).
+* **Output.** Everything the split returns that a client or agent wrote
+  (paths, names, headlines, branches) passes the brief's trust policy: a
+  low-trust handoff keeps only its ids and times, a low-trust path or name is
+  replaced by a withheld note.
 
 The ``relay_refiles`` table is created on first use (like the security state
 tables), so no schema migration is involved.
@@ -35,17 +47,29 @@ tables), so no schema migration is involved.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+import json
 import re
 import secrets
+import sqlite3
 import weakref
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 import structlog
 
-from remembra.relay.handoff import handoff_headline, handoff_location, handoff_verdict, relay_block, show_text
+from remembra.relay.handoff import (
+    assess_text,
+    handoff_headline,
+    handoff_location,
+    handoff_verdict,
+    relay_block,
+    show_text,
+)
 from remembra.relay.identity import (
     KIND_GIT,
     KIND_PATH,
@@ -54,13 +78,18 @@ from remembra.relay.identity import (
     repository_key,
     slugify_project,
 )
-from remembra.services.agent_session import _parse_metadata
+from remembra.services.agent_session import HANDOFF_ENDED_JD, _parse_metadata
 
 log = structlog.get_logger(__name__)
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 MAX_LISTED_STAYS = 500
-MAX_COMMITS_PER_HANDOFF = 31  # the HEAD and the (at most 30) commits a handoff's relay block keeps
+MAX_COMMITS_PER_HANDOFF = 30  # the (at most 30) commits a handoff's relay block keeps, else its HEAD
+WITHHELD_TEXT = "(withheld: low trust)"  # in place of client-written text the trust policy withholds
+# relay_refiles kinds: moves undo reverses, and records that only describe the batch.
+MOVE_KINDS = ("binding", "memory")
+KIND_PROJECT = "project"  # a target project this batch created (undo moves everything of its repository back)
+KIND_SUPERSEDE = "supersede"  # an older current copy of a moved session, superseded (one current handoff per session)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS relay_refiles (
@@ -92,8 +121,92 @@ async def ensure_schema(db: Any) -> None:
     _initialized.add(conn)
 
 
+class UserGate:
+    """Keeps a split or undo of an account from running while one of its closes is in flight (this process).
+
+    A close resolves its project and then stores its handoff (superseding the
+    session's earlier one in that project). A split between the two would move
+    the earlier version and leave the new one in the old project, or two
+    current handoffs for one session. Closes hold the gate shared (any number
+    at once); a split holds it exclusively: it waits for the closes in flight,
+    and closes that arrive meanwhile wait for it, then resolve with the new
+    bindings.
+    """
+
+    def __init__(self) -> None:
+        self._cond = asyncio.Condition()
+        self._readers = 0
+        self._writer = False
+        self._waiting = 0
+
+    @asynccontextmanager
+    async def shared(self) -> AsyncIterator[None]:
+        async with self._cond:
+            await self._cond.wait_for(lambda: not self._writer and not self._waiting)
+            self._readers += 1
+        try:
+            yield
+        finally:
+            async with self._cond:
+                self._readers -= 1
+                self._cond.notify_all()
+
+    @asynccontextmanager
+    async def exclusive(self) -> AsyncIterator[None]:
+        async with self._cond:
+            self._waiting += 1
+            try:
+                await self._cond.wait_for(lambda: not self._writer and not self._readers)
+            finally:
+                self._waiting -= 1
+                self._cond.notify_all()  # a cancelled split must not keep closes waiting
+            self._writer = True
+        try:
+            yield
+        finally:
+            async with self._cond:
+                self._writer = False
+                self._cond.notify_all()
+
+
+_gates: weakref.WeakValueDictionary[str, UserGate] = weakref.WeakValueDictionary()
+
+
+def user_gate(user_id: str) -> UserGate:
+    """The account's :class:`UserGate` (one per user id while anyone holds it)."""
+    gate = _gates.get(user_id)
+    if gate is None:
+        gate = UserGate()
+        _gates[user_id] = gate
+    return gate
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _safe(text: Any, limit: int = 400) -> Any:
+    """Client-written text as the split returns it: the brief's trust policy (low trust gives
+    :data:`WITHHELD_TEXT`), hidden characters removed. Identifiers are not flagged as commands."""
+    if not isinstance(text, str) or not text:
+        return text
+    if assess_text(text).withheld:
+        return WITHHELD_TEXT
+    return show_text(text, None, limit)
+
+
+def _safe_key(key: str) -> str:
+    """A fingerprint key for display: ``kind:`` and its value under :func:`_safe`."""
+    kind, sep, value = key.partition(":")
+    return f"{kind}{sep}{_safe(value)}" if sep else str(_safe(key))
+
+
+def _safe_place(place: dict[str, Any]) -> dict[str, Any]:
+    """A ``{host, path}`` for the client to read with git: withheld (no path) when the policy withholds it.
+    The path is otherwise returned as recorded, so the client can find the directory."""
+    if assess_text(place.get("host"), place.get("path")).withheld:
+        return {"host": None, "path": None, "withheld": True}
+    return place
 
 
 def _value(key: str) -> str:
@@ -128,11 +241,17 @@ class Repository:
     target: str = ""
     keeps: bool = False  # named like the project itself: it keeps the project
     checkouts: list[dict[str, Any]] = field(default_factory=list)
+    roots: set[str] = field(default_factory=set)  # root-commit keys seen with it (recorded locations, checkouts)
 
     @property
     def already(self) -> bool:
         """Split out by an earlier batch (not undone)."""
         return bool(self.moved)
+
+    @property
+    def read(self) -> bool:
+        """A checkout of it was read with git on the client's machine."""
+        return bool(self.checkouts)
 
     @property
     def name(self) -> str | None:
@@ -141,16 +260,20 @@ class Repository:
     def all_keys(self) -> set[str]:
         return {self.key, *self.fingerprints, *self.moved}
 
+    def known_roots(self) -> set[str]:
+        """Its root commits on record (empty when none is: then it may share history with any repository)."""
+        return {k for k in self.all_keys() if k.startswith(f"{KIND_ROOT}:")} | self.roots
+
     def as_dict(self) -> dict[str, Any]:
         paths = [_path_parts(p) for p in [*self.fingerprints, *self.moved] if p.startswith(f"{KIND_PATH}:")]
         return {
-            "key": self.key,
-            "name": self.name,
+            "key": _safe_key(self.key),
+            "name": _safe(self.name, 120),
             "target_project": self.target,
-            "bindings": sorted(self.fingerprints),
+            "bindings": sorted(_safe_key(k) for k in self.fingerprints),
             "already_split": self.already,
             "keeps_project": self.keeps,
-            "paths": paths,
+            "paths": [_safe_place(p) for p in paths],
             "checkouts": self.checkouts,
         }
 
@@ -167,7 +290,16 @@ class Checkout:
         return [fp.key for fp in self.locator.fingerprints()]
 
     def describe(self) -> dict[str, Any]:
-        return {"root_path": self.locator.root_path, "host": self.locator.host, "repository": repository_key(self.keys)}
+        repo = repository_key(self.keys)
+        return {
+            "root_path": _safe(self.locator.root_path),
+            "host": _safe(self.locator.host, 255),
+            "repository": _safe_key(repo) if repo else None,
+        }
+
+    @property
+    def roots(self) -> set[str]:
+        return {k for k in self.keys if k.startswith(f"{KIND_ROOT}:")}
 
 
 class SplitRefused(Exception):
@@ -275,6 +407,7 @@ def _apply_checkouts(repos: list[Repository], folders: list[str], checkouts: lis
             if key.startswith(f"{KIND_PATH}:") and key in folders:
                 folders.remove(key)
                 repo.fingerprints.append(key)
+        repo.roots |= checkout.roots
         repo.checkouts.append(checkout.describe())
     return matched
 
@@ -296,6 +429,7 @@ def _link_by_recorded_locations(repos: list[Repository], folders: list[str], rec
             continue
         for key in keys:
             if key.startswith(f"{KIND_ROOT}:"):
+                owner.roots.add(key)
                 for other in [r for r in repos if r is not owner and not r.moved and r.key == key]:
                     owner.fingerprints.extend(k for k in other.fingerprints if k not in owner.fingerprints)
                     repos.remove(other)
@@ -322,14 +456,20 @@ async def _assign_targets(db: Any, user_id: str, project: str, repos: list[Repos
         reserved.add(repo.target)
 
 
-def _commits_of(relay: dict[str, Any]) -> list[str]:
-    shas = [relay.get("head_commit")] + [c.get("sha") for c in relay.get("commits") or [] if isinstance(c, dict)]
+def _valid_shas(values: list[Any]) -> list[str]:
     out: list[str] = []
-    for sha in shas:
+    for sha in values:
         value = str(sha or "").strip().lower()
         if _SHA_RE.match(value) and value not in out:
             out.append(value)
     return out[:MAX_COMMITS_PER_HANDOFF]
+
+
+def _commits_of(relay: dict[str, Any]) -> list[str]:
+    """The commits that tie an older handoff to a repository: the session's own commits when it
+    recorded any, else its HEAD (a HEAD is often a commit the repository shares with forks)."""
+    own = _valid_shas([c.get("sha") for c in relay.get("commits") or [] if isinstance(c, dict)])
+    return own or _valid_shas([relay.get("head_commit")])
 
 
 async def _records(db: Any, user_id: str, project: str) -> list[dict[str, Any]]:
@@ -352,21 +492,33 @@ async def _records(db: Any, user_id: str, project: str) -> list[dict[str, Any]]:
 
 
 def _summary(memory: dict[str, Any]) -> dict[str, Any]:
+    """One handoff or checkpoint as the split lists it, under the brief's trust policy
+    (:func:`~remembra.relay.handoff.handoff_verdict`: its text, upstream and recorded location). A
+    withheld one keeps only its ids, times and commit; everything else passes :func:`_safe`."""
     meta = memory.get("metadata") or {}
     relay = relay_block(memory) or {}
     verdict = handoff_verdict(memory)
-    headline = "withheld (low trust)" if verdict.withheld else show_text(handoff_headline(memory), verdict, 120)
-    location = handoff_location(memory)
-    return {
+    item: dict[str, Any] = {
         "memory_id": memory["id"],
         "memory_type": memory.get("memory_type"),
-        "agent_id": relay.get("agent_id") or meta.get("agent_id"),
-        "session_id": meta.get("session_id"),
+        "agent_id": _safe(relay.get("agent_id") or meta.get("agent_id"), 60),
+        "session_id": _safe(meta.get("session_id"), 80),
         "created_at": memory.get("created_at"),
-        "branch": relay.get("branch"),
-        "head_commit": relay.get("head_commit"),
-        "headline": headline,
-        "location": {k: location.get(k) for k in ("name", "root_path", "host", "repository")} if location else None,
+        "head_commit": relay.get("head_commit") if _SHA_RE.match(str(relay.get("head_commit") or "")) else None,
+        "withheld": verdict.withheld,
+    }
+    if verdict.withheld:
+        return {**item, "branch": None, "headline": "withheld (low trust)", "location": None}
+    location = handoff_location(memory)
+    shown = None
+    if location:
+        shown = {k: _safe(location.get(k)) for k in ("name", "root_path", "host")}
+        shown["repository"] = _safe_key(str(location["repository"])) if location.get("repository") else None
+    return {
+        **item,
+        "branch": _safe(relay.get("branch"), 120),
+        "headline": show_text(handoff_headline(memory), verdict, 120),
+        "location": shown,
     }
 
 
@@ -388,34 +540,60 @@ def _match(
         keys = [str(k) for k in location.get("fingerprints") or []]
         repo_key = repository_key(keys)
         if repo_key is None:
-            return None, "", f"worked in a folder that is not a git repository; folders stay in '{project}'"
+            return None, "", f"worked in a folder (no git remote or root commit recorded); folders stay in '{project}'"
         found = [r for r in repos if r.all_keys() & {k for k in keys if not k.startswith(f"{KIND_PATH}:")}]
         if len(found) == 1:
-            return found[0], "location", f"recorded location {repo_key}"
+            return found[0], "location", f"recorded location {_safe_key(repo_key)}"
         if not found:
-            return None, "", f"its recorded repository ({repo_key}) is not bound to '{project}'"
+            return None, "", f"its recorded repository ({_safe_key(repo_key)}) is not bound to '{project}'"
         return None, "", f"its recorded location matches {len(found)} repositories"
     shas = _commits_of(relay)
     if not shas:
         return None, "", "no location or commit recorded (closed before Remembra 0.16.1, outside git)"
-    hits: dict[str, tuple[Repository, str, dict[str, Any]]] = {}
+    hits: dict[str, tuple[Repository, str, Checkout]] = {}
     for index, checkout in enumerate(checkouts):
         repo = matched_checkouts.get(index)
         if repo is None:
             continue
         sha = next((s for s in shas if s in checkout.present), None)
         if sha is not None and repo.key not in hits:
-            hits[repo.key] = (repo, sha, checkout.describe())
+            hits[repo.key] = (repo, sha, checkout)
     if len(hits) == 1:
-        repo, sha, where = next(iter(hits.values()))
+        repo, sha, checkout = next(iter(hits.values()))
+        unread = _may_share_history(repo, checkout.roots | repo.known_roots(), repos)
+        if unread:
+            names = ", ".join(sorted(str(_safe(r.name or r.key, 80)) for r in unread))
+            return (
+                None,
+                "",
+                (
+                    f"its commit {sha[:7]} is in the checkout of {_safe(repo.name or repo.key, 80)}, but {names} (not read "
+                    "on this machine) may share that history (a fork or clone); pass --repo with a checkout of each"
+                ),
+            )
+        where = checkout.describe()
         on = f" on {where['host']}" if where.get("host") else ""
         return repo, "commit", f"commit {sha[:7]} it recorded is in the checkout at {where['root_path']}{on} (read with git)"
     if len(hits) > 1:
-        names = ", ".join(sorted(str(r.name or r.key) for r, _, _ in hits.values()))
+        names = ", ".join(sorted(str(_safe(r.name or r.key, 80)) for r, _, _ in hits.values()))
         return None, "", f"its commits are in more than one repository ({names})"
     if checkouts:
         return None, "", "no location recorded (closed before Remembra 0.16.1), and none of its commits is in a checkout read"
     return None, "", "no location recorded (closed before Remembra 0.16.1); run the split where the repository is checked out"
+
+
+def _may_share_history(hit: Repository, roots: set[str], repos: list[Repository]) -> list[Repository]:
+    """The other repositories that were not read on the client's machine and may hold the same commits:
+    the same root commit, or no root commit on record (one bound by its remote only: its root commit is
+    already bound to another location, which a fork or clone of it would be)."""
+    out = []
+    for other in repos:
+        if other is hit or other.read:
+            continue
+        theirs = other.known_roots()
+        if not theirs or theirs & roots:
+            out.append(other)
+    return out
 
 
 async def plan(db: Any, user_id: str, project: str, checkouts: list[Checkout] | None = None) -> dict[str, Any]:
@@ -451,27 +629,96 @@ async def plan(db: Any, user_id: str, project: str, checkouts: list[Checkout] | 
             earlier = versions.get(relay_key, []) if isinstance(relay_key, str) else []
             moves.append({**item, "to_project": repo.target, "matched_by": how, "evidence": detail, "versions": earlier})
         elif repo is not None:
-            stays.append({**item, "reason": f"belongs to repository {repo.name}, which keeps project '{project}'"})
+            stays.append({**item, "reason": f"belongs to repository {_safe(repo.name, 80)}, which keeps project '{project}'"})
         else:
             stays.append({**item, "reason": detail})
     moving = [r for r in repos if r.fingerprints and not r.keeps]
+    targets = {r.target for r in moving} | {str(m["to_project"]) for m in moves}
+    restricted = await restricted_credentials(db, user_id, project, targets) if targets else []
     return {
         "project": project,
         "repositories": [r.as_dict() for r in sorted(repos, key=lambda r: (r.already, r.first_seen, r.key))],
-        "folders": [_path_parts(k) for k in folders if k.startswith(f"{KIND_PATH}:")],
+        "folders": [_safe_place(_path_parts(k)) for k in folders if k.startswith(f"{KIND_PATH}:")],
         "moves": moves,
         "stays": stays[:MAX_LISTED_STAYS],
         "stays_total": len(stays),
         "commit_candidates": candidates,
         "checkouts": [
-            {**c.describe(), "matched": matched_checkouts[i].name if i in matched_checkouts else None}
+            {**c.describe(), "matched": _safe(matched_checkouts[i].name, 120) if i in matched_checkouts else None}
             for i, c in enumerate(checkouts)
         ],
         "bindings_to_move": sum(len(r.fingerprints) for r in moving),
+        "restricted_credentials": restricted,
         "applied": False,
         "batch_id": None,
         "_repos": moving,  # for apply(); removed before the result leaves the service
     }
+
+
+async def _optional_rows(db: Any, sql: str, params: tuple[Any, ...]) -> list[Any]:
+    """Rows of a query on a table a deployment may not have (RBAC roles, OAuth grants): [] without it."""
+    try:
+        cursor = await db.conn.execute(sql, params)
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e).lower():
+            return []
+        raise
+    return list(await cursor.fetchall())
+
+
+async def restricted_credentials(db: Any, user_id: str, project: str, targets: set[str]) -> list[dict[str, Any]]:
+    """The account's API keys and connections restricted to ``project`` that would lose ``targets``.
+
+    A key restricted to projects is refused in every project it does not name.
+    Before the split the repositories were in ``project``, so such a key could
+    brief and close in them; after it they are in their own projects, and its
+    closes there are refused (and dropped from the client's queue after 14
+    days). Each entry: ``{kind, id, name, project_ids, loses}`` (ids and names
+    only, never a secret).
+    """
+    out: list[dict[str, Any]] = []
+    keys = await _optional_rows(
+        db,
+        "SELECT k.id, k.name, r.project_ids FROM api_keys k JOIN api_key_roles r ON r.api_key_id = k.id "
+        "WHERE k.user_id = ? AND k.active AND COALESCE(r.project_ids, '') != '' ORDER BY k.created_at, k.id",
+        (user_id,),
+    )
+    for key_id, name, projects in keys:
+        allowed = [p for p in str(projects or "").split(",") if p]
+        loses = sorted(targets - set(allowed))
+        if project in allowed and loses:
+            out.append({"kind": "api_key", "id": str(key_id), "name": _safe(name, 80), "project_ids": allowed, "loses": loses})
+    grants = await _optional_rows(
+        db,
+        "SELECT g.grant_id, COALESCE(c.client_name, g.client_id), g.project_ids FROM oauth_grants g "
+        "LEFT JOIN oauth_clients c ON c.client_id = g.client_id WHERE g.user_id = ? AND g.revoked_at IS NULL "
+        "ORDER BY g.created_at, g.grant_id",
+        (user_id,),
+    )
+    for grant_id, name, projects in grants:
+        try:
+            allowed = [str(p) for p in json.loads(projects or "[]")]
+        except (TypeError, ValueError):
+            continue
+        loses = sorted(targets - set(allowed))
+        if project in allowed and loses:
+            out.append(
+                {"kind": "connection", "id": str(grant_id), "name": _safe(name, 80), "project_ids": allowed, "loses": loses}
+            )
+    return out
+
+
+class SplitNeedsConfirmation(Exception):
+    """Applying would take repositories away from keys restricted to the project; the caller must confirm."""
+
+    def __init__(self, project: str, credentials: list[dict[str, Any]]) -> None:
+        names = ", ".join(f"{c['kind'].replace('_', ' ')} {c.get('name') or c['id']}" for c in credentials)
+        super().__init__(
+            f"Needs --keys-lose-access (API: restricted_keys_lose_access): {len(credentials)} API key(s) or "
+            f"connection(s) restricted to '{project}' would be refused in the split repositories. Or add the new "
+            f"projects to them first (dashboard). They are: {names}."
+        )
+        self.credentials = credentials
 
 
 async def _move_memory(db: Any, user_id: str, memory_id: str, source: str, target: str, now: str) -> bool:
@@ -484,6 +731,10 @@ async def _move_memory(db: Any, user_id: str, memory_id: str, source: str, targe
     await db.conn.execute("UPDATE memories_fts SET project_id = ? WHERE id = ? AND user_id = ?", (target, memory_id, user_id))
     await db.conn.execute(
         "UPDATE pending_embeddings SET project_id = ? WHERE memory_id = ? AND user_id = ?", (target, memory_id, user_id)
+    )
+    # Who picked the handoff up goes with it (deleting a project removes its pickups by project id).
+    await db.conn.execute(
+        "UPDATE relay_pickups SET project_id = ? WHERE user_id = ? AND handoff_id = ?", (target, user_id, memory_id)
     )
     return True
 
@@ -525,16 +776,35 @@ async def apply(
     project: str,
     checkouts: list[Checkout] | None = None,
     qdrant: Any | None = None,
+    *,
+    restricted_keys_lose_access: bool = False,
 ) -> dict[str, Any]:
-    """Carry out :func:`plan` in one transaction and log every change under a new batch id."""
-    result = await plan(db, user_id, project, checkouts)
-    repos: list[Repository] = result.pop("_repos")
+    """Carry out :func:`plan` and log every change under a new batch id.
+
+    The plan is made inside the same transaction as the moves, so nothing
+    written in between can be missed. Raises :class:`SplitNeedsConfirmation`
+    when keys or connections restricted to ``project`` would lose repositories
+    and ``restricted_keys_lose_access`` is not set (nothing changes). A target
+    project the batch creates is logged (kind ``project``) so :func:`undo` can
+    take back everything of that repository. After the moves, a session left
+    with more than one current handoff in a project (one moved in beside
+    another) keeps only its newest, as a close would (logged as ``supersede``).
+    Callers hold :func:`user_gate` exclusively so no close of the account runs
+    meanwhile.
+    """
+    await ensure_schema(db)
     batch = f"split-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S')}-{secrets.token_hex(4)}"
     now = _now()
     bindings = 0
     memories: list[tuple[str, str]] = []
     async with db.transaction():
+        result = await plan(db, user_id, project, checkouts)
+        repos: list[Repository] = result.pop("_repos")
+        credentials = result["restricted_credentials"]
+        if credentials and not restricted_keys_lose_access and (repos or result["moves"]):
+            raise SplitNeedsConfirmation(project, credentials)
         for repo in repos:
+            moved_here = 0
             for key in repo.fingerprints:
                 cursor = await db.conn.execute(
                     "UPDATE project_fingerprints SET project_id = ?, updated_at = ? "
@@ -542,22 +812,81 @@ async def apply(
                     (repo.target, now, user_id, key, project),
                 )
                 if (cursor.rowcount or 0) > 0:
-                    bindings += 1
+                    moved_here += 1
                     await _log(db, user_id, batch, "binding", key, project, repo.target, f"repository {repo.key}", now)
+            bindings += moved_here
+            if moved_here and not repo.already:
+                evidence = f"created by this split for repository {repo.key}"
+                await _log(db, user_id, batch, KIND_PROJECT, repo.target, project, repo.target, evidence, now)
         for move in result["moves"]:
             for memory_id in [move["memory_id"], *move["versions"]]:
                 if await _move_memory(db, user_id, memory_id, project, move["to_project"], now):
                     memories.append((memory_id, move["to_project"]))
                     await _log(db, user_id, batch, "memory", memory_id, project, move["to_project"], move["evidence"], now)
+        superseded = await _one_current_per_session(db, user_id, batch, [m for m, _ in memories], now)
     vector_errors = await _sync_vectors(qdrant, memories) if qdrant is not None else 0
     applied = bool(bindings or memories)
-    log.info("relay_project_split", project=project, batch=batch if applied else None, bindings=bindings, memories=len(memories))
+    log.info(
+        "relay_project_split",
+        project=project,
+        batch=batch if applied else None,
+        bindings=bindings,
+        memories=len(memories),
+        superseded=superseded,
+    )
     result.update(
         applied=applied,
         batch_id=batch if applied else None,
-        moved={"bindings": bindings, "memories": len(memories), "vector_payload_errors": vector_errors},
+        moved={
+            "bindings": bindings,
+            "memories": len(memories),
+            "superseded": superseded,
+            "vector_payload_errors": vector_errors,
+        },
     )
     return result
+
+
+def _active_cutoff() -> str:
+    return datetime.now(UTC).replace(tzinfo=None).isoformat()
+
+
+async def _one_current_per_session(db: Any, user_id: str, batch: str, moved_ids: list[str], now: str) -> int:
+    """Supersede all but the newest current handoff of each moved session in its new project.
+
+    A session can have a current handoff in two projects (it closed in a
+    folder and in the repository, or a close raced an earlier split); once
+    both are in one project, the older one is retired the way a repeat close
+    retires it. Returns how many were superseded (each logged)."""
+    if not moved_ids:
+        return 0
+    marks = ",".join("?" for _ in moved_ids)
+    cursor = await db.conn.execute(
+        f"SELECT DISTINCT project_id, json_extract(metadata, '$.relay_key') FROM memories "  # noqa: S608
+        f"WHERE user_id = ? AND id IN ({marks}) AND memory_type = 'handoff' AND json_valid(metadata)",
+        [user_id, *moved_ids],
+    )
+    count = 0
+    for target, key in await cursor.fetchall():
+        if not isinstance(key, str) or not key:
+            continue
+        rows = await db.conn.execute(
+            f"""
+            SELECT id FROM memories
+            WHERE user_id = ? AND project_id = ? AND memory_type = 'handoff' AND superseded_by IS NULL
+              AND (expires_at IS NULL OR expires_at > ?)
+              AND json_valid(metadata) AND json_extract(metadata, '$.relay_key') = ?
+            ORDER BY {HANDOFF_ENDED_JD} DESC, julianday(created_at) DESC, id DESC
+            """,  # noqa: S608 - a fixed SQL expression; values are bound
+            (user_id, target, _active_cutoff(), key),
+        )
+        current = [str(r[0]) for r in await rows.fetchall()]
+        for older in current[1:]:
+            await db.mark_memory_superseded(older, current[0], now)
+            evidence = f"superseded by {current[0]}: one current handoff per session"
+            await _log(db, user_id, batch, KIND_SUPERSEDE, older, str(target), str(target), evidence, now)
+            count += 1
+    return count
 
 
 async def _batch_rows(db: Any, user_id: str, batch_id: str | None) -> tuple[str, list[dict[str, Any]]]:
@@ -584,21 +913,47 @@ async def _batch_rows(db: Any, user_id: str, batch_id: str | None) -> tuple[str,
     return chosen, rows
 
 
-async def undo(
-    db: Any, user_id: str, batch_id: str | None = None, *, apply_it: bool = False, qdrant: Any = None
-) -> dict[str, Any]:
-    """Reverse one split batch (the latest one not undone by default).
+async def _written_since(
+    db: Any, user_id: str, target: str, source: str, batch_refs: set[str], repo_keys: set[str]
+) -> list[dict[str, Any]]:
+    """What undo takes back from ``target``, a project the batch created for one repository:
+    every location bound there since the split (it resolves to that repository's project, so it is
+    that repository's: another checkout or worktree), and every handoff whose recorded location is
+    one of the repository's (every version). Nothing else: checkpoints and handoffs with no recorded
+    location stay (see ``written_since``)."""
+    items: list[dict[str, Any]] = []
+    cursor = await db.conn.execute(
+        "SELECT fingerprint FROM project_fingerprints WHERE user_id = ? AND project_id = ? ORDER BY created_at, fingerprint",
+        (user_id, target),
+    )
+    keys = set(repo_keys)
+    for (key,) in await cursor.fetchall():
+        if str(key) in batch_refs:
+            continue
+        keys.add(str(key))
+        items.append({"kind": "binding", "ref": str(key), "from_project": target, "to_project": source, "since_split": True})
+    cursor = await db.conn.execute(
+        "SELECT id, memory_type, metadata, source FROM memories WHERE user_id = ? AND project_id = ? "
+        "AND memory_type = 'handoff' ORDER BY julianday(created_at), id",
+        (user_id, target),
+    )
+    for row in await cursor.fetchall():
+        memory = {"id": str(row[0]), "memory_type": row[1], "metadata": _parse_metadata(row[2]), "source": row[3]}
+        if memory["id"] in batch_refs:
+            continue
+        recorded = {str(k) for k in (handoff_location(memory) or {}).get("fingerprints") or []}
+        if recorded & keys:
+            items.append(
+                {"kind": "memory", "ref": memory["id"], "from_project": target, "to_project": source, "since_split": True}
+            )
+    return items
 
-    A binding goes back only while it is still bound where the split put it,
-    and a memory only while it is still in that project; anything changed since
-    is listed and left alone. Dry run unless ``apply_it``. Undoing a batch twice
-    changes nothing the second time.
-    """
-    await ensure_schema(db)
-    batch, rows = await _batch_rows(db, user_id, batch_id)
+
+async def _undo_plan(db: Any, user_id: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     pending = [r for r in rows if not r["undone_at"]]
-    bound = await _bound_to(db, user_id, [r["ref"] for r in pending if r["kind"] == "binding"])
-    memory_ids = [r["ref"] for r in pending if r["kind"] == "memory"]
+    moves = [r for r in pending if r["kind"] in MOVE_KINDS]
+    bound = await _bound_to(db, user_id, [r["ref"] for r in moves if r["kind"] == "binding"])
+    memory_ids = [r["ref"] for r in moves if r["kind"] == "memory"]
     located: dict[str, str] = {}
     if memory_ids:
         marks = ",".join("?" for _ in memory_ids)
@@ -609,57 +964,121 @@ async def undo(
         located = {str(r[0]): str(r[1]) for r in await cursor.fetchall()}
     back: list[dict[str, Any]] = []
     left: list[dict[str, Any]] = []
-    for r in pending:
+    for r in moves:
         now_at = bound.get(r["ref"]) if r["kind"] == "binding" else located.get(r["ref"])
         item = {"kind": r["kind"], "ref": r["ref"], "from_project": r["to_project"], "to_project": r["from_project"]}
         if now_at == r["to_project"]:
             back.append(item)
         else:
             left.append({**item, "reason": f"now in '{now_at}'" if now_at else "no longer exists"})
-    # Handoffs written in a split-out project since the split are not the batch's: they stay there.
-    batch_refs = {r["ref"] for r in rows if r["kind"] == "memory"}
+    batch_refs = {r["ref"] for r in rows if r["kind"] in MOVE_KINDS}
+    since: list[dict[str, Any]] = []
+    for r in pending:
+        if r["kind"] == KIND_PROJECT:
+            repo_keys = {m["ref"] for m in moves if m["kind"] == "binding" and m["to_project"] == r["ref"]}
+            since.extend(await _written_since(db, user_id, r["ref"], r["from_project"], batch_refs, repo_keys))
+    # Anything else written in a split-out project since the split is not the batch's: it stays there.
+    taken = batch_refs | {i["ref"] for i in since}
     written_since: dict[str, int] = {}
-    for target in sorted({r["to_project"] for r in pending}):
+    for target in sorted({r["to_project"] for r in moves}):
         cursor = await db.conn.execute(
             "SELECT id FROM memories WHERE user_id = ? AND project_id = ? AND memory_type IN ('handoff', 'checkpoint') "
             "AND superseded_by IS NULL",
             (user_id, target),
         )
-        count = sum(1 for r in await cursor.fetchall() if str(r[0]) not in batch_refs)
+        count = sum(1 for r in await cursor.fetchall() if str(r[0]) not in taken)
         if count:
             written_since[target] = count
-    result: dict[str, Any] = {
-        "batch_id": batch,
-        "already_undone": not pending,
-        "moves_back": back,
-        "left": left,
-        "written_since": written_since,
-        "applied": False,
-    }
-    if not apply_it or not pending:
-        return result
+    return {"pending": bool(pending), "back": back, "since": since, "left": left, "written_since": written_since}
+
+
+async def undo(
+    db: Any, user_id: str, batch_id: str | None = None, *, apply_it: bool = False, qdrant: Any = None
+) -> dict[str, Any]:
+    """Reverse one split batch (the latest one not undone by default).
+
+    A binding goes back only while it is still bound where the split put it,
+    and a memory only while it is still in that project; anything changed since
+    is listed and left alone. A project the batch created for a repository goes
+    back whole: the locations of that repository bound there since (another
+    checkout or worktree) and the handoffs recorded in them go back too
+    (``since_split`` in ``moves_back``, logged in the batch), so the repository
+    resolves to one project again and a later split can use the same name.
+    Checkpoints and handoffs with no recorded location written there since stay
+    and are counted in ``written_since``. A session left with two current
+    handoffs in one project keeps its newest (``superseded`` in ``moved``, logged
+    in the batch). Dry run unless ``apply_it``. Undoing a
+    batch twice changes nothing the second time. Callers hold :func:`user_gate`
+    exclusively when applying.
+    """
+    await ensure_schema(db)
+    batch, rows = await _batch_rows(db, user_id, batch_id)
+    if not apply_it:
+        found = await _undo_plan(db, user_id, rows)
+        return {
+            "batch_id": batch,
+            "already_undone": not found["pending"],
+            "moves_back": _shown([*found["back"], *found["since"]]),
+            "left": _shown(found["left"]),
+            "written_since": found["written_since"],
+            "applied": False,
+        }
     now = _now()
     moved: list[tuple[str, str]] = []
     bindings = 0
     async with db.transaction():
-        for item in back:
+        found = await _undo_plan(db, user_id, rows)
+        result: dict[str, Any] = {
+            "batch_id": batch,
+            "already_undone": not found["pending"],
+            "moves_back": [*found["back"], *found["since"]],
+            "left": found["left"],
+            "written_since": found["written_since"],
+            "applied": False,
+        }
+        if not found["pending"]:
+            return result
+        for item in result["moves_back"]:
             if item["kind"] == "binding":
                 cursor = await db.conn.execute(
                     "UPDATE project_fingerprints SET project_id = ?, updated_at = ? "
                     "WHERE user_id = ? AND fingerprint = ? AND project_id = ?",
                     (item["to_project"], now, user_id, item["ref"], item["from_project"]),
                 )
-                bindings += 1 if (cursor.rowcount or 0) > 0 else 0
-            elif await _move_memory(db, user_id, item["ref"], item["from_project"], item["to_project"], now):
-                moved.append((item["ref"], item["to_project"]))
+                done = (cursor.rowcount or 0) > 0
+                bindings += 1 if done else 0
+            else:
+                done = await _move_memory(db, user_id, item["ref"], item["from_project"], item["to_project"], now)
+                if done:
+                    moved.append((item["ref"], item["to_project"]))
+            if done and item.get("since_split"):
+                evidence = f"written in '{item['from_project']}' after the split; moved back by its undo"
+                await _log(db, user_id, batch, item["kind"], item["ref"], item["to_project"], item["from_project"], evidence, now)
+        # Back in one project, a session keeps one current handoff (as after a split).
+        superseded = await _one_current_per_session(db, user_id, batch, [m for m, _ in moved], now)
         await db.conn.execute(
             "UPDATE relay_refiles SET undone_at = ? WHERE user_id = ? AND batch_id = ? AND undone_at IS NULL",
             (now, user_id, batch),
         )
     vector_errors = await _sync_vectors(qdrant, moved) if qdrant is not None else 0
-    log.info("relay_project_split_undone", batch=batch, bindings=bindings, memories=len(moved))
-    result.update(applied=True, moved={"bindings": bindings, "memories": len(moved), "vector_payload_errors": vector_errors})
+    log.info("relay_project_split_undone", batch=batch, bindings=bindings, memories=len(moved), superseded=superseded)
+    result.update(
+        applied=True,
+        moves_back=_shown(result["moves_back"]),
+        left=_shown(result["left"]),
+        moved={
+            "bindings": bindings,
+            "memories": len(moved),
+            "superseded": superseded,
+            "vector_payload_errors": vector_errors,
+        },
+    )
     return result
+
+
+def _shown(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Undo items as returned: a binding's key (a path, a remote) under the trust policy (:func:`_safe_key`)."""
+    return [{**item, "ref": _safe_key(item["ref"])} if item.get("kind") == "binding" else item for item in items]
 
 
 def checkouts_from(items: list[dict[str, Any]]) -> list[Checkout]:

@@ -344,7 +344,7 @@ def test_split_apply_moves_exactly_the_matched_handoffs_and_is_idempotent(env, m
     assert code == 0, err
     result = jout(out)
     assert result["applied"] is True and result["batch_id"].startswith("split-")
-    assert result["moved"] == {"bindings": 6, "memories": 4, "vector_payload_errors": 0}
+    assert result["moved"] == {"bindings": 6, "memories": 4, "superseded": 0, "vector_payload_errors": 0}
 
     expected = {
         ids["alpha_v1"]: "alpha",
@@ -368,7 +368,8 @@ def test_split_apply_moves_exactly_the_matched_handoffs_and_is_idempotent(env, m
     ]  # the folder stays with the configured project
     assert [r for r in after["bindings"] + after["memories"] if r[0] == "other"] == other_before
     log_rows = rows(env, "SELECT user_id, kind, from_project FROM relay_refiles WHERE batch_id = ?", (result["batch_id"],))
-    assert len(log_rows) == 10 and {r[0] for r in log_rows} == {"owner"} and {r[2] for r in log_rows} == {"clawdbot"}
+    assert sorted(r[1] for r in log_rows) == ["binding"] * 6 + ["memory"] * 4 + ["project"] * 2  # two new projects
+    assert {r[0] for r in log_rows} == {"owner"} and {r[2] for r in log_rows} == {"clawdbot"}
     audit = rows(env, "SELECT user_id, resource_id FROM audit_log WHERE action = 'relay_project_split'")
     assert audit == [("owner", result["batch_id"])]
 
@@ -381,11 +382,12 @@ def test_split_apply_moves_exactly_the_matched_handoffs_and_is_idempotent(env, m
     text = brief_text(monkeypatch, capsys, ids["alpha"])
     assert text.startswith("# Remembra brief · project alpha ·") and "ship x" in text and "sales sweep" not in text
     assert "holds 2 repositories" not in text
-    # New sessions land in the repository's own project; an undo would leave them there and says so.
+    # New sessions land in the repository's own project; an undo takes them back with the repository.
     newer = close(monkeypatch, capsys, ids["alpha"], "a-new", "--todo", "after the split")
     assert project_of(env, newer) == "alpha"
     code, out, _ = run(monkeypatch, capsys, ["projects", "undo"])
-    assert code == 0 and "1 handoff(s) or checkpoint(s) written in 'alpha' since the split stay there." in out
+    assert code == 0 and f"memory   {newer}  alpha -> clawdbot  (written since the split)" in out
+    assert "since the split stay there" not in out
 
 
 def test_split_is_reversible(env, monkeypatch, capsys, tmp_path):

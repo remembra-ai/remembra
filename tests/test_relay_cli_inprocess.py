@@ -219,7 +219,7 @@ def test_cli_close_brief_trail_resolve_in_process(wired, monkeypatch, capsys, tm
     assert code == 0 and "close failed: HTTP 400" in err
 
     sessions = wired["home"] / ".remembra" / "relay" / "sessions"
-    state_files = [p for p in sessions.glob("*.json") if not p.name.startswith(("adhoc-", "brief-"))]
+    state_files = [p for p in sessions.glob("*.json") if not p.name.startswith(("adhoc-", "brief-", "sent-"))]
     assert len(state_files) == 1 and json.loads(state_files[0].read_text())["head"] != sha
 
 

@@ -157,6 +157,16 @@ class RepoInfo:
     branch: str | None = None
     head_commit: str | None = None
     is_git: bool = False
+    # git did not answer in time (the first probe timed out): whether this is a repository is unknown,
+    # which is not the same as "not a repository".
+    unknown: bool = False
+
+    @property
+    def git_repo(self) -> bool | None:
+        """True in a git repository, False outside one, None when git did not answer in time."""
+        if self.is_git:
+            return True
+        return None if self.unknown else False
 
     def locator(self, cwd: Path, host: str | None = None) -> dict[str, Any]:
         loc: dict[str, Any] = {
@@ -173,7 +183,7 @@ def repo_info(cwd: Path, deadline: Deadline) -> RepoInfo:
     git = Git(cwd, deadline)
     toplevel = git.line("rev-parse", "--show-toplevel")
     if not toplevel:
-        return RepoInfo(repo_name=cwd.name or None)
+        return RepoInfo(repo_name=cwd.name or None, unknown=git.timed_out)
     info = RepoInfo(toplevel=toplevel, is_git=True)
     branch = git.line("rev-parse", "--abbrev-ref", "HEAD")
     remote = _pick_remote(git, branch if branch and branch != "HEAD" else None)
@@ -390,10 +400,14 @@ def git_facts(
 
     ``incomplete`` lists the probes that did not finish in time (``log``,
     ``status``, ``diff``, ``upstream``): their facts are unknown, not empty.
+    ``repo`` means git did not even say whether this is a repository (the
+    first probe timed out): nothing about it is known.
     """
     info = info or repo_info(cwd, deadline)
     facts: dict[str, Any] = {}
     if not info.is_git:
+        if info.unknown:
+            facts["incomplete"] = ["repo"]
         return facts
     git = Git(cwd, deadline)
     incomplete: list[str] = []
