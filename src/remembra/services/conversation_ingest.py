@@ -21,6 +21,7 @@ from openai import AsyncOpenAI
 
 from remembra.config import Settings
 from remembra.core.ai_spend import SpendBudgetExceeded, metered_chat
+from remembra.core.llm_guard import make_llm_client
 from remembra.core.time import utcnow
 from remembra.extraction.prompting import reference_date_line, wrap_untrusted
 from remembra.extraction.prompts.conversation import (
@@ -73,9 +74,9 @@ class ConversationIngestService:
         log.info("conversation_ingest_service_initialized")
 
     def _get_client(self) -> AsyncOpenAI:
-        """Get or create OpenAI client."""
+        """Get or create the OpenAI client (shared LLM breaker, one retry as before)."""
         if self._client is None:
-            self._client = AsyncOpenAI(api_key=self.settings.openai_api_key, max_retries=1)
+            self._client = make_llm_client(self.settings.openai_api_key, max_retries=1)
         return self._client
 
     async def ingest(

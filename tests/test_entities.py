@@ -196,11 +196,12 @@ class TestEntityExtractor:
     async def test_lazy_client_init(self):
         extractor = EntityExtractor(api_key="sk-test")
         assert extractor._client is None
-        with patch("remembra.extraction.entities.AsyncOpenAI") as mock_cls:
-            mock_cls.return_value = MagicMock()
+        with patch("remembra.extraction.entities.make_llm_client") as mock_make:
+            mock_make.return_value = MagicMock()
             client = extractor._get_client()
-            assert client is not None
-            mock_cls.assert_called_once_with(api_key="sk-test")
+            assert client is mock_make.return_value
+            assert extractor._get_client() is client
+            mock_make.assert_called_once_with("sk-test")
 
 
 # ---------------------------------------------------------------------------

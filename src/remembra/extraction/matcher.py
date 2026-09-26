@@ -12,6 +12,7 @@ import structlog
 from openai import AsyncOpenAI
 
 from remembra.core.ai_spend import metered_chat
+from remembra.core.llm_guard import make_llm_client
 from remembra.extraction.entities import ExtractedEntity
 from remembra.extraction.prompting import wrap_untrusted
 
@@ -158,9 +159,9 @@ class EntityMatcher:
         self._client: AsyncOpenAI | None = None
 
     def _get_client(self) -> AsyncOpenAI:
-        """Get or create OpenAI client."""
+        """Get or create the OpenAI client (shared LLM breaker, bounded retries)."""
         if self._client is None:
-            self._client = AsyncOpenAI(api_key=self.api_key)
+            self._client = make_llm_client(self.api_key)
         return self._client
 
     async def match(
