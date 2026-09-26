@@ -20,6 +20,7 @@ When an nginx binary is on PATH, ``nginx -t`` also checks the syntax for real.
 from __future__ import annotations
 
 import importlib.util
+import json
 import re
 import shutil
 import subprocess
@@ -27,7 +28,7 @@ import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import ModuleType
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import pytest
 
@@ -265,6 +266,71 @@ def test_every_redirect_lands_on_a_page_that_exists() -> None:
         assert res.status == 200, (pattern, target)
         if parts.fragment:
             assert f'id="{parts.fragment}"' in Path(res.file).read_text(), (pattern, target)
+
+
+# Hosts a redirect from remembra.dev may send a visitor to.
+OUR_HOSTS = {"remembra.dev", "app.remembra.dev", "docs.remembra.dev"}
+
+
+def _browser_host(location: str, base: str = "https://remembra.dev/some/page") -> str | None:
+    """The host a browser goes to for ``Location: <location>`` on ``base``.
+
+    Browsers parse Location with the WHATWG URL rules, which differ from
+    RFC 3986 in the two ways that matter here: tabs and newlines anywhere in
+    the value are dropped, and for http(s) a backslash is a slash. So
+    ``/\\evil.com`` and ``/<tab>/evil.com`` both mean ``//evil.com``.
+    """
+    control_or_space = "".join(chr(c) for c in range(0x21))
+    cleaned = re.sub(r"[\t\n\r]", "", location).strip(control_or_space).replace("\\", "/")
+    return urlsplit(urljoin(base, cleaned)).hostname
+
+
+def _hostile_paths() -> list[str]:
+    """Encoded paths that try to turn a clean-URL redirect into a link to another site."""
+    tricks = ["%5C", "%5C%5C", "%09/", "%09%09", "%0A/", "%0D/", "%20/", "/", "%2F", "%2F%5C", "%5C%2F", "%09%5C"]
+    parents = ["", "/blog", "/changelog", "/docs", "/pricing"]
+    endings = ["/", ".html", "/index.html", ""]
+    return [f"{parent}/{trick}evil.com{end}" for parent in parents for trick in tricks for end in endings]
+
+
+def test_browser_host_reads_location_the_way_browsers_do() -> None:
+    assert _browser_host("/pricing") == "remembra.dev"
+    assert _browser_host("https://docs.remembra.dev/x") == "docs.remembra.dev"
+    assert _browser_host("/\\evil.com") == "evil.com"
+    assert _browser_host("/\t/evil.com") == "evil.com"
+    assert _browser_host("//evil.com") == "evil.com"
+    assert _browser_host("/a//evil.com") == "remembra.dev"
+    assert _browser_host(" \x01/\\evil.com") == "evil.com"
+    assert _browser_host("/-x-") == "remembra.dev"
+
+
+@pytest.mark.parametrize("path", _hostile_paths())
+def test_no_path_redirects_off_the_site(path: str) -> None:
+    res = nginx.resolve(path, nginx.load(CONF), _web_root())
+    if res.status in (301, 302, 307, 308):
+        assert res.location is not None
+        assert _browser_host(res.location) in OUR_HOSTS, (path, res.location)
+
+
+def test_the_encoded_backslash_and_tab_redirects_are_closed() -> None:
+    # The report: each of these used to answer 301 with a Location a browser reads as evil.com.
+    locs = nginx.load(CONF)
+    for path in ("/%5Cevil.com/", "/%09/evil.com/", "/%5Cevil.com.html", "/%5Cevil.com/index.html", "/%09/evil.com.html"):
+        res = nginx.resolve(path, locs, _web_root())
+        assert res.status == 404, (path, res)
+    # The old patterns, to show the check above would have caught them.
+    old = nginx.parse("server { location ~ ^(/.+)/$ { return 301 $1$is_args$args; } }")
+    moved = nginx.resolve("/%5Cevil.com/", old, _web_root())
+    assert moved.status == 301 and _browser_host(str(moved.location)) == "evil.com"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed; the Python reading above still ran")
+def test_browser_host_agrees_with_a_real_whatwg_url_parser() -> None:
+    samples = ["/pricing", "/\\evil.com", "/\t/evil.com", "/\t\\evil.com", "//evil.com", "/a//evil.com", "/changelog#v0.16.0"]
+    script = "for (const l of JSON.parse(process.argv[1])) console.log(new URL(l, 'https://remembra.dev/some/page').hostname)"
+    run = subprocess.run(["node", "-e", script, json.dumps(samples)], capture_output=True, text=True, timeout=30)
+    assert run.returncode == 0, run.stderr
+    assert run.stdout.split() == [_browser_host(s) for s in samples]
 
 
 def test_every_retired_release_page_has_its_anchor_on_the_changelog() -> None:
