@@ -1,0 +1,342 @@
+/* Task Board and receipts (WP-13c): the "baton trail" language in board form.
+   Stone paper cards, hairline rules, the dashed trail for continuity, and
+   signal orange only for what moves or needs you. Pixel craft (dithered
+   clouds, packets, the seal stamp) is drawn at whole-pixel steps. */
+
+.crew-board {
+  /* dither cloud tones: stone dust with ember flecks */
+  --d1: #e0e1da;
+  --d2: #d2d4cc;
+  --d3: #c1c4bb;
+  --d-or: #ff8a52;
+  --hatch: rgb(21 23 26 / 0.34);
+}
+.dark .crew-board {
+  /* a shade above the charcoal panel, so the banks read on the header card */
+  --d1: #232a27;
+  --d2: #2c3632;
+  --d3: #38443e;
+  --d-or: #9a4119;
+  --hatch: rgb(236 237 231 / 0.36);
+}
+
+/* ---------------------------------------------------------------- header */
+
+.cb-cloud {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+.cb-strip {
+  font-family: var(--f-mono);
+  background: var(--panel);
+  border: 1px solid var(--rule-strong);
+  border-radius: 3px;
+  box-shadow: var(--shadow);
+}
+.cb-strip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--ink-3);
+}
+.cb-strip-dot[data-live="true"] {
+  background: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-wash);
+}
+
+/* ------------------------------------------------------- the column trail */
+
+.cb-trail {
+  position: relative;
+  height: 10px;
+}
+.cb-trail::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 4px;
+  height: 2px;
+  background: repeating-linear-gradient(90deg, var(--rule) 0 6px, transparent 6px 11px);
+}
+.dark .cb-trail::before {
+  background: repeating-linear-gradient(90deg, #45494e 0 6px, transparent 6px 11px);
+}
+.cb-station {
+  position: absolute;
+  top: 1px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  background: var(--panel);
+  border: 2px solid var(--ink-3);
+}
+.cb-station[data-hot="true"] {
+  border-color: var(--signal);
+}
+
+/* An orange pixel packet with a dithered tail, travelling between stations. */
+.cb-packet {
+  position: absolute;
+  top: 2px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  background: var(--signal);
+  animation: cb-packet var(--cb-dur, 900ms) steps(18, end) forwards;
+}
+.cb-packet::before,
+.cb-packet::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  width: 4px;
+  height: 4px;
+  background: var(--signal);
+}
+.cb-packet::before {
+  right: calc(100% + 2px);
+  opacity: 0.55;
+}
+.cb-packet::after {
+  right: calc(100% + 8px);
+  opacity: 0.25;
+}
+.cb-packet[data-dir="-1"]::before {
+  right: auto;
+  left: calc(100% + 2px);
+}
+.cb-packet[data-dir="-1"]::after {
+  right: auto;
+  left: calc(100% + 8px);
+}
+@keyframes cb-packet {
+  from {
+    left: var(--cb-from);
+  }
+  to {
+    left: var(--cb-to);
+  }
+}
+
+/* ------------------------------------------------------------------ cards */
+
+.cb-card {
+  position: relative;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: 3px;
+  box-shadow: 0 1px 0 rgb(21 23 26 / 0.04);
+  transition: border-color 120ms ease, transform 120ms ease;
+}
+.cb-card:hover {
+  border-color: var(--ink-3);
+}
+.cb-card[data-dragging="true"] {
+  opacity: 0.45;
+}
+.cb-card[data-selected="true"] {
+  border-color: var(--rule-strong);
+  box-shadow: 3px 3px 0 var(--ink);
+}
+/* the left edge says where the card is on the trail */
+.cb-card::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+}
+.cb-card[data-col="progress"]::before {
+  background: repeating-linear-gradient(180deg, var(--ink) 0 4px, transparent 4px 7px);
+}
+.cb-card[data-col="review"]::before {
+  background: var(--signal);
+}
+.cb-card[data-col="done"]::before {
+  background: var(--ink-3);
+}
+.cb-card[data-col="blocked"]::before {
+  background: repeating-linear-gradient(180deg, var(--fail) 0 2px, transparent 2px 4px);
+}
+.cb-card[data-col="stalled"] {
+  border-style: dashed;
+  border-color: var(--signal);
+}
+.cb-card[data-col="stalled"]::before {
+  background: repeating-linear-gradient(180deg, var(--signal) 0 4px, transparent 4px 8px);
+}
+.cb-card[data-cancelled="true"] {
+  opacity: 0.6;
+}
+
+/* Acceptance meter: one pixel block per criterion. */
+.cb-meter {
+  display: inline-flex;
+  gap: 2px;
+}
+.cb-block {
+  width: 7px;
+  height: 7px;
+  border: 1px solid var(--ink-3);
+}
+.cb-block[data-state="met"] {
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.cb-block[data-state="met"][data-weak="true"] {
+  /* self-reported: half-inked through a 2x2 dither */
+  background: repeating-conic-gradient(var(--ink) 0 25%, transparent 0 50%) 0 0 / 2px 2px;
+}
+.cb-block[data-state="waived"] {
+  background: repeating-linear-gradient(135deg, var(--hatch) 0 1px, transparent 1px 3px);
+}
+.cb-block[data-state="unmet"] {
+  border-color: var(--fail);
+  background: var(--fail-wash);
+}
+.cb-block[data-optional="true"] {
+  border-style: dotted;
+}
+
+/* Checkpoint dots: small diamonds, oldest to newest. */
+.cb-ckp {
+  width: 5px;
+  height: 5px;
+  transform: rotate(45deg);
+  background: var(--ink-3);
+}
+.cb-ckp[data-recent="true"] {
+  background: var(--ink);
+}
+/* only the newest checkpoint, while it is fresh, is the moving thing */
+.cb-ckp[data-recent="true"][data-latest="true"] {
+  background: var(--signal);
+}
+
+/* Zone chips: solid exclusive, striped shared, outline watch. */
+.cb-zone {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--ink);
+  border-radius: 2px;
+  padding: 1px 5px;
+  font-family: var(--f-mono);
+  font-size: 10.5px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.cb-zone[data-mode="exclusive"] {
+  background: var(--ink);
+  color: var(--panel);
+}
+.cb-zone[data-mode="shared"] {
+  background: repeating-linear-gradient(135deg, var(--paper-2) 0 3px, var(--panel) 3px 6px);
+  color: var(--ink);
+}
+.cb-zone[data-mode="watch"] {
+  background: transparent;
+  color: var(--ink-2);
+  border-color: var(--ink-3);
+}
+.cb-zone[data-reserved="true"] {
+  border-style: dashed;
+  border-color: var(--signal);
+  background: var(--signal-wash);
+  color: var(--signal-ink);
+}
+
+/* ------------------------------------------------------------ the board */
+
+.cb-scroller {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
+}
+.cb-grid {
+  position: relative;
+  display: grid;
+  /* six columns share the width on a desktop; below that the board scrolls sideways inside itself */
+  grid-template-columns: repeat(6, minmax(168px, 1fr));
+  column-gap: 8px;
+  min-width: calc(6 * 168px + 5 * 8px);
+}
+@media (max-width: 1279px) {
+  .cb-grid {
+    grid-template-columns: repeat(6, minmax(212px, 1fr));
+    min-width: calc(6 * 212px + 5 * 8px);
+  }
+}
+
+.cb-cell {
+  min-height: 56px;
+  border-radius: 3px;
+  padding: 4px;
+  transition: background 120ms ease, outline-color 120ms ease;
+  outline: 1px dashed transparent;
+  outline-offset: -1px;
+}
+.cb-cell[data-target="true"] {
+  outline-color: var(--ink-3);
+}
+.cb-cell[data-over="true"] {
+  outline-color: var(--signal);
+  background: var(--signal-wash);
+}
+.cb-cell[data-over="refused"] {
+  outline-color: var(--fail);
+  background: var(--fail-wash);
+}
+.cb-lane-head {
+  grid-column: 1 / -1;
+  position: sticky;
+  left: 0;
+}
+
+.cb-deps {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+.cb-deps path {
+  fill: none;
+  stroke: var(--ink-3);
+  stroke-width: 1.25;
+  stroke-dasharray: 4 4;
+  opacity: 0.5;
+}
+.cb-deps path[data-open="true"] {
+  opacity: 0.8;
+}
+.cb-deps path[data-hot="true"] {
+  stroke: var(--ink);
+  opacity: 1;
+  stroke-width: 1.75;
+}
+
+/* --------------------------------------------------------------- receipt */
+
+.cb-receipt-edge {
+  /* the torn-paper bottom of a receipt, cut at pixel steps */
+  height: 8px;
+  background:
+    linear-gradient(135deg, var(--panel) 50%, transparent 50%) 0 0 / 8px 8px repeat-x,
+    linear-gradient(225deg, var(--panel) 50%, transparent 50%) 0 0 / 8px 8px repeat-x;
+}
+
+.cb-stamp {
+  image-rendering: pixelated;
+  shape-rendering: crispEdges;
+}
+
+/* Reduced motion: the global rule cuts the packet's run to an instant jump,
+   so it still lands (and is removed on animationend) without travelling. */

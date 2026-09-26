@@ -10,6 +10,7 @@
 
 import { HardHat, RadioTower } from 'lucide-react';
 import { useCrewSocket } from '../../hooks/useCrewSocket';
+import { Board } from '../../pages/crew/Board';
 import { useNow } from '../../hooks/useResource';
 import { absoluteTime, relativeTime } from '../time';
 import { Card, CardHeader, CopyCommand, ErrorNotice, Pill, PulseDot, StaleNotice, TrailSkeleton } from '../../components/relay/ui';
@@ -269,6 +270,8 @@ function CrewScreen() {
       </Card>
     );
   }
+  // WP-13 screens plug in per view; the rest keep the plain live view until theirs land.
+  if (route?.screen === 'board') return <Board crewId={lookup.crewId} project={project} />;
   return <CrewLive crewId={lookup.crewId} project={project} />;
 }
 
