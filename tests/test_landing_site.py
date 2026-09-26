@@ -1120,6 +1120,26 @@ def test_refund_policy_says_a_refund_cancels_the_subscription_and_the_webhook_do
     assert 'effective_from="immediately"' in billing
 
 
+# Who receives the mail sent to each domain the site gives an address for (MX records, 2026-09-26),
+# and the name the subprocessors page must use for that provider.
+MAIL_PROVIDERS = {"dolphytech.com": "Google Workspace", "remembra.dev": "Namecheap"}
+
+
+def test_every_email_address_on_the_site_has_its_mail_provider_named() -> None:
+    address = re.compile(r"(?:mailto:|formsubmit\.co/(?:ajax/)?)[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+)")
+    domains = {m.group(1).lower() for page in _site_text_files() for m in address.finditer(page.read_text(errors="replace"))}
+    assert domains, "no addresses found: the scan is broken"
+    # A new domain needs its mail provider added here and on the subprocessors page.
+    assert domains <= set(MAIL_PROVIDERS), domains - set(MAIL_PROVIDERS)
+    subs = _text((LANDING / "subprocessors.html").read_text())
+    privacy = _text((LANDING / "privacy.html").read_text())
+    for domain in domains:
+        assert MAIL_PROVIDERS[domain] in subs, domain
+        assert MAIL_PROVIDERS[domain] in privacy, domain
+    # The security page's promise is only true while the list is complete.
+    assert "Everyone who handles your data is on the subprocessors page" in _text((LANDING / "security.html").read_text())
+
+
 def _sentences(page: str) -> list[str]:
     return re.split(r"(?<=[.!?])\s+", _text((LANDING / page).read_text()))
 
@@ -1158,5 +1178,5 @@ def test_subprocessors_page_names_every_service_the_code_sends_data_to() -> None
     for setting, name in wired.items():
         assert setting in config, setting  # the check still describes the code
         assert name in subs, name
-    for name in ("Hetzner", "Paddle", "Formsubmit", "Google Fonts"):
+    for name in ("Hetzner", "Paddle", "Formsubmit", "Google Fonts", "Google Workspace", "Namecheap"):
         assert name in subs, name
