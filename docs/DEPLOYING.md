@@ -546,7 +546,8 @@ data migration. Stop at the first step that fixes the problem.
 1. **Flag off.** Set `REMEMBRA_CREW_MODE=false` and redeploy. Crew routes
    return 404, briefs lose the crew block, MCP crew tools answer
    "unavailable"; memory, Relay and the dashboard are unaffected. `crew.db` is
-   not opened, so it stays exactly as it was and keeps being replicated;
+   opened for account erasure only (no crew route or job uses it), so it stays
+   as it was apart from erased accounts, and keeps being replicated;
    switching the flag on again brings every crew back. `/health/ready` shows
    `components.crew.status: "disabled"`. Agents that joined before the switch
    keep their last local view until they end, so restart them; new sessions
@@ -560,7 +561,10 @@ data migration. Stop at the first step that fixes the problem.
    agent inbox reads and writes work) and never opens `crew.db`. Inbox
    messages sent while rolled back keep their project (that release writes
    the `project_id` column when it exists) but carry no crew id, and their
-   sender is recorded as an unverified agent (the column defaults).
+   sender is recorded as an unverified agent (the column defaults). Accounts
+   that release erases keep their `crew.db` rows until this release boots
+   again, whose erasure job erases them on its first run (an account with an
+   `account_erased` receipt and rows in `crew.db`); keep the rollback short.
 4. **Data restore** (only if data is wrong): stop the container, then restore
    the snapshot taken before the flip. Litestream holds the *latest* state,
    bad data included, so a litestream restore needs a point in time from

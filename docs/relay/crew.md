@@ -278,7 +278,9 @@ This section is for self-hosters and operators. Remembra Cloud's own procedure i
 | `REMEMBRA_NOTIFY_SIGNING_KEY` | the JWT secret | Key the per-target webhook signing secrets are derived from. Changing it (or the JWT secret when this is unset) changes every webhook's secret. |
 
 With the flag off, the server behaves exactly as it does without Crew mode: the crew routes return 404,
-`crew.db` is not opened, and memory, Relay and the dashboard work as before. `GET /health/ready` shows
+no `crew.db` is created, and memory, Relay and the dashboard work as before. A `crew.db` left from an
+earlier run with the flag on is opened for account erasure only, so an account erased while the flag is
+off loses its crew rows too; while it exists but cannot be opened, erasure waits. `GET /health/ready` shows
 the state under `components.crew`: `disabled`, or `ok` with `schema_version` and `latest_version`
 (`degraded` if `crew.db` cannot be read or is behind the code's migrations).
 
@@ -337,15 +339,18 @@ session whose token is older than the restored state simply joins again.
 Crew mode is additive, so rollback never needs a data migration:
 
 1. **Switch the flag off** (`REMEMBRA_CREW_MODE=false`) and restart. Crew routes disappear, briefs lose
-   the crew block, MCP crew tools answer "unavailable", and `crew.db` is left as it was: switching the
-   flag on again brings every crew back. New agent sessions stop joining and get the plain Relay brief.
+   the crew block, MCP crew tools answer "unavailable", and `crew.db` is left as it was (it is opened
+   only so that account erasure keeps covering it): switching the flag on again brings every crew back. New agent sessions stop joining and get the plain Relay brief.
    Sessions that joined earlier keep enforcing their last local view until they end, and about nine
    minutes after the switch they also stop writing in zones they held (their lease can no longer be
    renewed), so restart those agents.
 2. **Stop the local side** on each machine where it matters: `remembra-crew connect --uninstall --apply`.
 3. **Go back to an earlier release** if the problem is in shared code. A release from before Crew mode
-   runs on the v5 main database (tested); `crew.db` is simply ignored. Inbox messages sent while rolled
-   back have no project scope and stay visible to keys without a project restriction.
+   runs on the v5 main database (tested); `crew.db` is simply ignored. Rolling back to 0.16.x (ce067fd)
+   keeps inbox project scoping, because that release reads and writes the v5 `project_id` column; only
+   releases from before the Phase 0 inbox scoping change lose it. An account that release erases keeps
+   its `crew.db` rows until this release runs again: its erasure job then finds them (no account, an
+   erasure receipt) and erases them on its first run, so keep such a rollback short.
 4. **Restore a snapshot** only if data itself is wrong, as above.
 
 ## Troubleshooting
