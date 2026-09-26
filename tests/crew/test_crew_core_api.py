@@ -476,6 +476,17 @@ async def test_events_polling_pages_by_seq_with_etag(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+async def _teammates(h, owner: str, *users: str) -> str:
+    """A team the owner created and ``users`` joined (by accepting its invite)."""
+    from remembra.teams.manager import TeamManager
+
+    teams = TeamManager(h.db)
+    team = await teams.create_team("Crew team", owner, max_seats=10)
+    for user in users:
+        await teams.add_member(team["id"], user, invited_by=owner)
+    return str(team["id"])
+
+
 async def test_members_add_change_remove_are_human_only_and_audited(tmp_path, monkeypatch):
     from remembra.api.v1 import websocket
 
@@ -490,6 +501,7 @@ async def test_members_add_change_remove_are_human_only_and_audited(tmp_path, mo
         owner, key, jwt = await _owner(h)
         ids = await _world(db, events, owner)
         mate = await h.create_user("mate@example.com")
+        await _teammates(h, owner, mate)
         url = f"/api/v1/crews/{ids['crew_id']}/members"
 
         res = await h.client.post(url, json={"user_id": mate, "role": "member"}, headers=key)
@@ -536,6 +548,7 @@ async def test_crew_admin_cannot_grant_owner_or_admin(tmp_path):
         ids = await _world(db, events, owner)
         admin_user = await h.create_user("admin@example.com")
         other = await h.create_user("other@example.com")
+        await _teammates(h, owner, admin_user, other)
         async with db.transaction():
             await db.conn.execute(
                 "INSERT INTO crew_members (crew_id, user_id, role, added_at) VALUES (?, ?, 'admin', ?)",
@@ -547,6 +560,54 @@ async def test_crew_admin_cannot_grant_owner_or_admin(tmp_path):
         res = await h.client.post(url, json={"user_id": other, "role": "admin"}, headers=admin_jwt)
         assert res.status_code == 403 and res.json()["detail"]["error"] == "crew_role_required"
         assert (await h.client.request("DELETE", f"{url}/{admin_user}", headers=admin_jwt)).status_code == 403
+
+
+async def test_a_new_member_must_have_joined_the_owners_team_and_the_plan_must_include_teammates(tmp_path):
+    """Adding someone to a crew puts the crew in their inbox and alerts: it needs their consent (they
+    joined the owner's team, which only an accepted invite does) and a plan with crew teammates."""
+    from remembra.cloud.plans import PlanTier
+    from remembra.crew.limits import crew_limits_for_tier
+
+    async with crew_api(tmp_path) as (h, db, events, _):
+        owner, _key, jwt = await _owner(h)
+        ids = await _world(db, events, owner)
+        stranger = await h.create_user("stranger@example.com")
+        mate = await h.create_user("mate2@example.com")
+        url = f"/api/v1/crews/{ids['crew_id']}/members"
+
+        res = await h.client.post(url, json={"user_id": stranger, "role": "admin"}, headers=jwt)
+        assert res.status_code == 403 and res.json()["detail"]["error"] == "not_a_teammate", res.text
+        other_owner = await h.create_user("elsewhere@example.com")
+        await _teammates(h, other_owner, stranger)  # a team the crew owner is not in proves nothing
+        res = await h.client.post(url, json={"user_id": stranger, "role": "member"}, headers=jwt)
+        assert res.status_code == 403 and res.json()["detail"]["error"] == "not_a_teammate"
+        cursor = await db.conn.execute("SELECT COUNT(*) FROM crew_members WHERE user_id = ?", (stranger,))
+        assert (await cursor.fetchone())[0] == 0
+
+        await _teammates(h, owner, mate)
+        tiers: dict[str, PlanTier] = {owner: PlanTier.FREE}
+
+        class Meter:
+            async def get_account(self, user_id: str):  # noqa: ANN202
+                from types import SimpleNamespace
+
+                from remembra.cloud.plans import get_plan
+
+                return SimpleNamespace(limits=get_plan(tiers[user_id]))
+
+        h.app.state.usage_meter = Meter()
+        for tier in (PlanTier.FREE, PlanTier.PRO):
+            tiers[owner] = tier
+            assert crew_limits_for_tier(tier).teammates is False
+            res = await h.client.post(url, json={"user_id": mate, "role": "member"}, headers=jwt)
+            assert res.status_code == 402 and res.json()["detail"]["error"] == "plan_required", (tier, res.text)
+        tiers[owner] = PlanTier.TEAM
+        res = await h.client.post(url, json={"user_id": mate, "role": "member"}, headers=jwt)
+        assert res.status_code == 200, res.text
+        # a role change of an existing member is not a new add
+        tiers[owner] = PlanTier.FREE
+        res = await h.client.post(url, json={"user_id": mate, "role": "viewer"}, headers=jwt)
+        assert res.status_code == 200 and res.json()["previous_role"] == "member", res.text
 
 
 # ---------------------------------------------------------------------------
@@ -642,6 +703,7 @@ async def test_mutations_replay_their_response_for_a_repeated_idempotency_key(tm
         assert res.status_code == 422 and res.json()["detail"]["error"] == "idempotency_conflict"
 
         mate = await h.create_user("mate@example.com")
+        await _teammates(h, owner, mate)
         members = f"{url}/members"
         add = {**jwt, "Idempotency-Key": "add-1"}
         first = await h.client.post(members, json={"user_id": mate, "role": "member"}, headers=add)

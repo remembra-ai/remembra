@@ -116,6 +116,12 @@ class Matrix:
     async def _other_user(self) -> str:
         user, error = await self.s.app.state.users.create_user(email="teammate@example.com", password="Str0ng!Passw0rd")
         assert user is not None, error
+        # a crew member has joined the owner's team (only an accepted invite does that)
+        from remembra.teams.manager import TeamManager
+
+        teams = TeamManager(self.s.app.state.db)
+        team = await teams.create_team("Crew team", self.s.owner_id, max_seats=10)
+        await teams.add_member(team["id"], str(user.id), invited_by=self.s.owner_id)
         return str(user.id)
 
     @property

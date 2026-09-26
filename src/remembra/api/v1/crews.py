@@ -53,7 +53,7 @@ from remembra.crew.events import (
     idem_lookup,
     idem_store,
 )
-from remembra.crew.limits import enforce_rate_limit
+from remembra.crew.limits import crew_limits_for_owner, enforce_rate_limit
 from remembra.crew.settings import SettingsError
 from remembra.crew.store import CrewStore, CrewStoreError, NotFound, PreconditionFailed, now_iso
 from remembra.relay.identity import ProjectLocator
@@ -544,6 +544,41 @@ def _check_role_change(access: CrewAccess, role: str, current: str | None) -> No
         )
 
 
+async def _shares_team(main_db: Any, owner_user_id: str, user_id: str, team_id: str | None) -> bool:
+    """Has ``user_id`` joined a team the crew owner is in (the crew's own team, when it has one)?
+
+    Team membership is only ever created by accepting a team invite (or creating the team),
+    so it is the invitee's consent to working with the owner.
+    """
+    sql = "SELECT 1 FROM team_members a JOIN team_members b ON a.team_id = b.team_id WHERE a.user_id = ? AND b.user_id = ?"
+    params: list[Any] = [owner_user_id, user_id]
+    if team_id:
+        sql += " AND a.team_id = ?"
+        params.append(team_id)
+    try:
+        cursor = await main_db.conn.execute(sql + " LIMIT 1", params)
+        return await cursor.fetchone() is not None
+    except Exception:  # no teams tables: nobody is a teammate
+        return False
+
+
+async def _check_new_teammate(request: Request, access: CrewAccess, main_db: Any, user_id: str) -> None:
+    """A new crew member needs the owner's plan to include teammates and the member's consent (a shared team)."""
+    limits = await crew_limits_for_owner(getattr(request.app.state, "usage_meter", None), access.crew.owner_user_id)
+    if not limits.teammates:
+        raise crew_error(
+            status.HTTP_402_PAYMENT_REQUIRED,
+            "plan_required",
+            "Crew teammates come with the Team plan; this crew's owner is on a plan without them.",
+        )
+    if not await _shares_team(main_db, access.crew.owner_user_id, user_id, access.crew.team_id):
+        raise crew_error(
+            status.HTTP_403_FORBIDDEN,
+            "not_a_teammate",
+            "Add someone who has joined your team: invite them to the team first; they become a crew member after they accept.",
+        )
+
+
 @router.post("/crews/{crew_id}/members", summary="Add a member or change a role (human only)")
 @limiter.limit(WRITE_LIMIT)
 async def add_member(
@@ -562,6 +597,8 @@ async def add_member(
         raise crew_error(422, "unknown_user", "No account with that user id.")
     if body.user_id == access.crew.owner_user_id and body.role != "owner":
         raise crew_error(status.HTTP_409_CONFLICT, "crew_owner", "The crew's owner keeps the owner role.")
+    if current is None and body.user_id != access.crew.owner_user_id:
+        await _check_new_teammate(request, access, main_db, body.user_id)
     try:
         async with store.db.transaction():
             row = await store.set_member(access.crew_id, body.user_id, body.role, access.user.user_id)
