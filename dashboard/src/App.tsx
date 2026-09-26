@@ -4,6 +4,8 @@ import { ApiKeyForm } from './components/ApiKeyForm';
 import { CommandPalette } from './components/CommandPalette';
 import { ShortcutsDialog } from './components/ShortcutsDialog';
 import { RelayDataProvider } from './components/relay/RelayDataProvider';
+import { CrewProvider } from './lib/crew/CrewProvider';
+import { CrewRoutes } from './lib/crew/CrewRoutes';
 import { Dashboard } from './pages/Dashboard';
 import { Home } from './pages/Home';
 import { Trail } from './pages/Trail';
@@ -332,6 +334,7 @@ function App() {
   // Authenticated - mission control and the rest of the dashboard
   return (
     <div className={darkMode ? 'dark' : ''}>
+      <CrewProvider key={currentUser?.id ?? 'api-key'}>
       <RelayDataProvider userKey={currentUser?.id ?? 'api-key'}>
         <AuthenticatedShell
           activeTab={activeTab}
@@ -364,11 +367,12 @@ function App() {
         }}
       />
       <ShortcutsDialog open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
+      </CrewProvider>
     </div>
   );
 }
 
-const RELAY_TABS: TabType[] = ['home', 'trail', 'agents', 'inbox'];
+const RELAY_TABS: TabType[] = ['home', 'crews', 'crew', 'trail', 'agents', 'inbox'];
 
 function AuthenticatedShell({
   activeTab,
@@ -410,6 +414,7 @@ function AuthenticatedShell({
       inboxUnread={inboxCounts(inbox.data).forYou}
     >
       {tab === 'home' && <Home userName={userName} />}
+      {(tab === 'crews' || tab === 'crew') && <CrewRoutes tab={tab} />}
       {tab === 'trail' && <Trail />}
       {tab === 'agents' && <Agents />}
       {tab === 'inbox' && <Inbox />}
