@@ -251,9 +251,30 @@ class CheckpointService:
             fresh = await fetchone(tx.conn, "SELECT * FROM crew_sessions WHERE id = ? AND crew_id = ?", (session["id"], crew_id))
             if fresh is None:
                 raise _err(404, "not_found", "Not found.")
-            return await self.record_in_tx(
+            result = await self.record_in_tx(
                 tx, crew_id, fresh, trigger=trigger, facts=facts, task_id=task_id, facts_source=session_channel_source(fresh)
             )
+            if result.created and fresh.get("client_kind") == "mcp":
+                await self._mcp_footprints(tx, crew_id, fresh, facts)
+            return result
+
+    async def _mcp_footprints(self, tx: EventTx, crew_id: str, session: Mapping[str, Any], facts: Mapping[str, Any]) -> None:
+        """An MCP-only session has no crewd heartbeat: the files its checkpoint declares are its footprints (§5.3).
+
+        They are the session's own statement about its own writes (``certain``, state ``dirty``), so
+        collisions with other sessions are detected for MCP agents too (G2 "after the fact").
+        Paths that are not repo-relative are skipped, as the heartbeat skips them.
+        """
+        from remembra.crew.collisions import MAX_FOOTPRINTS_PER_CALL, heartbeat_footprints, record_footprints
+        from remembra.crew.zones import CrewOps
+
+        declared = facts.get("files_changed")
+        if not isinstance(declared, list) or not declared:
+            return
+        raw = [{"path": p, "state": "dirty", "attribution": "certain"} for p in declared if isinstance(p, str)]
+        footprints = heartbeat_footprints(raw[:MAX_FOOTPRINTS_PER_CALL])
+        if footprints:
+            await record_footprints(CrewOps(self.events), tx, crew_id, session, footprints)
 
     async def record_in_tx(
         self,
