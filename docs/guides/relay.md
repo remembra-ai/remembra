@@ -42,8 +42,10 @@ remembra-relay connect --apply    # writes the hooks (backups kept as *.bak-rela
 
 `connect` reads your existing Remembra config (`REMEMBRA_URL` / `REMEMBRA_API_KEY`, the `remembra` MCP
 server in `~/.claude.json` or `~/.codex/config.toml`, or `~/.remembra/credentials`). It never writes API
-keys into new places. When it finds no key it still shows (or writes) the hooks, prints a warning on stderr
-and exits 1: without a key the hooks cannot load or save anything. To save one where the hooks read it:
+keys into new places. When it finds no key it still shows (or writes) the hooks and ends with one warning on
+stderr: without a key the hooks cannot load or save anything. It exits 0 when every write it was asked for
+succeeded (`remembra-relay status` shows the key state), and 1 when a config could not be read or written.
+To save a key where the hooks read it:
 
 ```bash
 pipx install --force 'remembra[mcp]>=0.16'   # 0.16 is the first release with remembra-relay; [mcp] adds remembra-mcp
@@ -75,7 +77,7 @@ config or credentials file with a key that other users on the machine can read.
 |-------|-------|--------|
 | Claude Code | `~/.claude/settings.json` SessionStart → `brief`; SessionEnd, StopFailure (usage or billing limit) and PreCompact → `close` (transcript parsed) | verified |
 | Codex CLI | `~/.codex/hooks.json` SessionStart → `brief`, UserPromptSubmit → `brief --once`, SessionEnd → `close` (rollout parsed) | verified (codex-cli 0.155.0-alpha.16.4, a prerelease) |
-| Cursor IDE | `~/.cursor/hooks.json` sessionStart / sessionEnd (`additional_context` output) | unverified |
+| Cursor IDE | `~/.cursor/hooks.json` sessionStart / sessionEnd, IDE and cursor-agent (`additional_context` output) | unverified |
 | Gemini CLI | `~/.gemini/settings.json` SessionStart / SessionEnd (JSON-only stdout, timeouts in ms) | unverified |
 | Qwen Code | `~/.qwen/settings.json` SessionStart / SessionEnd (timeouts in seconds) | unverified |
 | Kimi Code | `~/.kimi/config.toml` `[[hooks]]` | unverified |
@@ -86,11 +88,31 @@ through its verified hook path (not a live Claude Code session), then a real `co
 ran commands and left its own handoff. That run used a local stand-in for the model, and recorded hook trust
 the way `/hooks` records it (the hash Codex's app server reports), not through the `/hooks` screen. Only the
 Codex version in the table has been run; it is a prerelease (the build bundled in ChatGPT.app), and no stable
-Codex release has been run yet. Cursor, Gemini CLI and Qwen Code are built from their hook docs and tested
-against payloads written from those docs, not against the tools.
+Codex release has been run yet. Gemini CLI and Qwen Code are built from their hook docs and tested
+against payloads written from those docs, not against the tools. Cursor's payloads were recorded from
+cursor-agent's own hook runner, driven outside a logged-in session, so it stays unverified too.
 
 Unverified adapters are dry-run only unless you pass `--include-unverified`; `connect --apply` ends by
-listing the ones it skipped and the command that writes them.
+listing the ones it skipped and the command that writes them. Hooks an earlier `--include-unverified` run
+wrote are kept current by a plain `connect --apply` (after a reinstall moves `remembra-relay`, for example).
+`connect --agent NAME --apply` for an agent that is not installed here writes nothing unless you add
+`--force`: it would create the agent's directory, which then looks like an install to every detector.
+`disconnect --apply` removes the directories `connect` created once only its own backups are left in them.
+
+`connect` follows `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and `QWEN_HOME` when they are set. Cursor, Gemini CLI and
+Qwen Code accept comments in their JSON config; `connect` reads such a file too, and when it rewrites it
+says so: the comments are not kept, the backup keeps them.
+
+**Hooks other agents run.** Grok Build loads `~/.claude/settings.json` hooks and `~/.cursor/hooks.json`
+by default; Cursor (IDE and cursor-agent), Devin and Continue's `cn` load the Claude Code hooks too; and
+`gemini hooks migrate`, `kimi migrate` and Grok's `/import-claude` copy them. The relay recognises the
+agent that runs a hook (Grok and Cursor by fields only they send, Gemini CLI, Qwen Code, Devin and
+Continue by variables only they set, Codex by its rollout path) and never files that session as Claude
+Code: `brief` prints nothing, and `close` saves the handoff under that agent (Cursor, Codex, Gemini CLI,
+Qwen Code, Kimi) or, for an agent the relay has no adapter for yet, does nothing. A session whose transcript is
+under `~/.claude/projects` is always Claude Code's. `connect` points out relay hooks an import copied into
+another agent's config; they can be deleted there. The same end of a session is saved once: Gemini CLI
+fires SessionEnd two or three times on exit, and a session can run several agents' copies of one hook.
 
 **Codex: trust the hooks.** Codex runs a hook only after you trust it, and skips untrusted hooks without a
 message. After `connect --apply`, open Codex, run `/hooks` and trust the three `remembra-relay` hooks.
@@ -98,8 +120,8 @@ Codex asks again whenever a hook's command changes (for example after `connect` 
 install path). The UserPromptSubmit hook covers sessions where SessionStart does not fire (Codex
 auto-restoring a thread): it prints the brief only if that session has not had one.
 
-**Agents that do not wait for the end hook.** Codex stops a SessionEnd hook after 1 to 3 seconds; Gemini CLI,
-Qwen Code and Cursor do not wait for it at all. For these `close` hands the work to a detached background
+**Agents that do not wait for the end hook.** Codex stops a SessionEnd hook after 1 to 3 seconds; Gemini CLI
+and Qwen Code do not wait for it, nor does the Cursor IDE by its docs. For these `close` hands the work to a detached background
 process and returns at once; that process logs to `~/.remembra/relay/last-detached-close.log`.
 
 **Usage limits.** Codex has no hook for its usage limit. When a Codex session's last turn stopped on the
@@ -107,8 +129,10 @@ limit, the handoff says `ended: usage_limit` (the brief and the trail show `stop
 Claude Code StopFailure) and lists Codex's limit message first under "Failing / errors", so the next agent
 knows the work stopped mid-way.
 
-**Cursor's CLI.** Cursor's docs say `cursor-agent` also runs hooks; that has not been tried. Use the MCP
-tools (`session_brief`, `close_session`) there until it is. For agents without hooks,
+**Cursor's CLI.** `cursor-agent` runs `~/.cursor/hooks.json` as the IDE does: its own hook runner
+(2026.09.26) returned the brief and stored the close, though no logged-in session has run them yet. It
+gives a brief to new chats only, not to `--resume` / `--continue`, and waits for it before the first
+request. For agents without hooks,
 `connect --agents-md PATH --apply` adds a short marked section to an `AGENTS.md`. Any MCP-capable agent is
 also told by the MCP server to call `session_brief` at start and `close_session` before finishing.
 
@@ -187,12 +211,13 @@ something needs attention.
 ## CLI
 
 ```text
-remembra-relay brief   [--agent X] [--cwd DIR] [--hook NAME] [--format text|json|hook-json|cursor-json] [--once]
+remembra-relay brief   [--agent X] [--cwd DIR] [--hook NAME] [--once]
+                       [--format text|json|hook-json|cursor-json|additional-context-json]
 remembra-relay close   [--agent X] [--session-id S] [--cwd DIR] [--transcript PATH] [--reason R]
                        [--summary S] [--notes N] [--next STEP] [--todo ITEM]... [--dry-run]
 remembra-relay trail   [--cwd DIR] [--project P] [--limit N] [--format text|json]
 remembra-relay resolve [--cwd DIR] [--project P] [--bind]
-remembra-relay connect [--apply] [--agent NAME]... [--include-unverified] [--agents-md PATH]
+remembra-relay connect [--apply] [--agent NAME]... [--include-unverified] [--force] [--agents-md PATH]
 remembra-relay disconnect [--apply] [--agent NAME]... [--agents-md PATH]
 remembra-relay status  [--format text|json] [--no-check]
 remembra-relay --version

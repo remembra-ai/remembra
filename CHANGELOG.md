@@ -32,6 +32,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **docs.remembra.dev no longer publishes repository notes** (the cloud runbook, an old self-host note, bug
   write-ups, a feedback transcript and the competitor scan): `mkdocs.yml` excludes them and a test keeps the
   list. The feedback transcript left the public repository.
+- **Relay: other agents' sessions are no longer filed as Claude Code.** Grok Build, Cursor (IDE and
+  cursor-agent), Devin and Continue run the Claude Code hooks in `~/.claude/settings.json`, and
+  `gemini hooks migrate`, `kimi migrate` and Grok's `/import-claude` copy them. Each such session wrote a
+  `claude-code` handoff (a Cursor one under a project named after `~/.claude`), and a Grok session was read as
+  a Claude transcript. The relay now names the agent running a hook from fields or variables only that agent
+  sets: the brief does nothing there, and the close is saved under that agent, or not at all when the relay
+  has no adapter for it yet. A session with its transcript under `~/.claude/projects` is always Claude Code's.
+  `connect` points out relay hooks an import copied into another agent's config.
+- **Relay: one handoff per session end.** Gemini CLI fires SessionEnd two or three times on exit, the last
+  with empty stdin; a repeat of the same close within a minute is dropped, and Gemini's empty one too.
+  Claude Code's StopFailure followed by its SessionEnd still writes both (the later supersedes).
+- **Relay `connect`:** exits 0 when every write succeeded and warns about a missing key once, at the end
+  (it exited 1 and warned twice), and says "server: not configured" instead of `http://localhost:8787`
+  when nothing is set up. It reads configs with comments or a byte order mark (Cursor, Gemini CLI and Qwen
+  Code accept them; it said "cannot read" and exited 1), follows `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
+  `QWEN_HOME`, and keeps hooks an earlier `--include-unverified` run wrote on the current relay path. For an
+  agent named with `--agent` that is not installed it writes nothing without `--force`, since the directory
+  it created looked like an install; `disconnect --apply` removes the directories `connect` created. Cursor's
+  `close` prints `{}` (Cursor logs empty output as a failed hook), `hook-json` is labelled with the hook's own
+  event, and `brief --format additional-context-json` prints `{"additionalContext": ...}`.
 
 ## [0.16.0] - 2026-09-26 - Remembra Relay
 
