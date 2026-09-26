@@ -316,6 +316,14 @@ class CloseRequest(BaseModel):
     facts: FactsIn = Field(default_factory=FactsIn)
     summary: str | None = Field(default=None, description="Optional agent-written summary; grounding-checked, never trusted")
     end_reason: str | None = None
+    closed_at: datetime | None = Field(
+        default=None,
+        description=(
+            "When the session ended on the client (a handoff sent late from an offline queue keeps its original time). "
+            "Never later than the server's clock and at most 15 days before it; omitted means now. A handoff that "
+            "ended before another session's does not replace it as the project's latest."
+        ),
+    )
 
     @field_validator("summary", mode="before")
     @classmethod
@@ -487,6 +495,7 @@ async def close_session(
         agent_verified=verified,
         screen=lambda text: screen_text(request, text, apply_pii=False),
         scrub=pii_scrubber(request),
+        closed_at=body.closed_at,
     )
     if result["changed"]:
         await record_relay_usage(request, current_user.user_id)

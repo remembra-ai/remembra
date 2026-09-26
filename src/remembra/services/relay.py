@@ -29,13 +29,14 @@ from remembra.relay.handoff import (
     HANDOFF_FORMAT_VERSION,
     build_sections,
     check_summary_grounding,
+    handoff_ended_at,
     handoff_headline,
     redact,
     render_brief,
     render_handoff,
 )
 from remembra.relay.identity import KIND_GIT, KIND_PATH, KIND_ROOT, Fingerprint, ProjectLocator, slugify_project
-from remembra.services.agent_session import AgentSessionService, _parse_metadata
+from remembra.services.agent_session import HANDOFF_ENDED_JD, AgentSessionService, _parse_metadata
 
 log = structlog.get_logger(__name__)
 
@@ -80,6 +81,22 @@ def strip_reserved_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] |
 
 def _now_iso() -> str:
     return utcnow().isoformat()
+
+
+# The oldest close time a client may give: its offline queue keeps a handoff
+# for 14 days, so anything older is clamped here.
+MAX_CLOSE_AGE = timedelta(days=15)
+
+
+def close_time(declared: datetime | None, received: datetime) -> datetime:
+    """When the session ended: the client's time, never later than ``received``
+    and never more than ``MAX_CLOSE_AGE`` before it; ``received`` without one."""
+    if declared is None:
+        return received
+    if declared.tzinfo is None:
+        declared = declared.replace(tzinfo=UTC)
+    declared = declared.astimezone(UTC)
+    return min(received, max(declared, received - MAX_CLOSE_AGE))
 
 
 class ProjectAccessDenied(Exception):
@@ -417,8 +434,17 @@ class RelayService:
         agent_verified: bool = False,
         screen: Any | None = None,
         scrub: Callable[[str], str] | None = None,
+        closed_at: datetime | None = None,
     ) -> dict[str, Any]:
         """Store (or update) the ONE handoff for ``(agent_id, session_id)``.
+
+        ``closed_at`` is when the session ended on the client (a close sent late
+        from its offline queue carries the original time; see :func:`close_time`).
+        A handoff older than the one already stored for the same session changes
+        nothing. One older than another session's handoff in the project is
+        stored for the trail but does not take over the ``last_agent`` /
+        ``branch`` status (``late`` in the result); the brief orders by the
+        same time, so it does not become the "Last session" either.
 
         Every input string passes ``redact_secrets`` and then ``scrub`` (the
         API passes the PII policy) before anything is built, so the rendered
@@ -434,7 +460,8 @@ class RelayService:
         summary = redact(summary, counts, scrub) if summary else None
         end_reason = redact(end_reason, counts, scrub) if end_reason else None
 
-        closed_at = datetime.now(UTC)
+        received_at = datetime.now(UTC)
+        closed_at = close_time(closed_at, received_at)
         grounding = check_summary_grounding(summary, facts)
         sections = build_sections(facts, facts.get("next_step"))
         text = render_handoff(
@@ -483,6 +510,7 @@ class RelayService:
             "end_reason": end_reason,
             "grounding": grounding,
             "closed_at": closed_at.isoformat(),
+            "received_at": received_at.isoformat(),
         }
         metadata = {
             RELAY_KEY_FIELD: key,
@@ -494,6 +522,25 @@ class RelayService:
 
         async with _close_lock_for(user_id, project_id, key):
             current = await self._current_handoffs_for_key(user_id, project_id, key)
+            if current:
+                newest = current[0]
+                raw = _parse_metadata(newest.get("metadata")).get("relay")
+                stored_relay: dict[str, Any] = raw if isinstance(raw, dict) else {}
+                stored_at = _parse_iso(stored_relay.get("closed_at"))
+                if stored_at is not None and stored_at > closed_at:
+                    # A late copy of this session (e.g. from an offline queue) never replaces a newer close.
+                    log.info("relay_close_stale", project_id=project_id, agent_id=agent_id, handoff_id=newest["id"])
+                    result = self._close_result(
+                        newest["id"],
+                        False,
+                        [],
+                        newest.get("content") or "",
+                        _stored_sections(stored_relay),
+                        stored_relay.get("grounding") or {},
+                        counts,
+                    )
+                    result["late"] = True
+                    return result
             if len(current) == 1:
                 # Identical re-close (hook retried, close called twice): the
                 # facts and every section match, only the close time differs.
@@ -526,10 +573,16 @@ class RelayService:
         where = facts.get("branch") or "(no branch)"
         if facts.get("head_commit"):
             where += f"@{str(facts['head_commit'])[:7]}"
-        for status_key, value in (
+        statuses = [
             (f"last_agent:{project_id}", f"{agent_id} (session {session_id[:40]}) on {where}"),
             (f"branch:{project_id}", where),
-        ):
+        ]
+        late = await self._newer_handoff_exists(user_id, project_id, key, closed_at)
+        if late:
+            # Another session's handoff ended later (this one was sent late): that one keeps the status.
+            log.info("relay_close_late", project_id=project_id, agent_id=agent_id, closed_at=closed_at.isoformat())
+            statuses = []
+        for status_key, value in statuses:
             try:
                 res = await self.sessions.upsert_status(
                     user_id=user_id,
@@ -545,7 +598,23 @@ class RelayService:
         log.info("relay_session_closed", project_id=project_id, agent_id=agent_id, handoff_id=new_id, superseded=len(superseded))
         result = self._close_result(new_id, True, superseded, text, sections, grounding, counts)
         result["status"] = status_updates
+        result["late"] = late
         return result
+
+    async def _newer_handoff_exists(self, user_id: str, project_id: str, key: str, closed_at: datetime) -> bool:
+        """True when another session's current handoff in the project ended after ``closed_at``."""
+        cursor = await self.db.conn.execute(
+            f"""
+            SELECT 1 FROM memories
+            WHERE user_id = ? AND project_id = ? AND memory_type = 'handoff' AND superseded_by IS NULL
+              AND (expires_at IS NULL OR expires_at > ?)
+              AND NOT (json_valid(metadata) AND json_extract(metadata, '$.relay_key') IS ?)
+              AND {HANDOFF_ENDED_JD} > julianday(?)
+            LIMIT 1
+            """,
+            (user_id, project_id, _now_iso(), key, closed_at.isoformat()),
+        )
+        return await cursor.fetchone() is not None
 
     @staticmethod
     def _close_result(
@@ -793,6 +862,7 @@ class RelayService:
             "id": latest["id"],
             "agent_id": latest.get("agent_id"),
             "created_at": latest.get("created_at"),
+            "ended_at": handoff_ended_at(latest),
             "headline": handoff_headline(latest),
         }
 
@@ -876,9 +946,30 @@ class RelayService:
 
 
 def _same_session_facts(prev: dict[str, Any], new: dict[str, Any]) -> bool:
-    """True when two relay metadata blocks describe the same facts (ignoring close time)."""
-    ignore = {"closed_at"}
+    """True when two relay metadata blocks describe the same facts (ignoring close and receipt time)."""
+    ignore = {"closed_at", "received_at"}
     return {k: v for k, v in prev.items() if k not in ignore} == {k: v for k, v in new.items() if k not in ignore}
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _stored_sections(relay: dict[str, Any]) -> dict[str, Any]:
+    """The sections of a stored handoff, from its relay metadata."""
+    return {
+        "headline": relay.get("headline") or "",
+        "done": list(relay.get("done") or []),
+        "not_done": list(relay.get("not_done") or []),
+        "failing": list(relay.get("failing") or []),
+        "next": relay.get("next"),
+    }
 
 
 _UNIX_EPOCH_JULIAN = 2440587.5

@@ -6,6 +6,8 @@ Production routes over a real SQLite ``Database`` and a real ``MemoryService``
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from remembra.auth.middleware import AuthenticatedUser, get_current_user
@@ -210,6 +212,102 @@ def test_close_upserts_last_agent_and_branch_status(api):
     items = {i["key"]: i["value"] for i in _get(api, "/session/status", {"project_id": "widget"})["items"]}
     assert items["branch:widget"] == "main@bbbbbbb"
     assert items["last_agent:widget"] == "claude-code (session sess-1) on main@bbbbbbb"
+
+
+def _last_line(brief: dict) -> str:
+    return next(line for line in brief["rendered"].splitlines() if line.startswith("Last session:"))
+
+
+def _status(api, project: str) -> dict[str, str]:
+    return {i["key"]: i["value"] for i in _get(api, "/session/status", {"project_id": project})["items"]}
+
+
+def test_a_handoff_sent_late_does_not_replace_a_newer_one(api):
+    """R-6: a close queued offline and delivered after a newer one keeps its own (older) place."""
+    now = datetime.now(UTC)
+    newer = _close(api, agent_id="claude-code", session_id="B-new", closed_at=now.isoformat())
+    older_at = now - timedelta(days=2)
+    late = _close(
+        api,
+        agent_id="codex",
+        session_id="A-old",
+        closed_at=older_at.isoformat(),
+        facts={**FACTS, "branch": "old-branch", "notes": "old work"},
+    )
+    assert newer["late"] is False and newer["status"]
+    assert late["changed"] is True and late["late"] is True and late["status"] == []
+    assert older_at.strftime("%Y-%m-%d %H:%M UTC") in late["rendered"]  # the handoff says when it really ended
+
+    brief = _get(api, "/session/brief", {"project_id": "widget", "agent_id": "gemini"})
+    assert _last_line(brief).startswith("Last session: claude-code (self-declared), just now, on main@bbbbbbb")
+    status = _status(api, "widget")
+    assert status["last_agent:widget"].startswith("claude-code (session B-new)")
+    assert status["branch:widget"] == "main@bbbbbbb"
+    trail = _get(api, "/trail", {"project": "widget"})["items"]
+    assert {i["session_id"] for i in trail} == {"B-new", "A-old"}  # kept for the trail
+
+
+def test_a_late_handoff_that_is_still_the_newest_says_when_it_ended(api):
+    ended = datetime.now(UTC) - timedelta(hours=3)
+    out = _close(api, project_id="gizmo", closed_at=ended.isoformat())
+    assert out["late"] is False
+    assert _status(api, "gizmo")["last_agent:gizmo"].startswith("claude-code (session sess-1)")
+    last = _last_line(_get(api, "/session/brief", {"project_id": "gizmo"}))
+    assert last.startswith("Last session: claude-code (self-declared), 3h ago, received just now, on main@bbbbbbb")
+
+
+def test_a_client_close_time_is_clamped_to_the_server_clock(api):
+    now = datetime.now(UTC)
+    future = _close(api, project_id="ahead", closed_at=(now + timedelta(days=3)).isoformat())
+    assert now.strftime("%Y-%m-%d") in future["rendered"].splitlines()[0]
+    assert "received" not in _last_line(_get(api, "/session/brief", {"project_id": "ahead"}))
+
+    _close(api, project_id="ancient", closed_at=(now - timedelta(days=400)).isoformat())
+    last = _last_line(_get(api, "/session/brief", {"project_id": "ancient"}))
+    assert ", 15d ago, received just now," in last
+
+    naive = (now - timedelta(hours=2)).replace(tzinfo=None).isoformat()  # no zone: read as UTC
+    _close(api, project_id="naive", closed_at=naive)
+    assert ", 2h ago, received just now," in _last_line(_get(api, "/session/brief", {"project_id": "naive"}))
+    _post(api, "/session/close", {"agent_id": "codex", "session_id": "s", "facts": {}, "closed_at": "yesterday"}, status=422)
+
+
+def test_an_older_copy_of_the_same_session_changes_nothing(api):
+    now = datetime.now(UTC)
+    first = _close(api, session_id="S", closed_at=now.isoformat(), facts={**FACTS, "notes": "the newer close"})
+    stale = _close(api, session_id="S", closed_at=(now - timedelta(hours=1)).isoformat(), facts={**FACTS, "notes": "older"})
+    assert stale["changed"] is False and stale["late"] is True and stale["handoff_id"] == first["handoff_id"]
+    assert stale["headline"] == first["headline"] and stale["sections"] == first["sections"]
+    [current] = _get(api, "/timeline", {"project_id": "widget", "memory_type": "handoff"})["memories"]
+    assert current["id"] == first["handoff_id"] and "the newer close" in current["content"]
+    # A newer close of the session still replaces it.
+    newer = _close(api, session_id="S", closed_at=(now + timedelta(seconds=1)).isoformat(), facts={**FACTS, "notes": "3rd"})
+    assert newer["changed"] is True and newer["superseded"] == [first["handoff_id"]]
+
+
+def test_only_relay_rows_carry_a_close_time(api):
+    """A free-form handoff (no relay block the server wrote) is ordered by when it was stored."""
+    _close(api, session_id="real", closed_at=(datetime.now(UTC) - timedelta(minutes=5)).isoformat())
+    forged = _post(
+        api,
+        "/memories",
+        {"content": "handoff: later", "project_id": "widget", "memory_type": "handoff"},
+        status=201,
+    )
+
+    async def backdate() -> None:  # as if a relay block had been planted on the row: it must not count
+        db = api["app"].state.db
+        await db.conn.execute(
+            "UPDATE memories SET metadata = json_set(COALESCE(metadata, '{}'), '$.relay.closed_at', ?) WHERE id = ?",
+            ("2099-01-01T00:00:00+00:00", forged["id"]),
+        )
+        await db.conn.commit()
+
+    api["http"].portal.call(backdate)
+    last = _last_line(_get(api, "/session/brief", {"project_id": "widget"}))
+    assert "free-form handoff" in last and "handoff: later" in last  # newest by its stored time
+    _close(api, session_id="after")
+    assert _last_line(_get(api, "/session/brief", {"project_id": "widget"})).startswith("Last session: claude-code")
 
 
 def test_summary_is_grounding_checked(api):

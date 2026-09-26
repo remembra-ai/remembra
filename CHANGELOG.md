@@ -156,8 +156,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing SessionStart/SessionEnd install in place, with a backup.
 - **No silent loss of a handoff.** A `close` that cannot be delivered is queued in
   `~/.remembra/relay/outbox/` (0600, atomic, bounded to 50 entries and 14 days, secrets redacted, never the
-  key) and logged to `~/.remembra/relay/relay.log`; the next `brief` or `close` sends it. The brief names
-  queued handoffs and a rejected key in its first lines. New `remembra-relay status`: queue, last result
+  key) and logged to `~/.remembra/relay/relay.log`; the next `brief` or `close` sends it, oldest first
+  (a `close` sends it before its own handoff when time allows). A close carries the time its session ended
+  (`closed_at`, clamped to the server clock and 15 days); the brief's "Last session" and the `last_agent`
+  status follow that time, so a handoff delivered late never replaces a newer one, and the brief says when
+  it arrived. The brief names queued handoffs and a rejected key in its first lines. New `remembra-relay status`: queue, last result
   per agent, and whether the server accepts the key.
 - **`remembra-relay disconnect`** (dry run unless `--apply`, backups kept) removes the relay hooks, and
   **`remembra-install --remove`** the MCP entries. The relay guide and the dashboard (Settings → Account,

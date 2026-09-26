@@ -418,6 +418,32 @@ def test_a_delivered_close_drops_the_queued_copy_of_the_same_session(tmp_path, h
     assert "Notes (agent): new" in handoff["content"]
 
 
+def test_a_queued_close_goes_before_the_next_close_and_keeps_its_place(tmp_path, home):
+    """R-6: codex's close is queued while the API is down; claude-code closes later, once it is back.
+    The brief must name claude-code's session as the last one, not the replayed older one."""
+    laptop, drive = _repo(tmp_path, "order")
+    port = _free_port()
+    old = relay(home, f"http://127.0.0.1:{port}", "close", "--agent", "codex", "--session-id", "A-old", "--cwd", str(laptop))
+    assert "queued" in old.stderr
+    [entry] = list((home / ".remembra" / "relay" / "outbox").glob("*.json"))
+    ended = json.loads(entry.read_text())["payload"]["closed_at"]
+    time.sleep(1.1)
+    with api_server(tmp_path / "order.db", port) as back:
+        new = relay(home, back, "close", "--agent", "claude-code", "--session-id", "B-new", "--cwd", str(laptop))
+        assert new.returncode == 0 and "Remembra handoff" in new.stdout, new.stderr
+        assert not list(entry.parent.glob("*.json"))
+        assert "outbox: delivered codex session A-old" in (home / ".remembra" / "relay" / "relay.log").read_text()
+
+        brief = relay(home, back, "brief", "--agent", "gemini", "--cwd", str(drive))
+        assert brief.returncode == 0, brief.stderr
+        [last] = [line for line in brief.stdout.splitlines() if line.startswith("Last session:")]
+        assert last.startswith("Last session: claude-code (self-declared), just now")
+        assert "- last_agent:order: claude-code (session B-new)" in brief.stdout
+        assert [i["session_id"] for i in _trail(back, "order")] == ["B-new", "A-old"]  # sent in the order they ended
+        codex = next(h for h in _handoffs(back, "order") if h["metadata"]["agent_id"] == "codex")
+        assert codex["metadata"]["relay"]["closed_at"] == ended  # the time it was closed, not when it arrived
+
+
 class _FixedStatus(http.server.BaseHTTPRequestHandler):
     status = 401
     body = {"detail": "Invalid or revoked API key"}

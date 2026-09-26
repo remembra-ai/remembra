@@ -121,9 +121,14 @@ install that only has SessionStart and SessionEnd, with a backup of `settings.js
 A `close` that cannot be delivered (no network, server down or slow, HTTP 429 or 5xx, a rejected key,
 no key yet) is not lost. It is queued in `~/.remembra/relay/outbox/` (one file per agent and session,
 owner-only, written atomically, after the same secret redaction the server applies; never the key) and
-logged to `~/.remembra/relay/relay.log`. The next `brief` or `close` on that machine sends it before
-anything else; the server keeps one handoff per agent and session, so a resend never duplicates one.
-The queue keeps at most 50 entries for at most 14 days; anything dropped is logged.
+logged to `~/.remembra/relay/relay.log`. The next `brief` or `close` on that machine sends it, oldest
+first: a `brief` before it asks for the brief, a `close` before its own handoff when that leaves the close
+enough of its 10 seconds, otherwise right after it. The server keeps one handoff per agent and session, so
+a resend never duplicates one. Each queued handoff carries the time its session ended, and the server
+orders by that time: one that arrives late is kept in the trail but does not replace a newer handoff as
+"Last session" or in the `last_agent` status, and the brief shows when it ended and when it arrived
+(`2d ago, received just now`). The queue keeps at most 50 entries for at most 14 days; anything dropped
+is logged.
 
 While something is queued, or when the server rejects your key, the brief starts with one line that says
 so (`Remembra: 1 handoff (1 from claude-code) could not be sent yet …`, or `your API key was rejected`).

@@ -69,6 +69,8 @@ USER_AGENT = "remembra-relay"
 # budget one resend may use (the brief itself still needs time after it).
 REPLAY_MAX_ENTRIES = 5
 REPLAY_BUDGET_SECONDS = 3.5
+# Time a close keeps for sending its own handoff when it sends queued ones first.
+CLOSE_RESERVE_SECONDS = 4.0
 
 
 def _err(message: str) -> None:
@@ -333,14 +335,16 @@ def _failure(response: httpx.Response | None, error: BaseException | None) -> st
     return f"{error.__class__.__name__}: {error}" if error else "unknown error"
 
 
-def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None) -> Replay:
+def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None, reserve: float = 0.0, drop_skipped: bool = True) -> Replay:
     """Send queued closes, oldest first, within a small budget. Never raises.
 
     Each entry goes with the key of the config source that queued it and as
     the agent that wrote it. Stops at the first network failure (the server is
     still unreachable) or rejected key; a 4xx that resending cannot fix drops
-    the entry (logged). ``skip`` is the (agent, session) the caller is about to
-    close itself: its queued copy is superseded, so it is dropped, not sent.
+    the entry (logged). ``skip`` is the (agent, session) the caller closes
+    itself: its queued copy is never sent, and with ``drop_skipped`` it is
+    dropped (the caller's close has been delivered and supersedes it).
+    ``reserve`` is time left untouched for the caller's own request.
     """
     report = Replay()
     try:
@@ -352,9 +356,11 @@ def replay_outbox(ctx: Context, skip: tuple[str, str] | None = None) -> Replay:
     stop = False
     for entry in entries:
         if skip and (entry.agent_id, entry.session_id) == skip:
-            outbox.discard(ctx.home, entry.agent_id, entry.session_id)
+            if drop_skipped:
+                outbox.discard(ctx.home, entry.agent_id, entry.session_id)
             continue
-        if stop or attempted >= REPLAY_MAX_ENTRIES or ctx.deadline.end - time.monotonic() < REPLAY_BUDGET_SECONDS:
+        left = ctx.deadline.end - time.monotonic()
+        if stop or attempted >= REPLAY_MAX_ENTRIES or left < REPLAY_BUDGET_SECONDS + reserve:
             report.remaining.append(entry)
             continue
         config = load_config(agent=entry.agent_id or None, prefer=_config_prefer(entry.data.get("config_source")))
@@ -614,7 +620,14 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
         facts.setdefault("todos_open", []).append(todo)
 
     project = ctx.project_params()
-    payload: dict[str, Any] = {"agent_id": agent, "session_id": session_id, "facts": facts}
+    # When the session ended: a close sent later from the outbox keeps this time,
+    # so the server does not rank it above handoffs written after it.
+    payload: dict[str, Any] = {
+        "agent_id": agent,
+        "session_id": session_id,
+        "facts": facts,
+        "closed_at": datetime.now(UTC).isoformat(),
+    }
     if "project_id" in project:
         payload["project_id"] = project["project_id"]
     else:
@@ -658,6 +671,9 @@ def cmd_close(args: argparse.Namespace) -> int:
             _err("close skipped: no API key (set REMEMBRA_API_KEY or configure the remembra MCP server)")
             _queue_close(ctx, payload, "no API key configured")
             return 0
+        own = (str(payload.get("agent_id")), str(payload.get("session_id")))
+        # Older queued handoffs go first, while that leaves this close enough time; the rest follow it.
+        replay_outbox(ctx, skip=own, reserve=CLOSE_RESERVE_SECONDS, drop_skipped=False)
         try:
             response = ctx.request("POST", "/api/v1/session/close", json=payload)
         except Exception as e:
@@ -683,8 +699,8 @@ def cmd_close(args: argparse.Namespace) -> int:
             return 0
         result = response.json()
         outbox.record(ctx.home, agent_id=str(payload.get("agent_id")), command="close", ok=True, config_source=ctx.config.source)
-        # This close supersedes a queued copy of the same session; then send what else is waiting.
-        replay_outbox(ctx, skip=(str(payload.get("agent_id")), str(payload.get("session_id"))))
+        # This close supersedes a queued copy of the same session; then send what is still waiting.
+        replay_outbox(ctx, skip=own)
         if not ctx.adapter:  # interactive use; hooks keep stdout clean (some require JSON-only stdout)
             print(f"Remembra handoff {result.get('handoff_id')} · project {result.get('project_id')} · {result.get('headline')}")
     except Exception as e:  # never break the agent's shutdown

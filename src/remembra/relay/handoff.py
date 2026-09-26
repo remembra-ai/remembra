@@ -119,6 +119,21 @@ def relative_time(value: Any, now: datetime | None = None) -> str:
     return f"{seconds // 86400}d ago"
 
 
+# A handoff that reached the server this long after its session ended says so.
+LATE_DELIVERY_SECONDS = 600
+
+
+def session_ended(relay: dict[str, Any], handoff: dict[str, Any], now: datetime | None = None) -> str:
+    """How long ago the session ended (``"2d ago"``), plus ``", received 5m ago"`` when
+    the handoff reached the server much later (it waited in the client's offline queue)."""
+    closed = _parse_ts(relay.get("closed_at")) or _parse_ts(handoff.get("created_at"))
+    when = relative_time(closed or handoff.get("created_at"), now)
+    received = _parse_ts(relay.get("received_at"))
+    if closed is not None and received is not None and (received - closed).total_seconds() >= LATE_DELIVERY_SECONDS:
+        when += f", received {relative_time(received, now)}"
+    return when
+
+
 def _where(branch: str | None, head: str | None) -> str:
     if branch and head:
         return f"{branch}@{short_sha(head)}"
@@ -451,6 +466,12 @@ def _relay_meta(handoff: dict[str, Any] | None) -> dict[str, Any] | None:
     return relay if isinstance(relay, dict) else None
 
 
+def handoff_ended_at(handoff: dict[str, Any]) -> Any:
+    """When the handoff's session ended: the relay's recorded close time, else the stored time."""
+    relay = _relay_meta(handoff) or {}
+    return relay.get("closed_at") or handoff.get("created_at")
+
+
 # End reasons ``remembra-relay close`` records for a session that is still open:
 # the API error that stopped a turn (Claude Code's StopFailure ``error``) and a
 # close written just before context compaction.
@@ -555,6 +576,7 @@ def render_last_session(
         )
     agent = relay.get("agent_id") or handoff.get("agent_id") or "unknown agent"
     who = f"{agent} ({'key-verified' if relay.get('agent_verified') is True else 'self-declared'})"
+    when = session_ended(relay, handoff, now)
     stop = end_reason_note(relay.get("end_reason"))
     if stop:
         when = f"{when}, {stop}"
@@ -639,7 +661,8 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
             latest = link.get("latest_handoff")
             if latest:
                 who = latest.get("agent_id") or "unknown"
-                info = f"{who}, {relative_time(latest.get('created_at'), now)}: {clip(latest.get('headline'), 120)}"
+                ended = latest.get("ended_at") or latest.get("created_at")
+                info = f"{who}, {relative_time(ended, now)}: {clip(latest.get('headline'), 120)}"
             else:
                 info = "no handoff yet"
             data.append(f"- {link.get('project_id')} ({link.get('relation')}): {info}")
