@@ -22,6 +22,7 @@ from pathlib import Path
 
 import pytest
 
+from remembra.relay.config_view import config_view
 from remembra.tools import doctor
 from remembra.tools.agents import EXIT_NOT_WRITTEN
 from remembra.tools.keyinput import ARGV_KEY_WARNING, mask_key, mask_text, resolve_api_key
@@ -365,6 +366,145 @@ def test_mask_text_hides_every_key_form() -> None:
     masked = mask_text(line, (KEY,))
     assert KEY not in masked and "sk-other-secret-value" not in masked and "plainsecret99" not in masked
     assert mask_key(KEY) in masked
+
+
+# Other tools' credentials that sit next to the Remembra entry in agent configs.
+GH_TOKEN = "ghp_" + "Q7r8S9t0U1v2W3x4Y5z6A7b8C9d0E1f2G3h4"
+PLAIN_SECRET = "correct-horse-battery-staple"  # no token shape: hidden only because of where it is
+ANTHROPIC = "sk-ant-" + "api03-Zx9Qw3Er7Ty1Ui5Op2As8Df4Gh6Jk0Lz"
+OTHER_SECRETS = (GH_TOKEN, PLAIN_SECRET, ANTHROPIC, "hunter2hunter2")
+
+
+def _crowded_home(root: Path) -> Path:
+    """Agent configs, in their users' own layouts, holding other servers' secrets."""
+    h = root / "crowded"
+    (h / ".cursor").mkdir(parents=True)
+    cursor = {
+        "mcpServers": {
+            "github": {"command": "gh-mcp", "env": {"GITHUB_TOKEN": GH_TOKEN, "LOG_LEVEL": PLAIN_SECRET}},
+            "search": {"url": "https://mcp.example/sse", "headers": {"X-Api-Header": PLAIN_SECRET}},
+            "db": {"command": "db-mcp", "args": ["--password", "hunter2hunter2", f"--token={PLAIN_SECRET}", "--verbose"]},
+        }
+    }
+    (h / ".cursor" / "mcp.json").write_text(json.dumps(cursor, indent=4))  # 4 spaces: every line differs from ours
+    (h / ".claude").mkdir()
+    settings = {"env": {"ANTHROPIC_API_KEY": ANTHROPIC, "DEPLOY_NOTE": PLAIN_SECRET}, "model": "opus"}
+    (h / ".claude" / "settings.json").write_text(json.dumps(settings))
+    (h / ".codex").mkdir()
+    (h / ".codex" / "config.toml").write_text(
+        'model = "gpt-5"\n'
+        f'api_key = "{PLAIN_SECRET}"\n\n'
+        "[mcp_servers.github]\n"
+        'command = "gh-mcp"\n'
+        f'args = ["--token", "{PLAIN_SECRET}"]\n'
+        f'env = {{ GITHUB_TOKEN = "{GH_TOKEN}" }}\n\n'
+        "[mcp_servers.linear.env]\n"
+        f'LINEAR_NOTE = "{PLAIN_SECRET}"\n'
+    )
+    return h
+
+
+def test_the_dry_run_diff_hides_other_servers_secrets(tmp_path: Path) -> None:
+    """R-22: printing a diff must not put another tool's token in the terminal, logs or a screen share."""
+    home = _crowded_home(tmp_path)
+    before = _snapshot(home)
+    result = install(home, "--all", env={"REMEMBRA_API_KEY": KEY})
+    assert result.returncode == EXIT_NOT_WRITTEN, result.stderr
+    printed = result.stdout + result.stderr
+    for secret in (*OTHER_SECRETS, KEY):
+        assert secret not in printed, secret
+    assert _snapshot(home) == before
+    assert '"GITHUB_TOKEN": "[hidden]"' in printed or "GITHUB_TOKEN" not in printed
+    assert '"REMEMBRA_AGENT_ID": "cursor"' in printed and 'REMEMBRA_AGENT_ID = "codex"' in printed
+    assert mask_key(KEY) in printed
+    # The 4-space file is compared in the layout it will be written in: the diff shows the new entry only.
+    cursor_diff = printed.split("[cursor]")[1].split("\n[")[0]
+    hunks = cursor_diff.split("(new)\n", 1)[1]
+    assert [line for line in hunks.splitlines() if line.startswith("  -")] == [], cursor_diff  # nothing removed
+    assert "rewritten with 2-space JSON indentation" in cursor_diff
+
+    applied = install(home, "--all", "--apply", env={"REMEMBRA_API_KEY": KEY})
+    assert applied.returncode == 0, applied.stderr
+    for secret in (*OTHER_SECRETS, KEY):
+        assert secret not in applied.stdout + applied.stderr, secret
+    written = json.loads((home / ".cursor" / "mcp.json").read_text())
+    assert written["mcpServers"]["github"]["env"]["GITHUB_TOKEN"] == GH_TOKEN  # only the printout hides it
+    assert written["mcpServers"]["db"]["args"][1] == "hunter2hunter2"
+    codex = tomllib.loads((home / ".codex" / "config.toml").read_text())
+    assert codex["mcp_servers"]["github"]["env"]["GITHUB_TOKEN"] == GH_TOKEN and codex["api_key"] == PLAIN_SECRET
+
+    removal = install(home, "--remove", "--all")
+    for secret in (*OTHER_SECRETS, KEY):
+        assert secret not in removal.stdout + removal.stderr, secret
+
+
+def test_relay_connect_and_disconnect_diffs_hide_secrets(tmp_path: Path) -> None:
+    home = _crowded_home(tmp_path)
+
+    def relay(*args: str) -> subprocess.CompletedProcess[str]:
+        env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home), "PYTHONPATH": SRC, "REMEMBRA_API_KEY": KEY}
+        return subprocess.run(
+            [sys.executable, "-m", "remembra.relay.cli", *args], capture_output=True, text=True, env=env, timeout=60
+        )
+
+    for run in (relay("connect", "--relay-command", "/opt/bin/remembra-relay"), relay("connect", "--apply")):
+        assert "[claude-code]" in run.stdout, run.stdout + run.stderr
+        for secret in (*OTHER_SECRETS, KEY):
+            assert secret not in run.stdout + run.stderr, secret
+    assert json.loads((home / ".claude" / "settings.json").read_text())["env"]["ANTHROPIC_API_KEY"] == ANTHROPIC
+    off = relay("disconnect")
+    assert "[claude-code]" in off.stdout
+    for secret in (*OTHER_SECRETS, KEY):
+        assert secret not in off.stdout + off.stderr, secret
+
+
+def test_config_view_rules() -> None:
+    other = json.dumps(
+        {
+            "mcpServers": {
+                "remembra": {
+                    "command": "remembra-mcp",
+                    "env": {"REMEMBRA_API_KEY": KEY, "REMEMBRA_URL": "https://u:p4ssw0rd99@x.dev"},
+                },
+                "web": {"command": "npx", "args": ["-y", "server", "--api-key", PLAIN_SECRET, "--port", "8080"]},
+                "hdr": {"url": "https://x.dev/?q=1", "headers": {"Authorization": f"Bearer {PLAIN_SECRET}"}, "timeout": 30},
+                "auth": {"client_secret": PLAIN_SECRET, "nested": {"refresh_token": PLAIN_SECRET, "note": f"uses {GH_TOKEN}"}},
+            },
+            "hooks": {"SessionStart": [{"hooks": [{"type": "command", "command": "/opt/bin/remembra-relay brief"}]}]},
+        }
+    )
+    view = config_view(other, Path("mcp.json"))
+    assert view is not None
+    for secret in (KEY, PLAIN_SECRET, GH_TOKEN, "p4ssw0rd99"):
+        assert secret not in view, secret
+    data = json.loads(view)
+    servers = data["mcpServers"]
+    assert servers["remembra"]["env"]["REMEMBRA_API_KEY"] == mask_key(KEY)
+    assert servers["remembra"]["env"]["REMEMBRA_URL"].startswith("https://u:")  # shown, with the password redacted
+    assert servers["web"]["args"] == ["-y", "server", "--api-key", "[hidden]", "--port", "8080"]
+    assert servers["hdr"]["headers"] == {"Authorization": "[hidden]"} and servers["hdr"]["timeout"] == 30
+    assert servers["auth"]["client_secret"] == "[hidden]" and servers["auth"]["nested"]["refresh_token"] == "[hidden]"
+    assert data["hooks"]["SessionStart"][0]["hooks"][0]["command"] == "/opt/bin/remembra-relay brief"  # hooks stay readable
+
+    toml_view = config_view(
+        'model = "gpt-5"\n'
+        f'token = "{PLAIN_SECRET}"\n'
+        "[mcp_servers.remembra.env]\n"
+        f'REMEMBRA_API_KEY = "{KEY}"\n'
+        'REMEMBRA_AGENT_ID = "codex"\n'
+        "[mcp_servers.x]\n"
+        f'args = ["--secret={PLAIN_SECRET}", "--flag"]\n'
+        f'http_headers = {{ "X-Key" = "{PLAIN_SECRET}" }}\n'
+        f'settings = {{ password = "{PLAIN_SECRET}", mode = "fast" }}\n'
+        f"# old token: {GH_TOKEN}\n",
+        Path("config.toml"),
+    )
+    assert toml_view is not None and PLAIN_SECRET not in toml_view and KEY not in toml_view and GH_TOKEN not in toml_view
+    assert 'model = "gpt-5"' in toml_view and 'REMEMBRA_AGENT_ID = "codex"' in toml_view
+    assert f'REMEMBRA_API_KEY = "{mask_key(KEY)}"' in toml_view and 'mode = "fast"' in toml_view
+    assert 'args = ["--secret=[hidden]", "--flag"]' in toml_view
+    text_view = config_view(f"# notes\nkey: {GH_TOKEN}\n", Path("AGENTS.md"))
+    assert text_view is not None and GH_TOKEN not in text_view and "# notes" in text_view
 
 
 def test_doctor_warns_on_a_key_file_others_can_read(tmp_path: Path) -> None:

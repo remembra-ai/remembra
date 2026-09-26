@@ -5,7 +5,9 @@ them in TOML (``~/.codex/config.toml``), so it goes through the Codex
 installer in :mod:`remembra.tools.codex`.
 
 ``remembra-install`` is a dry run by default: it shows each change as a diff
-(API keys masked) and writes only with ``--apply`` (or a "y" on a terminal).
+(the Remembra key masked, every other secret in the file hidden; see
+:mod:`remembra.relay.config_view`) and writes only with ``--apply`` (or a "y"
+on a terminal).
 Every write keeps a backup of the old file, is atomic, and leaves the file
 owner-only (0600) because it holds the key. The key is read from
 ``REMEMBRA_API_KEY``, a hidden prompt, ``--api-key-stdin`` or
@@ -34,7 +36,7 @@ from remembra.tools.codex import (
     plan_codex_config,
     remove_codex_mcp_block,
 )
-from remembra.tools.keyinput import mask_key, mask_text, resolve_api_key
+from remembra.tools.keyinput import mask_key, resolve_api_key
 
 # Default config paths for each agent
 AGENT_CONFIGS = {
@@ -486,7 +488,7 @@ def _show(agent: str, change: Change, keys: tuple[str, ...], removing: bool = Fa
         return
     for line in change.summary:
         print(f"  - {line}")
-    diff = change.diff(mask=lambda line: mask_text(line, keys))
+    diff = change.diff(keys=keys)
     if diff:
         print("  " + diff.replace("\n", "\n  ").rstrip())
 

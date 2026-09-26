@@ -28,6 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from remembra.relay.config_view import canonical_json, config_view
 from remembra.relay.handoff import PRE_COMPACT_REASON
 
 RELAY_MARKERS = ("remembra-relay", "remembra.relay")
@@ -140,16 +141,26 @@ class Change:
             return self.before is not None
         return self.before != self.after
 
-    def diff(self, mask: Callable[[str], str] | None = None) -> str:
-        """Unified diff; ``mask`` rewrites each line first (e.g. to hide API keys)."""
+    def diff(self, mask: Callable[[str], str] | None = None, keys: tuple[str, ...] = ()) -> str:
+        """Unified diff for printing, with every secret hidden (see :mod:`remembra.relay.config_view`).
+
+        ``keys`` are values to mask wherever they appear; ``mask`` rewrites each
+        line after that. JSON is compared in the layout it is written in; when
+        the current file uses another layout, a last line says it is rewritten.
+        """
 
         def lines(text: str | None) -> list[str]:
-            out = (text or "").splitlines(keepends=True)
+            out = (config_view(text, self.path, keys) or "").splitlines(keepends=True)
             return [mask(line) for line in out] if mask else out
 
         tofile = f"{self.path} (deleted)" if self.delete else f"{self.path} (new)"
         after = [] if self.delete else lines(self.after)
-        return "".join(difflib.unified_diff(lines(self.before), after, fromfile=f"{self.path} (current)", tofile=tofile))
+        text = "".join(difflib.unified_diff(lines(self.before), after, fromfile=f"{self.path} (current)", tofile=tofile))
+        if text and not self.delete and self.before is not None:
+            layout = canonical_json(self.before)
+            if layout is not None and layout != self.before and self.after == canonical_json(self.after):
+                text += "(the file is rewritten with 2-space JSON indentation; the content changes only as shown)\n"
+        return text
 
 
 def relay_command() -> str:

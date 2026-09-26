@@ -167,8 +167,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   also in the delete-account dialog) list the uninstall steps.
 
 ### Changed (relay launch)
-- **`remembra-install` is a dry run by default**: it prints each change as a diff with keys masked and
-  writes with `--apply` (or a "y" on a terminal). A run that writes nothing exits 3, so the dashboard's
+- **`remembra-install` is a dry run by default**: it prints each change as a diff and writes with `--apply`
+  (or a "y" on a terminal). The diff masks the Remembra key and hides every other secret in the file (other
+  MCP servers' `env`/`headers` values, token/key/password settings, `--token`-style arguments, known
+  credential formats); JSON is compared in the layout it is written in, so only the real change shows.
+  `remembra-relay connect` / `disconnect` print their diffs the same way. A run that writes nothing exits 3, so the dashboard's
   `remembra-install ... && remembra-relay connect --apply` stops when you answer no. The key is saved to
   `~/.remembra/credentials` even when no agent config is found. It reads the key from `REMEMBRA_API_KEY`, a hidden prompt,
   `--api-key-stdin` or `~/.remembra/credentials`; `--api-key` still works but warns (shell history). Writes
