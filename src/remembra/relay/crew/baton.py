@@ -319,6 +319,8 @@ class RestoreResult:
     deleted: list[str] = field(default_factory=list)
     branch: str | None = None
     next_command: str | None = None
+    error: str | None = None  # restore_failed: what failed
+    rolled_back: bool | None = None  # restore_failed: the checkout is back to its state before the restore
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -329,6 +331,8 @@ class RestoreResult:
             "deleted": self.deleted,
             "branch": self.branch,
             "next_command": self.next_command,
+            "error": self.error,
+            "rolled_back": self.rolled_back,
         }
 
 
@@ -347,10 +351,23 @@ def fetch_baton(toplevel: str | Path, ref: str, remote: str, *, timeout: float =
     return res.returncode == 0
 
 
+PATHSPEC_CHUNK = 500  # paths per git call (a large baton never hits ARG_MAX)
+
+
+def _chunks(items: Sequence[str], n: int = PATHSPEC_CHUNK) -> list[list[str]]:
+    return [list(items[i : i + n]) for i in range(0, len(items), n)]
+
+
 def restore_baton(
     toplevel: str | Path, ref: str, *, remote: str | None = None, retry_command: str | None = None
 ) -> RestoreResult:
-    """Bring a baton's saved work into ``toplevel`` (§8.1). Refuses on a dirty tree; never destructive."""
+    """Bring a baton's saved work into ``toplevel`` (§8.1). Refuses on a dirty tree; never destructive.
+
+    All or nothing: the tree is clean before anything is touched, so on any failure part-way (a
+    read-only fence, a permission error, a git error) the checkout is put back exactly as it was:
+    original branch or HEAD, index and tracked files reset to that HEAD, files the restore created
+    removed, a branch it created deleted. The result then says ``restore_failed`` with the error.
+    """
     top = os.path.realpath(str(toplevel))
     if not try_out(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], top):
         if not (remote and fetch_baton(top, ref, remote)):
@@ -361,38 +378,85 @@ def restore_baton(
     parent = out(["rev-parse", f"{commit}^"], top)
     message = out(["log", "-1", "--format=%B", commit], top)
     saved_branch = _trailer(message, "Remembra-Branch")
-    head = try_out(["rev-parse", "--verify", "--quiet", "HEAD"], top)
-    branch = try_out(["symbolic-ref", "--quiet", "--short", "HEAD"], top)
-    if head != parent:
-        taken = _checked_out_branches(top)
-        if (
-            saved_branch
-            and saved_branch != "(detached)"
-            and saved_branch not in taken
-            and (try_out(["rev-parse", "--verify", "--quiet", f"refs/heads/{saved_branch}"], top) == parent)
-        ):
-            git(["checkout", "--quiet", saved_branch], top)
-            branch = saved_branch
-        else:
-            label_seq = ref[len(BATON_PREFIX) + 1 :].replace("/", "-")
-            new = f"remembra/{label_seq}"
-            k = 1
-            while try_out(["rev-parse", "--verify", "--quiet", f"refs/heads/{new}"], top):
-                k += 1
-                new = f"remembra/{label_seq}-{k}"
-            git(["checkout", "--quiet", "-b", new, parent], top)
-            branch = new
+    orig_head = try_out(["rev-parse", "--verify", "--quiet", "HEAD"], top)
+    orig_branch = try_out(["symbolic-ref", "--quiet", "--short", "HEAD"], top)
+    branch = orig_branch
     changed = [p for p in out(["diff", "--name-only", "-z", "--diff-filter=d", parent, commit], top).split("\0") if p]
     deleted = [p for p in out(["diff", "--name-only", "-z", "--diff-filter=D", parent, commit], top).split("\0") if p]
-    if changed:
-        git(["checkout", commit, "--", *changed], top)
-        git(["reset", "--quiet", "--", *changed], top)
-    for p in deleted:
-        try:
-            os.unlink(os.path.join(top, p))
-        except FileNotFoundError:
-            pass
+    existed = {p for p in changed if os.path.lexists(os.path.join(top, p))}
+    created_branch: str | None = None
+    try:
+        if orig_head != parent:
+            taken = _checked_out_branches(top)
+            if (
+                saved_branch
+                and saved_branch != "(detached)"
+                and saved_branch not in taken
+                and (try_out(["rev-parse", "--verify", "--quiet", f"refs/heads/{saved_branch}"], top) == parent)
+            ):
+                git(["checkout", "--quiet", saved_branch], top)
+                branch = saved_branch
+            else:
+                label_seq = ref[len(BATON_PREFIX) + 1 :].replace("/", "-")
+                new = f"remembra/{label_seq}"
+                k = 1
+                while try_out(["rev-parse", "--verify", "--quiet", f"refs/heads/{new}"], top):
+                    k += 1
+                    new = f"remembra/{label_seq}-{k}"
+                git(["checkout", "--quiet", "-b", new, parent], top)
+                created_branch = branch = new
+        for chunk in _chunks(changed):
+            git(["checkout", commit, "--", *chunk], top, timeout=60.0)
+        for chunk in _chunks(changed):
+            git(["reset", "--quiet", "--", *chunk], top, timeout=60.0)
+        for p in deleted:
+            try:
+                os.unlink(os.path.join(top, p))
+            except FileNotFoundError:
+                pass
+    except (GitError, OSError) as e:
+        detail = str(e)[:300] or e.__class__.__name__
+        rolled_back = _roll_back(top, orig_head, orig_branch, created_branch, changed, existed)
+        return RestoreResult(
+            False,
+            "restore_failed",
+            ref,
+            branch=orig_branch,
+            next_command=retry_command,
+            error=detail,
+            rolled_back=rolled_back,
+        )
     return RestoreResult(True, "restored", ref, files=changed, deleted=deleted, branch=branch)
+
+
+def _roll_back(
+    top: str,
+    orig_head: str | None,
+    orig_branch: str | None,
+    created_branch: str | None,
+    changed: Sequence[str],
+    existed: set[str],
+) -> bool:
+    """Put a checkout back as it was before a failed restore (it was clean then). True when it is clean again."""
+    if orig_head:
+        target = orig_branch or orig_head
+        git(["checkout", "--quiet", "--force", target], top, check=False, timeout=60.0)
+        git(["reset", "--quiet", "--hard", orig_head], top, check=False, timeout=60.0)
+    for p in changed:
+        if p in existed:
+            continue
+        full = os.path.join(top, p)
+        if os.path.lexists(full) and not try_out(["ls-files", "--error-unmatch", "--", p], top):
+            try:
+                os.unlink(full)
+            except OSError:
+                pass
+    if created_branch and created_branch != orig_branch:
+        git(["branch", "--quiet", "-D", created_branch], top, check=False)
+    try:
+        return is_clean(top) and try_out(["rev-parse", "--verify", "--quiet", "HEAD"], top) == orig_head
+    except GitError:
+        return False
 
 
 # ---------------------------------------------------------------------------

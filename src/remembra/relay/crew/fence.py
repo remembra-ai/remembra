@@ -52,6 +52,35 @@ def _listed_files(toplevel: str) -> list[str]:
     return sorted({p for p in res.stdout.decode("utf-8", "replace").split("\0") if p})
 
 
+def _durable_write_json(path: Path, data: Any) -> None:
+    """Atomic *and* durable: fsync the file and its directory before returning (the fence's write-ahead)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.wal.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, separators=(",", ":"), sort_keys=True)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        dfd = os.open(path.parent, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(dfd)
+    except OSError:
+        pass
+    finally:
+        os.close(dfd)
+
+
 def _literal_prefix(glob: str) -> str:
     segs: list[str] = []
     for seg in glob.strip("/").split("/"):
@@ -115,10 +144,13 @@ class Fence:
             return {"toplevel": os.path.realpath(toplevel), "entries": {}}
         return data
 
-    def _save(self, toplevel: str, record: Mapping[str, Any]) -> None:
+    def _save(self, toplevel: str, record: Mapping[str, Any], *, durable: bool = False) -> None:
         path = _record_path(self.dir, toplevel)
         if record.get("entries"):
-            atomic_write_json(path, dict(record))
+            if durable:
+                _durable_write_json(path, dict(record))
+            else:
+                atomic_write_json(path, dict(record))
         else:
             try:
                 path.unlink()
@@ -150,6 +182,7 @@ class Fence:
                 result.restored.append(rel)
         # files first, then directories deepest-first so a directory is closed after its contents
         order = sorted(want, key=lambda r: (want[r] == "dir", -r.count("/")))
+        planned: list[tuple[str, int]] = []
         for rel in order:
             if rel in entries:
                 continue
@@ -163,14 +196,23 @@ class Fence:
             mode = stat.S_IMODE(st.st_mode)
             if mode & WRITE_BITS == 0:
                 continue  # already read-only by the user's choice; nothing to restore later
+            planned.append((rel, mode))
+        # Write-ahead: the original modes are on disk (fsynced) before the first chmod, so a crewd
+        # killed mid-fence (KeepAlive restart, OOM, reboot) leaves a record the start sweep can undo.
+        # Restoring an entry that was never chmodded just sets the mode it already has.
+        for rel, mode in planned:
+            entries[rel] = {"mode": mode, "kind": want[rel]}
+        record["toplevel"] = top
+        if planned:
+            self._save(top, record, durable=True)
+        for rel, mode in planned:
             try:
-                os.chmod(path, mode & ~WRITE_BITS)
+                os.chmod(os.path.join(top, rel), mode & ~WRITE_BITS)
             except OSError as e:
                 result.errors.append(f"{rel}: {e.__class__.__name__}")
+                entries.pop(rel, None)
                 continue
-            entries[rel] = {"mode": mode, "kind": want[rel]}
             result.fenced.append(rel)
-        record["toplevel"] = top
         self._save(top, record)
         return result
 

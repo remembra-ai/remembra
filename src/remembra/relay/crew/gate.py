@@ -60,6 +60,10 @@ RESPAWN_INTERVAL_S: Final = 30.0
 STATUS_STALE_S: Final = 180.0
 TURN_COMPACT_AFTER: Final = 40
 STDIN_WAIT_S: Final = 1.0
+# Hook payloads are read in full up to this size (a Write of a large file carries its whole content).
+# A larger payload is never silently skipped: the gate salvages the session, tool and path fields,
+# records gate.error, and refuses a write it cannot check (§5.2 rows 1-5 deny in every mode).
+STDIN_MAX_CHARS: Final = 64 * 1024 * 1024
 SOCKET_PATH_MAX: Final = 100  # macOS sun_path is 104 bytes
 EDIT_TOOLS: Final = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path", "NotebookEdit": "notebook_path"}
 COMPLETION_RE: Final = re.compile(
@@ -256,31 +260,45 @@ def write_json(path: Path, data: Any) -> None:
 
 def rpc(layout: Layout, op: str, args: Mapping[str, Any] | None = None, *, timeout: float = 0.5) -> dict[str, Any] | None:
     """One request/response on crewd's socket; ``None`` when crewd is unreachable or too slow."""
+    return rpc_ex(layout, op, args, timeout=timeout)[0]
+
+
+def rpc_ex(
+    layout: Layout, op: str, args: Mapping[str, Any] | None = None, *, timeout: float = 0.5
+) -> tuple[dict[str, Any] | None, bool]:
+    """:func:`rpc` plus whether the request reached crewd (``sent``).
+
+    ``(None, False)``: crewd is not running (connect or send failed), so the op certainly did not run.
+    ``(None, True)``: crewd took the request but no reply came in time; the op may have run, so a
+    caller must not blindly resend a non-idempotent op.
+    """
     path = layout.socket
     if path.parent != layout.run and not socket_dir_trusted(path.parent):
-        return None
+        return None, False
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     sock.settimeout(max(0.01, timeout))
     deadline = time.monotonic() + timeout
+    sent = False
     try:
         sock.connect(str(path))
         sock.sendall(json.dumps({"op": op, "args": dict(args or {})}, separators=(",", ":")).encode() + b"\n")
+        sent = True
         buf = b""
         while b"\n" not in buf:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return None
+                return None, sent
             sock.settimeout(remaining)
             chunk = sock.recv(65536)
             if not chunk:
                 break
             buf += chunk
             if len(buf) > 4 * 1024 * 1024:
-                return None
+                return None, sent
         data = json.loads(buf.split(b"\n", 1)[0] or b"null")
-        return data if isinstance(data, dict) else None
+        return (data if isinstance(data, dict) else None), sent
     except (OSError, ValueError):
-        return None
+        return None, sent
     finally:
         sock.close()
 
@@ -378,15 +396,61 @@ def _err(message: str) -> None:
 
 
 def read_stdin(wait: float = STDIN_WAIT_S) -> str:
+    return read_stdin_ex(wait)[0]
+
+
+def read_stdin_ex(wait: float = STDIN_WAIT_S, limit: int = STDIN_MAX_CHARS) -> tuple[str, bool]:
+    """``(text, oversized)``: stdin up to ``limit`` characters, and whether more was left unread."""
     try:
         if sys.stdin is None or sys.stdin.isatty():
-            return ""
+            return "", False
         ready, _, _ = select.select([sys.stdin], [], [], wait)
         if not ready:
-            return ""
-        return sys.stdin.read(4 * 1024 * 1024)
+            return "", False
+        text = sys.stdin.read(limit)
+        oversized = len(text) >= limit and bool(sys.stdin.read(1))
+        return text, oversized
     except (OSError, ValueError):
-        return ""
+        return "", False
+
+
+# A key of a JSON object: preceded by ``{`` or ``,`` (inside a JSON string every ``"`` is escaped, so
+# this never matches text that is part of a value such as a file's content).
+_SALVAGE_KEY: Final = r'[{{,]\s*"{key}"\s*:\s*"((?:[^"\\]|\\.)*)"'
+_SALVAGE_TOP: Final = ("session_id", "hook_event_name", "tool_name", "cwd", "permission_mode", "transcript_path")
+_SALVAGE_PATHS: Final = ("file_path", "notebook_path", "path", "absolute_path", "destination", "source", "target")
+
+
+def _json_str(escaped: str) -> str | None:
+    try:
+        value = json.loads(f'"{escaped}"')
+    except ValueError:
+        return None
+    return value if isinstance(value, str) else None
+
+
+def salvage_payload(raw: str) -> dict[str, Any]:
+    """The fields the gate needs from a payload that is too large to read in full or does not parse.
+
+    Top-level fields take their first occurrence (Claude Code writes them before ``tool_input``);
+    path-like fields become a ``tool_input`` of just those paths, so the zone and crew-policy checks
+    still run on them.
+    """
+    out: dict[str, Any] = {}
+    for key in _SALVAGE_TOP:
+        m = re.search(_SALVAGE_KEY.format(key=key), raw)
+        value = _json_str(m.group(1)) if m else None
+        if value is not None:
+            out[key] = value
+    tool_input: dict[str, Any] = {}
+    for key in _SALVAGE_PATHS:
+        m = re.search(_SALVAGE_KEY.format(key=key), raw)
+        value = _json_str(m.group(1)) if m else None
+        if value:
+            tool_input[key] = value
+    if tool_input:
+        out["tool_input"] = tool_input
+    return out
 
 
 def parse_payload(raw: str) -> dict[str, Any]:
@@ -406,6 +470,7 @@ class HookContext:
     payload: dict[str, Any]
     local_now: float = field(default_factory=time.time)
     started: float = field(default_factory=time.monotonic)
+    degraded: str | None = None  # "oversized" / "unparseable": ``payload`` holds only the salvaged fields
     _session: dict[str, Any] | None = None
     _session_loaded: bool = False
 
@@ -771,10 +836,57 @@ def _bash_verb(command: str) -> str | None:
     return os.path.basename(word)[:32] or None
 
 
+DEGRADED_DENY: Final = {
+    "oversized": (
+        "Crew: this tool call is too large for the crew gate to check (over 64 MB), so it is refused."
+        " Split it into smaller edits or commands."
+    ),
+    "unparseable": "Crew: the crew gate could not read this tool call, so it is refused. Try it again.",
+}
+
+
+def degraded_pretool(ctx: HookContext, session: dict[str, Any]) -> str | None:
+    """A payload the gate could not read in full: record it; refuse what cannot be checked.
+
+    Returns the deny output, or ``None`` when the salvaged fields are enough for the normal check
+    (an edit whose path was recovered, an MCP call).
+    """
+    from remembra.crew import schemas as S
+
+    reason = ctx.degraded or "unparseable"
+    _err(f"hook payload {reason}; checking the fields that could be recovered")
+    submit_events(
+        ctx.layout,
+        session,
+        ctx.key or "",
+        [{"type": "gate.error", "payload": {"stage": "payload", "error_class": f"payload_{reason}"[:64]}}],
+    )
+    tool = str(ctx.payload.get("tool_name") or "")
+    tool_input = _as_dict(ctx.payload.get("tool_input"))
+    if tool.startswith("mcp__"):
+        return None
+    if tool in EDIT_TOOLS and tool_input.get(EDIT_TOOLS[tool]):
+        return None
+    # a shell command cut off mid-string, or an edit whose target is unknown: nothing can be checked
+    return S.hook_pretool_deny(DEGRADED_DENY.get(reason, DEGRADED_DENY["unparseable"]))
+
+
 def cmd_pretool(ctx: HookContext) -> int:
     session = ctx.session()
     if session is None:
         return 0
+    if ctx.degraded:
+        try:
+            denied = degraded_pretool(ctx, session)
+        except Exception as e:
+            _err(f"pretool error ({e.__class__.__name__}) on an unreadable payload; refused")
+            from remembra.crew import schemas as S
+
+            denied = S.hook_pretool_deny(DEGRADED_DENY["unparseable"])
+        if denied:
+            sys.stdout.write(denied)
+            sys.stdout.flush()
+            return 0
     try:
         out, _ = evaluate_pretool(ctx, session)
     except Exception as e:  # never brick the agent (§10.3): allow, record gate.error
@@ -1497,8 +1609,9 @@ def gate_command(layout: Layout, sub: str, *, python: str | None = None, hook: s
     """The hook command line for one gate subcommand (with the ``# remembra-crew`` marker, §8.2)."""
     import shlex
 
-    py = shlex.quote(python or sys.executable)
-    return f"{py} -I {shlex.quote(str(layout.gate_script))} {sub} --hook {hook} # remembra-crew"
+    g = shlex.quote(str(layout.gate_script))
+    # a missing gate file must exit 0: `python -I missing.py` exits 2, a blocking hook error (§8.2)
+    return f"test ! -f {g} || exec {shlex.quote(python or sys.executable)} -I {g} {sub} --hook {hook} # remembra-crew"
 
 
 # ===========================================================================
@@ -1540,12 +1653,30 @@ def main(argv: Sequence[str] | None = None, *, layout: Layout | None = None) -> 
     sub, hook, rest = _parse(sys.argv[1:] if argv is None else argv)
     layout = layout or Layout.from_env()
     if sub in HOOK_COMMANDS:
-        raw = read_stdin()
+        raw, oversized = read_stdin_ex()
         payload = parse_payload(raw)
+        degraded: str | None = None
+        if oversized or (not payload and raw.strip()):
+            # never a silent skip (§10.3): recover the session and the fields the checks need
+            payload = salvage_payload(raw)
+            degraded = "oversized" if oversized else "unparseable"
         sid = payload.get("session_id")
         if not isinstance(sid, str) or not sid or not layout.session_file(session_key(hook, sid)).exists():
+            if degraded:
+                _err(f"hook payload {degraded} and no crew session found in it; not checked")
             return 0  # not a crew session: the <10 ms fast exit
-        return HOOK_COMMANDS[sub](HookContext(layout, hook, payload))
+        ctx = HookContext(layout, hook, payload, degraded=degraded)
+        if degraded and sub != "pretool":
+            session = ctx.session()
+            if session is not None:
+                _err(f"hook payload {degraded}; handled with the fields that could be recovered")
+                submit_events(
+                    layout,
+                    session,
+                    ctx.key or "",
+                    [{"type": "gate.error", "payload": {"stage": sub[:32], "error_class": f"payload_{degraded}"}}],
+                )
+        return HOOK_COMMANDS[sub](ctx)
     try:
         if sub == "precommit":
             res = git_gate_precommit(layout, os.getcwd())

@@ -52,6 +52,9 @@ One reducer, two implementations: Python (`remembra.crew.reducer`, reference; us
    server).
 9. `presence` → for each lane of a known session, replace that session's `presence` with the
    lane minus `session_id`. Never changes `state`, `stuck` or `last_seq`. Unknown sessions ignored.
+   The overlay is ephemeral detail (last action, calls, limit); views take `state` and `stuck`
+   from the session (server state), and the session events marked `presence = null` below drop
+   an overlay that would otherwise outlive the change.
 10. `crew.subscribed`, `crew.summary` and unknown frames change nothing.
 
 The session an event concerns is `refs.session_id`, else `actor.id` when `actor.kind = session`.
@@ -65,12 +68,12 @@ The session an event concerns is `refs.session_id`, else `actor.id` when `actor.
 | `crew.mode_changed` | `mode = crew.mode = to` |
 | `host.registered` / `unreachable` / `recovered` | `hosts[id].state` = view state / `unreachable` / `online` |
 | `session.joined` | insert view with `presence: null` |
-| `session.state_changed` | `state = to`; `quiet_reason` = payload value if `to = quiet`, else null; `state_reason = reason` |
+| `session.state_changed` | `state = to`; `quiet_reason` = payload value if `to = quiet`, else null; `state_reason = reason`; `presence = null` |
 | `session.recovered` | `state = active`, `quiet_reason = state_reason = null` |
-| `session.quota_blocked` | `state = quota_blocked` (an `ended` lane stays `ended`: a late StopFailure, S0), `state_reason = error` |
+| `session.quota_blocked` | `state = quota_blocked` (an `ended` lane stays `ended`: a late StopFailure, S0), `state_reason = error`; `presence = null` |
 | `session.limit_warning` | `limit = {level, pct, source}` |
-| `session.stuck` | `stuck` |
-| `session.paused` / `resumed` | `state = paused` / `state = to` |
+| `session.stuck` | `stuck`; `presence = null` |
+| `session.paused` / `resumed` | `state = paused`, `presence = null` / `state = to` |
 | `session.left` | `state = ended`, `end_reason = reason`, `ended_at = ts`, `presence = null` |
 | `session.lost` | `state = lost`, `state_reason = reason`, `presence = null` |
 | `activity.*` | `last_activity_at = ts`; `activity.commit` also sets `head_commit = sha` (unknown session: ignored) |

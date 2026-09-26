@@ -173,9 +173,10 @@ export const countUpTransition: Transition = {
 // Crew screens use only the presets below. Every preset has a reduced-motion
 // form: nothing travels, scales or blurs; state changes land instantly (or as
 // a short opacity fade that carries no position). Delight moments (the baton
-// pass, "Crew assembled") go through DelightGate, which enforces the rules:
-// one animation at a time, none while a needs-you item is open, dismissible,
-// never longer than 600 ms.
+// pass in BatonTransit, the "Crew assembled" line in CrewAssembled) go through
+// one shared DelightGate (lib/crew/delight.ts), which enforces the rules: one
+// animation at a time, none while a needs-you item is open, dismissible, never
+// longer than 600 ms.
 // ═══════════════════════════════════════════════════════════════
 
 /** The longest a crew animation may run (§9.13). */
@@ -267,6 +268,8 @@ export interface DelightGrant {
   ms: number;
   /** Stop early (the viewer dismissed it, or the screen went away). */
   dismiss: () => void;
+  /** Still allowed to play: false once dismissed, over, or a needs-you item opened (jump to the end state). */
+  active: () => boolean;
 }
 
 export type DelightRefusal = 'busy' | 'needs_you_open';
@@ -282,16 +285,31 @@ export class DelightGate {
   private needsYouOpen = false;
   private readonly now: () => number;
   private readonly reduced: () => boolean;
+  private readonly listeners = new Set<() => void>();
 
   constructor(options: { now?: () => number; reduced?: () => boolean } = {}) {
     this.now = options.now ?? (() => Date.now());
     this.reduced = options.reduced ?? (() => prefersReducedMotion());
   }
 
+  /** Called when a running delight is stopped from outside (a needs-you item opened). */
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  get needsYou(): boolean {
+    return this.needsYouOpen;
+  }
+
   /** Tell the gate whether a needs-you item is open on screen. Opening one stops any running delight. */
   setNeedsYouOpen(open: boolean): void {
+    if (this.needsYouOpen === open) return;
     this.needsYouOpen = open;
-    if (open) this.current = null;
+    if (open && this.current) {
+      this.current = null;
+      for (const l of [...this.listeners]) l();
+    }
   }
 
   get playing(): DelightKind | null {
@@ -311,6 +329,7 @@ export class DelightGate {
       dismiss: () => {
         if (this.current?.token === token) this.current = null;
       },
+      active: () => ms > 0 && this.current?.token === token && this.now() < this.current.until,
     };
   }
 }

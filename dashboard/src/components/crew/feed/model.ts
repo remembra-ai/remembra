@@ -598,6 +598,22 @@ export function scrollToReveal(index: number, scrollTop: number, viewport: numbe
   return null;
 }
 
+/**
+ * Where the event a deep link points at (`&seq=N`, §9.12) sits in the feed: its row (a collapsed
+ * checkpoint run counts as the row holding it), `older` while it is below the loaded window and
+ * older pages exist, `missing` when it cannot be shown (filtered out, not a known event).
+ */
+export function locateSeq(
+  rows: readonly FeedRow[],
+  seq: number,
+  view: { hasOlder: boolean; floorSeq: number },
+): { index: number; key: string } | 'older' | 'missing' {
+  const index = rows.findIndex((r) => r.events.some((e) => e.seq === seq));
+  if (index >= 0) return { index, key: rows[index].key };
+  if (view.hasOlder && (view.floorSeq === 0 || seq < view.floorSeq)) return 'older';
+  return 'missing';
+}
+
 /** Move a selection by `delta` rows (j = +1 older, k = −1 newer), clamped; null selection starts at the top. */
 export function moveSelection(rows: readonly FeedRow[], selected: string | null, delta: number): string | null {
   if (!rows.length) return null;

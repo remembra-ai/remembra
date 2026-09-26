@@ -345,6 +345,9 @@ def _agent_op(path: Path, spec: CrewSpec, cmds: CrewCommands, remove: bool) -> F
         return FileOp(path, None, None, None, [])
     legacy = CREW_LEGACY_MARKERS if spec.adapter == "claude-code" else ()
     after, summary = render(before, spec, cmds, remove=remove, legacy_markers=legacy, path_hint=str(path))
+    if path.is_symlink() and after != before:
+        # a dotfiles-managed config stays a link: the change is written to the file it points to
+        summary = [*summary, f"{path} is a symlink: the change is written to its target {os.path.realpath(path)}"]
     return FileOp(path, before, after, None if before is not None else 0o600, summary)
 
 
@@ -485,6 +488,13 @@ def build_plan(opts: ConnectOptions) -> InstallPlan:
         )
     status_section.ops.append(_manifest_op(home, manifest, opts, cmds, manifest_agents, repo_records))
     sections.append(status_section)
+    if remove:
+        # Uninstall takes the hooks out before the gate they run: if a later write fails ("Stopped: …
+        # re-run to finish"), no agent or git hook is left pointing at a missing crew-gate.py. The
+        # manifest (no agents left) is written before the gate goes, so crewd stops restoring it.
+        order = {s.title: i for i, s in enumerate(sections)}
+        wanted = ["Agent hooks", "Git hooks", "AGENTS.md", "Crew status files", "crewd supervisor", "Crew gate"]
+        sections.sort(key=lambda s: wanted.index(s.title) if s.title in wanted else len(wanted) + order[s.title])
     return plan
 
 

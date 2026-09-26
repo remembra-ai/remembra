@@ -8,6 +8,7 @@ import clsx from 'clsx';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { crewApi } from '../../../lib/crew/api';
+import { useNeedsYouOpen } from '../../../lib/crew/delight';
 import type { CrewState, DecisionView, SessionView } from '../../../lib/crew/types';
 import { absoluteTime, relativeTime } from '../../../lib/time';
 import { useResource } from '../../../hooks/useResource';
@@ -157,6 +158,8 @@ export function NeedsYouCard({
   const project = item.project_id ?? null;
   const action = primaryAction(item, project);
   const [panel, setPanel] = useState<'confirm' | 'answer' | 'release' | null>(null);
+  // an expanded needs-you card holds every crew delight animation back (§9.13)
+  useNeedsYouOpen(panel !== null);
   const [reason, setReason] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

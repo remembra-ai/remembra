@@ -21,7 +21,7 @@ import { EmptyFeed } from '../empty/EmptyStates';
 import { EventRow, ROW_H } from './EventRow';
 import { FeedFilters } from './FeedFilters';
 import { LiveStrip } from './LiveStrip';
-import { NO_FILTERS, buildRows, hasFilters, moveSelection, runKeyOf, scrollToReveal, windowRange, type FeedRow } from './model';
+import { NO_FILTERS, buildRows, hasFilters, locateSeq, moveSelection, runKeyOf, scrollToReveal, windowRange, type FeedRow } from './model';
 import { NewEventsPill } from './NewEventsPill';
 import { useFeedLog } from './useFeedLog';
 
@@ -49,11 +49,40 @@ export function EventFeed({ crewId, project }: { crewId: string; project: string
   const lastTop = useRef(0);
   const keyboardFocus = useRef(false);
 
+  const loadOlder = feed.loadOlder;
+  const loadOlderRef = useRef(loadOlder);
+  useLayoutEffect(() => {
+    loadOlderRef.current = loadOlder;
+  });
+
+  // A deep link (`&seq=N`, from an email or webhook notification, §9.12) selects that event until
+  // the viewer picks another row; older pages load until it is in the window.
+  const target = route?.seq ?? null;
+  const located = useMemo(
+    () => (target !== null && feed.status === 'ready' ? locateSeq(rows, target, feed) : null),
+    [target, rows, feed],
+  );
+  const targetKey = located !== null && typeof located === 'object' ? located.key : null;
+  const revealed = useRef<number | null>(null);
+  useEffect(() => {
+    if (target === null || located === null) return;
+    if (located === 'older') {
+      if (!feed.loadingOlder) loadOlderRef.current();
+      return;
+    }
+    if (located === 'missing' || revealed.current === target) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    revealed.current = target;
+    const reveal = scrollToReveal(located.index, el.scrollTop, el.clientHeight, ROW_H);
+    if (reveal !== null) el.scrollTop = reveal;
+  }, [target, located, feed.loadingOlder]);
+
   const selectedRef = useRef<string | null>(null);
   useLayoutEffect(() => {
     rowsRef.current = rows;
     newestRef.current = feed.newestSeq;
-    selectedRef.current = selected;
+    selectedRef.current = selected ?? targetKey;
   });
 
   // Keep the viewer's place when rows arrive above it.
@@ -77,7 +106,6 @@ export function EventFeed({ crewId, project }: { crewId: string; project: string
     return () => ro.disconnect();
   }, [hasList]);
 
-  const loadOlder = feed.loadOlder;
   const onScroll = useCallback(
     (e: UIEvent<HTMLDivElement>) => {
       const el = e.currentTarget;
@@ -165,7 +193,7 @@ export function EventFeed({ crewId, project }: { crewId: string; project: string
   const win = windowRange(scroll.top, scroll.height, rows.length, ROW_H);
   const filtered = hasFilters(filters);
   const loading = feed.status === 'idle' || feed.status === 'loading';
-  const selectedKey = selected && rows.some((r) => r.key === selected) ? selected : (rows[0]?.key ?? null);
+  const selectedKey = selected && rows.some((r) => r.key === selected) ? selected : (targetKey ?? rows[0]?.key ?? null);
 
   return (
     <section aria-labelledby="crew-feed-title" className="space-y-3">

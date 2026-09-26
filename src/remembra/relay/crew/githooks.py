@@ -109,6 +109,12 @@ class FileOp:
     backup: bool = True
     force: bool = False  # write even when the text is unchanged (e.g. restore a lost executable bit)
     quiet: bool = False  # the dry run lists the file without a diff (vendored package sources)
+    # Symlinks. By default a write to a symlinked path goes *through* the link to its target, so a
+    # dotfiles link (``~/.claude/settings.json -> dotfiles/…``) is kept. ``link_to`` makes the op
+    # create a symlink with that target instead of writing text (a chained git hook that was a
+    # symlink is kept as one); ``replace_link`` replaces a symlink at ``path`` with a regular file.
+    link_to: str | None = None
+    replace_link: bool = False
 
     @property
     def changed(self) -> bool:
@@ -122,19 +128,48 @@ class FileOp:
         return "".join(difflib.unified_diff(before, after, fromfile=old, tofile=new))
 
 
+def write_target(path: Path) -> Path:
+    """Where a text write to ``path`` lands: ``path`` itself, or the file a symlink at ``path`` points to."""
+    if not path.is_symlink():
+        return path
+    target = Path(os.path.realpath(path))
+    if not target.parent.is_dir():
+        raise OSError(f"{path} is a symlink to {target}, whose directory does not exist; fix or remove the link")
+    return target
+
+
 def apply_op(op: FileOp, stamp: str | None = None) -> Path | None:
-    """Apply one op atomically; returns the backup path (if one was kept)."""
+    """Apply one op atomically; returns the backup path (if one was kept).
+
+    A text write to a symlink goes through the link (the link stays, its target changes) unless
+    ``op.replace_link``; ``op.link_to`` writes a symlink instead of text.
+    """
     path = op.path
     stamp = stamp or datetime.now().strftime("%Y%m%d-%H%M%S")
     backup: Path | None = None
     exists = path.exists() or path.is_symlink()
-    if exists and op.backup:
+    if exists and op.backup and path.exists():
         backup = path.with_name(f"{path.name}.bak-crew-{stamp}")
         shutil.copy2(path, backup, follow_symlinks=True)
+    if op.link_to is not None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_link = path.with_name(f".{path.name}.link-{os.getpid()}-{stamp}")
+        if tmp_link.is_symlink() or tmp_link.exists():
+            tmp_link.unlink()
+        os.symlink(op.link_to, tmp_link)
+        try:
+            os.replace(tmp_link, path)
+        except BaseException:
+            if tmp_link.is_symlink():
+                tmp_link.unlink()
+            raise
+        return backup
     if op.after is None:
         if exists:
             path.unlink()
         return backup
+    if not op.replace_link:
+        path = write_target(path)
     mode = op.mode
     if mode is None:
         mode = (path.stat().st_mode & 0o777) if path.exists() else 0o600
@@ -521,19 +556,31 @@ def plan_install(repo: Path, gate: GateCommand, *, hooks: tuple[str, ...] = HOOK
             methods[hook] = "delegate"
             mode = active.stat().st_mode & 0o777
             prev_text = _read(prev)
+            # a symlinked hook (a shared hooks repo, dotfiles) is kept as the same symlink, never copied
+            link = os.readlink(active) if active.is_symlink() else None
             ops.append(
                 FileOp(
                     prev,
                     prev_text,
                     content,
                     mode,
-                    [f"{hook}: keep the existing hook as {prev.name} (it runs first)"],
+                    [f"{hook}: keep the existing hook as {prev.name} (it runs first)"]
+                    + ([f"{hook}: {prev.name} stays a symlink to {link}"] if link else []),
                     # a different hook already kept there (something replaced ours since) is backed up, never lost
                     backup=prev_text is not None and prev_text != content,
+                    link_to=link,
                 )
             )
             ops.append(
-                FileOp(active, content, want, 0o755, [f"{hook}: chain the crew gate after the existing hook"], backup=False)
+                FileOp(
+                    active,
+                    content,
+                    want,
+                    0o755,
+                    [f"{hook}: chain the crew gate after the existing hook"],
+                    backup=False,
+                    replace_link=link is not None,
+                )
             )
             entry = info.exclude_entry(prev)
             if entry and entry not in excludes:
@@ -598,7 +645,18 @@ def plan_uninstall(repo: Path) -> HookPlan:
                 prev_text = _read(prev)
                 if prev_text is not None:
                     mode = prev.stat().st_mode & 0o777
-                    ops.append(FileOp(active, content, prev_text, mode, [f"{hook}: restore the original hook"], backup=False))
+                    link = os.readlink(prev) if prev.is_symlink() else None
+                    ops.append(
+                        FileOp(
+                            active,
+                            content,
+                            prev_text,
+                            mode,
+                            [f"{hook}: restore the original hook" + (f" (the symlink to {link})" if link else "")],
+                            backup=False,
+                            link_to=link,
+                        )
+                    )
                     ops.append(FileOp(prev, prev_text, None, None, [f"{hook}: remove {prev.name}"], backup=False))
                 else:
                     ops.append(FileOp(active, content, None, None, [f"{hook}: remove the crew hook"], backup=False))

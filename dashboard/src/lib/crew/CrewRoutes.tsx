@@ -90,7 +90,8 @@ function CrewLive({ crewId, project }: { crewId: string; project: string }) {
           <h2 className="font-display text-lg font-bold text-ink">{state.crew?.name || project}</h2>
           <Pill>{state.mode}</Pill>
           <Pill>{state.crew?.enforcement ?? 'enforce'}</Pill>
-          <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-[11px] text-ink-2" role="status">
+          {/* not a live region: the seq changes with every event (§9.16) */}
+          <span className="ml-auto inline-flex items-center gap-1.5 font-mono text-[11px] text-ink-2" aria-live="off">
             <RadioTower className="h-3.5 w-3.5" aria-hidden="true" />
             <PulseDot active={conn.live} label={conn.text} />
             {conn.text} · seq {state.last_seq}

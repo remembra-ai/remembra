@@ -57,6 +57,47 @@ export interface CrewStreamView {
   error: CrewApiError | null;
   /** Client time of the last applied event or presence frame (ms), 0 if none. */
   lastFrameAt: number;
+  /** Client time (ms) each session's last presence frame arrived: the now line's "3s ago" keeps counting from it. */
+  presenceAt: Readonly<Record<string, number>>;
+}
+
+/**
+ * A snapshot resets the reducer state (docs/crew/reducer.md), but some of what a live page shows
+ * exists only in the stream and is not in any snapshot: presence overlays, guard and tamper
+ * counters, moments, batons, messages, baton refs, checkpoints, reports, hosts, budget. When the
+ * store re-applies a snapshot on top of a live state (a resync after a gap, a manual refresh) it
+ * carries those forward so the lanes' badges, now lines and the moments card do not blank out;
+ * entries of sessions or tasks the snapshot no longer has are dropped, and entries newer than the
+ * snapshot are left for the replay to bring back (no duplicates).
+ */
+export function carryLiveState(prev: CrewState, next: CrewState): CrewState {
+  if (!prev.crew || !next.crew || prev.crew.id !== next.crew.id) return next;
+  const upto = next.last_seq;
+  const sessions: CrewState['sessions'] = {};
+  for (const [id, session] of Object.entries(next.sessions)) {
+    const before = prev.sessions[id];
+    const live = before?.presence && !['ended', 'lost'].includes(session.state) && before.state === session.state;
+    sessions[id] = live ? { ...session, presence: before.presence } : session;
+  }
+  const bySession = <T,>(map: Record<string, T>): Record<string, T> =>
+    Object.fromEntries(Object.entries(map).filter(([sid]) => sid in next.sessions));
+  const byTask = <T,>(map: Record<string, T>): Record<string, T> =>
+    Object.fromEntries(Object.entries(map).filter(([tid]) => tid in next.tasks));
+  const upToSnapshot = <T extends { seq: number }>(list: readonly T[]): T[] => list.filter((x) => x.seq <= upto);
+  return {
+    ...next,
+    sessions,
+    guard_blocks: { ...bySession(prev.guard_blocks), ...next.guard_blocks },
+    tamper_blocks: { ...bySession(prev.tamper_blocks), ...next.tamper_blocks },
+    checkpoints: { ...bySession(prev.checkpoints), ...next.checkpoints },
+    reports: { ...byTask(prev.reports), ...next.reports },
+    moments: upToSnapshot(prev.moments),
+    batons: upToSnapshot(prev.batons),
+    messages: upToSnapshot(prev.messages),
+    baton_refs: Object.fromEntries(Object.entries(prev.baton_refs).filter(([, r]) => r.seq <= upto)),
+    hosts: { ...prev.hosts, ...next.hosts },
+    budget: { ...prev.budget, ...next.budget },
+  };
 }
 
 export interface CrewStoreOptions {
@@ -97,7 +138,7 @@ export class CrewStore {
       retryMaxMs: 30000,
       ...options,
     };
-    this.view = { crewId, status: 'loading', state: null, meta: null, error: null, lastFrameAt: 0 };
+    this.view = { crewId, status: 'loading', state: null, meta: null, error: null, lastFrameAt: 0, presenceAt: {} };
   }
 
   // -- external store ----------------------------------------------------------------------
@@ -116,7 +157,8 @@ export class CrewStore {
       next.state === this.view.state &&
       next.meta === this.view.meta &&
       next.error === this.view.error &&
-      next.lastFrameAt === this.view.lastFrameAt
+      next.lastFrameAt === this.view.lastFrameAt &&
+      next.presenceAt === this.view.presenceAt
     ) {
       return;
     }
@@ -194,9 +236,13 @@ export class CrewStore {
   private applySnapshot(snap: CrewSnapshot): void {
     const now = this.opts.timers.now();
     const serverMs = Date.parse(snap.server_time);
-    const state = applyFrame(this.view.state ?? fromSnapshot(snap), { type: 'snapshot', data: snap });
+    const prev = this.view.state;
+    const fresh = applyFrame(prev ?? fromSnapshot(snap), { type: 'snapshot', data: snap });
+    const state = prev ? carryLiveState(prev, fresh) : fresh;
+    const presenceAt = Object.fromEntries(Object.entries(this.view.presenceAt).filter(([sid]) => state.sessions[sid]?.presence));
     this.update({
       state,
+      presenceAt,
       error: null,
       meta: {
         etag: snap.etag,
@@ -292,9 +338,20 @@ export class CrewStore {
   private applyFrames(frames: FrameLike[]): void {
     let state = this.view.state;
     if (!state) return;
-    for (const frame of frames) state = applyFrame(state, frame);
+    const now = this.opts.timers.now();
+    let presenceAt = this.view.presenceAt;
+    for (const frame of frames) {
+      const before: CrewState = state;
+      const after: CrewState = applyFrame(before, frame);
+      state = after;
+      if (frame.type === 'presence' && after !== before) {
+        const stamped: Record<string, number> = { ...presenceAt };
+        for (const lane of frame.lanes ?? []) if (after.sessions[lane.session_id]) stamped[lane.session_id] = now;
+        presenceAt = stamped;
+      }
+    }
     if (state === this.view.state) return;
-    this.update({ state, lastFrameAt: this.opts.timers.now() });
+    this.update({ state, lastFrameAt: now, presenceAt });
     if (state.needs_resync) void this.load('resync');
   }
 

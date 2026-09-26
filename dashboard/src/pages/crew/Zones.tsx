@@ -106,10 +106,12 @@ export function ZonesPage({ crewId, project, zoneSlug }: { crewId: string; proje
   const count = (p: ZonePrimary) => userZones.filter((z) => statuses.get(z.id)?.primary === p).length;
   const held = count('held') + count('shared') + count('watched') + count('contested');
   const enforcement = state.crew?.enforcement ?? 'enforce';
+  // After an action only the REST listings are reloaded: the crew state moves by the events the
+  // action produces (stream or polling). A snapshot reload would reset the live-only state (lane
+  // badges, moments) and spend a replay subscribe.
   const refreshAll = () => {
     listing.refresh();
     changes.refresh();
-    crew.refresh();
   };
   const open = (zoneId: string) => {
     const z = state.zones[zoneId];

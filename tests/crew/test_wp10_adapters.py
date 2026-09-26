@@ -14,7 +14,9 @@ from remembra.relay.adapters import agents_md, claude_code, codex, cursor, gemin
 from remembra.relay.adapters.crew_hooks import CREW_MARKER, CrewCommands, CrewHook, crew_specs, render
 
 CMDS = CrewCommands(python="/usr/bin/python3", gate="/home/u/.remembra/crew/bin/crew-gate.py", crew="/opt/bin/remembra-crew")
-PY_GATE = "/usr/bin/python3 -I /home/u/.remembra/crew/bin/crew-gate.py"
+GATE = "/home/u/.remembra/crew/bin/crew-gate.py"
+# a missing gate exits 0 (python -I missing.py exits 2, a blocking hook error in Claude Code)
+PY_GATE = f"test ! -f {GATE} || exec /usr/bin/python3 -I {GATE}"
 MATCHER = "Edit|Write|MultiEdit|NotebookEdit|Bash|mcp__.*"
 
 # Spec §8.2, entry by entry (plus the S0 asyncRewake waiter on Stop).

@@ -89,7 +89,7 @@ def test_rewake_verb_runs_the_wake_waiter(tmp_path, monkeypatch):
     gate.write_json(layout.session_file(key), {"key": key, "inject": None})
     seen: list[str] = []
     monkeypatch.setitem(gate.HOOK_COMMANDS, "rewake", lambda ctx: seen.append(ctx.adapter) or 0)
-    monkeypatch.setattr(gate, "read_stdin", lambda *a, **k: json.dumps({"session_id": "sess-rw"}))
+    monkeypatch.setattr(gate, "read_stdin_ex", lambda *a, **k: (json.dumps({"session_id": "sess-rw"}), False))
     assert gate.main(["rewake", "--hook", "claude-code"], layout=layout) == 0
     assert seen == ["claude-code"]
 

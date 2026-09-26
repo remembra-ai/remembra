@@ -221,11 +221,19 @@ describe('notifications', () => {
     expect(markReadLocally(list, null, null).items.every((i) => i.read)).toBe(true);
   });
 
-  it('opens the right screen per kind', () => {
-    expect(notificationHref(n('crw_1', 1, false, 'decision'))).toBe('#/crew?project=yaadbooks&view=channel');
-    expect(notificationHref(n('crw_1', 1, false, 'zone_change'))).toBe('#/crew?project=yaadbooks&view=policy');
-    expect(notificationHref(n('crw_1', 1, false, 'handoff'))).toBe('#/crew?project=yaadbooks&view=feed&moments=1');
-    expect(notificationHref(n('crw_1', 1, false, 'collision'))).toBe('#/crew?project=yaadbooks&view=feed');
+  it('opens the exact item: the server deep link when it is a crew route, else the screen per kind with the event', () => {
+    // remembra.crew.notify.deep_link (tests/crew/test_notify.py asserts the same strings)
+    const server = { ...n('crw_1', 1042, false, 'handoff'), link: 'https://app.remembra.dev/#/crew?project=yaadbooks&view=feed&seq=1042' };
+    expect(notificationHref(server)).toBe('#/crew?project=yaadbooks&view=feed&seq=1042');
+    const receipt = { ...n('crw_1', 9, false, 'task_done'), link: 'https://x.test/#/crew?project=yaadbooks&view=report&report=rpt_0123456789abcdef&seq=9' };
+    expect(notificationHref(receipt)).toBe('#/crew?project=yaadbooks&view=report&report=rpt_0123456789abcdef&seq=9');
+    // an old-format or foreign link falls back to the kind's screen, still selecting the event
+    expect(notificationHref({ ...n('crw_1', 5, false, 'handoff'), link: 'https://app.remembra.dev/#/crews/crw_1/feed?seq=5' })).toBe(
+      '#/crew?project=yaadbooks&view=feed&seq=5',
+    );
+    expect(notificationHref(n('crw_1', 1, false, 'decision'))).toBe('#/crew?project=yaadbooks&view=channel&seq=1');
+    expect(notificationHref(n('crw_1', 1, false, 'zone_change'))).toBe('#/crew?project=yaadbooks&view=policy&seq=1');
+    expect(notificationHref(n('crw_1', 1, false, 'collision'))).toBe('#/crew?project=yaadbooks&view=feed&seq=1');
   });
 
   it('checks targets before they reach the server', () => {

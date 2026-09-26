@@ -41,12 +41,15 @@ export function CrewLane({
   canAct,
   quotaSource,
   onRequest,
+  presenceAt = null,
 }: {
   state: CrewState;
   session: SessionState;
   project: string;
   strip: Strip;
   nowMs: number;
+  /** Client time (ms) the last presence frame for this session arrived (`CrewStreamView.presenceAt`). */
+  presenceAt?: number | null;
   /** The viewer is a human principal (dashboard login). */
   canAct: boolean;
   /** Source of the last quota stop ("reported" / "detected"), when an event said so. */
@@ -60,7 +63,7 @@ export function CrewLane({
   const presence = presenceView(session, claims, nowMs, quotaSource);
   const enforcement = enforcementView(session);
   const chips = zoneChips(state, claims);
-  const line = nowLine(state, session, 0);
+  const line = nowLine(state, session, presenceAt ? nowMs - presenceAt : 0);
   const ring = reportRing(session, nowMs, strip.checkpointTimes[0] ?? null, presence.settled);
   const streak = presence.settled ? 0 : checkpointStreak(strip.checkpointTimes, nowMs);
   const meter = limitMeter(session);
@@ -202,11 +205,11 @@ export function CrewLane({
         </p>
         <p className="min-w-0 truncate font-mono text-[12px] text-ink-2">
           {line.action ? (
-            <>
-              <span className="text-ink">{line.action.tool}</span>
+            <span className={clsx(line.action.stale && 'opacity-60')} title={line.action.stale ? 'No new activity since' : undefined}>
+              <span className={line.action.stale ? 'text-ink-2' : 'text-ink'}>{line.action.tool}</span>
               {line.action.path && <span> {line.action.path}</span>}
               <span className="text-ink-3"> · {line.action.ageS < 5 ? 'just now' : `${shortAge(line.action.ageS)} ago`}</span>
-            </>
+            </span>
           ) : session.last_activity_at ? (
             <span className="text-ink-3">
               last activity {shortAge(Math.max(0, (nowMs - (parseServerTime(session.last_activity_at)?.getTime() ?? nowMs)) / 1000))} ago

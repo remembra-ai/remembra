@@ -350,6 +350,43 @@ def reducer_vectors() -> list[dict[str, Any]]:
     )
     v.append(
         vec(
+            "presence_cleared_by_session_state",
+            "A presence overlay never outlives a server state change: state_changed, quota_blocked, paused and "
+            "stuck drop it (the lane shows the server's state, not the last 5-second frame); a later frame sets it again.",
+            [
+                {"type": "presence", "crew_id": CREW, "lanes": [{**lane_a, "state": "active"}, {**lane_a, "session_id": "cs_b"}]},
+                frame(
+                    E(
+                        11,
+                        "session.quota_blocked",
+                        {"error": "billing_error", "source": "reported", "baton_ref": None, "claims_reserved": []},
+                        refs={"session_id": "cs_a"},
+                    )
+                ),
+                frame(
+                    E(
+                        12,
+                        "session.state_changed",
+                        {"from": "active", "to": "quiet", "reason": "heartbeat_missing", "quiet_reason": "host_unreachable"},
+                        refs={"session_id": "cs_b"},
+                    )
+                ),
+                {"type": "presence", "crew_id": CREW, "lanes": [{**lane_a, "session_id": "cs_b", "calls_since_checkpoint": 3}]},
+                frame(E(13, "session.stuck", {"signal": "no_progress", "stuck": True}, refs={"session_id": "cs_b"})),
+            ],
+            [
+                eq("sessions.cs_a.state", "quota_blocked"),
+                eq("sessions.cs_a.presence", None),
+                eq("sessions.cs_b.state", "quiet"),
+                eq("sessions.cs_b.quiet_reason", "host_unreachable"),
+                eq("sessions.cs_b.stuck", True),
+                eq("sessions.cs_b.presence", None),
+                eq("last_seq", 13),
+            ],
+        )
+    )
+    v.append(
+        vec(
             "session_lifecycle",
             "joined → quiet(host_unreachable) → recovered → limit → stuck → left; "
             "pause/resume by a human; lost; unknown ignored.",

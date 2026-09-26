@@ -37,6 +37,9 @@ MESSAGES_KEEP: Final = 100
 BATONS_KEEP: Final = 20
 BATON_REFS_KEEP: Final = 50
 COUNTED_AUDIENCES: Final = ("project", "crew")
+# Session events after which the presence overlay (state, stuck, last action as of the last 5-second
+# frame) is stale and dropped; session.left and session.lost clear it too.
+PRESENCE_CLEARING_TYPES: Final = frozenset({"session.state_changed", "session.quota_blocked", "session.paused", "session.stuck"})
 
 
 def empty_state() -> State:
@@ -220,6 +223,10 @@ def _session_change(state: State, event: Mapping[str, Any], p: Mapping[str, Any]
     if s is None:
         return
     kind = event["type"]
+    if kind in PRESENCE_CLEARING_TYPES:
+        # the server's state is authoritative: an overlay from before the change is stale (no new
+        # frame comes once an agent stops), so it is dropped until the next presence frame
+        s["presence"] = None
     if kind == "session.state_changed":
         s["state"] = p["to"]
         s["quiet_reason"] = p.get("quiet_reason") if p["to"] == "quiet" else None
