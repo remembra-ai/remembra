@@ -40,6 +40,10 @@ UNINSTALL_STEPS: tuple[tuple[str, str], ...] = (
     ("rm -r ~/.remembra", "deletes the saved key, the unsent-handoff queue and the log"),
 )
 
+# pipx installs commands in its bin directory (~/.local/bin unless PIPX_BIN_DIR says otherwise); this puts it
+# on the PATH of new shells, and changes nothing when it is there already. Run it even when pipx was there.
+PIPX_ENSUREPATH = "pipx ensurepath"
+
 # How to get pipx, per platform (docs: https://pipx.pypa.io). Windows is not tested.
 PIPX_BOOTSTRAP: dict[str, str] = {
     "macos": "brew install pipx && pipx ensurepath",
@@ -143,6 +147,7 @@ def remove_outbox_file(name: str) -> str:
 _A = r"[a-z0-9][a-z0-9._-]{0,63}"
 ALLOWED: tuple[re.Pattern[str], ...] = (
     re.compile(r"^" + re.escape(PIPX_INSTALL) + r"$"),
+    re.compile(r"^" + re.escape(PIPX_ENSUREPATH) + r"$"),
     re.compile(r"^remembra-install --all(?: --url https?://[A-Za-z0-9.-]+(?::\d{1,5})?(?:/[A-Za-z0-9._~/-]*)?)?$"),
     re.compile(rf"^remembra-relay connect(?: --apply)?(?: --agent {_A})*(?: --include-unverified)?$"),
     re.compile(rf"^remembra-relay close --agent {_A}$"),

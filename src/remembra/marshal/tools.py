@@ -105,7 +105,7 @@ def setup_payload(
         shell = shell or detected_shell
     # The server this MCP server talks to is the one to save the key for, when no key names another.
     url = full.get("REMEMBRA_URL") if sig.config.get("source") == "none" else None
-    plan = setup_plan.plan(sig, chosen or None, os_id=os_id, shell=shell, which=which, server_url=url)
+    plan = setup_plan.plan(sig, chosen or None, os_id=os_id, shell=shell, which=which, server_url=url, environ=env)
     return {"status": "ok", "rendered": setup_plan.render_plan(sig, plan), **plan.as_dict(), "changed_nothing": True}
 
 

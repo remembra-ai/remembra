@@ -121,6 +121,25 @@ def test_pipx_per_os(fh: FakeHome, os_id: str, command: str) -> None:
     assert steps(fh, ["claude-code"], os_id=os_id)["steps"][0]["command"] == command
 
 
+def test_pipx_already_there_still_puts_its_apps_on_path(fh: FakeHome) -> None:
+    """Homebrew's pipx on PATH, but `pipx ensurepath` never ran: pipx install puts the commands in ~/.local/bin,
+    which no shell looks in yet, so every later step would say `command not found`."""
+    fh.install("pipx", "claude")
+    first = steps(fh, ["claude-code"])["steps"][0]
+    assert first["command"] == commands.PIPX_ENSUREPATH == "pipx ensurepath"
+    assert (first["done"], first["needs_yes"], first["runs_where"]) == (False, True, "agent_ok")
+    assert "new shells only" in first["note"] and "PIPX_BIN_DIR" in first["note"]
+    assert commands.is_allowed(first["command"])
+    # Its bin directory is on PATH already (the default, or PIPX_BIN_DIR): nothing to do.
+    on_path = steps(fh, ["claude-code"], PATH=f"{fh.bin}:{fh.home / '.local' / 'bin'}")["steps"][0]
+    assert (on_path["title"], on_path["done"], on_path["command"]) == ("pipx is installed", True, None)
+    custom = steps(fh, ["claude-code"], PATH=f"{fh.bin}:/opt/pipx/bin", PIPX_BIN_DIR="/opt/pipx/bin")["steps"][0]
+    assert custom["done"] is True
+    # remembra's commands already found: whatever PATH holds works.
+    fh.install("remembra-relay", "remembra-mcp")
+    assert steps(fh, ["claude-code"])["steps"][0]["done"] is True
+
+
 def test_windows_stops_at_the_docs(fh: FakeHome) -> None:
     payload = steps(fh, ["claude-code"], os_id="windows")
     assert len(payload["steps"]) == 1 and payload["steps"][0]["stop"] is True

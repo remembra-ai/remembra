@@ -24,14 +24,16 @@ Tell the user which agents you found. Claude Code's and Codex's session hooks ar
 
 ## 2. pipx
 
-Skip this step when `command -v pipx` printed a path. Otherwise, with the user's yes:
+When `command -v pipx` printed nothing, install it, with the user's yes:
 
 - macOS: `brew install pipx && pipx ensurepath`
 - Debian or Ubuntu: `sudo apt install pipx && pipx ensurepath`
 - Fedora: `sudo dnf install pipx && pipx ensurepath`
 - Anything else: `python3 -m pip install --user pipx && python3 -m pipx ensurepath`
 
-`pipx ensurepath` changes the PATH for new shells only. Open a new shell before the next step.
+When pipx is already there, still run `pipx ensurepath`, with the user's yes. pipx puts the commands it installs in its own directory (`~/.local/bin` unless `PIPX_BIN_DIR` says otherwise), and a pipx that came from Homebrew or a package manager may never have put that directory on the PATH. `pipx ensurepath` adds it, or says it is there already and changes nothing.
+
+`pipx ensurepath` changes the PATH for new shells only. Ask the user to open a new terminal before step 5. A shell that started earlier, your own included, still won't find the commands: run `pipx environment --value PIPX_BIN_DIR` and put that directory in front of each command, or ask the user to restart you.
 
 ## 3. Stop: the user gets a key
 
@@ -44,6 +46,8 @@ pipx install --force 'remembra[mcp]>=0.16'
 ```
 
 Keep the quotes: zsh reads the brackets as a pattern without them. `--force` also upgrades an older install.
+
+Then check that the commands are found: `command -v remembra-install remembra-relay` prints two paths. If it prints nothing, go back to `pipx ensurepath` in step 2.
 
 ## 5. The user saves the key
 

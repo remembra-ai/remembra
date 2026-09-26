@@ -197,6 +197,20 @@ def test_setup_md_remembra_setup_and_the_dashboard_catalog_give_the_same_command
     assert [c for c, _ in commands.UNINSTALL_STEPS] == uninstall
 
 
+def test_pipx_already_installed_is_setup_mds_ensurepath_too(tmp_path: Path) -> None:
+    """setup.md step 2 and remembra_setup agree: pipx present still runs `pipx ensurepath`, then a new shell."""
+    fh = _fresh_machine(tmp_path)
+    fh.install("pipx")
+    payload = tools.setup_payload(None, environ=fh.environ(), home=fh.home, which=fh.which, os_id="macos", shell="zsh")
+    first = payload["steps"][0]
+    assert first["command"] == commands.PIPX_ENSUREPATH
+    step2 = _prose(_sections()["2"])
+    assert f"When pipx is already there, still run {commands.PIPX_ENSUREPATH}" in step2
+    assert "new shells only" in step2 and "new shells only" in first["note"]
+    assert "pipx environment --value PIPX_BIN_DIR" in step2 and "pipx environment --value PIPX_BIN_DIR" in first["note"]
+    assert "command -v remembra-install remembra-relay" in _prose(_sections()["4"])
+
+
 @pytest.mark.parametrize("os_id", sorted(OS_BULLETS.values()))
 def test_the_pipx_line_for_each_os_is_setup_mds(tmp_path: Path, os_id: str) -> None:
     fh = _fresh_machine(tmp_path)

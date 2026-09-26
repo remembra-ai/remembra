@@ -107,6 +107,20 @@ def _selected(sig: Signals, agents: list[str] | None) -> tuple[str, ...]:
     return found or ("claude-code", "codex")
 
 
+def pipx_bin_on_path(environ: Mapping[str, str], home: Path) -> bool:
+    """pipx's bin directory (``PIPX_BIN_DIR``, else ``~/.local/bin``) is on ``PATH``: its commands are found."""
+    bin_dir = environ.get("PIPX_BIN_DIR") or str(home / ".local" / "bin")
+    wanted = os.path.normpath(os.path.expanduser(bin_dir))
+    return any(os.path.normpath(os.path.expanduser(d)) == wanted for d in (environ.get("PATH") or "").split(os.pathsep) if d)
+
+
+ENSUREPATH_NOTE = (
+    "It changes new shells only: open a new terminal before the next step. A shell that started before it"
+    " (your agent's own, for one) still won't find remembra-relay: run pipx environment --value PIPX_BIN_DIR"
+    " and put that directory in front of the command, or restart the agent."
+)
+
+
 def plan(
     sig: Signals,
     agents: list[str] | None = None,
@@ -115,8 +129,10 @@ def plan(
     shell: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     server_url: str | None = None,
+    environ: Mapping[str, str] | None = None,
 ) -> SetupPlan:
     """The steps for ``agents`` (default: those found here). ``server_url`` overrides the configured server."""
+    env = os.environ if environ is None else environ
     if os_id is None:
         os_id, detected_shell = detect_os()
         shell = shell or detected_shell
@@ -136,14 +152,29 @@ def plan(
         return SetupPlan(os=os_id, shell=shell, agents=chosen, steps=tuple(steps))
 
     has_pipx = bool(which("pipx"))
-    add(
-        title="pipx is installed" if has_pipx else "Install pipx",
-        command=None if has_pipx else cmd.PIPX_BOOTSTRAP.get(os_id, cmd.PIPX_BOOTSTRAP["other"]),
-        runs_where="agent_ok",
-        writes=() if has_pipx else ("pipx (system package)",),
-        needs_yes=not has_pipx,
-        done=has_pipx,
-    )
+    installed = bool(which("remembra-relay")) and bool(which("remembra-mcp"))
+    if not has_pipx:
+        add(
+            title="Install pipx",
+            command=cmd.PIPX_BOOTSTRAP.get(os_id, cmd.PIPX_BOOTSTRAP["other"]),
+            runs_where="agent_ok",
+            writes=("pipx (system package)", "your shell's startup file (PATH)"),
+            needs_yes=True,
+            note=ENSUREPATH_NOTE,
+        )
+    elif installed or pipx_bin_on_path(env, sig.home):
+        add(title="pipx is installed", runs_where="agent_ok", done=True)
+    else:
+        # pipx is there but its bin directory is not on PATH (Homebrew's pipx, ensurepath never run): the
+        # commands pipx installs next would not be found.
+        add(
+            title="pipx is installed; put the commands it installs on your PATH",
+            command=cmd.PIPX_ENSUREPATH,
+            runs_where="agent_ok",
+            writes=("your shell's startup file (PATH), only when the directory is missing",),
+            needs_yes=True,
+            note=ENSUREPATH_NOTE,
+        )
     primary = next((k for k in sig.keys if k.primary), None)
     has_key = primary is not None and primary.state != "missing"
     add(
@@ -153,7 +184,6 @@ def plan(
         done=has_key,
         stop=not has_key,
     )
-    installed = bool(which("remembra-relay")) and bool(which("remembra-mcp"))
     add(
         title="remembra is installed" if installed else "Install remembra (with the MCP server)",
         command=None if installed else cmd.PIPX_INSTALL,
