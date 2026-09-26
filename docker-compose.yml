@@ -29,6 +29,8 @@ services:
       
       # Database (SQLite for metadata)
       - REMEMBRA_DATABASE_URL=sqlite:////data/remembra.db
+      # Crew mode (off by default; crew.db lives next to the main database in this volume)
+      - REMEMBRA_CREW_MODE=${REMEMBRA_CREW_MODE:-false}
       
       # Vector database (Qdrant)
       - REMEMBRA_QDRANT_URL=http://qdrant:6333

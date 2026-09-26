@@ -4,6 +4,9 @@ Every agent leaves a trail when it stops: who it was, what it did, what it did
 not finish, what is failing, and where it left off. The next agent, whatever the
 tool, machine, or checkout location, picks that up at session start.
 
+!!! tip "Several agents on one repository at once?"
+    [Crew mode](../relay/crew.md) builds on Relay: zones, claims, batons that carry the work, and a live view.
+
 ## How it works
 
 1. **Project identity.** A project is identified by the repository, not by the folder it sits in.

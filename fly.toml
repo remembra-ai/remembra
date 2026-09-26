@@ -15,6 +15,7 @@ primary_region = "iad"
   REMEMBRA_CLOUD_ENABLED = "true"
   REMEMBRA_AUTH_ENABLED = "true"
   REMEMBRA_STATIC_DIR = "/app/static"
+  REMEMBRA_CREW_MODE = "false"
   # Qdrant Cloud URL set via fly secrets
   # REMEMBRA_QDRANT_URL = <set via fly secrets>
   # REMEMBRA_QDRANT_API_KEY = <set via fly secrets>
