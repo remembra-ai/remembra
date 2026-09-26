@@ -30,6 +30,7 @@ from remembra.models.memory import StoreRequest
 from remembra.security.content_policy import prepare_content
 from remembra.security.secrets import scrub_memory_record
 from remembra.services.memory import MemoryService
+from remembra.services.relay import strip_reserved_metadata
 
 router = APIRouter(prefix="/transfer", tags=["import/export"])
 
@@ -361,7 +362,8 @@ async def _store_imported_items(
                 user_id=user_id,
                 project_id=project_id,
                 metadata={
-                    **(mem.metadata or {}),
+                    # An import is client data: server-only keys (relay block, trust fields) are dropped.
+                    **(strip_reserved_metadata(mem.metadata) or {}),
                     "import_source": mem.source_format,
                     "import_source_id": mem.source_id,
                 },

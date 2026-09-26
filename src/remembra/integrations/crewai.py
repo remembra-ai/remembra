@@ -34,6 +34,12 @@ from typing import Any
 
 from remembra.client.memory import Memory, MemoryError
 
+# Metadata keys the Remembra server reserves for its own computed values and
+# drops from client writes. CrewAI's values under these names (a long-term
+# item's ``quality`` score) are stored as ``crewai_<name>`` and handed back to
+# CrewAI under the original name by search().
+_SERVER_RESERVED = ("health", "quality", "confidence")
+
 
 class RemembraStorage:
     """CrewAI-compatible storage backend powered by Remembra.
@@ -93,6 +99,9 @@ class RemembraStorage:
 
         content, extra_metadata = _extract_content(value)
         metadata.update(extra_metadata)
+        for name in _SERVER_RESERVED:
+            if name in metadata:
+                metadata[f"crewai_{name}"] = metadata.pop(name)
 
         # Determine TTL based on memory type
         ttl = None
@@ -143,11 +152,7 @@ class RemembraStorage:
             return [
                 {
                     "context": m.content,
-                    "metadata": {
-                        "memory_id": m.id,
-                        "memory_type": self._type,
-                        **(m.metadata or {}),
-                    },
+                    "metadata": _crewai_metadata(m.id, self._type, m.metadata),
                     "score": m.relevance,
                 }
                 for m in result.memories
@@ -184,6 +189,16 @@ class RemembraStorage:
                 for m in result.memories:
                     with contextlib.suppress(MemoryError):
                         self._client.forget(memory_id=m.id)
+
+
+def _crewai_metadata(memory_id: str, memory_type: str, stored: dict[str, Any] | None) -> dict[str, Any]:
+    """Search-result metadata as CrewAI saved it (``crewai_quality`` back to ``quality``)."""
+    metadata: dict[str, Any] = {"memory_id": memory_id, "memory_type": memory_type, **(stored or {})}
+    for name in _SERVER_RESERVED:
+        saved = metadata.pop(f"crewai_{name}", None)
+        if saved is not None:
+            metadata[name] = saved
+    return metadata
 
 
 def _extract_content(value: Any) -> tuple[str, dict[str, Any]]:
