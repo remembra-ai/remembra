@@ -544,6 +544,63 @@ def test_picks_up_never_closes_is_proven_by_pickups(fh: FakeHome) -> None:
     assert "STALE_CHECKPOINT" not in ids(report)
 
 
+def test_an_idle_agent_that_handed_off_before_is_not_never_closes(fh: FakeHome) -> None:
+    """Pickups older than a week and its own handoff after them: idle, not broken (the slip says connected)."""
+    trail = healthy(fh)
+    trail.agents["codex"] = {"handoffs": 5, "sessions_7d": 0, "daily": [0] * 7, "last_active": "2026-09-17T12:00:00+00:00"}
+    trail.items = [
+        entry("codex", "handoff", NOW - 9 * 86400),
+        entry("claude-code", "handoff", NOW - 11 * 86400, picked=[("codex", NOW - 10 * 86400)]),
+    ]
+    report = run(fh, trail, agents=["codex"])
+    assert "PICKS_UP_NEVER_CLOSES" not in ids(report)
+    # Nothing waited for it and it handed off before: nothing is wrong, so nothing is said.
+    assert [f for f in report.findings if f.agent == "codex" and f.actionable] == []
+    assert report.exit_code == 0
+    # Its handoffs all-time count, even when the trail window holds none of them.
+    trail.items = [entry("claude-code", "handoff", NOW - 11 * 86400, picked=[("codex", NOW - 10 * 86400)])]
+    assert "PICKS_UP_NEVER_CLOSES" not in ids(run(fh, trail, agents=["codex"]))
+    # One brief read twice (two sessions) is one brief, as the slip counts it.
+    trail.agents["codex"] = {"handoffs": 0, "sessions_7d": 0, "daily": [0] * 7, "last_active": None}
+    trail.items = [entry("claude-code", "handoff", NOW - 3 * 3600, picked=[("codex", NOW - 2 * 3600), ("codex", NOW - 3600)])]
+    f = only(run(fh, trail, agents=["codex"]), "PICKS_UP_NEVER_CLOSES", "codex")
+    assert f.what == "Codex read 1 brief but never handed off: its close hasn't reached Remembra."
+
+
+def test_a_close_that_worked_after_the_failure_clears_close_failing(fh: FakeHome) -> None:
+    """status.json keeps one success slot, so a brief after a fixed close hides it; the trail still shows it."""
+    trail = healthy(fh)
+    failed = {"command": "close", "ts": NOW - 5 * 3600, "at": "x", "error": "HTTP 422: bad", "http_status": 422}
+    fh.status({"claude-code": {"last_success": {"command": "brief", "ts": NOW - 300, "at": "x"}, "last_failure": failed}})
+    # The trail holds claude-code's handoff from 2h ago, after the failed close: a close worked since.
+    report = run(fh, trail, agents=["claude-code"])
+    assert "CLOSE_FAILING" not in ids(report)
+    assert "no close has worked since" not in report.text()
+    # No handoff since on the trail: the brief worked, the close is untested since. Said, never as proven.
+    trail.items = [entry("codex", "handoff", NOW - 3 * 3600, picked=[("claude-code", NOW - 2.5 * 3600)])]
+    trail.agents["claude-code"]["last_active"] = "2026-09-26T06:00:00+00:00"
+    f = only(run(fh, trail, agents=["claude-code"]), "CLOSE_FAILING", "claude-code")
+    assert f.inferred is True and "no close has worked since" not in f.what
+    assert f.what == "claude-code's last close failed (HTTP 422) 5h ago; no handoff from it has reached the trail since."
+    assert f.fix is not None and f.fix.command == "remembra-relay close --agent claude-code"
+    # Without the trail, a later success only leaves a note: nothing is claimed about closes since.
+    offline = run(fh, check_server=False, agents=["claude-code"])
+    g = only(offline, "CLOSE_FAILING", "claude-code")
+    assert (g.severity, g.inferred) == ("info", True) and not g.to_do
+    assert "no close has worked since" not in g.what and "a brief worked since" in g.what
+    assert "1 thing to do" not in offline.text() and offline.exit_code == 0
+    # A retried failure with nothing queued and a later success: the next run sent it. Nothing to say.
+    fh.status(
+        {
+            "claude-code": {
+                "last_success": {"command": "brief", "ts": NOW - 300, "at": "x"},
+                "last_failure": {"command": "close", "ts": NOW - 5 * 3600, "at": "x", "error": "ConnectError: refused"},
+            }
+        }
+    )
+    assert "CLOSE_FAILING" not in ids(run(fh, check_server=False, agents=["claude-code"]))
+
+
 def test_stale_checkpoint_and_the_per_agent_read(fh: FakeHome) -> None:
     trail = healthy(fh)
     trail.items = [entry("claude-code", "checkpoint", NOW - 3 * 3600), entry("codex", "handoff", NOW - 4 * 3600)]
@@ -619,7 +676,7 @@ def test_a_retried_failure_with_nothing_queued_is_a_warning(fh: FakeHome) -> Non
     fh.trust_codex()
     fh.status({"codex": {"last_failure": {"command": "close", "ts": NOW - 600, "error": "HTTP 503: down", "http_status": 503}}})
     f = only(run(fh, FakeTrail(), agents=["codex"]), "CLOSE_FAILING", "codex")
-    assert (f.severity, f.inferred) == ("warn", False) and "(server)" in f.what
+    assert (f.severity, f.inferred) == ("warn", False) and "(HTTP 503)" in f.what
     assert f.fix is not None and f.fix.command is None and "relay.log" in f.fix.text
 
 

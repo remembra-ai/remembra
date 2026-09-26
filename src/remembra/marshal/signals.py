@@ -277,18 +277,41 @@ class ServerSignals:
     last_active: Mapping[str, float]
     trail_read: bool
     last_entry: Mapping[str, tuple[str, float]]  # agent -> (memory_type, created_at) of its newest entry
-    pickups_by: Mapping[str, int]  # handoffs in the window this agent picked up
+    pickups_by: Mapping[str, int]  # entries in the window this agent picked up (one per entry, as the slip counts)
     last_pickup: Mapping[str, float]
     handoffs: tuple[tuple[str, float, tuple[tuple[str, float], ...]], ...]  # (author, at, pickups), newest first
+    handoffs_all: Mapping[str, int] = field(default_factory=dict)  # the summary's all-time handoff count per agent
 
     @property
     def baton(self) -> tuple[str, float, tuple[tuple[str, float], ...]] | None:
         """The newest handoff in the window: who left it, when, and who picked it up."""
         return self.handoffs[0] if self.handoffs else None
 
-    def waiting_for(self, agent: str) -> int:
-        """Handoffs from other agents in the window that ``agent`` has not picked up."""
-        return sum(1 for author, _, picks in self.handoffs if author != agent and agent not in {r for r, _ in picks})
+    def waiting_for(self, agent: str, since: float | None = None) -> int:
+        """Handoffs from other agents in the window (left after ``since``, when given) that ``agent`` has not picked up."""
+        return sum(
+            1
+            for author, at, picks in self.handoffs
+            if author != agent and (since is None or at > since) and agent not in {r for r, _ in picks}
+        )
+
+    def handed_off(self, agent: str) -> bool:
+        """Any handoff from ``agent`` is known: in the summary's all-time count, this week's, or the trail read."""
+        last = self.last_entry.get(agent)
+        return bool(
+            self.handoffs_all.get(agent, 0)
+            or self.handoffs_7d.get(agent, 0)
+            or any(author == agent for author, _, _ in self.handoffs)
+            or (last is not None and last[0] == "handoff")
+        )
+
+    def handoff_since(self, agent: str, since: float) -> float | None:
+        """The newest handoff from ``agent`` the trail shows after ``since`` (a close that worked), or None."""
+        times = [at for author, at, _ in self.handoffs if author == agent and at > since]
+        last = self.last_entry.get(agent)
+        if last is not None and last[0] == "handoff" and last[1] > since:
+            times.append(last[1])
+        return max(times, default=None)
 
 
 @dataclass(frozen=True)
@@ -828,10 +851,12 @@ def _source(config: RelayConfig, home: Path) -> str:
     return source_label(config.source, home)
 
 
-def _summary(body: Any) -> tuple[dict[str, int], dict[str, int], dict[str, float]]:
+def _summary(body: Any) -> tuple[dict[str, int], dict[str, int], dict[str, float], dict[str, int]]:
+    """Per agent: entries in the 7 days, handoffs in the 7 days, the newest entry's time, handoffs all-time."""
     entries: dict[str, int] = {}
     handoffs: dict[str, int] = {}
     last: dict[str, float] = {}
+    all_time: dict[str, int] = {}
     agents = body.get("agents") if isinstance(body, dict) else None
     for item in agents if isinstance(agents, list) else []:
         if not isinstance(item, dict):
@@ -843,10 +868,11 @@ def _summary(body: Any) -> tuple[dict[str, int], dict[str, int], dict[str, float
         daily: list[Any] = raw_daily if isinstance(raw_daily, list) else []
         entries[label] = entries.get(label, 0) + sum(_count(n) for n in daily)
         handoffs[label] = handoffs.get(label, 0) + _count(item.get("sessions_7d"))
+        all_time[label] = all_time.get(label, 0) + _count(item.get("handoffs"))
         at = parse_time(item.get("last_active"))
         if at is not None:
             last[label] = max(at, last.get(label, 0.0))
-    return entries, handoffs, last
+    return entries, handoffs, last, all_time
 
 
 def _trail(items: list[Any]) -> dict[str, Any]:
@@ -865,13 +891,15 @@ def _trail(items: list[Any]) -> dict[str, Any]:
         if agent not in last_entry or at > last_entry[agent][1]:
             last_entry[agent] = (str(kind), at)
         picks: list[tuple[str, float]] = []
-        for pick in item.get("picked_up_by") or []:
+        raw_picks = item.get("picked_up_by")
+        for pick in raw_picks if isinstance(raw_picks, list) else []:
             reader = agent_label(pick.get("agent_id")) if isinstance(pick, dict) else None
             when = parse_time(pick.get("picked_up_at")) if isinstance(pick, dict) else None
             if reader and when is not None:
                 picks.append((reader, when))
-                pickups_by[reader] = pickups_by.get(reader, 0) + 1
                 last_pickup[reader] = max(when, last_pickup.get(reader, 0.0))
+        for reader in dict.fromkeys(r for r, _ in picks):  # one per entry, whatever the reader sessions (as the slip counts)
+            pickups_by[reader] = pickups_by.get(reader, 0) + 1
         if kind == "handoff":
             handoffs.append((agent, at, picks))
     ordered = sorted(handoffs, key=lambda h: h[1], reverse=True)
@@ -1025,7 +1053,7 @@ def collect(
             summary_body = answer.body
 
     if primary_reader is not None:
-        entries_7d, handoffs_7d, last_active = _summary(summary_body)
+        entries_7d, handoffs_7d, last_active, handoffs_all = _summary(summary_body)
         seen = sorted(entries_7d, key=lambda a: (-entries_7d[a], a))
         parts = [f"{a} {entries_7d[a]} entr{'y' if entries_7d[a] == 1 else 'ies'}" for a in seen[:4]]
         reads.append(Read("server", "7d: " + (" · ".join(parts) if parts else "no handoffs or checkpoints")))
@@ -1066,6 +1094,7 @@ def collect(
             pickups_by=trail["pickups_by"],
             last_pickup=trail["last_pickup"],
             handoffs=trail["handoffs"],
+            handoffs_all=handoffs_all,
         )
     elif check_server and primary.api_key:
         unchecked.append("your trail (the server did not accept a read)")

@@ -19,6 +19,7 @@ import re
 import shutil
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -252,18 +253,32 @@ def test_the_dashboard_words_are_generated_from_the_doctors() -> None:
 
 
 def _summary(items: list[dict[str, Any]], given: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
-    """The summary the server would report for these entries (7 days), with the fixture's own row when it has one."""
+    """The summary the server would report for these entries, with the fixture's own row when it has one.
+
+    ``handoffs`` and ``checkpoints`` are all-time; ``sessions_7d`` and ``daily`` count only the entries of
+    the last 7 days (a given row's own ``sessions_7d`` wins), as ``/api/v1/trail/summary`` does.
+    """
+    week_start = NOW - 7 * 86400
     out: dict[str, dict[str, Any]] = {}
+    recent: dict[str, dict[str, int]] = {}
     for item in items:
         agent = words.canonical_agent(item["agent_id"])
+        kind = "handoffs" if item["memory_type"] == "handoff" else "checkpoints"
         row = out.setdefault(agent, {"handoffs": 0, "checkpoints": 0, "last_active": None})
-        row["handoffs" if item["memory_type"] == "handoff" else "checkpoints"] += 1
+        row[kind] += 1
         row["last_active"] = max(row["last_active"] or "", item["created_at"])
+        if datetime.fromisoformat(item["created_at"].replace("Z", "+00:00")).timestamp() >= week_start:
+            week = recent.setdefault(agent, {"handoffs": 0, "checkpoints": 0})
+            week[kind] += 1
     if given:
-        out[words.canonical_agent(given["agent_id"])] = {k: given[k] for k in ("handoffs", "checkpoints", "last_active")}
-    for row in out.values():
-        row["sessions_7d"] = row["handoffs"]
-        row["daily"] = [0] * 6 + [row["handoffs"] + row["checkpoints"]]
+        agent = words.canonical_agent(given["agent_id"])
+        out[agent] = {k: given[k] for k in ("handoffs", "checkpoints", "last_active")}
+        if "sessions_7d" in given:
+            out[agent]["sessions_7d"] = given["sessions_7d"]
+    for agent, row in out.items():
+        week = recent.get(agent, {"handoffs": 0, "checkpoints": 0})
+        row.setdefault("sessions_7d", week["handoffs"])
+        row["daily"] = [0] * 6 + [max(row["sessions_7d"], week["handoffs"] + week["checkpoints"])]
     return out
 
 

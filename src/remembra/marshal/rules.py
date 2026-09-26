@@ -363,6 +363,8 @@ def rule_outbox(sig: Signals) -> list[Finding]:
 
 # Failures the next brief or close retries on its own (the handoff waits in the queue).
 _RETRIED = frozenset({"network", "server", "rate_limited", "firewall"})
+# Failures whose handoff the relay queued (``outbox.is_retryable_response``, and a close with no key or no answer).
+_QUEUED = _RETRIED | {"rejected", "refused", "no_key"}
 
 
 def _close_ts(slot: Any) -> float | None:
@@ -372,7 +374,18 @@ def _close_ts(slot: Any) -> float | None:
 
 
 def rule_close_failing(sig: Signals) -> list[Finding]:
+    """An agent's last close failed, and nothing read since shows a close that worked.
+
+    ``status.json`` keeps one ``last_success`` per agent, and every brief overwrites it: after a close that
+    failed, one that worked, and a brief, only the brief is left. So a close counts as having worked when
+    anything newer than the failure shows it: a close success, the agent's handoff on the trail after the
+    failure, or (for a failure the relay queues and retries) an empty queue after a later success. Without
+    that evidence a later brief still leaves the close untested: then the finding is inferred, and without
+    the trail only a note, never "no close has worked since".
+    """
     out: list[Finding] = []
+    server = sig.server
+    trail_read = server is not None and server.trail_read
     for name in scope(sig):
         agent = sig.agents[name]
         failure, success = agent.last_failure, agent.last_success
@@ -383,19 +396,26 @@ def rule_close_failing(sig: Signals) -> list[Finding]:
         close_ok_at = _close_ts(success)
         if close_ok_at is not None and close_ok_at > failed_at:
             continue
-        # A brief that succeeded after the failed close hides whether a close succeeded in between.
-        inferred = success_at is not None and close_ok_at is None and success_at > failed_at
+        if server is not None and server.handoff_since(name, failed_at) is not None:
+            continue  # its handoff reached the trail after the failure: a close worked since
+        # Something else (a brief) worked after the failed close; it hides whether a close worked in between.
+        later = success_at is not None and close_ok_at is None and success_at > failed_at
         error = str(failure.get("error") or "")
         status = failure.get("http_status") if isinstance(failure.get("http_status"), int) else None
         klass, ray = error_class(error, status)
         waiting = [e for e in sig.outbox if e.agent == name and not e.held]
         if klass in _RETRIED and waiting:
             continue  # queued and retried: OUTBOX_QUEUED already says so
+        if klass in _QUEUED and later and not waiting:
+            continue  # queued when it failed, gone from the queue after a later run worked: that run sent it
         evidence = [f"~/.remembra/relay/status.json: {failure.get('command')} failed {_ago(sig, failed_at)}"]
         if error:
             evidence.append(f"error: {clean_text(error)}")
         if ray:
             evidence.append(f"Cloudflare Ray ID {ray}")
+        worked = clean_text(str((success or {}).get("command") or "later command"), 30) if later else ""
+        if later:
+            evidence.append(f"~/.remembra/relay/status.json: {worked} worked {_ago(sig, success_at)}, after it")
         key = sig.key_for(name)
         fix: Fix
         if klass in ("rejected", "no_key"):
@@ -417,18 +437,30 @@ def rule_close_failing(sig: Signals) -> list[Finding]:
                 runs_where="agent_ok",
             )
         label = {"rejected": "HTTP 401", "refused": "HTTP 403", "firewall": "the server's firewall", "rate_limited": "HTTP 429"}
-        why = label.get(klass, klass.replace("_", " "))
+        why = label.get(klass, f"HTTP {status}" if status else klass.replace("_", " "))
+        failed = f"{name}'s last close failed ({why}) {_ago(sig, failed_at)}"
+        severity = WARN if klass in _RETRIED else BLOCKER
+        if not later:
+            what = f"{failed}; no close has worked since."
+        elif trail_read:
+            what = f"{failed}; no handoff from it has reached the trail since."
+            severity = WARN
+        else:
+            # Nothing here says whether a close worked between the failure and the brief: a note, not a to-do.
+            what = f"{failed}; a {worked} worked since, and whether a close has is not recorded here."
+            severity = INFO
         out.append(
             Finding(
                 "CLOSE_FAILING",
-                WARN if klass in _RETRIED else BLOCKER,
+                severity,
                 name,
-                f"{name}'s last close failed ({why}) {_ago(sig, failed_at)}; no close has worked since.",
+                what,
                 tuple(evidence),
-                inferred=inferred,
+                inferred=later,
                 fix=fix,
                 then=cmd.doctor(name),
                 doc=DOC_OUTBOX,
+                caveat=f"A {name} session may still be open: its close is the next test." if later and trail_read else None,
             )
         )
     log = sig.close_log
@@ -436,7 +468,8 @@ def rule_close_failing(sig: Signals) -> list[Finding]:
         detached = [sig.agents[n] for n in scope(sig) if sig.agents[n].detach_close]
         detached = [a for a in detached if a.detected or a.any_hooks] or detached
         newest_ok = max((t for a in detached if (t := _close_ts(a.last_success)) is not None), default=None)
-        if detached and (newest_ok is None or newest_ok < log.mtime):
+        handed = server is not None and any(server.handoff_since(a.name, log.mtime) is not None for a in detached)
+        if detached and not handed and (newest_ok is None or newest_ok < log.mtime):
             out.append(
                 Finding(
                     "CLOSE_FAILING",
@@ -827,12 +860,17 @@ def _hooks_should_run(sig: Signals, agent: AgentSignals) -> bool:
 
 
 def _never_closes(sig: Signals, name: str) -> int:
-    """Briefs ``name`` read (pickups in the trail window) with no handoff from it in 7 days; 0 when that isn't so."""
+    """Briefs ``name`` read (entries it picked up in the trail window) while no handoff from it ever arrived; else 0.
+
+    "Never" is all-time, as the dashboard's slip has it: the summary's all-time count, this week's, and any
+    handoff of its own the trail shows. An agent that handed off before and only read briefs since is idle
+    or mid-session, not one whose close never reaches Remembra.
+    """
     server = sig.server
     if server is None or not server.trail_read:
         return 0
     pickups = server.pickups_by.get(name, 0)
-    return pickups if pickups and not server.handoffs_7d.get(name, 0) else 0
+    return pickups if pickups and not server.handed_off(name) else 0
 
 
 def rule_server_entries(sig: Signals) -> list[Finding]:
@@ -867,7 +905,7 @@ def rule_server_entries(sig: Signals) -> list[Finding]:
                     words.say("PICKS_UP_NEVER_CLOSES", "what", name=agent.display, briefs=words.plural(briefs, "brief")),
                     (
                         f"trail: {name} picked up {words.plural(briefs, 'handoff')} in the last {TRAIL_WINDOW} entries",
-                        f"trail 7d: no handoff from {name}",
+                        f"summary: no handoff from {name} ever",
                     ),
                     fix=Fix(
                         kind="command",
@@ -883,10 +921,14 @@ def rule_server_entries(sig: Signals) -> list[Finding]:
         if server.entries_7d.get(name, 0) > 0:
             continue
         last = server.last_active.get(name) or (server.last_entry[name][1] if name in server.last_entry else None)
-        waiting = server.waiting_for(name) if server.trail_read else 0
+        # Handoffs from others it could have read: since its own last entry or pickup, when it has one.
+        seen_at = max((t for t in (last, server.last_pickup.get(name)) if t), default=None)
+        waiting = server.waiting_for(name, since=seen_at) if server.trail_read else 0
+        if last and server.trail_read and not waiting:
+            continue  # it handed off or checkpointed before, and nothing has waited for it since: idle, not broken
         evidence = [f"trail 7d: 0 handoffs or checkpoints from {name}"]
         evidence.append(f"last entry from {name}: {_ago(sig, last)}" if last else f"no entry from {name} ever")
-        if server.trail_read and not waiting and not last:
+        if server.trail_read and not waiting:
             evidence.append(f"no handoff from another agent in the last {TRAIL_WINDOW} entries")
             out.append(
                 Finding(
@@ -901,20 +943,26 @@ def rule_server_entries(sig: Signals) -> list[Finding]:
             )
             continue
         if waiting:
-            evidence.append(f"{waiting} handoff{'s' if waiting != 1 else ''} from other agents waited for it")
+            since = " since its last entry" if last else ""
+            evidence.append(f"{waiting} handoff{'s' if waiting != 1 else ''} from other agents waited for it{since}")
         if not server.trail_read:
             evidence.append("the trail could not be read: who waited for it is unknown")
         out.append(
             Finding(
                 "HOOKS_NOT_FIRING",
-                WARN,
+                # It worked before: a week without it is as likely a week it wasn't used, so a note, not a to-do.
+                INFO if last else WARN,
                 name,
                 words.say("HOOKS_NOT_FIRING", "what", name=agent.display, since=" in 7 days" if last else ""),
                 tuple(evidence),
                 inferred=True,
                 fix=check,
                 doc=_doc("HOOKS_NOT_FIRING"),
-                caveat=f"Also possible: {agent.display} hasn't ended a session since the hooks were written.",
+                caveat=(
+                    f"Also possible: {agent.display} wasn't used in 7 days."
+                    if last
+                    else f"Also possible: {agent.display} hasn't ended a session since the hooks were written."
+                ),
             )
         )
     return out

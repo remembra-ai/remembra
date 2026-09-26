@@ -161,6 +161,39 @@ def test_doctor_reads_a_real_trail(server: str, tmp_path: Path) -> None:  # noqa
     _check_text(clean.stdout)
 
 
+def test_a_close_fixed_before_a_brief_is_not_reported_as_failing(server: str, tmp_path: Path) -> None:  # noqa: F811
+    """A failed close, a close that works, then a brief: status.json only keeps the brief, the trail keeps the handoff."""
+    from remembra.relay import outbox
+
+    fh = FakeHome(tmp_path)
+    fh.hooks("claude-code")
+    env = {"REMEMBRA_URL": server, "REMEMBRA_API_KEY": KEY}
+    _, clones = make_remote_and_clones(tmp_path, ("laptop",))
+    repo = clones["laptop"]
+    # What `close` records when the server rejects the body (HTTP 422: not queued, not retried).
+    outbox.record(fh.home, agent_id="claude-code", command="close", ok=False, error="HTTP 422: bad body", http_status=422)
+    failing = json.loads(cli(fh, "doctor", "--agent", "claude-code", "--format", "json", env=env, cwd=repo).stdout)
+    found = [f for f in failing["findings"] if f["id"] == "CLOSE_FAILING"]
+    assert len(found) == 1 and found[0]["proven"] is True and found[0]["what"].endswith("no close has worked since.")
+
+    closed = cli(fh, "close", "--agent", "claude-code", "--session-id", "fix-1", "--cwd", str(repo), "--next", "go", env=env)
+    assert closed.returncode == 0, closed.stderr
+    brief = cli(fh, "brief", "--agent", "claude-code", "--session-id", "fix-2", "--cwd", str(repo), env=env)
+    assert brief.returncode == 0, brief.stderr
+    slot = json.loads((fh.home / ".remembra" / "relay" / "status.json").read_text())["agents"]["claude-code"]
+    assert slot["last_success"]["command"] == "brief" and slot["last_failure"]["command"] == "close"
+
+    out = cli(fh, "doctor", "--agent", "claude-code", env={**env, "NO_COLOR": "1"}, cwd=repo)
+    assert "last close failed" not in out.stdout and "Nothing to do." in out.stdout, out.stdout
+    assert "close failed just now (HTTP 422)" in out.stdout  # the station still shows what status.json holds
+    _check_text(out.stdout)
+    # Without the trail the brief hides whether a close worked: a note, never "no close has worked since".
+    offline = cli(fh, "doctor", "--agent", "claude-code", "--no-server", "--format", "json", env=env, cwd=repo)
+    note = next(f for f in json.loads(offline.stdout)["findings"] if f["id"] == "CLOSE_FAILING")
+    assert (note["severity"], note["marker"]) == ("info", "[??]") and "no close has worked since" not in note["what"]
+    assert offline.returncode == 0
+
+
 def test_usage_errors_exit_2(tmp_path: Path) -> None:
     fh = FakeHome(tmp_path)
     bad = cli(fh, "doctor", "--agent", "notepad")
