@@ -10,6 +10,9 @@ Two halves, both exercised on the real code:
    to p2 read p1 entity names (and a cross-user edge echoed the other user's
    entity name). They now return only edges whose both ends belong to the caller's
    user and resolved project.
+3. GET /debug/entities/graph (the dashboard's graph) filtered its edges by the
+   caller's nodes only when there were any, so a caller with no entities in scope
+   read every account's relationships. Its edge query is now scoped to the caller.
 """
 
 from __future__ import annotations
@@ -208,3 +211,78 @@ async def test_database_scope_keeps_only_edges_with_both_ends_in_scope(tmp_path)
         all_projects = await h.db.get_entity_relationships(g["person"].id, user_id=uid)
         assert len(all_projects) == 2
         assert await h.db.get_entity_relationships(g["person"].id, user_id="someone-else") == []
+
+
+# ---------------------------------------------------------------------------
+# 3. The dashboard's graph (GET /debug/entities/graph) returns only the caller's edges
+# ---------------------------------------------------------------------------
+
+
+async def test_the_entity_graph_never_returns_another_accounts_edges(tmp_path) -> None:
+    """TI-H1 residual (whole-release review): the graph's node query was scoped, but its edge query got the
+    "both ends are nodes" filter only when there were nodes. A caller with none in scope (a new account, a key on
+    an empty project, ?project_id of an empty project) read every account's relationships, and max_edges=0
+    removed the limit. Now the edge query is scoped to the caller itself and runs only with nodes."""
+    from remembra.api.v1 import auth, debug
+
+    async with secure_app(tmp_path, [auth.router, debug.router, *ROUTERS]) as h:
+        victim = await h.create_user("victim@example.com", verified=True)
+        person = await _entity(h.db, "Victim Person", "person", victim, "private")
+        employer = await _entity(h.db, "Victim Employer", "company", victim, "private")
+        spouse = await _entity(h.db, "Victim Spouse", "person", victim, "private")
+        await h.db.save_relationship(Relationship(from_entity_id=person.id, to_entity_id=employer.id, type="WORKS_AT"))
+        await h.db.save_relationship(Relationship(from_entity_id=person.id, to_entity_id=spouse.id, type="MARRIED_TO"))
+        secret = {person.id, employer.id, spouse.id}
+
+        def leaked(r) -> bool:
+            assert r.status_code == 200, r.text
+            body = r.json()
+            return bool(body["edges"]) or any(x in r.text for x in secret) or "WORKS_AT" in r.text
+
+        graph = "/api/v1/debug/entities/graph"
+        attacker = await h.create_user("attacker@example.com", verified=True)
+        as_attacker = h.jwt(attacker, "attacker@example.com")
+        assert not leaked(await h.client.get(graph, headers=as_attacker))
+        assert (await h.client.get(graph, params={"max_edges": 0}, headers=as_attacker)).status_code == 422
+
+        # A key limited to a project with no entities, while the account has entities elsewhere.
+        await _entity(h.db, "Attacker Thing", "concept", attacker, "busy")
+        key, _ = await h.api_key(attacker, "viewer", project_ids=["empty-project"])
+        assert not leaked(await h.client.get(graph, headers={"X-API-Key": key}))
+        assert not leaked(await h.client.get(graph, params={"project_id": "empty-project"}, headers=as_attacker))
+
+        # A brand-new, unverified account made through the real signup and login.
+        r = await h.client.post("/api/v1/auth/signup", json={"email": "fresh@example.com", "password": "Str0ng!Passw0rd"})
+        assert r.status_code == 201, r.text
+        r = await h.client.post("/api/v1/auth/login", json={"email": "fresh@example.com", "password": "Str0ng!Passw0rd"})
+        token = r.json()["access_token"]
+        assert not leaked(await h.client.get(graph, headers={"Authorization": f"Bearer {token}"}))
+
+        # The owner still sees their own graph, whole or by project.
+        for params in ({}, {"project_id": "private"}):
+            own = await h.client.get(graph, params=params, headers=h.jwt(victim, "victim@example.com"))
+            assert own.status_code == 200, own.text
+            assert {(e["source"], e["type"], e["target"]) for e in own.json()["edges"]} == {
+                (person.id, "WORKS_AT", employer.id),
+                (person.id, "MARRIED_TO", spouse.id),
+            }
+        capped = await h.client.get(graph, params={"max_edges": 1}, headers=h.jwt(victim, "victim@example.com"))
+        assert len(capped.json()["edges"]) == 1 and capped.json()["stats"]["truncated_edges"] is True
+
+
+async def test_the_entity_graph_drops_an_edge_whose_other_end_is_not_the_callers(tmp_path) -> None:
+    from remembra.api.v1 import debug
+
+    async with secure_app(tmp_path, [debug.router]) as h:
+        alice = await h.create_user("alice2@example.com")
+        bob = await h.create_user("bob2@example.com")
+        secret = await _entity(h.db, "AliceSecretCorp", "company", alice, "default")
+        bobco = await _entity(h.db, "BobCo", "company", bob, "default")
+        partner = await _entity(h.db, "BobPartner", "company", bob, "default")
+        await h.db.save_relationship(Relationship(from_entity_id=bobco.id, to_entity_id=partner.id, type="partner_of"))
+        # No write path creates this; it is here to prove the read side holds anyway.
+        await h.db.save_relationship(Relationship(from_entity_id=bobco.id, to_entity_id=secret.id, type="partner_of"))
+        r = await h.client.get("/api/v1/debug/entities/graph", headers=h.jwt(bob, "bob2@example.com"))
+        assert r.status_code == 200, r.text
+        assert [(e["source"], e["target"]) for e in r.json()["edges"]] == [(bobco.id, partner.id)]
+        assert secret.id not in r.text

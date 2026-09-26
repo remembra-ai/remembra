@@ -285,7 +285,8 @@ redact command-line credentials from handoffs stored before this release.
   /api/v1/admin/permissions` requires an admin, and the admin promo routes check the master key. While the
   one-time account check after a sign-in that verified the email is open, changing the password, deleting the
   account and turning 2FA off wait until it is done. Entity relationships and background entity merges stay
-  inside one project.
+  inside one project, and the dashboard's entity graph (`GET /api/v1/debug/entities/graph`) returns only the
+  caller's own relationships: a caller with no entities in scope got other accounts' (`max_edges=0` is refused).
 - **Relay and agents.** Credentials typed on a command line (`curl -u`, `docker login -p`, `vercel -t`,
   password variables and the like) are redacted from a handoff before it is stored, and ordinary values (test
   counts, askpass helpers, paths) are left alone. Terminal control characters are stripped from handoff text

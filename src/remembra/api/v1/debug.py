@@ -455,9 +455,9 @@ async def get_entity_graph(
     ),
     max_edges: int = Query(
         default=1500,
-        ge=0,
+        ge=1,
         le=20000,
-        description="Maximum number of relationships (edges) to return. 0 disables the edge limit.",
+        description="Maximum number of relationships (edges) to return.",
     ),
 ) -> EntityGraphResponse:
     """Get entity graph data in nodes + edges format for D3/vis-network."""
@@ -502,25 +502,28 @@ async def get_entity_graph(
 
     node_ids = [node["id"] for node in nodes]
 
-    relationship_query = """
-        SELECT r.id, r.from_entity_id, r.to_entity_id, r.type, r.confidence
-        FROM relationships r
-        WHERE 1=1
-    """
-    relationship_params: list[Any] = []
-
+    # TI-H1: an edge is returned only when both ends are nodes of this graph, and the
+    # query itself is scoped to the caller's user (and project), so it can never read
+    # another account's relationships, even without nodes to filter on.
+    rel_rows: list[Any] = []
     if node_ids:
         placeholders = ",".join(["?"] * len(node_ids))
-        relationship_query += f" AND r.from_entity_id IN ({placeholders}) AND r.to_entity_id IN ({placeholders})"
-        relationship_params.extend(node_ids)
-        relationship_params.extend(node_ids)
-
-    if max_edges:
+        relationship_query = f"""
+            SELECT r.id, r.from_entity_id, r.to_entity_id, r.type, r.confidence
+            FROM relationships r
+            JOIN entities src ON src.id = r.from_entity_id
+            JOIN entities dst ON dst.id = r.to_entity_id
+            WHERE src.user_id = ? AND dst.user_id = ?
+              AND r.from_entity_id IN ({placeholders}) AND r.to_entity_id IN ({placeholders})
+        """
+        relationship_params: list[Any] = [current_user.user_id, current_user.user_id, *node_ids, *node_ids]
+        if project_id:
+            relationship_query += " AND src.project_id = ? AND dst.project_id = ?"
+            relationship_params.extend([project_id, project_id])
         relationship_query += " LIMIT ?"
         relationship_params.append(max_edges)
-
-    cursor = await db.conn.execute(relationship_query, relationship_params)
-    rel_rows = await cursor.fetchall()
+        cursor = await db.conn.execute(relationship_query, relationship_params)
+        rel_rows = list(await cursor.fetchall())
 
     edges = []
     for row in rel_rows:
@@ -548,7 +551,7 @@ async def get_entity_graph(
         stats["relationship_types"][t] = stats["relationship_types"].get(t, 0) + 1
 
     stats["truncated_nodes"] = bool(max_nodes and len(nodes) == max_nodes)
-    stats["truncated_edges"] = bool(max_edges and len(edges) == max_edges)
+    stats["truncated_edges"] = len(edges) == max_edges
 
     return EntityGraphResponse(nodes=nodes, edges=edges, stats=stats)
 
