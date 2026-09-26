@@ -222,7 +222,14 @@ def _finding_block(slip: _Slip, finding: Finding, indent: list[Segment]) -> None
     if finding.then:
         slip.wrapped([*hang, ("then  ", None)], [*hang, ("      ", None)], finding.then)
     if finding.doc:
-        slip.wrapped([*hang, ("doc   ", "dim")], [*hang, ("      ", None)], finding.doc, "dim")
+        # A link is never wrapped either (half an anchor opens the wrong place): on the label's line when it
+        # fits, else on its own line two columns in.
+        lead = sum(len(t) for t, _ in hang)
+        if lead + len("doc   ") + len(finding.doc) <= WIDTH:
+            slip.add([*hang, ("doc   ", "dim"), (finding.doc, "dim")])
+        else:
+            slip.add([*hang, ("doc", "dim")])
+            slip.add([*hang, ("  ", None), (finding.doc, "dim")])
 
 
 def render_text(sig: Signals, findings: list[Finding], style: Style | None = None) -> str:

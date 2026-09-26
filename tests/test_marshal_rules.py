@@ -706,6 +706,26 @@ def test_rendering_rules(fh: FakeHome) -> None:
     assert all(ord(c) < 128 for c in ascii_text), [c for c in ascii_text if ord(c) >= 128][:5]
 
 
+def test_doc_links_are_never_broken_across_lines(fh: FakeHome) -> None:
+    """A per-agent finding's page (the longest anchor, under the rail) stays one piece that copies and opens."""
+    fh.credentials()
+    fh.hooks("codex")
+    fh.trust_codex()
+    failure = {"command": "close", "ts": NOW - 600, "error": "HTTP 422: bad", "http_status": 422}
+    fh.status({"codex": {"last_failure": failure}})
+    report = run(fh, FakeTrail(), agents=["codex"])
+    f = only(report, "CLOSE_FAILING", "codex")
+    assert f.doc == "docs.remembra.dev/guides/relay/#if-the-server-cannot-be-reached"
+    for text in (report.text(), report.text(Style(ascii=True)), report.text(Style(color=True))):
+        plain = text.replace("\033[2m", "").replace("\033[0m", "")
+        assert any(line.strip().endswith(f.doc) for line in plain.splitlines()), text
+    for line in report.text().splitlines():
+        assert len(line) <= 76 or commands.is_allowed(line.replace("┊", "").strip()), line
+    lines = report.text().splitlines()
+    doc_at = next(i for i, line in enumerate(lines) if line.strip().endswith(f.doc))
+    assert lines[doc_at - 1].strip().endswith("doc") or "doc   docs.remembra.dev" in lines[doc_at]
+
+
 def test_a_retried_close_failure_is_reported_once(fh: FakeHome) -> None:
     fh.credentials()
     fh.hooks("codex")
