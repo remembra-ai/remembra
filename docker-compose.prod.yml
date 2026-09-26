@@ -48,7 +48,9 @@ services:
       # Settings are read with the REMEMBRA_ prefix; a bare OPENAI_API_KEY is ignored (REL-13)
       - REMEMBRA_OPENAI_API_KEY=${REMEMBRA_OPENAI_API_KEY:?REMEMBRA_OPENAI_API_KEY is required}
       
-      # LLM for extraction
+      # Entity-extraction backend. REMEMBRA_LLM_MODEL is only its fallback model and
+      # does NOT change fact extraction or consolidation: those use
+      # REMEMBRA_EXTRACTION_MODEL (default gpt-4o-mini). See .env.example.
       - REMEMBRA_LLM_PROVIDER=${REMEMBRA_LLM_PROVIDER:-openai}
       - REMEMBRA_LLM_MODEL=${REMEMBRA_LLM_MODEL:-gpt-4o-mini}
       

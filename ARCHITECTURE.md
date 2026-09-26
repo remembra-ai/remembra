@@ -333,7 +333,9 @@ docker-compose up -d
 | `REMEMBRA_EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model |
 | `REMEMBRA_OPENAI_API_KEY` | - | OpenAI API key |
 | `REMEMBRA_OLLAMA_URL` | `http://localhost:11434` | Ollama address |
-| `REMEMBRA_LLM_MODEL` | `gpt-4o-mini` | LLM for extraction |
+| `REMEMBRA_EXTRACTION_MODEL` | `gpt-4o-mini` | OpenAI model for fact extraction, consolidation, entity matching and conversation ingest |
+| `REMEMBRA_LLM_PROVIDER` | `openai` | Entity-extraction backend only (`openai`, `anthropic`, `ollama`) |
+| `REMEMBRA_LLM_MODEL` | `gpt-4o-mini` | Entity-extraction fallback model, used only when `REMEMBRA_EXTRACTION_MODEL` does not fit the provider |
 
 ---
 

@@ -42,8 +42,22 @@ All environment variables for Remembra.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REMEMBRA_SMART_EXTRACTION_ENABLED` | `true` | Enable LLM extraction |
-| `REMEMBRA_EXTRACTION_MODEL` | `gpt-4o-mini` | Model for extraction |
+| `REMEMBRA_EXTRACTION_MODEL` | `gpt-4o-mini` | OpenAI model for fact extraction, consolidation (including sleep-time), entity matching and conversation ingest. Must be an OpenAI model |
+| `REMEMBRA_LLM_PROVIDER` | `openai` | Entity-extraction backend only: `openai`, `anthropic`, `ollama` |
+| `REMEMBRA_LLM_MODEL` | `gpt-4o-mini` | Entity-extraction model, used only when `REMEMBRA_EXTRACTION_MODEL` does not fit `REMEMBRA_LLM_PROVIDER`. Never changes fact extraction |
 | `REMEMBRA_EXTRACTION_TEMPERATURE` | `0.0` | Extraction temperature |
+
+!!! note "Which variable changes which model"
+    `REMEMBRA_EXTRACTION_MODEL` is the model that matters: every OpenAI call
+    (fact extraction, consolidation, entity matching, conversation ingest, and
+    entity extraction with the `openai` provider) uses it. `REMEMBRA_LLM_MODEL`
+    only applies to entity extraction on a provider the extraction model does
+    not fit, for example `REMEMBRA_LLM_PROVIDER=anthropic` with
+    `REMEMBRA_LLM_MODEL=claude-haiku-4-5`. Setting `REMEMBRA_EXTRACTION_MODEL` to
+    a Claude or Ollama model does not work: it is sent to OpenAI and rejected.
+    At startup the server logs `llm_task_models` with the model of every task,
+    and `extraction_model_not_openai` when the extraction model is not an
+    OpenAI model.
 
 ## Entity Resolution
 

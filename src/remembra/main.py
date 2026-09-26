@@ -274,6 +274,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pending_queue=app.state.pending_embeddings,
     )
     app.state.readiness.reranker = app.state.memory_service.reranker
+    app.state.memory_service.log_llm_task_models()
 
     # Cloud services (billing, metering, limits)
     if settings.cloud_enabled:

@@ -40,7 +40,9 @@ services:
       - REMEMBRA_EMBEDDING_MODEL=${REMEMBRA_EMBEDDING_MODEL:-text-embedding-3-small}
       - REMEMBRA_OPENAI_API_KEY=${REMEMBRA_OPENAI_API_KEY:-}
       
-      # LLM for fact extraction (optional)
+      # Entity-extraction backend. REMEMBRA_LLM_MODEL is only its fallback model and
+      # does NOT change fact extraction or consolidation: those use
+      # REMEMBRA_EXTRACTION_MODEL (default gpt-4o-mini). See .env.example.
       - REMEMBRA_LLM_PROVIDER=${REMEMBRA_LLM_PROVIDER:-openai}
       - REMEMBRA_LLM_MODEL=${REMEMBRA_LLM_MODEL:-gpt-4o-mini}
       

@@ -35,7 +35,7 @@ from remembra.extraction.consolidator import (
     MemoryConsolidator,
     validate_decision,
 )
-from remembra.extraction.entities import create_entity_extractor
+from remembra.extraction.entities import create_entity_extractor, is_openai_model
 from remembra.extraction.extractor import ExtractionConfig, FactExtractor
 from remembra.extraction.matcher import EntityMatcher, ExistingEntity, rank_candidates
 from remembra.extraction.typesafe import JevDecider
@@ -527,6 +527,43 @@ class MemoryService:
 
         # Query intent -> ranking mode (RET-1): rules first, Jev optional.
         self.intent_router = IntentRouter(settings, self.jev, log_decision=self._log_decision, spawn=spawn)
+
+    def llm_task_models(self) -> dict[str, str]:
+        """The model each LLM task of this service actually runs on.
+
+        ``REMEMBRA_EXTRACTION_MODEL`` drives fact extraction, consolidation
+        (the sleep-time pass reuses this consolidator), entity matching and
+        conversation ingest, all on the OpenAI API. Entity extraction runs on
+        ``REMEMBRA_LLM_PROVIDER``, with ``REMEMBRA_LLM_MODEL`` only as its
+        fallback when the extraction model does not fit that provider.
+        """
+        entity_extractor = self.entity_extractor
+        return {
+            "fact_extraction": f"openai:{self.extractor.config.model}",
+            "consolidation": f"openai:{self.consolidator.model}",
+            "entity_matching": f"openai:{self.entity_matcher.model}",
+            "conversation_ingest": f"openai:{self.settings.extraction_model}",
+            "entity_extraction": f"{entity_extractor.provider}:{entity_extractor.model}",
+        }
+
+    def log_llm_task_models(self) -> dict[str, str]:
+        """Log once (at startup) which model each LLM task uses; warn on a non-OpenAI extraction model."""
+        models = self.llm_task_models()
+        log.info(
+            "llm_task_models",
+            **models,
+            smart_extraction_enabled=self.settings.smart_extraction_enabled,
+            entity_resolution_enabled=self.settings.enable_entity_resolution,
+        )
+        if not is_openai_model(self.settings.extraction_model):
+            log.warning(
+                "extraction_model_not_openai",
+                extraction_model=self.settings.extraction_model,
+                impact="fact extraction, consolidation, entity matching and conversation ingest send this model "
+                "to the OpenAI API; when it is rejected they fall back to their non-LLM defaults (ingest returns "
+                "an error). Set REMEMBRA_EXTRACTION_MODEL to an OpenAI model",
+            )
+        return models
 
     # -----------------------------------------------------------------------
     # Store

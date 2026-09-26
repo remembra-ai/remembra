@@ -91,18 +91,38 @@ class Settings(BaseSettings):
     azure_openai_api_version: str = "2024-02-01"
 
     # -----------------------------------------------------------------------
-    # LLM (extraction / recall synthesis)
+    # LLM models. Which setting drives which task (logged once at startup as
+    # ``llm_task_models``):
+    #   * extraction_model  -> fact extraction, consolidation (also the
+    #     sleep-time pass), entity matching, conversation ingest. Always sent
+    #     to the OpenAI API, so it must be an OpenAI model.
+    #   * llm_provider      -> the entity-extraction backend only.
+    #   * llm_model         -> entity extraction only, and only when
+    #     extraction_model does not fit llm_provider (e.g. a Claude model for
+    #     llm_provider=anthropic). It never changes fact extraction.
     # -----------------------------------------------------------------------
-    llm_provider: str = Field("openai", description="openai | ollama | anthropic")
-    llm_model: str = "gpt-4o-mini"
-    llm_base_url: str | None = None
+    llm_provider: str = Field(
+        "openai",
+        description="Entity-extraction backend: openai | anthropic | ollama. Fact extraction, consolidation, "
+        "entity matching and conversation ingest always use OpenAI.",
+    )
+    llm_model: str = Field(
+        "gpt-4o-mini",
+        description="Entity-extraction model, used only when extraction_model does not fit llm_provider "
+        "(e.g. claude-haiku-4-5 with llm_provider=anthropic). Does not affect fact extraction or consolidation.",
+    )
+    llm_base_url: str | None = Field(None, description="Not read yet: every OpenAI call uses the default API URL.")
     anthropic_api_key: str | None = None
 
     # -----------------------------------------------------------------------
     # Intelligent Extraction (Week 4)
     # -----------------------------------------------------------------------
     smart_extraction_enabled: bool = Field(True, description="Enable LLM-powered fact extraction")
-    extraction_model: str = Field("gpt-4o-mini", description="Model for fact extraction and consolidation")
+    extraction_model: str = Field(
+        "gpt-4o-mini",
+        description="OpenAI model for fact extraction, consolidation (incl. sleep-time), entity matching and "
+        "conversation ingest; also entity extraction when llm_provider=openai. Must be an OpenAI model.",
+    )
     extraction_max_facts: int = Field(
         25,
         ge=1,
@@ -651,7 +671,7 @@ class Settings(BaseSettings):
     )
     sleep_time_model: str | None = Field(
         None,
-        description="Model for background consolidation (uses cheaper model if set)",
+        description="Not read yet: the sleep-time consolidation pass uses extraction_model.",
     )
 
     # -----------------------------------------------------------------------

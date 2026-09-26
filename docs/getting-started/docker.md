@@ -120,8 +120,9 @@ docker-compose up -d
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REMEMBRA_EMBEDDING_PROVIDER` | `openai` | Embedding provider (`openai`, `ollama`, `cohere`, `voyage`, `jina`, `azure`) |
-| `REMEMBRA_LLM_PROVIDER` | `openai` | LLM for entity extraction (`openai`, `anthropic`, `ollama`) |
-| `ANTHROPIC_API_KEY` | - | API key for Anthropic entity extraction |
+| `REMEMBRA_LLM_PROVIDER` | `openai` | Backend for entity extraction only (`openai`, `anthropic`, `ollama`) |
+| `REMEMBRA_LLM_MODEL` | `gpt-4o-mini` | Entity-extraction model, used only when `REMEMBRA_EXTRACTION_MODEL` does not fit the provider (e.g. `claude-haiku-4-5` with `anthropic`) |
+| `REMEMBRA_ANTHROPIC_API_KEY` | - | API key for Anthropic entity extraction |
 
 ### Storage
 
@@ -143,7 +144,7 @@ docker-compose up -d
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_EXTRACTION_MODEL` | `gpt-4o-mini` | Model for fact extraction |
+| `REMEMBRA_EXTRACTION_MODEL` | `gpt-4o-mini` | OpenAI model for fact extraction, consolidation, entity matching and conversation ingest (must be an OpenAI model) |
 | `REMEMBRA_SMART_EXTRACTION_ENABLED` | `true` | Enable LLM extraction |
 
 ### Retrieval

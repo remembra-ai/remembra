@@ -21,6 +21,7 @@ from openai import AsyncOpenAI
 
 from remembra.cloud.model_prices import anthropic_usage
 from remembra.core.ai_spend import estimate_chat_usd, hold_flat, metered_chat, record_llm_usage, release_flat
+from remembra.core.llm_guard import make_llm_client
 from remembra.extraction import metrics
 from remembra.extraction.prompting import wrap_untrusted
 
@@ -314,6 +315,8 @@ class EntityExtractor:
         # result.relationships = [Relationship(subject="John", predicate="WORKS_AT", ...)]
     """
 
+    provider = "openai"
+
     def __init__(
         self,
         model: str = "gpt-4o-mini",
@@ -324,9 +327,9 @@ class EntityExtractor:
         self._client: AsyncOpenAI | None = None
 
     def _get_client(self) -> AsyncOpenAI:
-        """Get or create OpenAI client."""
+        """Get or create the OpenAI client (shared LLM breaker, bounded retries)."""
         if self._client is None:
-            self._client = AsyncOpenAI(api_key=self.api_key)
+            self._client = make_llm_client(self.api_key)
             log.info("entity_extractor_initialized", model=self.model)
         return self._client
 
@@ -469,6 +472,8 @@ def _parse_extraction_json(raw_text: str) -> ExtractionResult:
 class AnthropicEntityExtractor:
     """Entity extraction using Anthropic Claude."""
 
+    provider = "anthropic"
+
     def __init__(self, model: str = "claude-sonnet-4-5", api_key: str | None = None) -> None:
         import anthropic
 
@@ -545,6 +550,8 @@ class AnthropicEntityExtractor:
 
 class OllamaEntityExtractor:
     """Entity extraction using local Ollama models."""
+
+    provider = "ollama"
 
     def __init__(
         self,
@@ -634,6 +641,16 @@ _PROVIDER_DEFAULT_MODELS = {
     "ollama": "llama3.1",
 }
 _OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt", "text-embedding")
+
+
+def is_openai_model(model: str | None) -> bool:
+    """True when ``model`` names an OpenAI model (including ``ft:`` fine-tunes).
+
+    Fact extraction, consolidation, entity matching and conversation ingest
+    send ``extraction_model`` to the OpenAI API, so anything else fails there.
+    """
+    name = (model or "").strip().lower()
+    return name.startswith((*_OPENAI_PREFIXES, "ft:"))
 
 
 def _model_fits_provider(model: str, provider: str) -> bool:
