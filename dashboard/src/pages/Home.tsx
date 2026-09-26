@@ -14,6 +14,7 @@ import { Card, CardHeader, ErrorNotice, Skeleton, StaleNotice, TrailSkeleton, Ag
 import { TrailNode } from '../components/relay/Handoff';
 import { LatestHandoff } from '../components/relay/LatestHandoff';
 import { ConnectChecklist, FirstHandoffCelebration, PlanMeter, WeeklyRecap } from '../components/relay/HomeCards';
+import { LiveCrewsStrip } from './crew/LiveCrewsStrip';
 
 const LAST_SEEN_KEY = 'remembra_home_last_seen';
 const LAST_ACTIVE_KEY = 'remembra_home_last_active';
@@ -155,6 +156,8 @@ export function Home({ userName }: { userName?: string }) {
           {statusLine || <Skeleton className="h-4 w-72 max-w-full" />}
         </div>
       </header>
+
+      <LiveCrewsStrip />
 
       {celebrate && latest && (
         <FirstHandoffCelebration

@@ -10,6 +10,7 @@ import { Dashboard } from './pages/Dashboard';
 import { Home } from './pages/Home';
 import { Trail } from './pages/Trail';
 import { Agents } from './pages/Agents';
+import { AgentRoute } from './pages/crew/AgentPage';
 import { Inbox } from './pages/Inbox';
 import { useRelayData } from './hooks/relayData';
 import { inboxCounts } from './lib/relay';
@@ -416,7 +417,7 @@ function AuthenticatedShell({
       {tab === 'home' && <Home userName={userName} />}
       {(tab === 'crews' || tab === 'crew') && <CrewRoutes tab={tab} />}
       {tab === 'trail' && <Trail />}
-      {tab === 'agents' && <Agents />}
+      {tab === 'agents' && <AgentRoute fallback={<Agents />} />}
       {tab === 'inbox' && <Inbox />}
       {!RELAY_TABS.includes(tab) && (
         <Dashboard
