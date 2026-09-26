@@ -120,3 +120,55 @@ def test_deploying_doc_lists_the_redirect_uris_the_code_sends(monkeypatch) -> No
         assert f"`{uri}`" in doc, provider
     assert "`user:email`" in doc and social.PROVIDERS["github"].scope == "user:email"
     assert "`openid email profile`" in doc and social.PROVIDERS["google"].scope == "openid email profile"
+
+
+REAL_INDEX = """<!doctype html>
+<html><head>
+<script>
+  (function () { document.documentElement.classList.add('dark'); })();
+</script>
+<script type="module" crossorigin src="/assets/index-abc.js"></script>
+</head><body><div id="root"></div>
+<script src="https://cdn.paddle.com/paddle/v2/paddle.js" onerror="console.warn('Paddle.js failed')"></script>
+</body></html>"""
+
+
+def _sha(source: str) -> str:
+    import base64
+    import hashlib
+
+    return "'sha256-" + base64.b64encode(hashlib.sha256(source.encode()).digest()).decode() + "'"
+
+
+def test_dashboard_csp_allows_exactly_this_index_inline_code() -> None:
+    from remembra.main import dashboard_csp
+
+    policy = dict(part.split(" ", 1) for part in dashboard_csp(REAL_INDEX).split("; "))
+    script_src = policy["script-src"].split()
+    inline = "\n  (function () { document.documentElement.classList.add('dark'); })();\n"
+    assert script_src[0] == "'self'"
+    assert _sha(inline) in script_src
+    assert "'unsafe-hashes'" in script_src and _sha("console.warn('Paddle.js failed')") in script_src
+    assert "'unsafe-inline'" not in script_src and "'unsafe-eval'" not in script_src and "*" not in script_src
+    assert "https://cdn.paddle.com" in script_src
+    assert policy["frame-ancestors"] == "'none'" and policy["object-src"] == "'none'"
+    assert policy["connect-src"] == "'self' https://*.paddle.com"
+    # Another inline script (e.g. injected into the file later) is not covered.
+    assert _sha("alert(1)") not in script_src
+
+
+async def test_dashboard_pages_carry_the_dashboard_csp_and_the_api_keeps_none(tmp_path) -> None:
+    options = _single_host(tmp_path)
+    (Path(options["static_dir"]) / "index.html").write_text(REAL_INDEX)
+    async with connector_app(tmp_path, **options) as h:
+        for path in ("/oauth/callback", "/verify-email", "/index.html", "/some/spa/route"):
+            r = await h.http.get(path)
+            assert r.status_code == 200 and r.text == REAL_INDEX, path
+            csp = r.headers["content-security-policy"]
+            assert "script-src 'self'" in csp and "default-src 'self'" in csp, path
+            assert r.headers["x-frame-options"] == "DENY"
+        for path in ("/api/v1/auth/providers", "/.well-known/oauth-authorization-server", "/oauth/nope"):
+            r = await h.http.get(path)
+            assert r.headers["content-security-policy"].startswith("default-src 'none'"), path
+        asset = await h.http.get("/assets/app.js")
+        assert asset.status_code == 200 and "script-src" not in asset.headers["content-security-policy"]
