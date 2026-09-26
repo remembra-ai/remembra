@@ -16,7 +16,7 @@ pip install "remembra[mcp]"
 remembra-install --all   # asks for your API key at a hidden prompt, shows the changes, writes after a "y"
 ```
 
-This auto-detects and configures: Claude Desktop, Claude Code, Codex, Cursor, Gemini, and Windsurf.
+This auto-detects and configures: Claude Desktop, Claude Code, Codex, Cursor and Gemini CLI. Windsurf is unverified: `remembra-install --agent windsurf` writes it, `--all` does not.
 
 **Verify setup:**
 ```bash
@@ -32,7 +32,7 @@ Step-by-step setup instructions for each AI tool:
 | **Claude Code** | [Setup guide](claude-code.md) — `claude mcp add remembra ...` |
 | **Claude Desktop** | [Setup guide](claude-desktop.md) — JSON config |
 | **Cursor** | [Setup guide](cursor.md) — `.cursor/mcp.json` |
-| **Windsurf** | [Setup guide](windsurf.md) — `mcp_config.json` |
+| **Windsurf** | [Setup guide](windsurf.md) — `~/.codeium/windsurf/mcp_config.json` (unverified) |
 | **Zed** | [Setup guide](zed.md) — `context_servers` in settings |
 | **OpenAI Codex** | [Setup guide](codex.md) — `codex mcp add remembra ...` |
 | **VS Code + Copilot** | [Setup guide](vscode.md) — `.vscode/mcp.json` |
@@ -613,10 +613,11 @@ Some agents run in sandboxes that block network access. Use the bridge:
 
 ```bash
 # Start the bridge
-remembra-bridge --url https://api.remembra.dev --api-key YOUR_KEY
+read -rs REMEMBRA_API_KEY && export REMEMBRA_API_KEY   # paste the key: not shown, not in shell history
+remembra-bridge --upstream https://api.remembra.dev   # listens on 127.0.0.1:9819
 
 # Reconfigure agents to use bridge
-remembra-install --all --url http://localhost:8766
+remembra-install --all --url http://127.0.0.1:9819
 ```
 
 ### "Unauthorized" or 401 errors

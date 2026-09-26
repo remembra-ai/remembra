@@ -282,10 +282,11 @@ Some agents (Codex, Claude Code) run in sandboxes. Use the bridge:
 
 ```bash
 # Start the bridge
-remembra-bridge --url https://api.remembra.dev --api-key YOUR_KEY
+read -rs REMEMBRA_API_KEY && export REMEMBRA_API_KEY   # paste the key: not shown, not in shell history
+remembra-bridge --upstream https://api.remembra.dev   # listens on 127.0.0.1:9819
 
 # Configure agents to use the bridge
-remembra-install --all --url http://localhost:8766
+remembra-install --all --url http://127.0.0.1:9819
 ```
 
 ### Qdrant connection issues

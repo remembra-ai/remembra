@@ -17,7 +17,15 @@ owner-only (0600) because it holds the key. The key is read from
 ``REMEMBRA_API_KEY``, a hidden prompt, ``--api-key-stdin`` or
 ``~/.remembra/credentials``; ``--api-key`` on the command line still works but
 warns. Each agent's entry carries its own ``REMEMBRA_AGENT_ID``.
-``--remove`` takes the Remembra entries out again.
+``--remove`` takes the Remembra entries out again, and lists the backups
+that still hold the key (``--delete-backups`` deletes them too).
+
+Without ``--url`` the server is the one already saved (``REMEMBRA_URL``,
+``~/.remembra/credentials``, or an existing remembra entry), so re-running the
+installer never moves a self-hosted setup to Remembra Cloud.
+
+Windsurf is not verified: ``--all`` leaves it out, ``--agent windsurf``
+writes it (see ``UNVERIFIED_AGENTS``).
 """
 
 from __future__ import annotations
@@ -25,8 +33,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import stat
 import sys
+import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -49,12 +60,27 @@ AGENT_CONFIGS = {
     "claude-code": Path.home() / ".claude.json",
     "gemini": Path.home() / ".gemini" / "settings.json",
     "cursor": Path.home() / ".cursor" / "mcp.json",
-    "windsurf": Path.home() / ".windsurf" / "mcp_config.json",
+    # Windsurf's docs (docs.windsurf.com, now served from docs.devin.ai/windsurf/plugins/cascade/mcp) name
+    # ~/.codeium/windsurf/mcp_config.json as the Windsurf Editor's file (read through its MCP discovery) and
+    # ~/.config/devin/mcp_config.json as the file Cascade's "Open MCP config file" opens. Neither has been run
+    # against Windsurf here: see UNVERIFIED_AGENTS.
+    "windsurf": Path.home() / ".codeium" / "windsurf" / "mcp_config.json",
     "codex": DEFAULT_CODEX_CONFIG,
 }
 
 # Agents whose config is not the JSON mcpServers shape.
 TOML_AGENTS = {"codex"}
+
+# Written only when named with --agent: the path follows the vendor's docs but has not been
+# checked against the tool itself, so --all does not claim to set it up.
+UNVERIFIED_AGENTS = {
+    "windsurf": (
+        "Windsurf is unverified: its docs name ~/.codeium/windsurf/mcp_config.json (the editor's MCP discovery; "
+        "enable the 'windsurf' source in Settings > chat.mcp.discovery.enabled) and ~/.config/devin/mcp_config.json "
+        "(what Cascade's 'Open MCP config file' opens). This writes the first; if Cascade does not list remembra, "
+        "add the same block to the second."
+    ),
+}
 
 
 def claude_code_old_config() -> Path:
@@ -70,6 +96,9 @@ CREDENTIALS_FILE = REMEMBRA_HOME / "credentials"
 
 DEFAULT_REMEMBRA_URL = "https://api.remembra.dev"
 DEFAULT_REMEMBRA_COMMAND = "remembra-mcp"
+
+# A Remembra key anywhere in a file (backups of agent configs and of the credentials file).
+_KEY_IN_FILE_RE = re.compile(rb"\brem_[A-Za-z0-9_\-]{20,}")
 
 # Exit code when there were changes to make but none was written (a dry run,
 # or "no" at the prompt), so `remembra-install --all && remembra-relay connect
@@ -404,9 +433,73 @@ def install_all_agents(
     return results
 
 
-def detect_agents() -> list[str]:
+def detect_agents(include_unverified: bool = True) -> list[str]:
     """Detect which agents are installed based on config directory existence."""
-    return [agent for agent in AGENT_CONFIGS if agent_detected(agent)]
+    return [agent for agent in AGENT_CONFIGS if agent_detected(agent) and (include_unverified or agent not in UNVERIFIED_AGENTS)]
+
+
+def _entry_url(agent: str, config_path: Path) -> str | None:
+    """``REMEMBRA_URL`` of the remembra entry already in ``agent``'s config, if any."""
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        if agent in TOML_AGENTS:
+            server = (tomllib.loads(text).get("mcp_servers") or {}).get("remembra") or {}
+        else:
+            data = json.loads(text)
+            server = (data.get("mcpServers") or {}).get("remembra") or {} if isinstance(data, dict) else {}
+    except (ValueError, AttributeError):
+        return None
+    env = server.get("env") if isinstance(server, dict) else None
+    url = env.get("REMEMBRA_URL") if isinstance(env, dict) else None
+    return url.strip() if isinstance(url, str) and url.strip() else None
+
+
+def resolve_url(cli_url: str | None, environ: Mapping[str, str] | None = None) -> tuple[str, str]:
+    """The server to write, and where it came from.
+
+    ``--url`` > ``REMEMBRA_URL`` > the saved ``~/.remembra/credentials`` > an
+    existing remembra entry > Remembra Cloud. A re-run without ``--url`` keeps
+    the server already set up (a self-hosted URL is never swapped for the cloud
+    while the key, which belongs to that server, is kept).
+    """
+    env = os.environ if environ is None else environ
+    if cli_url and cli_url.strip():
+        return cli_url.strip(), "--url"
+    if (env.get("REMEMBRA_URL") or "").strip():
+        return str(env["REMEMBRA_URL"]).strip(), "REMEMBRA_URL"
+    saved = read_credentials() or {}
+    if isinstance(saved.get("url"), str) and saved["url"].strip():
+        return saved["url"].strip(), str(CREDENTIALS_FILE)
+    for agent, path in AGENT_CONFIGS.items():
+        url = _entry_url(agent, path)
+        if url:
+            return url, f"the remembra entry in {path}"
+    return DEFAULT_REMEMBRA_URL, "default (Remembra Cloud)"
+
+
+def backups_holding_a_key(home: Path | None = None) -> list[Path]:
+    """Backups (``*.bak-*``) the installer and the relay kept next to agent configs that still hold a Remembra key."""
+    from remembra.relay.adapters import REGISTRY
+
+    home = home or Path.home()
+    files = {*AGENT_CONFIGS.values(), claude_code_old_config(), CREDENTIALS_FILE}
+    files.update(adapter.spec.config_path(home) for adapter in REGISTRY.values())
+    found: set[Path] = set()
+    for path in files:
+        try:
+            candidates = list(path.parent.glob(f"{path.name}.bak-*"))
+        except OSError:
+            continue
+        for backup in candidates:
+            try:
+                if backup.is_file() and _KEY_IN_FILE_RE.search(backup.read_bytes()):
+                    found.add(backup)
+            except OSError:
+                continue
+    return sorted(found)
 
 
 def plan_agent(
@@ -472,10 +565,15 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Agents: Claude Desktop, Claude Code (user scope, ~/.claude.json), Codex,
-Cursor, Gemini CLI and Windsurf. --all configures each one whose config
-directory exists. Qwen Code and Kimi
-are not written here yet; add remembra-mcp to them by hand:
+Cursor and Gemini CLI. --all configures each one whose config directory
+exists. Windsurf is unverified: only --agent windsurf writes it
+(~/.codeium/windsurf/mcp_config.json). Qwen Code and Kimi are not written
+here yet; add remembra-mcp to them by hand:
 https://docs.remembra.dev/guides/relay/#mcp-by-hand
+
+Without --url the server already set up is kept (REMEMBRA_URL, then
+~/.remembra/credentials, then an existing remembra entry); a first install
+defaults to https://api.remembra.dev.
 
 The API key is read from REMEMBRA_API_KEY, a hidden prompt (on a terminal),
 --api-key-stdin, or ~/.remembra/credentials. Never type it on the command
@@ -492,8 +590,11 @@ Examples:
   pbpaste | remembra-install --all --api-key-stdin --apply
   remembra-install --agent cursor --project myproject
   remembra-install --remove --all --apply         take Remembra out again
+  remembra-install --remove --all --apply --delete-backups
+                                                  ...and delete the backups that hold the key
         """,
     )
+    parser.add_argument("--version", action="version", version=f"remembra-install {_version()}")
 
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--all", action="store_true", help="All detected agents")
@@ -503,15 +604,33 @@ Examples:
     parser.add_argument("--apply", "--yes", dest="apply", action="store_true", help="Write the changes (backups are kept)")
     parser.add_argument("--remove", action="store_true", help="Remove the Remembra MCP entries instead of adding them")
     parser.add_argument(
+        "--delete-backups",
+        action="store_true",
+        help="With --remove --apply: also delete the *.bak-* backups that still hold a Remembra key",
+    )
+    parser.add_argument(
         "--api-key-stdin", action="store_true", help="Read the API key from stdin (e.g. piped from a password manager)"
     )
     # Deprecated: a key on the command line lands in shell history and `ps`. Still accepted, with a warning.
     parser.add_argument("--api-key", help=argparse.SUPPRESS)
     parser.add_argument("--project", default="default", help="Project namespace for shared memories")
     parser.add_argument("--user-id", default="default", help="User identifier for shared memories")
-    parser.add_argument("--url", default=DEFAULT_REMEMBRA_URL, help="Remembra base URL or local bridge URL")
+    parser.add_argument(
+        "--url",
+        default=None,
+        help=f"Remembra base URL or local bridge URL (default: the one already set up, else {DEFAULT_REMEMBRA_URL})",
+    )
     parser.add_argument("--command", default=DEFAULT_REMEMBRA_COMMAND, help="MCP command for the Remembra server")
     return parser
+
+
+def _version() -> str:
+    try:
+        from remembra import __version__
+
+        return str(__version__)
+    except Exception:
+        return "unknown"
 
 
 def _confirm(question: str) -> bool:
@@ -566,14 +685,22 @@ def main(argv: list[str] | None = None) -> int:
             print("No agents detected.")
         return 0
 
-    agents = detect_agents() if args.all else [args.agent]
+    if args.delete_backups and not args.remove:
+        parser.error("--delete-backups goes with --remove")
+    agents = detect_agents(include_unverified=args.remove) if args.all else [args.agent]
+    skipped = [a for a in detect_agents() if a in UNVERIFIED_AGENTS and a not in agents] if args.all else []
+    for agent in skipped:
+        print(f"[{agent}] detected, not set up by --all. {UNVERIFIED_AGENTS[agent]} Run: remembra-install --agent {agent}")
+    for agent in agents:
+        if agent in UNVERIFIED_AGENTS and not args.remove:
+            print(f"[{agent}] {UNVERIFIED_AGENTS[agent]}")
     if not agents and args.remove:
         print("No agents detected: no MCP entry to remove.")
-        return 0
+        return _report_backups(args)
     if not agents:
         # Still save the key: remembra-relay's hooks (Qwen Code, Kimi, ...) read it from ~/.remembra/credentials.
         print(
-            "No agent MCP config found (Claude Desktop, Claude Code, Codex, Cursor, Gemini CLI, Windsurf)."
+            "No agent MCP config found (Claude Desktop, Claude Code, Codex, Cursor, Gemini CLI)."
             f" This saves only the key (~/.remembra/credentials). For other agents add remembra-mcp by hand: {MCP_BY_HAND_URL}"
         )
 
@@ -598,8 +725,10 @@ def main(argv: list[str] | None = None) -> int:
                 " pipe it with --api-key-stdin, or run this in a terminal to be asked for it."
             )
         keys = (api_key,)
-        print(f"Remembra: key {mask_key(api_key)} (from {source}), server {args.url}, project {args.project}")
-        planned.append(("credentials", plan_credentials(api_key, args.project, args.user_id, args.url)))
+        url, url_source = resolve_url(args.url)
+        args.url = url
+        print(f"Remembra: key {mask_key(api_key)} (from {source}), server {url} (from {url_source}), project {args.project}")
+        planned.append(("credentials", plan_credentials(api_key, args.project, args.user_id, url)))
         for agent in agents:
             try:
                 planned.append(
@@ -640,9 +769,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if not todo and not loose:
         print("\nNothing to change.")
+        if args.remove:
+            return _report_backups(args) or (1 if problems else 0)
         return 1 if problems else 0
     if not args.apply and not _confirm(f"\nWrite {len(todo) + len(loose)} file(s)? Backups are kept. [y/N] "):
         print("\nDry run: nothing was written. Re-run with --apply to write (a backup of each file is kept).")
+        if args.remove:
+            _report_backups(args, dry_run=True)
         return 1 if problems else EXIT_NOT_WRITTEN
 
     failed = _write_all(todo)
@@ -654,6 +787,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[!] {agent}: could not chmod {change.path}: {e}", file=sys.stderr)
             failed += 1
     if args.remove:
+        failed += _report_backups(args)
         print(
             "\nThe saved key is still in ~/.remembra/credentials (remembra-relay reads it). To remove everything:"
             " remembra-relay disconnect --apply, pipx uninstall remembra, delete ~/.remembra and revoke the key"
@@ -663,6 +797,36 @@ def main(argv: list[str] | None = None) -> int:
         restart = "Restart your agents to load the new MCP config. " if agents else ""
         print(f"\n{restart}Next: remembra-relay connect")
     return 1 if (failed or problems) else 0
+
+
+def _report_backups(args: argparse.Namespace, dry_run: bool = False) -> int:
+    """List (or, with ``--delete-backups --apply``, delete) the backups that still hold a Remembra key.
+
+    Returns the number of backups that could not be deleted.
+    """
+    backups = backups_holding_a_key()
+    if not backups:
+        return 0
+    if args.delete_backups and args.apply and not dry_run:
+        failed = 0
+        for backup in backups:
+            try:
+                backup.unlink()
+                print(f"[+] deleted backup {backup}")
+            except OSError as e:
+                print(f"[!] could not delete {backup}: {e}", file=sys.stderr)
+                failed += 1
+        return failed
+    verb = "would be deleted with --apply" if args.delete_backups else "are kept"
+    print(f"\n{len(backups)} backup file(s) still hold a Remembra API key and {verb}:")
+    for backup in backups:
+        print(f"  {backup}")
+    if not args.delete_backups:
+        print(
+            "Delete them with: remembra-install --remove --all --apply --delete-backups"
+            " (or by hand), and revoke the key in the dashboard (API keys)."
+        )
+    return 0
 
 
 def entrypoint() -> None:

@@ -7,9 +7,13 @@ name: Release
 # Supply-chain rules (tests/test_release_workflow.py enforces them):
 # - every action is pinned to a full commit SHA, with the tag in a comment;
 #   Dependabot (.github/dependabot.yml) proposes updates.
-# - no job gets a permission it does not use; only the two publish jobs can
-#   mint an OIDC token, and they wait for approval in the `release`
-#   environment (GitHub > Settings > Environments > release > required reviewers).
+# - no job gets a permission it does not use; only the two publish jobs
+#   (publish-pypi, publish-mcp-registry) can mint an OIDC token. Every job
+#   that publishes (those two and docker) runs in the `release` environment,
+#   so each waits for a reviewer's approval (GitHub > Settings > Environments >
+#   release > required reviewers).
+# - the build job installs build and uv from .github/release-requirements.txt,
+#   pinned by version and sha256 (pip --require-hashes).
 # - PyPI uses trusted publishing (no stored token) and uploads PEP 740
 #   attestations; the Docker image carries provenance and an SBOM.
 
@@ -43,9 +47,11 @@ jobs:
       - name: Versions agree with the tag
         run: python scripts/check_release_versions.py "$GITHUB_REF_NAME"
 
+      - name: Install the pinned build tools
+        run: python -m pip install --require-hashes --no-deps -r .github/release-requirements.txt
+
       - name: Build remembra and the remembra-mcp launcher
         run: |
-          python -m pip install build
           python -m build --outdir dist .
           python -m build --outdir dist packages/remembra-mcp
           # pypa/gh-action-pypi-publish verifies the metadata before upload
@@ -56,7 +62,6 @@ jobs:
         # Clients start the server.json entry as `uvx remembra-mcp==<version>`.
         # Installed here from the wheels just built (dependencies from PyPI).
         run: |
-          python -m pip install uv
           version=$(python -c 'import json; print(json.load(open("server.json"))["version"])')
           REMEMBRA_URL=http://127.0.0.1:9 REMEMBRA_API_KEY=rem_release_check REMEMBRA_AGENT_ID=release-check \
             python scripts/mcp_stdio_check.py --expect-tool session_brief --expect-tool close_session -- \
@@ -92,6 +97,9 @@ jobs:
     name: Publish to the MCP Registry
     needs: publish-pypi
     runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://registry.modelcontextprotocol.io/
     permissions:
       contents: read
       id-token: write # mcp-publisher login github-oidc

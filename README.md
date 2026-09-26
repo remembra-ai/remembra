@@ -145,7 +145,7 @@ pip install remembra
 remembra-install --all --url http://localhost:8787
 ```
 
-This auto-detects and configures: Claude Desktop, Claude Code, Codex CLI, Cursor, Windsurf, Gemini.
+This auto-detects and configures: Claude Desktop, Claude Code, Codex CLI, Cursor, Gemini CLI. (Windsurf is unverified: `remembra-install --agent windsurf` writes it, `--all` does not.)
 
 **Verify setup:**
 

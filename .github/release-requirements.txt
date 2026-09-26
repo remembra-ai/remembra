@@ -1,0 +1,13 @@
+# Tools the release build job installs (.github/workflows/release.yml), pinned
+# with hashes: `pip install --require-hashes` refuses anything else, so a
+# compromised or re-uploaded release of build or uv cannot reach the job that
+# produces the files PyPI publishes. Dependabot (pip, /.github) proposes updates.
+# uv lists only the manylinux x86_64 wheel: the job runs on ubuntu-latest (x64).
+build==1.6.1 \
+    --hash=sha256:ecd351a4be9d35a9eaaba244a7687143c9c7d4aea6ac964e7e7ddab20cbcf4e7
+packaging==26.3 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+pyproject-hooks==1.3.3 \
+    --hash=sha256:5fc53fdac9f7bd63fbcdc868fb5f90b4784d78a53a3d3388cd738b807441a20b
+uv==0.12.19 \
+    --hash=sha256:a63d18a0aa38ee9f21a5406afbbaeb41303bcd954be9d6b7c1b95ac275e53958

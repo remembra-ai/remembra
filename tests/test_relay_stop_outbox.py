@@ -584,14 +584,142 @@ def test_a_refused_queued_handoff_does_not_hold_back_the_rest(home):
 
 def test_close_without_a_key_is_queued_and_sent_once_a_key_exists(tmp_path, home, server):
     laptop, _ = _repo(tmp_path, "keyless")
-    no_key = {"REMEMBRA_API_KEY": "", "REMEMBRA_URL": ""}
-    close = relay(home, "", "close", "--agent", "claude-code", "--session-id", "K", "--cwd", str(laptop), env=no_key)
+    no_key = {"REMEMBRA_API_KEY": ""}  # REMEMBRA_URL names the server, the key is not set up yet
+    close = relay(home, server, "close", "--agent", "claude-code", "--session-id", "K", "--cwd", str(laptop), env=no_key)
     assert "no API key" in close.stderr and "queued" in close.stderr
     [entry] = list((home / ".remembra" / "relay" / "outbox").glob("*.json"))
-    assert json.loads(entry.read_text())["url"] is None  # no server was configured: whichever is configured next
+    stored = json.loads(entry.read_text())
+    assert stored["url"] == server and stored["config_source"] == "none"  # kept for the server configured then
     brief = relay(home, server, "brief", "--agent", "codex", "--cwd", str(laptop))
     assert "sent 1 queued handoff from claude-code" in brief.stdout
     assert _trail(server, "keyless")[0]["session_id"] == "K"
+
+
+class _KeyRecorder(http.server.BaseHTTPRequestHandler):
+    """Accepts every close and records which key each one came with."""
+
+    posts: list[tuple[str, str]] = []
+
+    def _send(self, status: int, body: dict[str, Any]) -> None:
+        data = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_POST(self) -> None:
+        body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+        self.posts.append((str(body.get("session_id")), str(self.headers.get("X-API-Key"))))
+        self._send(200, {"ok": True, "memory_id": "m1"})
+
+    def do_GET(self) -> None:
+        self._send(200, {"rendered": "Remembra brief"})
+
+    def log_message(self, *args: Any) -> None:
+        pass
+
+
+@contextmanager
+def key_recorder() -> Iterator[tuple[str, type[_KeyRecorder]]]:
+    handler = type("Handler", (_KeyRecorder,), {"posts": []})
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_address[1]}", handler
+    finally:
+        srv.shutdown()
+
+
+def test_a_keyless_handoff_is_never_sent_to_a_server_configured_later(tmp_path, home):
+    """Queued with no key while REMEMBRA_URL named server A: a key set up later for server B does not
+    receive it; status says why it is held; a key for A sends it."""
+    laptop, _ = _repo(tmp_path, "keyless-bound")
+    with key_recorder() as (server_a, seen_a), key_recorder() as (server_b, seen_b):
+        close = relay(
+            home,
+            server_a,
+            "close",
+            "--agent",
+            "claude-code",
+            "--session-id",
+            "KA",
+            "--cwd",
+            str(laptop),
+            env={"REMEMBRA_API_KEY": ""},
+        )
+        assert "queued" in close.stderr
+        # No REMEMBRA_URL at all: bound to the local default, not to whatever comes next.
+        relay(
+            home,
+            "",
+            "close",
+            "--agent",
+            "gemini",
+            "--session-id",
+            "KD",
+            "--cwd",
+            str(laptop),
+            env={"REMEMBRA_API_KEY": "", "REMEMBRA_URL": ""},
+        )
+        stored = {e.session_id: e.url for e in outbox.pending(home)}
+        assert stored == {"KA": server_a, "KD": "http://localhost:8787"}
+
+        brief_b = relay(home, server_b, "brief", "--agent", "codex", "--cwd", str(laptop))
+        assert brief_b.returncode == 0 and "Remembra: sent" not in brief_b.stdout
+        assert [s for s, _ in seen_b.posts] == []  # neither keyless handoff went to B
+        assert "are for another server" in brief_b.stdout
+        status = relay(home, server_b, "status", "--no-check")
+        assert f"held: it is for {server_a}, and the key now points at {server_b}" in status.stdout
+        held = json.loads(relay(home, server_b, "status", "--no-check", "--format", "json").stdout)["queue"]
+        assert all(item["held"] for item in held)
+
+        brief_a = relay(home, server_a, "brief", "--agent", "codex", "--cwd", str(laptop))
+        assert "sent 1 queued handoff from claude-code" in brief_a.stdout
+        assert seen_a.posts == [("KA", KEY)]
+        assert [e.session_id for e in outbox.pending(home)] == ["KD"]  # still only for localhost:8787
+
+
+def test_a_queued_handoff_goes_only_with_the_key_of_the_source_that_queued_it(tmp_path, home):
+    """Queued with the key in ~/.claude.json: when that key is gone and another source
+    (~/.remembra/credentials) has a different key for the same server, it waits; it is sent
+    once ~/.claude.json has a key again, with that key."""
+    laptop, _ = _repo(tmp_path, "source-bound")
+    claude_key = "rem_claude_source_key_0123456789ab"
+    creds_key = "rem_credentials_other_key_98765432"
+    claude_json = home / ".claude.json"
+
+    def claude_config(key: str | None, url: str) -> None:
+        env = {"REMEMBRA_URL": url, **({"REMEMBRA_API_KEY": key} if key else {})}
+        claude_json.write_text(json.dumps({"mcpServers": {"remembra": {"command": "remembra-mcp", "env": env}}}))
+
+    with key_recorder() as (url, seen), fixed_status_server(503, "down") as down:
+        no_env = {"REMEMBRA_API_KEY": "", "REMEMBRA_URL": ""}
+        claude_config(claude_key, down)
+        close = relay(home, "", "close", "--agent", "claude-code", "--session-id", "S1", "--cwd", str(laptop), env=no_env)
+        assert "queued" in close.stderr
+        [entry] = outbox.pending(home)
+        assert entry.data["config_source"] == f"claude:{claude_json}" and entry.url == down
+        # The same server comes back at another address in the test: point the entry at it, as a server that
+        # was down and is up again (same URL) would be.
+        data = dict(entry.data, url=url)
+        entry.path.write_text(json.dumps(data))
+
+        claude_config(None, url)  # the key was removed from Claude Code's config ...
+        creds = home / ".remembra" / "credentials"
+        creds.parent.mkdir(exist_ok=True)
+        creds.write_text(json.dumps({"api_key": creds_key, "url": url}))  # ... and another source has one
+        brief = relay(home, "", "brief", "--agent", "codex", "--cwd", str(laptop), env=no_env)
+        assert brief.returncode == 0 and "Remembra: sent" not in brief.stdout
+        assert seen.posts == []  # not sent with the credentials key
+        status = relay(home, "", "status", "--no-check", env=no_env)
+        assert f"held: its key source (claude:{claude_json}) has no key now" in status.stdout
+
+        claude_config(claude_key, url)
+        again = relay(home, "", "brief", "--agent", "codex", "--cwd", str(laptop), env=no_env)
+        assert "sent 1 queued handoff from claude-code" in again.stdout
+        assert ("S1", claude_key) in seen.posts and ("S1", creds_key) not in seen.posts
+        assert outbox.pending(home) == []
 
 
 # --- outbox unit behaviour --------------------------------------------------

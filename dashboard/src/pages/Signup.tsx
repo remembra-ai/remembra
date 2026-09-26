@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type ReactNode } from 'react';
 import { UserPlus, Loader2, Eye, EyeOff, Check, X } from 'lucide-react';
 import { API_V1 } from '../config';
 import { BrandLockup } from '../brand/Brand';
@@ -10,6 +10,8 @@ import { passwordChecks as checkPassword } from '../lib/authProviders';
 interface SignupProps {
   onSignup: (user: { id: string; email: string; name?: string }) => void;
   onSwitchToLogin: () => void;
+  /** Shown under the form, in the page flow (never fixed over it): the "Use API Key instead" switch. */
+  footer?: ReactNode;
 }
 
 function detailMessage(detail: unknown, fallback: string): string {
@@ -21,7 +23,7 @@ function detailMessage(detail: unknown, fallback: string): string {
   return fallback;
 }
 
-export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
+export function Signup({ onSignup, onSwitchToLogin, footer }: SignupProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -250,6 +252,7 @@ export function Signup({ onSignup, onSwitchToLogin }: SignupProps) {
             Sign in
           </button>
         </p>
+        {footer}
       </div>
     </div>
   );

@@ -271,8 +271,11 @@ def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
     from remembra.tools.agents import AGENT_CONFIGS
 
     assert set(AGENT_CONFIGS) == {"claude-desktop", "claude-code", "codex", "cursor", "gemini", "windsurf"}
-    assert "remembra-install sets up those tools for Claude Code, Claude Desktop, Codex, Cursor, Gemini CLI and Windsurf" in note
-    assert "Qwen Code and Kimi you add by hand" in note
+    assert "remembra-install sets up those tools for Claude Code, Claude Desktop, Codex, Cursor and Gemini CLI." in note
+    from remembra.tools.agents import UNVERIFIED_AGENTS
+
+    assert set(UNVERIFIED_AGENTS) == {"windsurf"}  # --all leaves it out: the note must not claim it
+    assert "Windsurf, Qwen Code and Kimi you add by hand" in note
     assert "guides/relay/#mcp-by-hand" in (LANDING / "index.html").read_text()
     assert "{#mcp-by-hand}" in (Path(__file__).resolve().parent.parent / "docs" / "guides" / "relay.md").read_text()
 

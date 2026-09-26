@@ -12,3 +12,9 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "ci(actions)"
+  - package-ecosystem: pip
+    directory: /.github  # release-requirements.txt: the hash-pinned build tools of release.yml
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci(release-tools)"

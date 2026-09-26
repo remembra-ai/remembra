@@ -25,6 +25,7 @@ import { toast } from 'sonner';
 import { api } from './lib/api';
 import { API_V1 } from './config';
 import { AuthFrame } from './brand/AuthFrame';
+import { AuthSwitch } from './components/auth/AuthSwitch';
 import { appPath } from './lib/authProviders';
 import { confirmCheckout, isCheckoutReturn, sessionStore, takeCheckoutIntent, withoutCheckoutParam } from './lib/paddle';
 
@@ -308,12 +309,14 @@ function App() {
               onLogin={handleLogin}
               onSwitchToSignup={() => setAuthMode('signup')}
               onForgotPassword={() => setAuthMode('forgot-password')}
+              footer={<AuthSwitch label="Use API Key instead" onClick={() => setAuthMode('api-key')} />}
             />
           )}
           {authMode === 'signup' && (
             <Signup
               onSignup={handleSignup}
               onSwitchToLogin={() => setAuthMode('login')}
+              footer={<AuthSwitch label="Use API Key instead" onClick={() => setAuthMode('api-key')} />}
             />
           )}
           {authMode === 'forgot-password' && (
@@ -328,7 +331,10 @@ function App() {
             />
           )}
           {authMode === 'api-key' && (
-            <ApiKeyForm onAuthenticated={handleApiKeyAuth} />
+            <ApiKeyForm
+              onAuthenticated={handleApiKeyAuth}
+              footer={<AuthSwitch label="Sign in with email" onClick={() => setAuthMode('login')} />}
+            />
           )}
           {authMode === 'invite' && inviteToken && (
             <InviteAccept
@@ -348,30 +354,7 @@ function App() {
               }}
             />
           )}
-        
         </AuthFrame>
-
-        {/* Toggle between user auth and API key auth */}
-        {authMode !== 'api-key' && authMode !== 'invite' && (
-          <div className="fixed bottom-4 right-4">
-            <button
-              onClick={() => setAuthMode('api-key')}
-              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline"
-            >
-              Use API Key instead
-            </button>
-          </div>
-        )}
-        {authMode === 'api-key' && (
-          <div className="fixed bottom-4 right-4">
-            <button
-              onClick={() => setAuthMode('login')}
-              className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 underline"
-            >
-              Sign in with email
-            </button>
-          </div>
-        )}
       </div>
     );
   }
