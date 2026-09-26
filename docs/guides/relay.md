@@ -180,14 +180,23 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
   uncommitted files, open todos, tests not run on changed work, errors, failed commands),
   *Incomplete* (git timed out, or no git state recorded), *Conflicted* (the agent's summary
   contradicts the facts) or *Blocked* (a test run's latest result failed, or the handoff is withheld
-  for low trust), followed by what is missing. `POST /session/close` returns the same `health`, the
-  trail shows it as a badge, and `remembra-relay close` prints it when run by hand.
+  for low trust), followed by what is missing. Git probes that did not finish are named only when
+  they are the collector's own (`log`, `status`, `diff`, `upstream`); any other name is shown as
+  *other*. `POST /session/close` returns the same `health`, the trail shows it as a badge, and
+  `remembra-relay close` prints it when run by hand.
 - **Low trust.** One policy covers every recorded line: the handoff, inbox messages, status values,
   linked headlines and recent memories. When the text matches prompt-injection patterns (the
   sanitizer of `POST /memories`, plus requests to keep something from the user and hidden Unicode
   tag or bidirectional characters), it is withheld: the brief shows `withheld (LOW TRUST <score>, id
   <id>)` to review with the user. Rows stored before a pattern existed are scored again when shown.
-  The brief's JSON fields carry the same verdicts (`trust_score`, `withheld`, `flags`).
+  The brief's JSON fields carry the same verdicts (`trust_score`, `withheld`, `flags`); a withheld
+  status value loses its key too, and `handoff_health` of a withheld handoff reads *Blocked* with its
+  warnings (which quote agent text) replaced by a count (`warnings_withheld`). A shown handoff's
+  warnings are scored one by one. The patterns need an instruction or prompt aimed at the reader
+  ("ignore the above instructions", "don't tell the user"), so honest text such as "override existing
+  rules" or "never reveal to the user which field was wrong" is shown. The trail and the timeline show
+  recorded text as stored, so you can review a withheld handoff (MCP tools return it inside the
+  untrusted block).
 - **Commands.** Command-shaped text keeps its content and gets *[contains a command or URL: confirm
   with the user before running]*: pipe-to-shell, `base64 -d | sh`, `rm -rf`, `git push --force`,
   `--no-verify`, `core.hooksPath`, `--dangerously-skip-permissions`, `--yolo`, reads of `~/.ssh`,

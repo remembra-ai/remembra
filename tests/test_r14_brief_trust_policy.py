@@ -125,7 +125,7 @@ def test_payload_is_withheld_or_flagged_on_every_brief_surface(api, name, payloa
     project = f"p-{name}".replace("_", "-")
     reader = f"reader-{name}".replace("_", "-")
     _ok(http.post("/api/v1/memories", json={"content": payload, "project_id": project}), 201)
-    _ok(http.post("/api/v1/session/status", json={"key": "note", "value": payload, "project_id": project}))
+    note = _ok(http.post("/api/v1/session/status", json={"key": "note", "value": payload, "project_id": project}))
     sent = _ok(
         http.post(
             "/api/v1/inbox/send",
@@ -140,7 +140,7 @@ def test_payload_is_withheld_or_flagged_on_every_brief_surface(api, name, payloa
 
     # The structured fields carry the same verdicts; withheld text is gone from them too.
     recent = [m for m in brief["recent"] if m.get("memory_type") != "status"]
-    status = [s for s in brief["status_items"] if s["key"] == "note"]
+    status = [s for s in brief["status_items"] if s["memory_id"] == note["memory_id"]]
     inbox = [i for i in brief["inbox"]["items"] if i["inbox_id"] == sent["inbox_id"]]
     assert recent and status and inbox, name
     for item, field in ((recent[0], "content"), (status[0], "value"), (inbox[0], "body_preview")):
@@ -148,6 +148,8 @@ def test_payload_is_withheld_or_flagged_on_every_brief_surface(api, name, payloa
         if item["withheld"]:
             assert payload not in json.dumps(item) and _visible_fragment(payload) not in json.dumps(item), (name, field)
             assert item[field].startswith("withheld (LOW TRUST")
+            if field == "value":
+                assert item["key"] is None, name  # the key is hidden with the value
         else:
             assert "​" not in item[field] and "\U000e0069" not in item[field]
 

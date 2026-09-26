@@ -567,7 +567,8 @@ async def session_brief(
     Every recorded line passes one trust policy: low-trust text is withheld,
     command-shaped text is flagged, and the JSON fields carry the same
     verdicts (``trust_score`` / ``withheld`` / ``flags``). ``handoff_health``
-    is the last handoff's server grade.
+    is the last handoff's server grade under the same policy (Blocked, with
+    its warnings dropped, when the handoff is withheld).
 
     Records one pickup event when a handoff written by another agent is
     served (per handoff, reader agent and ``session_id``); nothing else is

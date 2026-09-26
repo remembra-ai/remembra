@@ -643,7 +643,13 @@ HEALTH_LABELS = {
     HEALTH_CONFLICTED: "Conflicted",
     HEALTH_BLOCKED: "Blocked",
 }
-_PROBE_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,19}$")
+# The git probes the facts collector reports in ``incomplete``
+# (:func:`remembra.relay.facts.git_facts`). The close API accepts any short
+# strings there, and the health line sits outside the untrusted-data block, so
+# any other name is shown only as "other".
+GIT_PROBE_NAMES = frozenset({"log", "status", "diff", "upstream"})
+# Why a withheld handoff is graded Blocked (server text: shown above the untrusted block).
+WITHHELD_HEALTH_REASON = "review with the user: the recorded text matched prompt-injection patterns"
 
 
 def _failed_commands(facts: dict[str, Any], test_cmds: set[str]) -> int:
@@ -685,7 +691,7 @@ def assess_handoff(facts: dict[str, Any], grounding: dict[str, Any] | None, trus
     errors = [e for e in facts.get("errors") or [] if str(e).strip()]
     tests = latest_tests(facts.get("tests") or [])
     unpushed = facts.get("unpushed_commits")
-    incomplete = sorted({str(x) if _PROBE_NAME_RE.match(str(x)) else "other" for x in facts.get("incomplete") or []})
+    incomplete = sorted({str(x) if str(x) in GIT_PROBE_NAMES else "other" for x in facts.get("incomplete") or []})
     worked = bool(commits or files or uncommitted)
 
     blocked: list[str] = []
@@ -695,7 +701,7 @@ def assess_handoff(facts: dict[str, Any], grounding: dict[str, Any] | None, trus
     warnings: list[str] = []
 
     if trust < BRIEF_TRUST_FLOOR:
-        blocked.append("review with the user: the recorded text matched prompt-injection patterns")
+        blocked.append(WITHHELD_HEALTH_REASON)
     failing = [t for t in tests if t.get("passed") is False]
     if failing:
         blocked.append(f"{len(failing)} failing test run(s)")
@@ -764,15 +770,49 @@ def stored_health(handoff: dict[str, Any] | None) -> dict[str, Any] | None:
     }
 
 
+def police_health(
+    health: dict[str, Any] | None, verdict: LineVerdict | None, allowed_urls: tuple[str, ...] = ()
+) -> dict[str, Any] | None:
+    """The brief's JSON ``handoff_health`` under the brief policy.
+
+    ``warnings`` quote agent-written text (a failing test command, the
+    upstream name, the summary's claims). When the handoff is withheld the
+    grade matches the rendered health line (Blocked, for review with the user)
+    and the warnings are dropped, leaving only their count; otherwise each
+    warning is scored on its own and withheld or flagged like any recorded line.
+    """
+    if verdict is not None and verdict.withheld:
+        return {
+            "status": HEALTH_BLOCKED,
+            "label": HEALTH_LABELS[HEALTH_BLOCKED],
+            "missing": [WITHHELD_HEALTH_REASON],
+            "warnings": [],
+            "warnings_withheld": len((health or {}).get("warnings") or []),
+            "rules_version": (health or {}).get("rules_version", HEALTH_RULES_VERSION),
+        }
+    if health is None:
+        return None
+    warnings: list[str] = []
+    withheld = 0
+    for warning in health.get("warnings") or []:
+        line = assess_text(warning, allowed_urls=allowed_urls)
+        if line.withheld:
+            withheld += 1
+            warnings.append(
+                f"warning withheld (LOW TRUST {line.trust:.2f}): the text matched prompt-injection patterns; "
+                "review the handoff with the user"
+            )
+        else:
+            warnings.append(show_text(warning, line))
+    return {**health, "warnings": warnings, "warnings_withheld": withheld}
+
+
 def health_line(handoff: dict[str, Any] | None, verdict: LineVerdict | None) -> str | None:
     """The brief's top line: the last handoff's server grade (server-written text only)."""
     if not handoff:
         return None
     if verdict is not None and verdict.withheld:
-        return (
-            f"Handoff health: {HEALTH_LABELS[HEALTH_BLOCKED]} (review with the user: the recorded text matched "
-            "prompt-injection patterns)."
-        )
+        return f"Handoff health: {HEALTH_LABELS[HEALTH_BLOCKED]} ({WITHHELD_HEALTH_REASON})."
     health = stored_health(handoff)
     if health is None:
         return "Handoff health: not graded (this handoff was not recorded by the relay's close-out)."
@@ -976,11 +1016,16 @@ def police_brief(brief: dict[str, Any]) -> None:
 
     The same verdicts as :func:`render_brief`: a withheld item keeps its ids and
     times but loses its text (replaced by the withheld note), every item gains
-    ``trust_score`` / ``withheld`` / ``flags``, and hidden characters are
-    removed everywhere. Call it after rendering.
+    ``trust_score`` / ``withheld`` / ``flags``, hidden characters are removed
+    everywhere, and ``handoff_health`` follows the handoff's verdict
+    (:func:`police_health`). Call it after rendering.
     """
     allowed = tuple(brief.get("repo_url_prefixes") or ())
     handoff = brief.get("handoff")
+    if "handoff_health" in brief:
+        brief["handoff_health"] = police_health(
+            brief.get("handoff_health"), handoff_verdict(handoff, allowed) if handoff else None, allowed
+        )
     if handoff:
         verdict = handoff_verdict(handoff, allowed)
         if verdict.withheld:
@@ -1009,7 +1054,8 @@ def police_brief(brief: dict[str, Any]) -> None:
     for item in brief.get("status_items") or []:
         verdict = _verdict_for_item([item.get("key"), item.get("value")], item, allowed)
         if verdict.withheld:
-            item = {**item, "value": withheld_note(verdict, item.get("memory_id"))}
+            # The key is scored with the value and hidden with it (the rendered line hides both).
+            item = {**item, "key": None, "value": withheld_note(verdict, item.get("memory_id"))}
         status_items.append({**_strip_hidden_deep(item), **verdict.as_dict()})
     brief["status_items"] = status_items
     for link in brief.get("linked_projects") or []:
