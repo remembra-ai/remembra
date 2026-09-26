@@ -55,6 +55,11 @@ function joinNames(names: readonly string[]): string {
 export const CODEX_TRUST_LINE = say(SHARED_RULES.CODEX_TRUST_MISSING.what, {
   hooks: plural(CODEX_TRUST_EVENTS.length, 'hook'),
 });
+/**
+ * The Codex row's reminder while nothing from Codex is on the trail. A reminder, not a call: the account
+ * may not use Codex, and only doctor on the machine can see its trust records.
+ */
+export const CODEX_TRUST_HINT = `using Codex? trust its ${plural(CODEX_TRUST_EVENTS.length, 'hook')} once: Codex Settings > Hooks > Trust`;
 /** The one Codex trust step (the app or the CLI), as the doctor and remembra_setup give it. */
 export const CODEX_TRUST_FIX = say(SHARED_RULES.CODEX_TRUST_MISSING.fix, { events: joinNames(CODEX_TRUST_EVENTS) });
 export const KEY_CAVEAT =
@@ -227,21 +232,24 @@ function endOneSession(name: string): string {
 }
 
 /** The waiting row's state before anyone opens the slip. */
-export type RowState = 'connected' | 'codex-trust' | 'briefed' | 'waiting' | 'unverified';
+export type RowState = 'connected' | 'codex-waiting' | 'briefed' | 'waiting' | 'unverified';
 
 /**
  * Codex skips hooks the user has not trusted, without a message. Until a Codex
- * brief (a pickup) or close (an entry) reaches the trail, the Codex row asks
- * for the trust step.
+ * brief (a pickup) or close (an entry) reaches the trail, the Codex row waits
+ * like any other and carries a dim reminder of the trust step. Only a
+ * reminder: an account with no Codex entry may not use Codex at all, and the
+ * dashboard can't see whether Codex is installed or its hooks trusted. The
+ * why? slip names the trust step as the likely cause, marked inferred.
  */
 export function rowState(agentId: string, activity: AgentActivity | undefined, trail: TrailItem[] | undefined): RowState {
   const id = canonicalAgentId(agentId);
   if (activity) return 'connected';
   const items = trail ?? [];
   const briefed = pickupsBy(id, items) > 0;
-  // A close on the trail that the summary has not counted yet (they refresh together) still ends the trust state.
+  // A close on the trail that the summary has not counted yet (they refresh together) still ends the reminder.
   const closed = items.some((item) => isAgent(id, item.agent_id));
-  if (id === 'codex' && !briefed && !closed) return 'codex-trust';
+  if (id === 'codex' && !briefed && !closed) return 'codex-waiting';
   if (briefed && !closed) return 'briefed';
   return agentMeta(id).verified ? 'waiting' : 'unverified';
 }

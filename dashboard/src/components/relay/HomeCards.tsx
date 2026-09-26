@@ -8,7 +8,7 @@ import { ArrowRight, Check, Copy, KeyRound, Loader2, X } from 'lucide-react';
 import type { ActivitySummary, AgentActivity, TrailItem } from '../../lib/relay';
 import { api } from '../../lib/api';
 import { CONNECTABLE_AGENTS, agentConnectCommand, agentMeta, canonicalAgentId, oneLineInstall } from '../../lib/agents';
-import { rowState, type RowState } from '../../lib/marshal';
+import { CODEX_TRUST_HINT, rowState, type RowState } from '../../lib/marshal';
 import { hrefFor } from '../../lib/nav';
 import { relativeTime } from '../../lib/time';
 import { useCopy } from '../../hooks/useCopy';
@@ -79,9 +79,10 @@ function RelayKeyStep({ newKey, onKey }: { newKey: string | null; onKey: (key: s
   );
 }
 
-const STATUS: Record<Exclude<RowState, 'connected' | 'codex-trust'>, string> = {
+const STATUS: Record<Exclude<RowState, 'connected'>, string> = {
   briefed: 'read a brief · waiting for its first handoff',
   waiting: 'waiting for its first handoff',
+  'codex-waiting': 'waiting for its first handoff',
   unverified: 'waiting · adapter not yet verified',
 };
 
@@ -112,7 +113,8 @@ export function AgentRow({
   const meta = agentMeta(agentId);
   const slipId = `${idBase}-why-${agentId}`;
   const whyId = `${slipId}-button`;
-  const trust = state === 'codex-trust';
+  // Codex: a dim reminder of its trust step, never a claim (the dashboard can't see Codex or its trust).
+  const trustHint = state === 'codex-waiting';
   const onKeyDown = (event: KeyboardEvent<HTMLLIElement>) => {
     if (event.key !== 'Escape' || !open) return;
     event.stopPropagation();
@@ -125,30 +127,21 @@ export function AgentRow({
         <span
           className={clsx(
             'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2',
-            activity ? 'border-ok bg-ok text-panel' : trust ? 'border-dashed border-fail' : 'border-rule',
+            activity ? 'border-ok bg-ok text-panel' : 'border-rule',
           )}
           aria-hidden="true"
         >
           {activity && <Check className="h-3 w-3" strokeWidth={3} />}
-          {trust && <span className="font-mono text-[10px] font-bold leading-none text-fail">!</span>}
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold text-ink">{meta.name}</span>
-          <span className={clsx('block font-mono text-[11px]', trust ? 'text-ink-2' : 'truncate text-ink-3')}>
-            {activity ? (
-              `connected · last handoff ${relativeTime(activity.last_active, now)}`
-            ) : trust ? (
-              <>
-                <span className="font-bold text-fail">needs you</span> to trust 3 hooks:
-              </>
-            ) : (
-              STATUS[state === 'connected' ? 'waiting' : state]
-            )}
+          <span className="block truncate font-mono text-[11px] text-ink-3">
+            {activity
+              ? `connected · last handoff ${relativeTime(activity.last_active, now)}`
+              : STATUS[state === 'connected' ? 'waiting' : state]}
           </span>
         </span>
-        <span className="sr-only">
-          {activity ? 'Connected' : trust ? 'Not connected yet: Codex needs you to trust its 3 hooks' : 'Not connected yet'}
-        </span>
+        <span className="sr-only">{activity ? 'Connected' : 'Not connected yet'}</span>
         {!activity && (
           <span className="flex shrink-0 items-center gap-1.5">
             <button
@@ -176,9 +169,9 @@ export function AgentRow({
           </span>
         )}
       </div>
-      {trust && (
-        <p className="-mt-1 pb-2 pl-8 font-mono text-[11px] leading-relaxed text-ink-2">
-          Codex Settings &gt; Hooks &gt; Trust · <code className="font-mono">/hooks</code> in the CLI
+      {trustHint && (
+        <p className="-mt-1 pb-2 pl-8 font-mono text-[11px] leading-relaxed text-ink-3">
+          {CODEX_TRUST_HINT} · <code className="font-mono">/hooks</code> in the CLI
         </p>
       )}
       {!activity && open && <WhySlip id={slipId} agentId={agentId} now={now} serverUrl={api.getApiBaseUrl()} />}
@@ -200,7 +193,7 @@ export function ConnectChecklist({
   agents: AgentActivity[];
   now: Date;
   onDismiss?: () => void;
-  /** The newest trail entries: a pickup or close there ends a row's "needs you" state. */
+  /** The newest trail entries: a pickup or close there ends the Codex row's trust reminder. */
   trail?: TrailItem[];
 }) {
   const titleId = useId();

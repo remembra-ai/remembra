@@ -193,11 +193,11 @@ function rows(html: string): Record<string, string> {
 }
 
 describe('ConnectChecklist rows', () => {
-  it('gives every waiting row a why? button wired to its slip, and Codex its own trust state', () => {
+  it('gives every waiting row a why? button wired to its slip, and Codex a dim trust reminder', () => {
     const html = renderToStaticMarkup(<ConnectChecklist agents={[ACTIVE]} now={NOW} trail={[item()]} />);
     expect(rows(html)).toEqual({
       Claude: 'connected',
-      Codex: 'codex-trust',
+      Codex: 'codex-waiting',
       Cursor: 'unverified',
       Gemini: 'unverified',
       Qwen: 'unverified',
@@ -208,11 +208,15 @@ describe('ConnectChecklist rows', () => {
     for (const [, buttonId, controls] of whys) expect(buttonId).toBe(`${controls}-button`);
     expect(html).toContain('aria-label="Why is Codex waiting?"');
     expect(html).not.toContain('aria-label="Why is Claude Code waiting?"');
-    const t = text(html);
-    const codex = text(/<li data-row-state="codex-trust">(.*?)<\/li>/s.exec(html)?.[1] ?? '');
-    expect(codex).toMatch(/^! Codex needs you to trust 3 hooks: Not connected yet: Codex needs you to trust its 3 hooks why\? command /);
-    expect(codex).toMatch(/Codex Settings > Hooks > Trust · \/hooks in the CLI$/);
-    expect(t.match(/needs you/g)).toHaveLength(2); // the Codex row only (its line and its screen-reader text)
+    // A Claude-Code-only account has no Codex entry either: the dashboard can't tell whether Codex is
+    // installed or its hooks trusted, so the row waits like any other and only reminds, dimly.
+    const row = /<li data-row-state="codex-waiting">(.*?)<\/li>/s.exec(html)?.[1] ?? '';
+    const codex = text(row);
+    expect(codex).toMatch(/^Codex waiting for its first handoff Not connected yet why\? command /);
+    expect(codex).toMatch(/using Codex\? trust its 3 hooks once: Codex Settings > Hooks > Trust · \/hooks in the CLI$/);
+    expect(text(html)).not.toContain('needs you');
+    expect(row).not.toMatch(/text-fail|border-fail|border-dashed/); // no fail colour on an unproven claim
+    expect(row).toContain('border-rule');
   });
 
   it('drops the trust state once a Codex brief or close is on the trail', () => {
@@ -239,7 +243,7 @@ describe('ConnectChecklist rows', () => {
         <AgentRow
           agentId="codex"
           activity={undefined}
-          state="codex-trust"
+          state="codex-waiting"
           now={NOW}
           open
           onToggle={() => {}}

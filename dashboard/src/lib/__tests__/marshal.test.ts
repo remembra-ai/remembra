@@ -218,9 +218,9 @@ describe('rowState: the checklist row before the slip opens', () => {
     projects: ['widget'],
   };
 
-  it('keeps Codex on the trust step until a Codex brief or close arrives', () => {
-    expect(rowState('codex', undefined, undefined)).toBe('codex-trust');
-    expect(rowState('codex', undefined, [trailItem({})])).toBe('codex-trust');
+  it('keeps the Codex trust reminder until a Codex brief or close arrives', () => {
+    expect(rowState('codex', undefined, undefined)).toBe('codex-waiting');
+    expect(rowState('codex', undefined, [trailItem({})])).toBe('codex-waiting');
     // a brief: Codex was served another agent's handoff
     expect(rowState('codex', undefined, [trailItem({ picked_up_by: [pickup('codex')] })])).toBe('briefed');
     // an alias of Codex counts
@@ -236,7 +236,7 @@ describe('rowState: the checklist row before the slip opens', () => {
     expect(rowState('gemini', undefined, [])).toBe('unverified');
   });
 
-  it('matches the verdict: the trust row opens on the trust call', () => {
+  it('matches the verdict: the Codex row opens on the trust call, inferred', () => {
     const v = diagnoseAgent({
       agentId: 'codex',
       keys: [{ name: 'k', created_at: '2026-09-20T00:00:00Z', last_used_at: '2026-09-26T09:00:00Z', active: true }],
@@ -246,6 +246,7 @@ describe('rowState: the checklist row before the slip opens', () => {
     });
     expect(v.code).toBe('CODEX_TRUST_MISSING');
     expect(v.verdict).toBe(CODEX_TRUST_LINE);
+    expect(v.proven).toBe(false); // [??]: the slip can't see Codex; doctor on that machine can
   });
 });
 
