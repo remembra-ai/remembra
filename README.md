@@ -65,10 +65,11 @@ The same repository on a laptop, a server or in a worktree is one project, becau
 | Agent | Session hooks | How it reads and writes handoffs today |
 |---|---|---|
 | Claude Code | **verified** | Hooks: brief at start, close at end, with test results from the transcript |
-| Codex, Cursor, Gemini CLI, Qwen Code, Kimi | unverified | MCP tools (`session_brief`, `close_session`) |
+| Codex | **verified** (codex-cli 0.155.0-alpha.16.4, a prerelease) | Hooks: brief at start, close at end, with commands and test runs from the rollout; trust them once with `/hooks` in Codex |
+| Cursor, Gemini CLI, Qwen Code, Kimi | unverified | MCP tools (`session_brief`, `close_session`) |
 | Any other MCP agent | none | MCP tools |
 
-Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet. `connect` leaves them out unless you add `--include-unverified`. Until they are tested, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent.
+Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease; no stable Codex release has been run yet). The hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet. `connect` leaves them out unless you add `--include-unverified`. Until they are tested, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent.
 
 ## How it compares
 

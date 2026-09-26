@@ -150,8 +150,9 @@ export function ConnectChecklist({
             />
             <p className="mt-1.5 text-xs text-ink-3">
               Want to see every change first? Run <code className="font-mono">remembra-relay connect</code> without{' '}
-              <code className="font-mono">--apply</code>: it is a dry run. It writes hooks for {verifiedNames.join(', ')}, the verified
-              adapter today; for {unverifiedNames.join(', ')}, copy that agent’s command below (it adds{' '}
+              <code className="font-mono">--apply</code>: it is a dry run. It writes hooks for {verifiedNames.join(' and ')}, the verified
+              adapters today (Codex runs them only after you trust them: run <code className="font-mono">/hooks</code> in Codex once);
+              for {unverifiedNames.join(', ')}, copy that agent’s command below (it adds{' '}
               <code className="font-mono">--include-unverified</code>).
             </p>
           </li>

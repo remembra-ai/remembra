@@ -51,10 +51,72 @@ def test_landing_and_relay_guide_use_the_dashboard_package_spec() -> None:
     assert pipx == MCP_INSTALL  # the hint remembra-mcp prints when the extra is missing
 
 
+def _pages() -> list[Path]:
+    """Every page a user copies an install line from: the landing site, the docs, README and CHANGELOG."""
+    return [
+        *sorted((ROOT / "landing").glob("*.html")),
+        *sorted((ROOT / "docs").rglob("*.md")),
+        ROOT / "README.md",
+        ROOT / "CHANGELOG.md",
+    ]
+
+
+def _lines(page: Path) -> list[str]:
+    text = page.read_text()
+    if page.suffix == ".html":
+        # One line per rendered command line: tags stripped, entities decoded.
+        text = re.sub(r"</span>\s*<span class=\"ln\">", "\n", text)
+        text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    return [" ".join(line.split()) for line in text.splitlines()]
+
+
+def test_every_pipx_install_of_remembra_uses_the_dashboard_line() -> None:
+    """A pipx line without --force leaves an old install in place, and without >=0.16 it may install a release
+    that has no remembra-relay. Every copy on every page is the dashboard's line (a local --editable install aside)."""
+    pipx = _dashboard_pipx()
+    seen = 0
+    for page in _pages():
+        for line in _lines(page):
+            command = line.lstrip("$ ").split(" #")[0].strip()
+            if not command.startswith("pipx install") or "remembra" not in command or "--editable" in command:
+                continue
+            seen += 1
+            assert command == pipx, f"{page.relative_to(ROOT)}: {command}"
+    assert seen >= 8  # landing (index, crew, changelog), README, docs home, docs changelog, CHANGELOG, relay guide
+
+
 def test_no_install_command_puts_the_key_on_the_command_line() -> None:
     dashboard = AGENTS_TS.read_text()
     assert "--api-key" not in dashboard
-    for page in ("index.html", "crew.html"):
-        assert "--api-key" not in (ROOT / "landing" / page).read_text(), page
-    guide = (ROOT / "docs" / "guides" / "relay.md").read_text()
-    assert "remembra-install --all --api-key" not in guide
+    for page in _pages():
+        for line in _lines(page):
+            where = f"{page.relative_to(ROOT)}: {line}"
+            assert "--api-key <" not in line and "--api-key &lt;" not in line, where
+            # remembra-install asks at a hidden prompt; only remembra-bridge still takes the key as an argument.
+            if re.search(r"\bremembra-install(?![-\w]).*--api-key(?![-\w])", line):
+                raise AssertionError(where)
+
+
+def test_every_page_names_the_same_verified_agents() -> None:
+    """Claude Code and Codex are the verified adapters (relay/adapters); no page may still call Codex unverified."""
+    from remembra.relay.adapters import REGISTRY
+
+    assert sorted(a.spec.name for a in REGISTRY.values() if a.spec.verified) == ["claude-code", "codex"]
+    dashboard = AGENTS_TS.read_text()
+    verified_ids = re.findall(r"'?([\w-]+)'?: \{[^}]*verified: true", dashboard)
+    assert sorted(verified_ids) == ["claude-code", "codex"]
+    stale = [
+        "hooks for Codex, Cursor",
+        "Codex, Cursor, Gemini CLI, Qwen Code, Kimi | unverified",
+        "Codex, Cursor, Gemini CLI, Qwen Code and Kimi hooks ship unverified",
+        "Codex, Cursor, Gemini CLI, Qwen Code and Kimi shipped unverified",
+        "Claude Code's session hooks are verified. The hooks for Codex",
+    ]
+    for page in _pages():
+        text = " ".join(html.unescape(page.read_text()).split())
+        for phrase in stale:
+            assert phrase not in text, f"{page.relative_to(ROOT)}: {phrase}"
+    for page in ("README.md", "docs/index.md", "docs/reference/changelog.md", "CHANGELOG.md", "landing/changelog.html"):
+        text = " ".join(html.unescape((ROOT / page).read_text()).split())
+        assert "Codex" in text and "codex-cli 0.155.0-alpha.16.4" in text, page
+        assert "Cursor, Gemini CLI, Qwen Code" in text and "unverified" in text, page

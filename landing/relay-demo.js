@@ -61,12 +61,13 @@ var RemembraTrail = window.RemembraTrail = window.RemembraTrail || (function () 
   function money(v) { return "$" + v.toFixed(2); }
   function pct(v) { return Math.round(v) + "%"; }
 
-  /* Only Claude Code's session hooks are verified, and only its transcript
-     is parsed for test results. Every other agent reads the brief and
-     writes its handoff through Remembra's MCP tools, so its facts are
-     declared by the agent and never include captured test counts. */
-  var HOOKED = "Claude Code";
-  function hooked(agent) { return agent === HOOKED; }
+  /* Claude Code's and Codex's session hooks are verified, and only their
+     transcripts (Codex: its rollout) are parsed for test results. Every
+     other agent reads the brief and writes its handoff through Remembra's
+     MCP tools, so its facts are declared by the agent and never include
+     captured test counts. */
+  var HOOKED = ["Claude Code", "OpenAI Codex"];
+  function hooked(agent) { return HOOKED.indexOf(agent) >= 0; }
 
   /* Every number below is internally consistent: times, ids, test counts,
      and which facts a stopped agent can still leave behind. */
@@ -277,8 +278,8 @@ var RemembraTrail = window.RemembraTrail = window.RemembraTrail || (function () 
   /* What the other views need to draw this handoff, worded once here so
      the hero window, its status strip and the constellation say the same
      thing. None of them claims a signature: a handoff records who wrote it and
-     where its facts came from. Only Claude Code's session hook reads its
-     facts from git; an MCP handoff or checkpoint is declared by the agent,
+     where its facts came from. Only a verified session hook (Claude Code,
+     Codex) reads its facts from git; an MCP handoff or checkpoint is declared by the agent,
      so the views mark it self-declared, as the brief does. */
   function agentId(a) { return AGENT_ID[a] || a.toLowerCase().replace(/\s+/g, "-"); }
   function summaryOf(s) {
@@ -436,7 +437,7 @@ var RemembraTrail = window.RemembraTrail = window.RemembraTrail || (function () 
     var closeT = holder.t + 9;
     var pickT = closeT + 2 + (taps % 4);
     var follow = s.followups[s.fi % s.followups.length];
-    /* Only a hook-closed session (Claude Code) captures test results. */
+    /* Only a hook-closed session (Claude Code, Codex) captures test results. */
     var facts = [["ok", "1 commit on " + s.branch + " · pushed"]];
     if (hooked(holder.agent)) facts.push(["ok", s.tests + " tests passed"]);
     facts.push(["todo", "next: " + follow]);

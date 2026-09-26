@@ -17,7 +17,7 @@ export interface AgentMeta {
 
 const KNOWN: Record<string, Omit<AgentMeta, 'id'>> = {
   'claude-code': { name: 'Claude Code', monogram: 'CC', lane: '#9a5530', adapter: 'claude-code', verified: true },
-  codex: { name: 'Codex', monogram: 'CX', lane: '#356b5d', adapter: 'codex' },
+  codex: { name: 'Codex', monogram: 'CX', lane: '#356b5d', adapter: 'codex', verified: true },
   cursor: { name: 'Cursor', monogram: 'CU', lane: '#4a6096', adapter: 'cursor' },
   gemini: { name: 'Gemini CLI', monogram: 'GE', lane: '#3d74a6', adapter: 'gemini' },
   qwen: { name: 'Qwen Code', monogram: 'QW', lane: '#7a55a0', adapter: 'qwen' },

@@ -538,10 +538,13 @@ def test_play_after_a_tap_finishes_that_trail_then_returns_to_the_first_tab() ->
 TEST_RESULT = re.compile(r"\btests? passed\b|\bfailing\b")  # a verdict, not a to-do about tests
 
 
+HOOKED = {"Claude Code", "OpenAI Codex"}  # the verified adapters (relay/adapters: verified=True)
+
+
 def _check_agent_facts(s: dict[str, Any]) -> None:
     closer, reader = s["fromAgent"], s["toAgent"]
     tests = [f["text"] for f in s["facts"] if TEST_RESULT.search(f["text"])]
-    if closer == "Claude Code":
+    if closer in HOOKED:
         assert s["kind"].startswith("Handoff")
         assert "· session hook ·" in s["sig"]
         assert s["src"] == "facts from git and the session transcript"
@@ -550,14 +553,14 @@ def _check_agent_facts(s: dict[str, Any]) -> None:
         assert "via MCP" in s["sig"] and "session hook" not in s["sig"]
         assert s["src"] in ("declared by the agent, not checked", "the agent's own note, not checked")
     brief = s["toLines"][0]
-    if reader == "Claude Code":
+    if reader in HOOKED:
         assert brief.startswith("›brief: "), s
     else:
         assert brief.startswith("›session_brief (MCP): "), s
 
 
 @needs_node
-def test_only_claude_code_handoffs_carry_test_results_and_other_agents_use_mcp() -> None:
+def test_only_hooked_agents_handoffs_carry_test_results_and_other_agents_use_mcp() -> None:
     steps: list[dict[str, Any]] = []
     for key in ORDER:
         steps += [_click(f'[data-scn="{key}"]'), _wait(ANIMATION_MS + 100), SNAP]
@@ -567,7 +570,7 @@ def test_only_claude_code_handoffs_carry_test_results_and_other_agents_use_mcp()
     for s in snaps:
         _check_agent_facts(s)
     closers = {s["fromAgent"] for s in snaps}
-    assert "Claude Code" in closers and len(closers) >= 4  # both branches were exercised
+    assert closers & HOOKED and len(closers - HOOKED) >= 2  # both branches were exercised
     assert any(re.search(r"\btests passed\b", f["text"]) for s in snaps[len(ORDER) :] for f in s["facts"])
 
 
@@ -650,7 +653,7 @@ def test_trail_bus_marks_every_mcp_handoff_self_declared_and_never_signed() -> N
             assert ev["title"] == "checkpoint.saved"
             assert ev["declared"] is True and ev["source"] == "self-declared"
             assert f"checkpoint {ev['id']} (self-declared)" in ev["line"]
-        elif ev["from"]["agent"] == "Claude Code":
+        elif ev["from"]["agent"] in HOOKED:
             assert ev["title"] == "handoff.saved" and ev["via"] == "session hook"
             assert ev["declared"] is False and ev["source"] == "from git"
             assert f"handoff {ev['id']} (facts from git)" in ev["line"]

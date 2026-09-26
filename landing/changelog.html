@@ -99,9 +99,9 @@
           <h2 id="v0-16-0-t">Remembra Relay</h2>
           <p><b>One agent stops, the next one already knows.</b> When a session ends, Remembra Relay saves a handoff built from facts it reads from git. When the next session starts, in any tool or on any machine, that agent gets a short brief of where the work stands. Every handoff stays on the trail.</p>
           <div class="cmd" role="group" aria-label="Install commands">
-            <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install 'remembra[mcp]'</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span><span>--api-key &lt;your-key&gt;</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
+            <code><span class="ln"><span class="ps" aria-hidden="true">$</span><span>pipx install --force 'remembra[mcp]&gt;=0.16'</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-install --all</span></span><span class="ln"><span class="ps" aria-hidden="true">$</span><span>remembra-relay connect</span></span></code>
           </div>
-          <p><code>connect</code> is a dry run that shows what it would change; add <code>--apply</code> to write the hooks. <a href="https://docs.remembra.dev/guides/relay/">Setup guide</a></p>
+          <p><code>remembra-install</code> asks for your key at a hidden prompt, so it never goes on the command line or into your shell history. <code>connect</code> is a dry run that shows what it would change; add <code>--apply</code> to write the hooks. <a href="https://docs.remembra.dev/guides/relay/">Setup guide</a></p>
 
           <p class="k">What is new</p>
           <ul>
@@ -111,7 +111,7 @@
             <li><strong>The trail.</strong> Every handoff and checkpoint in order: <code>remembra-relay trail</code>, and the Trail page in the dashboard.</li>
             <li><strong>One project on every machine.</strong> A repository is identified by its git remote, so the same repo on a laptop, a server or in a worktree is one project.</li>
             <li><strong>Agent-scoped keys.</strong> Give each agent its own key and its handoffs show as key-verified; that key cannot write as another agent. Handoffs closed with a shared key show as self-declared.</li>
-            <li><strong>Agents.</strong> Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi follow each tool's docs but have not been run against it yet, so <code>connect</code> leaves them out unless you add <code>--include-unverified</code>. Any agent that speaks MCP can use the <code>session_brief</code> and <code>close_session</code> tools.</li>
+            <li><strong>Agents.</strong> Claude Code's and Codex's session hooks are verified, Codex with codex-cli 0.155.0-alpha.16.4, a prerelease (run <code>/hooks</code> in Codex once to trust them). The hooks for Cursor, Gemini CLI, Qwen Code and Kimi follow each tool's docs but have not been run against it yet, so <code>connect</code> leaves them out unless you add <code>--include-unverified</code>. Any agent that speaks MCP can use the <code>session_brief</code> and <code>close_session</code> tools.</li>
             <li><strong>The dashboard.</strong> Home shows what changed since your last visit and the command that continues the work; Trail, Agents and Inbox sit beside it.</li>
             <li><strong>Lossless memory.</strong> The exact text a fact came from is kept as a source record, every derived fact points back to it, and a fact that does not match its source is stored flagged as unverified.</li>
             <li><strong>New plans.</strong> Free, Solo, Pro and Team, with <a href="/pricing">smart credits</a> for AI enrichment of new notes. Handoffs, briefs, the inbox, the trail and search never use credits. Billing moves to Paddle, which sells the plans as Merchant of Record.</li>

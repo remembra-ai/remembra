@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { PIPX_INSTALL, UNINSTALL_STEPS, oneLineInstall, saveKeyCommand } from '../agents';
+import { CONNECTABLE_AGENTS, PIPX_INSTALL, UNINSTALL_STEPS, agentMeta, oneLineInstall, saveKeyCommand } from '../agents';
 
 describe('oneLineInstall', () => {
   it('chains install, key save and connect --apply, with the key asked for at a prompt', () => {
@@ -32,5 +32,13 @@ describe('uninstall steps', () => {
     expect(commands.indexOf('remembra-relay disconnect --apply')).toBe(0);
     expect(commands.indexOf('remembra-install --remove --all --apply')).toBe(1);
     expect(commands.indexOf('pipx uninstall remembra')).toBe(2);
+  });
+});
+
+describe('verified adapters', () => {
+  it('match the relay: Claude Code and Codex are verified (relay/adapters verified=True), the rest are not', () => {
+    // tests/test_install_commands.py checks the same list against the Python adapters.
+    expect(CONNECTABLE_AGENTS.filter((id) => agentMeta(id).verified)).toEqual(['claude-code', 'codex']);
+    expect(CONNECTABLE_AGENTS.filter((id) => !agentMeta(id).verified)).toEqual(['cursor', 'gemini', 'qwen', 'kimi']);
   });
 });

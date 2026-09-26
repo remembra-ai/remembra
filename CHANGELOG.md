@@ -15,17 +15,18 @@ own summary is checked against them. When the next session starts, in any tool o
 gets a short brief. Every handoff stays on the trail.
 
 ```bash
-pipx install 'remembra[mcp]'
-remembra-install --all --api-key <your-key>
-remembra-relay connect          # dry run; add --apply to write the hooks
+pipx install --force 'remembra[mcp]>=0.16'
+remembra-install --all            # asks for the key at a hidden prompt
+remembra-relay connect            # dry run; add --apply to write the hooks
 ```
 
 - **Handoff:** done / not done / failing / next step, from git and the Claude Code transcript; the transcript
   never leaves the machine. **Brief:** about 1,500 tokens, everything recorded wrapped as untrusted data.
   **Trail:** every handoff and checkpoint in order (`remembra-relay trail`, the dashboard's Trail page).
 - **Agent-scoped keys:** a handoff closed with one is key-verified; that key cannot write as another agent.
-- **Adapters:** Claude Code verified. Codex, Cursor, Gemini CLI, Qwen Code and Kimi shipped unverified
-  (left out of `connect` unless `--include-unverified`); any MCP agent can use `session_brief` and `close_session`.
+- **Adapters:** Claude Code and Codex (codex-cli 0.155.0-alpha.16.4, a prerelease) verified. Cursor, Gemini CLI,
+  Qwen Code and Kimi shipped unverified (left out of `connect` unless `--include-unverified`); any MCP agent can
+  use `session_brief` and `close_session`.
 - **Existing users:** subscribers from before this release keep their plan and price on a grandfathered tier
   (with a monthly AI ceiling; lower note caps only after notice); a repository the server has not seen joins
   your configured project; briefs wrap recorded text as untrusted; `POST /memories` drops the relay-only

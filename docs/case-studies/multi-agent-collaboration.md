@@ -155,8 +155,8 @@ Based on this session, we're shipping:
 Connect your agents to shared memory:
 
 ```bash
-pipx install 'remembra[mcp]'
-remembra-install --all --api-key YOUR_KEY --project my-project
+pipx install --force 'remembra[mcp]>=0.16'
+remembra-install --all --project my-project   # asks for your key at a hidden prompt
 ```
 
 See [Multi-Agent Setup Guide](../guides/multi-agent-shared-memory.md) for details.

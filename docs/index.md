@@ -10,21 +10,23 @@ When the next session starts, in any tool, on any machine, that agent gets a **b
 where the work stands, led by the last handoff. Every handoff stays on the **trail**.
 
 ```bash
-pipx install 'remembra[mcp]'
-remembra-install --all --api-key <your-key>
+pipx install --force 'remembra[mcp]>=0.16'
+remembra-install --all
 remembra-relay connect
 ```
 
 Get a free key at [app.remembra.dev](https://app.remembra.dev/signup), or [host the server yourself](getting-started/docker.md).
-`connect` is a dry run that shows what it would change; add `--apply` to write the hooks. remembra 0.16.0 is the
+`remembra-install` asks for the key at a hidden prompt, so it never goes on the command line or into your shell
+history. `connect` is a dry run that shows what it would change; add `--apply` to write the hooks. remembra 0.16.0 is the
 first release with `remembra-relay`.
 
 - [Relay guide](guides/relay.md): how handoffs, briefs and the trail work, and which agents are verified.
 - [Agent setup](getting-started/agent-setup.md): connect Claude Code, Codex, Cursor and other agents.
 - [Remembra and other handoff tools](comparisons/handoff-tools.md): how it compares with claude-mem, agentmemory and local tools.
 
-Claude Code's session hooks are verified. The hooks for Codex, Cursor, Gemini CLI, Qwen Code and Kimi follow
-each tool's docs but have not been run against it yet; those agents use the MCP tools `session_brief` and
+Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease;
+run `/hooks` in Codex once to trust them). The hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified:
+they follow each tool's docs but have not been run against it yet; those agents use the MCP tools `session_brief` and
 `close_session` until they are.
 
 ---
