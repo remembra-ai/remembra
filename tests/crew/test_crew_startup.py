@@ -81,7 +81,14 @@ async def test_lifespan_starts_hooks_wires_bus_to_websocket_and_stops_cleanly(tm
     app = make_app(tmp_path)
     with TestClient(app) as client:
         rt = app.state.crew_runtime
-        assert [h.name for h in rt.started] == ["crew.db", "crew.bus", "crew.tailer", "crew.retention", "crew.outbox"]
+        assert [h.name for h in rt.started] == [
+            "crew.db",
+            "crew.bus",
+            "crew.tailer",
+            "crew.retention",
+            "crew.outbox",
+            "crew.claims",
+        ]
         assert rt.tailer is None and "crew-retention" in app.state.tasks.names()
         assert "crew-event-tailer" not in app.state.tasks.names()
         retention_task = rt.extras["task:crew-retention"]
