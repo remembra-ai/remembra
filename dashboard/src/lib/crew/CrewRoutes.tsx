@@ -1,114 +1,28 @@
 // Route outlet for the crew tabs (#/crews and #/crew?project=…, §9.1).
 //
-// WP-12 owns the routes and the data layer; the designed screens (Site Board,
-// Mission Control with lanes and pickup slots, Zone Map, Task Board, Channel,
-// Feed, Policy) are WP-13's and plug in here per screen. Until they land, this
-// renders a plain, fully live view of the same data so every crew route works
-// end to end: the crew list with live counts, and per crew the sessions with
-// presence, who holds each zone, reserved batons, Needs-you and the latest
-// moments. Untrusted text (titles, messages) is rendered as plain text only.
+// WP-12 owns the routes and the data layer; the designed screens are WP-13's
+// and plug in here per screen: the Site Board (#/crews) and Mission Control
+// (the track view) are WP-13a's. Views whose screens have not landed yet
+// render a plain, fully live view of the same data so every crew route works
+// end to end: per crew the sessions with presence, who holds each zone,
+// reserved batons, Needs-you and the latest moments. Untrusted text (titles,
+// messages) is rendered as plain text only.
 
 import { HardHat, RadioTower } from 'lucide-react';
 import { useCrewSocket } from '../../hooks/useCrewSocket';
 import { useNow } from '../../hooks/useResource';
 import { absoluteTime, relativeTime } from '../time';
-import { Card, CardHeader, CopyCommand, ErrorNotice, Pill, PulseDot, StaleNotice, TrailSkeleton } from '../../components/relay/ui';
-import { useCrewForProject, useCrewList } from './hooks';
-import { crewHref, inboxHref, useCrewRoute } from './routes';
+import { Card, CardHeader, CopyCommand, ErrorNotice, Pill, PulseDot, TrailSkeleton } from '../../components/relay/ui';
+import { MissionControl } from '../../pages/crew/MissionControl';
+import { SiteBoard } from '../../pages/crew/SiteBoard';
+import { useCrewForProject } from './hooks';
+import { inboxHref, useCrewRoute } from './routes';
 import { describeHolder, liveSessions, presenceText, sessionLabel, sortedZones, taskRef } from './selectors';
 import type { ConnectionStatus } from './socket';
 import type { CrewStreamStatus } from './store';
-import type { CrewListItem, CrewState } from './types';
+import type { CrewState } from './types';
 
 const INSTALL = 'pipx install remembra && remembra-crew connect --crew';
-
-function NoCrews() {
-  return (
-    <Card className="p-4 sm:p-5">
-      <p className="rr-eyebrow">No crews yet</p>
-      <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm text-ink">
-        <li>
-          Connect this machine (you will see every change before it is written):
-          <CopyCommand className="mt-2" command={INSTALL} label="Crew install command" />
-        </li>
-        <li>Open the repo in any connected agent; it joins automatically.</li>
-        <li>Name your zones so agents know what not to touch.</li>
-      </ol>
-    </Card>
-  );
-}
-
-function CrewCard({ item, now }: { item: CrewListItem; now: Date }) {
-  const titleId = `crew-${item.crew.id}`;
-  return (
-    <Card as="article" labelledBy={titleId} className="flex flex-col p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <h2 id={titleId} className="font-display truncate text-lg font-bold text-ink">
-            <a href={crewHref(item.crew.project_id)} className="hover:underline">
-              {item.crew.name || item.crew.project_id}
-            </a>
-          </h2>
-          <p className="truncate font-mono text-[11px] text-ink-3">{item.crew.project_id}</p>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
-          <Pill tone={item.live > 0 ? 'ok' : 'neutral'}>{item.live} live</Pill>
-          {item.needs_you > 0 && (
-            <a href={inboxHref('needs-you', item.crew.project_id)}>
-              <Pill tone="signal">
-                {item.needs_you} need{item.needs_you === 1 ? 's' : ''} you
-              </Pill>
-            </a>
-          )}
-        </div>
-      </div>
-      <p className="mt-2 font-mono text-[11px] text-ink-3" title={absoluteTime(item.last_event_at)}>
-        {item.last_event_at ? `last move ${relativeTime(item.last_event_at, now)}` : 'no events yet'} · {item.moments_24h} moments today
-      </p>
-      {item.phases.length > 0 && (
-        <ul className="mt-3 space-y-1 font-mono text-[12px] text-ink-2">
-          {item.phases.map((p) => (
-            <li key={p.phase ?? ''} className="flex justify-between gap-2">
-              <span className="truncate">{p.phase ?? 'Tasks'}</span>
-              <span className="tabular shrink-0">
-                {p.done}/{p.total}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-      {item.live_sessions.length > 0 && (
-        <p className="mt-3 flex flex-wrap gap-1.5">
-          {item.live_sessions.map((s) => (
-            <Pill key={s.id} title={sessionLabel(s)}>
-              {s.callsign} · {presenceText(s)}
-            </Pill>
-          ))}
-        </p>
-      )}
-    </Card>
-  );
-}
-
-function CrewList() {
-  const list = useCrewList();
-  const now = useNow();
-  if (list.status === 'loading') return <TrailSkeleton rows={3} />;
-  if (list.status === 'error' && list.items.length === 0) {
-    return <ErrorNotice error={list.error} what="your crews" onRetry={list.refresh} />;
-  }
-  if (list.items.length === 0) return <NoCrews />;
-  return (
-    <div className="space-y-3">
-      {list.error && <StaleNotice error={list.error} what="your crews" />}
-      <div className="grid gap-3 lg:grid-cols-2">
-        {list.items.map((item) => (
-          <CrewCard key={item.crew.id} item={item} now={now} />
-        ))}
-      </div>
-    </div>
-  );
-}
 
 function connectionText(status: CrewStreamStatus, connection: ConnectionStatus): { text: string; live: boolean } {
   if (status === 'live') return { text: 'live', live: true };
@@ -269,6 +183,8 @@ function CrewScreen() {
       </Card>
     );
   }
+  // WP-13a: the track is Mission Control; the other views plug in here as their WPs land.
+  if (route?.screen === 'track') return <MissionControl crewId={lookup.crewId} project={project} />;
   return <CrewLive crewId={lookup.crewId} project={project} />;
 }
 
@@ -278,7 +194,7 @@ export function CrewRoutes({ tab }: { tab: 'crews' | 'crew' }) {
       <h1 className="sr-only">
         <HardHat aria-hidden="true" /> {tab === 'crews' ? 'Crews' : 'Crew'}
       </h1>
-      {tab === 'crews' ? <CrewList /> : <CrewScreen />}
+      {tab === 'crews' ? <SiteBoard /> : <CrewScreen />}
     </section>
   );
 }
