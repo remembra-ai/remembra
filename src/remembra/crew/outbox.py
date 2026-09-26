@@ -322,6 +322,7 @@ def relay_handoff_handler(
             agent_verified=agent_verified,
             screen=screen,
             scrub=scrub,
+            server_facts=True,  # queued by the server itself: keeps facts_source "server-inferred"
         )
         handoff_id = result.get("handoff_id") if isinstance(result, dict) else None
         if not handoff_id:
