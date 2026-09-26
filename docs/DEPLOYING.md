@@ -86,6 +86,23 @@ docker cp "$CTR:/data/remembra-manual-$STAMP.db" "/root/remembra-manual-$STAMP.d
 
 Expected: the path, `ok` and the memory count.
 
+## Checking the migrations before a deploy
+
+From a checkout with the deployed commit and the release candidate available,
+this boots the real app three ways on throw-away SQLite files (no network, no
+keys): on a fresh database, on a database created by the deployed commit and
+filled with rows (it checks the pre-migration backup, that no row, column or
+value is lost apart from the intended legacy-tier rename, and that a second
+boot changes nothing), and with Crew mode's version 5 applied after 6 to 8:
+
+```bash
+python scripts/maintenance/verify_release_migrations.py --prod <deployed-commit> --this HEAD --crew feat/crew
+```
+
+It prints a JSON report and exits 1 on any failure. Main-DB migration versions
+in this release: 4 (relay), 6 (inbox trust score), 7 (relay pickups), 8
+(account erasure and Founding holds); 5 is reserved for Crew mode.
+
 ## Automatic pre-migration backup
 
 Every new build copies the database **before** any schema migration runs, with
