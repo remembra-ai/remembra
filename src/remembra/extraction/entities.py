@@ -315,6 +315,8 @@ class EntityExtractor:
         # result.relationships = [Relationship(subject="John", predicate="WORKS_AT", ...)]
     """
 
+    provider = "openai"
+
     def __init__(
         self,
         model: str = "gpt-4o-mini",
@@ -470,6 +472,8 @@ def _parse_extraction_json(raw_text: str) -> ExtractionResult:
 class AnthropicEntityExtractor:
     """Entity extraction using Anthropic Claude."""
 
+    provider = "anthropic"
+
     def __init__(self, model: str = "claude-sonnet-4-5", api_key: str | None = None) -> None:
         import anthropic
 
@@ -546,6 +550,8 @@ class AnthropicEntityExtractor:
 
 class OllamaEntityExtractor:
     """Entity extraction using local Ollama models."""
+
+    provider = "ollama"
 
     def __init__(
         self,
@@ -635,6 +641,16 @@ _PROVIDER_DEFAULT_MODELS = {
     "ollama": "llama3.1",
 }
 _OPENAI_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt", "text-embedding")
+
+
+def is_openai_model(model: str | None) -> bool:
+    """True when ``model`` names an OpenAI model (including ``ft:`` fine-tunes).
+
+    Fact extraction, consolidation, entity matching and conversation ingest
+    send ``extraction_model`` to the OpenAI API, so anything else fails there.
+    """
+    name = (model or "").strip().lower()
+    return name.startswith((*_OPENAI_PREFIXES, "ft:"))
 
 
 def _model_fits_provider(model: str, provider: str) -> bool:
