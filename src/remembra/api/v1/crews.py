@@ -445,6 +445,8 @@ async def submit_crew_events(request: Request, access: CrewAccess = Depends(crew
     except ValueError:
         raise crew_error(422, "invalid_body", "The body is not valid JSON.") from None
     items = body.get("events") if isinstance(body, dict) else None
+    if not isinstance(items, list):
+        raise crew_error(422, "invalid_events", "$.events: must be a list")
     try:
         results = await ingest_client_events(events, crew_id=access.crew_id, actor=session_actor(session), items=items)
     except EventValidationError as e:

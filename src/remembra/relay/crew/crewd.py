@@ -1980,6 +1980,7 @@ class Crewd:
             facts = await asyncio.to_thread(self.closing_facts, sess)
             if baton is not None:
                 facts["baton_ref"] = baton.ref
+                facts["uncommitted_files"] = baton.dirty_files[:50]  # as a stall does: the partial report lists them
             body: dict[str, Any] = {
                 "reason": reason,
                 "facts": outbound("checkpoint", facts, repo_root=top, home=str(self.layout.home)),

@@ -166,3 +166,56 @@ async def test_stall_reports_session_commits_and_adopt_resolves_the_baton_items(
         assert S.DATA_OPEN  # contract import kept honest (the brief block is covered by the model-free E2E)
         assert B.is_clean(str(wt_a)) is False  # A's own checkout is untouched by the adopt
         assert os.path.exists(wt_a / "src/app/pos/tender.ts")
+
+
+async def test_chain_verify_is_consistent_while_writers_append(tmp_path):
+    """The nightly verify runs while agents work (found by the WP-15 load run): events committed during the
+    scan are neither reported "missing" nor chased for ever; a forged event beyond the head is still caught."""
+    import asyncio
+
+    from remembra.crew.events import Actor, verify_crew_chain
+
+    async with crew_server(tmp_path) as srv:
+        repo = make_repo(tmp_path / "repo")
+        layout = Layout(tmp_path / "home")
+        d = new_crewd(layout, srv, alive=set())
+        a = await d.join(peer(os.getpid()), _join("sess-a", repo, os.getpid()))
+        crew_id = str(a["crew_id"])
+        actor = Actor.system()
+        for i in range(400):
+            await srv.events.emit(
+                crew_id=crew_id,
+                type="crew.shift_started",
+                actor=actor,
+                payload={"shift_id": f"s{i}", "live_sessions": 1},
+                summary="x",
+            )
+        stop = asyncio.Event()
+
+        async def writer() -> None:
+            n = 0
+            while not stop.is_set():
+                n += 1
+                await srv.events.emit(
+                    crew_id=crew_id,
+                    type="crew.shift_ended",
+                    actor=actor,
+                    payload={"shift_id": f"w{n}", "duration_s": 1},
+                    summary="y",
+                )
+                await asyncio.sleep(0)
+
+        task = asyncio.ensure_future(writer())
+        try:
+            for _ in range(5):
+                # many pages, many chances to race; unbounded, the scan chased the writer's tail for ever
+                report = await asyncio.wait_for(verify_crew_chain(srv.crew_db.conn, crew_id, batch=50), timeout=30)
+                assert report.ok, report.errors
+        finally:
+            stop.set()
+            await task
+        # a forged event beyond the head is still caught
+        await srv.crew_db.conn.execute("UPDATE crews SET last_seq = last_seq - 1 WHERE id = ?", (crew_id,))
+        await srv.crew_db.conn.commit()
+        report = await verify_crew_chain(srv.crew_db.conn, crew_id)
+        assert any("beyond crews.last_seq" in e for e in report.errors), report.errors
