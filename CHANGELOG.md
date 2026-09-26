@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PII redaction** no longer replaces the project number of a Google OAuth client id (and UUIDs or
   similar machine identifiers) with `[REDACTED_BANK_ACCOUNT]`. Account numbers written with a suffix
   (`123456789012-checking`, `...-SAV`, `ACCT-...-01`) are still redacted.
+- **Public copy says what the code does.** The Founding 100 price holds while the subscription stays active,
+  and 14 days after it ends (as the Terms say), with no lifetime promise. Pages no longer claim that every agent
+  or tool is covered: the session hooks are verified for Claude Code and Codex (a prerelease), and any MCP agent
+  can call `session_brief` and `close_session`. Transcript facts are read from Codex rollouts as well as Claude
+  Code transcripts, and the pages say so. The Claude and ChatGPT connector and the hosted remote MCP are marked
+  as coming (the connector is off at api.remembra.dev). The Team plan lists what the teams API enforces. The
+  PyPI summary describes Remembra Relay, and the MCP Registry text names the agent its handoffs are recorded
+  under. `tests/test_site_truth_polish.py` scans every public file for these claims.
 - **The install line connects.** On remembra.dev, the README and the docs, the copyable install ended in a bare
   `remembra-relay connect`, a dry run that writes nothing, so a new user following it stayed unconnected. Every
   block now asks for the free key first and ends in `remembra-relay connect --apply`; the dashboard's empty
