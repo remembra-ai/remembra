@@ -53,7 +53,9 @@ export function saveKeyCommand(serverUrl: string): string {
 /**
  * The whole first run on one line: install, save the key (asked for at a
  * hidden prompt, never on the command line) and add the MCP server to the
- * agents it finds, then write the hooks.
+ * agents it finds, then write the hooks. remembra-install exits 3 when the
+ * user answers no (or nothing was written), so `&&` stops before
+ * `connect --apply` writes any hook.
  */
 export function oneLineInstall(serverUrl: string): string {
   return `${PIPX_INSTALL} && ${saveKeyCommand(serverUrl)} && remembra-relay connect --apply`;

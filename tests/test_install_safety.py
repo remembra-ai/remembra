@@ -23,6 +23,7 @@ from pathlib import Path
 import pytest
 
 from remembra.tools import doctor
+from remembra.tools.agents import EXIT_NOT_WRITTEN
 from remembra.tools.keyinput import ARGV_KEY_WARNING, mask_key, mask_text, resolve_api_key
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
@@ -85,7 +86,7 @@ def test_all_without_apply_changes_no_file_and_masks_the_key(home: Path) -> None
     before = _snapshot(home)
     time.sleep(0.02)
     result = install(home, "--all", env={"REMEMBRA_API_KEY": KEY})
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == EXIT_NOT_WRITTEN, result.stderr  # non-zero: a chained `&& connect --apply` stops
     assert _snapshot(home) == before  # no file changed, none created (not even ~/.remembra/credentials)
     out = result.stdout
     assert KEY not in out + result.stderr
@@ -232,13 +233,83 @@ def test_interactive_prompt_reads_the_key_hidden_and_asks_before_writing(home: P
     assert data["mcpServers"]["remembra"]["env"]["REMEMBRA_API_KEY"] == KEY
 
 
+def test_the_key_is_saved_even_when_no_agent_config_is_detected(tmp_path: Path) -> None:
+    """R-22: a Qwen-only (or Kimi-only) machine still gets ~/.remembra/credentials for the relay hooks."""
+    qwen_only = tmp_path / "qwen-only"
+    (qwen_only / ".qwen").mkdir(parents=True)
+    creds = qwen_only / ".remembra" / "credentials"
+
+    dry = install(qwen_only, "--all", env={"REMEMBRA_API_KEY": KEY})
+    assert dry.returncode == EXIT_NOT_WRITTEN and not creds.exists()
+    assert "No agent MCP config found" in dry.stdout and "save the key where remembra-relay reads it" in dry.stdout
+    assert KEY not in dry.stdout + dry.stderr
+
+    applied = install(qwen_only, "--all", "--apply", env={"REMEMBRA_API_KEY": KEY})
+    assert applied.returncode == 0, applied.stderr
+    assert _mode(creds) == 0o600 and json.loads(creds.read_text())["api_key"] == KEY
+    assert "Restart your agents" not in applied.stdout and "Next: remembra-relay connect" in applied.stdout
+    assert sorted(p.name for p in qwen_only.iterdir()) == [".qwen", ".remembra"]  # no agent config was created
+
+    again = install(qwen_only, "--all", "--apply", env={"REMEMBRA_API_KEY": KEY})
+    assert again.returncode == 0 and "Nothing to change." in again.stdout
+    removed = install(qwen_only, "--remove", "--all", "--apply")
+    assert removed.returncode == 0 and "no MCP entry to remove" in removed.stdout and creds.exists()
+
+
+def test_a_run_that_writes_nothing_stops_a_chained_command(home: Path, tmp_path: Path) -> None:
+    """The dashboard one-liner chains `remembra-install --all && remembra-relay connect --apply`."""
+    marker = tmp_path / "connect-ran"
+    chained = subprocess.run(
+        ["sh", "-c", f'"{sys.executable}" -m remembra.tools.agents --all && touch "{marker}"'],
+        capture_output=True,
+        text=True,
+        env={"PATH": os.environ.get("PATH", ""), "HOME": str(home), "PYTHONPATH": SRC, "REMEMBRA_API_KEY": KEY},
+        stdin=subprocess.DEVNULL,
+        timeout=60,
+    )
+    assert chained.returncode == EXIT_NOT_WRITTEN and not marker.exists()
+    assert install(home, "--all", "--apply", env={"REMEMBRA_API_KEY": KEY}).returncode == 0
+    nothing_to_do = install(home, "--all", env={"REMEMBRA_API_KEY": KEY})
+    assert nothing_to_do.returncode == 0 and "Nothing to change." in nothing_to_do.stdout
+
+
+def test_answering_no_at_the_prompt_writes_nothing_and_exits_3(home: Path) -> None:
+    before = _snapshot(home)
+    master, slave = pty.openpty()
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home), "PYTHONPATH": SRC, "REMEMBRA_API_KEY": KEY}
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "remembra.tools.agents", "--all"],
+        stdin=slave,
+        stdout=slave,
+        stderr=slave,
+        env=env,
+        cwd=str(home),
+        start_new_session=True,
+    )
+    os.close(slave)
+    seen = b""
+    try:
+        deadline = time.time() + 20
+        while b"[y/N]" not in seen:
+            assert time.time() < deadline, seen.decode(errors="replace")
+            if select.select([master], [], [], 0.2)[0]:
+                seen += os.read(master, 4096)
+        os.write(master, b"n\n")
+        assert proc.wait(timeout=30) == EXIT_NOT_WRITTEN
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        os.close(master)
+    assert _snapshot(home) == before
+
+
 def test_remove_restores_the_configs_and_is_a_dry_run_first(home: Path) -> None:
     originals = {agent: (home / rel).read_text() for agent, rel in PATHS.items() if (home / rel).exists()}
     install(home, "--all", "--apply", env={"REMEMBRA_API_KEY": KEY})
     installed = _snapshot(home)
     time.sleep(0.02)
     dry = install(home, "--remove", "--all", env={"REMEMBRA_API_KEY": ""})
-    assert dry.returncode == 0 and "remove the remembra MCP server" in dry.stdout
+    assert dry.returncode == EXIT_NOT_WRITTEN and "remove the remembra MCP server" in dry.stdout
     assert KEY not in dry.stdout
     assert _snapshot(home) == installed
 

@@ -53,7 +53,10 @@ remembra-install --all --url <your server URL>   # asks for the key, shows the c
 would keep it. It reads `REMEMBRA_API_KEY`, asks at a hidden prompt on a terminal (Enter keeps the key
 already saved), takes it piped with `--api-key-stdin`, or uses `~/.remembra/credentials`. `--api-key`
 still works for old scripts but prints a warning. Without `--apply` (or a "y" at its question) it is a
-dry run: it prints each change as a diff with keys masked and writes nothing. When it writes, it keeps a
+dry run: it prints each change as a diff with keys masked, writes nothing and exits 3, so a command chained
+after it with `&&` does not run. It exits 0 when it wrote everything or nothing needed changing. It saves the
+key to `~/.remembra/credentials` even on a machine where it finds no agent config to add the MCP server to
+(Qwen Code or Kimi only, for example). When it writes, it keeps a
 backup of every file it changes (`*.bak-remembra-<time>`, owner-only), writes atomically and leaves each
 file owner-only (0600), because every one of them now holds your key. Each agent's entry gets its own
 `REMEMBRA_AGENT_ID` (`claude-code`, `codex`, `cursor`, ...). `remembra-doctor all` warns about any agent

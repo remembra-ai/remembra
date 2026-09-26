@@ -56,6 +56,12 @@ CREDENTIALS_FILE = REMEMBRA_HOME / "credentials"
 DEFAULT_REMEMBRA_URL = "https://api.remembra.dev"
 DEFAULT_REMEMBRA_COMMAND = "remembra-mcp"
 
+# Exit code when there were changes to make but none was written (a dry run,
+# or "no" at the prompt), so `remembra-install --all && remembra-relay connect
+# --apply` stops there. 0 means everything is already in place or was written.
+EXIT_NOT_WRITTEN = 3
+MCP_BY_HAND_URL = "https://docs.remembra.dev/guides/relay/#mcp-by-hand"
+
 
 def write_credentials(
     api_key: str,
@@ -428,7 +434,12 @@ https://docs.remembra.dev/guides/relay/#mcp-by-hand
 
 The API key is read from REMEMBRA_API_KEY, a hidden prompt (on a terminal),
 --api-key-stdin, or ~/.remembra/credentials. Never type it on the command
-line: shell history keeps it.
+line: shell history keeps it. The key is saved to ~/.remembra/credentials
+(where remembra-relay reads it) even when no agent is detected.
+
+Exit codes: 0 written, or nothing to change; 1 a config could not be read or
+written; 2 bad arguments or no key; 3 changes shown but not written (no
+--apply, or "no" at the prompt), so a command chained after && does not run.
 
 Examples:
   remembra-install --all                          show the changes, then ask
@@ -496,7 +507,7 @@ def _write_all(changes: list[tuple[str, Change]]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """CLI entry point for agent installation. Returns the exit code (0 also for a dry run)."""
+    """CLI entry point for agent installation. Returns the exit code (``EXIT_NOT_WRITTEN`` for a dry run)."""
     parser = build_parser()
     args = parser.parse_args(argv)
 
@@ -511,9 +522,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     agents = detect_agents() if args.all else [args.agent]
-    if not agents:
-        print("No agents detected. Install an agent first, or name one with --agent.")
+    if not agents and args.remove:
+        print("No agents detected: no MCP entry to remove.")
         return 0
+    if not agents:
+        # Still save the key: remembra-relay's hooks (Qwen Code, Kimi, ...) read it from ~/.remembra/credentials.
+        print(
+            "No agent MCP config found (Claude Desktop, Claude Code, Codex, Cursor, Gemini CLI, Windsurf)."
+            f" This saves only the key (~/.remembra/credentials). For other agents add remembra-mcp by hand: {MCP_BY_HAND_URL}"
+        )
 
     planned: list[tuple[str, Change]] = []
     problems = 0
@@ -571,7 +588,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1 if problems else 0
     if not args.apply and not _confirm(f"\nWrite {len(todo) + len(loose)} file(s)? Backups are kept. [y/N] "):
         print("\nDry run: nothing was written. Re-run with --apply to write (a backup of each file is kept).")
-        return 1 if problems else 0
+        return 1 if problems else EXIT_NOT_WRITTEN
 
     failed = _write_all(todo)
     for agent, change in loose:
@@ -588,7 +605,8 @@ def main(argv: list[str] | None = None) -> int:
             " in the dashboard (API keys)."
         )
     else:
-        print("\nRestart your agents to load the new MCP config. Next: remembra-relay connect")
+        restart = "Restart your agents to load the new MCP config. " if agents else ""
+        print(f"\n{restart}Next: remembra-relay connect")
     return 1 if (failed or problems) else 0
 
 

@@ -168,7 +168,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (relay launch)
 - **`remembra-install` is a dry run by default**: it prints each change as a diff with keys masked and
-  writes with `--apply` (or a "y" on a terminal). It reads the key from `REMEMBRA_API_KEY`, a hidden prompt,
+  writes with `--apply` (or a "y" on a terminal). A run that writes nothing exits 3, so the dashboard's
+  `remembra-install ... && remembra-relay connect --apply` stops when you answer no. The key is saved to
+  `~/.remembra/credentials` even when no agent config is found. It reads the key from `REMEMBRA_API_KEY`, a hidden prompt,
   `--api-key-stdin` or `~/.remembra/credentials`; `--api-key` still works but warns (shell history). Writes
   are atomic, keep a backup and leave the file 0600; each agent's entry gets its own `REMEMBRA_AGENT_ID`.
   `remembra-install-codex` no longer requires `--api-key`. `remembra-doctor` warns about a key file other
