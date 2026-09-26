@@ -24,6 +24,15 @@ If you haven't enabled MCP yet:
 
 ## Setup
 
+!!! warning "Unverified: check where your Windsurf reads MCP servers"
+    Windsurf's docs, now served from [docs.devin.ai](https://docs.devin.ai/windsurf/plugins/cascade/mcp), name two
+    files. The Windsurf Editor reads `~/.codeium/windsurf/mcp_config.json` (`~/.codeium/windsurf-next/` for
+    Windsurf Next) through its MCP discovery: enable the `windsurf` source under `chat.mcp.discovery.enabled` in
+    Settings. Cascade's **Open MCP config file** action opens `~/.config/devin/mcp_config.json`
+    (`%AppData%\devin\mcp_config.json` on Windows). This guide and `remembra-install --agent windsurf` use the
+    first; neither has been run against Windsurf by us. If Cascade does not list `remembra` after a restart, add the
+    same block to the second file. `remembra-install --all` does not write Windsurf.
+
 Open your Windsurf MCP config file:
 
 === "macOS"

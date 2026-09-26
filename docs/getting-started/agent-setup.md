@@ -14,10 +14,10 @@ remembra-install --all
 
 This command:
 
-1. **Detects** all installed AI agents (Claude, Codex, Cursor, Gemini, Windsurf)
+1. **Detects** the installed AI agents (Claude Desktop, Claude Code, Codex, Cursor, Gemini CLI)
 2. **Configures** MCP settings for each agent
 3. **Stores** credentials securely in `~/.remembra/credentials` (chmod 600)
-4. **Saves your API key** so future installs don't need `--api-key`
+4. **Saves your API key and server** so a later run keeps them (it never switches a self-hosted server to Remembra Cloud unless you pass `--url`)
 
 !!! success "Zero manual config"
     No JSON editing. No copy-pasting. Just run and restart your agents.
@@ -36,7 +36,7 @@ This command:
 | Codex CLI | `~/.codex/config.toml` | ✅ Auto-configured |
 | Gemini | `~/.gemini/settings.json` | ✅ Auto-configured |
 | Cursor | `~/.cursor/mcp.json` | ✅ Auto-configured |
-| Windsurf | `~/.windsurf/mcp_config.json` | ✅ Auto-configured |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | ⚠️ Unverified: not written by `--all`; `--agent windsurf` writes it (see below) |
 
 ---
 
@@ -53,8 +53,15 @@ remembra-install --agent claude-code
 remembra-install --agent codex
 remembra-install --agent cursor
 remembra-install --agent gemini
-remembra-install --agent windsurf
+remembra-install --agent windsurf   # unverified, see the note below
 ```
+
+!!! warning "Windsurf is unverified"
+    Windsurf's docs (now at [docs.devin.ai](https://docs.devin.ai/windsurf/plugins/cascade/mcp)) name two files:
+    `~/.codeium/windsurf/mcp_config.json`, which the Windsurf Editor reads through its MCP discovery (enable
+    the `windsurf` source under `chat.mcp.discovery.enabled` in Settings), and `~/.config/devin/mcp_config.json`,
+    which Cascade's **Open MCP config file** opens. `remembra-install --agent windsurf` writes the first; it has
+    not been run against Windsurf. If Cascade does not list `remembra`, add the same block to the second file.
 
 ### Detect Without Installing
 ```bash
@@ -144,11 +151,12 @@ remembra-install --all --url http://localhost:8787
 Some agents run in sandboxes that block network access. Use the **local bridge**:
 
 ```bash
-# Terminal 1: Start the bridge (keeps running)
-remembra-bridge --url https://api.remembra.dev --api-key your-key
+# Terminal 1: start the bridge (keeps running). It sends the key from REMEMBRA_API_KEY upstream.
+read -rs REMEMBRA_API_KEY && export REMEMBRA_API_KEY   # paste the key: not shown, not in shell history
+remembra-bridge --upstream https://api.remembra.dev
 
-# Terminal 2: Install agents pointing to bridge
-remembra-install --all --url http://localhost:8766
+# Terminal 2: point the agents at the bridge (it listens on 127.0.0.1:9819)
+remembra-install --all --url http://127.0.0.1:9819
 ```
 
 The bridge tunnels requests from the sandbox to your Remembra server.
@@ -269,6 +277,6 @@ The installer only configures agents it finds. If an agent isn't detected:
 
 If `remembra-doctor` shows `sandbox_blocked`:
 
-1. Start the bridge: `remembra-bridge --url https://api.remembra.dev --api-key your-key`
-2. Reconfigure agent: `remembra-install --agent <name> --url http://localhost:8766`
+1. Start the bridge with the key in `REMEMBRA_API_KEY`: `remembra-bridge --upstream https://api.remembra.dev`
+2. Reconfigure agent: `remembra-install --agent <name> --url http://127.0.0.1:9819`
 3. Restart the agent

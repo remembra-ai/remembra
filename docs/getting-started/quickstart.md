@@ -32,7 +32,7 @@ pip install remembra
 remembra-install --all
 ```
 
-This auto-detects Claude, Codex, Cursor, Gemini, Windsurf and configures them to share memory.
+This auto-detects Claude Desktop, Claude Code, Codex, Cursor and Gemini CLI and configures them to share memory.
 
 **Verify setup:**
 ```bash

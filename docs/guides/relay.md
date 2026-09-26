@@ -51,7 +51,12 @@ remembra-install --all --url <your server URL>   # asks for the key, shows the c
 
 `remembra-install` never needs the key on the command line, where shell history and the process list
 would keep it. It reads `REMEMBRA_API_KEY`, asks at a hidden prompt on a terminal (Enter keeps the key
-already saved), takes it piped with `--api-key-stdin`, or uses `~/.remembra/credentials`. `--api-key`
+already saved), takes it piped with `--api-key-stdin`, or uses `~/.remembra/credentials`. A key typed at the
+prompt or piped in must look like a Remembra key (`rem_` and at least 20 letters, digits, `-` or `_`); anything
+else is refused without being shown, and the prompt asks again (three tries). Without `--url` it keeps the
+server already set up (`REMEMBRA_URL`, then `~/.remembra/credentials`, then an existing `remembra` entry), so
+re-running it with a new key never moves a self-hosted setup to `https://api.remembra.dev`; a first install
+uses `https://api.remembra.dev`. `--api-key`
 still works for old scripts but prints a warning. Without `--apply` (or a "y" at its question) it is a
 dry run: it prints each change as a diff, writes nothing and exits 3, so a command chained after it with
 `&&` does not run. The diff shows your Remembra key as `rem_…wxyz` and hides every other secret in the file
@@ -109,9 +114,12 @@ also told by the MCP server to call `session_brief` at start and `close_session`
 ### MCP by hand {#mcp-by-hand}
 
 `remembra-install --all` adds the `remembra` MCP server to Claude Desktop, Claude Code (user scope, in
-`~/.claude.json`; `claude mcp get remembra` shows it), Codex (`~/.codex/config.toml`), Cursor, Gemini CLI
-and Windsurf, for each one whose config directory already
-exists. Run `remembra-install --detect` to see which it found.
+`~/.claude.json`; `claude mcp get remembra` shows it), Codex (`~/.codex/config.toml`), Cursor and Gemini CLI,
+for each one whose config directory already exists. Run `remembra-install --detect` to see which it found.
+Windsurf is unverified and left out of `--all`: `remembra-install --agent windsurf` writes
+`~/.codeium/windsurf/mcp_config.json`, the file Windsurf's docs name for the editor's MCP discovery (Cascade's
+own **Open MCP config file** opens `~/.config/devin/mcp_config.json`; add the block there if Cascade does not
+list `remembra`).
 
 It does not write Qwen Code or Kimi yet. Add the server to them yourself. Qwen Code reads the same
 `mcpServers` block as Gemini CLI, in `~/.qwen/settings.json`:
@@ -156,7 +164,12 @@ A `close` that cannot be delivered (no network, server down or slow, HTTP 429 or
 no key yet) is not lost. It is queued in `~/.remembra/relay/outbox/` (one file per agent and session,
 owner-only, written atomically, after the same secret redaction the server applies; never the key) and
 logged to `~/.remembra/relay/relay.log`. The next `brief` or `close` on that machine sends it, oldest
-first: a `brief` before it asks for the brief, a `close` before its own handoff when that leaves the close
+first, only with the key of the config source that queued it (`REMEMBRA_API_KEY`, `~/.claude.json`,
+`~/.codex/config.toml` or `~/.remembra/credentials`: a key found somewhere else may belong to another
+account) and only to the server it was queued for. A handoff queued before any key was set up is kept for
+the server configured then (`REMEMBRA_URL`, else `http://localhost:8787`) and is never sent to a server set up
+later; `remembra-relay status` says why an entry is held (delete its file in the outbox to drop it). The
+order: a `brief` before it asks for the brief, a `close` before its own handoff when that leaves the close
 enough of its 10 seconds, otherwise right after it. The server keeps one handoff per agent and session, so
 a resend never duplicates one. Each queued handoff carries the time its session ended, and the server
 orders by that time: one that arrives late is kept in the trail but does not replace a newer handoff as
@@ -181,6 +194,7 @@ remembra-relay resolve [--cwd DIR] [--project P] [--bind]
 remembra-relay connect [--apply] [--agent NAME]... [--include-unverified] [--agents-md PATH]
 remembra-relay disconnect [--apply] [--agent NAME]... [--agents-md PATH]
 remembra-relay status  [--format text|json] [--no-check]
+remembra-relay --version
 ```
 
 `brief`, `close` and `trail` are safe to run as hooks. They finish within 10 seconds, always exit 0, and
@@ -212,6 +226,10 @@ remembra-install --remove --all --apply      # removes the remembra MCP server f
 pipx uninstall remembra
 rm -r ~/.remembra                            # the saved key, the unsent-handoff queue and the log
 ```
+
+The backups `remembra-install` and `connect` keep next to each config (`*.bak-remembra-<time>`,
+`*.bak-relay-<time>`) can still hold your key. `remembra-install --remove` lists every backup that does; add
+`--delete-backups` (with `--apply`) to delete them too, or delete them by hand.
 
 Run the first two without `--apply` to see exactly what they will change. `disconnect` removes only the
 entries the relay wrote (commands that run `remembra-relay`); your other hooks stay. Pass

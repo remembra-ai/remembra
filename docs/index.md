@@ -295,7 +295,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    `remembra-install --all` auto-detects and configures Claude, Codex, Cursor, Gemini, Windsurf in one command.
+    `remembra-install --all` auto-detects and configures Claude Desktop, Claude Code, Codex, Cursor and Gemini CLI in one command.
 
 -   :material-stethoscope:{ .lg .middle } __Setup Diagnostics__
 
