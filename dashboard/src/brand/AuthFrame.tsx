@@ -38,7 +38,7 @@ export function AuthFrame({ children }: { children: ReactNode }) {
         <BrandHero className="absolute inset-0 block h-full w-full" />
         <div className="pointer-events-none absolute inset-x-10 top-9 flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">
           <span>Remembra relay</span>
-          <span>memory for every agent you run</span>
+          <span>memory for the agents you connect</span>
         </div>
         <div className="absolute inset-x-10 bottom-10 flex items-end justify-between gap-6">
           <p className="font-display min-w-0 max-w-[15ch] text-[clamp(1.6rem,1rem+1.4vw,2.4rem)] font-extrabold leading-[0.98] tracking-[-0.03em] text-ink">

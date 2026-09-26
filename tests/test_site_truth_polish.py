@@ -103,8 +103,9 @@ def _mkdocs_excluded() -> list[str]:
 
 
 def _public_files() -> list[Path]:
-    """What reaches readers: the README and changelog, package and registry metadata, the published docs,
-    everything remembra.dev serves as text, and the page sources kept in scripts/."""
+    """What reaches readers: the README, changelog and release notes, package and registry metadata, the
+    published docs, everything remembra.dev serves as text, the page sources kept in scripts/, and the
+    dashboard's screens (its sign-in page is public)."""
     excluded = _mkdocs_excluded()
 
     def published(path: Path) -> bool:
@@ -122,7 +123,9 @@ def _public_files() -> list[Path]:
         ROOT / "scripts" / "site-crew-section.html",
         ROOT / "scripts" / "site-social-card.html",
     ]
+    files += sorted(ROOT.glob("RELEASE-NOTES-*.md"))
     files += sorted(p for p in (ROOT / "docs").rglob("*.md") if published(p))
+    files += sorted(p for p in (ROOT / "dashboard" / "src").rglob("*.tsx") if "__tests__" not in p.parts)
     suffixes = (".html", ".js", ".txt", ".md", ".webmanifest", ".xml")
     files += sorted(p for p in LANDING.rglob("*") if p.is_file() and p.suffix in suffixes)
     return files
@@ -150,6 +153,7 @@ def test_the_public_file_list_covers_the_site_and_the_registry_metadata() -> Non
         "server.json",
         "pyproject.toml",
         "packages/remembra-mcp/README.md",
+        "dashboard/src/brand/AuthFrame.tsx",
     ):
         assert must in files, must
     assert not any(f.startswith("docs/bugs/") for f in files)

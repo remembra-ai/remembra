@@ -315,7 +315,7 @@ export function FirstHandoffCelebration({ item, onDismiss }: { item: TrailItem; 
             {meta.name} left its first trail.
           </h2>
           <p className="mt-1 max-w-xl text-sm opacity-80">
-            The next agent that starts in {project}, in any tool, on any machine, picks up right here.
+            The next connected agent that starts in {project}, in another tool or on another machine, picks up right here.
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">

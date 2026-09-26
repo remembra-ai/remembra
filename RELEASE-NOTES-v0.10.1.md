@@ -27,7 +27,7 @@ All systems green. Ready for production use.
 ## 🚀 Highlights
 
 ### Universal Agent Installer
-One command configures ALL your AI tools:
+One command configures the AI tools it detects:
 
 ```bash
 pip install remembra
