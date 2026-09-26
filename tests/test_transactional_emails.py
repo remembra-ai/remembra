@@ -465,10 +465,10 @@ async def test_legacy_renewal_filling_in_the_interval_sends_nothing(tmp_path, ou
         assert "Your Pro (legacy $49) plan was updated." in changed.text
 
 
-def test_founding_price_without_a_seat_is_quoted_without_the_lifetime_lock() -> None:
+def test_founding_price_without_a_seat_is_quoted_without_the_price_hold() -> None:
     line = tpl.price_line(PlanTier.SOLO, BillingInterval.YEAR, founding=True, founding_held=False)
     assert line.startswith("$108/year, the Founding 100 price") and "the offer was full" in line
-    assert "locked for life" not in line and "$120" not in line
+    assert "price holds" not in line and "locked for life" not in line and "$120" not in line
 
 
 def test_payment_failed_with_an_unknown_price_quotes_none() -> None:
@@ -503,17 +503,18 @@ async def test_former_founding_member_is_quoted_the_price_paddle_charges(tmp_pat
         c.h.app.state.tasks = None
         uid = await c.h.create_user("founder@example.com", verified=True)
 
-        # A real Founding 100 purchase: $108/year, locked for life.
+        # A real Founding 100 purchase: $108/year, held while the subscription stays active (the Terms).
         await _hook(c, "transaction.completed", _purchase("txn_f1", "sub_f1", "pri_founding", _bound(uid), customer="ctm_f"))
         await outbox.wait(1)
         [founded] = outbox.of("plan_changed")
         _message_ok(founded)
-        assert "$108/year (Founding 100, price locked for life)" in founded.text
+        assert "$108/year (Founding 100: the price holds while this subscription stays active)" in founded.text
+        assert "for life" not in founded.text
         await _hook(c, "subscription.past_due", _past_due("sub_f1", "ctm_f", "pri_founding"))
         await outbox.wait(2)
         [failed] = outbox.of("payment_failed")
         _message_ok(failed)
-        assert "Solo plan ($108/year (Founding 100, price locked for life))" in failed.text
+        assert "Solo plan ($108/year (Founding 100: the price holds while this subscription stays active))" in failed.text
         # A founder's past-due event without items cannot say which of $108 and $120 is due: no price is quoted.
         from remembra.cloud import notify
 
@@ -606,13 +607,13 @@ async def test_founding_charge_over_the_cap_is_quoted_at_what_was_charged(tmp_pa
         [changed] = outbox.of("plan_changed")
         _message_ok(changed)
         assert "$108/year, the Founding 100 price (the offer was full" in changed.text
-        assert "locked for life" not in changed.text and "$120" not in changed.text
+        assert "price holds" not in changed.text and "$120" not in changed.text
 
         await _hook(c, "subscription.past_due", _past_due("sub_late", "ctm_l", "pri_founding"))
         await outbox.wait(2)
         [failed] = outbox.of("payment_failed")
         _message_ok(failed)
-        assert "$108/year, the Founding 100 price" in failed.text and "locked for life" not in failed.text
+        assert "$108/year, the Founding 100 price" in failed.text and "price holds" not in failed.text
 
 
 async def test_api_signup_tenant_welcome_has_no_key(tmp_path, outbox) -> None:

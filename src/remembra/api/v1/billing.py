@@ -55,7 +55,7 @@ class PlanInfo(BaseModel):
 
 
 class FoundingOffer(BaseModel):
-    """Founding 100: Solo at $108/yr, price locked for life, annual only."""
+    """Founding 100: Solo at $108/yr, price held while subscribed (plus 14 days after it ends), annual only."""
 
     plan: str = "solo"
     price_yearly: int = FOUNDING_ANNUAL_PRICE_CENTS

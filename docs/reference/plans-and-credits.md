@@ -14,8 +14,10 @@ applies to the hosted service, Remembra Cloud. Prices are in USD and exclude tax
 | **Enterprise** | Custom (from $399 / month) | Contracted | Contracted | Contracted | Contracted | Contracted |
 
 **Founding 100.** The first 100 customers can take Solo at **$108 a year**,
-with the price locked for life. It is billed annually only, one per account,
-and cannot be combined with other offers.
+and the price never goes up while the subscription stays active. If it ends,
+the price and the seat are kept for 14 days; after that the seat goes to the
+next customer. It is billed annually only, one per account, and cannot be
+combined with other offers.
 
 **Annual plans bank the year up front.** On a yearly plan you get twelve
 months of credits on day one (Solo: 26,400) and can use them in any month of
