@@ -90,11 +90,7 @@ Codex release has been run yet. Cursor, Gemini CLI and Qwen Code are built from 
 against payloads written from those docs, not against the tools.
 
 Unverified adapters are dry-run only unless you pass `--include-unverified`; `connect --apply` ends by
-listing the ones it skipped and the command that writes them. When something is still left after `connect`
-(saving a key, `--apply` after a dry run, trusting the hooks in Codex), it ends with a short
-**You still need to** list; when nothing is left it prints none.
-
-### Codex trust and other agent notes {#codex-trust}
+listing the ones it skipped and the command that writes them.
 
 **Codex: trust the hooks.** Codex runs a hook only after you trust it, and skips untrusted hooks without a
 message. After `connect --apply`, open Codex, run `/hooks` and trust the three `remembra-relay` hooks.
@@ -230,6 +226,22 @@ What it checks:
 | `LEGACY_NAMESPACE`, `MCP_PROJECT_SPLIT` | `REMEMBRA_PROJECT` sends every new repository to one project; agents' MCP servers use different projects |
 | `SERVER_NO_ENTRIES`, `STALE_CHECKPOINT` | hooks written but nothing from that agent in 7 days; its last session ended on a checkpoint |
 | `NOT_DETECTED` | an agent named with `--agent` isn't on this machine |
+
+**After `connect`.** When something is still left (saving a key, `--apply` after a dry run, unverified
+adapters it skipped, trusting the hooks in Codex), `connect` ends with a short **You still need to** list.
+When nothing is left it prints none.
+
+### Codex hook trust {#codex-trust}
+
+Codex runs a hook only after you trust it (Settings > Hooks in the app, `/hooks` in the CLI) and skips an
+untrusted hook without a message, so a Codex that never gets a brief usually has hooks nobody trusted.
+Codex stores each trust as `[hooks.state."<hooks.json path>:<event>:<n>:<n>"] trusted_hash` in
+`~/.codex/config.toml`, a hash of that hook's command, timeout and matcher; when `connect` rewrites a hook
+(a new install path, for example) the old record no longer matches and Codex asks again. The doctor
+compares those records with the hooks in `~/.codex/hooks.json`, hashed the way Codex does (checked against
+codex-cli 0.155.0-alpha.16.4 and 0.157.1): a missing record is `CODEX_TRUST_MISSING`, a record for an older
+version of the hook `CODEX_TRUST_STALE`, `enabled = false` `CODEX_HOOK_DISABLED`. A `config.toml` it
+can't read is reported as unchecked, never as trusted.
 
 **Inside your agent.** The local Remembra MCP server has the same doctor as the `remembra_doctor` tool (it
 returns the slip as `rendered` plus the findings), `remembra_setup` (the install and connect steps for this

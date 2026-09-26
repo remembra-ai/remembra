@@ -965,7 +965,6 @@ def cmd_connect(args: argparse.Namespace) -> int:
         _warn_missing_key()
     exit_code = 0
     skipped_unverified: list[str] = []
-    outcomes: list[tuple[str, str, str | None, str]] = []  # (agent, state, text --apply would write, path)
     stamp = _stamp()
     for name, adapter in REGISTRY.items():
         if wanted and name not in wanted:
@@ -980,7 +979,6 @@ def cmd_connect(args: argparse.Namespace) -> int:
             change = adapter.plan(home, relay)
         except Exception as e:
             print(f"\n[{name}] {spec.display} ({label}): cannot read {spec.config_path(home)}: {e}")
-            outcomes.append((name, "unreadable", None, str(spec.config_path(home))))
             exit_code = 1
             continue
         print(f"\n[{name}] {spec.display} ({label}) -> {change.path}")
@@ -990,7 +988,6 @@ def cmd_connect(args: argparse.Namespace) -> int:
             print(f"  REQUIRED: {spec.setup_note}")
         if not change.changed:
             print("  already connected, no change")
-            outcomes.append((name, "already", None, str(change.path)))
             continue
         for line in change.summary:
             print(f"  - {line}")
@@ -999,16 +996,13 @@ def cmd_connect(args: argparse.Namespace) -> int:
             print("  " + diff.replace("\n", "\n  ").rstrip())
         if not args.apply:
             print("  (dry run: re-run with --apply to write, a backup is kept)")
-            outcomes.append((name, "dry_run", change.after, str(change.path)))
             continue
         if not spec.verified and not args.include_unverified:
             print("  skipped: unverified adapter (add --include-unverified to write it anyway)")
             skipped_unverified.append(name)
-            outcomes.append((name, "skipped_unverified", None, str(change.path)))
             continue
         backup = backup_and_write(change, stamp)
         print(f"  written{f' (backup: {backup})' if backup else ''}")
-        outcomes.append((name, "written", None, str(change.path)))
 
     md_path = Path(args.agents_md).expanduser() if args.agents_md else None
     print("\n[agents-md] fallback for agents without hooks (plus MCP session_brief / close_session):")
@@ -1030,40 +1024,10 @@ def cmd_connect(args: argparse.Namespace) -> int:
         agents_flags = " ".join(f"--agent {name}" for name in skipped_unverified)
         print(f"\nNot written (unverified adapters): {', '.join(skipped_unverified)}. To write them anyway:")
         print(f"  remembra-relay connect --apply --include-unverified {agents_flags}")
-    _print_connect_todo(home, outcomes, applied=bool(args.apply), missing_key=missing_key, config=config, wanted=wanted)
     if missing_key:
         _warn_missing_key()  # again at the end, where it is seen
         return 1
     return exit_code
-
-
-def _print_connect_todo(
-    home: Path,
-    outcomes: list[tuple[str, str, str | None, str]],
-    *,
-    applied: bool,
-    missing_key: bool,
-    config: RelayConfig,
-    wanted: list[str],
-) -> None:
-    """End connect with what the user still has to do (nothing is printed when nothing is left)."""
-    try:
-        from remembra.marshal import todo
-
-        items = todo.connect_todo(
-            home,
-            [todo.Outcome(agent, state, planned, path) for agent, state, planned, path in outcomes],
-            applied=applied,
-            missing_key=missing_key,
-            server_url=config.url,
-            wanted=wanted,
-        )
-        block = todo.format_todo(items)
-    except Exception as e:  # the hooks are written either way; never fail connect over its to-do list
-        _err(f"could not build the to-do list ({e.__class__.__name__})")
-        return
-    if block:
-        print(block)
 
 
 def _stamp() -> str:
@@ -1262,6 +1226,19 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 1 if attention else 0
 
 
+def _print_connect_todo(args: argparse.Namespace) -> None:
+    """End connect with what the user still has to do (nothing is printed when nothing is left)."""
+    try:
+        from remembra.marshal import todo
+
+        block = todo.format_todo(todo.after_connect(args))
+    except Exception as e:  # the hooks are written either way; never fail connect over its to-do list
+        _err(f"could not build the to-do list ({e.__class__.__name__})")
+        return
+    if block:
+        print(block)
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Marshal's rules over this machine and (unless --no-server) the trail: exit 0, or 1 when something needs you."""
     from remembra.marshal import doctor
@@ -1381,6 +1358,8 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:
         _err(f"{args.command} failed: {e.__class__.__name__}: {e}")
         code = 0 if args.command in ("brief", "close", "trail") else 1
+    if args.command == "connect":
+        _print_connect_todo(args)
     return code
 
 

@@ -80,6 +80,14 @@ def _version() -> str:
         return "unknown"
 
 
+def config_file(adapter: Adapter, home: Path) -> Path:
+    """The hook file an adapter writes: ``spec.config_file(home)`` where the relay has it (it follows
+    ``CODEX_HOME`` and similar), else ``spec.config_path(home)``."""
+    spec: Any = adapter.spec
+    resolver = getattr(spec, "config_file", None)
+    return Path(resolver(home) if callable(resolver) else spec.config_path(home))
+
+
 def agent_label(value: Any) -> str | None:
     """An agent id reduced to ``[a-z0-9._-]`` (server-sent labels never carry other characters into a slip)."""
     if not isinstance(value, str):
@@ -403,7 +411,12 @@ def _mcp_entry(name: str, home: Path, environ: Mapping[str, str]) -> tuple[str, 
     if spec is None:
         return "unknown", None, None
     kind, rel = spec
-    path = Path(environ.get("REMEMBRA_HOOK_CLAUDE_CONFIG") or home / rel) if name == "claude-code" else home / rel
+    if name == "claude-code":
+        path = Path(environ.get("REMEMBRA_HOOK_CLAUDE_CONFIG") or home / rel)
+    elif name == "codex":  # next to hooks.json: Codex keeps both in CODEX_HOME
+        path = config_file(REGISTRY["codex"], home).with_name("config.toml")
+    else:
+        path = home / rel
     try:
         if kind == "codex":
             target = tools_doctor.load_codex_target(path)
@@ -433,7 +446,7 @@ def _agent_signals(
     key_source: str,
 ) -> AgentSignals:
     spec = adapter.spec
-    path = spec.config_path(home)
+    path = config_file(adapter, home)
     text, readable = _read_text(path)
     events: dict[str, list[str]] = {}
     if text is not None:
@@ -1058,7 +1071,11 @@ def collect(
 
     # Codex: trust and automation runs.
     codex_agent = agent_signals.get("codex")
-    trust = codex_hooks.read_trust(home) if codex_agent and codex_agent.any_hooks else None
+    trust = (
+        codex_hooks.read_trust(home, hooks_path=config_file(REGISTRY["codex"], home))
+        if codex_agent and codex_agent.any_hooks
+        else None
+    )
     if trust is not None and trust.config_state == "unreadable":
         unchecked.append(f"Codex hook trust ({tilde(trust.config_path, home)} could not be read)")
     automations, subagents, scanned = _codex_runs(home, now)

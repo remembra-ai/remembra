@@ -71,7 +71,7 @@ def test_facts_are_the_plan_catalog() -> None:
     ("question", "title", "anchor"),
     [
         ("How do I uninstall Remembra?", "Uninstall", "#uninstall"),
-        ("Codex hooks are not running, how do I trust them?", "Codex trust and other agent notes", "#codex-trust"),
+        ("Codex hooks are not running, how do I trust them?", "Codex hook trust", "#codex-trust"),
         ("my handoffs are queued and not sent", "If the server cannot be reached", "#if-the-server-cannot-be-reached"),
         ("how do I run the doctor", "Doctor", "#doctor"),
         ("which project does a repository use", "Which project a repository uses", "#which-project-a-repository-uses"),

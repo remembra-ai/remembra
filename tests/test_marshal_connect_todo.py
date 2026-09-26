@@ -151,3 +151,22 @@ def test_brief_notices_point_at_the_doctor(tmp_path: Path) -> None:
     pointer = "Ask your agent to run remembra_doctor, or run `remembra-relay doctor`."
     assert notices[0].startswith("Remembra: your API key was rejected") and notices[0].endswith(pointer)
     assert "could not be sent yet" in notices[1] and notices[1].endswith(pointer)
+
+
+def test_an_unknown_agent_is_a_usage_error_without_a_list(tmp_path: Path) -> None:
+    fh = FakeHome(tmp_path)
+    out = connect(fh, "--agent", "notepad", "--apply")
+    assert out.returncode == 2 and "You still need to" not in out.stdout
+
+
+def test_hooks_an_apply_left_unwritten_are_named(tmp_path: Path) -> None:
+    from remembra.marshal import todo
+
+    items = todo.connect_todo(
+        tmp_path,
+        [todo.Outcome("claude-code", todo.NOT_WRITTEN, path=str(tmp_path / ".claude" / "settings.json"))],
+        applied=True,
+        missing_key=False,
+        server_url="https://api.remembra.dev",
+    )
+    assert items == ["Claude Code: not written by this run; see its lines above."]

@@ -265,10 +265,13 @@ def _read(path: Path) -> tuple[str | None, str | None]:
         return None, e.__class__.__name__
 
 
-def read_trust(home: Path, hooks_text: str | None = None, *, planned: bool = False) -> CodexTrust:
-    """Trust of the relay hooks in ``~/.codex/hooks.json`` (or in ``hooks_text`` when ``planned``)."""
-    hooks_path = Path(home) / ".codex" / "hooks.json"
-    config_path = Path(home) / ".codex" / "config.toml"
+def read_trust(home: Path, hooks_text: str | None = None, *, planned: bool = False, hooks_path: Path | None = None) -> CodexTrust:
+    """Trust of the relay hooks in ``hooks.json`` (or in ``hooks_text`` when ``planned``).
+
+    ``hooks_path`` defaults to ``~/.codex/hooks.json``; Codex keeps ``config.toml`` next to it.
+    """
+    hooks_path = hooks_path or Path(home) / ".codex" / "hooks.json"
+    config_path = hooks_path.with_name("config.toml")
     if not planned:
         hooks_text, _ = _read(hooks_path)
     config_text, error = _read(config_path)
