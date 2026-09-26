@@ -43,10 +43,13 @@ export const PIPX_INSTALL = "pipx install --force 'remembra[mcp]>=0.16'";
  * Saves the key where the relay hooks read it (~/.remembra/credentials) and
  * adds the Remembra MCP server to the agents it finds. The key is never part
  * of the command (shell history keeps commands): remembra-install asks for it
- * at a hidden prompt, shows each change and writes after a "y".
+ * at a hidden prompt, shows each change and writes after a "y". `serverUrl`
+ * is the server the key belongs to; the dashboard always passes its own.
+ * Without one, remembra-install keeps the server the machine already uses, or
+ * Remembra Cloud on a first install: the line remembra.dev and setup.md show.
  */
 export function saveKeyCommand(serverUrl: string): string {
-  return `remembra-install --all --url ${serverUrl || 'https://api.remembra.dev'}`;
+  return serverUrl ? `remembra-install --all --url ${serverUrl}` : 'remembra-install --all';
 }
 
 /**

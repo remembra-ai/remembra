@@ -44,7 +44,7 @@ from typing import Any
 import httpx
 
 from remembra.client.project import normalize_project_id, parse_project_aliases
-from remembra.marshal import codex_hooks
+from remembra.marshal import codex_hooks, words
 from remembra.relay import outbox
 from remembra.relay.adapters import REGISTRY, Adapter
 from remembra.relay.adapters.base import is_relay_command
@@ -89,10 +89,13 @@ def config_file(adapter: Adapter, home: Path) -> Path:
 
 
 def agent_label(value: Any) -> str | None:
-    """An agent id reduced to ``[a-z0-9._-]`` (server-sent labels never carry other characters into a slip)."""
+    """An agent id reduced to ``[a-z0-9._-]`` (server-sent labels never carry other characters into a slip).
+
+    Other spellings of a known agent ("claude", "codex-cli") become its id first, as the dashboard counts them.
+    """
     if not isinstance(value, str):
         return None
-    label = _AGENT_LABEL_RE.sub("", value.strip().lower())[:64]
+    label = _AGENT_LABEL_RE.sub("", words.canonical_agent(value))[:64]
     return label or None
 
 
@@ -473,7 +476,7 @@ def _agent_signals(
     slot = status_agents.get(name) if isinstance(status_agents.get(name), dict) else {}
     return AgentSignals(
         name=name,
-        display=spec.display,
+        display=words.agent_name(name),
         verified=spec.verified,
         detected=detected,
         config_path=tilde(path, home),

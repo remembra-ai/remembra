@@ -32,6 +32,7 @@ def test_a_new_machine_gets_every_step_key_first(fh: FakeHome) -> None:
         "Save the key and add the Remembra MCP server",
         "See what connect would change (dry run)",
         "Write the hooks",
+        "Only if you want them: Cursor's hooks",
         "Trust the hooks in Codex",
         "Restart your agents",
         "Check",
@@ -43,14 +44,21 @@ def test_a_new_machine_gets_every_step_key_first(fh: FakeHome) -> None:
     save = by_title["Save the key and add the Remembra MCP server"]
     assert save["command"] == "remembra-install --all" and save["runs_where"] == "user_terminal"
     assert "Never paste a key into a chat." in save["note"]
+    # None of them is installed here yet, so connect (which skips an agent it can't find) names each one.
     assert by_title["See what connect would change (dry run)"]["command"] == (
         "remembra-relay connect --agent claude-code --agent codex --agent cursor"
     )
     write = by_title["Write the hooks"]
-    assert (
-        write["command"] == "remembra-relay connect --apply --agent claude-code --agent codex --agent cursor --include-unverified"
+    assert write["command"] == "remembra-relay connect --apply --agent claude-code --agent codex"
+    assert write["needs_yes"] is True
+    cursor = by_title["Only if you want them: Cursor's hooks"]
+    assert cursor["command"] == "remembra-relay connect --apply --agent cursor --include-unverified"  # agentConnectCommand
+    assert cursor["needs_yes"] is True and "never been run against the real tool" in cursor["note"]
+    trust = by_title["Trust the hooks in Codex"]
+    assert trust["action"] == (
+        "Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd."
     )
-    assert write["needs_yes"] is True and "cursor" in write["note"]
+    assert trust["note"] == "Codex skips untrusted hooks without a message."
     assert by_title["Check"]["command"] == "remembra-relay doctor"
     for step in payload["steps"]:
         assert step["command"] is None or commands.is_allowed(step["command"])
@@ -83,7 +91,22 @@ def test_done_steps_are_marked_from_this_machine(fh: FakeHome) -> None:
 def test_default_agents_are_the_ones_found_here(fh: FakeHome) -> None:
     fh.install("codex")
     (fh.home / ".cursor").mkdir()
-    assert steps(fh)["agents"] == ["codex", "cursor"]
+    payload = steps(fh)
+    assert payload["agents"] == ["codex", "cursor"]
+    # Every agent found here was chosen: the plain lines every page shows, then the unverified one on its own.
+    commands_ = [s["command"] for s in payload["steps"] if s["command"]]
+    assert "remembra-relay connect" in commands_ and "remembra-relay connect --apply" in commands_
+    assert "remembra-relay connect --apply --agent cursor --include-unverified" in commands_
+
+
+def test_an_agent_left_out_is_never_written(fh: FakeHome) -> None:
+    fh.install("claude", "codex")
+    payload = steps(fh, ["codex"])
+    commands_ = [s["command"] for s in payload["steps"] if s["command"]]
+    # Plain connect --apply would write Claude Code's hooks too, so Codex is named.
+    assert "remembra-relay connect --agent codex" in commands_
+    assert "remembra-relay connect --apply --agent codex" in commands_
+    assert "remembra-relay connect --apply" not in commands_
 
 
 @pytest.mark.parametrize(
@@ -107,7 +130,7 @@ def test_windows_stops_at_the_docs(fh: FakeHome) -> None:
 def test_qwen_and_kimi_get_the_mcp_by_hand_pointer_and_a_self_hosted_url(fh: FakeHome) -> None:
     payload = steps(fh, ["qwen", "kimi"], REMEMBRA_URL="https://memory.example.org")
     titles = [s["title"] for s in payload["steps"]]
-    assert "Add the MCP server by hand: Qwen Code, Kimi Code CLI" in titles
+    assert "Add the MCP server by hand: Qwen Code, Kimi CLI" in titles
     save = next(s for s in payload["steps"] if s["runs_where"] == "user_terminal")
     assert save["command"] == "remembra-install --all --url https://memory.example.org"
 

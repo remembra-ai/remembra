@@ -1531,7 +1531,6 @@ def test_setup_md_is_key_first_and_asks_before_each_write() -> None:
         text.index("\nremembra-relay connect\n"),  # the dry run first
         text.index(f"\n{CONNECT_STEP}\n"),
         text.index("run `/hooks`"),
-        text.index("\nremembra-relay status\n"),
         text.index("\nremembra-relay doctor\n"),
     ]
     assert order == sorted(order)
@@ -1543,8 +1542,8 @@ def test_setup_md_is_key_first_and_asks_before_each_write() -> None:
 
 
 def test_setup_md_commands_are_ones_the_real_clis_accept() -> None:
-    """Every command in a bash block parses with the installed remembra-relay and remembra-install, except
-    `doctor`, which ships in remembra 0.16.1 (feat/marshal): it must be the dashboard's template."""
+    """Every command in a bash block parses with the real remembra-relay and remembra-install parsers, and
+    `doctor` (new in remembra 0.16.1) is also the dashboard's template."""
     import shlex
 
     from remembra.relay.cli import build_parser as relay_parser
@@ -1559,6 +1558,7 @@ def test_setup_md_commands_are_ones_the_real_clis_accept() -> None:
         words = shlex.split(line)
         if words[0] == "remembra-relay" and words[1] == "doctor":
             assert line == "remembra-relay doctor"
+            relay_parser().parse_args(words[1:])
         elif words[0] == "remembra-relay":
             relay_parser().parse_args(words[1:])
             seen["relay"] += 1

@@ -97,6 +97,6 @@ def test_the_client_side_runs_on_a_base_install(tmp_path: Path) -> None:
     assert result["doctor_exit"] == 1
     assert {"CODEX_TRUST_MISSING", "OUTBOX_QUEUED"} <= set(result["finding_ids"])
     assert "Relay Free allows 30 relay events a minute and 300 unenriched writes a day" in result["evidence"]
-    assert "You still need to:" in result["connect_out"] and "After --apply: Codex: trust" in result["connect_out"]
+    assert "You still need to:" in result["connect_out"] and "After --apply: Open Codex Settings > Hooks" in result["connect_out"]
     assert result["help_status"] == "answered" and result["free_keys"] == [3]
     assert result["setup_steps"] >= 5

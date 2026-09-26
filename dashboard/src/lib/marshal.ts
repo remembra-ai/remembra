@@ -7,6 +7,12 @@
 // on key use carry the one-key caveat, because one key can serve every agent
 // on a machine. tests/fixtures/marshal/diagnosis_cases.json holds the cases
 // (the server port in M2 runs the same file).
+//
+// Where the doctor (remembra-relay doctor, remembra_doctor) reaches the same
+// fault from this machine's side, the verdict has its rule id, its sentence
+// and its page: they come from marshalWords.ts, generated from the doctor's
+// own words (src/remembra/marshal/words.py), and tests/test_marshal_parity.py
+// runs the doctor on this same fixture.
 
 import { api, type ApiKeyInfo } from './api';
 import { relay, type AgentActivity, type TrailItem } from './relay';
@@ -20,6 +26,7 @@ import {
   oneLineInstall,
   pipxRunDoctorCommand,
 } from './agents';
+import { CODEX_TRUST_EVENTS, DASHBOARD_ONLY, SHARED_RULES, UNVERIFIED, type SharedRule } from './marshalWords';
 import { minutesSince, parseServerTime, relativeTime } from './time';
 
 /** How many trail entries the slip reads for pickups (the API's page maximum). */
@@ -27,23 +34,47 @@ export const SLIP_TRAIL_LIMIT = 100;
 /** How many of the agent's own entries it reads. */
 export const SLIP_AGENT_LIMIT = 5;
 
-export const CODEX_TRUST_LINE = 'Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust.';
-export const CODEX_TRUST_CLI = 'In the Codex CLI: run /hooks and trust SessionStart, UserPromptSubmit and SessionEnd.';
+/**
+ * Fills a shared template ("{name}" style). A value the template names but the
+ * caller did not give is a bug, never an empty gap: it throws.
+ */
+export function say(template: string, values: Record<string, string> = {}): string {
+  return template.replace(/\{(\w+)\}/g, (_, key: string) => {
+    if (!(key in values)) throw new Error(`marshal: no value for {${key}}`);
+    return values[key];
+  });
+}
+
+/** "A", "A and B", "A, B and C". */
+function joinNames(names: readonly string[]): string {
+  if (names.length <= 1) return names.join('');
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/** Codex's call, word for word the doctor's CODEX_TRUST_MISSING. */
+export const CODEX_TRUST_LINE = say(SHARED_RULES.CODEX_TRUST_MISSING.what, {
+  hooks: plural(CODEX_TRUST_EVENTS.length, 'hook'),
+});
+/** The one Codex trust step (the app or the CLI), as the doctor and remembra_setup give it. */
+export const CODEX_TRUST_FIX = say(SHARED_RULES.CODEX_TRUST_MISSING.fix, { events: joinNames(CODEX_TRUST_EVENTS) });
 export const KEY_CAVEAT =
   "One key can serve every agent on a machine, so Remembra can't tell which agent used it. Doctor on that machine can.";
 export const SLIP_FOOTER = 'Built by rules from your keys and trail. No model wrote this.';
 export const RELAY_GUIDE = 'https://docs.remembra.dev/guides/relay/';
 export const DETACHED_CLOSE_LOG = '~/.remembra/relay/last-detached-close.log';
 
-export type VerdictCode =
-  | 'NO_KEY'
-  | 'KEY_NEVER_USED'
-  | 'PICKS_UP_NEVER_CLOSES'
-  | 'CODEX_TRUST'
-  | 'NOTHING_WAITING'
-  | 'HOOKS_NOT_FIRING'
-  | 'STALE_CHECKPOINT'
-  | 'HANDED_OFF';
+/**
+ * A verdict is one of the doctor's own rule ids where it reaches the same fault
+ * (KEY_MISSING, PICKS_UP_NEVER_CLOSES, CODEX_TRUST_MISSING, NOTHING_WAITING,
+ * HOOKS_NOT_FIRING, STALE_CHECKPOINT), or one only a slip reaches
+ * (KEY_NEVER_USED, HANDED_OFF).
+ */
+export type VerdictCode = SharedRule | (typeof DASHBOARD_ONLY)[number];
+
+/** The guide section a shared rule links to: the same page the doctor prints. */
+function docFor(rule: SharedRule): string {
+  return `${RELAY_GUIDE}${SHARED_RULES[rule].doc}`;
+}
 
 /** The fields of a key the check reads (never the key itself: the list endpoint has only a preview). */
 export type KeyEvidence = Pick<ApiKeyInfo, 'name' | 'created_at' | 'last_used_at' | 'active'>;
@@ -186,11 +217,13 @@ function checkFor(id: string): { lead: string; commands: SlipCommand[] } {
 function unverifiedLine(id: string): string | null {
   const meta = agentMeta(id);
   if (meta.verified || !meta.adapter) return null;
-  return `${meta.name}'s adapter is built from its hook docs and has never been run against the real tool.`;
+  return say(UNVERIFIED, { name: meta.name });
 }
 
+const TICKS = 'Its handoff ticks this row.';
+
 function endOneSession(name: string): string {
-  return `End one ${name} session; its handoff ticks this row.`;
+  return `${say(SHARED_RULES.NOTHING_WAITING.fix, { name })} ${TICKS}`;
 }
 
 /** The waiting row's state before anyone opens the slip. */
@@ -238,28 +271,26 @@ export function diagnoseAgent(input: DiagnosisInput): Verdict {
   const briefs = pickupsBy(id, input.trail);
   const othersHandoffs = input.trail.filter((item) => item.memory_type === 'handoff' && !isAgent(id, item.agent_id)).length;
   const codexWaiting = id === 'codex' && briefs === 0 && entryCount === 0;
-  const codexThen = `${CODEX_TRUST_LINE} ${CODEX_TRUST_CLI}`;
-  const doc = id === 'codex' || !meta.verified ? `${RELAY_GUIDE}#setup` : RELAY_GUIDE;
 
-  const build = (v: Omit<Verdict, 'lines' | 'commands' | 'doc'>): Verdict => ({
+  const build = (v: Omit<Verdict, 'lines' | 'commands'>): Verdict => ({
     ...v,
     lines,
-    doc,
     commands: [...(v.fix?.commands ?? []), ...(v.check?.commands ?? [])].map((c) => c.text),
   });
 
   if (active.length === 0) {
     return build({
-      code: 'NO_KEY',
+      code: 'KEY_MISSING',
       proven: true,
-      verdict: "No relay key yet. Create one above; hooks can't reach Remembra without it.",
+      verdict: say(SHARED_RULES.KEY_MISSING.what, { where: 'active on your account' }),
       detail: null,
       causes: [],
       unverified: null,
       fix: { text: `Create a relay key in step 1. Then run the one-line install where you run ${name}.`, commands: [] },
-      then: codexWaiting ? codexThen : endOneSession(name),
+      then: codexWaiting ? CODEX_TRUST_FIX : endOneSession(name),
       check: checkFor(id),
       caveat: null,
+      doc: docFor('KEY_MISSING'),
     });
   }
 
@@ -275,9 +306,10 @@ export function diagnoseAgent(input: DiagnosisInput): Verdict {
         text: `Run the one-line install on the machine where you run ${name}. It asks for the key at a hidden prompt.`,
         commands: [{ prompt: '$', text: oneLineInstall(input.serverUrl ?? ''), label: 'One-line install and connect' }],
       },
-      then: codexWaiting ? codexThen : endOneSession(name),
+      then: codexWaiting ? CODEX_TRUST_FIX : endOneSession(name),
       check: checkFor(id),
       caveat: KEY_CAVEAT,
+      doc: `${RELAY_GUIDE}#setup`,
     });
   }
 
@@ -285,23 +317,24 @@ export function diagnoseAgent(input: DiagnosisInput): Verdict {
     return build({
       code: 'PICKS_UP_NEVER_CLOSES',
       proven: true,
-      verdict: `${name} read ${plural(briefs, 'brief')} but never handed off: its close hasn't reached Remembra.`,
+      verdict: say(SHARED_RULES.PICKS_UP_NEVER_CLOSES.what, { name, briefs: plural(briefs, 'brief') }),
       detail: meta.detachClose ? `${name} closes in the background and logs to ${DETACHED_CLOSE_LOG} on that machine.` : null,
       causes: [`a ${name} session is still open: the handoff is written when it ends`, 'the close failed on that machine'],
       unverified: null,
-      fix: { text: `End one ${name} session. If no handoff arrives, doctor names the failing close:`, commands: [] },
+      fix: { text: say(SHARED_RULES.PICKS_UP_NEVER_CLOSES.fix, { name }), commands: [] },
       then: null,
       check: checkFor(id),
       caveat: null,
+      doc: docFor('PICKS_UP_NEVER_CLOSES'),
     });
   }
 
   if (codexWaiting) {
     return build({
-      code: 'CODEX_TRUST',
+      code: 'CODEX_TRUST_MISSING',
       proven: false,
       verdict: CODEX_TRUST_LINE,
-      detail: 'Codex skips untrusted hooks without a message, so no brief or handoff from Codex has reached Remembra.',
+      detail: `${SHARED_RULES.CODEX_TRUST_MISSING.detail} No brief or handoff from Codex has reached Remembra.`,
       causes: [
         'Codex hooks not trusted yet',
         'connect ran as a dry run (the old homepage lines did this)',
@@ -309,12 +342,13 @@ export function diagnoseAgent(input: DiagnosisInput): Verdict {
       ],
       unverified: null,
       fix: {
-        text: `In the Codex app: Settings > Hooks > Trust. ${CODEX_TRUST_CLI}`,
+        text: CODEX_TRUST_FIX,
         commands: [{ prompt: '>', text: '/hooks', label: 'The Codex CLI command that lists hooks to trust', caption: 'in the Codex CLI:' }],
       },
       then: endOneSession('Codex'),
       check: checkFor(id),
       caveat: null,
+      doc: docFor('CODEX_TRUST_MISSING'),
     });
   }
 
@@ -323,7 +357,7 @@ export function diagnoseAgent(input: DiagnosisInput): Verdict {
     return build({
       code: 'NOTHING_WAITING',
       proven: true,
-      verdict: `${name} hasn't ended a session with the hooks yet, and no handoff was waiting for it.`,
+      verdict: say(SHARED_RULES.NOTHING_WAITING.what, { name }),
       detail: null,
       causes: [],
       unverified: honest,
@@ -332,10 +366,11 @@ export function diagnoseAgent(input: DiagnosisInput): Verdict {
             text: `connect --apply leaves ${name}'s hooks out unless you add --include-unverified:`,
             commands: [{ prompt: '$', text: agentConnectCommand(id), label: `Connect command for ${name}` }],
           }
-        : { text: endOneSession(name), commands: [] },
-      then: honest ? endOneSession(name) : null,
+        : { text: say(SHARED_RULES.NOTHING_WAITING.fix, { name }), commands: [] },
+      then: honest ? endOneSession(name) : TICKS,
       check: checkFor(id),
       caveat: null,
+      doc: docFor('NOTHING_WAITING'),
     });
   }
 
@@ -356,7 +391,7 @@ export function diagnoseAgent(input: DiagnosisInput): Verdict {
     return build({
       code: 'HOOKS_NOT_FIRING',
       proven: false,
-      verdict: `The key works, but nothing from ${name} has reached Remembra.`,
+      verdict: say(SHARED_RULES.HOOKS_NOT_FIRING.what, { name, since: '' }),
       detail: null,
       causes,
       unverified: honest,
@@ -369,6 +404,7 @@ export function diagnoseAgent(input: DiagnosisInput): Verdict {
       then: honest ? endOneSession(name) : null,
       check: honest ? check : null,
       caveat: KEY_CAVEAT,
+      doc: docFor('HOOKS_NOT_FIRING'),
     });
   }
 
@@ -378,17 +414,18 @@ export function diagnoseAgent(input: DiagnosisInput): Verdict {
     return build({
       code: 'STALE_CHECKPOINT',
       proven: true,
-      verdict: `${name}'s last session stopped without a handoff.`,
-      detail: `Its newest entry is a checkpoint from ${relativeTime(newest.created_at, input.now)}, with no handoff after it.`,
+      verdict: say(SHARED_RULES.STALE_CHECKPOINT.what, { name }),
+      detail: say(SHARED_RULES.STALE_CHECKPOINT.detail, { ago: relativeTime(newest.created_at, input.now) }),
       causes: [],
       unverified: null,
       fix: {
-        text: 'In that repository, write the handoff now:',
+        text: SHARED_RULES.STALE_CHECKPOINT.fix,
         commands: [{ prompt: '$', text: `remembra-relay close --agent ${adapter}`, label: `Close command for ${name}` }],
       },
       then: null,
       check: checkFor(id),
       caveat: null,
+      doc: docFor('STALE_CHECKPOINT'),
     });
   }
 
@@ -404,6 +441,7 @@ export function diagnoseAgent(input: DiagnosisInput): Verdict {
     then: null,
     check: null,
     caveat: null,
+    doc: RELAY_GUIDE,
   });
 }
 

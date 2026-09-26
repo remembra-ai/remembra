@@ -14,12 +14,15 @@ import {
   pipxRunDoctorCommand,
 } from '../agents';
 import {
+  CODEX_TRUST_FIX,
   CODEX_TRUST_LINE,
+  RELAY_GUIDE,
   dashboardSources,
   diagnoseAgent,
   initialSlipState,
   readSlip,
   rowState,
+  say,
   slipOutcome,
   type KeyEvidence,
   type SlipSources,
@@ -27,6 +30,7 @@ import {
   type Verdict,
   type VerdictCode,
 } from '../marshal';
+import { CODEX_TRUST_EVENTS, DASHBOARD_ONLY, SHARED_RULES, UNVERIFIED } from '../marshalWords';
 import type { AgentActivity, TrailItem } from '../relay';
 
 interface FixtureCase {
@@ -46,10 +50,11 @@ interface FixtureCase {
     lines: string[];
     causes: string[];
     unverified: string | null;
-    fix: string;
+    fix: string | null;
     then: string | null;
     commands: string[];
     caveat: string | null;
+    doc: string;
   }>;
 }
 
@@ -81,32 +86,53 @@ describe('diagnoseAgent: the shared fixture', () => {
     if (want.lines !== undefined) expect(v.lines.map((l) => `${l.label}: ${l.text}`)).toEqual(want.lines);
     if (want.causes !== undefined) expect(v.causes).toEqual(want.causes);
     if (want.unverified !== undefined) expect(v.unverified).toBe(want.unverified);
-    if (want.fix !== undefined) expect(v.fix?.text).toBe(want.fix);
+    if (want.fix !== undefined) expect(v.fix?.text ?? null).toBe(want.fix);
     if (want.then !== undefined) expect(v.then).toBe(want.then);
     if (want.commands !== undefined) expect(v.commands).toEqual(want.commands);
     if (want.caveat !== undefined) expect(v.caveat).toBe(want.caveat);
+    if (want.doc !== undefined) expect(v.doc).toBe(want.doc);
   });
 
-  it('covers every verdict in the table', () => {
+  it('covers every verdict: each rule it shares with the doctor, and the two only a slip reaches', () => {
     const codes = new Set(FIXTURE.cases.map((c) => run(c).code));
-    const table: VerdictCode[] = [
-      'NO_KEY',
-      'KEY_NEVER_USED',
-      'PICKS_UP_NEVER_CLOSES',
-      'CODEX_TRUST',
-      'NOTHING_WAITING',
-      'HOOKS_NOT_FIRING',
-      'STALE_CHECKPOINT',
-      'HANDED_OFF',
-    ];
+    const table: VerdictCode[] = [...(Object.keys(SHARED_RULES) as VerdictCode[]), ...DASHBOARD_ONLY];
     expect([...codes].sort()).toEqual([...table].sort());
+    expect(table).toEqual(
+      expect.arrayContaining(['KEY_MISSING', 'PICKS_UP_NEVER_CLOSES', 'CODEX_TRUST_MISSING', 'STALE_CHECKPOINT']),
+    );
+  });
+
+  it("says a shared rule in the doctor's words, and links the doctor's page for it", () => {
+    for (const c of FIXTURE.cases) {
+      const v = run(c);
+      if (!(v.code in SHARED_RULES)) continue;
+      const rule = SHARED_RULES[v.code as keyof typeof SHARED_RULES];
+      expect(v.doc, c.name).toBe(`${RELAY_GUIDE}${rule.doc}`);
+      // The call is the shared template with only its {values} filled in.
+      const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const shape = new RegExp(`^${rule.what.split(/\{\w+\}/).map(literal).join('.*?')}$`);
+      expect(v.verdict, c.name).toMatch(shape);
+    }
+    expect(CODEX_TRUST_LINE).toBe('Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust.');
+    expect(CODEX_TRUST_FIX).toBe(
+      'Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd.',
+    );
+    expect(CODEX_TRUST_EVENTS).toEqual(['SessionStart', 'UserPromptSubmit', 'SessionEnd']);
+    expect(say(UNVERIFIED, { name: 'Kimi CLI' })).toBe(
+      "Kimi CLI's adapter is built from its hook docs and has never been run against the real tool.",
+    );
+  });
+
+  it('fills a template only with the values it names, and refuses a missing one', () => {
+    expect(say('{name} read {briefs}.', { name: 'Codex', briefs: '2 briefs' })).toBe('Codex read 2 briefs.');
+    expect(() => say(SHARED_RULES.HOOKS_NOT_FIRING.what, { name: 'Codex' })).toThrow('no value for {since}');
   });
 
   it('marks every inference [??] and gives the one-key caveat wherever the call rests on key use', () => {
     for (const c of FIXTURE.cases) {
       const v = run(c);
       if (v.code === 'HOOKS_NOT_FIRING' || v.code === 'KEY_NEVER_USED') expect(v.caveat, c.name).not.toBeNull();
-      if (v.code === 'HOOKS_NOT_FIRING' || v.code === 'CODEX_TRUST') {
+      if (v.code === 'HOOKS_NOT_FIRING' || v.code === 'CODEX_TRUST_MISSING') {
         expect(v.proven, c.name).toBe(false);
         expect(v.causes.length, c.name).toBeGreaterThan(0);
       }
@@ -218,7 +244,7 @@ describe('rowState: the checklist row before the slip opens', () => {
       agentTrail: [],
       now: new Date('2026-09-26T12:00:00Z'),
     });
-    expect(v.code).toBe('CODEX_TRUST');
+    expect(v.code).toBe('CODEX_TRUST_MISSING');
     expect(v.verdict).toBe(CODEX_TRUST_LINE);
   });
 });
@@ -260,7 +286,7 @@ describe('readSlip: three reads, one line as each finishes', () => {
     expect(final.order).toEqual(['trail', 'keys', 'agentTrail']);
     expect(out.lines.map((l) => l.label)).toEqual(['pickups', 'keys', 'entries']);
     expect(out.pending).toBe(false);
-    expect(out.verdict?.code).toBe('CODEX_TRUST');
+    expect(out.verdict?.code).toBe('CODEX_TRUST_MISSING');
     expect(seen).toHaveLength(3);
   });
 
@@ -348,6 +374,6 @@ describe('dashboardSources: the real API client makes three GETs and nothing els
       expect(url).not.toMatch(/session\/brief|projects\/resolve|memories\/recall/);
     }
     const out = slipOutcome(final, CTX);
-    expect(out.verdict?.code).toBe('CODEX_TRUST');
+    expect(out.verdict?.code).toBe('CODEX_TRUST_MISSING');
   });
 });

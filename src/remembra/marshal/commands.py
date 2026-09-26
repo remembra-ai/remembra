@@ -1,9 +1,11 @@
 """Every command Marshal may hand a user, built from templates and checked against them.
 
 The strings mirror ``dashboard/src/lib/agents.ts`` (``PIPX_INSTALL``,
-``saveKeyCommand``, ``oneLineInstall``, ``UNINSTALL_STEPS``,
+``saveKeyCommand``, ``oneLineInstall``, ``agentConnectCommand``,
+``doctorCommand``, ``pipxRunDoctorCommand``, ``UNINSTALL_STEPS``,
 ``CONNECTABLE_AGENTS``); ``tests/test_marshal_commands_parity.py`` fails when
-the two drift. A finding or setup step may only carry a command that
+the two drift, and ``tests/test_marshal_parity.py`` holds remembra.dev/setup.md
+and ``remembra_setup`` to the same lines. A finding or setup step may only carry a command that
 :func:`is_allowed` accepts, so a fix can never be text copied from a brief, a
 memory or an inbox note. No template takes an API key: keys are typed into
 ``remembra-install``'s hidden prompt by the user, in their own terminal.
@@ -13,6 +15,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+
+from remembra.relay.adapters import REGISTRY
+from remembra.relay.config import DEFAULT_URL
 
 CLOUD_URL = "https://api.remembra.dev"
 SIGNUP_URL = "https://app.remembra.dev/signup"
@@ -43,8 +48,6 @@ PIPX_BOOTSTRAP: dict[str, str] = {
     "other": "python3 -m pip install --user pipx && python3 -m pipx ensurepath",
 }
 
-CODEX_TRUST_STEP = "Codex: trust the 3 remembra-relay hooks in Codex Settings > Hooks, or run /hooks in the Codex CLI."
-
 _AGENT_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 _PROJECT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _URL_RE = re.compile(r"^https?://[A-Za-z0-9.-]+(?::\d{1,5})?(?:/[A-Za-z0-9._~/-]*)?$")
@@ -57,12 +60,32 @@ def _agent(name: str) -> str:
     return name
 
 
-def save_key_command(server_url: str) -> str:
-    """``saveKeyCommand`` in agents.ts: save the key (asked at a hidden prompt) and add the MCP server."""
-    url = server_url or CLOUD_URL
-    if not _URL_RE.match(url):
+def save_key_command(server_url: str | None) -> str:
+    """``saveKeyCommand`` in agents.ts: save the key (asked at a hidden prompt) and add the MCP server.
+
+    ``server_url`` is the server the key belongs to, when it is known (the dashboard always knows its own).
+    Without one, ``remembra-install`` keeps the server this machine already uses, or Remembra Cloud on a first
+    install: the line remembra.dev and setup.md show.
+    """
+    if not server_url:
+        return INSTALL_KEEP_SERVER
+    if not _URL_RE.match(server_url):
         raise ValueError("not a server URL")
-    return f"remembra-install --all --url {url}"
+    return f"remembra-install --all --url {server_url}"
+
+
+def key_step(configured_url: str | None) -> str:
+    """The key step on a machine whose relay uses ``configured_url``: that server, or none when none is set up.
+
+    The relay's own default (``DEFAULT_URL``) means nothing is configured yet, so ``remembra-install`` is left
+    to choose (Remembra Cloud on a first install), exactly as remembra.dev and setup.md show it.
+    """
+    if not configured_url or configured_url.rstrip("/") == DEFAULT_URL:
+        return INSTALL_KEEP_SERVER
+    try:
+        return save_key_command(configured_url)
+    except ValueError:
+        return INSTALL_KEEP_SERVER
 
 
 def one_line_install(server_url: str) -> str:
@@ -78,6 +101,12 @@ def connect(agents: Iterable[str] = (), *, unverified: bool = False, apply: bool
     if unverified:
         parts.append("--include-unverified")
     return " ".join(parts)
+
+
+def agent_connect(agent: str) -> str:
+    """``agentConnectCommand`` in agents.ts: write one agent's hooks (an unverified adapter needs the flag)."""
+    adapter = REGISTRY.get(_agent(agent))
+    return connect([agent], unverified=adapter is None or not adapter.spec.verified)
 
 
 def close(agent: str) -> str:

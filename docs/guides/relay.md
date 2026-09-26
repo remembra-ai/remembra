@@ -224,8 +224,17 @@ What it checks:
 | `CODEX_TRUST_MISSING`, `CODEX_TRUST_STALE`, `CODEX_HOOK_DISABLED`, `CODEX_TRUST_UNCHECKED` | Codex has no trust record for a hook, one for an older version of it, the hook turned off, or `config.toml` could not be read (never counted as trusted) |
 | `CODEX_AUTOMATIONS` | Codex automation runs in the last 7 days, and whether this install skips them |
 | `LEGACY_NAMESPACE`, `MCP_PROJECT_SPLIT` | `REMEMBRA_PROJECT` sends every new repository to one project; agents' MCP servers use different projects |
-| `SERVER_NO_ENTRIES`, `STALE_CHECKPOINT` | hooks written but nothing from that agent in 7 days; its last session ended on a checkpoint |
+| `PICKS_UP_NEVER_CLOSES` | the agent reads briefs but no handoff from it arrived in 7 days |
+| `NOTHING_WAITING`, `HOOKS_NOT_FIRING` | hooks written but nothing from that agent yet, and no handoff was waiting for it; others handed off (or it did before) and nothing arrives now |
+| `STALE_CHECKPOINT` | its last session ended on a checkpoint more than an hour ago, with no handoff after it |
 | `NOT_DETECTED` | an agent named with `--agent` isn't on this machine |
+
+**On the dashboard.** Each agent still waiting on Home's setup checklist has a `why?` button. It reads your
+keys and your trail in the browser (three GET requests, nothing written) and prints the same kind of slip. Where
+it reaches a fault the doctor can also see (`KEY_MISSING`, `PICKS_UP_NEVER_CLOSES`, `CODEX_TRUST_MISSING`,
+`NOTHING_WAITING`, `HOOKS_NOT_FIRING`, `STALE_CHECKPOINT`) it uses the doctor's rule id, sentence and page; it
+also says when no key was ever used (`KEY_NEVER_USED`). It can't see your machine, so it ends with the doctor
+line to run there.
 
 **After `connect`.** When something is still left (saving a key, `--apply` after a dry run, unverified
 adapters it skipped, trusting the hooks in Codex), `connect` ends with a short **You still need to** list.

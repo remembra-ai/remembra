@@ -344,7 +344,10 @@ def test_unverified_adapter_not_written(fh: FakeHome) -> None:
     f = only(run(fh, check_server=False), "UNVERIFIED_NOT_WRITTEN", "cursor")
     assert (f.severity, f.inferred) == ("warn", False)
     assert f.fix is not None and f.fix.command == "remembra-relay connect --apply --agent cursor --include-unverified"
-    assert "never run against the real tool" in f.what and f.caveat and "--agents-md" in f.caveat
+    assert f.what == (
+        "Cursor: hooks not written. Cursor's adapter is built from its hook docs and has never been run against the real tool."
+    )
+    assert f.caveat and "--agents-md" in f.caveat
 
 
 def test_hooks_that_call_a_missing_command(fh: FakeHome) -> None:
@@ -378,7 +381,14 @@ def test_codex_trust_missing(fh: FakeHome) -> None:
     f = only(report, "CODEX_TRUST_MISSING")
     assert (f.severity, f.inferred, f.agent) == ("blocker", False, "codex")
     assert f.fix is not None and f.fix.runs_where == "codex_ui" and f.fix.command is None
-    assert "Codex Settings > Hooks" in f.fix.text and "/hooks" in f.fix.text
+    # The same call and fix as the dashboard's slip and remembra_setup (remembra.marshal.words).
+    assert f.what == (
+        "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Codex skips untrusted hooks without a message."
+    )
+    assert f.fix.text == (
+        "Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd."
+    )
+    assert f.doc == "docs.remembra.dev/guides/relay/#codex-trust"
     assert f.evidence == ("~/.codex/hooks.json: 3 remembra-relay hooks", "~/.codex/config.toml: no [hooks.state] entries")
     assert "trust NOT recorded" in report.text()
     # Trust recorded for one hook only: the other two are named.
@@ -386,6 +396,8 @@ def test_codex_trust_missing(fh: FakeHome) -> None:
     fh.trust_codex(trusted=["SessionStart"])
     g = only(run(fh, check_server=False), "CODEX_TRUST_MISSING")
     assert "~/.codex/config.toml: no trust record for UserPromptSubmit, SessionEnd" in g.evidence
+    assert g.what.startswith("Codex needs you to trust 2 hooks: ")
+    assert g.fix is not None and g.fix.text.endswith("and trust UserPromptSubmit and SessionEnd.")
 
 
 def test_codex_trust_keys_match_through_symlinks(fh: FakeHome, tmp_path: Path) -> None:
@@ -472,20 +484,64 @@ def test_codex_automations(fh: FakeHome, monkeypatch: pytest.MonkeyPatch) -> Non
 # ---------------------------------------------------------------------------
 
 
-def test_server_no_entries_inferred_or_proven_by_pickups(fh: FakeHome) -> None:
+def test_hooks_not_firing_when_others_handed_off_and_nothing_arrives(fh: FakeHome) -> None:
     trail = healthy(fh)
     trail.agents["codex"] = {"handoffs": 0, "sessions_7d": 0, "daily": [0] * 7, "last_active": None}
     trail.items = [entry("claude-code", "handoff", NOW - 2 * 3600)]
-    f = only(run(fh, trail), "SERVER_NO_ENTRIES", "codex")
-    assert (f.severity, f.inferred) == ("warn", True)
+    f = only(run(fh, trail), "HOOKS_NOT_FIRING", "codex")
+    assert (f.severity, f.inferred, f.marker) == ("warn", True, "[??]")
+    assert f.what == "The key works, but nothing from Codex has reached Remembra."  # the slip's sentence
     assert f.fix is not None and f.fix.command == "remembra-relay doctor --agent codex"
+    assert f.fix.text == "End one Codex session in a repository. Then run:"
     assert "no entry from codex ever" in f.evidence and "1 handoff from other agents waited for it" in f.evidence
-    trail.items = [entry("claude-code", "handoff", NOW - 2 * 3600, picked=[("codex", NOW - 3600)])]
-    g = only(run(fh, trail), "SERVER_NO_ENTRIES", "codex")
-    assert g.inferred is False and "reads briefs but no handoff from it reached Remembra" in g.what
+    assert f.doc == "docs.remembra.dev/guides/relay/#doctor"
+    # It handed off before, just not this week: the window is named.
+    trail.agents["codex"]["last_active"] = "2026-09-10T09:00:00+00:00"
+    g = only(run(fh, trail), "HOOKS_NOT_FIRING", "codex")
+    assert g.what == "The key works, but nothing from Codex has reached Remembra in 7 days."
+    assert "last entry from codex: 16d ago" in g.evidence
     # Untrusted Codex hooks explain the silence already: no second finding.
     (fh.home / ".codex" / "config.toml").write_text("")
-    assert "SERVER_NO_ENTRIES" not in ids(run(fh, trail))
+    assert "HOOKS_NOT_FIRING" not in ids(run(fh, trail))
+
+
+def test_nothing_waiting_is_proven_when_no_handoff_waited(fh: FakeHome) -> None:
+    trail = healthy(fh)
+    trail.agents["codex"] = {"handoffs": 0, "sessions_7d": 0, "daily": [0] * 7, "last_active": None}
+    trail.items = []
+    report = run(fh, trail)
+    f = only(report, "NOTHING_WAITING", "codex")
+    assert (f.severity, f.inferred, f.marker) == ("warn", False, "[!!]")
+    assert f.what == "Codex hasn't ended a session with the hooks yet, and no handoff was waiting for it."
+    assert f.fix is not None and f.fix.command == "remembra-relay doctor --agent codex"
+    assert "no handoff from another agent in the last 100 entries" in f.evidence
+    assert report.exit_code == 1  # ending one session is still the user's to do
+    # The trail could not be read: who waited is unknown, so it is only inferred.
+    trail.trail_status = 400
+    g = only(run(fh, trail), "HOOKS_NOT_FIRING", "codex")
+    assert g.inferred is True and "the trail could not be read: who waited for it is unknown" in g.evidence
+
+
+def test_picks_up_never_closes_is_proven_by_pickups(fh: FakeHome) -> None:
+    trail = healthy(fh)
+    trail.agents["codex"] = {"handoffs": 0, "sessions_7d": 0, "daily": [0] * 7, "last_active": None}
+    trail.items = [
+        entry("claude-code", "handoff", NOW - 2 * 3600, picked=[("codex", NOW - 3600)]),
+        entry("claude-code", "handoff", NOW - 5 * 3600, picked=[("codex", NOW - 4 * 3600)]),
+    ]
+    f = only(run(fh, trail), "PICKS_UP_NEVER_CLOSES", "codex")
+    assert (f.severity, f.inferred) == ("warn", False)
+    assert f.what == "Codex read 2 briefs but never handed off: its close hasn't reached Remembra."
+    assert f.fix is not None and f.fix.command == "remembra-relay doctor --agent codex"
+    assert f.fix.text == "End one Codex session. If no handoff arrives, doctor names the failing close:"
+    assert "trail: codex picked up 2 handoffs in the last 100 entries" in f.evidence
+    assert f.caveat and "session is still open" in f.caveat
+    # Checkpoints but no handoff: still never closes, and it is said once (no STALE_CHECKPOINT as well).
+    trail.agents["codex"] = {"handoffs": 0, "sessions_7d": 0, "daily": [0, 0, 0, 0, 0, 0, 1], "last_active": None}
+    trail.items.append(entry("codex", "checkpoint", NOW - 3 * 3600))
+    report = run(fh, trail)
+    assert only(report, "PICKS_UP_NEVER_CLOSES", "codex").what.startswith("Codex read 2 briefs")
+    assert "STALE_CHECKPOINT" not in ids(report)
 
 
 def test_stale_checkpoint_and_the_per_agent_read(fh: FakeHome) -> None:
@@ -494,7 +550,11 @@ def test_stale_checkpoint_and_the_per_agent_read(fh: FakeHome) -> None:
     f = only(run(fh, trail), "STALE_CHECKPOINT", "claude-code")
     assert (f.severity, f.inferred) == ("warn", False)
     assert f.fix is not None and f.fix.command == "remembra-relay close --agent claude-code"
-    assert "checkpoint, 3h ago" in f.what
+    assert f.fix.text == "In the repository it worked in, write the handoff now:"
+    assert f.what == (
+        "Claude Code's last session stopped without a handoff."
+        " Its newest entry is a checkpoint from 3h ago, with no handoff after it."
+    )
     # A checkpoint under an hour old is work in progress.
     trail.items = [entry("claude-code", "checkpoint", NOW - 1800), entry("codex", "handoff", NOW - 4 * 3600)]
     assert "STALE_CHECKPOINT" not in ids(run(fh, trail))
@@ -503,7 +563,7 @@ def test_stale_checkpoint_and_the_per_agent_read(fh: FakeHome) -> None:
     trail.agent_items = {"codex": [entry("codex", "checkpoint", NOW - 20 * 3600)]}
     trail.requests.clear()
     report = run(fh, trail)
-    assert only(report, "STALE_CHECKPOINT", "codex").what.startswith("codex's last session stopped without a handoff")
+    assert only(report, "STALE_CHECKPOINT", "codex").what.startswith("Codex's last session stopped without a handoff")
     assert [dict(r.url.params) for r in trail.requests][-1] == {"agent_id": "codex", "limit": "5"}
     assert len(trail.requests) <= signals.MAX_GETS
 

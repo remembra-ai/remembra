@@ -86,8 +86,10 @@ describe('SlipView states', () => {
     expect(t).toContain('= Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust.');
     expect(t).toContain('[??] (inferred, not proven)');
     expect(t).toContain('Likely one of: 1 Codex hooks not trusted yet 2 connect ran as a dry run (the old homepage lines did this)');
-    expect(t).toContain('fix → In the Codex app: Settings > Hooks > Trust. In the Codex CLI: run /hooks and trust SessionStart');
-    expect(t).toContain('then End one Codex session; its handoff ticks this row.');
+    expect(t).toContain(
+      'fix → Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd.',
+    );
+    expect(t).toContain('then End one Codex session in a repository. Its handoff ticks this row.');
     expect(t).toContain('check on the machine where you run Codex:');
     expect(t).toContain('ask your agent:');
     expect(t).toContain('no upgrade yet?');
@@ -102,7 +104,7 @@ describe('SlipView states', () => {
     // `>` for what is typed into an agent, `$` for the terminal
     const prompts = [...html.matchAll(/<span aria-hidden="true" class="select-none text-signal">([^<]*)<\/span>/g)].map((m) => m[1]);
     expect(prompts).toEqual(['&gt;', '$', '&gt;', '$']);
-    expect(html).toContain('href="https://docs.remembra.dev/guides/relay/#setup"');
+    expect(html).toContain('href="https://docs.remembra.dev/guides/relay/#codex-trust"'); // the doctor's page for it
     expect(t).toContain(SLIP_FOOTER);
     expect(html).not.toContain(KEY_CAVEAT);
   });
@@ -123,7 +125,9 @@ describe('SlipView states', () => {
 
   it('a proven call is marked [!!]', () => {
     const html = slip('claude-code', done([], []));
-    expect(text(html)).toContain('= No relay key yet. Create one above; hooks can\'t reach Remembra without it. [!!] (shown by your data)');
+    expect(text(html)).toContain(
+      "= No API key active on your account, so the hooks can't load or save handoffs. [!!] (shown by your data)",
+    );
   });
 
   it('a failed read: the line says why, there is no call, and it can read again', () => {

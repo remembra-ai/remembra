@@ -138,8 +138,9 @@ def test_doctor_reads_a_real_trail(server: str, tmp_path: Path) -> None:  # noqa
     assert agents["claude-code"]["trail"]["handoffs_7d"] == 1
     assert agents["codex"]["trail"]["pickups"] == 1 and agents["codex"]["trail"]["entries_7d"] == 0
     # Codex read a brief with its hooks trusted but no handoff from it arrived: proven, not guessed.
-    finding = next(f for f in data["findings"] if f["id"] == "SERVER_NO_ENTRIES")
+    finding = next(f for f in data["findings"] if f["id"] == "PICKS_UP_NEVER_CLOSES")
     assert finding["agent"] == "codex" and finding["proven"] is True
+    assert finding["what"] == "Codex read 1 brief but never handed off: its close hasn't reached Remembra."
     assert out.returncode == 1 == data["exit_code"]
 
     text = cli(fh, "doctor", env={**env, "NO_COLOR": "1"}, cwd=repo)

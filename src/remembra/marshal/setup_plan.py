@@ -20,10 +20,10 @@ from pathlib import Path
 from typing import Any
 
 from remembra.marshal import commands as cmd
+from remembra.marshal import words
 from remembra.marshal.render import WIDTH
 from remembra.marshal.signals import Signals
 from remembra.relay.adapters import REGISTRY
-from remembra.relay.config import DEFAULT_URL
 
 OS_LABELS = {
     "macos": "macOS",
@@ -163,11 +163,7 @@ def plan(
         done=installed,
     )
     needs_mcp = [a for a in chosen if a in INSTALLER_AGENTS and sig.agents[a].mcp != "configured"]
-    url = server_url or sig.server_url
-    try:
-        key_command = cmd.INSTALL_KEEP_SERVER if url.rstrip("/") == DEFAULT_URL else cmd.save_key_command(url)
-    except ValueError:
-        key_command = cmd.INSTALL_KEEP_SERVER
+    key_command = cmd.key_step(server_url or sig.server_url)
     saved = has_key and not needs_mcp
     add(
         title="Key saved and MCP server added" if saved else "Save the key and add the Remembra MCP server",
@@ -179,42 +175,52 @@ def plan(
         note=None if saved else "It asks for the key at a hidden prompt. Never paste a key into a chat.",
     )
     unwritten = [a for a in chosen if not sig.agents[a].hooks_written]
-    unverified = any(not REGISTRY[a].spec.verified for a in unwritten)
+    verified_new = [a for a in unwritten if REGISTRY[a].spec.verified]
+    unverified_new = [a for a in unwritten if not REGISTRY[a].spec.verified]
+    # `remembra-relay connect` with no --agent looks at every agent found here, and --apply then writes the
+    # verified ones: the lines remembra.dev and setup.md show. They are used unless they would miss a chosen
+    # agent (one not found here yet) or write one that was left out; then each agent is named.
+    left_out = [n for n, a in sig.agents.items() if n not in chosen and a.verified and a.detected and not a.hooks_written]
+    whole = not left_out and all(sig.agents[a].detected for a in verified_new)
     add(
         title="Hooks are written" if not unwritten else "See what connect would change (dry run)",
-        command=None if not unwritten else cmd.connect(unwritten, apply=False),
+        command=None if not unwritten else cmd.connect(() if whole else unwritten, apply=False),
         runs_where="agent_ok",
         done=not unwritten,
         note=None if not unwritten else "Writes nothing; show the output and ask before the next step.",
     )
-    if unwritten:
+    if verified_new:
         add(
             title="Write the hooks",
-            command=cmd.connect(unwritten, unverified=unverified),
+            command=cmd.connect(() if whole else verified_new),
             runs_where="agent_ok",
-            writes=tuple(sig.agents[a].config_path for a in unwritten),
+            writes=tuple(sig.agents[a].config_path for a in verified_new),
             needs_yes=True,
-            note=(
-                "Includes unverified adapters (never run against the real tool): "
-                + ", ".join(a for a in unwritten if not REGISTRY[a].spec.verified)
-                if unverified
-                else "A backup of each file is kept."
-            ),
+            note="A backup of each file is kept.",
+        )
+    for agent in unverified_new:
+        add(
+            title=f"Only if you want them: {words.agent_name(agent)}'s hooks",
+            command=cmd.agent_connect(agent),
+            runs_where="agent_ok",
+            writes=(sig.agents[agent].config_path,),
+            needs_yes=True,
+            note=f"{words.unverified_line(agent)} Without --include-unverified, connect --apply leaves it out.",
         )
     if "codex" in chosen:
         trust = sig.codex.trust
         trusted = trust is not None and trust.all_trusted and "codex" not in unwritten
         add(
             title="Codex trusts the hooks" if trusted else "Trust the hooks in Codex",
-            action=None if trusted else codex_trust_action(),
+            action=None if trusted else words.codex_trust_fix(),
             runs_where="codex_ui",
             done=trusted,
-            note=None if trusted else "Codex skips untrusted hooks without a message.",
+            note=None if trusted else words.say("CODEX_TRUST_MISSING", "detail"),
         )
     by_hand = [a for a in chosen if a in ("qwen", "kimi")]
     if by_hand:
         add(
-            title="Add the MCP server by hand: " + ", ".join(REGISTRY[a].spec.display for a in by_hand),
+            title="Add the MCP server by hand: " + ", ".join(words.agent_name(a) for a in by_hand),
             action="remembra-install does not write these yet; see docs.remembra.dev/guides/relay/#mcp-by-hand.",
             runs_where="user",
         )
@@ -231,10 +237,6 @@ def plan(
         note="Then end this session: the next agent starts with the brief.",
     )
     return SetupPlan(os=os_id, shell=shell, agents=chosen, steps=tuple(steps))
-
-
-def codex_trust_action() -> str:
-    return "Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd."
 
 
 def render_plan(sig: Signals, setup: SetupPlan) -> str:

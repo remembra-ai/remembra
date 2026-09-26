@@ -30,6 +30,7 @@ from types import ModuleType
 from typing import Any
 
 from remembra.marshal import commands as cmd
+from remembra.marshal import words
 
 PACK_DIR = Path(__file__).resolve().parent / "pack"
 PAGES: dict[str, str] = {
@@ -302,7 +303,7 @@ def facts() -> dict[str, Any]:
         "plans": plan_facts(),
         "founding": {"annual_price_cents": plans.FOUNDING_ANNUAL_PRICE_CENTS, "max_redemptions": plans.FOUNDING_MAX_REDEMPTIONS},
         "adapters": [
-            {"agent": name, "display": a.spec.display, "verified": a.spec.verified, "notes": a.spec.notes}
+            {"agent": name, "display": words.agent_name(name), "verified": a.spec.verified, "notes": a.spec.notes}
             for name, a in REGISTRY.items()
         ],
         "commands": {

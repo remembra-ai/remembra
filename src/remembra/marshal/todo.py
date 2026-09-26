@@ -24,11 +24,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from remembra.marshal import codex_hooks
+from remembra.marshal import codex_hooks, words
 from remembra.marshal import commands as cmd
 from remembra.marshal.signals import config_file
 from remembra.relay.adapters import REGISTRY, relay_command
-from remembra.relay.config import DEFAULT_URL, load_config
+from remembra.relay.config import load_config
 
 IN_PLACE = "in_place"
 DRY_RUN = "dry_run"
@@ -43,15 +43,6 @@ class Outcome:
     state: str  # in_place | dry_run | skipped_unverified | not_written | unreadable
     planned: str | None = None  # the file as --apply would write it (dry run)
     path: str | None = None
-
-
-def _key_command(server_url: str | None) -> str:
-    if not server_url or server_url.rstrip("/") == DEFAULT_URL:
-        return cmd.INSTALL_KEEP_SERVER
-    try:
-        return cmd.save_key_command(server_url)
-    except ValueError:
-        return cmd.INSTALL_KEEP_SERVER
 
 
 def outcomes(
@@ -94,12 +85,12 @@ def codex_trust_step(home: Path, outcome: Outcome) -> str | None:
     trust = codex_hooks.read_trust(home, outcome.planned if planned else None, planned=planned, hooks_path=hooks_path)
     if not trust.relay_hooks or trust.all_trusted:
         return None
-    n = len(REGISTRY["codex"].events())
-    step = f"Codex: trust the {n} remembra-relay hooks in Codex Settings > Hooks, or run /hooks in the Codex CLI."
+    # The same step, in the same words, as the doctor's CODEX_TRUST_MISSING and the dashboard's slip.
+    step = words.codex_trust_fix(t.hook.event for t in trust.per_hook if t.status != codex_hooks.TRUSTED)
     if trust.config_state == "unreadable":
         step += " (~/.codex/config.toml could not be read to check.)"
     else:
-        step += " Codex skips untrusted hooks without a message."
+        step += " " + words.say("CODEX_TRUST_MISSING", "detail")
     return ("After --apply: " + step) if planned else step
 
 
@@ -115,7 +106,7 @@ def connect_todo(
     items: list[str] = []
     if missing_key:
         items.append(
-            f"Save your key: run `{_key_command(server_url)}` in your own terminal; it asks for the key at a hidden prompt."
+            f"Save your key: run `{cmd.key_step(server_url)}` in your own terminal; it asks for the key at a hidden prompt."
         )
     for outcome in results:
         if outcome.state == UNREADABLE:
@@ -137,7 +128,7 @@ def connect_todo(
             items.append(f"Unverified adapters were skipped; to write them anyway: `{cmd.connect(skipped, unverified=True)}`.")
         for outcome in results:
             if outcome.state == NOT_WRITTEN:
-                items.append(f"{REGISTRY[outcome.agent].spec.display}: not written by this run; see its lines above.")
+                items.append(f"{words.agent_name(outcome.agent)}: not written by this run; see its lines above.")
     for outcome in results:
         if outcome.agent == "codex" and outcome.state in (IN_PLACE, DRY_RUN):
             step = codex_trust_step(home, outcome)

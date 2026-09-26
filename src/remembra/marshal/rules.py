@@ -18,7 +18,7 @@ from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from remembra.marshal import codex_hooks
+from remembra.marshal import codex_hooks, words
 from remembra.marshal import commands as cmd
 from remembra.marshal.signals import (
     TRAIL_WINDOW,
@@ -31,7 +31,6 @@ from remembra.marshal.signals import (
     slot_ts,
 )
 from remembra.relay.adapters import REGISTRY
-from remembra.relay.config import DEFAULT_URL
 
 BLOCKER = "blocker"
 WARN = "warn"
@@ -45,6 +44,11 @@ DOC_PROJECT = DOC + "#which-project-a-repository-uses"
 DOC_DOCTOR = DOC + "#doctor"
 DOC_MCP = DOC + "#mcp-by-hand"
 DOC_PLANS = "docs.remembra.dev/reference/plans-and-credits/"
+
+
+def _doc(rule: str) -> str:
+    """The page a rule both the doctor and the dashboard's slip reach links to (the same on both)."""
+    return DOC + words.SHARED_RULES[rule]["doc"]
 
 
 @dataclass(frozen=True)
@@ -136,15 +140,11 @@ def _host(url: str) -> str:
 
 def _key_fix(url: str | None) -> Fix:
     """Save a (new) key where the hooks read it; the key is typed at a hidden prompt, in the user's terminal."""
-    try:
-        command = cmd.save_key_command(url) if url and url.rstrip("/") != DEFAULT_URL else cmd.INSTALL_KEEP_SERVER
-    except ValueError:
-        command = cmd.INSTALL_KEEP_SERVER
     return Fix(
         kind="command",
         text="Create a key at app.remembra.dev (API keys), then run this in your own terminal;"
         " it asks for the key at a hidden prompt:",
-        command=command,
+        command=cmd.key_step(url),
         runs_where="user_terminal",
         writes=("~/.remembra/credentials", "the remembra MCP entry of each agent it finds"),
         backup=True,
@@ -181,11 +181,11 @@ def rule_keys(sig: Signals) -> list[Finding]:
                     "KEY_MISSING",
                     BLOCKER,
                     None,
-                    "No API key on this machine, so the hooks can't load or save handoffs.",
+                    words.say("KEY_MISSING", "what", where="on this machine"),
                     ("checked REMEMBRA_API_KEY, ~/.claude.json, ~/.codex/config.toml, ~/.remembra/credentials",),
                     fix=_key_fix(sig.server_url if sig.config.get("source") == "none" else key.url),
                     then=cmd.doctor(),
-                    doc=DOC_SETUP,
+                    doc=_doc("KEY_MISSING"),
                 )
             )
         elif key.state == "rejected" or (key.state == "skipped" and recorded.get("state") == "rejected"):
@@ -546,8 +546,7 @@ def rule_hooks(sig: Signals) -> list[Finding]:
                         "UNVERIFIED_NOT_WRITTEN",
                         WARN,
                         name,
-                        f"{agent.display}: hooks not written. Its adapter is built from its hook docs and has never run"
-                        " against the real tool.",
+                        f"{agent.display}: hooks not written. {words.unverified_line(name)}",
                         (*evidence, f"adapter: {agent.notes}"),
                         fix=_connect_fix(agent),
                         then=cmd.doctor(name),
@@ -595,10 +594,9 @@ def rule_hooks(sig: Signals) -> list[Finding]:
 
 
 def _codex_ui_fix(events: list[str]) -> Fix:
-    listed = ", ".join(dict.fromkeys(events))
     return Fix(
         kind="codex_ui",
-        text=f"Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust {listed}.",
+        text=words.codex_trust_fix(events),
         runs_where="codex_ui",
         writes=("~/.codex/config.toml (Codex writes it)",),
     )
@@ -643,11 +641,11 @@ def rule_codex_trust(sig: Signals) -> list[Finding]:
                 "CODEX_TRUST_MISSING",
                 BLOCKER,
                 "codex",
-                "Codex: hooks written, trust not recorded. Codex skips untrusted hooks without a message.",
+                f"{words.codex_trust_call(len(dict.fromkeys(events)))} {words.say('CODEX_TRUST_MISSING', 'detail')}",
                 (hooks_line, state_line),
                 fix=_codex_ui_fix(events),
                 then=cmd.doctor("codex"),
-                doc=DOC_TRUST,
+                doc=_doc("CODEX_TRUST_MISSING"),
             )
         )
     if by_status.get(codex_hooks.MODIFIED):
@@ -828,7 +826,23 @@ def _hooks_should_run(sig: Signals, agent: AgentSignals) -> bool:
     return True
 
 
+def _never_closes(sig: Signals, name: str) -> int:
+    """Briefs ``name`` read (pickups in the trail window) with no handoff from it in 7 days; 0 when that isn't so."""
+    server = sig.server
+    if server is None or not server.trail_read:
+        return 0
+    pickups = server.pickups_by.get(name, 0)
+    return pickups if pickups and not server.handoffs_7d.get(name, 0) else 0
+
+
 def rule_server_entries(sig: Signals) -> list[Finding]:
+    """An agent whose hooks should run, seen from the trail: it never closes, or nothing from it arrives.
+
+    The same verdicts, in the same order and words, as the dashboard's "why?" slip (``diagnoseAgent`` in
+    dashboard/src/lib/marshal.ts): PICKS_UP_NEVER_CLOSES (it reads briefs and never hands off), NOTHING_WAITING
+    (nothing from it yet, and nothing was waiting for it) and HOOKS_NOT_FIRING (others handed off, or it did
+    before, and nothing arrives now). The doctor adds what it reads on this machine as evidence.
+    """
     server = sig.server
     if server is None:
         return []
@@ -837,38 +851,70 @@ def rule_server_entries(sig: Signals) -> list[Finding]:
         agent = sig.agents[name]
         if not _in_play(agent, sig) or not _hooks_should_run(sig, agent):
             continue
+        check = Fix(
+            kind="command",
+            text=words.say("NOTHING_WAITING", "fix", name=agent.display) + " Then run:",
+            command=cmd.doctor(name),
+            runs_where="agent_ok",
+        )
+        briefs = _never_closes(sig, name)
+        if briefs:
+            out.append(
+                Finding(
+                    "PICKS_UP_NEVER_CLOSES",
+                    WARN,
+                    name,
+                    words.say("PICKS_UP_NEVER_CLOSES", "what", name=agent.display, briefs=words.plural(briefs, "brief")),
+                    (
+                        f"trail: {name} picked up {words.plural(briefs, 'handoff')} in the last {TRAIL_WINDOW} entries",
+                        f"trail 7d: no handoff from {name}",
+                    ),
+                    fix=Fix(
+                        kind="command",
+                        text=words.say("PICKS_UP_NEVER_CLOSES", "fix", name=agent.display),
+                        command=cmd.doctor(name),
+                        runs_where="agent_ok",
+                    ),
+                    doc=_doc("PICKS_UP_NEVER_CLOSES"),
+                    caveat=f"Also possible: a {agent.display} session is still open; its handoff is written when it ends.",
+                )
+            )
+            continue
         if server.entries_7d.get(name, 0) > 0:
             continue
-        pickups = server.pickups_by.get(name, 0)
+        last = server.last_active.get(name) or (server.last_entry[name][1] if name in server.last_entry else None)
+        waiting = server.waiting_for(name) if server.trail_read else 0
         evidence = [f"trail 7d: 0 handoffs or checkpoints from {name}"]
-        last = server.last_active.get(name)
         evidence.append(f"last entry from {name}: {_ago(sig, last)}" if last else f"no entry from {name} ever")
-        if pickups:
-            evidence.append(f"{name} picked up {pickups} handoff{'s' if pickups != 1 else ''} in the last {TRAIL_WINDOW} entries")
-            what = f"{name} reads briefs but no handoff from it reached Remembra in 7 days: its close isn't arriving."
-            inferred = False
-        else:
-            waiting = server.waiting_for(name) if server.trail_read else 0
-            if waiting:
-                evidence.append(f"{waiting} handoff{'s' if waiting != 1 else ''} from other agents waited for it")
-            what = f"{name}: hooks written, but nothing from {name} reached Remembra in 7 days."
-            inferred = True
+        if server.trail_read and not waiting and not last:
+            evidence.append(f"no handoff from another agent in the last {TRAIL_WINDOW} entries")
+            out.append(
+                Finding(
+                    "NOTHING_WAITING",
+                    WARN,
+                    name,
+                    words.say("NOTHING_WAITING", "what", name=agent.display),
+                    tuple(evidence),
+                    fix=check,
+                    doc=_doc("NOTHING_WAITING"),
+                )
+            )
+            continue
+        if waiting:
+            evidence.append(f"{waiting} handoff{'s' if waiting != 1 else ''} from other agents waited for it")
+        if not server.trail_read:
+            evidence.append("the trail could not be read: who waited for it is unknown")
         out.append(
             Finding(
-                "SERVER_NO_ENTRIES",
+                "HOOKS_NOT_FIRING",
                 WARN,
                 name,
-                what,
+                words.say("HOOKS_NOT_FIRING", "what", name=agent.display, since=" in 7 days" if last else ""),
                 tuple(evidence),
-                inferred=inferred,
-                fix=Fix(
-                    kind="command",
-                    text=f"End one {agent.display} session in a repository, then run:",
-                    command=cmd.doctor(name),
-                    runs_where="agent_ok",
-                ),
-                doc=DOC_DOCTOR,
-                caveat=None if pickups else f"Also possible: {name} hasn't ended a session since the hooks were written.",
+                inferred=True,
+                fix=check,
+                doc=_doc("HOOKS_NOT_FIRING"),
+                caveat=f"Also possible: {agent.display} hasn't ended a session since the hooks were written.",
             )
         )
     return out
@@ -886,21 +932,26 @@ def rule_stale_checkpoint(sig: Signals) -> list[Finding]:
         minutes = (sig.now - last[1]) / 60
         if minutes <= 60:
             continue
+        agent = sig.agents[name]
+        if _in_play(agent, sig) and _hooks_should_run(sig, agent) and _never_closes(sig, name):
+            continue  # PICKS_UP_NEVER_CLOSES says it first, as the slip does
+        ago = _ago(sig, last[1])
+        what = words.say("STALE_CHECKPOINT", "what", name=agent.display)
         out.append(
             Finding(
                 "STALE_CHECKPOINT",
                 WARN,
                 name,
-                f"{name}'s last session stopped without a handoff (its last entry is a checkpoint, {_ago(sig, last[1])}).",
-                (f"trail: newest {name} entry is a checkpoint from {_ago(sig, last[1])}, with no handoff after it",),
+                f"{what} {words.say('STALE_CHECKPOINT', 'detail', ago=ago)}",
+                (f"trail: newest {name} entry: a checkpoint, {ago}",),
                 fix=Fix(
                     kind="command",
-                    text="In the repository it worked in, write the handoff now:",
+                    text=words.say("STALE_CHECKPOINT", "fix"),
                     command=cmd.close(name),
                     runs_where="agent_ok",
                 ),
                 then=cmd.doctor(name),
-                doc=DOC,
+                doc=_doc("STALE_CHECKPOINT"),
             )
         )
     return out
@@ -914,7 +965,7 @@ RULES: tuple[Rule, ...] = (
     Rule("HOOKS", rule_hooks),
     Rule("CODEX_TRUST", rule_codex_trust),
     Rule("CODEX_AUTOMATIONS", rule_codex_automations),
-    Rule("SERVER_NO_ENTRIES", rule_server_entries),
+    Rule("TRAIL", rule_server_entries),
     Rule("STALE_CHECKPOINT", rule_stale_checkpoint),
 )
 
@@ -940,7 +991,9 @@ RULE_IDS: tuple[str, ...] = (
     "CODEX_HOOK_DISABLED",
     "CODEX_TRUST_UNCHECKED",
     "CODEX_AUTOMATIONS",
-    "SERVER_NO_ENTRIES",
+    "PICKS_UP_NEVER_CLOSES",
+    "NOTHING_WAITING",
+    "HOOKS_NOT_FIRING",
     "STALE_CHECKPOINT",
 )
 

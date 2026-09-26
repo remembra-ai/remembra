@@ -14,6 +14,8 @@ import json
 import re
 from pathlib import Path
 
+from remembra.marshal import words
+from remembra.marshal.rules import RULE_IDS
 from remembra.relay.adapters import REGISTRY
 from remembra.relay.cli import _close_log_path
 
@@ -43,24 +45,21 @@ def test_codex_trust_names_the_hooks_connect_writes() -> None:
     spec = REGISTRY["codex"].spec
     events = [spec.start_event, spec.prompt_event, spec.end_event]
     assert all(events) and len(events) == 3
-    assert _ts_const("CODEX_TRUST_LINE") == f"Codex needs you to trust {len(events)} hooks: Codex Settings > Hooks > Trust."
-    assert _ts_const("CODEX_TRUST_CLI") == f"In the Codex CLI: run /hooks and trust {events[0]}, {events[1]} and {events[2]}."
+    assert list(words.CODEX_TRUST_EVENTS) == events
+    assert words.codex_trust_call() == "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust."
+    assert words.codex_trust_fix().endswith(f"and trust {events[0]}, {events[1]} and {events[2]}.")
+    # The slip builds both lines from the generated words, not from its own copy.
+    assert "SHARED_RULES.CODEX_TRUST_MISSING.what" in MARSHAL_TS and "SHARED_RULES.CODEX_TRUST_MISSING.fix" in MARSHAL_TS
     assert "/hooks" in spec.setup_note and "three remembra-relay hooks" in spec.setup_note
 
 
-def test_every_verdict_in_the_table_has_a_fixture_case() -> None:
-    union = re.search(r"export type VerdictCode =(.*?);", MARSHAL_TS, re.S)
-    assert union
-    codes = set(re.findall(r"'([A-Z_]+)'", union.group(1)))
-    assert codes == {c["expect"]["code"] for c in FIXTURE["cases"]}
-    assert {
-        "NO_KEY",
-        "KEY_NEVER_USED",
-        "PICKS_UP_NEVER_CLOSES",
-        "NOTHING_WAITING",
-        "HOOKS_NOT_FIRING",
-        "STALE_CHECKPOINT",
-    } <= codes
+def test_every_verdict_is_a_doctor_rule_or_one_only_a_slip_reaches() -> None:
+    assert "export type VerdictCode = SharedRule | (typeof DASHBOARD_ONLY)[number];" in MARSHAL_TS
+    codes = {c["expect"]["code"] for c in FIXTURE["cases"]}
+    assert codes == set(words.SHARED_RULES) | set(words.DASHBOARD_ONLY)
+    # A shared verdict is one of the doctor's own rule ids; a slip-only one never is.
+    assert set(words.SHARED_RULES) <= set(RULE_IDS)
+    assert not set(words.DASHBOARD_ONLY) & set(RULE_IDS)
 
 
 def test_the_fixture_only_uses_agents_the_relay_can_connect() -> None:
@@ -79,12 +78,14 @@ def test_doctor_lines_pin_the_release_that_has_doctor() -> None:
                 assert f"'remembra>={release.group(1)}'" in cmd
 
 
-def test_the_slip_links_a_heading_the_relay_guide_has() -> None:
+def test_the_slip_links_headings_the_relay_guide_has() -> None:
     guide = (ROOT / "docs" / "guides" / "relay.md").read_text()
     assert _ts_const("RELAY_GUIDE") == "https://docs.remembra.dev/guides/relay/"
-    assert "\n## Setup\n" in guide  # mkdocs' toc makes it #setup; the Codex trust paragraph is in it
-    setup = guide.split("\n## Setup\n", 1)[1].split("\n## ", 1)[0]
-    assert "**Codex: trust the hooks.**" in setup
+    anchors = {"#setup"}  # mkdocs' toc makes "## Setup" #setup; the others are set with {#...}
+    anchors |= {"#" + a for a in re.findall(r"^#{2,3} .*\{#([a-z-]+)\}$", guide, re.M)}
+    assert "\n## Setup\n" in guide
+    for rule, parts in words.SHARED_RULES.items():
+        assert parts["doc"] == "" or parts["doc"] in anchors, rule
 
 
 def test_the_slip_footer_says_no_model_wrote_it() -> None:

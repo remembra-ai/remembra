@@ -23,10 +23,15 @@ def _ts_const(name: str) -> str:
 
 def test_install_line_and_key_step_equal_the_dashboard() -> None:
     assert _ts_const("PIPX_INSTALL") == commands.PIPX_INSTALL
-    # saveKeyCommand(serverUrl) = `remembra-install --all --url ${serverUrl || 'https://api.remembra.dev'}`
-    assert "return `remembra-install --all --url ${serverUrl || 'https://api.remembra.dev'}`;" in AGENTS_TS
-    assert commands.save_key_command("") == "remembra-install --all --url https://api.remembra.dev"
+    # saveKeyCommand(serverUrl): --url for a known server; without one, the machine keeps its own (or Cloud)
+    assert "return serverUrl ? `remembra-install --all --url ${serverUrl}` : 'remembra-install --all';" in AGENTS_TS
+    assert commands.save_key_command("") == commands.INSTALL_KEEP_SERVER == "remembra-install --all"
+    assert commands.save_key_command("https://api.remembra.dev") == "remembra-install --all --url https://api.remembra.dev"
     assert commands.save_key_command("https://memory.example.org") == "remembra-install --all --url https://memory.example.org"
+    # On a machine: its configured server, or none when only the relay's default is there.
+    assert commands.key_step(None) == commands.key_step("http://localhost:8787") == "remembra-install --all"
+    assert commands.key_step("https://memory.example.org") == "remembra-install --all --url https://memory.example.org"
+    assert commands.key_step("not a url; rm -rf ~") == "remembra-install --all"
     # oneLineInstall(serverUrl) = `${PIPX_INSTALL} && ${saveKeyCommand(serverUrl)} && remembra-relay connect --apply`
     assert "return `${PIPX_INSTALL} && ${saveKeyCommand(serverUrl)} && remembra-relay connect --apply`;" in AGENTS_TS
     assert commands.one_line_install("https://api.remembra.dev") == (
@@ -66,6 +71,9 @@ def test_the_relay_guide_and_help_pack_use_the_same_lines() -> None:
         commands.connect(["codex"]),
         commands.connect(["gemini", "qwen"], unverified=True),
         commands.close("claude-code"),
+        commands.agent_connect("claude-code"),
+        commands.agent_connect("kimi"),
+        commands.key_step("https://memory.example.org"),
         commands.resolve_bind("widget"),
         commands.status_json(),
         commands.doctor(),

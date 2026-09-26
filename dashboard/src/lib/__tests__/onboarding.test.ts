@@ -8,8 +8,10 @@ describe('oneLineInstall', () => {
     );
   });
 
-  it('defaults the server', () => {
-    expect(oneLineInstall('')).toContain('--url https://api.remembra.dev');
+  it('without a server, keeps the one the machine uses (Remembra Cloud on a first install): the remembra.dev line', () => {
+    expect(oneLineInstall('')).toBe(
+      "pipx install --force 'remembra[mcp]>=0.16' && remembra-install --all && remembra-relay connect --apply",
+    );
   });
 
   it('never puts a key on the command line', () => {

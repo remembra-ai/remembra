@@ -17,8 +17,9 @@ from tests.marshal_fixtures import KEY, FakeHome
 
 SRC = str(Path(__file__).resolve().parents[1] / "src")
 RELAY = "/opt/bin/remembra-relay"
+# The doctor's CODEX_TRUST_MISSING fix and the dashboard's, word for word (remembra.marshal.words).
 TRUST = (
-    "Codex: trust the 3 remembra-relay hooks in Codex Settings > Hooks, or run /hooks in the Codex CLI."
+    "Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd."
     " Codex skips untrusted hooks without a message."
 )
 TAIL = "Then check everything with: remembra-relay doctor"
@@ -70,7 +71,10 @@ def test_one_trusted_hook_is_not_enough(tmp_path: Path) -> None:
     (fh.home / ".codex").mkdir()
     connect(fh, "--agent", "codex", "--apply")
     fh.trust_codex(trusted=["SessionStart", "SessionEnd"])
-    assert todo(connect(fh, "--agent", "codex", "--apply").stdout) == [TRUST]
+    assert todo(connect(fh, "--agent", "codex", "--apply").stdout) == [
+        "Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust UserPromptSubmit."
+        " Codex skips untrusted hooks without a message."
+    ]
 
 
 def test_a_dry_run_lists_apply_then_trust(tmp_path: Path) -> None:

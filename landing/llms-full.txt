@@ -87,7 +87,7 @@ The names are `cursor`, `gemini`, `qwen` and `kimi`.
 
 ### 8. Codex: the user trusts the hooks
 
-Codex runs a hook only after the user trusts it, and skips untrusted hooks without a message. Tell the user: Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. In the Codex CLI, run `/hooks` and trust SessionStart, UserPromptSubmit and SessionEnd. Codex asks again whenever a hook's command changes.
+Codex runs a hook only after the user trusts it. Codex skips untrusted hooks without a message. Tell the user: Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Open Codex Settings > Hooks, or run `/hooks` in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd. Codex asks again whenever a hook's command changes.
 
 ### 9. Restart the agents
 
@@ -95,19 +95,13 @@ Codex runs a hook only after the user trusts it, and skips untrusted hooks witho
 
 ### 10. Check
 
-Whenever handoffs don't arrive, run `remembra-relay status` and `remembra-relay doctor`. Run both now.
-
-```bash
-remembra-relay status
-```
-
-It shows whether the server accepts the key, the handoffs waiting to be sent and the last result per agent.
+Whenever handoffs don't arrive, run `remembra-relay doctor`. Run it now.
 
 ```bash
 remembra-relay doctor
 ```
 
-Doctor arrived in remembra 0.16.1. When `remembra-relay --help` does not list it, run `pipx run --spec 'remembra>=0.16.1' remembra-relay doctor` instead. Doctor reads this machine's files and the trail, changes nothing and prints the one fix for each problem. Show its output as printed. Offer its fixes one at a time, and run one only after the user says yes to it.
+Doctor arrived in remembra 0.16.1. When `remembra-relay --help` does not list it, run `pipx run --spec 'remembra>=0.16.1' remembra-relay doctor` instead. Doctor reads this machine's files and the trail, changes nothing and prints the one fix for each problem. It checks the key with the server, the handoffs waiting to be sent, each agent's hooks and the last result per agent. Show its output as printed. Offer its fixes one at a time, and run one only after the user says yes to it. Right after setup it names each agent that hasn't ended a session with the hooks yet: step 11 is that session.
 
 ### 11. Hand off
 
