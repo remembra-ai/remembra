@@ -694,6 +694,8 @@ class PaddleBillingManager:
             return WebhookResult(
                 action="payment_failed",
                 user_id=user_id,
+                paddle_customer_id=data.get("customer_id"),
+                paddle_subscription_id=data.get("id"),
             )
 
         # Unhandled event type

@@ -522,6 +522,13 @@ class Settings(BaseSettings):
         description="Resend API key for sending emails (welcome, password reset, etc.)",
         validation_alias=AliasChoices("REMEMBRA_RESEND_API_KEY", "RESEND_API_KEY"),
     )
+    email_from: str = Field(
+        "Remembra <noreply@remembra.dev>", description="From address of transactional email (a verified Resend domain)"
+    )
+    email_reply_to: str | None = Field(
+        "support@remembra.dev",
+        description="Reply-To of transactional email, so a reply reaches a person (empty: no Reply-To header)",
+    )
 
     # -----------------------------------------------------------------------
     # Webhooks

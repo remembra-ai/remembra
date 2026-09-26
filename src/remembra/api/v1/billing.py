@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from remembra.auth.middleware import CurrentUser, JWTOrAPIKeyUser
+from remembra.cloud import notify
 from remembra.cloud.paddle_config import CheckoutUnavailableError, get_paddle_config
 from remembra.cloud.plans import (
     FOUNDING_ANNUAL_PRICE_CENTS,
@@ -547,6 +548,8 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
     if result is None or result.action in ("ignored", "payment_failed", "payment_issue"):
         if result is not None and result.action in ("payment_failed", "payment_issue"):
             log.warning("paddle_payment_problem", user_id=result.user_id, action=result.action)
+        if result is not None and result.action == "payment_failed" and meter is not None:
+            await _notify_payment_failed(request, meter, result)
         return "no_change"
 
     if meter is None:
@@ -608,6 +611,7 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
         )
         return "flagged"
 
+    before = dict(tenant) if tenant else None
     await meter.apply_subscription(
         user_id,
         plan,
@@ -638,7 +642,22 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
             log.warning("paddle_team_plan_sync_failed", user_id=user_id, error_type=type(e).__name__)
 
     log.info("paddle_plan_applied", user_id=user_id, plan=plan.value, action=result.action)
+    # Tell the customer when the plan, interval or seats changed (renewals send nothing).
+    notify.notify_billing_change(request.app.state, user_id, before, cancelled=result.action == "cancel_subscription")
     return "applied"
+
+
+async def _notify_payment_failed(request: Request, meter: Any, result: Any) -> None:
+    """Email the account holding the past-due subscription (Paddle sends no custom_data we trust here)."""
+    if not result.paddle_subscription_id:
+        return
+    user_id = await meter.find_tenant_by_billing_ids(subscription_id=result.paddle_subscription_id, customer_id=None)
+    if user_id is None:
+        log.warning("paddle_past_due_unmatched")
+        return
+    if meter.active_subscription_id(await meter.get_tenant(user_id)) != result.paddle_subscription_id:
+        return  # not the subscription this account's plan comes from
+    notify.notify_payment_failed(request.app.state, str(user_id), result.paddle_subscription_id)
 
 
 async def _resolve_paddle_account(request: Request, meter: Any, result: Any) -> str | None:
@@ -729,6 +748,7 @@ async def _apply_paddle_refund(request: Request, meter: Any, result: Any) -> str
         return "no_change"
     await meter.apply_subscription(user_id, PlanTier.FREE)
     await meter.set_billing_flag(user_id, f"{result.adjustment_action or 'refund'}_downgraded")
+    notify.notify_billing_change(request.app.state, user_id, dict(tenant) if tenant else None)
     team_manager = getattr(request.app.state, "team_manager", None)
     if team_manager is not None:
         try:

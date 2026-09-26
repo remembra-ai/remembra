@@ -1,7 +1,7 @@
 """Authentication API endpoints for user signup, login, and password management."""
 
-import asyncio
 from typing import Annotated, Any
+from urllib.parse import urlencode
 
 import structlog
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
@@ -349,33 +349,9 @@ async def signup(
         )
     assert user is not None  # create_user returns a user whenever error is falsy
 
-    # Send welcome email with API key (fire-and-forget, don't block signup)
-    if EMAIL_AVAILABLE:
-        try:
-            settings = get_settings()
-            if settings.resend_api_key:
-                # Create an API key for the new user
-                key_manager = request.app.state.api_key_manager
-                api_key = await key_manager.create_key(
-                    user_id=user.id,
-                    name="Default Key",
-                )
-
-                email_service = EmailService.create(provider=EmailProvider.RESEND)
-                asyncio.create_task(
-                    email_service.send_welcome_email(
-                        to=user.email,
-                        api_key=api_key.key,  # Pass just the key string, not the full object
-                        user_id=user.id,
-                        plan="Free",
-                    )
-                )
-                log.info("welcome_email_queued", user_id=user.id)
-        except Exception as e:
-            # Don't fail signup if email fails
-            log.warning("welcome_email_failed", user_id=user.id, error_type=type(e).__name__)
-
-    await _send_signup_verification(user_manager, user.id, user.email)
+    # One email at signup: the welcome, with the verification link. It never
+    # carries an API key: keys are created (and shown once) in the dashboard.
+    await _send_signup_welcome(user_manager, user.id, user.email)
 
     return SignupResponse(
         id=user.id,
@@ -384,20 +360,22 @@ async def signup(
     )
 
 
-async def _send_signup_verification(user_manager: UserManager, user_id: str, email: str) -> None:
-    """Email the verification link right after signup (best effort; never fails the signup)."""
+async def _send_signup_welcome(user_manager: UserManager, user_id: str, email: str) -> None:
+    """Email the welcome (install lines, dashboard, verify link) right after signup; never fails the signup."""
     if not EMAIL_AVAILABLE or not get_settings().resend_api_key:
         return
     try:
         token = await security_state.create_email_verification(user_manager.db, user_id, email)
         email_service = EmailService.create(provider=EmailProvider.RESEND)
-        result = await email_service.send_email_verification_email(
-            to=email, verify_url=dashboard_link(f"/verify-email?token={token}")
+        result = await email_service.send_welcome_email(
+            to=email, verify_url=dashboard_link("/verify-email?" + urlencode({"token": token}))
         )
         if not result.success:
-            log.warning("signup_verification_email_failed", user_id=user_id)
+            log.warning("signup_welcome_email_failed", user_id=user_id)
+        else:
+            log.info("signup_welcome_email_sent", user_id=user_id)
     except Exception as e:
-        log.warning("signup_verification_email_failed", user_id=user_id, error_type=type(e).__name__)
+        log.warning("signup_welcome_email_failed", user_id=user_id, error_type=type(e).__name__)
 
 
 @router.post(
@@ -535,15 +513,19 @@ async def forgot_password(
 
         # Send the password reset email
         try:
+            from remembra.auth.users import PASSWORD_RESET_EXPIRATION_HOURS
             from remembra.cloud.email import EmailProvider, EmailService
 
             email_service = EmailService.create(provider=EmailProvider.RESEND)
-            reset_url = f"https://app.remembra.dev/reset-password?token={reset_token}&email={body.email}"
+            address = str(body.email).lower().strip()
+            reset_url = dashboard_link("/reset-password?" + urlencode({"token": reset_token, "email": address}))
+            account = await user_manager.db.get_user_by_email(address)
 
             result = await email_service.send_password_reset_email(
-                to=body.email,
+                to=address,
                 reset_url=reset_url,
-                expires_in="1 hour",
+                expires_hours=PASSWORD_RESET_EXPIRATION_HOURS,
+                email_verified=bool((account or {}).get("email_verified")),
             )
 
             if result.success:
@@ -1091,7 +1073,7 @@ async def request_email_verification(
         email_service = EmailService.create(provider=EmailProvider.RESEND)
         result = await email_service.send_email_verification_email(
             to=user_row["email"],
-            verify_url=dashboard_link(f"/verify-email?token={token}"),
+            verify_url=dashboard_link("/verify-email?" + urlencode({"token": token})),
         )
     except Exception as e:
         log.error("verification_email_error", error_type=type(e).__name__)

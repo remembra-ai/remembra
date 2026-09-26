@@ -870,24 +870,12 @@ async def link_identity(db: Any, identity: ProviderIdentity, user_id: str) -> No
 
 async def _send_link_notice(to: str, provider_name: str, provider_email: str) -> None:
     """Tell the account owner a sign-in method was added (best effort)."""
-    if not get_settings().resend_api_key:
+    from remembra.cloud.email import email_service_or_none
+
+    service = email_service_or_none()
+    if service is None:
         return
-    import html as _html
-
-    from remembra.cloud.email import EmailMessage, EmailProvider, EmailService
-
-    service = EmailService.create(provider=EmailProvider.RESEND)
-    body = (
-        f"<p>{_html.escape(provider_name)} sign-in ({_html.escape(provider_email)}) was just added to your Remembra account.</p>"
-        "<p>If this was not you, sign in, remove it under Settings, Security, and change your password.</p>"
-    )
-    message = EmailMessage(
-        to=to,
-        subject=f"Remembra: {provider_name} sign-in added to your account",
-        html=body,
-        tags={"template": "identity_linked"},
-    )
-    await service.backend.send(message)
+    await service.send_identity_linked_email(to, provider_name=provider_name, provider_email=provider_email)
 
 
 # Swapped in tests; called with (account_email, provider_display_name, provider_email).

@@ -137,12 +137,8 @@ class TenantProvisioner:
         # Send welcome email if email service is available and email provided
         if self._email_service and email:
             try:
-                await self._email_service.send_welcome_email(
-                    to=email,
-                    api_key=api_key_result.key,
-                    user_id=user_id,
-                    plan=plan.value,
-                )
+                # The key is returned to the caller once; it is never emailed.
+                await self._email_service.send_welcome_email(to=email, dashboard_account=False)
                 logger.info("Welcome email sent")
             except Exception as e:
                 # Don't fail provisioning if email fails

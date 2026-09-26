@@ -1,26 +1,37 @@
 """
-Email delivery system for Remembra Cloud.
+Email delivery for Remembra Cloud.
 
-Sends transactional emails for:
-- Welcome emails with API keys
-- Usage warnings and limit notifications
-- Billing and subscription updates
-- Account notifications
+Sends the transactional emails of Remembra Relay (welcome, email
+verification, password reset, API key created, plan changed, payment failed,
+subscription ended, memory cap warnings, team invites, sign-in method added).
+Their content lives in :mod:`remembra.cloud.email_templates`: every email has
+an HTML and a plain-text part, prices come from the plan catalog, and no email
+ever carries an API key.
 
-Supports multiple providers (Resend, SMTP) with a unified interface.
+Supports Resend (production) and SMTP with one interface. Mail is sent from
+``REMEMBRA_EMAIL_FROM`` with ``Reply-To: REMEMBRA_EMAIL_REPLY_TO`` (support), so
+a reply reaches a person.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from enum import Enum
-from pathlib import Path
 from typing import Any, cast
 
+from remembra.cloud import email_templates as templates
+from remembra.cloud.email_templates import RenderedEmail
+from remembra.cloud.plans import BillingInterval, PlanTier
+
 logger = logging.getLogger(__name__)
+
+DEFAULT_FROM = "Remembra <noreply@remembra.dev>"
+DEFAULT_REPLY_TO = templates.SUPPORT_EMAIL
 
 
 class EmailProvider(Enum):
@@ -30,16 +41,34 @@ class EmailProvider(Enum):
     SMTP = "smtp"
 
 
+def _sender_defaults() -> tuple[str, str | None]:
+    try:
+        from remembra.config import get_settings
+
+        settings = get_settings()
+        return settings.email_from or DEFAULT_FROM, settings.email_reply_to or None
+    except Exception:  # settings unavailable (scripts): the production defaults
+        return DEFAULT_FROM, DEFAULT_REPLY_TO
+
+
 @dataclass
 class EmailMessage:
-    """Email message data."""
+    """Email message data. ``from_email`` / ``reply_to`` default to the configured sender."""
 
     to: str
     subject: str
     html: str
-    from_email: str = "Remembra <noreply@remembra.dev>"
+    text: str | None = None
+    from_email: str | None = None
     reply_to: str | None = None
     tags: dict[str, str] | None = None
+
+    def __post_init__(self) -> None:
+        default_from, default_reply_to = _sender_defaults()
+        if not self.from_email:
+            self.from_email = default_from
+        if self.reply_to is None:
+            self.reply_to = default_reply_to
 
 
 @dataclass
@@ -63,14 +92,13 @@ class EmailBackend(ABC):
 class ResendBackend(EmailBackend):
     """Resend email backend.
 
-    Requires RESEND_API_KEY environment variable.
-    Get your API key from: https://resend.com/api-keys
+    Uses ``REMEMBRA_RESEND_API_KEY`` (settings; ``RESEND_API_KEY`` also works).
     """
 
     def __init__(self, api_key: str | None = None) -> None:
-        self.api_key = api_key or os.getenv("RESEND_API_KEY")
+        self.api_key = api_key or _configured_resend_key()
         if not self.api_key:
-            raise ValueError("RESEND_API_KEY environment variable is required for Resend backend")
+            raise ValueError("REMEMBRA_RESEND_API_KEY (or RESEND_API_KEY) is required for the Resend backend")
 
     async def send(self, message: EmailMessage) -> EmailResult:
         """Send email via Resend API."""
@@ -86,6 +114,8 @@ class ResendBackend(EmailBackend):
                 "subject": message.subject,
                 "html": message.html,
             }
+            if message.text:
+                params["text"] = message.text
 
             if message.reply_to:
                 params["reply_to"] = message.reply_to
@@ -93,7 +123,8 @@ class ResendBackend(EmailBackend):
             if message.tags:
                 params["tags"] = [{"name": k, "value": v} for k, v in message.tags.items()]
 
-            response = resend.Emails.send(cast("resend.Emails.SendParams", params))
+            # The Resend SDK is synchronous: keep it off the event loop.
+            response = await asyncio.to_thread(resend.Emails.send, cast("resend.Emails.SendParams", params))
 
             logger.info(
                 "Email sent via Resend: subject=%s id=%s",
@@ -156,15 +187,16 @@ class SMTPBackend(EmailBackend):
             # Create message
             msg = MIMEMultipart("alternative")
             msg["Subject"] = message.subject
-            msg["From"] = message.from_email
+            msg["From"] = message.from_email or DEFAULT_FROM
             msg["To"] = message.to
 
             if message.reply_to:
                 msg["Reply-To"] = message.reply_to
 
-            # Add HTML content
-            html_part = MIMEText(message.html, "html")
-            msg.attach(html_part)
+            # Plain text first, HTML last: clients show the last part they support.
+            if message.text:
+                msg.attach(MIMEText(message.text, "plain", "utf-8"))
+            msg.attach(MIMEText(message.html, "html", "utf-8"))
 
             # Send email
             await aiosmtplib.send(
@@ -194,39 +226,65 @@ class SMTPBackend(EmailBackend):
             )
 
 
+def _configured_resend_key() -> str | None:
+    try:
+        from remembra.config import get_settings
+
+        key = get_settings().resend_api_key
+    except Exception:
+        key = None
+    return key or os.getenv("RESEND_API_KEY") or None
+
+
+def email_service_or_none() -> EmailService | None:
+    """The Resend-backed service when a key is configured, else None (email off)."""
+    try:
+        return EmailService.create(provider=EmailProvider.RESEND)
+    except ValueError:  # no Resend key: email is off
+        return None
+    except Exception as e:  # bad config: email stays off, never fails a request
+        logger.warning("email_service_unavailable: %s", type(e).__name__)
+        return None
+
+
+def _dashboard_base() -> str:
+    try:
+        from remembra.config import get_settings
+
+        return get_settings().public_dashboard_url or templates.DEFAULT_DASHBOARD_URL
+    except Exception:
+        return templates.DEFAULT_DASHBOARD_URL
+
+
+def _display_time(value: str | datetime) -> str:
+    if isinstance(value, datetime):
+        moment = value
+    else:
+        try:
+            moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return str(value)
+    return moment.strftime("%Y-%m-%d %H:%M UTC")
+
+
 class EmailService:
-    """High-level email service for Remembra.
-
-    Handles template loading and email sending with retries.
-
-    Args:
-        backend: Email backend to use (ResendBackend or SMTPBackend)
-        template_dir: Directory containing HTML email templates
+    """Renders a template and sends it through the configured backend.
 
     Example:
         ```python
-        # Using Resend (recommended)
-        service = EmailService.create(provider=EmailProvider.RESEND)
-
-        # Using SMTP
-        service = EmailService.create(provider=EmailProvider.SMTP)
-
-        # Send welcome email
-        await service.send_welcome_email(
-            to="user@example.com",
-            api_key="rem_abc123",
-            user_id="user_xyz",
-        )
+        service = email_service_or_none()
+        if service:
+            await service.send_welcome_email(to="user@example.com", verify_url=url)
         ```
     """
 
-    def __init__(
-        self,
-        backend: EmailBackend,
-        template_dir: Path | None = None,
-    ) -> None:
+    def __init__(self, backend: EmailBackend, dashboard_url: str | None = None) -> None:
         self.backend = backend
-        self.template_dir = template_dir or (Path(__file__).parent / "templates" / "email")
+        self._dashboard_url = dashboard_url
+
+    @property
+    def dashboard(self) -> str:
+        return self._dashboard_url or _dashboard_base()
 
     @classmethod
     def create(
@@ -234,15 +292,7 @@ class EmailService:
         provider: EmailProvider = EmailProvider.RESEND,
         **kwargs: Any,
     ) -> EmailService:
-        """Create an EmailService with the specified provider.
-
-        Args:
-            provider: Email provider to use
-            **kwargs: Additional arguments for the backend
-
-        Returns:
-            Configured EmailService instance
-        """
+        """Create an EmailService with the specified provider."""
         backend: EmailBackend
         if provider == EmailProvider.RESEND:
             backend = ResendBackend(**kwargs)
@@ -253,284 +303,118 @@ class EmailService:
 
         return cls(backend=backend)
 
-    def _load_template(self, template_name: str) -> str:
-        """Load an email template from disk."""
-        template_path = self.template_dir / f"{template_name}.html"
-
-        if not template_path.exists():
-            raise FileNotFoundError(f"Email template not found: {template_path}")
-
-        return template_path.read_text()
-
-    def _render_template(self, template: str, **kwargs: Any) -> str:
-        """Simple template rendering using string formatting.
-
-        For more complex templates, consider using Jinja2.
-        """
-        return template.format(**kwargs)
-
-    async def send_email(
-        self,
-        to: str,
-        subject: str,
-        template_name: str,
-        **template_vars: Any,
-    ) -> EmailResult:
-        """Send an email using a template.
-
-        Args:
-            to: Recipient email address
-            subject: Email subject line
-            template_name: Name of the template file (without .html)
-            **template_vars: Variables to render in the template
-
-        Returns:
-            EmailResult with success status and details
-        """
+    async def send_rendered(self, to: str, email: RenderedEmail) -> EmailResult:
+        """Send a rendered email (HTML + text). Never raises: failures come back as a result."""
         try:
-            # Load and render template
-            template = self._load_template(template_name)
-            html = self._render_template(template, **template_vars)
-
-            # Create message
-            message = EmailMessage(
-                to=to,
-                subject=subject,
-                html=html,
-                tags={"template": template_name},
+            result = await self.backend.send(
+                EmailMessage(to=to, subject=email.subject, html=email.html, text=email.text, tags={"template": email.template})
             )
-
-            # Send email
-            result = await self.backend.send(message)
-
-            if result.success:
-                logger.info(
-                    "Email sent successfully: template=%s",
-                    template_name,
-                )
-            else:
-                logger.warning(
-                    "Email send failed: template=%s error=%s",
-                    template_name,
-                    result.error,
-                )
-
-            return result
-
         except Exception as e:
-            logger.error(
-                "Email send error: template=%s error=%s",
-                template_name,
-                str(e),
-            )
-            return EmailResult(
-                success=False,
-                error=str(e),
-            )
+            logger.error("Email send error: template=%s error=%s", email.template, type(e).__name__)
+            return EmailResult(success=False, error=str(e))
+        if result.success:
+            logger.info("Email sent: template=%s", email.template)
+        else:
+            logger.warning("Email send failed: template=%s error=%s", email.template, result.error)
+        return result
 
-    async def send_welcome_email(
-        self,
-        to: str,
-        api_key: str,
-        user_id: str,
-        plan: str = "Free",
-    ) -> EmailResult:
-        """Send welcome email with API key to new user.
-
-        Args:
-            to: User's email address
-            api_key: Generated API key
-            user_id: User ID
-            plan: Plan tier name
-        """
-        return await self.send_email(
-            to=to,
-            subject="Welcome to Remembra - Your API Key Inside",
-            template_name="welcome",
-            api_key=api_key,
-            user_id=user_id,
-            plan=plan,
-            dashboard_url="https://app.remembra.dev",
-            docs_url="https://docs.remembra.dev",
-        )
-
-    async def send_usage_warning_email(
-        self,
-        to: str,
-        usage_percent: int,
-        current_usage: int,
-        limit: int,
-        plan: str,
-    ) -> EmailResult:
-        """Send usage warning email (80% threshold).
-
-        Args:
-            to: User's email address
-            usage_percent: Current usage percentage
-            current_usage: Current memory count
-            limit: Plan memory limit
-            plan: Plan tier name
-        """
-        return await self.send_email(
-            to=to,
-            subject=f"Remembra: {usage_percent}% of your memory limit reached",
-            template_name="usage_warning",
-            usage_percent=usage_percent,
-            current_usage=current_usage,
-            limit=limit,
-            plan=plan,
-            dashboard_url="https://app.remembra.dev",
-            upgrade_url="https://app.remembra.dev/billing",
-        )
-
-    async def send_limit_exceeded_email(
-        self,
-        to: str,
-        current_usage: int,
-        limit: int,
-        plan: str,
-    ) -> EmailResult:
-        """Send limit exceeded email.
-
-        Args:
-            to: User's email address
-            current_usage: Current memory count
-            limit: Plan memory limit
-            plan: Plan tier name
-        """
-        return await self.send_email(
-            to=to,
-            subject="Remembra: Memory limit reached",
-            template_name="limit_exceeded",
-            current_usage=current_usage,
-            limit=limit,
-            plan=plan,
-            dashboard_url="https://app.remembra.dev",
-            upgrade_url="https://app.remembra.dev/billing",
-        )
-
-    async def send_payment_receipt_email(
-        self,
-        to: str,
-        amount: str,
-        invoice_url: str,
-        plan: str,
-        period_start: str,
-        period_end: str,
-    ) -> EmailResult:
-        """Send payment receipt email.
-
-        Args:
-            to: User's email address
-            amount: Payment amount (e.g., "$49.00")
-            invoice_url: Stripe invoice URL
-            plan: Plan tier name
-            period_start: Billing period start date
-            period_end: Billing period end date
-        """
-        return await self.send_email(
-            to=to,
-            subject=f"Remembra: Payment received - {amount}",
-            template_name="payment_receipt",
-            amount=amount,
-            invoice_url=invoice_url,
-            plan=plan,
-            period_start=period_start,
-            period_end=period_end,
-            dashboard_url="https://app.remembra.dev",
-        )
-
-    async def send_payment_failed_email(
-        self,
-        to: str,
-        amount: str,
-        plan: str,
-        retry_date: str,
-        update_payment_url: str = "https://app.remembra.dev/billing",
-    ) -> EmailResult:
-        """Send payment failed email.
-
-        Args:
-            to: User's email address
-            amount: Failed payment amount (e.g., "$49.00")
-            plan: Plan tier name
-            retry_date: When Stripe will retry the payment
-            update_payment_url: URL to update payment method
-        """
-        return await self.send_email(
-            to=to,
-            subject="Remembra: Payment failed - Action required",
-            template_name="payment_failed",
-            amount=amount,
-            plan=plan,
-            retry_date=retry_date,
-            update_payment_url=update_payment_url,
-            dashboard_url="https://app.remembra.dev",
-            support_email="support@remembra.dev",
-        )
-
-    async def send_subscription_cancelled_email(
-        self,
-        to: str,
-        plan: str,
-        cancel_date: str,
-    ) -> EmailResult:
-        """Send subscription cancelled email.
-
-        Args:
-            to: User's email address
-            plan: Cancelled plan tier name
-            cancel_date: Date subscription ends
-        """
-        return await self.send_email(
-            to=to,
-            subject="Remembra: Subscription cancelled",
-            template_name="subscription_cancelled",
-            plan=plan,
-            cancel_date=cancel_date,
-            dashboard_url="https://app.remembra.dev",
-            resubscribe_url="https://app.remembra.dev/billing",
-        )
-
-    async def send_password_reset_email(
-        self,
-        to: str,
-        reset_url: str,
-        expires_in: str = "1 hour",
-    ) -> EmailResult:
-        """Send password reset email.
-
-        Args:
-            to: User's email address
-            reset_url: Full URL with reset token
-            expires_in: Human-readable expiration time
-        """
-        return await self.send_email(
-            to=to,
-            subject="Remembra: Reset your password",
-            template_name="password_reset",
-            reset_url=reset_url,
-            expires_in=expires_in,
-            dashboard_url="https://app.remembra.dev",
-            support_email="support@remembra.dev",
+    async def send_welcome_email(self, to: str, *, verify_url: str | None = None, dashboard_account: bool = True) -> EmailResult:
+        """Welcome after signup: the install lines and the dashboard, never an API key."""
+        return await self.send_rendered(
+            to, templates.welcome(dashboard=self.dashboard, verify_url=verify_url, dashboard_account=dashboard_account)
         )
 
     async def send_email_verification_email(self, to: str, verify_url: str) -> EmailResult:
-        """Send an email-address verification link (inline HTML; no template file)."""
-        import html as _html
+        return await self.send_rendered(to, templates.email_verification(dashboard=self.dashboard, verify_url=verify_url))
 
-        safe_url = _html.escape(verify_url, quote=True)
-        message = EmailMessage(
-            to=to,
-            subject="Remembra: verify your email address",
-            html=(
-                "<p>Confirm this email address for your Remembra account.</p>"
-                f'<p><a href="{safe_url}">Verify email address</a></p>'
-                "<p>The link expires in 24 hours. If you did not request this, ignore this email.</p>"
+    async def send_password_reset_email(
+        self, to: str, reset_url: str, *, expires_hours: int, email_verified: bool = True
+    ) -> EmailResult:
+        return await self.send_rendered(
+            to,
+            templates.password_reset(
+                dashboard=self.dashboard, reset_url=reset_url, expires_hours=expires_hours, email_verified=email_verified
             ),
-            tags={"template": "email_verification"},
         )
-        return await self.backend.send(message)
+
+    async def send_key_created_email(
+        self,
+        to: str,
+        *,
+        key_name: str | None,
+        role: str,
+        project_ids: list[str] | None = None,
+        agent_id: str | None = None,
+        created_at: datetime,
+    ) -> EmailResult:
+        return await self.send_rendered(
+            to,
+            templates.key_created(
+                dashboard=self.dashboard,
+                key_name=key_name,
+                role=role,
+                project_ids=project_ids or [],
+                agent_id=agent_id,
+                created_at=created_at,
+            ),
+        )
+
+    async def send_plan_changed_email(
+        self,
+        to: str,
+        *,
+        old_tier: PlanTier | None,
+        new_tier: PlanTier,
+        interval: BillingInterval | None,
+        seats: int | None,
+        founding: bool,
+        memory_cap: int,
+    ) -> EmailResult:
+        return await self.send_rendered(
+            to,
+            templates.plan_changed(
+                dashboard=self.dashboard,
+                old_tier=old_tier,
+                new_tier=new_tier,
+                interval=interval,
+                seats=seats,
+                founding=founding,
+                memory_cap=memory_cap,
+            ),
+        )
+
+    async def send_payment_failed_email(
+        self, to: str, *, tier: PlanTier, interval: BillingInterval | None, seats: int | None, founding: bool
+    ) -> EmailResult:
+        return await self.send_rendered(
+            to,
+            templates.payment_failed(dashboard=self.dashboard, tier=tier, interval=interval, seats=seats, founding=founding),
+        )
+
+    async def send_subscription_cancelled_email(self, to: str, *, old_tier: PlanTier, memory_cap: int) -> EmailResult:
+        return await self.send_rendered(
+            to, templates.subscription_cancelled(dashboard=self.dashboard, old_tier=old_tier, memory_cap=memory_cap)
+        )
+
+    async def send_usage_warning_email(
+        self, to: str, *, usage_percent: int, current_usage: int, limit: int, plan: PlanTier | str
+    ) -> EmailResult:
+        return await self.send_rendered(
+            to,
+            templates.usage_warning(
+                dashboard=self.dashboard,
+                tier=PlanTier(plan),
+                usage_percent=usage_percent,
+                current_usage=current_usage,
+                limit=limit,
+            ),
+        )
+
+    async def send_limit_exceeded_email(self, to: str, *, current_usage: int, limit: int, plan: PlanTier | str) -> EmailResult:
+        return await self.send_rendered(
+            to,
+            templates.limit_exceeded(dashboard=self.dashboard, tier=PlanTier(plan), current_usage=current_usage, limit=limit),
+        )
 
     async def send_team_invite_email(
         self,
@@ -539,26 +423,22 @@ class EmailService:
         inviter_email: str,
         role: str,
         invite_url: str,
-        expires_at: str,
+        expires_at: str | datetime,
     ) -> EmailResult:
-        """Send team invite email.
+        return await self.send_rendered(
+            to,
+            templates.team_invite(
+                dashboard=self.dashboard,
+                team_name=team_name,
+                inviter_email=inviter_email,
+                role=role,
+                invite_url=invite_url,
+                expires_at=_display_time(expires_at),
+            ),
+        )
 
-        Args:
-            to: Invitee's email address
-            team_name: Name of the team
-            inviter_email: Email of person who sent the invite
-            role: Role being granted (admin, member, viewer)
-            invite_url: Full URL to accept the invite
-            expires_at: Expiration timestamp
-        """
-        return await self.send_email(
-            to=to,
-            subject=f"You've been invited to join {team_name} on Remembra",
-            template_name="team_invite",
-            team_name=team_name,
-            inviter_email=inviter_email,
-            role=role,
-            invite_url=invite_url,
-            expires_at=expires_at,
-            dashboard_url="https://app.remembra.dev",
+    async def send_identity_linked_email(self, to: str, *, provider_name: str, provider_email: str) -> EmailResult:
+        return await self.send_rendered(
+            to,
+            templates.identity_linked(dashboard=self.dashboard, provider_name=provider_name, provider_email=provider_email),
         )

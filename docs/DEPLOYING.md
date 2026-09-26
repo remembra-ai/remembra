@@ -220,6 +220,25 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://api.remembra.de
 curl -s -o /dev/null -w '%{http_code} %{content_type}\n' https://app.remembra.dev/oauth/callback   # 200 text/html
 ```
 
+## Transactional email (Resend)
+
+With `REMEMBRA_RESEND_API_KEY` set, the API sends: the welcome at signup (with
+the verify link and the three install lines, never an API key), email
+verification, password reset, "a new API key was created", plan changed,
+payment failed, subscription ended, the memory-cap warnings, team invites and
+"sign-in method added". Without the key, nothing is sent and nothing fails.
+
+- Content: `src/remembra/cloud/email_templates.py`. Every email has an HTML and
+  a plain-text part; prices and limits come from `remembra.cloud.plans`; links
+  go to `REMEMBRA_PUBLIC_DASHBOARD_URL` (default `https://app.remembra.dev`).
+- Sender: `REMEMBRA_EMAIL_FROM` (default `Remembra <noreply@remembra.dev>`, a
+  Resend-verified domain) with `Reply-To: REMEMBRA_EMAIL_REPLY_TO` (default
+  `support@remembra.dev`), so that mailbox must receive mail.
+- Preview every email without sending: `python scripts/preview_emails.py`
+  (writes `build/email-previews/`). With the key set,
+  `python scripts/preview_emails.py --send-to you@example.com` sends each
+  sample to that one address, to check delivery, the text part and Reply-To.
+
 ## Health, readiness, metrics
 
 | Endpoint | Purpose | Status codes |

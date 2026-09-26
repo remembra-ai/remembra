@@ -15,6 +15,7 @@ from remembra.auth.middleware import (
     get_client_ip,
 )
 from remembra.auth.rbac import ROLE_LEVEL, Role, RoleManager
+from remembra.cloud import notify
 from remembra.cloud.limits import EnforceKeyLimit
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
@@ -348,6 +349,15 @@ async def create_api_key(
             user_id=user_id,
             key_id=api_key.id,
             ip_address=get_client_ip(request),
+        )
+        # Security notice to the account's address (never the key itself).
+        notify.notify_key_created(
+            request.app.state,
+            user_id,
+            key_name=api_key.name,
+            role=role.value,
+            project_ids=body.project_ids,
+            agent_id=body.agent_id,
         )
 
         return CreateKeyResponse(
