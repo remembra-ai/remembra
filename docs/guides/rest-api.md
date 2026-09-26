@@ -149,27 +149,16 @@ PUT /api/v1/memories/{memory_id}
 
 ### Delete Memory
 
-Delete specific memories.
+Delete one memory, or every memory in one project. The parameters go in the query string.
 
 ```http
-DELETE /api/v1/memories
+DELETE /api/v1/memories?memory_id=mem_abc123
+DELETE /api/v1/memories?project_id=my-project
 ```
 
-**Request Body:**
-```json
-{
-  "memory_ids": ["mem_abc123", "mem_def456"]
-}
-```
-
-Or delete all for a user:
-
-```json
-{
-  "user_id": "user_123",
-  "all": true
-}
-```
+`all_memories=true` deletes every memory the account holds; a project-scoped key cannot use it. Delete by
+entity is not implemented yet: `entity` does not limit what is deleted, so do not pass it. A call with none of
+these parameters is rejected.
 
 ---
 

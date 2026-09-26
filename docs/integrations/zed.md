@@ -127,6 +127,6 @@ Save the settings file and Zed should pick up changes automatically. If not, res
 
 ## Next Steps
 
-- [MCP Tool Reference](mcp-server.md) — Full documentation of all 5 tools and 2 resources
+- [MCP Tool Reference](mcp-server.md) — Full documentation of all 21 tools and 2 resources
 - [Python SDK](../guides/python-sdk.md) — Programmatic access from Python
 - [REST API](../guides/rest-api.md) — Direct HTTP access
