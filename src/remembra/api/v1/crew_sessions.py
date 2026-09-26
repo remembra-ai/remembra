@@ -6,7 +6,7 @@ JWT (``get_current_user``). On top of that:
 * ``POST /crew/heartbeat`` and ``POST /crew/hosts/{id}/rotate`` need the host
   token (``X-Remembra-Host-Token``);
 * ``leave`` and ``stall`` need the session token of the named session
-  (``X-Remembra-Session-Token``);
+  (``X-Remembra-Crew-Session``);
 * ``join`` binds a session to a host only with that host's token, and rotates a
   session token only for the host that owns the session (§4.3);
 * pause, resume, request-checkpoint and release-all are **human-only** (D27):

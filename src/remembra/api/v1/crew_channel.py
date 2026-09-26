@@ -7,8 +7,8 @@ confirm, reject, supersede) use the human-only permissions, so an API key gets
 403 whatever its role (D27).
 
 An agent writes through its **crew session**: the request carries
-``X-Remembra-Crew-Session`` (the ``cs_…`` id) and ``X-Remembra-Crew-Token`` (the
-token ``join`` returned). The author, callsign and key-verified flag come from
+``X-Remembra-Crew-Session`` carrying the session token ``join`` returned (the one
+session-token header every crew route uses). The author, callsign and key-verified flag come from
 that session, never from the body. A dashboard login writes as the human.
 """
 
@@ -21,7 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from remembra.crew import schemas
 from remembra.crew.access import CrewAccess, CrewEntity, crew_access, crew_entity, crew_error
-from remembra.crew.channel import SESSION_HEADER, TOKEN_HEADER, CrewChannel, authenticate_session
+from remembra.crew.channel import SESSION_HEADER, CrewChannel, authenticate_session
 from remembra.crew.decisions import CrewDecisions, CrewRef
 from remembra.crew.events import CrewEventLog, IdempotencyConflict, idem_lookup, idem_store
 from remembra.crew.inbox import Author, CrewInbox, InboxError
@@ -75,7 +75,6 @@ async def author_for(request: Request, access: CrewAccess) -> Author:
             access.crew.id,
             access.user.user_id,
             request.headers.get(SESSION_HEADER),
-            request.headers.get(TOKEN_HEADER),
             agent_id=access.user.agent_id,
         )
     except InboxError as e:
@@ -83,7 +82,7 @@ async def author_for(request: Request, access: CrewAccess) -> Author:
 
 
 def _limit_messages(request: Request, access: CrewAccess) -> None:
-    enforce_rate_limit("messages", user_id=access.user.user_id, session_token=request.headers.get(TOKEN_HEADER))
+    enforce_rate_limit("messages", user_id=access.user.user_id, session_token=request.headers.get(SESSION_HEADER))
 
 
 # ---------------------------------------------------------------------------

@@ -345,23 +345,25 @@ async def test_authenticate_session(tmp_path):
     env = await make_env(tmp_path)
     await seed_crew(env.db, CREW_B, owner="u2")
     await add_session(env.db, CREW_A, "cs_a", callsign="cc-1", agent_id="codex")
-    ok = await authenticate_session(env.db.conn, CREW_A, OWNER, "cs_a", "tok-cs_a")
+    ok = await authenticate_session(env.db.conn, CREW_A, OWNER, "tok-cs_a")
     assert ok.session_id == "cs_a" and ok.verified
     from remembra.crew.channel import SessionAuthError
 
     for args, kw in (
-        ((CREW_A, OWNER, "cs_a", "wrong"), {}),
-        ((CREW_B, OWNER, "cs_a", "tok-cs_a"), {}),
-        ((CREW_A, "u2", "cs_a", "tok-cs_a"), {}),
-        ((CREW_A, OWNER, None, None), {}),
-        ((CREW_A, OWNER, "cs_a", "tok-cs_a"), {"agent_id": "claude-code"}),
+        ((CREW_A, OWNER, "wrong"), {}),
+        ((CREW_A, OWNER, "cs_a"), {}),  # the session id is not a credential
+        ((CREW_B, OWNER, "tok-cs_a"), {}),
+        ((CREW_A, "u2", "tok-cs_a"), {}),
+        ((CREW_A, OWNER, None), {}),
+        ((CREW_A, OWNER, "x" * 513), {}),
+        ((CREW_A, OWNER, "tok-cs_a"), {"agent_id": "claude-code"}),
     ):
         with pytest.raises(SessionAuthError):
             await authenticate_session(env.db.conn, *args, **kw)
     async with env.db.transaction():
         await env.db.conn.execute("UPDATE crew_sessions SET state = 'ended' WHERE id = 'cs_a'")
     with pytest.raises(SessionAuthError):
-        await authenticate_session(env.db.conn, CREW_A, OWNER, "cs_a", "tok-cs_a")
+        await authenticate_session(env.db.conn, CREW_A, OWNER, "tok-cs_a")
 
 
 def test_reply_as_data_neutralises_and_clips():

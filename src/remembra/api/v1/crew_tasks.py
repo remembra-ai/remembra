@@ -40,7 +40,7 @@ log = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["crew-tasks"])
 
-SESSION_TOKEN_HEADER: Final = "X-Crew-Session-Token"
+SESSION_TOKEN_HEADER: Final = "X-Remembra-Crew-Session"  # same header as sessions/claims/channel
 IDEMPOTENCY_HEADER: Final = "Idempotency-Key"
 PR, PW, PC, PO = "crew:read", "crew:write", "crew:claim", "crew:override"
 
@@ -114,7 +114,8 @@ async def resolve_caller(request: Request, access: CrewAccess, *, mutation: bool
         conn = services(request).events.db.conn
         session = await session_for_token(conn, access.crew_id, token.strip())
         user = access.user
-        if session is None or session["user_id"] != user.user_id:
+        if session is None or session["user_id"] != user.user_id or session["state"] == "ended":
+            # an ended session's token is dead on every crew router (same rule as claims/channel)
             raise crew_error(401, "invalid_session_token", "The crew session token is not valid for this crew.")
         agent = getattr(user, "agent_id", None)
         if agent and session["agent_id"] != agent:

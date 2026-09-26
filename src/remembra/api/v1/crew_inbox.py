@@ -34,7 +34,7 @@ from remembra.crew.access import (
     key_permissions,
     require_human,
 )
-from remembra.crew.channel import SESSION_HEADER, TOKEN_HEADER, authenticate_session
+from remembra.crew.channel import SESSION_HEADER, authenticate_session
 from remembra.crew.events import CrewEventLog
 from remembra.crew.inbox import Author, CrewInbox, InboxError
 from remembra.crew.notify import (
@@ -66,8 +66,8 @@ def as_http(e: InboxError) -> Exception:
 
 
 async def optional_session(request: Request, access: CrewAccess) -> Author | None:
-    """The caller's crew session when session headers are present (verified), else None."""
-    if not request.headers.get(SESSION_HEADER) and not request.headers.get(TOKEN_HEADER):
+    """The caller's crew session when the session-token header is present (verified), else None."""
+    if not request.headers.get(SESSION_HEADER):
         return None
     try:
         return await authenticate_session(
@@ -75,7 +75,6 @@ async def optional_session(request: Request, access: CrewAccess) -> Author | Non
             access.crew.id,
             access.user.user_id,
             request.headers.get(SESSION_HEADER),
-            request.headers.get(TOKEN_HEADER),
             agent_id=access.user.agent_id,
         )
     except InboxError as e:

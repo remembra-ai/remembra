@@ -70,7 +70,7 @@ from remembra.relay.handoff import redact
 
 log = structlog.get_logger(__name__)
 
-SESSION_TOKEN_HEADER: Final = "X-Remembra-Session-Token"
+SESSION_TOKEN_HEADER: Final = "X-Remembra-Crew-Session"  # one header for every crew route (integration)
 SESSION_TOKEN_PREFIX: Final = "rcs_"
 
 # Presence thresholds (§10.1). Settings carry the per-crew lease/idle/lost values.

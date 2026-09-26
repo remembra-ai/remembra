@@ -69,7 +69,8 @@ async def agent_key(h, user_id: str, agent_id: str | None = None, role: str = "e
 
 
 def sess(session_id: str) -> dict[str, str]:
-    return {"X-Remembra-Crew-Session": session_id, "X-Remembra-Crew-Token": f"tok-{session_id}"}
+    """The session-token header every crew route reads (the token ``join`` returned)."""
+    return {"X-Remembra-Crew-Session": f"tok-{session_id}"}
 
 
 def test_every_wp7_l0_route_is_registered_with_the_contract_access_rules():
@@ -97,7 +98,7 @@ async def test_agent_posts_through_its_session_and_humans_through_their_login(tm
 
         res = await h.client.post(url, json=body, headers=key)
         assert res.status_code == 401 and res.json()["detail"]["error"] == "session_auth"
-        bad = {**sess("cs_a"), "X-Remembra-Crew-Token": "wrong"}
+        bad = {"X-Remembra-Crew-Session": "wrong"}
         assert (await h.client.post(url, json=body, headers={**key, **bad})).status_code == 401
         # an agent-scoped key cannot speak as another agent's session
         assert (await h.client.post(url, json=body, headers={**key, **sess("cs_b")})).status_code == 401

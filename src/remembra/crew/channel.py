@@ -64,8 +64,7 @@ from remembra.crew.inbox import (
 )
 from remembra.crew.store import CrewStore, new_id, now_iso, parse_iso
 
-SESSION_HEADER: Final = "X-Remembra-Crew-Session"
-TOKEN_HEADER: Final = "X-Remembra-Crew-Token"
+SESSION_HEADER: Final = "X-Remembra-Crew-Session"  # carries the session token (same header on every crew route)
 RESERVED_SENDER_NAMES: Final = frozenset({"mani", "human", "system", "remembra"})
 RESERVED_KINDS: Final = frozenset({"override", "pause"})
 SERVER_ONLY_MESSAGE_KINDS: Final = frozenset({"system"})
@@ -114,17 +113,18 @@ def token_hash(token: str) -> str:
 
 
 async def authenticate_session(
-    conn: Any, crew_id: str, user_id: str, session_id: str | None, token: str | None, *, agent_id: str | None = None
+    conn: Any, crew_id: str, user_id: str, token: str | None, *, agent_id: str | None = None
 ) -> Author:
     """The :class:`Author` for a crew session proven by its token; 401 on any mismatch.
 
-    The session must belong to ``crew_id`` and to the calling user, must not be
-    ``ended``, and ``token`` must hash to its stored ``token_hash``. An
-    agent-scoped key (``agent_id``) may only act as sessions of its own agent.
+    The token (``X-Remembra-Crew-Session``) is looked up by its sha256
+    (``crew_sessions.token_hash``). The session must belong to ``crew_id`` and
+    to the calling user and must not be ``ended``. An agent-scoped key
+    (``agent_id``) may only act as sessions of its own agent.
     """
-    if not session_id or not token or not schemas.is_id("session", session_id):
-        raise SessionAuthError("a crew session id and token are required")
-    async with conn.execute("SELECT * FROM crew_sessions WHERE id = ?", (session_id,)) as cur:
+    if not token or len(token) > 512:
+        raise SessionAuthError("a crew session token is required")
+    async with conn.execute("SELECT * FROM crew_sessions WHERE token_hash = ?", (token_hash(token),)) as cur:
         found = await cur.fetchone()
     row = dict(found) if found is not None else None
     if (

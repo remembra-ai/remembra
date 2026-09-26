@@ -314,21 +314,20 @@ async def test_reaper_hook_runs_in_the_app_lifespan(tmp_path, monkeypatch):
         app.state.tasks = TaskRegistry()
         app.state.crew_db = env.db
         monkeypatch.setattr(startup, "HOOK_MODULES", ("remembra.crew.reaper",))
-        # only the bus and the reaper: the db is provided, the outbox needs the main lifespan
-        for name in ("crew.tailer", "crew.retention", "crew.db", "crew.outbox"):
-            startup._HOOKS.pop(name, None)
+        # only the bus and the reaper: the db is provided, the outbox needs the main lifespan. The
+        # registry is isolated, so hooks other modules registered earlier in the run stay out of it.
+        monkeypatch.setattr(startup, "_HOOKS", {k: v for k, v in startup._HOOKS.items() if k == "crew.bus"})
+        from remembra.crew import reaper as reaper_module
+
+        reaper_module.register_hooks()
         try:
             await startup.start(app)
+            assert [h.name for h in app.state.crew_runtime.started] == ["crew.bus", "crew.reaper"]
             assert "crew-reaper" in app.state.tasks.names()
             assert app.state.crew_reaper is not None and app.state.crew_sessions.log is app.state.crew_events
             await startup.stop(app)
             assert app.state.crew_sessions is None and app.state.crew_reaper is None
         finally:
-            import remembra.crew.db_hook as db_hook
-
-            startup.add_hook("crew.tailer", order=20, start=startup._start_tailer, stop=startup._stop_tailer)
-            startup.add_hook("crew.retention", order=30, start=startup._start_retention, stop=startup._stop_retention)
-            db_hook.register_hooks()
             await app.state.tasks.shutdown(timeout=2.0)
     finally:
         await env.db.close()
