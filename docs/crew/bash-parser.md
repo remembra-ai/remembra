@@ -1,7 +1,7 @@
 # Bash parser contract
 
 Consumer: gatecore (WP-3), for PreToolUse on `Bash`, the pre-commit/pre-push identity and the
-post-tool check. Vectors: `tests/crew/vectors/bash/corpus.json` (321 commands). Runner:
+post-tool check. Vectors: `tests/crew/vectors/bash/corpus.json` (375 commands). Runner:
 `run_bash_corpus(parse_fn)`. Vocabulary constants: `remembra.crew.schemas.BASH_*`.
 
 ## Output
@@ -61,6 +61,22 @@ Paths: relative to the command's starting cwd, POSIX-normalised (`./` dropped, n
    fix flags), git subcommands in `BASH_READ_ONLY_GIT` (including `config --get`/`config <key>`
    with no value), and the test runners in `BASH_TEST_RUNNERS`. A whole command is `read_only` only
    when every segment is and nothing is redirected to a file.
+
+   The read-only list is a hint, not a verdict. A segment is **not** read-only (it is opaque and
+   raw-scanned, or a writer) when:
+   * git gets `-c key=value`, `--config-env` or `--exec-path=` (a config value can be a command:
+     `core.fsmonitor`, `diff.external`, `core.pager` …);
+   * it has an environment prefix (or an earlier `export`) that makes it run other code or read other
+     config: `GIT_*`, `PAGER`, `EDITOR`, `VISUAL`, `LESS*`, `PATH`, `HOME`, `NODE_OPTIONS`,
+     `LD_*`/`DYLD_*`, `BASH_ENV`, `PYTHON*`, `RIPGREP_CONFIG_PATH` …;
+   * an option writes a file: `git diff|log|show|whatchanged|shortlog --output[=]F` (and git's
+     abbreviations such as `--outp`), `git format-patch -o DIR`, `uniq IN OUT`, `sort -o F` (also in a
+     cluster such as `-uo F`), `tree -o F`, `less -o|-O F`/`--log-file`;
+   * an option runs a command: `git grep -O…/--open-files-in-pager`, `git fetch --upload-pack`,
+     `sort --compress-program`, `rg --pre`, `fd -x|-X`, `ag --pager`, `less +!cmd`;
+   * a sed script has `w`/`W` or `s///w FILE` (FILE is written), `e` or `s///e` (runs a command), or
+     cannot be read (`-f FILE`, a construct the sed reader does not know). `--sandbox` makes any
+     script read-only. Options are recognised quoted or not (`sed "-i" …` is in-place).
 8. **Opaque.** `eval`, `bash|sh|zsh -c` (not recursively parsed), `python -c`, `node -e`,
    scripts (`./x.sh`, `bash x.sh`, `node x.js`, `python x.py`), `make`, `xargs`, `find -exec`,
    `find -delete`, subshells `( … )`, groups `{ …; }`, `$(…)`/backticks, and any writer target
@@ -72,17 +88,39 @@ Paths: relative to the command's starting cwd, POSIX-normalised (`./` dropped, n
    * `env_crew_var`: assigning (`X=…` prefix, `export`, `env X=`) or `unset`-ting
      `REMEMBRA_CREW`, `REMEMBRA_CREW_SESSION`, `REMEMBRA_BYPASS` — except `REMEMBRA_BYPASS=<code>`
      in the literal form `RCB-XXXXX-XXXXX` as an inline prefix of a `git` command;
-   * `no_verify`: `--no-verify` on `git commit|push|merge|rebase|am`, `-n` on `git commit`
-     including combined short flags (`-nm`, `-anm`); a flag that takes a value ends the cluster
-     (`-mn` is the message "n"), and `git push -n` is a dry run;
+   * `no_verify`: `--no-verify` or any abbreviation git accepts (`--no-v…`) on `git
+     commit|push|merge|rebase|am|pull|cherry-pick|revert` and on unknown subcommands (aliases), `-n`
+     on `git commit` including combined short flags (`-nm`, `-anm`); a flag that takes a value ends
+     the cluster (`-mn` is the message "n"), and `git push -n` is a dry run. Also an alias definition
+     (`-c alias.X=…`, `git config alias.X …`) that is a shell alias (`!…`), expands to a hook-running
+     subcommand (`git ci -n` would then skip the hooks unseen) or contains tamper; and `git
+     commit-tree` (a commit made without any hook);
    * `hooks_path`: `git -c core.hooksPath=…` (key case-insensitive), `git config [scope]
-     core.hooksPath <value>`, `--unset`, `--unset-all`, `--add`, `--replace-all`;
+     core.hooksPath <value>`, `--unset`, `--unset-all`, `--add`, `--replace-all`; the same for
+     `include.path` and `includeIf.*.path`; `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`,
+     `GIT_CONFIG_VALUE_n`, `GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`,
+     `GIT_CONFIG` as a prefix, `env` or `export`; and `git config <key> <value>` storing a command
+     (a path, a shell form or arguments) in a key git runs later (`core.fsmonitor`, `core.pager`,
+     `diff.external`, `*.textconv`, filters, `credential.helper` …) — a plain program name with flags
+     (`cat`, `less -R`, `code --wait`) is fine;
+   * `settings_hook_edit`: a command that is not read-only and names `disableAllHooks` or
+     `allowManagedHooksOnly` (Edit/Write of settings files are judged by gatecore on the content);
    * `husky_off`: `HUSKY=0`, `HUSKY_SKIP_HOOKS=…`; `lefthook_off`: `LEFTHOOK=0`, `LEFTHOOK_EXCLUDE=…`;
    * `crewd_kill`: `kill`/`pkill`/`killall` naming crewd, `launchctl bootout|unload|remove|kill|disable`
      of the crewd label (`dev.remembra.crewd`), `systemctl --user stop|disable|kill|mask` of
      `remembra-crewd`;
    * `crew_files_removed`: `rm`, `unlink`, `mv` (as source), `truncate`, `chmod`/`chown` of
-     `.remembra/…`, `~/.remembra/…` or `.git/hooks/…`.
+     `.remembra/…`, `~/.remembra/…` or `.git/hooks/…` (`$HOME/…` and `${HOME}/…` count as `~/…`;
+     any other variable target makes the segment opaque and raw-scanned).
+10. **Whole-checkout git operations.** `git worktree remove|move P` removes the directory `P` (so
+    the foreign-checkout rule applies to another session's checkout). Git pathspecs are resolved:
+    `:/`, `:(top)` are relative to the checkout's top level (`top_writes`, resolved by gatecore from
+    the command's directory); a wildcard pattern (`src/*.ts`, `:(glob)src/**`) becomes its fixed
+    leading directory; `:(icase)` its parent directory; only exclusions (`:!x`, `:^x`), `:(attr:…)` or
+    unknown magic cover the whole scope; `--pathspec-from-file` covers the whole checkout.
+    `checkout -f|--force` without a branch, `reset --merge|--keep` (and abbreviations such as
+    `--ha`), `read-tree -u` and `checkout-index -a` are the tree-wide op `reset_hard`; `clean --forc`
+    is `clean`.
 
    Plus a **raw scan of opaque segments** (including a heredoc fed to a shell) for the markers in
    `BASH_TAMPER_SCAN` (`crewd` and crew paths only together with a kill/removal verb). Read-only

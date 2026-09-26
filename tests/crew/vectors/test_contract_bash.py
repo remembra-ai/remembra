@@ -28,8 +28,9 @@ def test_required_forms_are_covered() -> None:
     tags = {t for e in ENTRIES for t in e["tags"]}
     assert set(CORPUS["required_tags"]) <= tags
     tamper = {k for e in ENTRIES for k in e["expect"].get("tamper", [])}
-    # settings_hook_edit is an Edit/Write of settings.json, covered by guard/concrete.json
-    assert tamper == set(S.TAMPER_KINDS) - {"settings_hook_edit"}
+    # settings_hook_edit is mostly an Edit/Write of settings.json (guard/concrete.json); in Bash it is a
+    # writing command that sets disableAllHooks / allowManagedHooksOnly
+    assert tamper == set(S.TAMPER_KINDS)
     ops = {e["expect"].get("git_tree_op") for e in ENTRIES} - {None}
     assert ops == set(S.GIT_TREE_OPS)
     assert sum(1 for e in ENTRIES if e["expect"].get("read_only")) >= 50
@@ -73,13 +74,14 @@ def test_entry_is_internally_consistent(entry: dict[str, Any]) -> None:
     for w in exp["tree_scope"]:
         assert w == "." or w in cmd, (w, cmd)
     markers = {
-        "no_verify": r"--no-verify|\s-[a-z]*n[a-z]*\s",
-        "hooks_path": r"(?i)hookspath",
+        "no_verify": r"--no-v|\s-[a-z]*n[a-z]*\s|alias\.|commit-tree",
+        "hooks_path": r"(?i)hookspath|git_config|include\.path|core\.fsmonitor",
         "husky_off": r"HUSKY",
         "lefthook_off": r"LEFTHOOK",
         "env_crew_var": r"REMEMBRA_",
         "crewd_kill": r"crewd",
         "crew_files_removed": r"\.remembra|\.git/hooks",
+        "settings_hook_edit": r"disableAllHooks|allowManagedHooksOnly",
     }
     for kind in exp["tamper"]:
         assert re.search(markers[kind], cmd), (kind, cmd)

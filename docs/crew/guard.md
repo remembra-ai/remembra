@@ -37,6 +37,16 @@ The table is split in two layers so the gate and the server agree by constructio
 | 18 | `parent_zone_unclaimed` | deny `task_required` | warn | |
 | 19 | `no_zone_match` (or no predicate at all) | `undeclared_policy` (below) | same | |
 
+**Row 2 locations (gatecore).** Besides `CREW_POLICY_GLOBS` (`.remembra/**`, `.git/hooks/**`,
+`~/.remembra/**`), the git config files are crew policy for direct writes: `.git/config`,
+`.git/config.worktree`, `<git common dir>/config`, `config.worktree` and `worktrees/*/config*`,
+`~/.gitconfig`, `~/.config/git/config` and `/etc/gitconfig` (a line there can set `core.hooksPath` or
+an include). Settings files: an edit or write that drops crew hook entries is tamper; so is one that
+sets `disableAllHooks`/`allowManagedHooksOnly` in any Claude settings scope (user, project,
+project-local), whichever file holds the crew hooks; so is removing or moving a directory above a
+file that holds crew hook entries (`rm -rf ~/.claude`, `mv .husky x`). Other settings edits stay
+allowed.
+
 `warn` = allow, log `would_deny` (effect `would_deny`). Every `deny` except row 2 carries effect
 `guard.blocked`; row 2 carries `guard.tamper_blocked`.
 

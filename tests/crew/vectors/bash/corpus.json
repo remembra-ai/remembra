@@ -3597,6 +3597,683 @@
     ],
     "opaque": true
    }
+  },
+  {
+   "id": "b322",
+   "cmd": "git -c core.fsmonitor='pkill crewd' status",
+   "tags": [
+    "tamper",
+    "git_config",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b323",
+   "cmd": "git -c diff.external='pkill crewd' diff",
+   "tags": [
+    "tamper",
+    "git_config",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b324",
+   "cmd": "git -c color.ui=always log --oneline",
+   "tags": [
+    "git_config"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b325",
+   "cmd": "git grep -O'pkill crewd' x",
+   "tags": [
+    "tamper",
+    "exec_option",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b326",
+   "cmd": "git grep --open-files-in-pager=vim TODO",
+   "tags": [
+    "exec_option"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b327",
+   "cmd": "git fetch --upload-pack='pkill crewd' origin",
+   "tags": [
+    "tamper",
+    "exec_option",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b328",
+   "cmd": "git diff --output=.git/hooks/pre-commit",
+   "tags": [
+    "output_option"
+   ],
+   "expect": {
+    "writes": [
+     ".git/hooks/pre-commit"
+    ]
+   }
+  },
+  {
+   "id": "b329",
+   "cmd": "git log --output ~/.remembra/crew/snapshot.json",
+   "tags": [
+    "output_option"
+   ],
+   "expect": {
+    "writes": [
+     "~/.remembra/crew/snapshot.json"
+    ]
+   }
+  },
+  {
+   "id": "b330",
+   "cmd": "git log --grep=--no-verify",
+   "tags": [
+    "tamper_text_in_read"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b331",
+   "cmd": "sed -n 'w .git/hooks/pre-commit' /tmp/evil",
+   "tags": [
+    "sed_script"
+   ],
+   "expect": {
+    "writes": [
+     ".git/hooks/pre-commit"
+    ]
+   }
+  },
+  {
+   "id": "b332",
+   "cmd": "sed 's/a/b/w out.txt' in.txt",
+   "tags": [
+    "sed_script"
+   ],
+   "expect": {
+    "writes": [
+     "out.txt"
+    ]
+   }
+  },
+  {
+   "id": "b333",
+   "cmd": "sed -n 's/we/us/p' notes.txt",
+   "tags": [
+    "sed_script"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b334",
+   "cmd": "sed '1e pkill crewd' x.txt",
+   "tags": [
+    "tamper",
+    "sed_script",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b335",
+   "cmd": "sed -f script.sed x.txt",
+   "tags": [
+    "sed_script"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b336",
+   "cmd": "sed --sandbox -n '1p' x.txt",
+   "tags": [
+    "sed_script"
+   ],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b337",
+   "cmd": "sed \"-i\" \"s/a/b/\" src/x.ts",
+   "tags": [
+    "sed_i",
+    "quoted_option"
+   ],
+   "expect": {
+    "writes": [
+     "src/x.ts"
+    ]
+   }
+  },
+  {
+   "id": "b338",
+   "cmd": "uniq /tmp/evil .git/hooks/pre-commit",
+   "tags": [
+    "output_option"
+   ],
+   "expect": {
+    "writes": [
+     ".git/hooks/pre-commit"
+    ]
+   }
+  },
+  {
+   "id": "b339",
+   "cmd": "uniq -c names.txt",
+   "tags": [],
+   "expect": {
+    "read_only": true
+   }
+  },
+  {
+   "id": "b340",
+   "cmd": "sort -uo sorted.txt names.txt",
+   "tags": [
+    "output_option",
+    "combined_flags"
+   ],
+   "expect": {
+    "writes": [
+     "sorted.txt"
+    ]
+   }
+  },
+  {
+   "id": "b341",
+   "cmd": "sort --compress-program='pkill crewd' big.txt",
+   "tags": [
+    "tamper",
+    "exec_option",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b342",
+   "cmd": "tree -o listing.txt src",
+   "tags": [
+    "output_option"
+   ],
+   "expect": {
+    "writes": [
+     "listing.txt"
+    ]
+   }
+  },
+  {
+   "id": "b343",
+   "cmd": "rg --pre 'pkill crewd' TODO src",
+   "tags": [
+    "tamper",
+    "exec_option",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b344",
+   "cmd": "fd -e ts -x rm",
+   "tags": [
+    "exec_option"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b345",
+   "cmd": "GIT_EXTERNAL_DIFF='pkill crewd' git diff",
+   "tags": [
+    "tamper",
+    "env_prefix",
+    "raw_scan"
+   ],
+   "expect": {
+    "tamper": [
+     "crewd_kill"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b346",
+   "cmd": "PAGER=cat git log",
+   "tags": [
+    "env_prefix"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b347",
+   "cmd": "export GIT_PAGER=cat && git log",
+   "tags": [
+    "env_prefix"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b348",
+   "cmd": "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null git commit -m x",
+   "tags": [
+    "tamper",
+    "env_prefix"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b349",
+   "cmd": "GIT_CONFIG_PARAMETERS=\"'core.hooksPath'='/dev/null'\" git commit -m x",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b350",
+   "cmd": "export GIT_CONFIG_GLOBAL=/tmp/evil.cfg",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b351",
+   "cmd": "git commit --no-verif -m x",
+   "tags": [
+    "tamper",
+    "abbrev"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b352",
+   "cmd": "git commit --no-veri -m x",
+   "tags": [
+    "tamper",
+    "abbrev"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b353",
+   "cmd": "git push --no-verif",
+   "tags": [
+    "tamper",
+    "abbrev"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b354",
+   "cmd": "git lg --no-verif",
+   "tags": [
+    "tamper",
+    "abbrev",
+    "alias"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b355",
+   "cmd": "git -c alias.ci='commit --no-verify' ci -m x",
+   "tags": [
+    "tamper",
+    "git_config",
+    "alias"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b356",
+   "cmd": "git config alias.ci 'commit --no-verify'",
+   "tags": [
+    "tamper",
+    "git_config",
+    "alias"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ]
+   }
+  },
+  {
+   "id": "b357",
+   "cmd": "git config alias.ci commit",
+   "tags": [
+    "tamper",
+    "git_config",
+    "alias"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ]
+   }
+  },
+  {
+   "id": "b358",
+   "cmd": "git config alias.lg 'log --oneline'",
+   "tags": [
+    "git_config",
+    "alias",
+    "not_tamper"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b359",
+   "cmd": "git config include.path ../evil.cfg",
+   "tags": [
+    "tamper",
+    "git_config"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ]
+   }
+  },
+  {
+   "id": "b360",
+   "cmd": "git -c include.path=/tmp/e commit -m x",
+   "tags": [
+    "tamper",
+    "git_config"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b361",
+   "cmd": "git config core.pager cat",
+   "tags": [
+    "git_config",
+    "not_tamper"
+   ],
+   "expect": {
+    "opaque": true
+   }
+  },
+  {
+   "id": "b362",
+   "cmd": "git config core.fsmonitor ./watch.sh",
+   "tags": [
+    "tamper",
+    "git_config"
+   ],
+   "expect": {
+    "tamper": [
+     "hooks_path"
+    ]
+   }
+  },
+  {
+   "id": "b363",
+   "cmd": "git commit-tree HEAD^{tree} -m x",
+   "tags": [
+    "tamper"
+   ],
+   "expect": {
+    "tamper": [
+     "no_verify"
+    ],
+    "opaque": true
+   }
+  },
+  {
+   "id": "b364",
+   "cmd": "printf '[core]\\n\\thooksPath=/dev/null\\n' >> .git/config",
+   "tags": [
+    "redirect",
+    "crew_policy_write"
+   ],
+   "expect": {
+    "writes": [
+     ".git/config"
+    ]
+   }
+  },
+  {
+   "id": "b365",
+   "cmd": "rm -rf $HOME/.remembra",
+   "tags": [
+    "tamper",
+    "variable",
+    "home"
+   ],
+   "expect": {
+    "tamper": [
+     "crew_files_removed"
+    ],
+    "writes": [
+     "~/.remembra"
+    ]
+   }
+  },
+  {
+   "id": "b366",
+   "cmd": "git worktree remove --force ../yaadbooks-a",
+   "tags": [
+    "worktree"
+   ],
+   "expect": {
+    "writes": [
+     "../yaadbooks-a"
+    ]
+   }
+  },
+  {
+   "id": "b367",
+   "cmd": "git checkout HEAD -- ':(glob)src/**'",
+   "tags": [
+    "pathspec",
+    "checkout_ref_dir"
+   ],
+   "expect": {
+    "writes": [
+     "src"
+    ]
+   }
+  },
+  {
+   "id": "b368",
+   "cmd": "git checkout -- ':!src/app/pos/cart.ts'",
+   "tags": [
+    "pathspec"
+   ],
+   "expect": {
+    "writes": [
+     "."
+    ]
+   }
+  },
+  {
+   "id": "b369",
+   "cmd": "git checkout -f",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "reset_hard"
+   }
+  },
+  {
+   "id": "b370",
+   "cmd": "git reset --ha",
+   "tags": [
+    "git_tree_op",
+    "abbrev"
+   ],
+   "expect": {
+    "git_tree_op": "reset_hard"
+   }
+  },
+  {
+   "id": "b371",
+   "cmd": "git read-tree -u -m HEAD",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "reset_hard"
+   }
+  },
+  {
+   "id": "b372",
+   "cmd": "git checkout-index -a -f",
+   "tags": [
+    "git_tree_op"
+   ],
+   "expect": {
+    "git_tree_op": "reset_hard"
+   }
+  },
+  {
+   "id": "b373",
+   "cmd": "git clean --forc -d",
+   "tags": [
+    "git_tree_op",
+    "abbrev"
+   ],
+   "expect": {
+    "git_tree_op": "clean"
+   }
+  },
+  {
+   "id": "b374",
+   "cmd": "echo '{\"disableAllHooks\": true}' > .claude/settings.local.json",
+   "tags": [
+    "redirect",
+    "tamper"
+   ],
+   "expect": {
+    "writes": [
+     ".claude/settings.local.json"
+    ],
+    "tamper": [
+     "settings_hook_edit"
+    ]
+   }
+  },
+  {
+   "id": "b375",
+   "cmd": "grep -rn disableAllHooks docs",
+   "tags": [
+    "tamper_text_in_read"
+   ],
+   "expect": {
+    "read_only": true
+   }
   }
  ]
 }

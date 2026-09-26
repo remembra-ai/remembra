@@ -145,7 +145,7 @@ def _scan_balanced(s: str, i: int, open_ch: str, close_ch: str) -> int:
             i = j + 1
             continue
         if c == '"':
-            i = _scan_dquote(s, i + 1, Word())
+            i = _scan_dquote(s, i + 1, _WB())
             continue
         if c == "`":
             j = s.find("`", i + 1)
@@ -163,21 +163,62 @@ def _scan_balanced(s: str, i: int, open_ch: str, close_ch: str) -> int:
     raise _LexError(f"unbalanced {open_ch}")
 
 
-def _scan_dollar(s: str, i: int, w: Word) -> int:
+class _WB:
+    """Word builder: collects text in lists and joins once (linear time on long words, §10.3 deadline)."""
+
+    __slots__ = ("val", "raw", "vlen", "quoted", "has_var", "has_subst", "has_glob", "has_brace", "quote_start")
+
+    def __init__(self) -> None:
+        self.val: list[str] = []
+        self.raw: list[str] = []
+        self.vlen = 0
+        self.quoted = False
+        self.has_var = False
+        self.has_subst = False
+        self.has_glob = False
+        self.has_brace = False
+        self.quote_start: int | None = None
+
+    def add(self, value: str, raw: str | None = None) -> None:
+        if value:
+            self.val.append(value)
+            self.vlen += len(value)
+        self.raw.append(value if raw is None else raw)
+
+    def add_raw(self, raw: str) -> None:
+        self.raw.append(raw)
+
+    def mark_quote(self) -> None:
+        self.quoted = True
+        if self.quote_start is None:
+            self.quote_start = self.vlen
+
+    def word(self) -> Word:
+        return Word(
+            value="".join(self.val),
+            raw="".join(self.raw),
+            quoted=self.quoted,
+            has_var=self.has_var,
+            has_subst=self.has_subst,
+            has_glob=self.has_glob,
+            has_brace=self.has_brace,
+            quote_start=self.quote_start,
+        )
+
+
+def _scan_dollar(s: str, i: int, w: _WB) -> int:
     """``s[i] == '$'``: consume one expansion into ``w`` and return the next index."""
     n = len(s)
     nxt = s[i + 1] if i + 1 < n else ""
     if nxt == "(":
         end = _scan_balanced(s, i + 2, "(", ")")
         w.has_subst = True
-        w.raw += s[i:end]
-        w.value += s[i:end]
+        w.add(s[i:end])
         return end
     if nxt == "{":
         end = _scan_balanced(s, i + 2, "{", "}")
         w.has_var = True
-        w.raw += s[i:end]
-        w.value += s[i:end]
+        w.add(s[i:end])
         return end
     if nxt and (nxt.isalnum() or nxt in "_@*#?$!-"):
         j = i + 1
@@ -187,26 +228,30 @@ def _scan_dollar(s: str, i: int, w: Word) -> int:
         else:
             j += 1
         w.has_var = True
-        w.raw += s[i:j]
-        w.value += s[i:j]
+        w.add(s[i:j])
         return j
-    w.raw += "$"
-    w.value += "$"
+    w.add("$")
     return i + 1
 
 
-def _scan_dquote(s: str, i: int, w: Word) -> int:
+_DQ_PLAIN_RE: Final = re.compile(r'[^"\\$`]+')
+
+
+def _scan_dquote(s: str, i: int, w: _WB) -> int:
     """Inside double quotes starting at ``i`` (just after the quote); return index after the closing quote."""
     n = len(s)
     while i < n:
+        m = _DQ_PLAIN_RE.match(s, i)
+        if m is not None:  # a run of plain characters in one slice
+            w.add(m.group())
+            i = m.end()
+            continue
         c = s[i]
         if c == '"':
-            w.raw += '"'
+            w.add_raw('"')
             return i + 1
         if c == "\\" and i + 1 < n and s[i + 1] in '$`"\\\n':
-            if s[i + 1] != "\n":
-                w.value += s[i + 1]
-            w.raw += s[i : i + 2]
+            w.add(s[i + 1] if s[i + 1] != "\n" else "", s[i : i + 2])
             i += 2
             continue
         if c == "$":
@@ -217,12 +262,10 @@ def _scan_dquote(s: str, i: int, w: Word) -> int:
             if j < 0:
                 raise _LexError("unterminated backtick")
             w.has_subst = True
-            w.raw += s[i : j + 1]
-            w.value += s[i : j + 1]
+            w.add(s[i : j + 1])
             i = j + 1
             continue
-        w.raw += c
-        w.value += c
+        w.add(c)
         i += 1
     raise _LexError("unterminated double quote")
 
@@ -368,18 +411,24 @@ def _word_end(s: str, i: int) -> int:
     return j
 
 
-def _mark_quote(w: Word) -> None:
-    w.quoted = True
-    if w.quote_start is None:
-        w.quote_start = len(w.value)
+# Characters with no special meaning inside an unquoted word (copied a whole run at a time).
+_PLAIN_RUN_RE: Final = re.compile(r"[^ \t\n;&|()<>\\'\"$`*?\[{},.]+")
 
 
 def _lex_word(s: str, i: int) -> tuple[Word, int]:
-    w = Word()
+    """One unquoted-context word starting at ``i``. Linear in the word length (no per-character copies)."""
+    w = _WB()
     n = len(s)
     brace_open = False
     brace_sep = False
+    word_end = -1  # first word-break index at or after the current position (valid while >= i)
+    close_at = -1  # first "]" after the current "[" (valid while > i); n when there is none
     while i < n:
+        m = _PLAIN_RUN_RE.match(s, i)
+        if m is not None:
+            w.add(m.group())
+            i = m.end()
+            continue
         c = s[i]
         if c in _WORD_BREAK:
             break
@@ -388,9 +437,8 @@ def _lex_word(s: str, i: int) -> tuple[Word, int]:
                 if s[i + 1] == "\n":
                     i += 2
                     continue
-                _mark_quote(w)
-                w.value += s[i + 1]
-                w.raw += s[i : i + 2]
+                w.mark_quote()
+                w.add(s[i + 1], s[i : i + 2])
                 i += 2
             else:
                 i += 1
@@ -399,31 +447,29 @@ def _lex_word(s: str, i: int) -> tuple[Word, int]:
             j = s.find("'", i + 1)
             if j < 0:
                 raise _LexError("unterminated single quote")
-            _mark_quote(w)
-            w.value += s[i + 1 : j]
-            w.raw += s[i : j + 1]
+            w.mark_quote()
+            w.add(s[i + 1 : j], s[i : j + 1])
             i = j + 1
             continue
         if c == "$" and s[i + 1 : i + 2] == "'":  # ANSI-C quoting: literal text
             j = i + 2
-            buf = ""
+            buf: list[str] = []
             while j < n and s[j] != "'":
                 if s[j] == "\\" and j + 1 < n:
-                    buf += s[j : j + 2]
+                    buf.append(s[j : j + 2])
                     j += 2
                     continue
-                buf += s[j]
+                buf.append(s[j])
                 j += 1
             if j >= n:
                 raise _LexError("unterminated $' quote")
-            _mark_quote(w)
-            w.value += buf
-            w.raw += s[i : j + 1]
+            w.mark_quote()
+            w.add("".join(buf), s[i : j + 1])
             i = j + 1
             continue
         if c == '"':
-            _mark_quote(w)
-            w.raw += '"'
+            w.mark_quote()
+            w.add_raw('"')
             i = _scan_dquote(s, i + 1, w)
             continue
         if c == "$":
@@ -434,22 +480,28 @@ def _lex_word(s: str, i: int) -> tuple[Word, int]:
             if j < 0:
                 raise _LexError("unterminated backtick")
             w.has_subst = True
-            w.value += s[i : j + 1]
-            w.raw += s[i : j + 1]
+            w.add(s[i : j + 1])
             i = j + 1
             continue
-        if c in "*?" or (c == "[" and "]" in s[i + 1 : _word_end(s, i)]):
+        if c in "*?":
             w.has_glob = True
+        elif c == "[":
+            if word_end < i:
+                word_end = _word_end(s, i)
+            if close_at <= i:
+                found = s.find("]", i + 1)
+                close_at = n if found < 0 else found
+            if close_at < word_end:
+                w.has_glob = True
         elif c == "{":
             brace_open = True
         elif c == "," and brace_open or c == "." and brace_open and s[i : i + 2] == "..":
             brace_sep = True
         elif c == "}" and brace_open and brace_sep:
             w.has_brace = True
-        w.value += c
-        w.raw += c
+        w.add(c)
         i += 1
-    return w, i
+    return w.word(), i
 
 
 # ===========================================================================
@@ -501,6 +553,44 @@ _HOOK_ENV_TAMPER: Final[Mapping[str, str]] = {
     "LEFTHOOK": "lefthook_off",
     "LEFTHOOK_EXCLUDE": "lefthook_off",
 }
+# Environment variables that make a command run other code, read other config or write trace files.
+# A segment with one of these as a prefix (or exported) is never read-only: it is opaque and raw-scanned.
+_EXEC_ENV_EXACT: Final = frozenset(
+    {
+        "PAGER",
+        "MANPAGER",
+        "EDITOR",
+        "VISUAL",
+        "LESS",
+        "LESSOPEN",
+        "LESSCLOSE",
+        "BASH_ENV",
+        "ENV",
+        "PROMPT_COMMAND",
+        "SHELLOPTS",
+        "BASHOPTS",
+        "PS4",
+        "IFS",
+        "PATH",
+        "HOME",
+        "NODE_OPTIONS",
+        "PYTHONSTARTUP",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PERL5OPT",
+        "PERL5LIB",
+        "RUBYOPT",
+        "RUBYLIB",
+        "SSH_ASKPASS",
+        "SUDO_ASKPASS",
+        "RIPGREP_CONFIG_PATH",
+        "GREP_OPTIONS",
+        "XDG_CONFIG_HOME",
+    }
+)
+_EXEC_ENV_PREFIXES: Final = ("GIT_", "LD_", "DYLD_")
+# Git reads these as extra config (core.hooksPath included): setting them is a hooks-path tamper.
+_GIT_CONFIG_ENV_RE: Final = re.compile(r"GIT_CONFIG(?:_COUNT|_KEY_\d+|_VALUE_\d+|_PARAMETERS|_GLOBAL|_SYSTEM)?")
 _PM_TEST_SCRIPTS: Final = ("test", "t")
 _FORMATTERS: Final = frozenset({"prettier", "eslint", "biome", "ruff", "black", "gofmt"})
 _FILE_EXT_RE: Final = re.compile(r"^[^.]*[^/]*\.[A-Za-z0-9_+-]{1,16}$")
@@ -534,6 +624,9 @@ class BashParse:
     git_tree_op_cwd: str | None = None  # cwd (relative to the start) of the first tree-wide git op
     argvs: list[tuple[str | None, list[str]]] = field(default_factory=list)  # (cwd, normalised argv) per command
     scanned: list[str] = field(default_factory=list)  # raw text of opaque code that was tamper-scanned
+    # targets relative to the checkout's top level (git ``:/`` and ``:(top)`` pathspecs):
+    # (cwd of the command, path from the top level, remove, restore, is_dir)
+    top_writes: list[tuple[str, str, bool, bool, bool]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -549,6 +642,7 @@ class BashParse:
             "restores": sorted(self.restores),
             "git_tree_op_cwd": self.git_tree_op_cwd,
             "argvs": [[cwd, list(argv)] for cwd, argv in self.argvs],
+            "top_writes": sorted({rel for _cwd, rel, *_ in self.top_writes}),
         }
 
 
@@ -573,14 +667,21 @@ def parse_bash_full(command: str) -> BashParse:
         _raw_scan(command, res)
         return res
     _Parser(command, toks, res).run()
-    if res.opaque or res.writes or res.tree_writer or res.tamper or res.git_tree_op:
+    if res.opaque or res.writes or res.top_writes or res.tree_writer or res.tamper or res.git_tree_op:
         res.read_only = False
     return res
+
+
+# Claude Code settings keys that switch every hook off. A command that writes or runs code and names
+# one is tamper (settings_hook_edit): its effect on a settings file cannot be known before it runs.
+_HOOKS_OFF_RE: Final = re.compile(r"disableAllHooks|allowManagedHooksOnly", re.IGNORECASE)
 
 
 def _raw_scan(text: str, res: BashParse) -> None:
     """Tamper markers in opaque code (``BASH_TAMPER_SCAN``); kill/removal markers need their verb in the same text."""
     res.scanned.append(text)
+    if _HOOKS_OFF_RE.search(text):
+        res.tamper.add("settings_hook_edit")
     low = text.lower()
     for kind, markers in S.BASH_TAMPER_SCAN.items():
         hit = any((m.lower() in low) if kind == "hooks_path" else (m in text) for m in markers)
@@ -622,6 +723,38 @@ def _norm_join(cwd: str | None, path: str) -> str | None:
     return out
 
 
+_HOME_VAR_RE: Final = re.compile(r"(?:\$HOME|\$\{HOME\})(?=/|$)")
+
+
+def _home_word(w: Word) -> Word:
+    """``$HOME/x`` or ``${HOME}/x`` with nothing else dynamic is ``~/x`` (the gate resolves ``~`` to the home)."""
+    if not w.has_var or w.has_subst or w.has_glob or w.has_brace:
+        return w
+    m = _HOME_VAR_RE.match(w.value)
+    if m is None:
+        return w
+    rest = w.value[m.end() :]
+    if "$" in rest or "`" in rest:
+        return w
+    return Word(value="~" + rest, raw=w.raw, quoted=w.quoted, quote_start=w.quote_start)
+
+
+def _exec_env(name: str) -> bool:
+    """The variable makes the command run other code or read other config (see ``_EXEC_ENV_EXACT``)."""
+    return name in _EXEC_ENV_EXACT or name.startswith(_EXEC_ENV_PREFIXES)
+
+
+def _long_opt(key: str, options: Iterable[str], *, min_len: int = 3) -> str | None:
+    """getopt_long / git parse-options abbreviation: the option ``key`` names exactly, or the only one it prefixes."""
+    opts = tuple(options)
+    if key in opts:
+        return key
+    if len(key) < min_len or not key.startswith("--"):
+        return None
+    hits = [o for o in opts if o.startswith(key)]
+    return hits[0] if len(hits) == 1 else None
+
+
 def _has_ext(path: str) -> bool:
     last = posixpath.basename(path.rstrip("/"))
     if not last or last in (".", ".."):
@@ -640,6 +773,10 @@ class _Parser:
         self.dirstack: list[str | None] = []
         self.any_read_only = False
         self.all_read_only = True
+        self.seg_raw = ""  # raw text of the segment being classified (raw-scanned when a target is dynamic)
+        self.no_ro = False  # the segment cannot be read-only (config or exec-capable env prefix)
+        self.exported_exec = False  # an exec-capable variable was exported earlier in this command line
+        self.seg_ro = False  # the segment being classified turned out read-only
 
     # -- driver -------------------------------------------------------------
     def run(self) -> None:
@@ -648,6 +785,8 @@ class _Parser:
             if seg is None:
                 continue
             self._command(seg)
+            if not self.seg_ro and _HOOKS_OFF_RE.search(seg.raw):
+                self.res.tamper.add("settings_hook_edit")
         self.res.read_only = self.all_read_only and self.any_read_only
 
     def _segments(self) -> list[_Seg | None]:
@@ -761,17 +900,25 @@ class _Parser:
     def _mark_opaque(self, seg: _Seg, scan: bool = False, extra: str = "") -> None:
         self.res.opaque = True
         self.all_read_only = False
-        if scan:
-            _raw_scan(seg.raw + ("\n" + extra if extra else ""), self.res)
+        if scan or self.no_ro:
+            self._scan_once(seg.raw + ("\n" + extra if extra else ""))
+
+    def _scan_once(self, text: str) -> None:
+        if text not in self.res.scanned:
+            _raw_scan(text, self.res)
 
     def _target(
         self, w: Word, *, cwd: str | None = None, remove: bool = False, is_dir: bool = False, restore: bool = False
     ) -> None:
-        """Record a write target; dynamic targets make the command opaque instead."""
+        """Record a write target; dynamic targets make the command opaque (and raw-scanned) instead."""
         base = self.cwd if cwd is None else cwd
+        w = _home_word(w)
         if w.dynamic:
+            # the shell decides the path: scan the segment so `rm -rf $X/.remembra` is still tamper
             self.res.opaque = True
             self.all_read_only = False
+            if self.seg_raw:
+                self._scan_once(self.seg_raw)
             return
         path = _norm_join(base, w.value)
         if path is None:
@@ -785,6 +932,19 @@ class _Parser:
             self.res.removes.add(path)
         if is_dir or path == ".":
             self.res.dirs.add(path)
+
+    def _top_target(self, rel: str, *, remove: bool = False, restore: bool = False, is_dir: bool = False) -> None:
+        """A target relative to the checkout's top level (resolved by :func:`evaluate` from the command's cwd)."""
+        self.all_read_only = False
+        if self.cwd is None:
+            self.res.opaque = True  # which checkout is unknown
+            return
+        self.res.top_writes.append((self.cwd, posixpath.normpath(rel), remove, restore, is_dir))
+
+    def _crew_word(self, w: Word) -> bool:
+        """``w`` (``$HOME`` resolved) names a crew file: ``.remembra/…``, ``~/.remembra/…`` or ``.git/hooks/…``."""
+        w = _home_word(w)
+        return not w.dynamic and self._crew_path(w.value)
 
     def _crew_path(self, value: str) -> bool:
         path = _norm_join(self.cwd or ".", value) or value
@@ -808,6 +968,9 @@ class _Parser:
 
     # -- one simple command -------------------------------------------------
     def _command(self, seg: _Seg) -> None:
+        self.seg_raw = seg.raw
+        self.seg_ro = False
+        self.no_ro = self.exported_exec
         words = list(seg.words)
         # keywords
         while words and not words[0].quoted and words[0].value in _STRIP_KEYWORDS:
@@ -829,6 +992,8 @@ class _Parser:
         words, env_bare = self._unwrap(words, assigns, unsets)
         head = words[0].value if words else ""
         self._assign_tamper(assigns, unsets, head)
+        if any(_exec_env(name) for name, _v, _w in assigns):
+            self.no_ro = True  # e.g. GIT_EXTERNAL_DIFF=… git diff, PAGER=… git log: never read-only
         # redirections
         redirect_write = self._redirections(seg)
         if env_bare and not words:
@@ -882,10 +1047,14 @@ class _Parser:
         self._mark_opaque(seg)
 
     def _read_only_seg(self, seg: _Seg, redirect_write: bool) -> None:
+        if self.no_ro:
+            self._mark_opaque(seg, scan=True)
+            return
         if redirect_write:
             self.all_read_only = False
         else:
             self.any_read_only = True
+            self.seg_ro = True
 
     def _redirections(self, seg: _Seg) -> bool:
         wrote = False
@@ -913,6 +1082,9 @@ class _Parser:
                 self.res.tamper.add("env_crew_var")
 
     def _check_var(self, name: str, value: str, *, inline_head: str | None, exported: bool) -> None:
+        if _GIT_CONFIG_ENV_RE.fullmatch(name):
+            self.res.tamper.add("hooks_path")  # git reads it as config: core.hooksPath, include.path, alias.*
+            return
         if name in S.CREW_ENV_TAMPER_VARS:
             if (
                 name == "REMEMBRA_BYPASS"
@@ -1101,7 +1273,7 @@ def _h_rm(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str 
     if name in ("rmdir",):
         recursive = True
     for w in pos:
-        if not w.dynamic and p._crew_path(w.value):
+        if p._crew_word(w):
             p.res.tamper.add("crew_files_removed")
         p._target(w, remove=True, is_dir=recursive)
 
@@ -1156,7 +1328,7 @@ def _h_chmod(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: s
         pos.append(args[i])
         i += 1
     for w in pos:
-        if not w.dynamic and p._crew_path(w.value):
+        if p._crew_word(w):
             p.res.tamper.add("crew_files_removed")
         p._target(w, is_dir=recursive)
 
@@ -1164,7 +1336,7 @@ def _h_chmod(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: s
 def _h_truncate(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str | None) -> None:
     _flags, pos, _ = _split_opts(args, ("-s", "-r", "--size", "--reference"))
     for w in pos:
-        if not w.dynamic and p._crew_path(w.value):
+        if p._crew_word(w):
             p.res.tamper.add("crew_files_removed")
         p._target(w)
 
@@ -1188,9 +1360,165 @@ def _cluster_has(flags: Iterable[str], letter: str) -> bool:
     return any(f.startswith("-") and not f.startswith("--") and letter in f[1:] for f in flags)
 
 
+_SED_LONG: Final = (
+    "--quiet",
+    "--silent",
+    "--debug",
+    "--expression",
+    "--file",
+    "--follow-symlinks",
+    "--in-place",
+    "--line-length",
+    "--null-data",
+    "--zero-terminated",
+    "--posix",
+    "--regexp-extended",
+    "--separate",
+    "--sandbox",
+    "--unbuffered",
+    "--binary",
+    "--help",
+    "--version",
+)
+_SED_SIMPLE_CMDS: Final = frozenset("=dDgGhHnNpPxzF")
+
+
+@dataclass
+class _SedEffects:
+    writes: list[str] = field(default_factory=list)  # files named by w / W / s///w
+    executes: bool = False  # e command or s///e flag
+    unknown: bool = False  # a construct this reader does not understand
+
+
+def _sed_script_effects(script: str) -> _SedEffects:
+    """What a sed script does besides printing: ``w``/``W`` and ``s///w`` write files, ``e`` and ``s///e`` run commands.
+
+    A small reader of the GNU/BSD sed grammar (addresses, blocks, labels, text commands, ``s`` and ``y``
+    with any delimiter). Anything it cannot read is ``unknown`` (the caller treats the command as opaque).
+    """
+    out = _SedEffects()
+    s = script
+    n = len(s)
+
+    def eol(j: int) -> tuple[str, int]:
+        k = s.find("\n", j)
+        return (s[j:], n) if k < 0 else (s[j:k], k + 1)
+
+    def until(j: int, stops: str) -> int:
+        while j < n and s[j] not in stops:
+            j += 1
+        return j
+
+    def delimited(j: int, d: str) -> int:
+        """Index just past the unescaped delimiter ``d`` at or after ``j``; -1 when there is none."""
+        while j < n:
+            c = s[j]
+            if c == "\\":
+                j += 2
+                continue
+            if c == d:
+                return j + 1
+            j += 1
+        return -1
+
+    def filename(j: int) -> int:
+        name, nxt = eol(j)
+        name = name.strip()
+        if not name:
+            out.unknown = True
+        elif name not in _DEV_TARGETS:
+            out.writes.append(name)
+        return nxt
+
+    i = 0
+    while i < n:
+        c = s[i]
+        if c in " \t\n;":
+            i += 1
+            continue
+        if c == "#":
+            i = eol(i)[1]
+            continue
+        # address: numbers, $, first~step, addr,+N, /re/I, \cREc, !
+        while i < n:
+            c = s[i]
+            if c.isdigit() or c in "$,~+! \t":
+                i += 1
+            elif c == "/":
+                i = delimited(i + 1, "/")
+                if i < 0:
+                    out.unknown = True
+                    return out
+                while i < n and s[i] in "IM":
+                    i += 1
+            elif c == "\\" and i + 1 < n:
+                i = delimited(i + 2, s[i + 1])
+                if i < 0:
+                    out.unknown = True
+                    return out
+                while i < n and s[i] in "IM":
+                    i += 1
+            else:
+                break
+        if i >= n:
+            break
+        c = s[i]
+        if c in "{}" or c in _SED_SIMPLE_CMDS:
+            i += 1
+        elif c in "qQlL":
+            i = until(i + 1, ";\n}")
+        elif c in "btTv:":
+            i = until(i + 1, ";\n") if c == ":" else until(i + 1, ";\n}")
+        elif c in "aic":
+            # one-line text, continued by a trailing backslash
+            j = i + 1
+            while True:
+                line, j = eol(j)
+                if not line.endswith("\\") or j >= n:
+                    break
+            i = j
+        elif c in "rR":
+            i = eol(i + 1)[1]
+        elif c in "wW":
+            i = filename(i + 1)
+        elif c == "e":
+            out.executes = True
+            i = eol(i + 1)[1]
+        elif c in "sy":
+            if i + 1 >= n or s[i + 1] in "\n\\":
+                out.unknown = True
+                return out
+            d = s[i + 1]
+            j = delimited(i + 2, d)
+            j = delimited(j, d) if j >= 0 else -1
+            if j < 0:
+                out.unknown = True
+                return out
+            i = j
+            if c == "y":
+                continue
+            while i < n and s[i] not in ";\n}":
+                f = s[i]
+                if f == "w":
+                    i = filename(i + 1)
+                    break
+                if f == "e":
+                    out.executes = True
+                elif not (f.isdigit() or f in "gpiImM \t"):
+                    out.unknown = True
+                    return out
+                i += 1
+        else:
+            out.unknown = True
+            return out
+    return out
+
+
 def _h_sed(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str | None) -> None:
     in_place = False
-    have_script_opt = False
+    sandbox = False
+    script_file = False
+    scripts: list[Word] = []
     pos: list[Word] = []
     i = 0
     while i < len(args):
@@ -1200,47 +1528,82 @@ def _h_sed(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str
             pos.extend(args[i + 1 :])
             break
         if v.startswith("--"):
-            if v.startswith("--in-place"):
+            key, eq, val = v.partition("=")
+            opt = _long_opt(key, _SED_LONG)
+            if opt == "--in-place":
                 in_place = True
-            elif v in ("--expression", "--file"):
-                have_script_opt = True
-                i += 1
-            elif v.startswith(("--expression=", "--file=")):
-                have_script_opt = True
+            elif opt == "--sandbox":
+                sandbox = True
+            elif opt in ("--expression", "--file", "--line-length"):
+                if not eq:
+                    i += 1
+                    val = args[i].value if i < len(args) else ""
+                if opt == "--expression":
+                    src = args[i] if not eq and i < len(args) else w
+                    scripts.append(Word(value=val, raw=val, has_var=src.has_var, has_subst=src.has_subst))
+                elif opt == "--file":
+                    script_file = True
+            elif opt is None:
+                script_file = True  # an option sed would reject or one we do not know: do not trust it
             i += 1
             continue
-        if v.startswith("-") and len(v) > 1 and not w.quoted:
+        if v.startswith("-") and len(v) > 1:
             letters = v[1:]
-            k = 0
             consumed_next = False
-            while k < len(letters):
-                ch = letters[k]
+            for k, ch in enumerate(letters):
                 if ch == "i":
                     in_place = True
                     if k == len(letters) - 1 and i + 1 < len(args) and args[i + 1].value == "" and args[i + 1].quoted:
                         consumed_next = True  # BSD: -i ''
-                    break
-                if ch in ("e", "f"):
-                    have_script_opt = True
-                    if k == len(letters) - 1:
+                    break  # GNU: the rest of the cluster is the backup suffix
+                if ch in ("e", "f", "l"):
+                    rest = letters[k + 1 :]
+                    if not rest:
                         consumed_next = True
+                        rest = args[i + 1].value if i + 1 < len(args) else ""
+                        src = args[i + 1] if i + 1 < len(args) else w
+                    else:
+                        src = w
+                    if ch == "e":
+                        scripts.append(Word(value=rest, raw=rest, has_var=src.has_var, has_subst=src.has_subst))
+                    elif ch == "f":
+                        script_file = True
                     break
-                if ch == "l":
-                    if k == len(letters) - 1:
-                        consumed_next = True
-                    break
-                k += 1
             i += 2 if consumed_next else 1
             continue
         pos.append(w)
         i += 1
-    files = pos if have_script_opt else pos[1:]
-    if not in_place:
+    if not scripts and not script_file:
+        if pos:
+            scripts.append(pos[0])
+        files = pos[1:]
+    else:
+        files = pos
+    effects = _SedEffects()
+    for sw in scripts:
+        if sw.dynamic:
+            effects.unknown = True
+            continue
+        one = _sed_script_effects(sw.value)
+        effects.writes += one.writes
+        effects.executes = effects.executes or one.executes
+        effects.unknown = effects.unknown or one.unknown
+    if sandbox:
+        effects = _SedEffects()  # --sandbox rejects e, w and r: the script can only print
+        script_file = False
+    unreadable = script_file or effects.executes or effects.unknown
+    if unreadable:
+        # a script we cannot see or read, or one that runs commands: opaque, raw-scanned
+        p._mark_opaque(seg, scan=True, extra="\n".join(sw.value for sw in scripts))
+    for target in effects.writes:
+        p.all_read_only = False
+        p._target(Word(value=target, raw=target))
+    if in_place:
+        p.all_read_only = False
+        for w in files:
+            p._target(w)
+    elif not unreadable and not effects.writes:
         p._read_only_seg(seg, rw)
-        return
-    p.all_read_only = False
-    for w in files:
-        p._target(w)
 
 
 def _h_perl(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str | None) -> None:
@@ -1254,7 +1617,7 @@ def _h_perl(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: st
         if v == "--":
             pos.extend(args[i + 1 :])
             break
-        if v.startswith("-") and len(v) > 1 and not w.quoted:
+        if v.startswith("-") and len(v) > 1:
             letters = v[1:]
             k = 0
             consumed_next = False
@@ -1306,7 +1669,7 @@ def _h_mv(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str 
         p._mark_opaque(seg)
         return
     for w in sources:
-        if not w.dynamic and p._crew_path(w.value):
+        if p._crew_word(w):
             p.res.tamper.add("crew_files_removed")
         p._target(w, remove=True)
     if target is not None:
@@ -1435,20 +1798,181 @@ def _h_patch(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: s
         p._mark_opaque(seg)
 
 
+_SORT_LONG: Final = (
+    "--ignore-leading-blanks",
+    "--dictionary-order",
+    "--ignore-case",
+    "--general-numeric-sort",
+    "--ignore-nonprinting",
+    "--month-sort",
+    "--human-numeric-sort",
+    "--numeric-sort",
+    "--random-sort",
+    "--random-source",
+    "--reverse",
+    "--sort",
+    "--version-sort",
+    "--batch-size",
+    "--check",
+    "--compress-program",
+    "--debug",
+    "--files0-from",
+    "--key",
+    "--merge",
+    "--output",
+    "--stable",
+    "--buffer-size",
+    "--field-separator",
+    "--temporary-directory",
+    "--parallel",
+    "--unique",
+    "--zero-terminated",
+    "--help",
+    "--version",
+)
+_SORT_LONG_VALUE: Final = frozenset(
+    {
+        "--random-source",
+        "--sort",
+        "--batch-size",
+        "--compress-program",
+        "--files0-from",
+        "--key",
+        "--output",
+        "--buffer-size",
+        "--field-separator",
+        "--temporary-directory",
+        "--parallel",
+    }
+)
+
+
 def _h_sort(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str | None) -> None:
-    out: str | None = None
-    for i, w in enumerate(args):
-        if w.value in ("-o", "--output") and i + 1 < len(args):
-            out = args[i + 1].value
-        elif w.value.startswith("--output="):
-            out = w.value.split("=", 1)[1]
-        elif w.value.startswith("-o") and len(w.value) > 2 and not w.value.startswith("--"):
-            out = w.value[2:]
-    if out is None:
+    outs: list[Word] = []
+    i = 0
+    while i < len(args):
+        w = args[i]
+        v = w.value
+        if v == "--":
+            break
+        if v.startswith("--"):
+            key, eq, val = v.partition("=")
+            opt = _long_opt(key, _SORT_LONG)
+            vw = w
+            if opt in _SORT_LONG_VALUE and not eq:
+                i += 1
+                vw = args[i] if i < len(args) else Word()
+                val = vw.value
+            if opt == "--compress-program":
+                p._mark_opaque(seg, scan=True)  # sort runs this program
+                return
+            if opt == "--output":
+                outs.append(Word(value=val, raw=val, has_var=vw.has_var, has_subst=vw.has_subst, has_glob=vw.has_glob))
+            i += 1
+            continue
+        if v.startswith("-") and len(v) > 1:
+            letters = v[1:]
+            for k, ch in enumerate(letters):
+                if ch in "ktoST":
+                    rest = letters[k + 1 :]
+                    vw = w
+                    if not rest:
+                        i += 1
+                        vw = args[i] if i < len(args) else Word()
+                        rest = vw.value
+                    if ch == "o":
+                        outs.append(Word(value=rest, raw=rest, has_var=vw.has_var, has_subst=vw.has_subst, has_glob=vw.has_glob))
+                    break
+            i += 1
+            continue
+        i += 1
+    if not outs:
         p._read_only_seg(seg, rw)
         return
     p.all_read_only = False
-    p._target(Word(value=out, raw=out))
+    for o in outs:
+        p._target(o)
+
+
+def _h_uniq(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str | None) -> None:
+    """``uniq [OPTION]… [INPUT [OUTPUT]]``: the second operand is written."""
+    _flags, pos, _ = _split_opts(args, ("-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars"))
+    if len(pos) >= 2 and pos[1].value not in ("-", *_DEV_TARGETS):
+        p.all_read_only = False
+        p._target(pos[1])
+        return
+    p._read_only_seg(seg, rw)
+
+
+def _h_tree(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str | None) -> None:
+    """``tree -o FILE`` writes its listing to FILE."""
+    i = 0
+    outs: list[Word] = []
+    while i < len(args):
+        v = args[i].value
+        if v in ("-L", "-P", "-I", "-H", "-T", "--filelimit", "--timefmt", "--charset", "--sort", "--infile"):
+            i += 2
+            continue
+        if v == "-o" and i + 1 < len(args):
+            outs.append(args[i + 1])
+            i += 2
+            continue
+        i += 1
+    if not outs:
+        p._read_only_seg(seg, rw)
+        return
+    p.all_read_only = False
+    for o in outs:
+        p._target(o)
+
+
+def _h_pager(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str | None) -> None:
+    """``less``/``more``: ``-o``/``-O``/``--log-file`` write a log file; ``+…!cmd`` runs a shell command."""
+    outs: list[Word] = []
+    i = 0
+    while i < len(args):
+        w = args[i]
+        v = w.value
+        if v.startswith("+") and "!" in v:
+            p._mark_opaque(seg, scan=True)
+            return
+        key, eq, val = v.partition("=")
+        if key.lower() == "--log-file":
+            if eq:
+                outs.append(Word(value=val, raw=val, has_var=w.has_var, has_subst=w.has_subst, has_glob=w.has_glob))
+            elif i + 1 < len(args):
+                outs.append(args[i + 1])
+                i += 1
+        elif v[:2] in ("-o", "-O") and not v.startswith("--"):
+            if len(v) > 2:
+                outs.append(Word(value=v[2:], raw=v[2:], has_var=w.has_var, has_subst=w.has_subst, has_glob=w.has_glob))
+            elif i + 1 < len(args):
+                outs.append(args[i + 1])
+                i += 1
+        i += 1
+    if not outs:
+        p._read_only_seg(seg, rw)
+        return
+    p.all_read_only = False
+    for o in outs:
+        p._target(o)
+
+
+def _h_search(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str | None) -> None:
+    """``rg --pre CMD``, ``fd -x/-X CMD`` and ``ag --pager CMD`` run commands; plain searches are read-only."""
+    runs = {
+        "rg": ("--pre",),
+        "fd": ("-x", "--exec", "-X", "--exec-batch"),
+        "ag": ("--pager",),
+    }[name]
+    for w in args:
+        key = w.value.split("=", 1)[0]
+        if key == "--":
+            break
+        if key in runs or (key.startswith("--") and len(key) > 3 and any(r.startswith(key) for r in runs if r.startswith("--"))):
+            p._mark_opaque(seg, scan=True)
+            return
+    p._read_only_seg(seg, rw)
 
 
 _CURL_VALUE_LETTERS: Final = frozenset("oHdurXAebcDKmwyYzECFT")
@@ -1537,6 +2061,10 @@ def _h_export(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: 
         m = _ASSIGN_RE.fullmatch(w.value)
         if m:
             p._check_var(m.group(1), m.group(3), inline_head=None, exported=True)
+            if _exec_env(m.group(1)):
+                # PAGER, GIT_*, PATH …: later commands run other code; they are never read-only
+                p.exported_exec = True
+                p._mark_opaque(seg, scan=True)
 
 
 def _h_unset(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str | None) -> None:
@@ -1971,14 +2499,186 @@ _GIT_READ_ONLY_SUBS: Final = frozenset(
 )
 
 
+# Subcommands that run client-side hooks (pre-commit, commit-msg, pre-merge-commit, pre-push,
+# applypatch-msg, pre-rebase): an abbreviated --no-verify on any of them skips the hooks.
+_GIT_HOOK_SUBS: Final = frozenset({"commit", "push", "merge", "am", "rebase", "pull", "cherry-pick", "revert"})
+# Every git subcommand the parser knows; anything else is an alias or an external git-<name>.
+_GIT_KNOWN_SUBS: Final = frozenset(
+    {
+        *_GIT_READ_ONLY_SUBS,
+        *_GIT_HOOK_SUBS,
+        "add",
+        "annotate",
+        "apply",
+        "archive",
+        "backfill",
+        "bisect",
+        "branch",
+        "bundle",
+        "check-attr",
+        "check-mailmap",
+        "check-ref-format",
+        "checkout",
+        "checkout-index",
+        "cherry",
+        "clean",
+        "clone",
+        "column",
+        "commit-graph",
+        "commit-tree",
+        "config",
+        "credential",
+        "diff-files",
+        "diff-index",
+        "diff-tree",
+        "difftool",
+        "fast-export",
+        "fast-import",
+        "fetch-pack",
+        "filter-branch",
+        "fmt-merge-msg",
+        "for-each-repo",
+        "format-patch",
+        "fsck",
+        "gc",
+        "hash-object",
+        "hook",
+        "index-pack",
+        "init",
+        "interpret-trailers",
+        "lfs",
+        "ls-remote",
+        "maintenance",
+        "merge-file",
+        "merge-index",
+        "merge-tree",
+        "mergetool",
+        "mktag",
+        "mktree",
+        "multi-pack-index",
+        "mv",
+        "notes",
+        "pack-objects",
+        "pack-refs",
+        "patch-id",
+        "prune",
+        "range-diff",
+        "read-tree",
+        "remote",
+        "repack",
+        "replace",
+        "replay",
+        "request-pull",
+        "rerere",
+        "reset",
+        "restore",
+        "rm",
+        "send-email",
+        "show-branch",
+        "sparse-checkout",
+        "stash",
+        "stripspace",
+        "submodule",
+        "switch",
+        "symbolic-ref",
+        "tag",
+        "update-index",
+        "update-ref",
+        "verify-commit",
+        "verify-tag",
+        "worktree",
+        "write-tree",
+    }
+)
+# Config whose value git runs as a command (or that writes trace files / enables other transports).
+_GIT_EXEC_KEYS: Final = frozenset(
+    {
+        "core.fsmonitor",
+        "core.pager",
+        "core.sshcommand",
+        "core.editor",
+        "core.askpass",
+        "core.gitproxy",
+        "core.alternaterefscommand",
+        "core.worktree",
+        "diff.external",
+        "sequence.editor",
+        "gpg.program",
+        "credential.helper",
+        "uploadpack.packobjectshook",
+        "interactive.difffilter",
+        "web.browser",
+    }
+)
+_GIT_EXEC_KEY_RE: Final = re.compile(
+    r"(?:pager|trace2|protocol)\..+"
+    r"|diff\..+\.(?:textconv|command)|merge\..+\.driver|filter\..+\.(?:clean|smudge|process)"
+    r"|(?:difftool|mergetool|browser|man)\..+\.(?:cmd|path)|credential\..+\.helper|gpg\..+\.program"
+    r"|submodule\..+\.update|hook\..+\.command|remote\..+\.(?:uploadpack|receivepack|vcs)"
+)
+# A command value that is only a program name plus flags (``cat``, ``less -R``, ``code --wait``).
+_GIT_SIMPLE_COMMAND_RE: Final = re.compile(r"[A-Za-z0-9_.+-]+(?: +-{1,2}[A-Za-z0-9_=.-]+)*")
+_GIT_CHECKOUT_LONG: Final = (
+    "--quiet",
+    "--progress",
+    "--no-progress",
+    "--force",
+    "--ours",
+    "--theirs",
+    "--track",
+    "--no-track",
+    "--guess",
+    "--no-guess",
+    "--detach",
+    "--orphan",
+    "--ignore-skip-worktree-bits",
+    "--merge",
+    "--conflict",
+    "--patch",
+    "--ignore-other-worktrees",
+    "--overwrite-ignore",
+    "--no-overwrite-ignore",
+    "--recurse-submodules",
+    "--no-recurse-submodules",
+    "--overlay",
+    "--no-overlay",
+    "--pathspec-from-file",
+    "--pathspec-file-nul",
+)
+_GIT_RESET_LONG: Final = (
+    "--quiet",
+    "--no-quiet",
+    "--refresh",
+    "--no-refresh",
+    "--mixed",
+    "--soft",
+    "--hard",
+    "--merge",
+    "--keep",
+    "--recurse-submodules",
+    "--no-recurse-submodules",
+    "--patch",
+    "--intent-to-add",
+    "--pathspec-from-file",
+    "--pathspec-file-nul",
+)
+_GIT_CLEAN_LONG: Final = ("--force", "--dry-run", "--quiet", "--interactive", "--exclude")
+
+
+def _is_no_verify(value: str) -> bool:
+    """``--no-verify`` or any abbreviation git's option parser would accept for it (``--no-veri``, ``--no-verif``)."""
+    key = value.split("=", 1)[0]
+    return len(key) >= len("--no-v") and "--no-verify".startswith(key)
+
+
 def _git_no_verify(args: list[Word], short_n_is_tamper: bool) -> bool:
-    """``--no-verify`` anywhere in options; ``-n`` in a short-flag cluster for commit (a value flag ends the cluster)."""
+    """``--no-verify`` (or an abbreviation) in options; ``-n`` in a short-flag cluster for commit (a value flag ends it)."""
     i = 0
     while i < len(args):
         v = args[i].value
         if v == "--":
             return False
-        if v == "--no-verify":
+        if _is_no_verify(v):
             return True
         if v in _GIT_COMMIT_VALUE_LONG:
             i += 2
@@ -2001,8 +2701,61 @@ def _git_no_verify(args: list[Word], short_n_is_tamper: bool) -> bool:
     return False
 
 
+def _git_key_class(key: str) -> str:
+    """``hooks`` (hooks path, includes), ``alias``, ``exec`` (the value runs as a command) or ``other``."""
+    k = key.strip().lower()
+    if k == "core.hookspath" or k == "include.path" or (k.startswith("includeif.") and k.endswith(".path")):
+        return "hooks"
+    if k.startswith("alias."):
+        return "alias"
+    if k in _GIT_EXEC_KEYS or _GIT_EXEC_KEY_RE.fullmatch(k):
+        return "exec"
+    return "other"
+
+
+def _git_subcommand(argv: Sequence[str]) -> str | None:
+    """The subcommand of ``git …`` values (global options skipped)."""
+    i = 0
+    while i < len(argv):
+        v = argv[i]
+        if v in ("-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env"):
+            i += 2
+            continue
+        if v.startswith("-"):
+            i += 1
+            continue
+        return v
+    return None
+
+
+def _git_alias_tamper(value: str | None) -> bool:
+    """An alias that could run a hook-skipping command unseen: a shell alias, an alias of a hook-running
+    subcommand (``git ci -n`` then skips the hooks) or one whose own text is tamper."""
+    if value is None:
+        return True  # the value comes from the environment
+    text = value.strip()
+    if text.startswith("!"):
+        return True
+    parsed = parse_bash_full("git " + text)
+    if parsed.tamper or parsed.opaque and not parsed.argvs:
+        return True
+    sub = _git_subcommand(parsed.argvs[0][1][1:]) if parsed.argvs else None
+    return sub in _GIT_HOOK_SUBS or sub == "commit-tree"
+
+
+def _git_config_override(p: _Parser, pair: str, *, known: bool) -> None:
+    """One ``-c key=value`` / ``--config-env=key=VAR`` for a single git run."""
+    key, _eq, value = pair.partition("=")
+    cls = _git_key_class(key)
+    if cls == "hooks":
+        p.res.tamper.add("hooks_path")
+    elif cls == "alias" and _git_alias_tamper(value if known else None):
+        p.res.tamper.add("no_verify")
+
+
 def _h_git(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str | None) -> None:
     cwd = p.cwd
+    configured = False
     i = 0
     while i < len(args):
         w = args[i]
@@ -2013,17 +2766,21 @@ def _h_git(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str
             i += 2
             continue
         if v == "-c" and i + 1 < len(args):
-            if args[i + 1].value.lower().startswith("core.hookspath"):
-                p.res.tamper.add("hooks_path")
+            _git_config_override(p, args[i + 1].value, known=not args[i + 1].dynamic)
+            configured = True
             i += 2
             continue
         if v.startswith("--config-env"):
             val = v.split("=", 1)[1] if "=" in v else (args[i + 1].value if i + 1 < len(args) else "")
-            if val.lower().startswith("core.hookspath"):
-                p.res.tamper.add("hooks_path")
+            _git_config_override(p, val.split("=", 1)[0], known=False)
+            configured = True
             i += 1 if "=" in v else 2
             continue
-        if v in ("--git-dir", "--work-tree", "--namespace", "--exec-path") and i + 1 < len(args):
+        if v.startswith("--exec-path="):
+            configured = True  # git runs its subcommands from that directory
+            i += 1
+            continue
+        if v in ("--git-dir", "--work-tree", "--namespace") and i + 1 < len(args):
             if v == "--work-tree":
                 cwd = None if args[i + 1].dynamic else _norm_join(cwd, args[i + 1].value)
             i += 2
@@ -2036,6 +2793,11 @@ def _h_git(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str
             i += 1
             continue
         break
+    if configured:
+        # a -c value can be a command git runs (core.fsmonitor, diff.external, core.pager …):
+        # never read-only, and scanned like opaque code
+        p.no_ro = True
+        p._scan_once(seg.raw)
     if i >= len(args):
         p._read_only_seg(seg, rw)
         return
@@ -2050,12 +2812,59 @@ def _h_git(p: _Parser, seg: _Seg, name: str, args: list[Word], rw: bool, hd: str
         p.cwd = saved
 
 
+def _git_read_only_effects(p: _Parser, seg: _Seg, sub: str, rest: list[Word]) -> bool:
+    """Options of read-only subcommands that write files or run commands. True when the segment was classified."""
+    outs: list[Word] = []
+    runs = False
+    i = 0
+    while i < len(rest):
+        w = rest[i]
+        v = w.value
+        if v == "--":
+            break
+        if v.startswith("--"):
+            key, eq, val = v.partition("=")
+            if sub in ("diff", "log", "show", "whatchanged", "shortlog") and len(key) >= 5 and "--output".startswith(key):
+                vw = w
+                if not eq:
+                    i += 1
+                    vw = rest[i] if i < len(rest) else Word()
+                    val = vw.value
+                outs.append(Word(value=val, raw=val, has_var=vw.has_var, has_subst=vw.has_subst, has_glob=vw.has_glob))
+            elif (
+                (sub == "grep" and len(key) >= 4 and "--open-files-in-pager".startswith(key))
+                or (sub == "fetch" and len(key) >= 5 and "--upload-pack".startswith(key))
+                or (sub == "help" and key in ("--web", "--info"))
+            ):
+                runs = True
+        elif v.startswith("-") and len(v) > 1:
+            if sub == "grep" and "O" in v[1:]:
+                runs = True  # -O[<pager>] opens the matches in a pager command
+            elif sub == "help" and any(c in v[1:] for c in "wi"):
+                runs = True
+        i += 1
+    if runs:
+        p._mark_opaque(seg, scan=True)
+    if outs:
+        p.all_read_only = False
+        for o in outs:
+            p._target(o)
+    return runs or bool(outs)
+
+
 def _git_sub(p: _Parser, seg: _Seg, sub: str, rest: list[Word], vals: list[str], cwd: str | None, rw: bool) -> None:
     def ro() -> None:
         p._read_only_seg(seg, rw)
 
+    unknown = sub not in _GIT_KNOWN_SUBS
+    if (sub in _GIT_HOOK_SUBS or unknown) and _git_no_verify(rest, short_n_is_tamper=sub == "commit"):
+        p.res.tamper.add("no_verify")
+    if unknown:
+        p._mark_opaque(seg, scan=True)  # an alias or an external git-<name>: we cannot see what it runs
+        return
     if sub in _GIT_READ_ONLY_SUBS:
-        ro()
+        if not _git_read_only_effects(p, seg, sub, rest):
+            ro()
         return
     if sub == "branch":
         listing_only = all(
@@ -2086,7 +2895,7 @@ def _git_sub(p: _Parser, seg: _Seg, sub: str, rest: list[Word], vals: list[str],
         ro() if (not vals or vals[0] in ("-v", "--verbose", "show", "get-url")) else p._mark_opaque(seg)
         return
     if sub == "worktree":
-        ro() if vals[:1] == ["list"] else p._mark_opaque(seg)
+        _git_worktree(p, seg, rest, vals)
         return
     if sub == "config":
         _git_config(p, seg, vals, rw)
@@ -2100,10 +2909,10 @@ def _git_sub(p: _Parser, seg: _Seg, sub: str, rest: list[Word], vals: list[str],
             p.all_read_only = False
         return
     if sub == "clean":
-        flags = [v for v in vals if v.startswith("-")]
-        if any(f in ("-n", "--dry-run") or (not f.startswith("--") and "n" in f[1:]) for f in flags):
+        opts = [_long_opt(v.split("=", 1)[0], _GIT_CLEAN_LONG) if v.startswith("--") else v for v in vals if v.startswith("-")]
+        if any(f == "--dry-run" or (f and not f.startswith("--") and "n" in f[1:]) for f in opts):
             ro()
-        elif any(f == "--force" or (not f.startswith("--") and "f" in f[1:]) for f in flags):
+        elif any(f == "--force" or (f and not f.startswith("--") and "f" in f[1:]) for f in opts):
             p._git_op("clean", cwd)
             p.all_read_only = False
         else:
@@ -2117,26 +2926,32 @@ def _git_sub(p: _Parser, seg: _Seg, sub: str, rest: list[Word], vals: list[str],
         p.all_read_only = False
         return
     if sub == "restore":
-        _flags, pos, values = _split_opts(rest, ("-s", "--source", "--conflict"))
-        if "--pathspec-from-file" in values or not pos:
+        flags, pos, values = _split_opts(rest, ("-s", "--source", "--conflict", "--pathspec-from-file"))
+        from_ref = "-s" in values or "--source" in values or any(f.startswith("-s") and len(f) > 2 for f in flags)
+        if "--pathspec-from-file" in values:
+            p._top_target(".", restore=not from_ref, is_dir=True)  # the listed paths can be anywhere in the tree
+            return
+        if not pos:
             p._mark_opaque(seg)
             return
-        from_ref = "-s" in values or "--source" in values or any(f.startswith("-s") and len(f) > 2 for f in _flags)
-        for w in pos:
-            p._target(w, is_dir=not _has_ext(w.value), restore=not from_ref)
+        _git_pathspecs(p, pos, restore=not from_ref)
         return
     if sub == "rm":
-        flags, pos, _ = _split_opts(rest, ("--pathspec-from-file",))
+        flags, pos, values = _split_opts(rest, ("--pathspec-from-file",))
         if any(f in ("-n", "--dry-run") for f in flags):
             ro()
             return
         recursive = any(f == "-r" or (not f.startswith("--") and "r" in f[1:]) for f in flags)
         for w in pos:
-            if not w.dynamic and p._crew_path(w.value):
+            if p._crew_word(w):
                 p.res.tamper.add("crew_files_removed")
-            p._target(w, remove=True, is_dir=recursive)
+        if "--pathspec-from-file" in values:
+            p._top_target(".", remove=True, is_dir=True)
+            return
         if not pos:
             p._mark_opaque(seg)
+            return
+        _git_pathspecs(p, pos, remove=True, is_dir=recursive)
         return
     if sub == "mv":
         _flags, pos, _ = _split_opts(rest)
@@ -2144,39 +2959,71 @@ def _git_sub(p: _Parser, seg: _Seg, sub: str, rest: list[Word], vals: list[str],
             p._mark_opaque(seg)
             return
         for w in pos[:-1]:
-            if not w.dynamic and p._crew_path(w.value):
+            if p._crew_word(w):
                 p.res.tamper.add("crew_files_removed")
             p._target(w, remove=True)
         p._target(pos[-1])
         return
     if sub == "reset":
-        if "--hard" in vals:
-            p._git_op("reset_hard", cwd)
+        reset_opts = {_long_opt(v.split("=", 1)[0], _GIT_RESET_LONG) for v in vals if v.startswith("--")}
+        if reset_opts & {"--hard", "--merge", "--keep"}:
+            p._git_op("reset_hard", cwd)  # --merge and --keep also rewrite working-tree files
             p.all_read_only = False
         else:
             p._mark_opaque(seg)
         return
+    if sub == "read-tree":
+        if any(v == "-u" or (v.startswith("-") and not v.startswith("--") and "u" in v[1:]) for v in vals):
+            p._git_op("reset_hard", cwd)  # -u rewrites the working tree from the read index
+            p.all_read_only = False
+        else:
+            p._mark_opaque(seg)
+        return
+    if sub == "checkout-index":
+        _git_checkout_index(p, seg, rest, cwd)
+        return
+    if sub == "format-patch":
+        _flags, _pos, values = _split_opts(rest, ("-o", "--output-directory"))
+        out = values.get("-o") or values.get("--output-directory")
+        if out is not None:
+            p._target(Word(value=out, raw=out), is_dir=True)
+        elif "--stdout" in vals:
+            ro()
+        else:
+            p._mark_opaque(seg)  # writes numbered patch files into the current directory
+        return
+    if sub == "commit-tree":
+        p.res.tamper.add("no_verify")  # a commit object made without running any hook
+        p._mark_opaque(seg)
+        return
     if sub in ("rebase", "merge", "pull", "cherry-pick"):
-        if sub in ("rebase", "merge", "pull") and "--no-verify" in vals:
-            p.res.tamper.add("no_verify")
         p._git_op(sub.replace("-", "_"), cwd)
         p.all_read_only = False
         return
-    if sub == "commit":
-        if _git_no_verify(rest, short_n_is_tamper=True):
-            p.res.tamper.add("no_verify")
-        p._mark_opaque(seg)
+    p._mark_opaque(seg)
+
+
+def _git_worktree(p: _Parser, seg: _Seg, rest: list[Word], vals: list[str]) -> None:
+    """``worktree remove|move`` delete or move a whole checkout: a directory removal of that path (rule 4 applies)."""
+    op = vals[0] if vals else ""
+    if op == "list":
+        p._read_only_seg(seg, False)
         return
-    if sub in ("push", "am"):
-        if _git_no_verify(rest, short_n_is_tamper=False):
-            p.res.tamper.add("no_verify")
-        p._mark_opaque(seg)
+    _flags, pos, _ = _split_opts(rest[1:], ("--reason",))
+    if op == "remove" and pos:
+        for w in pos:
+            p._target(w, remove=True, is_dir=True)
+        return
+    if op == "move" and len(pos) >= 2:
+        p._target(pos[0], remove=True, is_dir=True)
+        p._target(pos[1], is_dir=True)
         return
     p._mark_opaque(seg)
 
 
 def _git_config(p: _Parser, seg: _Seg, vals: list[str], rw: bool) -> None:
     action: str | None = None
+    unset = False
     pos: list[str] = []
     i = 0
     while i < len(vals):
@@ -2206,8 +3053,16 @@ def _git_config(p: _Parser, seg: _Seg, vals: list[str], rw: bool) -> None:
             action = "get"
             i += 1
             continue
-        if v in ("--unset", "--unset-all", "--add", "--replace-all", "--rename-section", "--remove-section"):
+        if v in ("--unset", "--unset-all"):
+            action, unset = "set", True
+            i += 1
+            continue
+        if v in ("--add", "--replace-all"):
             action = "set"
+            i += 1
+            continue
+        if v in ("--rename-section", "--remove-section"):
+            action = "section"
             i += 1
             continue
         if v in ("--edit", "-e"):
@@ -2222,25 +3077,112 @@ def _git_config(p: _Parser, seg: _Seg, vals: list[str], rw: bool) -> None:
     if pos and pos[0] in ("get", "list"):
         action, pos = "get", pos[1:]
     elif pos and pos[0] in ("set", "unset"):
-        action, pos = "set", pos[1:]
+        action, unset, pos = "set", pos[0] == "unset", pos[1:]
+    elif pos and pos[0] in ("rename-section", "remove-section"):
+        action, pos = "section", pos[1:]
+    elif pos and pos[0] == "edit":
+        action, pos = "edit", pos[1:]
     if action == "edit":
         p._mark_opaque(seg)
         return
     if action == "get" or (action is None and len(pos) <= 1):
         p._read_only_seg(seg, rw)
         return
-    if pos and pos[0].lower() == "core.hookspath":
-        p.res.tamper.add("hooks_path")
-        p.all_read_only = False
+    p.all_read_only = False
+    cls = _git_key_class(pos[0]) if pos and action != "section" else "other"
+    value = pos[1] if len(pos) > 1 else None
+    if cls == "hooks":
+        p.res.tamper.add("hooks_path")  # set or unset: core.hooksPath, include.path, includeIf.*.path
         return
-    p._mark_opaque(seg)
+    if cls == "alias" and not unset and _git_alias_tamper(value):
+        p.res.tamper.add("no_verify")
+        return
+    if cls == "exec" and not unset and (value is None or not _GIT_SIMPLE_COMMAND_RE.fullmatch(value.strip())):
+        # a stored command (a path, a shell form, arguments) that later read-only git runs execute
+        p.res.tamper.add("hooks_path")
+        return
+    p._mark_opaque(seg, scan=True)
+
+
+def _pathspec_magic(value: str) -> tuple[set[str], str]:
+    """Split git pathspec magic: ``:/x`` → ({top}, x); ``:(top,glob)x`` → ({top, glob}, x); ``:!x`` → ({exclude}, x)."""
+    if not value.startswith(":") or len(value) < 2:
+        return set(), value
+    if value.startswith(":("):
+        end = value.find(")")
+        if end < 0:
+            return {"?"}, ""
+        magic = {m.strip().split(":", 1)[0].lower() for m in value[2:end].split(",") if m.strip()}
+        return magic, value[end + 1 :]
+    magic = set()
+    j = 1
+    short = {"/": "top", "!": "exclude", "^": "exclude"}
+    while j < len(value) and value[j] in short:
+        magic.add(short[value[j]])
+        j += 1
+    if j == 1:
+        return {"?"}, ""  # ``:<unknown>``: treat as the whole tree
+    if j < len(value) and value[j] == ":":
+        j += 1
+    return magic, value[j:]
+
+
+def _git_pathspecs(
+    p: _Parser,
+    words: list[Word],
+    *,
+    remove: bool = False,
+    restore: bool = False,
+    is_dir: bool | None = None,
+) -> None:
+    """Record git pathspecs as write targets.
+
+    Magic is resolved: ``:/`` and ``:(top)`` are relative to the checkout's top level; a wildcard
+    pattern (git matches ``*?[`` itself, and ``:(glob)``) becomes its fixed leading directory; an
+    ``:(icase)`` pattern becomes its parent directory; exclusions only (``:!x``), ``:(attr:…)`` or
+    unknown magic cover the whole scope (the current directory, or the top level with ``top``).
+    """
+    positives = 0
+    whole_top = False
+    for w in words:
+        if w.dynamic:
+            p._target(w)  # the shell decides: opaque and raw-scanned
+            positives += 1
+            continue
+        magic, pattern = _pathspec_magic(w.value)
+        top = "top" in magic
+        if "exclude" in magic:
+            whole_top = whole_top or top
+            continue
+        positives += 1
+        dir_ = is_dir if is_dir is not None else not _has_ext(pattern)
+        if magic - {"top", "literal", "glob", "icase"}:
+            pattern, dir_ = "", True
+        elif "literal" not in magic and any(c in pattern for c in "*?["):
+            fixed = pattern[: min(pattern.index(c) for c in "*?[" if c in pattern)]
+            pattern, dir_ = (fixed.rsplit("/", 1)[0] if "/" in fixed else ""), True
+        elif "icase" in magic:
+            pattern, dir_ = posixpath.dirname(pattern.rstrip("/")), True
+        rel = pattern.rstrip("/") or "."
+        if top:
+            p._top_target(rel, remove=remove, restore=restore, is_dir=dir_ or rel == ".")
+        else:
+            p._target(Word(value=rel, raw=rel), remove=remove, restore=restore, is_dir=dir_ or rel == ".")
+    if positives == 0 and words:
+        # only exclusions: git applies them to everything under the scope
+        if whole_top:
+            p._top_target(".", remove=remove, restore=restore, is_dir=True)
+        else:
+            p._target(Word(value=".", raw="."), remove=remove, restore=restore, is_dir=True)
 
 
 def _git_checkout(p: _Parser, seg: _Seg, rest: list[Word], cwd: str | None) -> None:
-    values_opts = ("-b", "-B", "--orphan", "--conflict", "-t", "--track")
+    values_opts = ("-b", "-B", "--orphan", "--conflict", "-t", "--track", "--pathspec-from-file")
     before: list[Word] = []
     after: list[Word] | None = None
     switch = False
+    force = False
+    from_file = False
     i = 0
     while i < len(rest):
         w = rest[i]
@@ -2257,10 +3199,26 @@ def _git_checkout(p: _Parser, seg: _Seg, rest: list[Word], cwd: str | None) -> N
             switch = True
             i += 2
             continue
+        if v.startswith("--"):
+            key, eq, _val = v.partition("=")
+            opt = _long_opt(key, _GIT_CHECKOUT_LONG)
+            if opt == "--force":
+                force = True
+            elif opt == "--pathspec-from-file":
+                from_file = True
+                i += 1 if eq else 2
+                continue
+            elif opt in values_opts and not eq and opt not in ("--track",):
+                i += 2
+                continue
+            i += 1
+            continue
         if v in values_opts:
             i += 2
             continue
         if v.startswith("-") and v != "-":
+            if "f" in v[1:]:
+                force = True
             i += 1
             continue
         before.append(w)
@@ -2269,27 +3227,52 @@ def _git_checkout(p: _Parser, seg: _Seg, rest: list[Word], cwd: str | None) -> N
         p._git_op("switch", cwd)
         p.all_read_only = False
         return
+    if from_file:
+        p._top_target(".", restore=not before, is_dir=True)
+        return
     if after is not None:
-        for w in after:
-            p._target(w, is_dir=not _has_ext(w.value), restore=not before)
-        if not after:
+        if after:
+            _git_pathspecs(p, after, restore=not before)
+        elif force:
+            p._git_op("reset_hard", cwd)
+            p.all_read_only = False
+        else:
             p._mark_opaque(seg)
         return
     if not before:
-        p._mark_opaque(seg)
+        if force:
+            p._git_op("reset_hard", cwd)  # `git checkout -f`: discard every local change
+            p.all_read_only = False
+        else:
+            p._mark_opaque(seg)
         return
     first = before[0]
     if len(before) == 1:
-        if first.value == "." or (_has_ext(first.value) and first.value != "-"):
-            p._target(first, is_dir=first.value == ".", restore=True)
+        if first.value.startswith(":") or first.value == "." or (_has_ext(first.value) and first.value != "-"):
+            _git_pathspecs(p, [first], restore=True)
         else:
             p._git_op("checkout_branch", cwd)
             p.all_read_only = False
         return
-    no_ref = first.value == "." or _has_ext(first.value)
-    paths = before if no_ref else before[1:]
-    for w in paths:
-        p._target(w, is_dir=not _has_ext(w.value), restore=no_ref)
+    no_ref = first.value == "." or first.value.startswith(":") or _has_ext(first.value)
+    _git_pathspecs(p, before if no_ref else before[1:], restore=no_ref)
+
+
+def _git_checkout_index(p: _Parser, seg: _Seg, rest: list[Word], cwd: str | None) -> None:
+    """``checkout-index -a`` rewrites every file from the index (a tree-wide op); with paths, those files."""
+    flags, pos, values = _split_opts(rest, ("--stage",))
+    if any(f.startswith("--prefix") for f in flags) or "--stdin" in flags:
+        p._mark_opaque(seg)
+        return
+    if any(f in ("-a", "--all") or (not f.startswith("--") and "a" in f[1:]) for f in flags):
+        p._git_op("reset_hard", cwd)
+        p.all_read_only = False
+        return
+    if not pos:
+        p._mark_opaque(seg)
+        return
+    for w in pos:
+        p._target(w, restore=True)
 
 
 _HANDLERS: Final[Mapping[str, Handler]] = {
@@ -2314,6 +3297,13 @@ _HANDLERS: Final[Mapping[str, Handler]] = {
     "rsync": _h_rsync,
     "patch": _h_patch,
     "sort": _h_sort,
+    "uniq": _h_uniq,
+    "tree": _h_tree,
+    "less": _h_pager,
+    "more": _h_pager,
+    "rg": _h_search,
+    "fd": _h_search,
+    "ag": _h_search,
     "curl": _h_curl,
     "wget": _h_wget,
     "cd": _h_cd,
@@ -3358,6 +4348,14 @@ def _extract_bash(parsed: BashParse, cwd: str, ctx: _Ctx) -> tuple[list[Target],
         # checked against the zone that contains it and against other sessions' dirty files, not
         # against every zone below it
         targets.append(Target(kind, op=op, abs_path=_abs(cwd, w, ctx.home), overlap=op != "restore"))
+    # git `:/` and `:(top)` pathspecs name paths from the top level of the checkout the command runs in
+    for seg_cwd, rel, remove, restore, is_dir in parsed.top_writes:
+        base = _abs(cwd, seg_cwd, ctx.home)
+        co = ctx.idx.locate(ctx.fs.realpath(base))
+        top = co.toplevel if co is not None else base
+        op = "remove" if remove else ("restore" if restore else "write")
+        a = posixpath.normpath(posixpath.join(top, rel))
+        targets.append(Target("dir" if is_dir else "path", op=op, abs_path=a, overlap=op != "restore"))
     # tree writers (row 13) and their scopes
     if parsed.tree_writer:
         blockers: list[tuple[Mapping[str, Any], Mapping[str, Any]]] = []
@@ -3483,6 +4481,29 @@ def _outside_display(abs_path: str, ctx: _Ctx) -> str | None:
     return None
 
 
+# Git config files: a direct write can set core.hooksPath or an include (§5.2 row 2), so they are
+# crew policy like the hooks directory. Home-relative, then relative to the git common dir and the top level.
+_GIT_CONFIG_HOME_FILES: Final = (".gitconfig", ".config/git/config")
+_GIT_CONFIG_COMMON_FILES: Final = ("config", "config.worktree")
+_GIT_CONFIG_COMMON_GLOBS: Final = ("worktrees/*/config.worktree", "worktrees/*/config")
+_GIT_CONFIG_REPO_FILES: Final = (".git/config", ".git/config.worktree")
+
+
+def _git_config_file(abs_path: str, co: CheckoutGroup | None, rel: str | None, ctx: _Ctx) -> bool:
+    ci = True
+    folded = fold(abs_path, ci)
+    if any(folded == fold(posixpath.join(ctx.home, f), ci) for f in _GIT_CONFIG_HOME_FILES) or folded == "/etc/gitconfig":
+        return True
+    for c in ctx.idx.checkouts:
+        if is_under(abs_path, c.git_common_dir, case_insensitive=ci):
+            crel = rel_to(abs_path, c.git_common_dir)
+            if fold(crel, ci) in _GIT_CONFIG_COMMON_FILES:
+                return True
+            if any(compile_glob(g, ci).match(crel) for g in _GIT_CONFIG_COMMON_GLOBS):
+                return True
+    return rel is not None and fold(rel, ci) in _GIT_CONFIG_REPO_FILES
+
+
 def _crew_policy(abs_path: str, co: CheckoutGroup | None, rel: str | None, ctx: _Ctx, op: str) -> bool:
     ci = True  # crew-policy locations are compared case-insensitively everywhere (safe on any volume)
     home_crew = posixpath.join(ctx.home, ".remembra")
@@ -3496,11 +4517,13 @@ def _crew_policy(abs_path: str, co: CheckoutGroup | None, rel: str | None, ctx: 
         hooks = posixpath.join(c.git_common_dir, "hooks")
         if is_under(abs_path, hooks, case_insensitive=ci):
             return True
-        roots += [hooks, posixpath.join(c.toplevel, ".remembra")]
+        roots += [hooks, posixpath.join(c.toplevel, ".remembra"), posixpath.join(c.git_common_dir, "config")]
     if co is not None and rel is not None:
         for g in ctx.policy_repo_globs:
             if compile_glob(g, ci).match(rel):
                 return True
+    if _git_config_file(abs_path, co, rel, ctx):
+        return True
     if op == "remove":
         # removing an ancestor of a crew-policy location removes the policy too
         for r in roots:
@@ -3568,26 +4591,94 @@ def crew_hook_entries(text: str) -> set[tuple[str, ...]]:
     return out or entries
 
 
-def _settings_tamper(t: Target, real: str, ctx: _Ctx) -> bool:
+# Claude Code settings keys that switch hooks off for every scope (user, project, project-local).
+_HOOKS_OFF_KEYS: Final = ("disableAllHooks", "allowManagedHooksOnly")
+_CLAUDE_SETTINGS_GLOB: Final = ".claude/settings*.json"
+# Files that can hold crew hook entries; removing a directory above one that does removes the entries.
+_MARKER_HOME_FILES: Final = (".claude/settings.json", ".claude/settings.local.json")
+_MARKER_REPO_FILES: Final = (
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".husky/pre-commit",
+    ".husky/pre-push",
+    ".husky/prepare-commit-msg",
+    "lefthook.yml",
+    "lefthook.yaml",
+    "lefthook-local.yml",
+    "lefthook-local.yaml",
+    ".lefthook.yml",
+    ".lefthook.yaml",
+    ".lefthook-local.yml",
+    ".lefthook-local.yaml",
+    ".config/lefthook.yml",
+    ".config/lefthook.yaml",
+    ".config/lefthook-local.yml",
+    ".config/lefthook-local.yaml",
+)
+
+
+def _claude_settings_file(abs_path: str, rel: str | None, ctx: _Ctx) -> bool:
+    if is_under(abs_path, ctx.home, case_insensitive=True) and compile_glob(_CLAUDE_SETTINGS_GLOB, True).match(
+        rel_to(abs_path, ctx.home)
+    ):
+        return True
+    return rel is not None and compile_glob(_CLAUDE_SETTINGS_GLOB, True).match(rel)
+
+
+def switches_hooks_off(text: str) -> bool:
+    """The settings JSON sets ``disableAllHooks`` (or ``allowManagedHooksOnly``), which silences the crew gate."""
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return False
+    return isinstance(data, dict) and any(bool(data.get(k)) for k in _HOOKS_OFF_KEYS)
+
+
+def _settings_tamper(t: Target, real: str, rel: str | None, ctx: _Ctx) -> bool:
     """Surgical protection of crew hook entries (D28, §5.2 row 2).
 
     Tamper when an edit's ``old_string`` contains the crew marker, or when the file after the write or
     the simulated edit no longer has every crew hook entry it has now (same event, matcher and
     command). Other edits to the same file are allowed. A Bash or MCP write whose result cannot be
-    known is tamper only when the file currently holds crew entries.
+    known is tamper when the file currently holds crew entries.
+
+    Claude settings files (``~/.claude/settings*.json`` and the repo's ``.claude/settings*.json``) are
+    also tamper when the result sets ``disableAllHooks``/``allowManagedHooksOnly`` (that switches off
+    the crew hooks of every scope, whichever file holds them). When a write's result cannot be
+    known, only a file that holds crew entries is protected (other settings stay editable, §5.2).
     """
     if any(S.CREW_HOOK_MARKER in old for old, _new, _all in t.edits):
         return True
     current = ctx.fs.read_text(real)
     have = crew_hook_entries(current or "")
-    if not have:
-        return False
+    claude = _claude_settings_file(real, rel, ctx)
     if t.content is not None:
-        return not have <= crew_hook_entries(t.content)
-    if t.edits:
-        after = _apply_edits(current or "", t.edits)
-        return after is not None and not have <= crew_hook_entries(after)
-    return True
+        after = t.content
+    elif t.edits:
+        edited = _apply_edits(current or "", t.edits)
+        if edited is None:
+            return False  # an old_string is missing: the tool fails and nothing changes
+        after = edited
+    else:
+        # Bash/MCP write or removal: the result is unknown. The parser flags a writing command whose
+        # text sets a hooks-off key (``_HOOKS_OFF_RE``); anything else is judged by the entries.
+        return bool(have)
+    if claude and switches_hooks_off(after):
+        return True
+    return bool(have) and not have <= crew_hook_entries(after)
+
+
+def _removes_hook_entries(abs_path: str, ctx: _Ctx) -> bool:
+    """Removing (or moving away) a directory above a file that holds crew hook entries (``rm -rf ~/.claude``)."""
+    candidates = [posixpath.join(ctx.home, f) for f in _MARKER_HOME_FILES]
+    for c in ctx.idx.checkouts:
+        candidates += [posixpath.join(c.toplevel, f) for f in _MARKER_REPO_FILES]
+    for cand in dict.fromkeys(candidates):
+        if fold(cand, True) == fold(abs_path, True) or not is_under(cand, abs_path, case_insensitive=True):
+            continue
+        if crew_hook_entries(ctx.fs.read_text(cand) or ""):
+            return True
+    return False
 
 
 def _target_facts(t: Target, ctx: _Ctx) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -3610,7 +4701,9 @@ def _target_facts(t: Target, ctx: _Ctx) -> tuple[dict[str, Any], dict[str, Any]]
     if _crew_policy(real, co, rel, ctx, t.op) or (real != t.abs_path and _crew_policy(t.abs_path, co, rel, ctx, t.op)):
         facts["crew_policy_target"] = True
         info["policy"] = True
-    if _marker_file(real, co, rel, ctx) and _settings_tamper(t, real, ctx):
+    if (_marker_file(real, co, rel, ctx) and _settings_tamper(t, real, rel, ctx)) or (
+        t.op == "remove" and _removes_hook_entries(real, ctx)
+    ):
         facts["tamper_command"] = True
         info["tamper_kinds"] = {"settings_hook_edit"}
     if co is None:
@@ -3854,12 +4947,12 @@ def _service_facts(t: Target, ctx: _Ctx, facts: dict[str, Any], info: dict[str, 
 _TAMPER_LABELS: Final[Mapping[str, str]] = {
     "env_crew_var": "changing crew environment variables",
     "no_verify": "skipping the git hooks",
-    "hooks_path": "changing the git hooks path",
+    "hooks_path": "changing the git hooks path or git settings that run commands",
     "husky_off": "switching off Husky",
     "lefthook_off": "switching off lefthook",
     "crewd_kill": "stopping the crew daemon",
     "crew_files_removed": "removing crew files",
-    "settings_hook_edit": "removing crew hook entries from a settings file",
+    "settings_hook_edit": "removing or switching off the crew hooks in a settings file",
 }
 _PATH_SAFE_RE: Final = re.compile(r"[^\w./@+,=%~ -]")
 
