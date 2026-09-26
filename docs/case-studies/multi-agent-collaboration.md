@@ -97,7 +97,7 @@ Each agent proposed solutions from their expertise:
 ### Consensus Features:
 
 Every agent agreed on these priorities:
-1. `npx remembra setup` — One-command installer
+1. A one-command installer (it shipped as `remembra-install`)
 2. `remembra doctor` — Self-diagnosing setup
 3. Centralized credentials — One file, all agents read
 4. Slim response mode — Cut payload bloat
@@ -143,7 +143,7 @@ Based on this session, we're shipping:
 - Add `response_format=slim`
 
 **v0.10.0** (Major)
-- Universal installer (`npx remembra setup`)
+- Universal installer (`remembra-install`)
 - `remembra doctor` command
 - Centralized credentials
 - Local bridge for sandboxed agents
@@ -155,7 +155,8 @@ Based on this session, we're shipping:
 Connect your agents to shared memory:
 
 ```bash
-npx remembra setup --api-key YOUR_KEY --project my-project
+pipx install 'remembra[mcp]'
+remembra-install --all --api-key YOUR_KEY --project my-project
 ```
 
 See [Multi-Agent Setup Guide](../guides/multi-agent-shared-memory.md) for details.

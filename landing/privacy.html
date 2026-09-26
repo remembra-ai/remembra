@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Privacy policy · Remembra</title>
-<meta name="description" content="How DolphyTech handles data for Remembra: the website, the docs and Remembra Cloud. Self-hosted deployments send us nothing.">
+<meta name="description" content="What Remembra collects, what goes to OpenAI and our other subprocessors, where it is stored (the US), how long we keep it, and your rights. Self-hosted Remembra sends us nothing.">
 <link rel="canonical" href="https://remembra.dev/privacy">
 <!-- @head -->
 <script>
@@ -21,7 +21,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="site.css">
+<link rel="stylesheet" href="/site.css">
 <!-- /@head -->
 </head>
 <body class="site" data-page="privacy">
@@ -55,141 +55,133 @@
   <section class="wrap page-head" aria-labelledby="doc-title">
     <p class="eyebrow">Legal</p>
     <h1 id="doc-title">Privacy policy</h1>
-    <p class="lede">Last updated: September 25, 2026</p>
-    <!-- requires counsel review of the Paddle (Merchant of Record) wording before paid plans go live -->
+    <p class="lede">Last updated: September 26, 2026. What we collect when you use Remembra, who else handles it, and how long we keep it.</p>
+    <!-- requires counsel review of privacy.html, subprocessors.html, dpa.html and refunds.html (legal bases, transfers, retention, entity name) before paid plans go live -->
+    <!-- requires owner: the registered legal name of DolphyTech, exactly as registered with Paddle, in Terms, Privacy, Refunds and the DPA -->
   </section>
   <div class="wrap doc-grid">
     <aside aria-label="On this page">
       <p class="k">On this page</p>
       <nav class="toc">
-          <a href="#tldr">TL;DR</a>
-          <a href="#introduction">Introduction</a>
-          <a href="#information-we-collect">Information We Collect</a>
-          <a href="#self-hosted">Self-Hosted Deployments</a>
-          <a href="#how-we-use">How We Use Your Information</a>
-          <a href="#data-security">Data Security</a>
-          <a href="#data-sharing">Data Sharing</a>
-          <a href="#your-rights">Your Rights</a>
-          <a href="#cookies">Cookies</a>
-          <a href="#data-retention">Data Retention</a>
-          <a href="#children-s-privacy">Children&#x27;s Privacy</a>
-          <a href="#international-data-transfers">International Data Transfers</a>
-          <a href="#changes-to-this-policy">Changes to This Policy</a>
-          <a href="#contact">Contact Us</a>
+          <a href="#short">The short version</a>
+          <a href="#who">Who we are</a>
+          <a href="#collect">What we collect</a>
+          <a href="#ai">What goes to OpenAI</a>
+          <a href="#use">Why we use it</a>
+          <a href="#sharing">Who else handles it</a>
+          <a href="#where">Where it is stored</a>
+          <a href="#security">How it is protected</a>
+          <a href="#retention">How long we keep it</a>
+          <a href="#rights">Your rights</a>
+          <a href="#cookies">Cookies and local storage</a>
+          <a href="#self-hosted">Self-hosted Remembra</a>
+          <a href="#children">Children</a>
+          <a href="#changes">Changes</a>
+          <a href="#contact">Contact</a>
       </nav>
     </aside>
     <article class="prose">
-<h2 id="tldr">TL;DR - The Short Version</h2>
+<h2 id="short">The short version</h2>
 <ul>
-<li><strong>Self-hosted?</strong> We collect nothing. Your data stays on your servers.</li>
-<li><strong>Using our cloud?</strong> We collect only what's needed to run the service.</li>
-<li><strong>We don't sell your data.</strong> Ever. To anyone.</li>
-<li><strong>You own your data.</strong> Export or delete it anytime.</li>
-<li><strong>Open source.</strong> Audit our code yourself.</li>
+<li><strong>Self-hosted?</strong> Your server sends us nothing.</li>
+<li><strong>On Remembra Cloud,</strong> we keep your account, your notes, your handoffs and what we need to bill you.</li>
+<li><strong>Text you store is sent to OpenAI</strong> to make it searchable and, for notes, to pull out facts and names. OpenAI does not train on it under its API terms.</li>
+<li><strong>We name everyone else who handles your data</strong> on the <a href="/subprocessors">subprocessors</a> page.</li>
+<li><strong>We don't sell your data,</strong> show you ads, or run analytics scripts on our websites.</li>
+<li><strong>Your data is stored in the United States.</strong></li>
 </ul>
-<h2 id="introduction">Introduction</h2>
-<p>At DolphyTech ("we", "us", "our"), we build Remembra, an open-source AI memory layer. We believe in transparency about how we handle data—especially since we're building tools that help AI systems remember things.</p>
-<p>This Privacy Policy explains what information we collect, how we use it, and your rights regarding your data when you use our website (remembra.dev), documentation (docs.remembra.dev), and cloud services.</p>
-<h2 id="information-we-collect">Information We Collect</h2>
-<h3>Website Visitors</h3>
-<p>When you visit our website, we may collect:</p>
+
+<h2 id="who">Who we are</h2>
+<p>Remembra is made by DolphyTech ("we", "us"), 515 Centerpoint Drive, Suite #212, Middletown, CT 06457, USA. This policy covers our website (remembra.dev), our docs (docs.remembra.dev), the dashboard (app.remembra.dev) and the hosted service, Remembra Cloud (api.remembra.dev).</p>
+<p>We decide how your account and billing information is used, so for that we are the controller. If you use Remembra Cloud to store information about other people for your organization, we process that content on your instructions; our <a href="/dpa">data processing agreement</a> covers that.</p>
+
+<h2 id="collect">What we collect</h2>
+<h3>When you visit our websites</h3>
 <ul>
-<li>Basic analytics data (pages visited, time on site, referral source)</li>
-<li>Device and browser information</li>
-<li>IP address (anonymized for analytics)</li>
-<li>Cookies for site functionality (see Cookies section)</li>
+<li><strong>Request logs.</strong> Our web server and Cloudflare, which sits in front of it, record each request: IP address, time, page, referrer and browser. We use them to keep the sites running and to stop abuse.</li>
+<li><strong>Fonts.</strong> remembra.dev loads its typefaces from Google Fonts, so your browser sends your IP address and browser details to Google when a page loads. We plan to host the fonts ourselves. The docs site uses your system fonts and sends nothing to Google.</li>
+<li><strong>No analytics or ad trackers.</strong> Neither site runs analytics, advertising or tracking scripts.</li>
 </ul>
-<h3>Cloud Service Users</h3>
-<p>If you use Remembra Cloud, we collect:</p>
+<h3>When you write to us</h3>
 <ul>
-<li><strong>Account information:</strong> Email address, name, company (optional)</li>
-<li><strong>Payment information:</strong> Collected and processed by Paddle, our Merchant of Record. Your card details go to Paddle, never to us. Paddle tells us what we need to run your subscription: your email, plan, country and whether a payment went through.</li>
-<li><strong>Usage data:</strong> API calls, storage usage, feature usage for billing and optimization</li>
-<li><strong>Memory data:</strong> The memories, entities, and relationships you choose to store</li>
+<li>The contact form sends your name, email, company (if given) and message through formsubmit.co to contact@remembra.dev.</li>
+<li>Email to our remembra.dev addresses (support@, sales@, contact@) passes through Namecheap's email forwarding. Our dolphytech.com addresses (admin@, security@) are hosted by Google Workspace. Both are on the <a href="/subprocessors">subprocessors</a> page.</li>
+<li>Email you send us is kept in our inbox.</li>
 </ul>
-<h3>Contact &amp; Support</h3>
-<p>When you contact us, we collect:</p>
+<h3>When you use Remembra Cloud</h3>
 <ul>
-<li>Your name and email address</li>
-<li>Any information you provide in your message</li>
-<li>Support ticket history</li>
+<li><strong>Account:</strong> your email address, an optional name, a hash of your password (never the password), and, if you sign in with GitHub or Google, your account id and verified email from that provider. If you turn on two-factor sign-in, its secret is stored encrypted.</li>
+<li><strong>API keys:</strong> the keys you create, with the agent and projects each is limited to.</li>
+<li><strong>What you store:</strong> notes and memories, the facts and names pulled out of them, handoffs and checkpoints your agents leave, inbox messages between agents, and the project and repository names they belong to.</li>
+<li><strong>Handoffs:</strong> when an agent's session ends, <code>remembra-relay</code> reads facts from git on your machine (branch, commit ids and messages, changed file names, whether commits are pushed) and, for Claude Code, from the local session transcript (commands run, test results, open items). Secrets and personal data the redaction rules catch are removed before anything is sent. The transcript itself is never uploaded.</li>
+<li><strong>Usage:</strong> API requests, credits used, storage used and errors, for billing, plan limits and fixing problems. Our security log records sign-ins, key changes and other account events with the IP address that made them.</li>
+<li><strong>Billing:</strong> Paddle takes the payment. It tells us your email, plan, country, subscription status and whether a payment went through. Your card details go to Paddle, never to us.</li>
 </ul>
-<h2 id="self-hosted">Self-Hosted Deployments</h2>
-<p><strong>If you self-host Remembra, we collect absolutely nothing.</strong></p>
-<p>The software runs entirely on your infrastructure. Your memories, entities, API keys, and all other data stay on your servers. We have no access to it, no visibility into it, and no way to retrieve it. That's the whole point of self-hosting.</p>
-<p>The only time we might know you're using Remembra is if you choose to contact us for support or participate in our community.</p>
-<h2 id="how-we-use">How We Use Your Information</h2>
-<p>We use information we collect to:</p>
+
+<h2 id="ai">What goes to OpenAI</h2>
+<p>Remembra Cloud uses OpenAI's API for two things:</p>
 <ul>
-<li><strong>Provide our services:</strong> Run the Remembra Cloud platform and process your requests</li>
-<li><strong>Process payments:</strong> Manage subscriptions and billing through Paddle</li>
-<li><strong>Improve our products:</strong> Understand how features are used and identify areas for improvement</li>
-<li><strong>Communicate with you:</strong> Respond to support requests, send important service updates</li>
-<li><strong>Ensure security:</strong> Detect and prevent fraud, abuse, and security incidents</li>
-<li><strong>Comply with law:</strong> Meet legal obligations when required</li>
+<li><strong>Search.</strong> The text of each note and handoff you store is sent to OpenAI to compute an embedding, the list of numbers that makes it searchable. Your search queries are embedded the same way.</li>
+<li><strong>Enrichment.</strong> While you have credits, the text of each new note is sent to OpenAI's language models to pull out facts, people and projects and to merge duplicates. Handoffs are not enriched.</li>
 </ul>
-<h3>What We Don't Do</h3>
+<p>OpenAI processes this data for us under its API terms. It says it does not use API data to train its models unless the customer opts in (we have not), and that it may keep API data for up to 30 days to detect abuse. See <a href="https://developers.openai.com/api/docs/guides/your-data">how OpenAI handles API data</a>.</p>
+
+<h2 id="use">Why we use it</h2>
+<p>We use your information only to:</p>
 <ul>
-<li>We <strong>don't sell</strong> your personal data to anyone</li>
-<li>We <strong>don't use</strong> your stored memories to train AI models</li>
-<li>We <strong>don't share</strong> your data with third parties for marketing</li>
-<li>We <strong>don't access</strong> your stored memories unless required for support (with your permission) or legal compliance</li>
+<li><strong>Run the service you signed up for:</strong> store and search your memory, build briefs and handoffs, bill your plan. (For visitors in the EEA and UK, the legal basis is our contract with you.)</li>
+<li><strong>Keep it secure:</strong> detect and stop abuse, fraud and attacks, and keep security logs. (Our legitimate interest in a secure service.)</li>
+<li><strong>Fix and improve it:</strong> look at errors and aggregate usage, not the content of your notes. (Our legitimate interest.)</li>
+<li><strong>Tell you what you need to know:</strong> email verification, password resets, security notices and billing notices. We do not send marketing email without your consent.</li>
+<li><strong>Meet legal obligations,</strong> such as tax records, which Paddle keeps as the seller. (Legal obligation.)</li>
 </ul>
-<h2 id="data-security">Data Security</h2>
-<p>We take security seriously. Our cloud infrastructure includes:</p>
+<p>We do not sell your data, share it for advertising, or use what you store to train AI models. We look at the content of your account only when you ask us to for support, or when the law requires it.</p>
+
+<h2 id="sharing">Who else handles it</h2>
+<p>A small number of companies process data for us: hosting, the network edge, AI processing, email and payments. Each is named, with what it receives and where, on the <a href="/subprocessors">subprocessors</a> page. We will update that page before adding a new one.</p>
+<p><strong>Paddle</strong> (Paddle.com Market Ltd) sells our paid plans as Merchant of Record. It receives your billing details (name, email, address, payment method) to take payment, charge tax and handle refunds, and it handles them under <a href="https://www.paddle.com/legal/privacy">its own privacy policy</a>.</p>
+<p>We may also disclose information when the law requires it, to protect people from harm, or to a buyer if the business is sold, in which case we will tell you first.</p>
+
+<h2 id="where">Where it is stored</h2>
+<p>Remembra Cloud runs on servers rented from Hetzner in the United States. If you use it from outside the US, your data is transferred to and stored in the US. For transfers from the EEA, UK and Switzerland we rely on the European Commission's standard contractual clauses, which our <a href="/dpa">DPA</a> includes. We do not offer an EU data region yet.</p>
+
+<h2 id="security">How it is protected</h2>
 <ul>
-<li><strong>Encryption in transit:</strong> All connections use TLS 1.3</li>
-<li><strong>Encryption at rest:</strong> Memory content in our vector store is encrypted with AES-256-GCM; we are extending encryption to all stored memory data. Credentials pasted into memories are automatically redacted.</li>
-<li><strong>Access controls:</strong> Strict internal access policies and audit logging</li>
-<li><strong>Regular audits:</strong> Periodic security reviews and penetration testing</li>
-<li><strong>Secure infrastructure:</strong> Hosted on reputable cloud providers with SOC 2 compliance</li>
+<li><strong>In transit:</strong> every connection to our sites and API uses HTTPS.</li>
+<li><strong>At rest:</strong> memory content and metadata in our vector store are encrypted with AES-256-GCM, and two-factor secrets are encrypted. The database that holds the other copy of your notes and your account records is not yet field-encrypted; we are extending encryption to it.</li>
+<li><strong>Redaction:</strong> keys, tokens and other secrets are stripped from what you store before it is saved.</li>
+<li><strong>Access:</strong> each account's data is kept apart, and API keys can be limited to one agent and to certain projects.</li>
 </ul>
-<p>No system is 100% secure. If we discover a security breach affecting your data, we will notify you promptly as required by applicable law.</p>
-<h2 id="data-sharing">Data Sharing</h2>
-<p>We may share data with:</p>
+<p>Remembra has not had a SOC 2 audit or an outside penetration test. The <a href="/security">security page</a> says what we do today, what we don't do yet, and how to report a problem. If a breach affects your data, we will tell you without undue delay and as the law requires.</p>
+
+<h2 id="retention">How long we keep it</h2>
 <ul>
-<li><strong>Service providers:</strong> Companies that help us operate (e.g., hosting providers). They're bound by confidentiality agreements.</li>
-<li><strong>Paddle:</strong> Paddle.com sells our paid plans as Merchant of Record. It receives your billing details (name, email, address, payment method) to take payment, charge tax and handle refunds, and it handles them under <a href="https://www.paddle.com/legal/privacy">its own privacy policy</a>.</li>
-<li><strong>Legal requirements:</strong> When required by law, court order, or to protect our rights and safety</li>
-<li><strong>Business transfers:</strong> If we're acquired or merged, your data may transfer to the new entity (we'll notify you)</li>
+<li><strong>Your account and what you store</strong> are kept while your account is open. Handoffs and structured checkpoints do not expire: they stay on your trail until you delete them or your account is erased. Free-text checkpoints expire after 7 days by default.</li>
+<li><strong>Deleting your account:</strong> deleting it from the dashboard today deactivates it and revokes its keys, but does not yet erase what is stored. To have everything erased, email <a href="mailto:admin@dolphytech.com">admin@dolphytech.com</a> from the account's address and we will erase it within 30 days. Backup copies are removed as backups are replaced.</li>
+<li><strong>Request logs and security logs</strong> are kept only as long as we need them to run and protect the service.</li>
+<li><strong>Billing records</strong> are kept by Paddle for as long as tax law requires.</li>
 </ul>
-<h2 id="your-rights">Your Rights</h2>
-<p>Depending on your location, you may have the right to:</p>
-<h4>Access</h4>
-<p>Request a copy of your personal data</p>
-<h4>Correction</h4>
-<p>Update inaccurate or incomplete data</p>
-<h4>Deletion</h4>
-<p>Request deletion of your data ("right to be forgotten")</p>
-<h4>Portability</h4>
-<p>Export your data in a machine-readable format</p>
-<h4>Restriction</h4>
-<p>Limit how we process your data</p>
-<h4>Objection</h4>
-<p>Object to certain types of processing</p>
-<p>To exercise these rights, contact us at <a href="mailto:admin@dolphytech.com">admin@dolphytech.com</a>. We'll respond within 30 days.</p>
-<h2 id="cookies">Cookies</h2>
-<p>We use cookies for:</p>
-<ul>
-<li><strong>Essential cookies:</strong> Required for the website to function (authentication, preferences)</li>
-<li><strong>Analytics cookies:</strong> Help us understand how visitors use our site (can be disabled)</li>
-</ul>
-<p>You can control cookies through your browser settings. Disabling essential cookies may affect site functionality.</p>
-<h2 id="data-retention">Data Retention</h2>
-<p>We retain your data as long as your account is active or as needed to provide services. If you delete your account, we'll delete your data within 30 days, except where we're legally required to retain it (e.g., financial records for tax purposes).</p>
-<h2 id="children-s-privacy">Children's Privacy</h2>
-<p>Remembra is not directed to children under 13 (or 16 in some jurisdictions). We don't knowingly collect personal information from children. If you believe we have, please contact us and we'll delete it promptly.</p>
-<h2 id="international-data-transfers">International Data Transfers</h2>
-<p>Our servers are located in the United States. If you're accessing from outside the US, your data will be transferred to and processed in the US. We use standard contractual clauses and other safeguards to ensure adequate protection for international transfers.</p>
-<h2 id="changes-to-this-policy">Changes to This Policy</h2>
-<p>We may update this Privacy Policy from time to time. We'll notify you of significant changes by posting the new policy on this page and updating the "Last updated" date. For major changes, we may also send an email notification.</p>
-<h2 id="contact">Contact Us</h2>
-<p>Questions about this Privacy Policy? Contact us:</p>
-<p>DolphyTech</p>
-<p>515 Centerpoint Drive, Suite #212</p>
-<p>Middletown, CT 06457</p>
-<p><strong>Privacy inquiries:</strong> <a href="mailto:admin@dolphytech.com">admin@dolphytech.com</a></p>
-<p><strong>General contact:</strong> <a href="mailto:admin@dolphytech.com">admin@dolphytech.com</a></p>
+
+<h2 id="rights">Your rights</h2>
+<p>Depending on where you live, you can ask us to give you a copy of your data, correct it, erase it, restrict or object to how we use it, or hand it over in a machine-readable format. You can export your memories yourself through the API. For anything else, email <a href="mailto:admin@dolphytech.com">admin@dolphytech.com</a>; we answer within 30 days. If you are in the EEA or UK and think we got it wrong, you can complain to your data protection authority.</p>
+<p>California residents: we do not sell or share personal information as the CCPA defines those terms.</p>
+
+<h2 id="cookies">Cookies and local storage</h2>
+<p>Our websites set no cookies of their own. Cloudflare, which protects them, may set a cookie its bot checks need. Your browser's local storage keeps your light or dark theme choice, and the pricing page remembers the monthly or yearly toggle for the visit. Nothing in them identifies you, and they never leave your browser.</p>
+<p>The dashboard keeps your sign-in token in your browser's local storage so you stay signed in. Signing in with GitHub or Google uses short-lived cookies that tie the sign-in to your browser; they are cleared when sign-in finishes. None of these are used for tracking or advertising.</p>
+
+<h2 id="self-hosted">Self-hosted Remembra</h2>
+<p>If you run Remembra on your own servers, it sends us nothing: your memories, keys and logs stay with you. It sends text to the AI provider you configure, under your own account with them.</p>
+
+<h2 id="children">Children</h2>
+<p>Remembra is not meant for children under 16, and we don't knowingly collect their data. If you think a child has given us personal data, contact us and we will delete it.</p>
+
+<h2 id="changes">Changes</h2>
+<p>When we change this policy we update the date at the top. If a change affects how we use data you already gave us, we will email account holders before it takes effect.</p>
+
+<h2 id="contact">Contact</h2>
+<p>DolphyTech<br>515 Centerpoint Drive, Suite #212<br>Middletown, CT 06457, USA</p>
+<p><strong>Privacy requests:</strong> <a href="mailto:admin@dolphytech.com">admin@dolphytech.com</a></p>
     </article>
   </div>
 </main>
@@ -211,6 +203,10 @@
         <li><a href="/security">Security</a></li>
         <li><a href="/privacy" aria-current="page">Privacy</a></li>
         <li><a href="/terms">Terms</a></li>
+        <li><a href="/refunds">Refunds</a></li>
+        <li><a href="/subprocessors">Subprocessors</a></li>
+        <li><a href="/dpa">DPA</a></li>
+        <li><a href="/changelog">Changelog</a></li>
         <li><a href="/contact">Contact</a></li>
       </ul>
     </nav>
@@ -218,6 +214,6 @@
 </footer>
 <!-- /@footer -->
 
-<script src="site.js" defer></script>
+<script src="/site.js" defer></script>
 </body>
 </html>

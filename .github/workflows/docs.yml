@@ -3,7 +3,7 @@ name: Deploy Documentation
 on:
   push:
     branches: [main]
-    paths: ['docs/**', 'mkdocs.yml', '.github/workflows/docs.yml']
+    paths: ['docs/**', 'mkdocs.yml', 'README.md', 'scripts/site_predeploy.py', '.github/workflows/docs.yml']
   workflow_dispatch:
 
 permissions:
@@ -26,6 +26,8 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install mkdocs-material pymdown-extensions
+      # Every package an install command in docs/ or the README names must exist on PyPI or npm.
+      - run: python scripts/site_predeploy.py --packages
       - run: mkdocs build --strict
       - uses: actions/configure-pages@1f0c5cde4bc74cd7e1254d0cb4de8d49e9068c7d # v4.0.0
       - uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1

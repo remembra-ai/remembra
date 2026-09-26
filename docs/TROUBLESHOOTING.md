@@ -507,7 +507,7 @@ Higher tiers have higher rate limits.
 2. **Check logs**: `docker logs remembra 2>&1 | tail -100`
 3. **Enable debug mode**: Set `REMEMBRA_LOG_LEVEL=debug` and restart
 4. **Check bridge status**: `remembra-bridge --status` (for sandboxed agents)
-5. **Join Discord**: https://discord.gg/Bzv3JshRa3
+5. **Join Discord**: https://discord.gg/mPYQRKzXz5
 6. **Open an issue**: https://github.com/remembra-ai/remembra/issues
 
 When reporting issues, include:

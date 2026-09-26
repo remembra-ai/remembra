@@ -19,17 +19,7 @@ import { clampSeats, creditsView, formatUsd, parseSeatDraft, planLine, resetLabe
 import { useResource } from '../hooks/useResource';
 import { Card, CardHeader, ErrorNotice, Pill, Skeleton } from './relay/ui';
 import { DegradedNotice, PixelMeter } from './credits/Credits';
-
-interface PaddleGlobal {
-  Initialized?: boolean;
-  Initialize: (opts: { token: string }) => void;
-  Checkout: { open: (opts: Record<string, unknown>) => void };
-}
-
-function paddle(): PaddleGlobal | null {
-  const p = (window as unknown as { Paddle?: PaddleGlobal }).Paddle;
-  return p && typeof p.Checkout?.open === 'function' ? p : null;
-}
+import { initPaddle, paddleGlobal, rememberCheckout, sessionStore, successUrl } from '../lib/paddle';
 
 function userEmail(): string | undefined {
   try {
@@ -45,21 +35,21 @@ function userEmail(): string | undefined {
  * server's signature over the account id in customData); per-seat Team and
  * Founding 100 always go through a server transaction, where the seat minimum
  * and the redemption cap are enforced. A subscribed account is sent to the
- * billing portal instead of a second subscription.
+ * billing portal instead of a second subscription. Just before the checkout
+ * opens, the tab notes the plan it is on and the plan it is buying, so the
+ * return page waits for that plan instead of announcing the current one.
  */
 async function startCheckout(
   plan: string,
   cycle: BillingCycle,
   seats: number | undefined,
   perSeat: boolean,
+  currentPlan: string,
   onPortal: () => void,
 ): Promise<void> {
   const config = await api.getBillingClientConfig().catch(() => null);
-  const P = paddle();
-  if (P && config?.client_token && !P.Initialized) {
-    P.Initialize({ token: config.client_token });
-    P.Initialized = true;
-  }
+  const P = paddleGlobal();
+  if (P) initPaddle(P, config, window.location.origin);
   const route = checkoutRoute(config, plan, cycle, perSeat, api.getUserId());
   if (route.kind === 'portal') {
     onPortal();
@@ -67,18 +57,21 @@ async function startCheckout(
   }
   if (P && route.kind === 'overlay') {
     const email = userEmail();
+    rememberCheckout(sessionStore(), currentPlan, plan);
     P.Checkout.open({
       items: [{ priceId: route.priceId, quantity: 1 }],
       ...(email ? { customer: { email } } : {}),
       customData: route.customData,
-      settings: { successUrl: config?.success_url || 'https://remembra.dev/dashboard?checkout=success' },
+      settings: { successUrl: successUrl(config, window.location.origin) },
     });
     return;
   }
   const response = await api.createCheckout(plan, cycle, perSeat ? seats : undefined);
   if (response.transaction_id && P) {
+    rememberCheckout(sessionStore(), currentPlan, plan);
     P.Checkout.open({ transactionId: response.transaction_id });
   } else if (response.checkout_url) {
+    rememberCheckout(sessionStore(), currentPlan, plan);
     window.location.href = response.checkout_url;
   } else {
     throw new Error('Checkout could not start: Paddle did not load in this browser. Disable blockers for paddle.com and try again.');
@@ -398,7 +391,7 @@ function PlansSection({
     setBusy(planId);
     onError(null);
     try {
-      await startCheckout(planId, forceCycle ?? cycle, seats, perSeat, onPortal);
+      await startCheckout(planId, forceCycle ?? cycle, seats, perSeat, currentPlan, onPortal);
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Checkout could not start.');
     } finally {

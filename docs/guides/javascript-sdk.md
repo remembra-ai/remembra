@@ -1,6 +1,6 @@
 # JavaScript / TypeScript SDK
 
-Complete reference for the `@remembra/client` package.
+Complete reference for the `remembra` package.
 
 Works in Node.js 18+, Deno, Bun, and modern browsers.
 
@@ -9,31 +9,31 @@ Works in Node.js 18+, Deno, Bun, and modern browsers.
 === "npm"
 
     ```bash
-    npm install @remembra/client
+    npm install remembra
     ```
 
 === "yarn"
 
     ```bash
-    yarn add @remembra/client
+    yarn add remembra
     ```
 
 === "pnpm"
 
     ```bash
-    pnpm add @remembra/client
+    pnpm add remembra
     ```
 
 === "Deno"
 
     ```typescript
-    import { Remembra } from "npm:@remembra/client";
+    import { Remembra } from "npm:remembra";
     ```
 
 ## Quick Start
 
 ```typescript
-import { Remembra } from '@remembra/client';
+import { Remembra } from 'remembra';
 
 const memory = new Remembra({
   url: 'http://localhost:8787',
@@ -267,7 +267,7 @@ console.log(`Stored ${result.memories_stored} releases`);
 All errors are thrown as `RemembraError`:
 
 ```typescript
-import { Remembra, RemembraError } from '@remembra/client';
+import { Remembra, RemembraError } from 'remembra';
 
 try {
   await memory.store('some content');
@@ -293,7 +293,7 @@ Common status codes:
 
 ## Zero Dependencies
 
-`@remembra/client` has zero runtime dependencies. It uses the native `fetch()` API available in:
+`remembra` has zero runtime dependencies. It uses the native `fetch()` API available in:
 
 - Node.js 18+
 - Deno
@@ -318,7 +318,7 @@ import type {
   EntityDetail,
   DecayInfo,
   DecayReportResult,
-} from '@remembra/client';
+} from 'remembra';
 ```
 _ߍ{i]<\Vmusx5
 ---

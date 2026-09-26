@@ -2,7 +2,25 @@
 
 See [CHANGELOG.md](https://github.com/remembra-ai/remembra/blob/main/CHANGELOG.md) for the full version history.
 
-## Latest: v0.10.1 (March 15, 2026)
+## Latest: v0.16.0, Remembra Relay
+
+When an agent's session ends, `remembra-relay close` saves a handoff built from git facts (and, for Claude Code,
+the session's test runs), and checks the agent's own summary against them. The next agent, in any tool or on any
+machine, starts from a short brief; every handoff stays on the trail. Agent-scoped keys mark handoffs
+key-verified. Claude Code's hooks are verified; Codex, Cursor, Gemini CLI, Qwen Code and Kimi hooks ship unverified.
+
+```bash
+pipx install 'remembra[mcp]'
+remembra-install --all --api-key <your-key>
+remembra-relay connect
+```
+
+Setup: [Relay guide](../guides/relay.md). The short version of every release: [remembra.dev/changelog](https://remembra.dev/changelog).
+Releases v0.11 to v0.15 are in [CHANGELOG.md](https://github.com/remembra-ai/remembra/blob/main/CHANGELOG.md).
+
+---
+
+## v0.10.1 (March 15, 2026)
 
 ### Added
 - **Centralized Credentials** — API keys stored securely in `~/.remembra/credentials` (chmod 600). No more repeating `--api-key` on every command.

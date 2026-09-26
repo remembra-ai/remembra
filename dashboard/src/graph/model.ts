@@ -309,7 +309,7 @@ export function trailEvent(item: TrailItem, summary: ActivitySummary | null | un
     at,
     kind: 'handoff',
     path,
-    text: `${who} stopped · handoff signed${failing} → ${next ? agentLabel(next) : 'the next agent'} already knows`,
+    text: `${who} stopped · handoff saved${failing} → ${next ? agentLabel(next) : 'the next agent'} already knows`,
   };
 }
 

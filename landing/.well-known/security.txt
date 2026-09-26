@@ -1,0 +1,8 @@
+# Report security issues in Remembra (remembra.dev, app.remembra.dev,
+# api.remembra.dev, docs.remembra.dev and the open-source code) privately.
+# Scope, safe harbor and what to expect: https://remembra.dev/security#disclosure
+Contact: mailto:security@dolphytech.com
+Expires: 2027-09-01T00:00:00Z
+Policy: https://remembra.dev/security#disclosure
+Preferred-Languages: en
+Canonical: https://remembra.dev/.well-known/security.txt

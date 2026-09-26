@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Security · Remembra</title>
-<meta name="description" content="How Remembra protects your memory: secrets redacted before anything is saved, accounts walled off, every handoff attributed to the agent that wrote it, and an open-source core you can audit and host yourself.">
+<meta name="description" content="How Remembra protects your agents' memory, what it does not do yet (no SOC 2, US hosting only), the roadmap, an OWASP agentic top 10 mapping, and how to report a vulnerability.">
 <meta property="og:title" content="Security · Remembra">
 <meta property="og:description" content="Redacted, isolated, attributed and open: how Remembra protects your agents' memory.">
 <meta property="og:type" content="website">
@@ -27,7 +27,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="site.css">
+<link rel="stylesheet" href="/site.css">
 <!-- /@head -->
 <style>
 .four { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 2px solid var(--ink); margin-top: clamp(28px, 4vw, 40px); }
@@ -70,7 +70,7 @@
   <section class="wrap page-head" aria-labelledby="doc-title">
     <p class="eyebrow">Security</p>
     <h1 id="doc-title">Your agents' memory, <mark>kept on a short leash.</mark></h1>
-    <p class="lede">A memory that every agent reads has to be careful about what goes in, who can read it back, and who wrote it. This is how Remembra handles each.</p>
+    <p class="lede">A memory that every agent reads has to be careful about what goes in, who can read it back, and who wrote it. This is how Remembra handles each, what it doesn't do yet, and when that changes.</p>
     <ol class="four">
       <li><p class="k">Redacted</p><p>Keys, tokens and other secrets are stripped out before anything is saved.</p></li>
       <li><p class="k">Isolated</p><p>Every account's memory is walled off, and project-scoped keys only see their own projects.</p></li>
@@ -84,16 +84,18 @@
       <p class="k">On this page</p>
       <nav class="toc">
         <a href="#handoffs">Handoffs and briefs</a>
-        <a href="#data">Data protection</a>
-        <a href="#access">Access control</a>
-        <a href="#hosting">Hosting</a>
-        <a href="#privacy">Compliance and privacy</a>
-        <a href="#disclosure">Responsible disclosure</a>
+        <a href="#today">What we do today</a>
+        <a href="#not-yet">What we don't do yet</a>
+        <a href="#roadmap">Roadmap</a>
+        <a href="#retention">Retention and deletion</a>
+        <a href="#owasp">OWASP agentic top 10</a>
+        <a href="#crew">Crew mode</a>
+        <a href="#disclosure">Reporting a vulnerability</a>
       </nav>
     </aside>
     <article class="prose">
       <h2 id="handoffs">Handoffs and briefs</h2>
-      <p>The relay passes work between agents, so it is built on the assumption that what one agent wrote may be wrong, or may try to steer the next one.</p>
+      <p>Remembra Relay passes work between agents, so it is built on the assumption that what one agent wrote may be wrong, or may try to steer the next one.</p>
       <ul>
         <li><strong>Redacted before storage.</strong> Every string in a handoff passes secret redaction and the server's PII policy, value by value. A blocked value is replaced with <code>[REDACTED:pii]</code>; a close is never rejected for it.</li>
         <li><strong>The raw transcript stays on your machine.</strong> Close-out reads git and, for Claude Code, the local session transcript, and sends only the facts it pulled out.</li>
@@ -102,39 +104,93 @@
         <li><strong>Attributed.</strong> A handoff closed with a key scoped to one agent is shown as <em>key-verified</em>, and that key cannot write as another agent. Otherwise it is shown as <em>self-declared</em>. An agent's own summary is marked unverified, or contradicted when the facts disagree.</li>
       </ul>
 
-      <h2 id="data">Data protection</h2>
+      <h2 id="today">What we do today</h2>
+      <p>Each item links to the code or the doc that does it, so you can check.</p>
       <ul>
-        <li><strong>Encryption at rest:</strong> memory content and metadata in the vector store are encrypted with AES-256-GCM, and 2FA secrets are encrypted. The metadata database is not yet field-encrypted; we are extending encryption to all stored memory data.</li>
-        <li><strong>Encryption in transit:</strong> all API traffic uses HTTPS.</li>
-        <li><strong>User scoping:</strong> memories are strictly scoped to their account, preventing cross-account leakage.</li>
-        <li><strong>PII detection:</strong> built-in detection and optional redaction of sensitive data.</li>
+        <li><strong>Redaction on both ends.</strong> The relay client redacts secrets before a handoff leaves your machine (<a href="https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/facts.py">relay/facts.py</a>), and the server scans every stored value again for secrets and PII (<a href="https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/secret_scan.py">secret_scan.py</a>, <a href="https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/pii_detector.py">pii_detector.py</a>).</li>
+        <li><strong>Untrusted-data framing</strong> of everything agents recorded, in every brief (<a href="https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/handoff.py">relay/handoff.py</a>).</li>
+        <li><strong>Key-verified attribution.</strong> The agent on a handoff comes from the API key, not from the request (<a href="https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/identity.py">relay/identity.py</a>).</li>
+        <li><strong>Scoped keys.</strong> Keys can be limited to one agent, to certain projects and to a role; keys are stored hashed (<a href="https://github.com/remembra-ai/remembra/blob/main/src/remembra/auth/keys.py">auth/keys.py</a>, <a href="https://github.com/remembra-ai/remembra/blob/main/src/remembra/auth/rbac.py">auth/rbac.py</a>).</li>
+        <li><strong>OAuth for the Claude and ChatGPT apps</strong> is authorization code with PKCE (S256 only), and you choose which projects a connection may see (<a href="https://github.com/remembra-ai/remembra/blob/main/src/remembra/connector/oauth.py">connector/oauth.py</a>).</li>
+        <li><strong>Encryption at rest for the vector store:</strong> memory content and metadata there are encrypted with AES-256-GCM, and two-factor secrets are encrypted (<a href="https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/encryption.py">security/encryption.py</a>).</li>
+        <li><strong>HTTPS everywhere,</strong> with the API, dashboard and website behind Cloudflare, on servers rented from Hetzner in the United States.</li>
+        <li><strong>Named subprocessors.</strong> Everyone who handles your data is on the <a href="/subprocessors">subprocessors</a> page, with what they receive.</li>
+        <li><strong>An audit log</strong> of sign-ins, key changes and other account events (<a href="https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/audit.py">security/audit.py</a>).</li>
+        <li><strong>Rate limits</strong> per plan and per minute, and a burst limit on handoffs.</li>
+        <li><strong>Open source and self-hostable</strong> under the <a href="https://github.com/remembra-ai/remembra/blob/main/LICENSE">MIT license</a>. A <a href="https://docs.remembra.dev/getting-started/docker/">self-hosted server</a> keeps your memory on your network and sends us nothing.</li>
       </ul>
 
-      <h2 id="access">Access control</h2>
+      <h2 id="not-yet">What we don't do yet</h2>
+      <p>Most security questionnaires ask about these. The honest answers:</p>
       <ul>
-        <li><strong>Scoped API keys:</strong> keys can be limited to one agent, to certain projects, and to certain permissions.</li>
-        <li><strong>Project-restricted keys</strong> can only resolve into, close, brief and see links for their own projects, and never move a repository's binding.</li>
-        <li><strong>Roles:</strong> admin, editor and viewer roles for keys, and owner, admin, member and viewer roles for teams.</li>
-        <li><strong>Rate limiting</strong> against abuse, per plan and per minute.</li>
-        <li><strong>Audit logging</strong> of API operations.</li>
+        <li><strong>No SOC 2 report, and no outside penetration test.</strong> Remembra has had internal security reviews only. Cloudflare and Paddle have their own audits; Hetzner's ISO 27001 certificate covers its European data centers, not the US site Remembra runs in. Remembra itself is not audited.</li>
+        <li><strong>No EU data region.</strong> Remembra Cloud is hosted in the United States only.</li>
+        <li><strong>The metadata database is not field-encrypted.</strong> Encryption at rest covers the vector store; the database that holds account records and a second copy of your notes does not have field-level encryption yet. One encryption key protects the vector store, and it is not rotated yet.</li>
+        <li><strong>API keys don't expire.</strong> You revoke them yourself. An agent-scoped key fixes who a handoff is from, but it can read everything the account can; limit reads with project-scoped keys.</li>
+        <li><strong>No SSO or SAML</strong> for the dashboard.</li>
+        <li><strong>Account erasure is manual.</strong> Deleting an account in the dashboard deactivates it and revokes its keys; erasing the stored data is done by us on request, within 30 days (see <a href="#retention">retention</a>).</li>
       </ul>
 
-      <h2 id="hosting">Hosting</h2>
-      <h3>Self-hosted</h3>
-      <p>Run Remembra on your own infrastructure with full control over your data. The hosted service is optional; a self-hosted server keeps your memory on your network.</p>
-      <h3>Remembra Cloud</h3>
-      <p>Our managed service is designed for secure operations, with audit logging, hardened defaults and deployment controls that support customer compliance reviews.</p>
+      <h2 id="roadmap">Roadmap</h2>
+      <!-- requires owner: approve the roadmap quarters and the SOC 2 wording on security.html -->
+      <table>
+        <thead><tr><th>What</th><th>When</th></tr></thead>
+        <tbody>
+          <tr><td>Automated, complete account erasure, including backups</td><td>Q4 2026</td></tr>
+          <tr><td>Key expiry, key rotation, and read limits for agent-scoped keys</td><td>Q1 2027</td></tr>
+          <tr><td>Field-level encryption for the metadata database, with key rotation</td><td>Q1 2027</td></tr>
+          <tr><td>SSO (SAML and OIDC) for Team plans</td><td>Q2 2027</td></tr>
+          <tr><td>An outside penetration test, with a summary published here</td><td>Q2 2027</td></tr>
+          <tr><td>EU data region; SOC 2</td><td>When customers need them; no date yet</td></tr>
+        </tbody>
+      </table>
 
-      <h2 id="privacy">Compliance and privacy</h2>
+      <h2 id="retention">Retention and deletion</h2>
       <ul>
-        <li><strong>Export and deletion:</strong> export your memories, or delete them, whenever you want.</li>
-        <li><strong>No training on your data:</strong> your memories are never used to train AI models.</li>
+        <li><strong>Handoffs and structured checkpoints never expire.</strong> They stay on your trail until you delete them or your account is erased. Free-text checkpoints expire after 7 days by default.</li>
+        <li><strong>Notes and memories</strong> are kept while your account is open, unless you set an expiry on them.</li>
+        <li><strong>Account erasure</strong> is done on request today: email <a href="mailto:admin@dolphytech.com">admin@dolphytech.com</a> from the account's address and we erase it within 30 days. The <a href="/privacy#retention">privacy policy</a> has the rest.</li>
+        <li><strong>Export</strong> your memories whenever you want, through the API.</li>
+        <li><strong>No training on your data:</strong> we never use what you store to train AI models, and OpenAI, which embeds and enriches it, does not train on API data under its terms.</li>
       </ul>
-      <p>The <a href="/privacy">privacy policy</a> covers what we collect and why.</p>
 
-      <h2 id="disclosure">Responsible disclosure</h2>
-      <p>If you find a security issue, please report it privately to <a href="mailto:security@dolphytech.com">security@dolphytech.com</a>. We aim to respond within 48 hours and will work with you to understand and fix it.</p>
-      <p>For security questions or our security documentation, <a href="/contact">contact us</a>.</p>
+      <h2 id="owasp">OWASP top 10 for agentic applications</h2>
+      <p>How Remembra lines up against the <a href="https://genai.owasp.org/2025/12/09/owasp-top-10-for-agentic-applications-the-benchmark-for-agentic-security-in-the-age-of-autonomous-ai/">OWASP Top 10 for Agentic Applications</a> (December 2025). Remembra is the memory and handoff layer, not the agent, so most rows are partly covered.</p>
+      <table>
+        <thead><tr><th>Risk</th><th>Status</th><th>What Remembra does, and what it doesn't</th></tr></thead>
+        <tbody>
+          <tr><td>ASI01 Agent goal hijack</td><td>Partly</td><td>Recorded text reaches the next agent inside an untrusted-data block, and text that looks like prompt injection is withheld. An agent can still choose to follow what it reads.</td></tr>
+          <tr><td>ASI02 Tool misuse</td><td>Partly</td><td>Nothing over the Claude and ChatGPT connector edits or deletes memories, and key roles limit what a key can do. The tools on your machine are outside Remembra.</td></tr>
+          <tr><td>ASI03 Identity and privilege abuse</td><td>Partly</td><td>Agent- and project-scoped keys, roles, and PKCE-only OAuth with per-project consent. Keys don't expire yet, and agent-scoped keys can read the whole account.</td></tr>
+          <tr><td>ASI04 Agentic supply chain</td><td>Partly</td><td>The code is open, and dependencies are pinned in <code>uv.lock</code>. Release artifacts carry no signature yet, and there is no SBOM.</td></tr>
+          <tr><td>ASI05 Unexpected code execution</td><td>Covered</td><td>The server never runs stored content, and the relay hooks run fixed commands; nothing in a brief is executed.</td></tr>
+          <tr><td>ASI06 Memory and context poisoning</td><td>Partly</td><td>Secrets are redacted, handoff facts come from git rather than an LLM, an agent's summary is checked against them, and facts that don't match their source are flagged unverified. A key with write access can still store a false note.</td></tr>
+          <tr><td>ASI07 Insecure inter-agent communication</td><td>Partly</td><td>Handoffs and inbox messages travel over HTTPS, stay inside one account and project, and show whether the sender was key-verified or self-declared. Messages carry no end-to-end signature.</td></tr>
+          <tr><td>ASI08 Cascading failures</td><td>Partly</td><td>Hooks time out in 10 seconds and never block an agent, AI-provider failures trip a circuit breaker, and running out of credits degrades a save instead of failing it. A wrong handoff can still mislead the next agent, which is why facts and claims are labelled apart.</td></tr>
+          <tr><td>ASI09 Human-agent trust exploitation</td><td>Partly</td><td>The brief and the dashboard show where each fact came from and mark agent-written text as unverified or contradicted.</td></tr>
+          <tr><td>ASI10 Rogue agents</td><td>Not covered</td><td>The trail and audit log record what each key did, but Remembra cannot stop an agent on your machine. Crew mode's enforcement is planned.</td></tr>
+        </tbody>
+      </table>
+
+      <h2 id="crew">Crew mode</h2>
+      <p>Crew mode, several agents on one project at once, is not available yet. When it ships, its limits are these: local enforcement coordinates cooperative agents. It cannot stop an agent deliberately working around it on your machine; every bypass is recorded.</p>
+
+      <h2 id="disclosure">Reporting a vulnerability</h2>
+      <p>Report security issues privately to <a href="mailto:security@dolphytech.com">security@dolphytech.com</a>. We aim to reply within 48 hours, keep you updated while we fix it, and credit you when it is fixed if you want. The same contact is in our <a href="/.well-known/security.txt">security.txt</a>.</p>
+      <h3>In scope</h3>
+      <ul>
+        <li>remembra.dev, app.remembra.dev, api.remembra.dev and docs.remembra.dev</li>
+        <li>The open-source code in <a href="https://github.com/remembra-ai/remembra">remembra-ai/remembra</a>, including <code>remembra-relay</code>, the MCP server and the installers</li>
+      </ul>
+      <h3>Out of scope</h3>
+      <ul>
+        <li>Denial of service, load testing, spam and social engineering</li>
+        <li>Services we use but don't run, such as Paddle, Cloudflare and GitHub: report those to them</li>
+        <li>Findings with no security impact, such as missing headers on pages without sensitive content</li>
+      </ul>
+      <h3>Safe harbor</h3>
+      <p>If you make a good-faith effort to follow this page, we will not take legal action against you or ask anyone else to, and we will treat your research as authorized. In return: use only accounts you own or have permission to test, look at no more of anyone else's data than you need to show the problem, and delete it afterwards; don't degrade the service; and give us 90 days to fix an issue before you publish it, or tell us if you need to publish sooner. We don't run a paid bug bounty.</p>
+      <p>For security questions or a questionnaire, <a href="/contact">contact us</a>.</p>
     </article>
   </div>
 </main>
@@ -156,6 +212,10 @@
         <li><a href="/security" aria-current="page">Security</a></li>
         <li><a href="/privacy">Privacy</a></li>
         <li><a href="/terms">Terms</a></li>
+        <li><a href="/refunds">Refunds</a></li>
+        <li><a href="/subprocessors">Subprocessors</a></li>
+        <li><a href="/dpa">DPA</a></li>
+        <li><a href="/changelog">Changelog</a></li>
         <li><a href="/contact">Contact</a></li>
       </ul>
     </nav>
@@ -163,6 +223,6 @@
 </footer>
 <!-- /@footer -->
 
-<script src="site.js" defer></script>
+<script src="/site.js" defer></script>
 </body>
 </html>

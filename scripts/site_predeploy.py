@@ -19,6 +19,12 @@ against the version the install gates name (remembra>=X).
 It exits 1 when a docs link has no source page or is not live yet, or when
 PyPI is behind the gate, so the site is not deployed ahead of the docs it
 points to or the package its install lines pull.
+
+Online, it also checks every package an install command in docs/ or the
+README names (pip, pipx, uv, npm, yarn, pnpm) against PyPI or npm, so the
+docs never tell anyone to install a package that does not exist:
+
+    python scripts/site_predeploy.py --packages   # only the package check (the docs CI job runs this)
 """
 
 from __future__ import annotations
@@ -30,7 +36,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 LANDING = ROOT / "landing"
@@ -44,6 +50,15 @@ import site_partials  # noqa: E402  (the pages and the crew switch live there)
 GATE = re.compile(r"<!--\s*(requires\b.*?)\s*-->", re.S)
 DOCS_LINK = re.compile(r'href="(https://docs\.remembra\.dev[^"#]*)')
 PYPI_JSON = "https://pypi.org/pypi/remembra/json"
+NGINX_CONF = LANDING / "nginx.conf"
+NGINX_DOCS_TARGET = re.compile(r"(https://docs\.remembra\.dev/[^\s;\"$]*)")
+
+# `pip install x`, `npm i -g y`, ... up to the end of the command.
+INSTALL_CMD = re.compile(
+    r"\b(uv pip install|uv add|pipx install|pip3? install|npm (?:install|i)|yarn add|pnpm add)\b([^\n`|;&#)]*)"
+)
+TAKES_VALUE = {"-r", "-e", "-c", "--requirement", "--editable", "--constraint", "--index-url", "-i", "--python"}
+PACKAGE_NAME = re.compile(r"(@[a-z0-9][a-z0-9._-]*/)?[A-Za-z0-9][A-Za-z0-9._-]*")
 MIN_RELEASE = re.compile(r"remembra>=(\d+(?:\.\d+)*)")
 
 
@@ -63,13 +78,84 @@ def gates() -> dict[str, list[str]]:
 
 
 def docs_links() -> dict[str, list[str]]:
-    """Each docs.remembra.dev URL on the pages, with the pages that link it."""
-    out: dict[str, list[str]] = {}
+    """Each docs.remembra.dev URL on the pages or in nginx.conf's redirects, with where it appears."""
+    out: dict[str, list[str]] = {url: list(where) for url, where in nginx_docs_targets().items()}
     for page in pages():
         for url in DOCS_LINK.findall(page.read_text()):
             if page.name not in out.setdefault(url, []):
                 out[url].append(page.name)
     return out
+
+
+def nginx_docs_targets() -> dict[str, list[str]]:
+    """docs.remembra.dev pages that landing/nginx.conf redirects to (not the /docs/* passthrough)."""
+    if not NGINX_CONF.is_file():
+        return {}
+    return {url: ["nginx.conf"] for url in NGINX_DOCS_TARGET.findall(NGINX_CONF.read_text()) if urlsplit(url).path.strip("/")}
+
+
+def install_sources() -> list[Path]:
+    return sorted([*DOCS_DIR.rglob("*.md"), ROOT / "README.md"])
+
+
+def package_names(sources: list[Path] | None = None) -> dict[tuple[str, str], list[str]]:
+    """(registry, package) for every package an install command names, with the files that name it."""
+    out: dict[tuple[str, str], list[str]] = {}
+    for path in install_sources() if sources is None else sources:
+        rel = path.relative_to(ROOT).as_posix() if path.is_relative_to(ROOT) else path.name
+        for m in INSTALL_CMD.finditer(path.read_text(errors="replace")):
+            registry = "npm" if m.group(1).split()[0] in ("npm", "yarn", "pnpm") else "pypi"
+            skip = False
+            for raw in m.group(2).split():
+                token = raw.strip("'\"")
+                if skip:
+                    skip = False
+                    continue
+                if token in TAKES_VALUE:
+                    skip = True
+                    continue
+                if (
+                    not token
+                    or token.startswith(("-", ".", "/", "~", "<", "$", "{", "git+", "http://", "https://"))
+                    or token.endswith(".txt")
+                ):
+                    continue
+                name = _package_of(token, registry)
+                if not PACKAGE_NAME.fullmatch(name):
+                    continue
+                files = out.setdefault((registry, name), [])
+                if rel not in files:
+                    files.append(rel)
+    return out
+
+
+def _package_of(token: str, registry: str) -> str:
+    """The bare package name in an install argument: remembra[mcp]>=0.16 -> remembra, @a/b@1.2 -> @a/b."""
+    if registry == "npm":
+        scope, _, rest = token.partition("/") if token.startswith("@") else ("", "", token)
+        base = rest.split("@", 1)[0]
+        return f"{scope}/{base}" if scope else base
+    return re.split(r"[\[<>=!~;@ ]", token, maxsplit=1)[0]
+
+
+def registry_url(registry: str, name: str) -> str:
+    if registry == "npm":
+        return "https://registry.npmjs.org/" + quote(name, safe="@")
+    return f"https://pypi.org/pypi/{name}/json"
+
+
+def package_problems(fetch: Callable[[str], int] | None = None, sources: list[Path] | None = None) -> list[str]:
+    """One line per package the registry does not have, or could not confirm."""
+    fetch = fetch or http_status
+    problems = []
+    for (registry, name), where in sorted(package_names(sources).items()):
+        code = fetch(registry_url(registry, name))
+        if code == 404:
+            problems.append(f"{registry} has no package named {name} ({', '.join(where)})")
+        elif code != 200:
+            state = f"HTTP {code}" if code else "unreachable"
+            problems.append(f"{registry} could not confirm {name} ({state}; {', '.join(where)})")
+    return problems
 
 
 def built_docs() -> set[str]:
@@ -159,6 +245,15 @@ def check(
 
 
 def main(argv: list[str]) -> int:
+    if "--packages" in argv:
+        found = package_names()
+        problems = package_problems()
+        print(f"Checked {len(found)} packages named by install commands in docs/ and README.md.")
+        if problems:
+            print("\n".join(f"  x {p}" for p in problems))
+            return 1
+        print("Every one exists on its registry.")
+        return 0
     lines, problems = check(online="--offline" not in argv)
     print("\n".join(lines))
     if problems:

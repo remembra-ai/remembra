@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from remembra.auth.middleware import CurrentUser, JWTOrAPIKeyUser
+from remembra.cloud.billing_paddle import DEFAULT_DASHBOARD_ORIGIN
 from remembra.cloud.paddle_config import CheckoutUnavailableError, get_paddle_config
 from remembra.cloud.plans import (
     FOUNDING_ANNUAL_PRICE_CENTS,
@@ -201,7 +202,10 @@ class ClientConfigResponse(BaseModel):
     provider: str
     client_token: str | None = None
     prices: dict[str, str] = Field(default_factory=dict, description="Plan -> price_id mapping")
-    success_url: str = "https://remembra.dev/dashboard?checkout=success"
+    success_url: str = Field(
+        f"{DEFAULT_DASHBOARD_ORIGIN}/?checkout=success",
+        description="Where Paddle.js sends the buyer after paying: the dashboard, which confirms the plan",
+    )
     checkout_binding: str | None = Field(
         None,
         description=(
@@ -212,6 +216,22 @@ class ClientConfigResponse(BaseModel):
     has_subscription: bool = Field(
         False, description="Signed-in account already holds an active subscription: no prices; use the portal"
     )
+
+
+def dashboard_origin(settings: Any) -> str:
+    """The dashboard's public origin: Settings.public_dashboard_url, else app.remembra.dev."""
+    configured = getattr(settings, "public_dashboard_url", None)
+    return (configured if isinstance(configured, str) and configured.strip() else DEFAULT_DASHBOARD_ORIGIN).strip().rstrip("/")
+
+
+def checkout_success_url(settings: Any) -> str:
+    """After a successful checkout the buyer lands on the dashboard home, which shows the new plan."""
+    return f"{dashboard_origin(settings)}/?checkout=success"
+
+
+def payment_link_url(settings: Any) -> str:
+    """The dashboard page that loads Paddle.js and opens a transaction from ``?_ptxn=``."""
+    return f"{dashboard_origin(settings)}/pay"
 
 
 @router.get(
@@ -276,7 +296,7 @@ async def get_client_config(
             provider="paddle",
             client_token=paddle_settings.client_token,
             prices=prices,
-            success_url="https://remembra.dev/dashboard?checkout=success",
+            success_url=checkout_success_url(settings),
             checkout_binding=binding,
         )
 
@@ -310,6 +330,7 @@ async def create_checkout(
             api_key=paddle_settings.api_key,
             webhook_secret=paddle_settings.webhook_secret or "",
             sandbox=paddle_settings.sandbox,
+            payment_link=payment_link_url(settings),
         )
 
         plan_name = body.plan.strip().lower()
@@ -711,6 +732,13 @@ async def _apply_paddle_refund(request: Request, meter: Any, result: Any) -> str
     carries no custom_data for adjustments. Downgrading to Free also ends the
     annual credit bank, so credits that were paid for and refunded cannot be
     spent afterwards. Revenue was already reduced by the caller.
+
+    Paddle does not cancel a subscription when one of its payments is refunded
+    or charged back: left alone it renews at the next period, charges the
+    customer again, and that payment's webhook puts the paid plan back. So the
+    subscription is cancelled at Paddle here, immediately. If that fails, the
+    account is flagged ``<action>_downgraded_cancel_failed`` and the operator
+    is alerted to cancel it by hand.
     """
     user_id = await meter.find_tenant_by_billing_ids(
         subscription_id=result.paddle_subscription_id, customer_id=result.paddle_customer_id
@@ -728,7 +756,28 @@ async def _apply_paddle_refund(request: Request, meter: Any, result: Any) -> str
         log.info("paddle_refund_for_other_subscription", user_id=user_id)
         return "no_change"
     await meter.apply_subscription(user_id, PlanTier.FREE)
-    await meter.set_billing_flag(user_id, f"{result.adjustment_action or 'refund'}_downgraded")
+    flag = f"{result.adjustment_action or 'refund'}_downgraded"
+    subscription_id = result.paddle_subscription_id or held
+    if subscription_id and not await _cancel_refunded_subscription(str(subscription_id), user_id):
+        flag += "_cancel_failed"
+        alerts = getattr(request.app.state, "alerts", None)
+        if alerts is not None:
+            coro = alerts.notify(
+                f"paddle_refund_cancel_failed:{subscription_id}",
+                "A refunded or charged-back Paddle subscription could not be cancelled. The account is on Free; "
+                "cancel the subscription in Paddle before it renews and charges again.",
+                {"user_id": user_id, "subscription_id": subscription_id},
+            )
+            tasks = getattr(request.app.state, "tasks", None)
+            try:  # best-effort, off the webhook's clock; the flag and the log remain either way
+                if tasks is not None:
+                    tasks.spawn(coro, name="alert:paddle_refund_cancel_failed")
+                else:
+                    await coro
+            except Exception as e:
+                coro.close()
+                log.warning("paddle_refund_cancel_alert_failed", error_type=type(e).__name__)
+    await meter.set_billing_flag(user_id, flag)
     team_manager = getattr(request.app.state, "team_manager", None)
     if team_manager is not None:
         try:
@@ -737,3 +786,38 @@ async def _apply_paddle_refund(request: Request, meter: Any, result: Any) -> str
             log.warning("paddle_team_plan_sync_failed", user_id=user_id, error_type=type(e).__name__)
     log.warning("paddle_refund_downgraded", user_id=user_id)
     return "applied"
+
+
+async def _cancel_refunded_subscription(subscription_id: str, user_id: str) -> bool:
+    """Cancel a refunded or charged-back Paddle subscription now, so it never renews.
+
+    Returns True when the subscription is cancelled, including when Paddle
+    refuses because it already was (a customer who cancelled before asking for
+    the refund). Returns False, after logging, when it may still renew.
+    """
+    from remembra.cloud.billing_paddle import PaddleBillingManager
+    from remembra.cloud.paddle_config import get_paddle_settings
+
+    try:
+        paddle_settings = get_paddle_settings()
+    except ValueError:  # no API key: nothing can reach Paddle
+        log.error("paddle_refund_cancel_failed", user_id=user_id, subscription_id=subscription_id, reason="no_api_key")
+        return False
+    billing = PaddleBillingManager(
+        api_key=paddle_settings.api_key,
+        webhook_secret=paddle_settings.webhook_secret or "",  # only the API is used here
+        sandbox=paddle_settings.sandbox,
+    )
+    try:
+        await billing.cancel_subscription(subscription_id, effective_from="immediately")
+    except Exception as e:
+        try:
+            if (await billing.get_subscription(subscription_id)).get("status") == "canceled":
+                log.info("paddle_refund_subscription_already_canceled", user_id=user_id, subscription_id=subscription_id)
+                return True
+        except Exception:
+            pass  # reported below with the cancel error
+        log.error("paddle_refund_cancel_failed", user_id=user_id, subscription_id=subscription_id, error_type=type(e).__name__)
+        return False
+    log.warning("paddle_refund_subscription_canceled", user_id=user_id, subscription_id=subscription_id)
+    return True

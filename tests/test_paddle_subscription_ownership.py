@@ -331,7 +331,7 @@ async def test_client_config_signs_for_the_account_and_withholds_prices_from_sub
             "provider": "paddle",
             "client_token": None,
             "prices": {},
-            "success_url": "https://remembra.dev/dashboard?checkout=success",
+            "success_url": "https://app.remembra.dev/?checkout=success",
             "checkout_binding": None,
             "has_subscription": True,
         }

@@ -1,88 +1,90 @@
-# Remembra — Competitive Landscape & Roadmap (2026)
+# Remembra: competitive landscape (2026-09-25)
 
-A field scan of the AI agent-memory market and a prioritized plan to put Remembra
-demonstrably above it. Sourced from competitor docs, papers, and benchmarks (June 2026).
+A scan of the tools a Remembra Relay buyer compares us with, in three groups: memory layers, the memory built
+into each agent vendor's product, and handoff tools and orchestrators.
 
-## TL;DR
+**Rules for this page.** Every fact about another product cites the page it came from, with the date we read
+it. "Not checked" means nobody verified it; don't repeat it publicly until someone does. Prices and star
+counts change: re-check before quoting. Star counts come from the GitHub API on 2026-09-25. This replaces the
+June 2026 version, which had several errors (it marked Remembra closed source, said Zep and Letta had no MCP,
+and quoted benchmark numbers without sources).
 
-Remembra already ships a feature set most competitors don't: a 3-stage retrieval
-pipeline (FTS5/BM25 + vector → cross-encoder rerank → graph expansion), entity/knowledge
-graph, temporal decay + TTL + **cold archive**, **sleep-time consolidation**, conflict
-resolution, multi-tenant RBAC/teams, AES-256-GCM at rest, 2FA, webhooks, MCP, and
-**audio/meeting ingestion**. The last three (cold archive, sleep consolidation, audio
-ingest) are near-unique. The gap to the leaders is **proof** (a published benchmark) and
-a few high-leverage capabilities, not raw features.
+## Where Remembra sits
 
-## Where the field stands
+Remembra Relay is a hosted (or self-hosted, MIT) continuity layer: when an agent stops, it saves a handoff
+built from git facts, checks the agent's own summary against them, and the next agent, in another tool or on
+another machine, starts from a brief. Every handoff stays on a trail. Underneath is a memory API with an MCP
+server of 21 tools (`src/remembra/mcp/server.py`).
 
-| Capability | Remembra | Mem0 | Letta | Zep/Graphiti | Cognee | Supermemory |
-|---|---|---|---|---|---|---|
-| Hybrid (FTS+vector) | ✓ | ✓ | partial | ✓ | ✓ | ✓ |
-| Cross-encoder rerank | ✓ | ✓ | – | – | partial | ✓ |
-| Knowledge graph | ✓ | Pro+ | partial | ✓ | ✓ | partial |
-| Bi-temporal | ✓ | partial | – | ✓ (core) | – | partial |
-| Temporal decay | ✓ | – | – | ✓ | – | partial |
-| Cold archive | ✓ | – | – | – | – | ✓ |
-| Sleep consolidation | ✓ | – | – | – | – | – |
-| Conflict resolution | ✓ | LLM | partial | temporal | partial | partial |
-| Audio/meeting ingest | ✓ | – | – | – | – | – |
-| MCP-native | ✓ | ✓ | emerging | – | ✓ | ✓ |
-| Open source | – | – | ✓ | Graphiti | core | – |
+- Cloud prices: Free; Solo $12/mo; Pro $29/mo; Team $15/seat/mo, 3-seat minimum (`src/remembra/cloud/plans.py`,
+  [remembra.dev/pricing](https://remembra.dev/pricing)).
+- Verified agents: Claude Code only. Codex, Cursor, Gemini CLI, Qwen Code and Kimi hooks are shipped
+  unverified (`docs/guides/relay.md`).
 
-### Benchmarks (2026 SOTA)
-- **LoCoMo** (1,540 Qs, the conversational-memory standard): SOTA ≈ **92.5** (Mem0,
-  Apr 2026); ByteRover 92.2; others 80–89. **Publish-target: 93.5+.**
-- **LongMemEval** (500 Qs): cloud SOTA ≈ 94.4 (Mem0); MemPalace 96.6 (local-only).
-- **BEAM** (1M–10M tokens, production realism): Mem0 64.1 / 48.6; field largely unbenchmarked.
+## 1. Memory layers
 
-### Competitor one-liners
-- **Mem0** — primary threat; mature API, 21 integrations, token-efficient, SOC2/HIPAA.
-  Gaps: pricing cliff ($19→$249 for graph), no consolidation, calls staleness "unresolved."
-- **Letta/MemGPT** — open-source agent runtime, clean 3-tier memory. Gaps: no entity
-  graph, no decay/TTL, MCP emerging, no published benchmarks.
-- **Zep/Graphiti** — temporal-KG specialist (bi-temporal edges). Gaps: token bloat
-  (~600K/conv), community edition deprecated, REST-only (no MCP).
-- **Cognee** — well-funded (€7.5M seed), MCP-native, enterprise traction. Gaps: no
-  published benchmarks, no decay, no audio.
-- **Supermemory** — claims the benchmark trifecta but numbers are inconsistent and
-  unverified; opaque (no public repo/docs).
-- **OpenAI / Anthropic memory** — consumer/filesystem-grade; not API-first agent memory.
+| Product | What it is | Price | MCP | Source (accessed 2026-09-25) |
+|---|---|---|---|---|
+| Mem0 | Memory API for AI apps | Free; Starter $19; Pro $249 (graph memory on Pro) | Not checked | [mem0.ai/pricing](https://mem0.ai/pricing) |
+| Zep | Agent memory on the Graphiti knowledge graph | Free; Flex $125; Flex Plus $375 | Yes: Graphiti MCP server; MCP server seats on its plans | [getzep.com/pricing](https://www.getzep.com/pricing/), [Graphiti MCP](https://help.getzep.com/graphiti/getting-started/mcp-server) |
+| Letta | Agent platform with memory; open source | Pro $20; Teams $20/seat; OSS free | Yes: MCP client support and a hosted server | [Letta pricing](https://docs.letta.com/letta-code/pricing), [Letta MCP](https://docs.letta.com/guides/mcp/overview/) |
+| Supermemory | Memory API | Free; Pro $19 incl. 3 seats; Max $100; Scale $399 | Claude Code and Codex plugins | [supermemory.ai/pricing](https://supermemory.ai/pricing/), [claude-supermemory](https://github.com/supermemoryai/claude-supermemory) |
+| Cognee | Memory graph; publishes HotPotQA comparisons | Not checked | Not checked | [Cognee benchmarks](https://www.cognee.ai/blog/deep-dives/knowledge-graph-memory-benchmarks) |
+| Basic Memory | Markdown memory | Team $15/seat; Business $30/seat; OSS AGPL | Via MCP | [basicmemory.com/pricing](https://basicmemory.com/pricing) |
+| ByteRover | Context memory | Free; Pro $15/mo billed yearly | Via MCP | [byterover.dev/pricing](https://www.byterover.dev/pricing) |
 
-## Roadmap to surpass the field
+None of these builds a handoff from git facts or keeps a trail of sessions across agents. They are the better
+choice for app memory (a chatbot that remembers its users), which Remembra's API also does but is not what we
+lead with.
 
-### Quick wins (highest leverage first)
-1. **Publish a reproducible LoCoMo benchmark** targeting 93.5+ with open methodology and
-   code. This is the single biggest credibility move — the leaders compete on this number
-   and Supermemory's opacity is an opening. *(Foundation: a recall-quality eval harness.)*
-2. **Salience-aware memory** — pin (never-forget) + importance-weighted decay.
-   ✅ **Shipped in 0.14.0.** Cognitive-science-aligned; none of the competitors expose
-   user-controlled decay protection.
-3. **Webhook events for memory lifecycle** (consolidation done, archive moved, conflict
-   resolved) so agents can react to memory changes — closes the agent feedback loop.
+## 2. Memory built into the agent vendors
 
-### Medium effort
-4. **Bi-temporal cold archive cost story** — benchmark tokens/query vs Zep's ~600K and
-   publish the delta; tier hot/warm/cold explicitly.
-5. **Audio/meeting ingest with diarization** — connect Otter/Fireflies/Krisp transcripts,
-   map speakers to entities. This is open whitespace (no competitor has it).
-6. **Per-tenant envelope encryption + key rotation** ("blind indexing") for regulated
-   verticals (health/finance) — a compliance differentiator over Mem0's basic RBAC.
+| Product | What it does | Limits | Source (accessed 2026-09-25) |
+|---|---|---|---|
+| Claude Code | Auto memory, agent teams, cross-session messaging, agent view, Remote Control | Claude only; agent-teams docs: two teammates editing one file overwrite each other, and in-process teammates do not survive resume | [agent teams](https://code.claude.com/docs/en/agent-teams), [cross-session messaging](https://code.claude.com/docs/en/cross-session-messaging), [agent view](https://claude.com/blog/agent-view-in-claude-code) |
+| Codex | Local memories | Codex only; off by default | [Codex memories](https://learn.chatgpt.com/docs/customization/memories?surface=app) |
+| GitHub Copilot | Agentic memory, validated against the code, 28-day expiry | Copilot only; public preview | [GitHub changelog](https://github.blog/changelog/2026-01-15-agentic-memory-for-github-copilot-is-in-public-preview/) |
+| Windsurf | Cascade memories | Windsurf only; one workspace | [Windsurf memories](https://docs.windsurf.com/windsurf/cascade/memories) |
 
-### Large effort
-7. **Deepen sleep-time consolidation** — retroactive conflict resolution + redundancy
-   compression on idle, measured against steady-state latency/footprint. This is the
-   true differentiator; lead with it.
-8. **First-class framework integrations** (LangGraph/Autogen) to become the shared brain
-   for multi-agent systems.
+Each vendor's memory stays inside that vendor. That is the gap Remembra Relay fills, and also the platform risk:
+if a vendor ships cross-vendor handoffs, the gap narrows. Check Anthropic's and OpenAI's changelogs weekly.
 
-## Positioning angles (true given the feature set)
-- *"A memory control plane, not just a retriever."* Full visibility: graph, consolidation
-  logs, archive tiers, conflict audit trail.
-- *"Agents that actually remember meetings."* Native audio/diarization ingest.
-- *"Temporal memory done right."* Cognitive decay + consolidation + cold archive +
-  conflict-by-time.
-- *"MCP-first."* One-click into Claude/Cursor and any MCP client.
+## 3. Handoff tools and orchestrators
 
----
-*Compiled June 2026 from competitor documentation, arXiv papers, and public benchmarks.
-Treat specific competitor numbers as point-in-time; re-verify before publishing claims.*
+### Handoff tools
+
+| Tool | What it does | License | Stars | Source (accessed 2026-09-25) |
+|---|---|---|---|---|
+| claude-mem | LLM-compressed session memory for Claude Code, Codex and Cursor | Apache-2.0 | 94,704 | [repo](https://github.com/thedotmack/claude-mem) |
+| agentmemory | Memory plus `/handoff`, `session_handoff`, `memory_lease`, `memory_commit_lookup`; hooks for Claude Code, Codex, Copilot CLI and more; P2P sync | Apache-2.0 | 28,860 | [repo](https://github.com/rohitg00/agentmemory) |
+| continues | Local handoff across 16 agents from their transcripts; last push 2026-05-07 | MIT | about 1.5k | [repo](https://github.com/yigitkonur/cli-continues) |
+| catchup | Local handoff across 11 agents | MIT | 73 | [repo](https://github.com/wilbeibi/catchup) |
+| waybill | Local handoff bundle from diff, commands and tests; treats the bundle as untrusted | Apache-2.0 | 95 | [repo](https://github.com/wardmos/waybill) |
+| relay-dev | Local handoff CLI with rate-limit detection; similar name to ours | MIT | 39 | [repo](https://github.com/Manavarya09/relay) |
+
+The public comparison is [Remembra and other handoff tools](comparisons/handoff-tools.md).
+
+### Orchestrators
+
+| Tool | What it does | Source (accessed 2026-09-25) |
+|---|---|---|
+| Conductor | Mac app running Claude Code, Codex and Cursor in worktrees on one machine; paid tiers reported, not confirmed | [research note](https://rywalker.com/research/conductor) |
+| Superset, Sculptor | Parallel agents in worktrees (Superset) or Docker (Sculptor, free beta) | [comparison](https://superset.sh/compare/superset-vs-sculptor) |
+| Claude Squad | Terminal manager for several agents | [overview](https://vibecodinghub.org/tools/claude-squad) |
+| Terragon, Crystal, Vibe Kanban | Shut down in 2026 | [Vibe Kanban alternatives](https://aq.dev/alternatives/vibe-kanban/) |
+| Also compared in | Round-up of Claude Code multi-agent tools | [munderdiffl.in](https://munderdiffl.in/blog/best-claude-code-multi-agent-tools/) |
+
+Orchestrators isolate agents on one machine and carry nothing between sessions. Remembra should work inside
+them (their agents run the real CLIs, so the hooks should fire; not yet verified), not compete with them.
+
+## What is defensible
+
+- Handoff facts read from git, and the agent's summary checked against them (grounding).
+- Hosted identity across machines, with no local engine, by git remote.
+- Key-verified attribution with agent-scoped keys.
+- Untrusted-data framing of everything agents recorded.
+- A durable trail.
+- Crew mode's zones, which block same-file edits between agents (in build; not shipped).
+
+What is not defensible: "first", "only", or "no competitor". claude-mem and agentmemory are larger, and the
+free local tools do the everyday limit-switch well.
