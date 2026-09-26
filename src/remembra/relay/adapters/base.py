@@ -115,16 +115,33 @@ class AdapterSpec:
     end_event: str | None
     payload: PayloadMap = field(default_factory=PayloadMap)
     output: str = "text"
-    transcript_format: str | None = None  # only "claude-jsonl" is parsed
+    transcript_format: str | None = None  # "claude-jsonl" | "codex-rollout-jsonl" (facts.TRANSCRIPT_FORMATS); None: not parsed
     detect_bins: tuple[str, ...] = ()
     detect_dirs: tuple[str, ...] = ()  # relative to home
     config_source: str | None = None  # prefer this config file for the API key ("claude" | "codex")
-    hook_timeout: int | None = None  # seconds, only where the unit is verified
+    # Per-hook timeouts in SECONDS, keyed "start" / "prompt" / "end"; written in the agent's
+    # own unit (``timeout_unit``). Only set where the agent documents the field and unit.
+    hook_timeouts: dict[str, int] = field(default_factory=dict)
+    timeout_unit: str = "s"  # "s" or "ms" (Gemini CLI reads milliseconds: 15 would be 15 ms)
+    # A third event that runs `brief --once`: delivers the brief when the start event did
+    # not fire (Codex does not fire SessionStart when it auto-restores a thread).
+    prompt_event: str | None = None
+    # `close` hands the work to a detached process and exits at once: for agents that
+    # do not wait for the end hook or kill it after a short timeout.
+    detach_close: bool = False
+    # Printed by `connect` after writing: a step the user must take before the hooks run.
+    setup_note: str = ""
     notes: str = ""
     # Events besides ``end_event`` that write the handoff early (Claude Code:
     # StopFailure on a usage/billing limit, PreCompact). A later close of the
     # same session supersedes it on the server.
     extra_close_events: tuple[CloseEvent, ...] = ()
+
+    def timeout_value(self, key: str) -> int | None:
+        seconds = self.hook_timeouts.get(key)
+        if not seconds:
+            return None
+        return seconds * 1000 if self.timeout_unit == "ms" else seconds
 
 
 @dataclass
@@ -172,7 +189,7 @@ def relay_command() -> str:
 
 
 # Our hook entries end with "<verb> --hook <adapter> --agent <id>", whatever the binary path is.
-_RELAY_ARGS_RE = re.compile(r"\s(?:brief|close) --hook [\w.-]+ --agent \S+$")
+_RELAY_ARGS_RE = re.compile(r"\s(?:brief|close) --hook [\w.-]+ --agent \S+(?: --once)?$")
 
 
 def is_relay_command(command: Any) -> bool:
@@ -242,17 +259,25 @@ class Adapter:
 
     def commands(self, relay: str) -> dict[str, str]:
         base = f"{relay} {{verb}} --hook {self.spec.name} --agent {self.spec.name}"
-        return {"start": base.format(verb="brief"), "end": base.format(verb="close")}
+        commands = {"start": base.format(verb="brief"), "end": base.format(verb="close")}
+        if self.spec.prompt_event:
+            commands["prompt"] = base.format(verb="brief") + " --once"
+        return commands
 
     def hook_events(self) -> list[tuple[str, str, str | None]]:
-        """``(command key, event, matcher)`` for every hook this adapter installs."""
-        events: list[tuple[str, str, str | None]] = []
-        if self.spec.start_event:
-            events.append(("start", self.spec.start_event, None))
-        if self.spec.end_event:
-            events.append(("end", self.spec.end_event, None))
+        """``(command key, event, matcher)`` for every hook this adapter installs.
+
+        The start, prompt (``brief --once``) and end events, then the extra
+        events that also run ``close`` (with their matcher, if any).
+        """
+        pairs = [("start", self.spec.start_event), ("prompt", self.spec.prompt_event), ("end", self.spec.end_event)]
+        events: list[tuple[str, str, str | None]] = [(key, event, None) for key, event in pairs if event]
         events.extend(("end", extra.event, extra.matcher) for extra in self.spec.extra_close_events)
         return events
+
+    def events(self) -> list[tuple[str, str]]:
+        """``(command key, event)`` for every hook this adapter writes (:meth:`hook_events` without matchers)."""
+        return [(key, event) for key, event, _ in self.hook_events()]
 
     def plan(self, home: Path, relay: str) -> Change:
         path = self.spec.config_path(home)
@@ -296,14 +321,15 @@ class JsonHooksAdapter(Adapter):
 
     legacy_markers: tuple[str, ...] = ()
 
-    def _entry(self, command: str) -> dict[str, Any]:
+    def _entry(self, key: str, command: str) -> dict[str, Any]:
         hook: dict[str, Any] = {"type": "command", "command": command}
-        if self.spec.hook_timeout:
-            hook["timeout"] = self.spec.hook_timeout
+        timeout = self.spec.timeout_value(key)
+        if timeout:
+            hook["timeout"] = timeout
         return {"hooks": [hook]}
 
-    def _group(self, command: str, matcher: str | None) -> dict[str, Any]:
-        group = self._entry(command)
+    def _group(self, key: str, command: str, matcher: str | None) -> dict[str, Any]:
+        group = self._entry(key, command)
         return {"matcher": matcher, **group} if matcher else group
 
     def render(self, before: str | None, relay: str) -> tuple[str, list[str]]:
@@ -317,7 +343,7 @@ class JsonHooksAdapter(Adapter):
         for key, event, matcher in self.hook_events():
             groups = hooks.get(event)
             groups = list(groups) if isinstance(groups, list) else []
-            wanted = self._entry(commands[key])["hooks"][0]
+            wanted = self._entry(key, commands[key])["hooks"][0]
             kept: list[Any] = []
             present = False
             for group in groups:
@@ -343,7 +369,7 @@ class JsonHooksAdapter(Adapter):
                 if remaining:
                     kept.append({**group, "hooks": remaining})
             if not present:
-                kept.append(self._group(commands[key], matcher))
+                kept.append(self._group(key, commands[key], matcher))
                 on = f" (matcher `{matcher}`)" if matcher else ""
                 summary.append(f"{event}{on}: add `{commands[key]}`")
             hooks[event] = kept

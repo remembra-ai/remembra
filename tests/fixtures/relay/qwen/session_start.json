@@ -1,0 +1,10 @@
+{
+  "session_id": "b8e4f0a2-19c3-4d6e-a7f5-2c9b1d3e4f60",
+  "transcript_path": "/home/dev/.qwen/tmp/9f86d081884c7d65/chats/session-b8e4f0a2.json",
+  "cwd": "/home/dev/work/widget",
+  "hook_event_name": "SessionStart",
+  "timestamp": "2026-09-25T15:10:03.004Z",
+  "permission_mode": "default",
+  "source": "startup",
+  "model": "qwen3-coder-plus"
+}

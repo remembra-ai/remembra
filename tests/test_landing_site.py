@@ -224,7 +224,8 @@ def test_lede_does_not_promise_a_handoff_after_a_closed_lid() -> None:
 
 def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
     note = _text(re.search(r'<p class="fine" id="agents-note">.*?</p>', (LANDING / "index.html").read_text(), re.S).group(0))
-    assert "Claude Code's session hooks are verified" in note
+    assert "Claude Code's and Codex's session hooks are verified" in note
+    assert "run /hooks once" in note  # Codex skips untrusted hooks silently
     assert "unverified" in note and "beta" not in note.lower()
     assert "through Remembra's MCP tools" in note
     # what remembra-relay connect really does (relay/cli.py): a dry run until --apply, unverified adapters opt-in
@@ -233,8 +234,14 @@ def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
 
     specs = [adapter.spec for adapter in REGISTRY.values()]
     unverified = [spec for spec in specs if not spec.verified]
-    assert [spec.name for spec in specs if spec.verified] == ["claude-code"]
-    assert len(unverified) == 5  # Codex, Cursor, Gemini CLI, Qwen Code and Kimi, as the note names them
+    assert [spec.name for spec in specs if spec.verified] == ["claude-code", "codex"]
+    assert "codex-cli 0.155" in note and REGISTRY["codex"].spec.notes.startswith("Verified with codex-cli 0.155.")
+    # only a prerelease was run, through codex exec against a local model stand-in (codex.TESTED_VERSIONS)
+    assert "Codex with a prerelease of codex-cli 0.155 (" in note and "codex exec" in note
+    assert "with a local stand-in for the model)" in note
+    assert "other Codex versions have not been run" in note and "live round trip" not in note
+    assert len(unverified) == 4  # Cursor, Gemini CLI, Qwen Code and Kimi, as the note names them
+    assert "hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified" in note
     # which agents the second install line really writes MCP config for (tools/agents.py)
     from remembra.tools.agents import AGENT_CONFIGS
 
@@ -1042,3 +1049,18 @@ def test_predeploy_check_fails_while_pypi_is_behind_the_install_gate() -> None:
     assert unreachable == ["PyPI could not be reached to confirm remembra>=0.16 is released"]
     _, ok = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.0")
     assert ok == []
+
+
+def test_codex_verification_copy_says_what_was_run() -> None:
+    """Changelog and guide: the Claude Code half was replayed, the model was a stand-in, the build a prerelease."""
+    root = LANDING.parent
+    changelog = " ".join((root / "CHANGELOG.md").read_text().split())
+    guide = " ".join((root / "docs" / "guides" / "relay.md").read_text().split())
+    for text in (changelog, guide):
+        assert "0.155.0-alpha.16.4" in text and "prerelease" in text
+        assert "replayed through its verified hook path (not a live Claude Code session)" in text
+        assert "local stand-in for the model" in text
+        assert "live round trip" not in text
+    assert "No stable Codex release has been run" in changelog
+    assert "no stable Codex release has been run yet" in guide
+    assert "| verified (codex-cli 0.155.0-alpha.16.4, a prerelease) |" in guide

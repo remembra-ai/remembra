@@ -1,0 +1,13 @@
+{
+  "conversation_id": "c0a8012e-7f4b-4e1a-9d2c-5b6e7f8a9b0c",
+  "generation_id": "e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a5b",
+  "model": "claude-sonnet",
+  "hook_event_name": "sessionStart",
+  "cursor_version": "3.21.0",
+  "workspace_roots": ["/home/dev/work/widget"],
+  "user_email": null,
+  "transcript_path": "/home/dev/.cursor/projects/home-dev-work-widget/agent-transcripts/c0a8012e.txt",
+  "session_id": "c0a8012e-7f4b-4e1a-9d2c-5b6e7f8a9b0c",
+  "is_background_agent": false,
+  "composer_mode": "agent"
+}

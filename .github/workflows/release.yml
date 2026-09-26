@@ -1,68 +1,185 @@
 name: Release
 
+# One tag (vX.Y.Z) builds once, then publishes the same files to PyPI
+# (remembra + the remembra-mcp launcher), the MCP Registry, Docker Hub and a
+# GitHub release.
+#
+# Supply-chain rules (tests/test_release_workflow.py enforces them):
+# - every action is pinned to a full commit SHA, with the tag in a comment;
+#   Dependabot (.github/dependabot.yml) proposes updates.
+# - no job gets a permission it does not use; only the two publish jobs can
+#   mint an OIDC token, and they wait for approval in the `release`
+#   environment (GitHub > Settings > Environments > release > required reviewers).
+# - PyPI uses trusted publishing (no stored token) and uploads PEP 740
+#   attestations; the Docker image carries provenance and an SBOM.
+
 on:
   push:
     tags:
       - 'v*'
 
-permissions:
-  contents: write
-  id-token: write  # For PyPI trusted publishing
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  release:
+  build:
+    name: Build and check
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Extract version from tag
-        id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-      
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          name: ${{ steps.version.outputs.VERSION }}
-          generate_release_notes: true
-          draft: false
-          prerelease: false
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
-      # PyPI Publishing
+          persist-credentials: false
+
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.11"
-      
-      - name: Install build tools
-        run: pip install build twine
-      
-      - name: Build package
-        run: python -m build
-      
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: Versions agree with the tag
+        run: python scripts/check_release_versions.py "$GITHUB_REF_NAME"
+
+      - name: Build remembra and the remembra-mcp launcher
+        run: |
+          python -m pip install build
+          python -m build --outdir dist .
+          python -m build --outdir dist packages/remembra-mcp
+          # pypa/gh-action-pypi-publish verifies the metadata before upload
+          # (verify-metadata); the twine in our dev venv (6.2) rejects
+          # hatchling's Metadata-Version 2.5, so it is not run here.
+
+      - name: The command MCP Registry clients run answers initialize
+        # Clients start the server.json entry as `uvx remembra-mcp==<version>`.
+        # Installed here from the wheels just built (dependencies from PyPI).
+        run: |
+          python -m pip install uv
+          version=$(python -c 'import json; print(json.load(open("server.json"))["version"])')
+          REMEMBRA_URL=http://127.0.0.1:9 REMEMBRA_API_KEY=rem_release_check REMEMBRA_AGENT_ID=release-check \
+            python scripts/mcp_stdio_check.py --expect-tool session_brief --expect-tool close_session -- \
+            uvx --isolated --find-links dist "remembra-mcp==${version}"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-      
-      # Docker Publishing
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  publish-pypi:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://pypi.org/project/remembra/
+    permissions:
+      id-token: write # trusted publishing + attestations; no API token
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish remembra and remembra-mcp
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          attestations: true
+
+  publish-mcp-registry:
+    name: Publish to the MCP Registry
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # mcp-publisher login github-oidc
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+      MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc # mcp-publisher_linux_amd64.tar.gz
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - name: Install mcp-publisher (pinned, checksum verified)
+        run: |
+          curl -fsSL -o mcp-publisher.tar.gz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum --check --strict
+          tar -xzf mcp-publisher.tar.gz mcp-publisher
+          ./mcp-publisher --help >/dev/null
+
+      - name: Wait until PyPI serves the launcher
+        # The registry checks the PyPI package (and the mcp-name line in its
+        # README) when it accepts the entry; a fresh upload can take a minute.
+        run: |
+          version=$(python3 -c 'import json; print(json.load(open("server.json"))["version"])')
+          for attempt in $(seq 1 30); do
+            if curl -fsS -o /dev/null "https://pypi.org/pypi/remembra-mcp/${version}/json"; then exit 0; fi
+            sleep 10
+          done
+          echo "remembra-mcp ${version} is not on PyPI after 5 minutes" >&2
+          exit 1
+
+      - name: Validate and publish server.json
+        run: |
+          ./mcp-publisher validate server.json
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish server.json
+
+  docker:
+    name: Publish the Docker image
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: release
+      url: https://hub.docker.com/r/remembra/remembra
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
+
+      - name: Build and push (with provenance and SBOM)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: true
+          provenance: mode=max
+          sbom: true
           tags: |
-            remembra/remembra:${{ steps.version.outputs.VERSION }}
+            remembra/remembra:${{ github.ref_name }}
             remembra/remembra:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+
+  github-release:
+    name: GitHub release
+    needs: [publish-pypi, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist/
+
+      - name: Create the release with the published files
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          files: dist/*

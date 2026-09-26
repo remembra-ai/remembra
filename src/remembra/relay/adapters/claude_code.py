@@ -39,7 +39,7 @@ SPEC = AdapterSpec(
     detect_bins=("claude",),
     detect_dirs=(".claude",),
     config_source="claude",
-    hook_timeout=15,
+    hook_timeouts={"start": 15, "end": 15},
     notes="Verified against Claude Code hook docs and real JSONL transcripts.",
     extra_close_events=(CloseEvent("StopFailure", "|".join(LIMIT_ERRORS)), CloseEvent("PreCompact")),
 )

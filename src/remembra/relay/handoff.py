@@ -472,12 +472,15 @@ def handoff_ended_at(handoff: dict[str, Any]) -> Any:
     return relay.get("closed_at") or handoff.get("created_at")
 
 
-# End reasons ``remembra-relay close`` records for a session that is still open:
-# the API error that stopped a turn (Claude Code's StopFailure ``error``) and a
-# close written just before context compaction.
+# End reasons ``remembra-relay close`` records for work that stopped rather than
+# finished: the API error that stopped a turn (Claude Code's StopFailure
+# ``error``) and a Codex session whose last turn hit its usage limit (read from
+# the rollout, see ``USAGE_LIMIT_REASON`` in the CLI). A close written just
+# before context compaction is noted separately.
 STOP_REASONS = frozenset(
     {
         "rate_limit",
+        "usage_limit",
         "billing_error",
         "account_on_hold",
         "cloud_credential_error",

@@ -2,7 +2,7 @@
 
 Subcommands::
 
-    remembra-relay brief   [--agent X] [--cwd DIR] [--hook NAME] [--format text|json|hook-json|cursor-json]
+    remembra-relay brief   [--agent X] [--cwd DIR] [--hook NAME] [--format text|json|hook-json|cursor-json] [--once]
     remembra-relay close   [--agent X] [--session-id S] [--cwd DIR] [--transcript PATH] [--reason R] [--hook NAME]
     remembra-relay trail   [--cwd DIR] [--project P] [--limit N]
     remembra-relay resolve [--cwd DIR] [--project P] [--bind]
@@ -14,6 +14,10 @@ Subcommands::
 git calls and HTTP bounded), never raise, always exit 0 and report problems
 on stderr. With ``--hook NAME`` the agent's hook payload is read from stdin
 (session id, cwd, transcript path, end reason) using that adapter's mapping.
+``brief --once`` prints nothing when this session already had its brief (a
+per-prompt hook that covers a missed start hook). For adapters whose agent
+does not wait for the end hook, ``close --hook`` re-runs itself in a detached
+process and returns at once.
 
 A close that cannot be delivered is queued in ``~/.remembra/relay/outbox``
 and sent again by the next ``brief`` or ``close`` (see
@@ -43,6 +47,7 @@ import hashlib
 import json
 import os
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -71,6 +76,7 @@ REPLAY_MAX_ENTRIES = 5
 REPLAY_BUDGET_SECONDS = 3.5
 # Time a close keeps for sending its own handoff when it sends queued ones first.
 CLOSE_RESERVE_SECONDS = 4.0
+USAGE_LIMIT_REASON = "usage_limit"  # end_reason when the transcript shows a usage-limit stop
 
 
 def _err(message: str) -> None:
@@ -156,6 +162,29 @@ def load_session_state(home: Path, agent: str, session_id: str) -> dict[str, Any
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def _brief_marker_path(home: Path, key: str, session_id: str) -> Path:
+    digest = hashlib.sha256(f"brief\x1f{key}\x1f{session_id}".encode()).hexdigest()[:24]
+    return _state_dir(home) / f"brief-{digest}.json"
+
+
+def brief_delivered(home: Path, key: str, session_id: str) -> bool:
+    """True when this session already got its brief (see ``brief --once``)."""
+    try:
+        return time.time() - _brief_marker_path(home, key, session_id).stat().st_mtime <= STATE_TTL_SECONDS
+    except OSError:
+        return False
+
+
+def mark_brief_delivered(home: Path, key: str, session_id: str) -> None:
+    path = _brief_marker_path(home, key, session_id)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"at": datetime.now(UTC).isoformat()}))
+        os.chmod(path, 0o600)
+    except OSError as e:
+        _err(f"could not record the brief ({e.__class__.__name__})")
 
 
 def _adhoc_marker_path(home: Path, agent: str, host: str, anchor: str) -> Path:
@@ -485,13 +514,33 @@ def _emit_brief(mode: str, text: str, raw: dict[str, Any] | None, notices: list[
         print(text)
 
 
+def _once_key(args: argparse.Namespace, adapter: Adapter | None) -> str:
+    return (adapter.spec.name if adapter else None) or getattr(args, "agent", None) or "unknown-agent"
+
+
 def cmd_brief(args: argparse.Namespace) -> int:
     mode = args.format or "text"
     ctx: Context | None = None
     try:
-        ctx = Context(args)
+        adapter = get_adapter(getattr(args, "hook", None))
+        payload = read_hook_payload() if adapter else {}
+        fields = adapter.spec.payload.extract(payload) if adapter else {}
+        hook_session = fields.get("session_id") or args.session_id
+        home = Path(os.environ.get("HOME") or Path.home())
+        # --once (a per-prompt hook) and a resumed session whose context already holds the
+        # brief: deliver only if this session has not had one. Checked before any git or HTTP
+        # work, because the prompt hook runs on every prompt.
+        once = bool(args.once) or (payload.get("source") == "resume" and bool(adapter and adapter.spec.prompt_event))
+        once_key = _once_key(args, adapter)
+        if once:
+            if not hook_session or brief_delivered(home, once_key, hook_session):
+                return 0
+        ctx = Context(args, payload=payload)
         if not args.format and ctx.adapter:
             mode = ctx.adapter.spec.output
+        if hook_session:
+            # Recorded before the HTTP call: a failed brief is not retried on every prompt.
+            mark_brief_delivered(ctx.home, once_key, hook_session)
         if not ctx.config.api_key:
             _emit_brief(
                 mode,
@@ -575,15 +624,17 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
     """Gather facts deterministically and build the ``/session/close`` body."""
     transcript_path = args.transcript or ctx.hook_fields.get("transcript")
     transcript = None
-    parse_ok = ctx.adapter is None or ctx.adapter.spec.transcript_format == "claude-jsonl"
-    if transcript_path and parse_ok:
+    if transcript_path:
         path = Path(transcript_path).expanduser()
         if path.is_file():
-            try:
-                transcript = factlib.parse_claude_transcript(path, factlib.Deadline(3.0), root=ctx.repo.toplevel)
-            except Exception as e:
-                _err(f"transcript not parsed ({e.__class__.__name__}); using git facts only")
-        else:
+            # A hook's adapter names its format (None: not parsed); a path given by hand is sniffed.
+            fmt = ctx.adapter.spec.transcript_format if ctx.adapter else factlib.detect_transcript_format(path)
+            if fmt in factlib.TRANSCRIPT_FORMATS:
+                try:
+                    transcript = factlib.parse_transcript(path, fmt, factlib.Deadline(3.0), root=ctx.repo.toplevel)
+                except Exception as e:
+                    _err(f"transcript not parsed ({e.__class__.__name__}); using git facts only")
+        elif not ctx.adapter or ctx.adapter.spec.transcript_format:
             _err(f"transcript not found: {path}")
 
     agent = ctx.agent or "unknown-agent"
@@ -632,7 +683,12 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
         payload["project_id"] = project["project_id"]
     else:
         payload["project"] = project
-    reason = args.reason or ctx.hook_fields.get("reason")
+    limit = transcript.usage_limit if transcript else None
+    if limit:
+        # The agent's last turn stopped on its plan's usage limit: say so first, so
+        # whoever picks up knows the work stopped mid-way, not because it was done.
+        facts["errors"] = [f"Stopped on a usage limit: {limit}", *(facts.get("errors") or [])]
+    reason = args.reason or (USAGE_LIMIT_REASON if limit else None) or ctx.hook_fields.get("reason")
     if reason:
         payload["end_reason"] = reason
     if args.summary:
@@ -658,11 +714,58 @@ def _queue_close(ctx: Context, payload: dict[str, Any], error: str, http_status:
         _err(f"the handoff is queued in {path.parent} and will be sent by the next brief or close")
 
 
+def _close_log_path(home: Path) -> Path:
+    return home / ".remembra" / "relay" / "last-detached-close.log"
+
+
+def spawn_detached_close(args: argparse.Namespace, hook_payload: dict[str, Any]) -> bool:
+    """Re-run this ``close`` in a new session (its own process group) and return.
+
+    The child gets the hook payload on stdin and ``--foreground``; its stderr
+    goes to ``~/.remembra/relay/last-detached-close.log``. The agent can exit,
+    kill the hook, or close its terminal, and the handoff is still posted.
+    False when the child could not be started (the caller closes inline).
+    """
+    home = Path(os.environ.get("HOME") or Path.home())
+    argv = [sys.executable, "-m", "remembra.relay.cli", *getattr(args, "raw_argv", ["close"]), "--foreground"]
+    log_path = _close_log_path(home)
+    log: Any = subprocess.DEVNULL
+    try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        log = os.fdopen(fd, "w")
+    except OSError:
+        log = subprocess.DEVNULL
+    kwargs: dict[str, Any] = {}
+    if os.name == "nt":  # pragma: no cover - exercised on Windows only
+        kwargs["creationflags"] = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        child = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=log, close_fds=True, **kwargs)
+        assert child.stdin is not None
+        with child.stdin:
+            child.stdin.write(json.dumps(hook_payload).encode())
+    except (OSError, ValueError) as e:
+        _err(f"could not detach the close ({e.__class__.__name__}); closing inline")
+        return False
+    finally:
+        if log is not subprocess.DEVNULL:
+            log.close()
+    return True
+
+
 def cmd_close(args: argparse.Namespace) -> int:
     ctx: Context | None = None
     payload: dict[str, Any] | None = None
     try:
-        ctx = Context(args)
+        adapter = get_adapter(getattr(args, "hook", None))
+        hook_payload: dict[str, Any] | None = None
+        if adapter and adapter.spec.detach_close and not args.foreground and not args.dry_run:
+            hook_payload = read_hook_payload()
+            if spawn_detached_close(args, hook_payload):
+                return 0
+        ctx = Context(args, payload=hook_payload)
         payload = build_close_payload(ctx, args)
         if args.dry_run:
             print(json.dumps(payload, indent=2))
@@ -812,6 +915,8 @@ def cmd_connect(args: argparse.Namespace) -> int:
         print(f"\n[{name}] {spec.display} ({label}) -> {change.path}")
         if spec.notes:
             print(f"  note: {spec.notes}")
+        if spec.setup_note:
+            print(f"  REQUIRED: {spec.setup_note}")
         if not change.changed:
             print("  already connected, no change")
             continue
@@ -1081,11 +1186,16 @@ def build_parser() -> argparse.ArgumentParser:
     common(p_brief)
     p_brief.add_argument("--format", choices=["text", "json", "hook-json", "cursor-json"], help="Output format")
     p_brief.add_argument("--recent", type=int, default=8, help="Recent memories to include (default 8)")
+    p_brief.add_argument(
+        "--once", action="store_true", help="Print nothing if this session already had its brief (for per-prompt hooks)"
+    )
     p_brief.set_defaults(func=cmd_brief)
 
     p_close = sub.add_parser("close", help="Gather session facts and store the handoff")
     common(p_close)
-    p_close.add_argument("--transcript", help="Claude Code JSONL transcript to extract commands/tests/todos from")
+    p_close.add_argument(
+        "--transcript", help="Claude Code JSONL or Codex rollout to extract commands/tests/todos from (format detected)"
+    )
     p_close.add_argument("--reason", help="Why the session ended")
     p_close.add_argument("--summary", help="Optional summary (checked against the facts)")
     p_close.add_argument("--notes", help="Free-form notes for the next agent")
@@ -1093,6 +1203,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_close.add_argument("--todo", action="append", help="An unfinished item (repeatable)")
     p_close.add_argument("--hours", type=float, default=12.0, help="Commit window when the session start is unknown")
     p_close.add_argument("--dry-run", action="store_true", help="Print the payload instead of sending it")
+    p_close.add_argument("--foreground", action="store_true", help=argparse.SUPPRESS)  # set on the detached child
     p_close.set_defaults(func=cmd_close)
 
     p_trail = sub.add_parser("trail", help="Handoffs and checkpoints across agents, newest first")
@@ -1136,6 +1247,7 @@ def main(argv: list[str] | None = None) -> int:
         code = int(e.code) if isinstance(e.code, int) else 2
         # Hook-facing commands never fail the agent, even when miswired.
         return 0 if raw and raw[0] in ("brief", "close", "trail") else code
+    args.raw_argv = list(raw)
     try:
         code = int(args.func(args))
     except Exception as e:

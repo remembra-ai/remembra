@@ -111,7 +111,7 @@ def test_every_adapter_plans_idempotently(tmp_path):
         _write(first.path, first.after)
         assert not adapter.plan(tmp_path, "/bin/relay").changed, name
         moved = adapter.plan(tmp_path, "/new/relay")  # relay moved: our entry is replaced, not duplicated
-        hooks = 2 + len(adapter.spec.extra_close_events)
+        hooks = len(adapter.hook_events())
         assert moved.changed and moved.after.count("/new/relay") == hooks and "/bin/relay" not in moved.after, name
 
 
@@ -218,7 +218,7 @@ def test_cli_close_brief_trail_resolve_in_process(wired, monkeypatch, capsys, tm
     assert code == 0 and "close failed: HTTP 400" in err
 
     sessions = wired["home"] / ".remembra" / "relay" / "sessions"
-    state_files = [p for p in sessions.glob("*.json") if not p.name.startswith("adhoc-")]
+    state_files = [p for p in sessions.glob("*.json") if not p.name.startswith(("adhoc-", "brief-"))]
     assert len(state_files) == 1 and json.loads(state_files[0].read_text())["head"] != sha
 
 

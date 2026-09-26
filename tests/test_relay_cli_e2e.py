@@ -436,12 +436,40 @@ def test_connect_without_a_key_warns_and_fails_but_still_writes_hooks(home):
 
 def test_connect_apply_lists_the_unverified_adapters_it_skipped(home):
     relay_cmd = "/opt/bin/remembra-relay"
-    out = relay(home, "http://x", "connect", "--agent", "codex", "--agent", "gemini", "--apply", "--relay-command", relay_cmd)
+    out = relay(home, "http://x", "connect", "--agent", "qwen", "--agent", "gemini", "--apply", "--relay-command", relay_cmd)
     assert out.returncode == 0, out.stderr
-    assert "Not written (unverified adapters): codex, gemini." in out.stdout
-    assert "remembra-relay connect --apply --include-unverified --agent codex --agent gemini" in out.stdout
-    dry = relay(home, "http://x", "connect", "--agent", "codex", "--relay-command", relay_cmd)
+    assert "Not written (unverified adapters): gemini, qwen." in out.stdout
+    assert "remembra-relay connect --apply --include-unverified --agent gemini --agent qwen" in out.stdout
+    dry = relay(home, "http://x", "connect", "--agent", "qwen", "--relay-command", relay_cmd)
     assert "Not written (unverified adapters)" not in dry.stdout  # a dry run writes nothing anyway
+
+
+def test_connect_codex_writes_three_hooks_and_says_they_need_trust(home):
+    """Codex skips a hook until the user trusts it in /hooks, silently. connect must say so."""
+    relay_cmd = "/opt/bin/remembra-relay"
+    trust = "Open Codex and run /hooks to trust the three remembra-relay hooks"
+    dry = relay(home, "http://x", "connect", "--agent", "codex", "--relay-command", relay_cmd)
+    assert dry.returncode == 0 and trust in dry.stdout and "(dry run" in dry.stdout
+    out = relay(home, "http://x", "connect", "--agent", "codex", "--apply", "--relay-command", relay_cmd)
+    assert out.returncode == 0, out.stderr
+    assert "OpenAI Codex CLI (verified)" in out.stdout and "Not written" not in out.stdout
+    assert trust in out.stdout and "they will not run until you do" in out.stdout
+    # the note says which build was run and how, not just "verified"
+    assert (
+        "note: Verified with codex-cli 0.155.0-alpha.16.4 (prerelease), run through codex exec "
+        "with a local stand-in for the model; other versions have not been run." in out.stdout
+    )
+    hooks = json.loads((home / ".codex" / "hooks.json").read_text())["hooks"]
+    assert {e: [h["hooks"][0] for h in hooks[e]] for e in hooks} == {
+        "SessionStart": [{"type": "command", "command": f"{relay_cmd} brief --hook codex --agent codex", "timeout": 15}],
+        "UserPromptSubmit": [
+            {"type": "command", "command": f"{relay_cmd} brief --hook codex --agent codex --once", "timeout": 15}
+        ],
+        # Codex allows SessionEnd at most 3 s; close detaches to fit.
+        "SessionEnd": [{"type": "command", "command": f"{relay_cmd} close --hook codex --agent codex", "timeout": 3}],
+    }
+    again = relay(home, "http://x", "connect", "--agent", "codex", "--apply", "--relay-command", relay_cmd)
+    assert "already connected, no change" in again.stdout and trust in again.stdout
 
 
 def test_connect_agents_md_block_is_idempotent(home, tmp_path):

@@ -14,6 +14,41 @@ Please do **not** open public GitHub issues for security vulnerabilities.
 
 ---
 
+## Installing a release you can check
+
+`remembra-relay` runs as a session hook on your machine, so treat an upgrade
+like any other code you run. Install an exact version rather than "latest":
+
+```bash
+pipx install 'remembra==0.16.0'            # CLI + relay hooks
+uvx 'remembra-mcp==0.16.0'                 # MCP server, as the MCP Registry entry runs it
+```
+
+How releases are built (`.github/workflows/release.yml`): one `v*` tag builds
+the wheels once, a maintainer approves the `release` environment, and the same
+files go to PyPI through trusted publishing (no stored PyPI token). Every
+GitHub Action in the workflows is pinned to a commit SHA.
+
+Releases published by that workflow carry PEP 740 attestations on PyPI. To
+check that a wheel was built from this repository's release workflow:
+
+```bash
+pipx run pypi-attestations verify pypi \
+  --repository https://github.com/remembra-ai/remembra \
+  pypi:remembra-0.16.0-py3-none-any.whl
+```
+
+The Docker image is pushed with build provenance and an SBOM:
+
+```bash
+docker buildx imagetools inspect remembra/remembra:v0.16.0 --format '{{ json .Provenance }}'
+```
+
+Versions published before this workflow (0.13.2 and earlier) have no
+attestations.
+
+---
+
 ## Security Architecture
 
 ### Defense in Depth
