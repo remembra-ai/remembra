@@ -713,6 +713,17 @@ class Settings(BaseSettings):
         ),
     )
     temporal_cleanup_interval_seconds: int = Field(3600, description="Seconds between TTL cleanup runs")
+    pre_migration_backup: bool = Field(
+        True,
+        description=(
+            "Copy the SQLite database (online backup API) before schema migrations run, once per build. "
+            "Startup stops if the copy is needed and fails, so a deploy never migrates unprotected data."
+        ),
+    )
+    pre_migration_backup_keep: int = Field(3, ge=1, le=50, description="Pre-migration backups to keep (newest first)")
+    pre_migration_backup_dir: str | None = Field(
+        None, description="Directory for pre-migration backups (default: a 'backups' folder next to the database)"
+    )
     qdrant_init_retries: int = Field(5, description="Attempts to reach Qdrant at startup (exponential backoff)")
     reconcile_interval_hours: float = Field(
         24.0, description="Hours between report-only SQLite/Qdrant/FTS drift scans (0 disables)"
