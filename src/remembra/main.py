@@ -270,6 +270,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         embeddings=app.state.embeddings,
         pending_queue=app.state.pending_embeddings,
         probe_interval=settings.readiness_probe_interval_seconds,
+        app_state=app.state,  # Crew mode component (WP-16): crew_db is set by the crew hooks later
     )
 
     # Security services (Week 7)
