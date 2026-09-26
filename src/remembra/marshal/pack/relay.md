@@ -256,11 +256,11 @@ remembra-relay brief   [--agent X] [--cwd DIR] [--hook NAME] [--format text|json
 remembra-relay close   [--agent X] [--session-id S] [--cwd DIR] [--transcript PATH] [--reason R]
                        [--summary S] [--notes N] [--next STEP] [--todo ITEM]... [--dry-run]
 remembra-relay trail   [--cwd DIR] [--project P] [--limit N] [--format text|json]
+remembra-relay doctor  [--agent NAME]... [--format text|json] [--no-server] [--color auto|always|never]
 remembra-relay resolve [--cwd DIR] [--project P] [--bind]
 remembra-relay connect [--apply] [--agent NAME]... [--include-unverified] [--agents-md PATH]
 remembra-relay disconnect [--apply] [--agent NAME]... [--agents-md PATH]
 remembra-relay status  [--format text|json] [--no-check]
-remembra-relay doctor  [--agent NAME]... [--format text|json] [--no-server] [--color auto|always|never]
 remembra-relay --version
 ```
 

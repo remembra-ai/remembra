@@ -5,11 +5,11 @@ Subcommands::
     remembra-relay brief   [--agent X] [--cwd DIR] [--hook NAME] [--format text|json|hook-json|cursor-json] [--once]
     remembra-relay close   [--agent X] [--session-id S] [--cwd DIR] [--transcript PATH] [--reason R] [--hook NAME]
     remembra-relay trail   [--cwd DIR] [--project P] [--limit N]
+    remembra-relay doctor  [--agent NAME ...] [--format text|json] [--no-server] [--color auto|always|never]
     remembra-relay resolve [--cwd DIR] [--project P] [--bind]
     remembra-relay connect [--apply] [--agent NAME ...] [--include-unverified] [--agents-md PATH]
     remembra-relay disconnect [--apply] [--agent NAME ...] [--agents-md PATH]
     remembra-relay status  [--format text|json] [--no-check]
-    remembra-relay doctor  [--agent NAME ...] [--format text|json] [--no-server] [--color auto|always|never]
 
 ``brief``/``close``/``trail`` are hook-safe: they never block (≤10 s total,
 git calls and HTTP bounded), never raise, always exit 0 and report problems
@@ -1308,6 +1308,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_trail.add_argument("--format", choices=["text", "json"], default="text")
     p_trail.set_defaults(func=cmd_trail)
 
+    p_doctor = sub.add_parser(
+        "doctor", help="Say why handoffs don't arrive, from this machine's files and your trail (reads only)"
+    )
+    p_doctor.add_argument("--agent", action="append", choices=list(REGISTRY), help=f"Only these agents ({hooks}); repeatable")
+    p_doctor.add_argument("--format", choices=["text", "json"], default="text")
+    p_doctor.add_argument("--no-server", action="store_true", help="Do not ask the server; read this machine only")
+    p_doctor.add_argument("--color", choices=["auto", "always", "never"], default="auto")
+    p_doctor.set_defaults(func=cmd_doctor)
+
     p_resolve = sub.add_parser("resolve", help="Show (or bind) the project id for this location")
     common(p_resolve)
     p_resolve.add_argument("--bind", action="store_true", help="Re-bind this location to --project")
@@ -1332,15 +1341,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.add_argument("--format", choices=["text", "json"], default="text")
     p_status.add_argument("--no-check", action="store_true", help="Do not ask the server; show the last recorded key state")
     p_status.set_defaults(func=cmd_status)
-
-    p_doctor = sub.add_parser(
-        "doctor", help="Say why handoffs don't arrive, from this machine's files and your trail (reads only)"
-    )
-    p_doctor.add_argument("--agent", action="append", choices=list(REGISTRY), help=f"Only these agents ({hooks}); repeatable")
-    p_doctor.add_argument("--format", choices=["text", "json"], default="text")
-    p_doctor.add_argument("--no-server", action="store_true", help="Do not ask the server; read this machine only")
-    p_doctor.add_argument("--color", choices=["auto", "always", "never"], default="auto")
-    p_doctor.set_defaults(func=cmd_doctor)
     return parser
 
 
