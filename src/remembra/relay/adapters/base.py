@@ -28,6 +28,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from remembra.crew.schemas import CREW_HOOK_MARKER
+
 RELAY_MARKERS = ("remembra-relay", "remembra.relay")
 
 # Output modes for `remembra-relay brief`:
@@ -120,6 +122,8 @@ _RELAY_ARGS_RE = re.compile(r"\s(?:brief|close) --hook [\w.-]+ --agent \S+$")
 
 def is_relay_command(command: Any) -> bool:
     if not isinstance(command, str):
+        return False
+    if CREW_HOOK_MARKER in command:  # crew entries (remembra-crew connect) are not relay's to replace
         return False
     return any(marker in command for marker in RELAY_MARKERS) or bool(_RELAY_ARGS_RE.search(command.strip()))
 
