@@ -1,13 +1,15 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
 import { api } from '../lib/api';
 import { BrandLockup } from '../brand/Brand';
 
 interface ApiKeyFormProps {
   onAuthenticated: () => void;
+  /** Shown under the form, in the page flow: the "Sign in with email" switch. */
+  footer?: ReactNode;
 }
 
-export function ApiKeyForm({ onAuthenticated }: ApiKeyFormProps) {
+export function ApiKeyForm({ onAuthenticated, footer }: ApiKeyFormProps) {
   const [apiKey, setApiKey] = useState('');
   const [userId, setUserId] = useState(api.getUserId() || '');
   const [projectId, setProjectId] = useState(api.getProjectId() || '');
@@ -125,6 +127,7 @@ export function ApiKeyForm({ onAuthenticated }: ApiKeyFormProps) {
         <p className="text-center text-xs text-gray-400 mt-6">
           Your API key is stored locally and never sent to third parties.
         </p>
+        {footer}
       </div>
     </div>
   );

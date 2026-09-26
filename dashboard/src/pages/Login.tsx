@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { LogIn, Loader2, Eye, EyeOff } from 'lucide-react';
 import { API_V1 } from '../config';
 import { BrandLockup } from '../brand/Brand';
@@ -9,9 +9,11 @@ interface LoginProps {
   onLogin: (token: string, user: { id: string; email: string; name?: string; is_admin?: boolean }) => void;
   onSwitchToSignup: () => void;
   onForgotPassword: () => void;
+  /** Shown under the form, in the page flow (never fixed over it): the "Use API Key instead" switch. */
+  footer?: ReactNode;
 }
 
-export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProps) {
+export function Login({ onLogin, onSwitchToSignup, onForgotPassword, footer }: LoginProps) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -160,6 +162,7 @@ export function Login({ onLogin, onSwitchToSignup, onForgotPassword }: LoginProp
             Sign up
           </button>
         </p>
+        {footer}
       </div>
     </div>
   );
