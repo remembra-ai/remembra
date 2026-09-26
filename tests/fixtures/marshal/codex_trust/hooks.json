@@ -1,0 +1,65 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo pre"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/dev/.local/bin/remembra-relay brief --hook codex --agent codex",
+            "timeout": 15
+          }
+        ]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/opt/My Tools/venv/bin/python' -m remembra.relay.cli brief --hook codex --agent codex",
+            "timeout": 15,
+            "statusMessage": "Loading the Remembra brief"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/dev/.local/bin/remembra-relay brief --hook codex --agent codex --once",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/home/dev/.local/bin/remembra-relay close --hook codex --agent codex",
+            "timeout": 3
+          },
+          {
+            "type": "command",
+            "command": "/home/dev/.local/bin/remembra-relay close --hook codex --agent codex",
+            "timeout": 30,
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}

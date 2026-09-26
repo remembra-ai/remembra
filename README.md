@@ -45,6 +45,11 @@ change without writing. Codex runs the hooks only after you trust them: run `/ho
 [Hosting the server yourself](https://docs.remembra.dev/getting-started/docker/)? Add `--url <your server>` to `remembra-install`.
 `remembra-relay` ships in remembra 0.16.0.
 
+**Handoffs not arriving?** `remembra-relay doctor` says where the baton dropped, from this machine's files and your
+trail, with one fix per problem; it only reads. Inside your agent the local MCP server has the same checks as
+read-only tools: `remembra_doctor`, `remembra_setup` (the install steps for this machine) and `remembra_help`.
+See [Doctor](https://docs.remembra.dev/guides/relay/#doctor).
+
 ## What the next agent sees
 
 Claude Code finished a session and wrote in its summary that the work was done and pushed. Git disagreed. The next agent's brief starts with:
