@@ -9,6 +9,8 @@
 // moments. Untrusted text (titles, messages) is rendered as plain text only.
 
 import { HardHat, RadioTower } from 'lucide-react';
+import { PolicyPage } from '../../pages/crew/Policy';
+import { ZonesPage } from '../../pages/crew/Zones';
 import { useCrewSocket } from '../../hooks/useCrewSocket';
 import { useNow } from '../../hooks/useResource';
 import { absoluteTime, relativeTime } from '../time';
@@ -269,6 +271,9 @@ function CrewScreen() {
       </Card>
     );
   }
+  // WP-13b screens (Zone Map, Policy); the other views keep the live overview until their WPs land.
+  if (route?.screen === 'zones') return <ZonesPage crewId={lookup.crewId} project={project} zoneSlug={route.zone} />;
+  if (route?.screen === 'policy') return <PolicyPage crewId={lookup.crewId} project={project} />;
   return <CrewLive crewId={lookup.crewId} project={project} />;
 }
 
