@@ -2717,6 +2717,15 @@ ROUTES: Final[tuple[Route, ...]] = (
         step_up=True,
         request="BypassIssue",
     ),
+    _R(
+        "GET",
+        "/crews/{crew_id}/bypass-codes",
+        "WP-5",
+        "crew",
+        PO,
+        "List bypass codes (ids, scope, session, state; never the code)",
+        human=True,
+    ),
     _R("POST", "/bypass-codes/redeem", "WP-5", "session", PC, "Redeem a bypass code", request="BypassRedeem"),
     # Collisions
     _R("GET", "/crews/{crew_id}/collisions", "WP-5", "crew", PR, "List collisions (?state=)"),

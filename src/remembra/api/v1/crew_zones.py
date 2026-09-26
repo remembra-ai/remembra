@@ -178,12 +178,21 @@ def if_match_version(request: Request) -> int:
 async def list_zones(request: Request, access: CrewAccess = Depends(crew_access(PR))) -> dict[str, Any]:
     conn = access_conn(request)
     rows = await Z.load_zone_rows(conn, access.crew_id)
+    tree = await Z.fetchone(
+        conn, "SELECT tree, node_count, captured_at FROM crew_repo_trees WHERE crew_id = ?", (access.crew_id,)
+    )
     return {
         "zones": [Z.zone_detail(r) for r in rows],
         "commons": await Z.active_commons(conn, access.crew_id),
         "ignore": await Z.active_ignore(conn, access.crew_id),
         "bootstrap_zones": await Z.bootstrap_active(conn, access.crew_id),
         "pending_zone_changes": await Z.list_pending_change_ids(conn, access.crew_id),
+        # The folder-only tree snapshot (names and file counts, 3 levels, §11) the Zone Map overlays zones on.
+        "tree": (
+            {"tree": json.loads(tree["tree"]), "node_count": tree["node_count"], "captured_at": tree["captured_at"]}
+            if tree
+            else None
+        ),
     }
 
 
