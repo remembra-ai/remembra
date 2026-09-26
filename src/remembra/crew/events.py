@@ -645,15 +645,23 @@ TOMBSTONE_ACTOR: Final[Mapping[str, Any]] = {
 }
 TOMBSTONE_PAYLOAD: Final[Mapping[str, Any]] = {"erased": True}
 TOMBSTONE_SUMMARY: Final = "erased (account deleted)"
+# A human's redaction of a channel message tombstones the events that carried its body the same
+# way (remembra.crew.channel.CrewChannel.redact); only the summary says why.
+REDACTION_TOMBSTONE_REASON: Final = "message_redacted"
+TOMBSTONE_SUMMARIES: Final[Mapping[str, str]] = {REDACTION_TOMBSTONE_REASON: "removed (message redacted by a human)"}
+
+
+def tombstone_summary(reason: str) -> str:
+    return TOMBSTONE_SUMMARIES.get(reason, TOMBSTONE_SUMMARY)
 
 
 def is_tombstone(envelope: Mapping[str, Any]) -> bool:
-    """Is this envelope's content exactly the erasure tombstone?"""
+    """Is this envelope's content exactly a tombstone (account erasure or message redaction)?"""
     return (
         envelope.get("actor") == dict(TOMBSTONE_ACTOR)
         and envelope.get("refs") == {}
         and envelope.get("payload") == dict(TOMBSTONE_PAYLOAD)
-        and envelope.get("summary") == TOMBSTONE_SUMMARY
+        and envelope.get("summary") in {TOMBSTONE_SUMMARY, *TOMBSTONE_SUMMARIES.values()}
     )
 
 
@@ -683,7 +691,7 @@ async def tombstone_events(
             """UPDATE crew_events SET actor = ?, refs = '{}', payload = ?, summary = ?, actor_kind = 'system',
                    actor_id = 'erased', session_id = NULL, task_id = NULL, zone_id = NULL, ref_id = NULL, idem_key = NULL
                 WHERE crew_id = ? AND seq = ?""",
-            (_json_text(dict(TOMBSTONE_ACTOR)), _json_text(dict(TOMBSTONE_PAYLOAD)), TOMBSTONE_SUMMARY, crew_id, seq),
+            (_json_text(dict(TOMBSTONE_ACTOR)), _json_text(dict(TOMBSTONE_PAYLOAD)), tombstone_summary(reason), crew_id, seq),
         )
         done += 1
     return done

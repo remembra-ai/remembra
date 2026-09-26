@@ -52,7 +52,7 @@ from typing import Any, Final
 from remembra.crew import schemas
 from remembra.crew.bus import CrewBus
 from remembra.crew.decisions import CrewDecisions, CrewRef, decision_api, title_from_body
-from remembra.crew.events import CrewEventLog, EventTx
+from remembra.crew.events import REDACTION_TOMBSTONE_REASON, CrewEventLog, EventTx, tombstone_events
 from remembra.crew.inbox import (
     Author,
     CrewInbox,
@@ -63,6 +63,7 @@ from remembra.crew.inbox import (
     require_same_crew,
 )
 from remembra.crew.store import CrewStore, new_id, now_iso, parse_iso
+from remembra.security.secrets import scrub
 
 SESSION_HEADER: Final = "X-Remembra-Crew-Session"  # carries the session token (same header on every crew route)
 RESERVED_SENDER_NAMES: Final = frozenset({"mani", "human", "system", "remembra"})
@@ -76,6 +77,7 @@ MAX_CLIENT_MSG_ID: Final = 64
 REPLY_DATA_CLIP: Final = 1000
 TRUST_COLLAPSE_BELOW: Final = 0.5
 KIND_AGENT_INBOX_SEND: Final = "agent_inbox_send"
+REDACTED_MENTION_BODY: Final = "(a human removed this message)"
 LIVE_SESSION_STATES: Final = schemas.LIVE_PRESENCE_STATES
 
 MENTION_RE: Final = re.compile(r"(?<![A-Za-z0-9_@/.\\-])@([A-Za-z0-9][A-Za-z0-9._:-]{0,79})")
@@ -331,8 +333,13 @@ class CrewChannel:
         refs: Sequence[str] | None = None,
         wait_s: int = 0,
     ) -> PostResult:
-        """Post a message, route its mentions, and optionally wait up to ``wait_s`` (≤120) for the first reply."""
+        """Post a message, route its mentions, and optionally wait up to ``wait_s`` (≤120) for the first reply.
+
+        Credentials in the body are redacted before it is stored or sent anywhere (as the agent
+        inbox does): the row, the ``message.posted`` event, mentions and a ``kind=decision``'s text.
+        """
         self._validate(author, kind, body, client_msg_id, refs, wait_s)
+        body = scrub(body)
         routing = Routing()
         decision_out: dict[str, Any] | None = None
         replayed = False
@@ -749,6 +756,7 @@ class CrewChannel:
             raise ValidationFailed("body is required")
         if len(body.encode("utf-8")) > schemas.MAX_MESSAGE_BYTES:
             raise ValidationFailed(f"body is larger than {schemas.MAX_MESSAGE_BYTES} bytes")
+        body = scrub(body)
         stamp = now or datetime.now(UTC)
         async with self.log.transaction() as tx:
             row = await self._get(tx, message_id)
@@ -791,7 +799,14 @@ class CrewChannel:
         return [{"prev_body": r["prev_body"], "edited_at": r["edited_at"]} for r in rows]
 
     async def redact(self, message_id: str, human: Author) -> dict[str, Any]:
-        """Human-only: remove the body (and its edit history), keep ``redacted_body_hash``."""
+        """Human-only: remove the body everywhere Remembra keeps it, keep ``redacted_body_hash``.
+
+        The row and its edit history lose the body; the ``message.posted`` and ``message.edited``
+        events that carried it are tombstoned (:func:`remembra.crew.events.tombstone_events`: same
+        seq, type and chain links, no content; ``verify_crew_chain`` still passes), so the event
+        feed and ``since_seq`` replay no longer return it; mention deliveries to agent inboxes
+        still queued carry a placeholder instead of the body.
+        """
         if not human.is_human:
             raise NotAllowed("only a human can redact a message")
         async with self.log.transaction() as tx:
@@ -806,6 +821,17 @@ class CrewChannel:
                 (digest, message_id),
             )
             await tx.conn.execute("UPDATE crew_message_edits SET prev_body = '' WHERE message_id = ?", (message_id,))
+            async with tx.conn.execute(
+                "SELECT seq FROM crew_events WHERE crew_id = ? AND ref_id = ? AND type IN ('message.posted', 'message.edited')",
+                (row["crew_id"], message_id),
+            ) as cur:
+                carried = [int(r[0]) for r in await cur.fetchall()]
+            await tombstone_events(tx.conn, str(row["crew_id"]), carried, reason=REDACTION_TOMBSTONE_REASON)
+            await tx.conn.execute(
+                "UPDATE crew_outbox SET payload = json_set(payload, '$.body', ?) WHERE crew_id = ? AND kind = ?"
+                " AND state != 'done' AND json_extract(payload, '$.metadata.crew_message_id') = ?",
+                (REDACTED_MENTION_BODY, row["crew_id"], KIND_AGENT_INBOX_SEND, message_id),
+            )
             row = await self._get(tx, message_id)
             assert row is not None
             result = await tx.emit(

@@ -49,6 +49,7 @@ from remembra.crew import schemas
 from remembra.crew.events import Actor, CrewEventLog, EventTx
 from remembra.crew.settings import load_settings
 from remembra.crew.store import dumps, is_accountable_for, loads, new_id, now_iso, parse_iso
+from remembra.security.secrets import scrub
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -355,7 +356,7 @@ def _check_text(value: Any, name: str, max_len: int, *, required: bool = False) 
         raise _err(422, "invalid_task", f"{name} must not be empty")
     if len(value) > max_len:
         raise _err(422, "invalid_task", f"{name} is longer than {max_len} characters")
-    return value
+    return scrub(value)  # credentials never reach the table or the event log (as in the agent inbox)
 
 
 def _check_priority(value: Any) -> int:
@@ -1421,6 +1422,7 @@ class TaskService:
             raise _err(422, "invalid_task", "; ".join(errors[:3]))
         title = _check_text(body.get("title"), "title", 200, required=True)
         assert title is not None
+        text = _check_text(body.get("body"), "body", 8000)
         acceptance = validate_acceptance(body.get("acceptance") or [])
         priority = _check_priority(body.get("priority", 2))
         async with self.events.transaction() as tx:
@@ -1439,7 +1441,7 @@ class TaskService:
                     crew_id,
                     number,
                     title,
-                    body.get("body"),
+                    text,
                     status,
                     body.get("phase"),
                     priority,

@@ -40,6 +40,7 @@ from remembra.crew.inbox import (
 from remembra.crew.limits import SELF_HOSTED_CREW_LIMITS, CrewLimits, promotion_decision
 from remembra.crew.outbox import KIND_MEMORY_PROMOTION
 from remembra.crew.store import CrewStore, new_id, now_iso
+from remembra.security.secrets import scrub
 
 MAX_TITLE: Final = 200
 MAX_DECISION: Final = 2000
@@ -81,7 +82,7 @@ def _flat(text: Any, limit: int, field: str, *, required: bool = True) -> str | 
     value = text.strip()
     if len(value) > limit:
         raise ValidationFailed(f"{field} is longer than {limit} characters")
-    return value
+    return scrub(value)  # credentials never reach the table or the event log
 
 
 def title_from_body(body: str) -> str:
