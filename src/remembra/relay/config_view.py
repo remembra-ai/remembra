@@ -11,7 +11,15 @@ logs. So the printed view hides:
   ``REMEMBRA_USER_ID``, ``REMEMBRA_AGENT_ID``);
 - every value whose name says it is a secret (``*token*``, ``*secret*``,
   ``*password*``, ``api_key``, ``*_key``, ``auth*``, ...);
-- the value after a ``--token``-style flag in an argument list;
+- the value after a ``--token``-style flag in an argument list, and in an
+  argument the value of ``NAME=value`` (``docker -e DB_PASSWORD=...``) and of
+  an HTTP header (``--header "Authorization: Bearer ..."``) whose name says it
+  is a secret;
+- a URL query parameter whose name says it is a secret (``?key=...``), however
+  short the value;
+- in TOML, the lines of a multi-line array and a multi-line string with the
+  same rules as a one-line value (a multi-line string of a secret setting is
+  hidden whole);
 - anything that looks like a credential wherever it is (provider key formats,
   credentials in a URL, bearer tokens, long random strings), via
   :func:`remembra.security.secrets.redact_secrets`.
@@ -59,9 +67,60 @@ def hide(value: str) -> str:
     return mask_key(value) if _REM_KEY_RE.match(value) else HIDDEN
 
 
+_QUERY_PARAM_RE = re.compile(r"([?&;])([^=&#;\s\"'?]+)=([^&#;\s\"']*)")
+_NAME_ASSIGN_RE = re.compile(r"^(\s*[A-Za-z_][\w.\-]*=)(.+)$", re.S)
+_HEADER_RE = re.compile(r"^(\s*[A-Za-z][\w\-]*\s*:\s*)(\S.*)$", re.S)
+_AUTH_SCHEME_RE = re.compile(r"(?i)\b(bearer|basic)(\s+)[^\s\"',]+")
+_FLAG_ASSIGN_RE = re.compile(r"^(--?[\w.\-]+=)(.+)$", re.S)
+
+
+def _hide_query(text: str) -> str:
+    """``?key=abc`` -> ``?key=[hidden]`` for every query parameter whose name says it is a secret."""
+
+    def one(match: re.Match[str]) -> str:
+        sep, name, value = match.groups()
+        return f"{sep}{name}={HIDDEN}" if value and secret_name(name) else match.group(0)
+
+    return _QUERY_PARAM_RE.sub(one, text)
+
+
 def scrub(text: str, keys: tuple[str, ...] = ()) -> str:
     """Credential-looking substrings of free text hidden (the given keys and rem_ keys masked)."""
-    return redact_secrets(mask_text(text, keys)).text
+    return redact_secrets(_hide_query(mask_text(text, keys))).text
+
+
+def _arg_value(item: str) -> str | None:
+    """One argument with its secret part hidden, or None when nothing in it is a secret by name.
+
+    ``DB_PASSWORD=x`` (a ``docker -e`` / ``env`` assignment), ``Authorization: Bearer x``
+    (an HTTP header), ``Bearer x`` and ``--flag=<one of those>``.
+    """
+    flagged = _FLAG_ASSIGN_RE.match(item)
+    if flagged:
+        inner = _arg_value(flagged.group(2))
+        return None if inner is None else flagged.group(1) + inner
+    assigned = _NAME_ASSIGN_RE.match(item)
+    if assigned and secret_name(assigned.group(1).strip()[:-1]):
+        return assigned.group(1) + hide(assigned.group(2))
+    header = _HEADER_RE.match(item)
+    if header and secret_name(header.group(1).strip()[:-1].strip()):
+        return header.group(1) + HIDDEN
+    if _AUTH_SCHEME_RE.search(item):
+        return _AUTH_SCHEME_RE.sub(lambda m: m.group(1) + m.group(2) + HIDDEN, item)
+    return None
+
+
+def _view_arg(item: str, after_flag: bool, keys: tuple[str, ...]) -> tuple[str, bool]:
+    """One string of an argument list as printed, and whether the next one follows a secret flag."""
+    if after_flag:
+        return hide(item), False
+    assigned = _SECRET_FLAG_ASSIGN_RE.match(item)
+    if assigned:
+        return assigned.group(1) + hide(assigned.group(2)), False
+    if _SECRET_FLAG_RE.match(item):
+        return item, True
+    by_name = _arg_value(item)
+    return (scrub(by_name, keys) if by_name is not None else scrub(item, keys)), False
 
 
 def _view_args(items: list[Any], keys: tuple[str, ...]) -> list[Any]:
@@ -69,14 +128,7 @@ def _view_args(items: list[Any], keys: tuple[str, ...]) -> list[Any]:
     after_flag = False
     for item in items:
         if isinstance(item, str):
-            assigned = _SECRET_FLAG_ASSIGN_RE.match(item)
-            if after_flag:
-                item = hide(item)
-            elif assigned:
-                item = assigned.group(1) + hide(assigned.group(2))
-            else:
-                item = scrub(item, keys)
-            after_flag = bool(_SECRET_FLAG_RE.match(item)) if isinstance(item, str) else False
+            item, after_flag = _view_arg(item, after_flag, keys)
         else:
             item = _view(item, keys, in_block=False)
             after_flag = False
@@ -152,24 +204,42 @@ def _hide_strings(value: str) -> str:
     return _STRING_RE.sub(lambda m: _hide_literal(m.group(0)), value)
 
 
-def _toml_array_view(value: str) -> str:
-    """Hide the string after a ``--token``-style flag (and ``--token=x``) in a TOML array."""
-    after_flag = False
+class _ArrayState:
+    """Where a TOML array is while it is read line by line: open brackets, and whether the next string follows a secret flag."""
+
+    def __init__(self, secret: bool) -> None:
+        self.secret = secret
+        self.depth = 0
+        self.after_flag = False
+
+
+def _bracket_depth(fragment: str) -> int:
+    """Open ``[`` minus closed ``]`` in a TOML value fragment, outside strings and comments."""
+    bare = _STRING_RE.sub("", fragment).split("#", 1)[0]
+    return bare.count("[") - bare.count("]")
+
+
+def _toml_array_view(value: str, state: _ArrayState, keys: tuple[str, ...]) -> str:
+    """The strings of (one line of) a TOML array as printed, with the argument-list rules."""
 
     def one(match: re.Match[str]) -> str:
-        nonlocal after_flag
         literal = match.group(0)
-        inner = literal[1:-1]
-        if after_flag:
-            after_flag = False
+        if state.secret:
             return _hide_literal(literal)
-        assigned = _SECRET_FLAG_ASSIGN_RE.match(inner)
-        after_flag = bool(_SECRET_FLAG_RE.match(inner))
-        if assigned:
-            return literal[0] + assigned.group(1) + hide(assigned.group(2)) + literal[0]
-        return literal
+        shown, state.after_flag = _view_arg(literal[1:-1], state.after_flag, keys)
+        return literal[0] + shown + literal[0]
 
+    state.depth += _bracket_depth(value)
     return _STRING_RE.sub(one, value)
+
+
+def _multiline_opener(value: str) -> str | None:
+    """The delimiter of a multi-line string that ``value`` opens and does not close on this line."""
+    stripped = value.lstrip()
+    for delim in ('"""', "'''"):
+        if stripped.startswith(delim) and delim not in stripped[3:]:
+            return delim
+    return None
 
 
 def _inline_pair_view(match: re.Match[str]) -> str:
@@ -181,7 +251,29 @@ def _inline_pair_view(match: re.Match[str]) -> str:
 def _toml_view(text: str, keys: tuple[str, ...]) -> str:
     out: list[str] = []
     table: list[str] = []
+    array: _ArrayState | None = None  # inside a multi-line array
+    string: tuple[str, bool] | None = None  # inside a multi-line string: (delimiter, secret)
     for line in text.splitlines(keepends=True):
+        if string is not None:
+            delim, secret = string
+            body, newline = (line[:-1], "\n") if line.endswith("\n") else (line, "")
+            end = body.find(delim)
+            content, rest = (body, "") if end < 0 else (body[:end], body[end:])
+            if end >= 0:
+                string = None
+            if secret:
+                out.append((HIDDEN if content.strip() else content) + rest + newline)
+            else:
+                out.append(scrub(line, keys))
+            continue
+        if array is not None:
+            if line.lstrip().startswith("#"):
+                out.append(scrub(line, keys))
+                continue
+            out.append(scrub(_toml_array_view(line, array, keys), keys))
+            if array.depth <= 0:
+                array = None
+            continue
         header = _TABLE_RE.match(line)
         if header:
             table = _segments(header.group(1))
@@ -193,14 +285,29 @@ def _toml_view(text: str, keys: tuple[str, ...]) -> str:
             path = table + _segments(dotted)
             name = path[-1]
             in_block = any(seg.lower() in SECRET_BLOCKS for seg in path[:-1])
+            secret = name not in SHOWN_SETTINGS and (in_block or secret_name(name) or name.lower() in SECRET_BLOCKS)
+            opener = _multiline_opener(value)
+            if opener is not None:
+                string = (opener, secret)
+                start = value.index(opener) + 3
+                tail = value[start:]
+                if secret and tail.strip():
+                    tail = HIDDEN
+                elif not secret:
+                    tail = scrub(tail, keys)
+                out.append(indent + dotted + eq + value[:start] + tail + (newline or ""))
+                continue
             if name in SHOWN_SETTINGS:
                 pass
-            elif in_block or secret_name(name) or name.lower() in SECRET_BLOCKS:
+            elif value.lstrip().startswith("["):
+                state = _ArrayState(secret)
+                value = _toml_array_view(value, state, keys)
+                if state.depth > 0:
+                    array = state
+            elif secret:
                 value = _hide_strings(value)
             elif value.lstrip().startswith("{"):
                 value = _INLINE_PAIR_RE.sub(_inline_pair_view, value)
-            elif value.lstrip().startswith("["):
-                value = _toml_array_view(value)
             line = indent + dotted + eq + value + (newline or "")
         out.append(scrub(line, keys))
     return "".join(out)

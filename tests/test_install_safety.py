@@ -507,6 +507,82 @@ def test_config_view_rules() -> None:
     assert text_view is not None and GH_TOKEN not in text_view and "# notes" in text_view
 
 
+def test_config_view_hides_secrets_in_common_mcp_shapes() -> None:
+    """Secrets that sit in an argument (docker -e, mcp-remote --header), a URL query or a
+    multi-line TOML value are hidden too, whatever their length."""
+    shapes = json.dumps(
+        {
+            "mcpServers": {
+                "remote": {
+                    "command": "npx",
+                    "args": ["mcp-remote", "https://x.dev/mcp", "--header", "Authorization: Bearer 7Hk2pQ9xLm4Rt8Vw"],
+                },
+                "h2": {"command": "npx", "args": ["--header=X-Api-Key: k9short", "Bearer b3arer9"]},
+                "db": {"command": "docker", "args": ["run", "-e", "DB_PASSWORD=Sup3rS3cret!", "-e", "MODE=fast", "img:latest"]},
+                "env": {"command": "srv", "args": ["--env=API_TOKEN=q1w2e3"]},
+                "url": {"url": "https://h.dev/mcp?key=abc123&region=eu&access_token=zz9"},
+            }
+        }
+    )
+    view = config_view(shapes, Path("mcp.json"))
+    assert view is not None
+    for secret in ("7Hk2pQ9xLm4Rt8Vw", "k9short", "b3arer9", "Sup3rS3cret!", "q1w2e3", "abc123", "zz9"):
+        assert secret not in view, secret
+    servers = json.loads(view)["mcpServers"]
+    assert servers["remote"]["args"] == ["mcp-remote", "https://x.dev/mcp", "--header", "Authorization: [hidden]"]
+    assert servers["db"]["args"] == ["run", "-e", "DB_PASSWORD=[hidden]", "-e", "MODE=fast", "img:latest"]
+    assert servers["url"]["url"] == "https://h.dev/mcp?key=[hidden]&region=eu&access_token=[hidden]"
+
+    toml = (
+        'model = "o4"\n'
+        "[mcp_servers.gh]\n"
+        'command = "npx"\n'
+        "args = [\n"
+        '  "gh-mcp",\n'
+        '  "--token",\n'
+        '  "ghs_short1",\n'
+        "  # a comment\n"
+        '  "-e", "DB_PASSWORD=pw12",\n'
+        '  "--header", "Authorization: Bearer tok3n",\n'
+        '  "--port", "8080",\n'
+        "]\n"
+        'url = "https://h.dev/mcp?token=t0k"\n'
+        "[mcp_servers.other]\n"
+        'password = """\n'
+        "multilinesecret\n"
+        '"""\n'
+        'notes = """\n'
+        "plain words stay\n"
+        '"""\n'
+        'after = "shown"\n'
+    )
+    toml_view = config_view(toml, Path("config.toml"))
+    assert toml_view is not None
+    for secret in ("ghs_short1", "pw12", "tok3n", "t0k", "multilinesecret"):
+        assert secret not in toml_view, secret
+    assert '  "[hidden]",\n' in toml_view and '"DB_PASSWORD=[hidden]"' in toml_view and '"8080"' in toml_view
+    assert 'password = """\n[hidden]\n"""\n' in toml_view
+    assert "plain words stay" in toml_view and 'after = "shown"' in toml_view and 'model = "o4"' in toml_view
+    assert tomllib.loads(toml_view)["mcp_servers"]["gh"]["args"][2] == "[hidden]"  # still valid TOML
+
+
+def test_the_codex_dry_run_diff_hides_a_token_on_an_array_continuation_line(tmp_path: Path) -> None:
+    """The Remembra block moves to the end of config.toml, so the file's last lines are diff context."""
+    from remembra.tools.codex import plan_codex_config
+
+    path = tmp_path / "config.toml"
+    path.write_text(
+        'model = "o4"\n\n[mcp_servers.remembra]\ncommand = "remembra-mcp"\n\n'
+        '[mcp_servers.remembra.env]\nREMEMBRA_URL = "https://api.remembra.dev"\n\n'
+        '[mcp_servers.gh]\ncommand = "npx"\nargs = [\n  "gh-mcp",\n  "--token",\n  "ghs_short1",\n]\n'
+    )
+    change = plan_codex_config(
+        path, api_key=KEY, project="default", user_id="u", url="https://api.remembra.dev", command="remembra-mcp"
+    )
+    diff = change.diff(keys=(KEY,))
+    assert "--token" in diff and "ghs_short1" not in diff and KEY not in diff
+
+
 def test_doctor_warns_on_a_key_file_others_can_read(tmp_path: Path) -> None:
     path = tmp_path / "mcp.json"
     path.write_text(json.dumps({"mcpServers": {"remembra": {"command": "remembra-mcp", "env": {"REMEMBRA_API_KEY": KEY}}}}))
