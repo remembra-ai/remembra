@@ -35,7 +35,7 @@ export function AppLayout({
   const [connectionOpen, setConnectionOpen] = useState(false);
   const section = sectionOf(activeTab);
   const meta = TABS[activeTab];
-  const subTabs = section.tabs.length > 1 ? section.tabs : [];
+  const subTabs = section.tabs.length > 1 && section.subnav !== false ? section.tabs : [];
   const usesMemoryProject = section.id === 'memory' || section.id === 'graph';
   const wide = activeTab === 'graph';
 

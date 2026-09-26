@@ -5,6 +5,7 @@ import { useEffect, useRef, useState, type ElementType } from 'react';
 import clsx from 'clsx';
 import {
   Bot,
+  HardHat,
   Database,
   Ellipsis,
   GitCommitVertical,
@@ -27,6 +28,7 @@ export type { TabType } from '../lib/nav';
 
 const ICONS: Record<SectionId, ElementType> = {
   home: House,
+  crews: HardHat,
   trail: GitCommitVertical,
   agents: Bot,
   inbox: Inbox,

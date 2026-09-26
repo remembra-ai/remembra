@@ -28,11 +28,51 @@ import {
   PenLine,
   Keyboard,
   Brain,
+  HardHat,
+  Navigation,
+  UserSearch,
+  Snowflake,
+  Pause,
+  Save,
+  MessageSquare,
+  KeyRound,
+  Copy,
+  CornerDownLeft,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { toast } from 'sonner';
 import { api } from '../lib/api';
 import type { Memory } from '../lib/api';
 import { navigate, type TabType } from '../lib/nav';
+import { useCrewSocket } from '../hooks/useCrewSocket';
+import { crewApi } from '../lib/crew/api';
+import {
+  CREW_COMMANDS,
+  answer as answerCrewStep,
+  back as backCrewStep,
+  flowErrorMessage,
+  nextStep as nextCrewStep,
+  runFlow,
+  startFlow,
+  validateText,
+  type CrewCommandId,
+  type CrewFlow,
+  type FlowContext,
+  type FlowCrew,
+  type PickOption,
+} from '../lib/crew/commands';
+import { useCrewList } from '../lib/crew/hooks';
+import { useCrewRoute } from '../lib/crew/routes';
+
+const CREW_ICONS: Record<CrewCommandId, ElementType> = {
+  go: Navigation,
+  'who-holds': UserSearch,
+  freeze: Snowflake,
+  pause: Pause,
+  checkpoint: Save,
+  post: MessageSquare,
+  bypass: KeyRound,
+};
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -85,11 +125,120 @@ const panelVariants = {
 export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onShowShortcuts, isAdmin = false }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [mode, setMode] = useState<'commands' | 'search'>('commands');
+  const [mode, setMode] = useState<'commands' | 'search' | 'crew'>('commands');
   const [searchResults, setSearchResults] = useState<Memory[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+
+  // Crew commands (§9.1): a short flow per command (crew → target → reason → run).
+  const crewList = useCrewList(isOpen);
+  const crewRoute = useCrewRoute();
+  const [flow, setFlow] = useState<CrewFlow | null>(null);
+  const [flowPinned, setFlowPinned] = useState(false);
+  const [flowRunning, setFlowRunning] = useState(false);
+  const [flowError, setFlowError] = useState<string | null>(null);
+  const [flowResult, setFlowResult] = useState<{ message: string; copy: string } | null>(null);
+  const flowCrew = useCrewSocket(isOpen && flow?.crew ? flow.crew.crewId : null);
+  const flowCtx: FlowContext = {
+    crews: crewList.items,
+    stateOf: (crewId) => (crewId === flowCrew.crewId ? flowCrew.state : null),
+  };
+  const crewStep = flow && !flowResult ? nextCrewStep(flow, flowCtx) : null;
+  const crewOptions: PickOption[] =
+    crewStep?.kind === 'pick'
+      ? crewStep.options.filter((o) => {
+          const q = query.trim().toLowerCase();
+          return !q || o.label.toLowerCase().includes(q) || !!o.description?.toLowerCase().includes(q);
+        })
+      : [];
+  const currentCrew: FlowCrew | null = (() => {
+    if (!crewRoute?.project) return null;
+    const item = crewList.items.find((c) => c.crew.project_id === crewRoute.project);
+    return item ? { crewId: item.crew.id, project: item.crew.project_id } : null;
+  })();
+  const crewReady = crewList.status === 'ready' || crewList.items.length > 0;
+  const humanLogin = api.getAuthMode() === 'jwt';
+
+  const resetFlow = () => {
+    setFlow(null);
+    setFlowPinned(false);
+    setFlowRunning(false);
+    setFlowError(null);
+    setFlowResult(null);
+  };
+
+  const executeFlow = async (ready: CrewFlow) => {
+    setFlowRunning(true);
+    setFlowError(null);
+    try {
+      const result = await runFlow(ready, flowCtx, crewApi);
+      if (result.copy) {
+        setFlowResult({ message: result.message, copy: result.copy });
+        return;
+      }
+      toast.success(result.message);
+      if (result.href) window.location.hash = result.href;
+      resetFlow();
+      setMode('commands');
+      onClose();
+    } catch (err) {
+      setFlowError(flowErrorMessage(err));
+    } finally {
+      setFlowRunning(false);
+    }
+  };
+
+  const advanceFlow = (next: CrewFlow) => {
+    setFlow(next);
+    setQuery('');
+    setSelectedIndex(0);
+    setFlowError(null);
+    if (nextCrewStep(next, flowCtx).kind === 'ready') void executeFlow(next);
+  };
+
+  const startCrewCommand = (command: CrewCommandId) => {
+    resetFlow();
+    setMode('crew');
+    setFlowPinned(currentCrew !== null);
+    advanceFlow(startFlow(command, currentCrew));
+  };
+
+  const chooseCrewOption = (value: string) => {
+    if (!flow || flowRunning) return;
+    const next = answerCrewStep(flow, flowCtx, value);
+    if (next !== flow) advanceFlow(next);
+  };
+
+  const submitCrewText = () => {
+    if (!flow || flowRunning || crewStep?.kind !== 'text') return;
+    const problem = validateText(crewStep, query);
+    if (problem) {
+      setFlowError(problem);
+      return;
+    }
+    advanceFlow(answerCrewStep(flow, flowCtx, query));
+  };
+
+  const crewStepBack = () => {
+    if (flowResult) {
+      resetFlow();
+      setMode('commands');
+      onClose();
+      return;
+    }
+    const prev = flow ? backCrewStep(flow, flowPinned) : null;
+    if (!prev) {
+      resetFlow();
+      setMode('commands');
+      setQuery('');
+      return;
+    }
+    setFlow(prev);
+    setQuery('');
+    setSelectedIndex(0);
+    setFlowError(null);
+  };
 
   const go = (tab: TabType) => () => {
     onNavigate(tab);
@@ -103,6 +252,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
     ...(onShowShortcuts ? [{ id: 'shortcuts', label: 'Keyboard shortcuts', icon: Keyboard, section: 'Actions', action: () => onShowShortcuts(), keywords: ['keys', 'help'], shortcut: '?' }] : []),
     // Relay
     { id: 'nav-home', label: 'Home', description: 'Mission control', icon: House, section: 'Relay', action: go('home'), keywords: ['mission', 'dashboard', 'overview'], shortcut: 'g h' },
+    { id: 'nav-crews', label: 'Crews', description: 'Every project with agents on it', icon: HardHat, section: 'Relay', action: go('crews'), keywords: ['crew', 'site', 'board', 'projects', 'live'] },
     { id: 'nav-trail', label: 'Trail', description: 'Every handoff, newest first', icon: GitCommitVertical, section: 'Relay', action: go('trail'), keywords: ['handoff', 'log', 'history', 'sessions'], shortcut: 'g t' },
     { id: 'nav-agents', label: 'Agents', description: 'Activity per agent', icon: Bot, section: 'Relay', action: go('agents'), keywords: ['claude', 'codex', 'cursor', 'gemini'], shortcut: 'g a' },
     { id: 'nav-inbox', label: 'Inbox', description: 'Messages between agents', icon: Inbox, section: 'Relay', action: go('inbox'), keywords: ['messages', 'notes'], shortcut: 'g i' },
@@ -122,6 +272,18 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
     { id: 'nav-teams', label: 'Teams', description: 'Collaboration', icon: UsersRound, section: 'Settings', action: go('teams') },
     { id: 'nav-projects', label: 'Projects', description: 'Memory workspaces', icon: FolderOpen, section: 'Settings', action: go('projects') },
     ...(isAdmin ? [{ id: 'nav-admin', label: 'Admin', description: 'Operate the service', icon: Shield, section: 'Settings', action: go('admin') }] : []),
+    // Crew (only once the server answered GET /crews; human-only actions need a dashboard login)
+    ...(crewReady
+      ? CREW_COMMANDS.filter((c) => humanLogin || !c.humanOnly).map((c) => ({
+          id: `crew-${c.id}`,
+          label: c.label,
+          description: c.description,
+          icon: CREW_ICONS[c.id],
+          section: 'Crew',
+          action: () => startCrewCommand(c.id),
+          keywords: c.keywords,
+        }))
+      : []),
   ];
 
   // Filter commands based on query
@@ -169,6 +331,11 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
       setSelectedIndex(0);
       setMode('commands');
       setSearchResults([]);
+      setFlow(null);
+      setFlowPinned(false);
+      setFlowRunning(false);
+      setFlowError(null);
+      setFlowResult(null);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }, [isOpen]);
@@ -178,6 +345,26 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (mode === 'crew') {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          crewStepBack();
+        } else if (e.key === 'Backspace' && query === '' && !flowRunning) {
+          e.preventDefault();
+          crewStepBack();
+        } else if (e.key === 'ArrowDown' && crewStep?.kind === 'pick') {
+          e.preventDefault();
+          setSelectedIndex((i) => Math.min(i + 1, Math.max(0, crewOptions.length - 1)));
+        } else if (e.key === 'ArrowUp' && crewStep?.kind === 'pick') {
+          e.preventDefault();
+          setSelectedIndex((i) => Math.max(i - 1, 0));
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          if (crewStep?.kind === 'pick' && crewOptions[selectedIndex]) chooseCrewOption(crewOptions[selectedIndex].value);
+          else if (crewStep?.kind === 'text') submitCrewText();
+        }
+        return;
+      }
       if (e.key === 'Escape') {
         if (mode === 'search') {
           setMode('commands');
@@ -208,7 +395,7 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, selectedIndex, flatItems, mode, searchResults, onClose]);
+  });
 
   // Auto-search with debounce in search mode
   useEffect(() => {
@@ -251,6 +438,8 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
             <div className="flex items-center gap-3 px-4 py-3.5 border-b border-[hsl(var(--border)/0.4)]">
               {mode === 'search' ? (
                 <Sparkles className="w-4 h-4 text-[hsl(var(--primary))] flex-shrink-0" />
+              ) : mode === 'crew' ? (
+                <HardHat className="w-4 h-4 text-signal-ink flex-shrink-0" />
               ) : (
                 <Search className="w-4 h-4 text-[hsl(var(--muted-foreground))] flex-shrink-0" />
               )}
@@ -261,13 +450,34 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
                 onChange={(e) => {
                   setQuery(e.target.value);
                   setSelectedIndex(0);
+                  if (mode === 'crew') setFlowError(null);
                 }}
-                placeholder={mode === 'search' ? 'Search memories semantically...' : 'Type a command or search...'}
+                placeholder={
+                  mode === 'search'
+                    ? 'Search memories semantically...'
+                    : mode === 'crew'
+                      ? crewStep?.kind === 'text'
+                        ? crewStep.placeholder
+                        : crewStep?.kind === 'pick'
+                          ? `${crewStep.title} (type to filter)`
+                          : ''
+                      : 'Type a command or search...'
+                }
+                maxLength={crewStep?.kind === 'text' ? crewStep.maxLength : undefined}
+                disabled={mode === 'crew' && (flowRunning || !!flowResult)}
                 className="cmdk-input"
-                aria-label={mode === 'search' ? 'Search memories' : 'Type a command'}
+                aria-label={mode === 'search' ? 'Search memories' : mode === 'crew' ? crewStep && crewStep.kind !== 'ready' ? crewStep.title : 'Crew command' : 'Type a command'}
                 autoComplete="off"
                 spellCheck={false}
               />
+              {mode === 'crew' && (
+                <button
+                  onClick={crewStepBack}
+                  className="text-xs text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] px-2 py-1 rounded-md bg-[hsl(var(--muted)/0.5)] flex-shrink-0"
+                >
+                  ESC
+                </button>
+              )}
               {mode === 'search' && (
                 <button
                   onClick={() => { setMode('commands'); setQuery(''); setSearchResults([]); }}
@@ -285,7 +495,24 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
 
             {/* Results */}
             <div ref={listRef} className="max-h-[360px] overflow-y-auto py-2 px-2">
-              {mode === 'commands' ? (
+              {mode === 'crew' ? (
+                <CrewFlowBody
+                  flow={flow}
+                  step={crewStep}
+                  options={crewOptions}
+                  selectedIndex={selectedIndex}
+                  onHover={setSelectedIndex}
+                  onChoose={chooseCrewOption}
+                  onSubmitText={submitCrewText}
+                  running={flowRunning}
+                  error={flowError ?? (flowCrew.status === 'not_found' ? 'That crew is no longer visible to you.' : null)}
+                  result={flowResult}
+                  onDone={() => {
+                    resetFlow();
+                    onClose();
+                  }}
+                />
+              ) : mode === 'commands' ? (
                 <>
                   {Object.entries(sections).map(([section, items]) => (
                     <div key={section} className="mb-1">
@@ -390,5 +617,144 @@ export function CommandPalette({ isOpen, onClose, onNavigate, onNewMemory, onSho
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+/** The current step of a crew command flow: pick list, text entry, progress, error or the one-time result. */
+function CrewFlowBody({
+  flow,
+  step,
+  options,
+  selectedIndex,
+  onHover,
+  onChoose,
+  onSubmitText,
+  running,
+  error,
+  result,
+  onDone,
+}: {
+  flow: CrewFlow | null;
+  step: ReturnType<typeof nextCrewStep> | null;
+  options: PickOption[];
+  selectedIndex: number;
+  onHover: (index: number) => void;
+  onChoose: (value: string) => void;
+  onSubmitText: () => void;
+  running: boolean;
+  error: string | null;
+  result: { message: string; copy: string } | null;
+  onDone: () => void;
+}) {
+  const muted = 'text-[hsl(var(--muted-foreground))]';
+  const crumb = flow?.crew ? (
+    <div className={clsx('px-3 pb-1.5 pt-1 font-mono text-[10px] uppercase tracking-[0.2em]', muted)}>{flow.crew.project}</div>
+  ) : null;
+  const errorLine = error ? (
+    <p role="alert" className="mx-3 my-2 border-l-[3px] border-fail bg-fail-wash px-3 py-2 text-sm text-ink">
+      {error}
+    </p>
+  ) : null;
+
+  if (result) {
+    return (
+      <div className="px-3 py-3">
+        <p className="text-sm text-ink">{result.message}</p>
+        <div className="mt-3 flex items-center gap-2">
+          <code className="flex-1 select-all rounded-[2px] border border-rule px-2 py-1.5 font-mono text-sm text-ink">{result.copy}</code>
+          <button
+            type="button"
+            className="rr-btn-ghost inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs"
+            onClick={() => {
+              void navigator.clipboard?.writeText(result.copy).then(
+                () => toast.success('Copied'),
+                () => toast.error('Could not copy; select the code instead'),
+              );
+            }}
+          >
+            <Copy className="h-3.5 w-3.5" aria-hidden="true" /> Copy
+          </button>
+        </div>
+        <p className={clsx('mt-2 text-xs', muted)}>Shown once. Give it to the person at that terminal; it works for one use.</p>
+        <button type="button" className="rr-btn-ghost mt-3 px-2.5 py-1.5 text-xs" onClick={onDone}>
+          Done
+        </button>
+      </div>
+    );
+  }
+  if (running) {
+    return (
+      <div className={clsx('flex items-center justify-center gap-2 py-8 text-sm', muted)}>
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> Working…
+      </div>
+    );
+  }
+  if (!step || step.kind === 'ready') {
+    return (
+      <>
+        {crumb}
+        {errorLine}
+      </>
+    );
+  }
+  if (step.kind === 'loading') {
+    return (
+      <>
+        {crumb}
+        <div className={clsx('flex items-center justify-center gap-2 py-8 text-sm', muted)}>
+          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> {step.title}
+        </div>
+        {errorLine}
+      </>
+    );
+  }
+  if (step.kind === 'text') {
+    return (
+      <>
+        {crumb}
+        <div className="px-3 py-2">
+          <p className="text-sm text-ink">{step.title}</p>
+          <p className={clsx('mt-1 text-xs', muted)}>Type it above, then press Enter. Backspace on an empty field goes back.</p>
+          <button type="button" className="rr-btn-ghost mt-3 inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs" onClick={onSubmitText}>
+            <CornerDownLeft className="h-3.5 w-3.5" aria-hidden="true" /> Submit
+          </button>
+        </div>
+        {errorLine}
+      </>
+    );
+  }
+  return (
+    <>
+      {crumb}
+      <div className={clsx('px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.24em]', muted)}>{step.title}</div>
+      {options.map((option, index) => {
+        const isSelected = index === selectedIndex;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            data-selected={isSelected}
+            aria-disabled={option.disabled ? true : undefined}
+            onClick={() => onChoose(option.value)}
+            onMouseEnter={() => onHover(index)}
+            className={clsx(
+              'cmdk-item w-full text-left',
+              isSelected && 'bg-[hsl(var(--primary)/0.1)] text-[hsl(var(--foreground))]',
+              option.disabled && 'opacity-50',
+            )}
+          >
+            <div className="min-w-0 flex-1">
+              <span className="font-mono text-sm">{option.label}</span>
+              {(option.disabled || option.description) && (
+                <span className={clsx('ml-2 text-xs', muted)}>{option.disabled ?? option.description}</span>
+              )}
+            </div>
+            {isSelected && !option.disabled && <ArrowRight className="h-3.5 w-3.5 flex-shrink-0 text-signal-ink" />}
+          </button>
+        );
+      })}
+      {options.length === 0 && <div className={clsx('py-8 text-center text-sm', muted)}>{step.options.length ? 'No match.' : step.empty}</div>}
+      {errorLine}
+    </>
   );
 }
