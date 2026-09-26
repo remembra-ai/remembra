@@ -3,32 +3,34 @@
 // WP-12 owns the routes and the data layer; the designed screens are WP-13's
 // and plug in here per screen: the Site Board (#/crews) and Mission Control
 // (the track view) are WP-13a's, Zone Map and Policy WP-13b's, Task Board and
-// report receipts WP-13c's, the Channel WP-13d's. Views whose screens have not
-// landed yet render a plain, fully live view of the same data so every crew
-// route works end to end: per crew the sessions with presence, who holds each
-// zone, reserved batons, Needs-you and the latest moments. Untrusted text
-// (titles, messages) is rendered as plain text only.
+// report receipts WP-13c's, the Channel WP-13d's, the Event Feed, empty states
+// and live regions WP-13e's. Any other view renders a plain, fully live view
+// of the same data so every crew route works end to end: per crew the
+// sessions with presence, who holds each zone, reserved batons, Needs-you and
+// the latest moments. Untrusted text (titles, messages) is rendered as plain
+// text only.
 
 import { HardHat, RadioTower } from 'lucide-react';
-import { PolicyPage } from '../../pages/crew/Policy';
-import { ZonesPage } from '../../pages/crew/Zones';
 import { useCrewSocket } from '../../hooks/useCrewSocket';
-import { Board } from '../../pages/crew/Board';
-import { Receipt } from '../../pages/crew/Receipt';
 import { useNow } from '../../hooks/useResource';
 import { absoluteTime, relativeTime } from '../time';
-import { Card, CardHeader, CopyCommand, ErrorNotice, Pill, PulseDot, TrailSkeleton } from '../../components/relay/ui';
+import { Card, CardHeader, ErrorNotice, Pill, PulseDot, TrailSkeleton } from '../../components/relay/ui';
+import { CrewGoKeys, CrewLiveRegions, CrewMomentAnnouncer } from '../../components/crew/a11y/CrewA11y';
 import { ChannelScreen } from '../../components/crew/channel/ChannelScreen';
+import { NoCrewsEmpty } from '../../components/crew/empty/EmptyStates';
+import { EventFeed } from '../../components/crew/feed/EventFeed';
+import { Board } from '../../pages/crew/Board';
 import { MissionControl } from '../../pages/crew/MissionControl';
+import { PolicyPage } from '../../pages/crew/Policy';
+import { Receipt } from '../../pages/crew/Receipt';
 import { SiteBoard } from '../../pages/crew/SiteBoard';
+import { ZonesPage } from '../../pages/crew/Zones';
 import { useCrewForProject } from './hooks';
-import { inboxHref, useCrewRoute } from './routes';
+import { inboxHref, useCrewRoute, type CrewRoute } from './routes';
 import { describeHolder, liveSessions, presenceText, sessionLabel, sortedZones, taskRef } from './selectors';
 import type { ConnectionStatus } from './socket';
 import type { CrewStreamStatus } from './store';
 import type { CrewState } from './types';
-
-const INSTALL = 'pipx install remembra && remembra-crew connect --crew';
 
 function connectionText(status: CrewStreamStatus, connection: ConnectionStatus): { text: string; live: boolean } {
   if (status === 'live') return { text: 'live', live: true };
@@ -167,6 +169,22 @@ function CrewLive({ crewId, project }: { crewId: string; project: string }) {
   );
 }
 
+// WP-13a: the track is Mission Control; WP-13b: Zone Map and Policy;
+// WP-13c: Task Board and report receipts; WP-13d: the Channel; WP-13e: the
+// Event Feed. Any other view keeps the live overview.
+function CrewView({ crewId, project, route }: { crewId: string; project: string; route: CrewRoute | null }) {
+  if (route?.screen === 'track') return <MissionControl crewId={crewId} project={project} />;
+  if (route?.screen === 'zones') return <ZonesPage crewId={crewId} project={project} zoneSlug={route.zone} />;
+  if (route?.screen === 'policy') return <PolicyPage crewId={crewId} project={project} />;
+  if (route?.screen === 'board') return <Board crewId={crewId} project={project} />;
+  if (route?.screen === 'report' && route.report) {
+    return <Receipt crewId={crewId} project={project} reportId={route.report} taskParam={route.task} />;
+  }
+  if (route?.screen === 'channel') return <ChannelScreen crewId={crewId} project={project} thread={route.thread} />;
+  if (route?.screen === 'feed') return <EventFeed crewId={crewId} project={project} />;
+  return <CrewLive crewId={crewId} project={project} />;
+}
+
 function CrewScreen() {
   const route = useCrewRoute();
   const project = route?.project ?? null;
@@ -180,35 +198,24 @@ function CrewScreen() {
   }
   if (lookup.status === 'loading') return <TrailSkeleton rows={3} />;
   if (lookup.status === 'error') return <ErrorNotice error={lookup.error} what="your crews" />;
-  if (lookup.status === 'none') {
-    return (
-      <Card className="p-4 sm:p-5">
-        <p className="rr-eyebrow">No crew for {project}</p>
-        <p className="mt-2 text-sm text-ink-2">A crew starts when the first connected agent joins this project.</p>
-        <CopyCommand className="mt-3" command={INSTALL} label="Crew install command" />
-      </Card>
-    );
-  }
-  // WP-13a: the track is Mission Control; WP-13b: Zone Map and Policy;
-  // WP-13c: Task Board and report receipts; WP-13d: the Channel. The other
-  // views keep the live overview until their WPs land.
-  if (route?.screen === 'track') return <MissionControl crewId={lookup.crewId} project={project} />;
-  if (route?.screen === 'zones') return <ZonesPage crewId={lookup.crewId} project={project} zoneSlug={route.zone} />;
-  if (route?.screen === 'policy') return <PolicyPage crewId={lookup.crewId} project={project} />;
-  if (route?.screen === 'board') return <Board crewId={lookup.crewId} project={project} />;
-  if (route?.screen === 'report' && route.report) {
-    return <Receipt crewId={lookup.crewId} project={project} reportId={route.report} taskParam={route.task} />;
-  }
-  if (route?.screen === 'channel') return <ChannelScreen crewId={lookup.crewId} project={project} thread={route.thread} />;
-  return <CrewLive crewId={lookup.crewId} project={project} />;
+  if (lookup.status === 'none') return <NoCrewsEmpty project={project} />;
+  return (
+    <>
+      <CrewMomentAnnouncer crewId={lookup.crewId} />
+      <CrewView crewId={lookup.crewId} project={project} route={route} />
+    </>
+  );
 }
 
 export function CrewRoutes({ tab }: { tab: 'crews' | 'crew' }) {
+  const route = useCrewRoute();
   return (
     <section aria-label={tab === 'crews' ? 'Crews' : 'Crew'} className="space-y-3">
       <h1 className="sr-only">
         <HardHat aria-hidden="true" /> {tab === 'crews' ? 'Crews' : 'Crew'}
       </h1>
+      <CrewLiveRegions />
+      <CrewGoKeys project={tab === 'crew' ? (route?.project ?? null) : null} />
       {tab === 'crews' ? <SiteBoard /> : <CrewScreen />}
     </section>
   );

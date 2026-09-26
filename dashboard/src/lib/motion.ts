@@ -3,6 +3,7 @@
  * Premium, subtle, performant animations inspired by Linear & Vercel
  */
 
+import { useSyncExternalStore } from 'react';
 import type { Variants, Transition } from 'framer-motion';
 
 // ─── Spring Presets ─────────────────────────────────────────────
@@ -165,3 +166,160 @@ export const countUpTransition: Transition = {
   duration: 0.8,
   ease: [0.22, 1, 0.36, 1],
 };
+
+// ═══════════════════════════════════════════════════════════════
+// Crew mode: the reduced set (spec §9.13 delight rules, §9.16 reduced motion)
+//
+// Crew screens use only the presets below. Every preset has a reduced-motion
+// form: nothing travels, scales or blurs; state changes land instantly (or as
+// a short opacity fade that carries no position). Delight moments (the baton
+// pass, "Crew assembled") go through DelightGate, which enforces the rules:
+// one animation at a time, none while a needs-you item is open, dismissible,
+// never longer than 600 ms.
+// ═══════════════════════════════════════════════════════════════
+
+/** The longest a crew animation may run (§9.13). */
+export const CREW_MAX_MS = 600;
+
+/** `prefers-reduced-motion: reduce`, read safely (false outside a browser). */
+export function prefersReducedMotion(win: { matchMedia?: (q: string) => { matches: boolean } } | null = typeof window !== 'undefined' ? window : null): boolean {
+  try {
+    return !!win?.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return false;
+  }
+}
+
+/** Subscribe to the reduced-motion preference (for useSyncExternalStore). */
+export function onReducedMotionChange(listener: () => void): () => void {
+  if (typeof window === 'undefined' || !window.matchMedia) return () => {};
+  const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+  mq.addEventListener?.('change', listener);
+  return () => mq.removeEventListener?.('change', listener);
+}
+
+export interface CrewMotion {
+  reduced: boolean;
+  /** A feed row or card arriving at the top of a list. */
+  rowEnter: Variants;
+  /** A pill or chip appearing (new-events pill, live pill). */
+  pill: Variants;
+  /** The baton pass along its dashed bezier (§9.4): full length, or an instant move. */
+  batonPass: Transition;
+  /** A drawer or sheet sliding in (phone check-in sheets, zone drawer). */
+  sheet: Variants;
+  /** Duration of the orange pixel packets on the live strip; 0 = packets are not drawn. */
+  packetMs: number;
+  /** Whether ambient art (the dithered cloud) may drift; false = drawn once, still. */
+  ambient: boolean;
+}
+
+const EASE_OUT: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+/** The crew motion presets, in their full or reduced form. */
+export function crewMotion(reduced: boolean): CrewMotion {
+  if (reduced) {
+    const still: Variants = { initial: { opacity: 1 }, animate: { opacity: 1, transition: { duration: 0 } }, exit: { opacity: 0, transition: { duration: 0 } } };
+    return {
+      reduced: true,
+      rowEnter: still,
+      pill: still,
+      batonPass: { duration: 0 },
+      sheet: still,
+      packetMs: 0,
+      ambient: false,
+    };
+  }
+  return {
+    reduced: false,
+    rowEnter: {
+      initial: { opacity: 0, y: -6 },
+      animate: { opacity: 1, y: 0, transition: { duration: 0.22, ease: EASE_OUT } },
+      exit: { opacity: 0, transition: { duration: 0.12 } },
+    },
+    pill: {
+      initial: { opacity: 0, y: -4, scale: 0.96 },
+      animate: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.18, ease: EASE_OUT } },
+      exit: { opacity: 0, y: -4, transition: { duration: 0.12 } },
+    },
+    batonPass: { duration: CREW_MAX_MS / 1000, ease: EASE_OUT },
+    sheet: {
+      initial: { opacity: 0, y: 24 },
+      animate: { opacity: 1, y: 0, transition: { duration: 0.24, ease: EASE_OUT } },
+      exit: { opacity: 0, y: 24, transition: { duration: 0.16 } },
+    },
+    packetMs: 900,
+    ambient: true,
+  };
+}
+
+export type DelightKind = 'baton_pass' | 'crew_assembled';
+
+export interface DelightRequest {
+  kind: DelightKind;
+  /** Wanted duration; clamped to CREW_MAX_MS. */
+  ms: number;
+}
+
+export interface DelightGrant {
+  kind: DelightKind;
+  /** Duration to animate for (0 = reduced motion: apply the end state at once). */
+  ms: number;
+  /** Stop early (the viewer dismissed it, or the screen went away). */
+  dismiss: () => void;
+}
+
+export type DelightRefusal = 'busy' | 'needs_you_open';
+
+/**
+ * The delight rules as a gate (§9.13): one animation at a time, none while a
+ * needs-you item is open, ≤600 ms, dismissible, and the reduced-motion form
+ * (ms = 0) when the viewer asked for it. Framework-free; the clock is injected.
+ */
+export class DelightGate {
+  private current: { kind: DelightKind; until: number; token: number } | null = null;
+  private token = 0;
+  private needsYouOpen = false;
+  private readonly now: () => number;
+  private readonly reduced: () => boolean;
+
+  constructor(options: { now?: () => number; reduced?: () => boolean } = {}) {
+    this.now = options.now ?? (() => Date.now());
+    this.reduced = options.reduced ?? (() => prefersReducedMotion());
+  }
+
+  /** Tell the gate whether a needs-you item is open on screen. Opening one stops any running delight. */
+  setNeedsYouOpen(open: boolean): void {
+    this.needsYouOpen = open;
+    if (open) this.current = null;
+  }
+
+  get playing(): DelightKind | null {
+    if (this.current && this.now() >= this.current.until) this.current = null;
+    return this.current?.kind ?? null;
+  }
+
+  request(req: DelightRequest): DelightGrant | DelightRefusal {
+    if (this.needsYouOpen) return 'needs_you_open';
+    if (this.playing) return 'busy';
+    const ms = this.reduced() ? 0 : Math.max(0, Math.min(CREW_MAX_MS, Math.round(req.ms)));
+    const token = ++this.token;
+    if (ms > 0) this.current = { kind: req.kind, until: this.now() + ms, token };
+    return {
+      kind: req.kind,
+      ms,
+      dismiss: () => {
+        if (this.current?.token === token) this.current = null;
+      },
+    };
+  }
+}
+
+const FULL_MOTION = crewMotion(false);
+const REDUCED_MOTION = crewMotion(true);
+
+/** The crew presets for this viewer, following `prefers-reduced-motion` live. */
+export function useCrewMotion(): CrewMotion {
+  const reduced = useSyncExternalStore(onReducedMotionChange, () => prefersReducedMotion(), () => false);
+  return reduced ? REDUCED_MOTION : FULL_MOTION;
+}

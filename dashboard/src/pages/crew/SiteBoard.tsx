@@ -13,12 +13,12 @@ import { useCrewList } from '../../lib/crew/hooks';
 import { crewHref, inboxHref } from '../../lib/crew/routes';
 import type { CrewListItem, CrewSnapshot } from '../../lib/crew/types';
 import { absoluteTime, relativeTime } from '../../lib/time';
-import { CopyCommand, ErrorNotice, StaleNotice, TrailSkeleton } from '../../components/relay/ui';
+import { ErrorNotice, StaleNotice, TrailSkeleton } from '../../components/relay/ui';
+import { NoCrewsEmpty } from '../../components/crew/empty/EmptyStates';
 import { DitherField } from '../../components/crew/lane/DitherField';
 import { agentPageHref } from '../../components/crew/lane/model';
 import { branch, buildTree, progressRail, type PhaseNode, type TreeLeaf } from './buildTree';
 
-const INSTALL = 'pipx install remembra && remembra-crew connect --crew';
 /** Cards whose trees are loaded (the rest show list data only). */
 const TREE_LIMIT = 24;
 
@@ -75,22 +75,6 @@ function useSiteSnapshots(items: CrewListItem[]): Map<string, CrewSnapshot | nul
     for (const [id, e] of entries) out.set(id, e.snapshot);
     return out;
   }, [entries]);
-}
-
-function NoCrews() {
-  return (
-    <div className="rr-card rounded-[3px] p-4 sm:p-5">
-      <p className="rr-eyebrow">No crews yet</p>
-      <ol className="mt-2 list-decimal space-y-2 pl-5 text-sm text-ink">
-        <li>
-          Connect this machine (you will see every change before it is written):
-          <CopyCommand className="mt-2" command={INSTALL} label="Crew install command" />
-        </li>
-        <li>Open the repo in any connected agent; it joins automatically.</li>
-        <li>Name your zones so agents know what not to touch.</li>
-      </ol>
-    </div>
-  );
 }
 
 function LeafRow({ leaf, gutter, last, project }: { leaf: TreeLeaf; gutter: string; last: boolean; project: string }) {
@@ -255,7 +239,7 @@ export function SiteBoard() {
   if (list.status === 'error' && list.items.length === 0) {
     return <ErrorNotice error={list.error} what="your crews" onRetry={list.refresh} />;
   }
-  if (list.items.length === 0) return <NoCrews />;
+  if (list.items.length === 0) return <NoCrewsEmpty />;
   const live = list.items.reduce((n, i) => n + i.live, 0);
   const busy = list.items.filter((i) => i.live > 0).length;
   return (
