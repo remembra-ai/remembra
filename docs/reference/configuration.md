@@ -27,6 +27,20 @@ All environment variables for Remembra.
 | `QDRANT_API_KEY` | - | Qdrant API key (if secured) |
 | `QDRANT_COLLECTION` | `remembra` | Qdrant collection name |
 
+## Crew mode
+
+Off by default. See [Crew mode: running the server](../relay/crew.md#running-the-server).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REMEMBRA_CREW_MODE` | `false` | `1`/`true`/`yes`/`on` turns Crew mode on at startup (crew routes, crew.db, crew jobs) |
+| `REMEMBRA_CREW_DB_PATH` | next to the main database | Location of `crew.db` |
+| `REMEMBRA_CREW_DB_TAILER` | `false` | Cross-process event tailing; only for more than one server process |
+| `REMEMBRA_CREW_LIVECHECK_BLOCKED_CIDRS` | - | Extra networks acceptance live checks never fetch |
+| `REMEMBRA_DASHBOARD_URL` | `https://app.remembra.dev` | Base URL for links in crew notifications |
+| `REMEMBRA_NOTIFY_SIGNING_KEY` | JWT secret | Key the crew webhook signing secrets derive from |
+| `LITESTREAM_CREW_REPLICA_URL` | `<LITESTREAM_REPLICA_URL>-crew` | Cloud image: where `crew.db` is replicated |
+
 ## Embeddings
 
 | Variable | Default | Description |
