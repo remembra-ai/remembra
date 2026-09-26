@@ -104,9 +104,14 @@ class UserManager:
         """
         return hashlib.sha256(token.encode()).hexdigest()
 
-    def create_jwt_token(self, user_id: str, email: str) -> str:
-        """Create a JWT access token."""
+    def create_jwt_token(self, user_id: str, email: str, extra_claims: dict[str, Any] | None = None) -> str:
+        """Create a JWT access token.
+
+        ``extra_claims`` may add claims the server itself decides (e.g. the
+        ``rvw`` account-review claim); they never override the standard ones.
+        """
         payload = {
+            **(extra_claims or {}),
             "sub": user_id,
             "email": email,
             "iat": datetime.now(UTC),
@@ -311,14 +316,18 @@ class UserManager:
         # Delete the used reset token
         await self.db.delete_password_reset_token(user_data["id"])
 
+        from remembra.auth import account_review
+
         if not user_data.get("email_verified"):
             # The token was only ever sent to the account address, so using it
             # proves control of that mailbox. Nobody had proven that before, so
             # whoever created this account (and its keys, 2FA, connector
             # grants, webhooks) may not be the mailbox owner: someone can
-            # pre-register a victim's address and wait. Treat the mailbox
-            # owner as a new owner and clear every credential set up before.
-            await reset_credentials_for_new_owner(self.db, user_data["id"])
+            # pre-register a victim's address and wait. Nothing is revoked
+            # here (that would silently disconnect a real owner's agents):
+            # the new password is the mailbox owner's, and the next sign-in
+            # with it opens a review of everything set up before.
+            #
             # The email is now verified (which also lets Sign in with Google
             # link to it), unless another account already verified the same
             # address: one free account per verified email.
@@ -326,6 +335,24 @@ class UserManager:
                 log.warning("password_reset_email_verified_elsewhere", user_id=user_data["id"])
             else:
                 await self.db.update_user_email_verified(user_data["id"], True)
+            review = await account_review.open_review(
+                self.db,
+                user_data["id"],
+                origin=account_review.ORIGIN_PASSWORD_RESET,
+                verified_at=account_review.now_iso(),
+                totp_enabled=bool(user_data.get("totp_enabled")),
+            )
+            await account_review.audit_opened(self.db, review, ip=None)
+        elif await account_review.is_pending(self.db, user_data["id"]):
+            # A review still open (e.g. from Sign in with Google): the password
+            # is now the mailbox owner's, so signing in with it may finish it.
+            await account_review.open_review(
+                self.db,
+                user_data["id"],
+                origin=account_review.ORIGIN_PASSWORD_RESET,
+                verified_at=account_review.now_iso(),
+                totp_enabled=False,
+            )
 
         # A reset means the old password may be compromised: kill every session.
         await security_state.invalidate_user_sessions(self.db, user_data["id"])
@@ -606,7 +633,8 @@ async def email_verified_on_another_account(db: Any, email: str, *, exclude_user
     tenants (``cloud_tenants``, which have no users row). Every path that
     marks an address verified or creates a pre-verified account calls it:
     dashboard verify-email, API-signup verify-email, password reset, and
-    Sign in with Google / GitHub account creation.
+    Sign in with Google / GitHub account creation or Google linking into an
+    unverified account.
     """
     import sqlite3
 
@@ -627,48 +655,3 @@ async def email_verified_on_another_account(db: Any, email: str, *, exclude_user
         if await cursor.fetchone():
             return True
     return False
-
-
-async def reset_credentials_for_new_owner(db: Database, user_id: str) -> dict[str, int]:
-    """Clear every credential set up on an account before its mailbox owner took it over.
-
-    Called when control of the address is proven for the first time (a
-    password reset on an unverified account). Revokes API keys and every
-    dashboard session, turns 2FA off (the authenticator may be someone
-    else's), revokes MCP connector grants and their tokens, pauses webhooks
-    (they push memory contents to a URL someone else chose), and drops any
-    provider identity links. Returns counts per kind, for the log.
-    """
-    import sqlite3
-
-    counts = {"api_keys": await revoke_user_access(db, user_id)}
-    await db.disable_totp(user_id)
-    now = time.time()
-    statements = (
-        (
-            "connector_tokens",
-            "UPDATE oauth_tokens SET revoked_at = ? WHERE revoked_at IS NULL"
-            " AND grant_id IN (SELECT grant_id FROM oauth_grants WHERE user_id = ?)",
-            (now, user_id),
-        ),
-        (
-            "connector_grants",
-            "UPDATE oauth_grants SET revoked_at = ?, revoke_reason = 'email_owner_verified'"
-            " WHERE user_id = ? AND revoked_at IS NULL",
-            (now, user_id),
-        ),
-        ("webhooks", "UPDATE webhooks SET active = 0 WHERE user_id = ? AND active = 1", (user_id,)),
-        ("identities", "DELETE FROM user_identities WHERE user_id = ?", (user_id,)),
-    )
-    for name, sql, args in statements:
-        try:
-            cursor = await db.conn.execute(sql, args)
-        except sqlite3.OperationalError as e:
-            if not _missing_table(e):
-                raise
-            counts[name] = 0
-            continue
-        counts[name] = cursor.rowcount or 0
-    await db.conn.commit()
-    log.warning("account_credentials_reset_for_verified_owner", user_id=user_id, **counts)
-    return counts

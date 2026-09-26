@@ -140,9 +140,11 @@ and you land in the dashboard. Repeat with Google.
       `@gmail.com`, or a Google Workspace account (`hd` claim).
 3. The API picks exactly one account:
     - the account already linked to this provider account signs in;
-    - else, **Google only**: an account with the same email is **linked**, only
-      if that account's email is already verified. The account owner gets an
-      email saying Google sign-in was added;
+    - else, **Google only**: an account with the same email is **linked**. The
+      account owner gets an email saying Google sign-in was added. If that
+      account's email was never verified, the link also verifies it and opens
+      a one-time account check (see "Accounts made before email verification"
+      below); nothing is revoked and API keys keep working;
     - else **GitHub** is refused when an account with that email exists
       ("connect GitHub in Settings"). GitHub never re-verifies addresses, so a
       "verified" primary email can belong to someone who no longer owns the
@@ -188,7 +190,8 @@ a provider is added. `GET /api/v1/auth/identities` lists connections and
 | GitHub primary email not verified, or a noreply address | "needs a verified primary email address" |
 | Google `email_verified` false | "did not confirm your email address" |
 | Google address that is neither Gmail nor Workspace | "Google cannot confirm who owns this email address" (sign up with email instead) |
-| An account with that email exists but was never verified | Refused, never linked (protects against someone pre-registering a victim's address). The owner uses **Forgot password** (or the verification link emailed at signup, while signed in). Signing in with the password alone does not verify the email |
+| Google, and an account with that email exists but was never verified | Signed in and linked; the email becomes verified and the account check opens (below) |
+| Google, same case, but an API signup already verified that address | Refused (one free account per verified email) |
 | GitHub, and an account with that email already exists | Refused: sign in with the password or Google, then connect GitHub in Settings |
 | No account has the email, but an API signup already verified it | Refused (one free account per verified email) |
 | This Remembra account is already linked to a different GitHub / Google account | Refused |
@@ -201,15 +204,44 @@ One account per verified email and per provider account: `user_identities` is
 unique on `(provider, provider_user_id)` and on `(user_id, provider)`, and
 `users.email` is unique.
 
-### Pre-registered accounts
+### Accounts made before email verification
 
-Someone can sign up with another person's address and never verify it. When
-the real owner of the mailbox completes **Forgot password** on such an account
-(the first proof that anyone controls the address), the API treats them as a new
-owner: it revokes every API key and dashboard session, turns 2FA off, revokes
-Claude / ChatGPT connector grants, pauses webhooks, and removes provider links,
-then marks the email verified. A reset of an account whose email was already
-verified keeps its keys, as before.
+Accounts made before email verification existed, and any account whose owner
+never clicked the link, have an unverified email. Anyone could have signed up
+with another person's address and a password and set things up on it. So the
+first proof that someone owns the mailbox (**Sign in with Google**, which
+Google verifies, or an emailed **Forgot password** reset) does not wipe the
+account. It:
+
+1. marks the email verified (unless another account already verified it);
+2. opens a one-time **account check** (`account_reviews`, schema migration 10).
+   Everything keeps working until the owner acts, so no agent is disconnected;
+3. shows the owner, right after sign-in, everything on the account: API keys
+   (name, created, last used, access, projects, agent), app connections,
+   webhooks, sign-in links added before verification, 2FA turned on before
+   verification, and the password when it was set before verification.
+   **Keep all** finishes in one click; each item can be revoked on its own,
+   and the password removed. "Later" hides it for the browser session; it
+   comes back until it is done. Every revoke, "later" and finish is written to
+   the audit log, and the finished check is emailed to the account address.
+
+Only a session that proved the mailbox can act on the check: the Google
+sign-in that opened it (or a provider connected later from such a session),
+or a password set through the emailed reset. Those sessions carry the
+check's id as the `rvw` JWT claim. Any other session (a password or GitHub
+link set up before verification) still signs in, but sees no check, cannot
+turn on 2FA or connect a sign-in method until it is done, and an owner address
+gives no superadmin rights until then. 2FA set up before verification does not
+apply to the proven sessions (it is one of the items to check). Removing the
+password or a sign-in link signs out every other session.
+
+API: `GET /api/v1/auth/review`, `POST /api/v1/auth/review/revoke`
+(`{"kind": "key|connection|webhook|identity|two_factor|password", "id": ...}`),
+`POST /api/v1/auth/review/complete`, `POST /api/v1/auth/review/defer`
+(dashboard session only).
+
+GitHub is never linked by email into an existing account, verified or not
+(see above); connect it in Settings after signing in.
 
 Rate limits per client IP: `start` 20/minute, `callback` 30/minute, `exchange`
 10/minute, `providers` 60/minute, `link` 10/minute.

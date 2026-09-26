@@ -21,8 +21,11 @@ Flow (the API is the OAuth client; the dashboard never sees provider tokens):
 
 3. The identity is resolved to ONE account: an existing identity link signs
    in; otherwise, for Google only, an existing account with that email is
-   linked if that account's email is already verified (a verified provider
-   email never takes over an unverified password account). GitHub is never
+   linked. When that account's email was never verified, the link also
+   verifies it and opens a one-time review of the credentials set up before
+   (API keys keep working until the owner keeps or revokes them; see
+   :mod:`remembra.auth.account_review`), so a pre-registered account never
+   hands the mailbox owner's sign-in to whoever registered it. GitHub is never
    linked by email: GitHub does not re-verify addresses, so a "verified"
    primary can belong to a former owner of the mailbox. A GitHub account is
    connected to an existing Remembra account only from a signed-in session
@@ -793,12 +796,6 @@ async def _resolve_once(db: Any, identity: ProviderIdentity, client_ip: str) -> 
     if existing is not None:
         if not existing.get("is_active", True):
             raise SocialLoginError("account_disabled")
-        if not existing.get("email_verified"):
-            # Never attach a provider to an account whose email nobody has
-            # proven: that account may have been pre-registered by someone
-            # else with this address (pre-account-takeover).
-            log.warning("oauth_link_refused_unverified_account", provider=identity.provider, user_id=existing["id"])
-            raise SocialLoginError("account_exists_unverified")
         cursor = await db.conn.execute(
             "SELECT 1 FROM user_identities WHERE user_id = ? AND provider = ?", (existing["id"], identity.provider)
         )
@@ -809,9 +806,15 @@ async def _resolve_once(db: Any, identity: ProviderIdentity, client_ip: str) -> 
         if identity.provider not in EMAIL_LINK_PROVIDERS:
             # GitHub never re-verifies an address: its "verified" primary may be
             # a mailbox that has since changed hands (a former employer's
-            # domain). It is connected only from the owner's signed-in session.
+            # domain). It is connected only from the owner's signed-in session,
+            # whether or not the account's email is verified.
             log.warning("oauth_link_refused_needs_session", provider=identity.provider, user_id=existing["id"])
             raise SocialLoginError("account_exists_link_required")
+        if not existing.get("email_verified"):
+            # Google just proved this person owns the mailbox, but whoever
+            # created the account may not have (pre-registered address). Link,
+            # verify, and open a review of everything set up before now.
+            return await _link_unverified_account(db, identity, existing, client_ip), False
         now = _now_iso()
         await db.conn.execute(
             "INSERT INTO user_identities (provider, provider_user_id, user_id, email, created_at, last_login_at)"
@@ -824,6 +827,39 @@ async def _resolve_once(db: Any, identity: ProviderIdentity, client_ip: str) -> 
         return str(existing["id"]), False
 
     return await _create_account(db, identity, client_ip), True
+
+
+async def _link_unverified_account(db: Any, identity: ProviderIdentity, existing: dict[str, Any], client_ip: str) -> str:
+    """Google sign-in into an account whose email was never verified.
+
+    The identity is linked, the email marked verified and a review opened in
+    one transaction. Nothing is revoked: API keys, connections and webhooks
+    keep working until the owner reviews them (``remembra.auth.account_review``).
+    """
+    from remembra.auth import account_review
+    from remembra.auth.users import email_verified_on_another_account
+
+    user_id = str(existing["id"])
+    # One free account per verified email: an API-signup tenant (or another
+    # dashboard account) may already hold this address as verified.
+    if await email_verified_on_another_account(db, identity.email, exclude_user_id=user_id):
+        log.warning("oauth_link_refused_email_verified_elsewhere", provider=identity.provider, user_id=user_id)
+        raise SocialLoginError("email_in_use")
+    now = _now_iso()
+    async with db.transaction():
+        await db.conn.execute(
+            "INSERT INTO user_identities (provider, provider_user_id, user_id, email, created_at, last_login_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (identity.provider, identity.subject, user_id, identity.email, now, now),
+        )
+        await db.conn.execute("UPDATE users SET email_verified = ?, updated_at = ? WHERE id = ?", (True, now, user_id))
+        review = await account_review.open_review(
+            db, user_id, origin=account_review.ORIGIN_GOOGLE, verified_at=now, totp_enabled=bool(existing.get("totp_enabled"))
+        )
+    log.info("oauth_identity_linked_unverified_account", provider=identity.provider, user_id=user_id)
+    await account_review.audit_opened(db, review, ip=client_ip)
+    await _notify_linked(str(existing["email"]), identity)
+    return user_id
 
 
 async def link_identity(db: Any, identity: ProviderIdentity, user_id: str) -> None:

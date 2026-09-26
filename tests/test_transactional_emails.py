@@ -152,13 +152,21 @@ def test_email_verification_and_reset_links() -> None:
     assert f"{DASH}/verify-email?token=t" in SAMPLES["email_verification"].text
     reset = SAMPLES["password_reset"]
     assert f"{DASH}/reset-password?token=t&email=a%40example.com" in reset.text
-    assert "24 hours" in reset.text and "never verified" in reset.text
-    # What reset_credentials_for_new_owner does: webhooks are paused (active = 0), not removed.
-    assert "pauses the webhooks until you turn them back on" in reset.text and "removes the API keys" not in reset.text
+    assert "24 hours" in reset.text and "also confirms this email address" in reset.text
+    # A reset of an unverified account revokes nothing; the owner reviews it at the next sign-in.
+    assert "keep working until then" in reset.text and "revokes" not in reset.text
     verified = tpl.password_reset(
         dashboard=DASH, reset_url=f"{DASH}/reset-password?token=x", expires_hours=24, email_verified=True
     )
-    assert "never verified" not in verified.text
+    assert "confirms this email address" not in verified.text
+
+
+def test_account_review_notice_lists_what_was_kept_and_removed() -> None:
+    email = SAMPLES["account_review_done"]
+    assert "Kept: API key 'laptop' (editor, all projects); Two-factor sign-in." in email.text
+    assert "Removed: Password." in email.text and f"{DASH}/#/keys" in email.text
+    nothing = tpl.account_review_done(dashboard=DASH, kept=[], removed=[])
+    assert "Kept: nothing." in nothing.text and "Removed:" not in nothing.text
 
 
 def test_key_created_names_the_key_but_never_contains_it() -> None:
@@ -344,7 +352,7 @@ async def test_forgot_password_link_resets_the_password(tmp_path, outbox) -> Non
         assert r.status_code == 200, r.text
         [reset] = outbox.of("password_reset")
         _message_ok(reset)
-        assert "24 hours" in reset.text and "never verified" not in reset.text
+        assert "24 hours" in reset.text and "confirms this email address" not in reset.text
         link = next(u for u in _text_links(reset.text) if "/reset-password?" in u)
         assert link.startswith(f"{DASH}/reset-password?")
         params = dict(parse_qsl(urlsplit(link).query))

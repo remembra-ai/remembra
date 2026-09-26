@@ -215,6 +215,7 @@ ERASURE_RULES: tuple[TableRule, ...] = (
     _by_user("security_email_verifications"),
     TableRule("security_login_attempts", deletes=("account_key = :login_key",)),
     _by_user("account_deletion_codes"),
+    _by_user("account_reviews"),
     _by_user("promo_redemptions"),
     _by_user("reindex_jobs"),
     _by_user("audit_log"),

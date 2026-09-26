@@ -23,10 +23,10 @@ from fastapi import APIRouter, Body, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
-from remembra.api.v1.auth import CurrentUser, get_user_manager
-from remembra.auth import social
+from remembra.api.v1.auth import CurrentUser, get_user_manager, refuse_until_review_done
+from remembra.auth import account_review, social
 from remembra.auth.middleware import get_client_ip
-from remembra.auth.superadmin import account_is_owner
+from remembra.auth.superadmin import account_is_owner_now
 from remembra.cloud import notify
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
@@ -262,7 +262,10 @@ async def oauth_exchange(
             detail="Too many failed attempts. Try again later.",
             headers={"Retry-After": str(remaining)},
         )
-    if await user_manager.is_totp_enabled(user_row["id"]):
+    # A provider identity linked when (or after) the mailbox was proven may
+    # finish a pending account review; 2FA set up before that does not apply.
+    review_claims, skip_old_totp = await account_review.login_claims(db, user_row["id"], provider=info["provider"])
+    if not skip_old_totp and await user_manager.is_totp_enabled(user_row["id"]):
         if not body.totp_code:
             return OAuthExchangeResponse(requires_2fa=True, provider=info["provider"], message="2FA code required")
         if not await user_manager.verify_totp(user_row["id"], body.totp_code):
@@ -273,7 +276,7 @@ async def oauth_exchange(
         raise expired
     await security_state.clear_failures(db, lock_key)
     await db.update_user_last_login(user_row["id"])
-    token = user_manager.create_jwt_token(user_row["id"], user_row["email"])
+    token = user_manager.create_jwt_token(user_row["id"], user_row["email"], extra_claims=review_claims)
     response.delete_cookie(social.login_cookie_name(), path="/", secure=social.cookie_secure(), httponly=True, samesite="lax")
     log.info("oauth_session_issued", provider=info["provider"], user_id=user_row["id"], new_account=info["new_account"])
     return OAuthExchangeResponse(
@@ -283,7 +286,7 @@ async def oauth_exchange(
             "email": user_row["email"],
             "name": user_row.get("name"),
             "email_verified": bool(user_row.get("email_verified")),
-            "is_admin": account_is_owner(user_row),
+            "is_admin": await account_is_owner_now(db, user_row),
         },
         new_account=info["new_account"],
         provider=info["provider"],
@@ -311,6 +314,7 @@ async def oauth_link_start(request: Request, response: Response, provider: str, 
     """
     _require_provider(provider)
     user_manager = await get_user_manager(request)
+    await refuse_until_review_done(user_manager, current_user)
     payload = user_manager.verify_jwt_token(current_user["token"]) or {}
     age_ms = time.time() * 1000 - security_state.token_issued_at_ms(payload)
     if age_ms > social.LINK_REAUTH_SECONDS * 1000:

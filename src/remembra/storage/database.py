@@ -58,6 +58,24 @@ CREATE TABLE IF NOT EXISTS founding_holds (
 )
 """
 
+# One row per account whose mailbox was proven after credentials were set up
+# on it (migration 10). ``review_id`` is carried as the ``rvw`` claim of the
+# sessions that proved the mailbox; only those may finish the review.
+ACCOUNT_REVIEWS_DDL = """
+CREATE TABLE IF NOT EXISTS account_reviews (
+    user_id TEXT PRIMARY KEY,
+    review_id TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    verified_at TEXT NOT NULL,
+    verified_at_ms INTEGER NOT NULL,
+    password_status TEXT NOT NULL DEFAULT 'untrusted',
+    totp_status TEXT NOT NULL DEFAULT 'none',
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    completed_by TEXT
+)
+"""
+
 # Versioned migrations (REL-15). Each entry runs once, inside a transaction,
 # and is recorded in schema_version. Append only — never edit an applied entry.
 # Version 1 marks the legacy idempotent ALTER list in _run_migrations().
@@ -214,6 +232,18 @@ VERSIONED_MIGRATIONS: list[tuple[int, str, list[str]]] = [
             # pool's rows from idx_memories_user and subtracts the relay-written
             # ones, found through this index instead of reading every row.
             "CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories(user_id, memory_type)",
+        ],
+    ),
+    (
+        10,
+        "account_reviews",
+        [
+            # The first proof that the account holder owns its mailbox (Sign in
+            # with Google on an account whose email was never verified, or an
+            # emailed password reset on one) opens a one-time review of the
+            # credentials set up before it. Nothing is revoked until the owner
+            # chooses; see remembra.auth.account_review.
+            ACCOUNT_REVIEWS_DDL,
         ],
     ),
 ]

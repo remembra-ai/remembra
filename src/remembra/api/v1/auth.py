@@ -8,8 +8,9 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
+from remembra.auth import account_review
 from remembra.auth.middleware import authenticate_jwt, get_client_ip
-from remembra.auth.superadmin import account_is_owner
+from remembra.auth.superadmin import account_is_owner_now
 from remembra.auth.users import PENDING_ERASURE_PREFIX, UserManager, email_verified_on_another_account
 from remembra.cloud.signup_guard import TURNSTILE_HEADER, guard_signup
 from remembra.config import get_settings
@@ -290,6 +291,18 @@ async def get_current_user_from_jwt(
 CurrentUser = Annotated[dict[str, Any], Depends(get_current_user_from_jwt)]
 
 
+async def refuse_until_review_done(user_manager: UserManager, current_user: dict[str, Any]) -> None:
+    """403 while an account review is pending and this session did not prove the mailbox.
+
+    Used on the routes that add a way into the account (2FA, a new sign-in
+    method): during the review only the mailbox owner may add one.
+    """
+    payload = user_manager.verify_jwt_token(current_user["token"])
+    message = await account_review.untrusted_block(user_manager.db, current_user["id"], payload)
+    if message:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=message)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -429,8 +442,14 @@ async def login(
         )
     assert user is not None  # authenticate returns a user whenever error is falsy
 
+    # A password set through an emailed reset proves the mailbox: such a
+    # session may finish a pending account review, and 2FA that was set up
+    # before the email was verified (possibly by someone else) does not
+    # stand in its way.
+    review_claims, skip_old_totp = await account_review.login_claims(db, user.id, provider=None)
+
     # Check if 2FA is enabled
-    if await user_manager.is_totp_enabled(user.id):
+    if not skip_old_totp and await user_manager.is_totp_enabled(user.id):
         if not body.totp_code:
             # Password correct but need 2FA code
             return LoginResponse(
@@ -447,8 +466,10 @@ async def login(
             )
 
     await security_state.clear_failures(db, lock_key)
+    if review_claims:
+        token = user_manager.create_jwt_token(user.id, user.email, extra_claims=review_claims)
 
-    is_admin = account_is_owner(await db.get_user_by_id(user.id))
+    is_admin = await account_is_owner_now(db, await db.get_user_by_id(user.id))
 
     return LoginResponse(
         access_token=token,
@@ -602,7 +623,7 @@ async def get_me(
             )
 
         # Superadmin only for verified owner accounts (never an unverified email claim)
-        is_admin = account_is_owner(await user_manager.db.get_user_by_id(user.id))
+        is_admin = await account_is_owner_now(user_manager.db, await user_manager.db.get_user_by_id(user.id))
 
         return UserResponse(
             id=user.id,
@@ -1005,6 +1026,7 @@ async def setup_totp(
     Requires a valid Bearer token in the Authorization header.
     """
     user_manager = await get_user_manager(request)
+    await refuse_until_review_done(user_manager, current_user)
 
     secret, provisioning_uri, error = await user_manager.setup_totp(current_user["id"])
 
@@ -1041,6 +1063,7 @@ async def enable_totp(
     Requires a valid Bearer token in the Authorization header.
     """
     user_manager = await get_user_manager(request)
+    await refuse_until_review_done(user_manager, current_user)
 
     success, error = await user_manager.enable_totp(current_user["id"], body.code)
 
@@ -1049,6 +1072,8 @@ async def enable_totp(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=error or "Failed to enable 2FA",
         )
+    # Turned on by the proven owner during a review: it is theirs, not an item to review.
+    await account_review.note_totp_enabled(user_manager.db, current_user["id"])
 
     return TotpVerifyResponse()
 

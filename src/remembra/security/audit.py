@@ -38,6 +38,12 @@ class AuditAction(StrEnum):
     # Account lifecycle (receipt rows keep no account content)
     ACCOUNT_ERASED = "account_erased"
 
+    # Review of credentials set up before the email was verified
+    ACCOUNT_REVIEW_OPENED = "account_review_opened"
+    ACCOUNT_REVIEW_REVOKED = "account_review_revoked"
+    ACCOUNT_REVIEW_DEFERRED = "account_review_deferred"
+    ACCOUNT_REVIEW_COMPLETED = "account_review_completed"
+
 
 @dataclass
 class AuditEvent:

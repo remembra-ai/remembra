@@ -4,7 +4,9 @@
    callback ran in (HttpOnly cookie set with the code, required and burned at
    /oauth/exchange).
 2. Pre-registered accounts: the first proof of mailbox control (a password
-   reset on an unverified account) clears every credential set up before it.
+   reset on an unverified account) verifies the email and opens a review of
+   the credentials set up before it (nothing is revoked until the owner
+   chooses; tests/test_account_review.py).
 3. GitHub never links by email into an existing account; it is connected
    from a signed-in session (Settings) instead.
 4. One free account per verified email, in both directions: a verified API
@@ -198,7 +200,7 @@ async def test_existing_login_codes_table_gets_the_binding_column(tmp_path, prov
 
 
 # ---------------------------------------------------------------------------
-# 2. Pre-registered account: the mailbox owner's reset clears the squatter
+# 2. Pre-registered account: the mailbox owner's reset opens a review
 # ---------------------------------------------------------------------------
 
 
@@ -230,7 +232,7 @@ async def _squatter_credentials(h: Any, uid: str) -> dict[str, Any]:
     return {"key": raw_key}
 
 
-async def test_preregistered_account_reset_clears_the_squatters_credentials(tmp_path, providers) -> None:
+async def test_preregistered_account_reset_revokes_nothing_and_opens_a_review(tmp_path, providers) -> None:
     async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
         # Attacker registers the victim's address, never verifies it, sets up access.
         uid = await h.create_user("victim@gmail.com", verified=False)
@@ -238,26 +240,28 @@ async def test_preregistered_account_reset_clears_the_squatters_credentials(tmp_
         assert (await h.client.get("/api/v1/keys", headers={"X-API-Key": squat["key"]})).status_code == 200
 
         providers.google_claims = {"email": "victim@gmail.com"}
-        # The victim is told to use Forgot password; the reset proves the mailbox.
+        # The mailbox owner resets the password: that proves the mailbox, revokes nothing.
         token, _ = await h.users.create_password_reset_token("victim@gmail.com")
         ok, err = await h.users.reset_password("victim@gmail.com", token, "N3w!Passw0rdX")
         assert ok, err
 
         user = await h.db.get_user_by_id(uid)
-        assert user["email_verified"] and not user["totp_enabled"] and not user.get("totp_secret")
-        assert (await h.client.get("/api/v1/keys", headers={"X-API-Key": squat["key"]})).status_code == 401
-        assert await count(h, "SELECT COUNT(*) FROM api_keys WHERE user_id = ? AND active", uid) == 0
-        assert await count(h, "SELECT COUNT(*) FROM webhooks WHERE user_id = ? AND active = 1", uid) == 0
-        assert await count(h, "SELECT COUNT(*) FROM oauth_grants WHERE user_id = ? AND revoked_at IS NULL", uid) == 0
-        assert await count(h, "SELECT COUNT(*) FROM oauth_tokens WHERE revoked_at IS NULL") == 0
+        assert user["email_verified"] and user["totp_enabled"]
+        assert (await h.client.get("/api/v1/keys", headers={"X-API-Key": squat["key"]})).status_code == 200
+        assert await count(h, "SELECT COUNT(*) FROM webhooks WHERE user_id = ? AND active = 1", uid) == 1
+        assert await count(h, "SELECT COUNT(*) FROM oauth_grants WHERE user_id = ? AND revoked_at IS NULL", uid) == 1
+        assert await count(h, "SELECT COUNT(*) FROM account_reviews WHERE user_id = ? AND completed_at IS NULL", uid) == 1
 
-        # Google now links into the account, and the squatter's key stays dead.
-        body = (await exchange(h, (await sign_in(h, providers, "google"))["code"])).json()
-        assert body["user"]["id"] == uid
-        assert (await h.client.get("/api/v1/keys", headers={"X-API-Key": squat["key"]})).status_code == 401
-        # The victim signs in with the new password without the squatter's 2FA.
+        # The victim signs in with the new password without the squatter's 2FA, and
+        # that session may act on the review (tests/test_account_review.py).
         r = await h.client.post("/api/v1/auth/login", json={"email": "victim@gmail.com", "password": "N3w!Passw0rdX"})
         assert r.status_code == 200 and r.json().get("access_token")
+        claims = jwt.decode(r.json()["access_token"], JWT_SECRET, algorithms=["HS256"])
+        assert claims.get("rvw")
+
+        # Google now links into the (verified) account.
+        body = (await exchange(h, (await sign_in(h, providers, "google"))["code"])).json()
+        assert body["user"]["id"] == uid
 
 
 async def test_reset_of_a_verified_account_keeps_its_keys(tmp_path, providers) -> None:

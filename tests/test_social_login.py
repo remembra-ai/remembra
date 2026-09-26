@@ -520,14 +520,22 @@ async def test_verified_account_is_linked_not_duplicated(tmp_path, providers) ->
         assert await count(h, "SELECT COUNT(*) FROM user_identities WHERE user_id = ?", uid) == 1
 
 
-async def test_unverified_password_account_is_never_taken_over(tmp_path, providers) -> None:
+async def test_unverified_account_links_google_under_review_but_never_github(tmp_path, providers) -> None:
     async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
-        # Someone pre-registered the victim's address with a password and never verified it.
-        await h.create_user("person@gmail.com", verified=False)
-        frag = await sign_in(h, providers, "google")
-        assert frag["error"] == "account_exists_unverified"
+        # An account whose email was never verified (legacy, or pre-registered by someone else).
+        uid = await h.create_user("person@gmail.com", verified=False)
+        # GitHub's "verified" may be stale: never linked by email, verified or not.
+        providers.github_emails = [{"email": "person@gmail.com", "primary": True, "verified": True}]
+        frag = await sign_in(h, providers, "github")
+        assert frag == {"error": "account_exists_link_required", "provider": "github", "from": "login"}
         assert await count(h, "SELECT COUNT(*) FROM user_identities") == 0
         assert await count(h, "SELECT COUNT(*) FROM oauth_login_codes") == 0
+        assert not (await h.db.get_user_by_id(uid))["email_verified"]
+        # Google is authoritative for the address: linked, verified, signed in, review open
+        # (tests/test_account_review.py covers the review itself).
+        body = (await exchange(h, (await sign_in(h, providers, "google", code="auth-code-2"))["code"])).json()
+        assert body["user"]["id"] == uid and body["user"]["email_verified"] is True
+        assert await count(h, "SELECT COUNT(*) FROM account_reviews WHERE user_id = ? AND completed_at IS NULL", uid) == 1
 
 
 async def test_password_reset_verifies_the_email_so_linking_then_works(tmp_path, providers) -> None:
