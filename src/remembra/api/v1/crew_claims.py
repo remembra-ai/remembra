@@ -29,6 +29,7 @@ from remembra.crew import collisions as CO
 from remembra.crew import zones as Z
 from remembra.crew.access import CrewAccess, CrewEntity, crew_access, crew_entity, crew_error, load_crew
 from remembra.crew.limits import enforce_rate_limit
+from remembra.crew.store import now_iso, parse_iso
 
 router = APIRouter(tags=["crew-claims"])
 
@@ -229,6 +230,32 @@ async def issue_bypass_code(request: Request, access: CrewAccess = Depends(crew_
         return await B.issue_code(
             ops, access.crew_id, human, session_id=body["session_id"], scope=body["scope"], minutes=body["minutes"]
         )
+
+
+@router.get("/crews/{crew_id}/bypass-codes")
+async def list_bypass_codes(request: Request, access: CrewAccess = Depends(crew_access(PO))) -> Any:
+    """(H) The crew's bypass codes, newest first (≤50): who may pass the gate right now, and every use.
+
+    Only ids, scope, session and times; the plain code is shown once, at issue, and never stored.
+    ``state`` is ``active`` (unused, not expired), ``used`` or ``expired`` by the server clock.
+    """
+    rows = await Z.fetchall(
+        access_conn(request),
+        "SELECT * FROM crew_bypass_codes WHERE crew_id = ? ORDER BY created_at DESC, id DESC LIMIT 50",
+        (access.crew_id,),
+    )
+    now = Z.utcnow()
+    codes = []
+    for row in rows:
+        view = B.bypass_view(row)
+        if row.get("used_at"):
+            view["state"] = "used"
+        elif parse_iso(str(row["expires_at"])) <= now:
+            view["state"] = "expired"
+        else:
+            view["state"] = "active"
+        codes.append(view)
+    return {"codes": codes, "server_time": now_iso(now)}
 
 
 @router.post("/bypass-codes/redeem")

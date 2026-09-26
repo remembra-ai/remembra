@@ -2,13 +2,15 @@
 //
 // WP-12 owns the routes and the data layer; the designed screens are WP-13's
 // and plug in here per screen: the Site Board (#/crews) and Mission Control
-// (the track view) are WP-13a's. Views whose screens have not landed yet
+// (the track view) are WP-13a's, Zone Map and Policy are WP-13b's. Views whose screens have not landed yet
 // render a plain, fully live view of the same data so every crew route works
 // end to end: per crew the sessions with presence, who holds each zone,
 // reserved batons, Needs-you and the latest moments. Untrusted text (titles,
 // messages) is rendered as plain text only.
 
 import { HardHat, RadioTower } from 'lucide-react';
+import { PolicyPage } from '../../pages/crew/Policy';
+import { ZonesPage } from '../../pages/crew/Zones';
 import { useCrewSocket } from '../../hooks/useCrewSocket';
 import { useNow } from '../../hooks/useResource';
 import { absoluteTime, relativeTime } from '../time';
@@ -183,8 +185,11 @@ function CrewScreen() {
       </Card>
     );
   }
-  // WP-13a: the track is Mission Control; the other views plug in here as their WPs land.
+  // WP-13a: the track is Mission Control; WP-13b: Zone Map and Policy. The
+  // other views keep the live overview until their WPs land.
   if (route?.screen === 'track') return <MissionControl crewId={lookup.crewId} project={project} />;
+  if (route?.screen === 'zones') return <ZonesPage crewId={lookup.crewId} project={project} zoneSlug={route.zone} />;
+  if (route?.screen === 'policy') return <PolicyPage crewId={lookup.crewId} project={project} />;
   return <CrewLive crewId={lookup.crewId} project={project} />;
 }
 

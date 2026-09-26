@@ -77,7 +77,7 @@ def _stale(user_id: str) -> dict[str, str]:
 async def test_every_wp5_route_is_registered_with_the_contract_access(tmp_path):
     async with crew_http(tmp_path) as (h, _db, _ctx):
         assert audit_crew_routes(h.app.router.routes, WP5, require_all=True) == []
-        assert len(WP5) == 29
+        assert len(WP5) == 30
 
 
 async def test_zones_claims_and_guard_over_http(tmp_path):

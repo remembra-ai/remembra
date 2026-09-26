@@ -8144,6 +8144,52 @@
       }
     },
     "/api/v1/crews/{crew_id}/bypass-codes": {
+      "get": {
+        "operationId": "getCrewsByCrewBypassCodes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "crew_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "404": {
+            "$ref": "#/components/responses/E404"
+          },
+          "409": {
+            "$ref": "#/components/responses/E409"
+          },
+          "412": {
+            "$ref": "#/components/responses/E412"
+          },
+          "422": {
+            "$ref": "#/components/responses/E422"
+          },
+          "423": {
+            "$ref": "#/components/responses/E423"
+          },
+          "429": {
+            "$ref": "#/components/responses/E429"
+          }
+        },
+        "summary": "List bypass codes (ids, scope, session, state; never the code)",
+        "tags": [
+          "WP-5"
+        ],
+        "x-access": "crew",
+        "x-human-only": true,
+        "x-permission": "crew:override",
+        "x-rate-bucket": "default",
+        "x-release": "L0",
+        "x-step-up": false
+      },
       "post": {
         "operationId": "postCrewsByCrewBypassCodes",
         "parameters": [
