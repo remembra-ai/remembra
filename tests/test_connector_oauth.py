@@ -1027,7 +1027,7 @@ async def test_connector_brief_only_shows_inbox_of_granted_projects(h):
     await _send_as_desktop(h, key, "claude-code", "untagged note", {})
     await _send_as_desktop(h, key, "claude-code", "project-a task", {"project_id": "project-a"})
     await _send_as_desktop(h, key, "secret-agent", "project-b only agent", {"project_id": "project-b"})
-    conn = await h.connect("alice@example.com", ["project-a"])
+    conn = await h.connect("alice@example.com", ["project-a"], agent="claude-code")
 
     brief = await h.tool(conn.access_token, "session_brief", {"agent_id": "claude-code"})
     assert brief["status"] == "ok"
@@ -1038,6 +1038,11 @@ async def test_connector_brief_only_shows_inbox_of_granted_projects(h):
     assert "project-b" not in dump and "untagged note" not in dump
     assert brief["known_agents"] == ["claude-code", "codex"]
     assert "secret-agent" not in brief["known_agents"]
+
+    # The grant is bound to its agent: another agent's inbox is refused (404, no content).
+    other = await h.tool(conn.access_token, "session_brief", {"agent_id": "secret-agent"})
+    assert other["status"] == "error" and other["code"] == 404
+    assert "project-b only agent" not in json.dumps(other)
 
     # The unrestricted desktop key still sees everything, as before.
     full = await h.http.get(
@@ -1072,4 +1077,5 @@ async def test_inbox_project_filter_edges():
     assert _inbox_project_filter(None) == ("", [])
     assert _inbox_project_filter([]) == (" AND 0", [])
     sql, args = _inbox_project_filter(["a", "b"])
-    assert sql == " AND json_extract(metadata, '$.project_id') IN (?, ?)" and args == ["a", "b"]
+    assert sql == " AND (CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.project_id') END) IN (?, ?)"
+    assert args == ["a", "b"]

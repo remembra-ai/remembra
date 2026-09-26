@@ -92,7 +92,11 @@ def _inbox_project_filter(project_ids: list[str] | None) -> tuple[str, list[str]
     if not project_ids:
         return " AND 0", []
     marks = ", ".join("?" for _ in project_ids)
-    return f" AND json_extract(metadata, '$.project_id') IN ({marks})", list(project_ids)
+    # Malformed legacy metadata reads as untagged instead of failing the query.
+    return (
+        f" AND (CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.project_id') END) IN ({marks})",
+        list(project_ids),
+    )
 
 
 def _to_naive_utc_iso(value: datetime) -> str:
