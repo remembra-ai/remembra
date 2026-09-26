@@ -9,6 +9,7 @@ import { SignInMethods } from '../components/auth/SignInMethods';
 import { EmailVerificationStatus } from '../components/auth/EmailVerificationStatus';
 import { UNINSTALL_STEPS } from '../lib/agents';
 import { hrefFor } from '../lib/nav';
+import { DELETE_ACCOUNT_BILLING, DELETE_ACCOUNT_EFFECT, DELETE_ACCOUNT_SOCIAL, DELETE_ACCOUNT_SUMMARY } from '../lib/accountDeletion';
 
 const SETTINGS_TABS: readonly SettingsTab[] = ['profile', 'password', 'security', 'workspace', 'retrieval', 'diagnostics', 'account'];
 
@@ -641,9 +642,7 @@ function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => voi
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
               Delete Account
             </h2>
-            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-              Permanently delete your account and all associated data. This action cannot be undone.
-            </p>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">{DELETE_ACCOUNT_SUMMARY}</p>
             <button
               onClick={() => setShowDeleteModal(true)}
               className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white font-medium transition-colors"
@@ -668,9 +667,8 @@ function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => voi
 
             {/* Content */}
             <div className="p-4 space-y-4">
-              <p className="text-gray-600 dark:text-gray-300">
-                This will permanently delete your account and all memories. This action cannot be undone.
-              </p>
+              <p className="text-gray-600 dark:text-gray-300">{DELETE_ACCOUNT_EFFECT}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-300">{DELETE_ACCOUNT_BILLING}</p>
 
               <div className="rounded-lg border border-gray-200 dark:border-gray-700 p-3">
                 <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
@@ -698,6 +696,7 @@ function AccountSettings({ onLogout }: { user: UserResponse; onLogout: () => voi
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                   Enter your password
                 </label>
+                <p className="mb-2 text-xs text-gray-500 dark:text-gray-400">{DELETE_ACCOUNT_SOCIAL}</p>
                 <input
                   type="password"
                   value={password}

@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import secrets
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -415,11 +416,15 @@ class UserManager:
         self,
         user_id: str,
         password: str,
+        before_deactivate: Callable[[], Awaitable[str | None]] | None = None,
     ) -> tuple[bool, str | None]:
         """
         Deactivate user account (soft delete).
 
-        Requires password confirmation for security.
+        Requires password confirmation for security. ``before_deactivate``
+        runs after the password is checked and before anything changes (the
+        route cancels a paid subscription there); an error message it returns
+        stops the deletion with that message.
         Returns (True, None) on success, (False, error_message) on failure.
         """
         user_data = await self.db.get_user_by_id(user_id)
@@ -430,6 +435,11 @@ class UserManager:
         if not self.verify_password(password, user_data["password_hash"]):
             log.warning("account_deletion_failed_wrong_password", user_id=user_id)
             return False, "Password is incorrect"
+
+        if before_deactivate is not None:
+            refusal = await before_deactivate()
+            if refusal:
+                return False, refusal
 
         # Deactivate account
         success = await self.db.deactivate_user(user_id)

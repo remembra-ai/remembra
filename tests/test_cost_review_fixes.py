@@ -913,3 +913,64 @@ async def test_anthropic_entity_extraction_is_budgeted_and_metered() -> None:
         result = await extractor.extract("Suzan works at the clinic in Ocho Rios.")
         assert result.entities == [] and len(calls) == 1
     await job.wait_settled()
+
+
+# ---------------------------------------------------------------------------
+# 17. Deleting an account ends its subscription first
+# ---------------------------------------------------------------------------
+
+PASSWORD = "Str0ng!Passw0rd"
+
+
+async def _delete_me(c: Any, uid: str, email: str, password: str = PASSWORD) -> httpx.Response:
+    return await c.h.client.request("DELETE", "/api/v1/auth/me", json={"password": password}, headers=c.h.jwt(uid, email))
+
+
+async def test_deleting_an_account_cancels_its_paddle_subscription_at_period_end(tmp_path, monkeypatch) -> None:
+    """A deactivated account cannot sign in to Billing to cancel, so the delete cancels it (no further charge)."""
+    calls = _fake_paddle_api(monkeypatch)
+    async with cost_app(tmp_path) as c:
+        _paddle(c, **PRICES)
+        uid = await _refundable_solo(c, "leaving@example.com", "sub_leave")
+        wrong = await _delete_me(c, uid, "leaving@example.com", password="not-the-password")
+        assert wrong.status_code == 400 and calls == []  # nothing is cancelled before the password checks out
+
+        r = await _delete_me(c, uid, "leaving@example.com")
+        assert r.status_code == 200, r.text
+        assert calls == [("POST", "/subscriptions/sub_leave/cancel", {"effective_from": "next_billing_period"})]
+        assert not (await c.h.db.get_user_by_id(uid))["is_active"]
+
+
+async def test_an_account_whose_subscription_cannot_be_cancelled_is_not_deleted(tmp_path, monkeypatch) -> None:
+    calls = _fake_paddle_api(monkeypatch, cancel_error=500, status="active")
+    async with cost_app(tmp_path) as c:
+        _paddle(c, **PRICES)
+        uid = await _refundable_solo(c, "stuck@example.com", "sub_stuck")
+        r = await _delete_me(c, uid, "stuck@example.com")
+        assert r.status_code == 400
+        assert "subscription could not be cancelled" in r.json()["detail"] and "Manage subscription" in r.json()["detail"]
+        assert [(m, e) for m, e, _ in calls] == [("POST", "/subscriptions/sub_stuck/cancel"), ("GET", "/subscriptions/sub_stuck")]
+        assert (await c.h.db.get_user_by_id(uid))["is_active"]  # still there: Billing is still reachable
+        me = await c.h.client.get("/api/v1/auth/me", headers=c.h.jwt(uid, "stuck@example.com"))
+        assert me.status_code == 200
+
+
+async def test_deleting_an_account_whose_subscription_is_already_cancelled_goes_ahead(tmp_path, monkeypatch) -> None:
+    calls = _fake_paddle_api(monkeypatch, cancel_error=400, status="canceled")
+    async with cost_app(tmp_path) as c:
+        _paddle(c, **PRICES)
+        uid = await _refundable_solo(c, "cancelled@example.com", "sub_done")
+        r = await _delete_me(c, uid, "cancelled@example.com")
+        assert r.status_code == 200, r.text
+        assert [(m, e) for m, e, _ in calls] == [("POST", "/subscriptions/sub_done/cancel"), ("GET", "/subscriptions/sub_done")]
+        assert not (await c.h.db.get_user_by_id(uid))["is_active"]
+
+
+async def test_deleting_a_free_account_calls_no_billing_provider(tmp_path, monkeypatch) -> None:
+    calls = _fake_paddle_api(monkeypatch)
+    async with cost_app(tmp_path) as c:
+        _paddle(c, **PRICES)
+        uid = await c.h.create_user("free@example.com")
+        r = await _delete_me(c, uid, "free@example.com")
+        assert r.status_code == 200, r.text
+        assert calls == []

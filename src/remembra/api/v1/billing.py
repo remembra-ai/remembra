@@ -788,6 +788,67 @@ async def _apply_paddle_refund(request: Request, meter: Any, result: Any) -> str
     return "applied"
 
 
+async def end_subscription_before_account_deletion(request: Request, user_id: str) -> str | None:
+    """Cancel the account's paid subscription before the account is deactivated.
+
+    A deactivated account cannot sign in, so it can never reach Billing >
+    Manage subscription again: a subscription left running would keep
+    renewing and charging. The cancel takes effect at the end of the period
+    already paid for (Paddle ``next_billing_period``): no further charge, no
+    refund owed. Returns None when there is nothing to cancel or it is
+    cancelled (or already cancelled or scheduled to be); otherwise the reason
+    the account must not be deleted yet.
+    """
+    meter = getattr(request.app.state, "usage_meter", None)
+    if meter is None:
+        return None
+    subscription_id = meter.active_subscription_id(await meter.get_tenant(user_id))
+    if not subscription_id:
+        return None
+    blocked = (
+        "Your subscription could not be cancelled, so your account was not deleted. Cancel it in Billing"
+        " (Manage subscription), then delete your account, or email admin@dolphytech.com."
+    )
+    settings = get_settings()
+    if get_billing_provider(settings) != "paddle":
+        log.error("account_delete_subscription_not_cancelled", user_id=user_id, reason="no_billing_provider")
+        return blocked
+
+    from remembra.cloud.billing_paddle import PaddleBillingManager
+    from remembra.cloud.paddle_config import get_paddle_settings
+
+    try:
+        paddle_settings = get_paddle_settings()
+    except ValueError:
+        log.error("account_delete_subscription_not_cancelled", user_id=user_id, reason="no_api_key")
+        return blocked
+    billing = PaddleBillingManager(
+        api_key=paddle_settings.api_key,
+        webhook_secret=paddle_settings.webhook_secret or "",  # only the API is used here
+        sandbox=paddle_settings.sandbox,
+    )
+    try:
+        await billing.cancel_subscription(subscription_id, effective_from="next_billing_period")
+    except Exception as e:
+        try:
+            current = await billing.get_subscription(subscription_id)
+            scheduled = current.get("scheduled_change") or {}
+            if current.get("status") == "canceled" or (isinstance(scheduled, dict) and scheduled.get("action") == "cancel"):
+                log.info("account_delete_subscription_already_canceled", user_id=user_id, subscription_id=subscription_id)
+                return None
+        except Exception:
+            pass  # reported below with the cancel error
+        log.error(
+            "account_delete_subscription_not_cancelled",
+            user_id=user_id,
+            subscription_id=subscription_id,
+            error_type=type(e).__name__,
+        )
+        return blocked
+    log.warning("account_delete_subscription_canceled", user_id=user_id, subscription_id=subscription_id)
+    return None
+
+
 async def _cancel_refunded_subscription(subscription_id: str, user_id: str) -> bool:
     """Cancel a refunded or charged-back Paddle subscription now, so it never renews.
 

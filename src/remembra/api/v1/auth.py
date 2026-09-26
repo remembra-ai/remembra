@@ -792,13 +792,23 @@ async def delete_account(
     This is a soft delete - the account is deactivated but data is retained.
     Contact support if you need complete data deletion.
 
+    A paid subscription is cancelled first (at the end of the period already
+    paid for): a deactivated account can no longer reach Billing to cancel
+    it. When it cannot be cancelled, the account is not deactivated (400).
+
     Requires a valid Bearer token in the Authorization header.
     """
+    from remembra.api.v1.billing import end_subscription_before_account_deletion
+
     user_manager = await get_user_manager(request)
+
+    async def end_billing() -> str | None:
+        return await end_subscription_before_account_deletion(request, current_user["id"])
 
     success, error = await user_manager.delete_account(
         user_id=current_user["id"],
         password=body.password,
+        before_deactivate=end_billing,
     )
 
     if not success:
