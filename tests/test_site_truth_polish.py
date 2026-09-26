@@ -188,7 +188,7 @@ def test_no_public_copy_says_the_founding_price_is_locked_for_life() -> None:
 
     from remembra.cloud.metering import FOUNDING_LAPSE_GRACE
 
-    assert FOUNDING_LAPSE_GRACE == timedelta(days=14)
+    assert timedelta(days=14) == FOUNDING_LAPSE_GRACE
     emails = [ROOT / "src" / "remembra" / "cloud" / "email_templates.py"]
     assert _hits(LOCKED) == [] and _hits(LOCKED, emails) == []
     terms = _text((LANDING / "terms.html").read_text())
@@ -241,16 +241,29 @@ def test_transcript_claims_name_every_agent_whose_transcript_is_read() -> None:
             if claude_only.search(sentence) and re.search(r"transcript|test runs?\b", sentence, re.I):
                 bad.append(f"{path.relative_to(ROOT)}: {sentence[:200]}")
     assert bad == []
-    row = next(ln for ln in (ROOT / "docs" / "comparisons" / "handoff-tools.md").read_text().splitlines() if ln.startswith("| **Remembra Relay**"))
+    row = next(
+        ln
+        for ln in (ROOT / "docs" / "comparisons" / "handoff-tools.md").read_text().splitlines()
+        if ln.startswith("| **Remembra Relay**")
+    )
     assert "Claude Code transcript or Codex rollout" in row
 
 
 # Names the pages use for each adapter (relay/adapters/*.py).
-AGENT_NAMES = {"claude-code": "Claude Code", "codex": "Codex", "cursor": "Cursor", "gemini": "Gemini CLI", "qwen": "Qwen Code", "kimi": "Kimi"}
+AGENT_NAMES = {
+    "claude-code": "Claude Code",
+    "codex": "Codex",
+    "cursor": "Cursor",
+    "gemini": "Gemini CLI",
+    "qwen": "Qwen Code",
+    "kimi": "Kimi",
+}
 
 
 @pytest.mark.parametrize(
-    "page", [ROOT / "docs" / "comparisons" / "handoff-tools.md", LANDING / "blog" / "remembra-vs-mem0-vs-zep.html"], ids=lambda p: p.name
+    "page",
+    [ROOT / "docs" / "comparisons" / "handoff-tools.md", LANDING / "blog" / "remembra-vs-mem0-vs-zep.html"],
+    ids=lambda p: p.name,
 )
 def test_pages_name_the_verified_agents_the_registry_verifies(page: Path) -> None:
     """The comparison page and the blog list which hooks are verified: exactly the adapters marked verified,
@@ -281,7 +294,10 @@ def test_the_phone_connector_is_marked_coming_wherever_it_appears() -> None:
 
     assert Settings.model_fields["connector_enabled"].default is False
     home = (LANDING / "index.html").read_text()
-    assert "<!-- beta: the connector is built and tested locally; not yet verified inside the live Claude and ChatGPT apps -->" in home
+    assert (
+        "<!-- beta: the connector is built and tested locally; not yet verified inside the live Claude and ChatGPT apps -->"
+        in home
+    )
     marker = re.compile(r"not live|not switched on|coming", re.I)
     bad = []
     for path in sorted(LANDING.rglob("*.html")):
@@ -308,8 +324,12 @@ def test_team_card_and_plan_features_claim_only_what_the_teams_api_enforces() ->
     from remembra.cloud.plans import PlanTier
     from remembra.teams.manager import VALID_ROLES
 
-    assert VALID_ROLES == {"owner", "admin", "member", "viewer"}
-    card = _text(re.search(r'<article class="plan" aria-labelledby="p-team">(.*?)</article>', (LANDING / "pricing.html").read_text(), re.S).group(1))
+    assert {"owner", "admin", "member", "viewer"} == VALID_ROLES
+    card = _text(
+        re.search(
+            r'<article class="plan" aria-labelledby="p-team">(.*?)</article>', (LANDING / "pricing.html").read_text(), re.S
+        ).group(1)
+    )
     assert "The owner and admins invite and remove teammates and set their roles" in card
     assert "through shared spaces, read or write per person" in card
     # A viewer has the same team access as a member (see the API test below) and team roles do not gate notes.
@@ -344,8 +364,18 @@ async def test_team_viewer_has_the_same_access_as_a_member_and_admins_manage(tmp
             return {
                 "read": (await c.get(f"/api/v1/teams/{tid}", headers=auth(role))).status_code,
                 "members": (await c.get(f"/api/v1/teams/{tid}/members", headers=auth(role))).status_code,
-                "invite": (await c.post(f"/api/v1/teams/{tid}/invites", json={"email": f"new-{role}@example.com", "role": "member"}, headers=auth(role))).status_code,
-                "set_role": (await c.patch(f"/api/v1/teams/{tid}/members/{users['extra']}/role", json={"role": "viewer"}, headers=auth(role))).status_code,
+                "invite": (
+                    await c.post(
+                        f"/api/v1/teams/{tid}/invites",
+                        json={"email": f"new-{role}@example.com", "role": "member"},
+                        headers=auth(role),
+                    )
+                ).status_code,
+                "set_role": (
+                    await c.patch(
+                        f"/api/v1/teams/{tid}/members/{users['extra']}/role", json={"role": "viewer"}, headers=auth(role)
+                    )
+                ).status_code,
                 "rename": (await c.patch(f"/api/v1/teams/{tid}", json={"name": "Renamed"}, headers=auth(role))).status_code,
                 "delete": (await c.delete(f"/api/v1/teams/{tid}", headers=auth(role))).status_code,
             }
@@ -398,7 +428,9 @@ def test_the_plans_page_holds_a_new_yearly_bank_like_the_metering_code() -> None
     doc = " ".join((ROOT / "docs" / "reference" / "plans-and-credits.md").read_text().split())
     pricing = _text((LANDING / "pricing.html").read_text())
     for text in (doc, pricing):
-        assert re.search(rf"full (?:credit )?bank {unlock} days after purchase; until then one month's credits are available", text)
+        assert re.search(
+            rf"full (?:credit )?bank {unlock} days after purchase; until then one month's credits are available", text
+        )
     assert "on day one" not in doc and "up front" not in doc
     # Team pools the allowance for members without a paid plan of their own (metering.get_account), not notes.
     assert "who has no paid plan of their own" in doc and "shared only through shared spaces" in doc
@@ -412,7 +444,11 @@ def test_the_team_card_does_not_promise_pro_limits_or_a_shared_memory_pool() -> 
     pro, team = PLANS[PlanTier.PRO], PLANS[PlanTier.TEAM]
     assert team.max_recalls_per_month * team.min_seats < pro.max_recalls_per_month
     assert team.enrichment_concurrency == pro.enrichment_concurrency and team.has_priority_support
-    card = _text(re.search(r'<article class="plan" aria-labelledby="p-team">(.*?)</article>', (LANDING / "pricing.html").read_text(), re.S).group(1))
+    card = _text(
+        re.search(
+            r'<article class="plan" aria-labelledby="p-team">(.*?)</article>', (LANDING / "pricing.html").read_text(), re.S
+        ).group(1)
+    )
     assert "Everything in Pro" not in card and "sharing one pool" not in card
     assert "Agents and people on one pooled allowance." in card
     assert "The trail of every session" not in _text((LANDING / "pricing.html").read_text())
@@ -450,7 +486,10 @@ async def test_docs_state_the_mcp_tool_count_the_server_registers() -> None:
     from remembra.mcp import server
 
     tools, resources = await server.mcp.list_tools(), await server.mcp.list_resources()
-    count = re.compile(r"\ball (\d+) tools and (\d+) resources\b|\bhas (\d+) tools\b|\bserver with (\d+) tools\b|tools \((\d+)\)|the (\d+) tools\b")
+    count = re.compile(
+        r"\ball (\d+) tools and (\d+) resources\b|\bhas (\d+) tools\b|\bserver with (\d+) tools\b"
+        r"|tools \((\d+)\)|the (\d+) tools\b"
+    )
     stated = []
     for path in _public_files():
         if path.name in ("CHANGELOG.md", "changelog.md", "changelog.html"):
