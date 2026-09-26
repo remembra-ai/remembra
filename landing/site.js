@@ -1,5 +1,5 @@
-/* Remembra site: theme toggle, mobile menu, sticky header rule and
-   copy-to-clipboard. No dependencies. Dark is the default; the page's
+/* Remembra site: theme toggle, mobile menu, sticky header rule,
+   copy-to-clipboard and the install tabs. No dependencies. Dark is the default; the page's
    inline head script has already applied a saved choice before paint. */
 (function () {
   "use strict";
@@ -50,6 +50,38 @@
     window.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
   }
+
+  /* ---------------- Install tabs: terminal | your agent ----------------
+     A WAI-ARIA tablist: each tab shows its own panel; Left/Right (and Up/Down)
+     move to the next tab and select it, Home and End jump to the ends. Only
+     the chosen tab is in the Tab order. */
+  document.querySelectorAll("[data-cmd-tabs]").forEach(function (list) {
+    var tabs = Array.prototype.slice.call(list.querySelectorAll('[role="tab"]'));
+    function select(tab, focus) {
+      tabs.forEach(function (t) {
+        var on = t === tab;
+        t.setAttribute("aria-selected", on ? "true" : "false");
+        t.setAttribute("tabindex", on ? "0" : "-1");
+        t.classList.toggle("solid", on);
+        var panel = document.getElementById(t.getAttribute("aria-controls"));
+        if (panel) panel.hidden = !on;
+      });
+      if (focus) tab.focus();
+    }
+    tabs.forEach(function (tab, i) {
+      tab.addEventListener("click", function () { select(tab, false); });
+      tab.addEventListener("keydown", function (e) {
+        var next = null;
+        if (e.key === "ArrowRight" || e.key === "ArrowDown") next = tabs[(i + 1) % tabs.length];
+        else if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = tabs[(i - 1 + tabs.length) % tabs.length];
+        else if (e.key === "Home") next = tabs[0];
+        else if (e.key === "End") next = tabs[tabs.length - 1];
+        if (!next) return;
+        e.preventDefault();
+        select(next, true);
+      });
+    });
+  });
 
   /* ---------------- Copy command ---------------- */
   document.querySelectorAll("[data-copy]").forEach(function (btn) {

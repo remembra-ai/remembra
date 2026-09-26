@@ -15,6 +15,12 @@ rewrite ... permanent, internal, and try_files against the files in landing/.
 Anything else in a location (add_header, include, default_type) does not
 change which file or redirect is sent.
 
+``content_type`` answers the Content-Type nginx sends with a file: the type
+its extension has in the config's ``types`` blocks or in the stock
+mime.types the config includes (STOCK_TYPES), else the location's (or the
+server's) ``default_type``, with ``; charset=utf-8`` when that type is in
+``charset_types`` (text/html always is).
+
     python scripts/site_nginx.py /pricing /dashboard?checkout=success
 
 tests/test_landing_nginx.py checks this model against nginx's documented
@@ -153,6 +159,64 @@ def resolve(url: str, locations: list[Location] | None = None, root: Path | None
         return resolve(last, locations, root)
     found = _file(root, path)
     return Response(200, file=found, matched=loc) if found else Response(404, matched=loc)
+
+
+# The entries of nginx's stock conf/mime.types (included by nginx.conf) that remembra.dev's files use.
+# It has no entry for .md: a markdown file needs the config's own types block, or a default_type.
+STOCK_TYPES = {
+    "html": "text/html",
+    "htm": "text/html",
+    "css": "text/css",
+    "xml": "text/xml",
+    "js": "application/javascript",
+    "json": "application/json",
+    "txt": "text/plain",
+    "svg": "image/svg+xml",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "ico": "image/x-icon",
+    "webp": "image/webp",
+}
+
+
+def _http_level(text: str) -> str:
+    """The config with every location block cut out: what is left is set for the whole server."""
+    return _LOCATION.sub("", _strip_comments(text))
+
+
+def config_types(text: str) -> dict[str, str]:
+    """extension -> MIME type from the config's own ``types { ... }`` blocks."""
+    out: dict[str, str] = {}
+    for block in re.findall(r"\btypes\s*\{([^{}]*)\}", _strip_comments(text)):
+        for words in _directives(block):
+            for ext in words[1:]:
+                out[ext] = words[0]
+    return out
+
+
+def http_directive(text: str, name: str) -> list[str] | None:
+    """A directive set outside every location (``charset_types``, ``gzip_types``, ``default_type``)."""
+    outside = re.sub(r"\btypes\s*\{[^{}]*\}", "", _http_level(text))
+    m = re.search(rf"(?m)^\s*{re.escape(name)}\s+([^;{{}}]+);", outside)
+    return m.group(1).split() if m else None
+
+
+def content_type(url: str, conf: str | None = None, root: Path | None = None) -> str | None:
+    """The Content-Type nginx sends for ``url``, or None when it sends no file (a redirect or a 404)."""
+    text = conf if conf is not None else CONF.read_text()
+    locations = parse(text)
+    res = resolve(url, locations, root)
+    if res.status != 200 or res.file is None:
+        return None
+    ext = res.file.suffix.lstrip(".").lower()
+    mime = {**STOCK_TYPES, **config_types(text)}.get(ext)
+    if mime is None:
+        local = res.matched.directive("default_type") if res.matched else None
+        mime = (local or http_directive(text, "default_type") or ["text/plain"])[0]
+    charset = http_directive(text, "charset")
+    charset_types = set(http_directive(text, "charset_types") or []) | {"text/html"}
+    return f"{mime}; charset={charset[0]}" if charset and mime in charset_types else mime
 
 
 def follow(url: str, locations: list[Location] | None = None, root: Path | None = None, hops: int = 5) -> Response:
