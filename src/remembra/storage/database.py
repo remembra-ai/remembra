@@ -142,6 +142,31 @@ VERSIONED_MIGRATIONS: list[tuple[int, str, list[str]]] = [
             "ALTER TABLE agent_inbox ADD COLUMN trust_score REAL",
         ],
     ),
+    (
+        7,
+        "relay_pickups",
+        [
+            # R-18: one row per handoff served to another agent in a brief (ids
+            # and times only, never content), deduplicated per reader session.
+            """
+            CREATE TABLE IF NOT EXISTS relay_pickups (
+                user_id TEXT NOT NULL,
+                project_id TEXT NOT NULL,
+                handoff_id TEXT NOT NULL,
+                handoff_agent TEXT,
+                reader_agent TEXT NOT NULL,
+                reader_verified INTEGER NOT NULL DEFAULT 0,
+                reader_session TEXT NOT NULL DEFAULT '',
+                handoff_at TEXT,
+                picked_up_at TEXT NOT NULL,
+                gap_seconds INTEGER,
+                PRIMARY KEY (user_id, handoff_id, reader_agent, reader_session)
+            )
+            """,
+            "CREATE INDEX IF NOT EXISTS idx_relay_pickups_user_time ON relay_pickups(user_id, picked_up_at)",
+            "CREATE INDEX IF NOT EXISTS idx_relay_pickups_time ON relay_pickups(picked_up_at)",
+        ],
+    ),
 ]
 
 
@@ -1591,6 +1616,8 @@ class Database:
                 (memory_id,),
             )
             await self.conn.execute("DELETE FROM memories_fts WHERE id = ?", (memory_id,))
+            # Pickup events of a deleted handoff (ids and times only) go with it.
+            await self.conn.execute("DELETE FROM relay_pickups WHERE handoff_id = ?", (memory_id,))
 
             # Now safe to delete the memory
             cursor = await self.conn.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
@@ -1623,6 +1650,7 @@ class Database:
                 memory_ids,
             )
             await self.conn.execute("DELETE FROM memories_fts WHERE user_id = ?", (user_id,))
+            await self.conn.execute("DELETE FROM relay_pickups WHERE user_id = ?", (user_id,))
 
             # Now safe to delete the memories
             cursor = await self.conn.execute("DELETE FROM memories WHERE user_id = ?", (user_id,))
@@ -1659,6 +1687,10 @@ class Database:
             )
             await self.conn.execute(
                 "DELETE FROM memories_fts WHERE user_id = ? AND project_id = ?",
+                (user_id, project_id),
+            )
+            await self.conn.execute(
+                "DELETE FROM relay_pickups WHERE user_id = ? AND project_id = ?",
                 (user_id, project_id),
             )
 

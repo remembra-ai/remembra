@@ -18,9 +18,10 @@ before, to look up the inbox). Every stored string passes ``redact_secrets``;
 access to each project is checked with the key's project restrictions, and
 project-restricted keys never create or move location bindings.
 
-Reads never write: GET brief and trail compute the project for an unseen
+Reads never bind: GET brief and trail compute the project for an unseen
 location without recording it; only close and ``POST /projects/resolve``
-record bindings.
+record bindings. The one thing a brief records is a pickup event (R-18): the
+ids and times of a handoff served to a different agent, never its content.
 """
 
 from __future__ import annotations
@@ -550,6 +551,9 @@ async def session_brief(
     hint_project: Annotated[str | None, Query(max_length=128)] = None,
     branch: Annotated[str | None, Query(max_length=255, description="The reader's current branch")] = None,
     head_commit: Annotated[str | None, Query(max_length=64, description="The reader's current HEAD")] = None,
+    session_id: Annotated[
+        str | None, Query(max_length=200, description="The reader's session id (one pickup is recorded per session)")
+    ] = None,
 ) -> dict[str, Any]:
     """Latest handoff ("Last session: ..."), unread inbox, status, linked
     projects and recent memories by time, plus ``rendered`` — a compact
@@ -563,15 +567,20 @@ async def session_brief(
     Every recorded line passes one trust policy: low-trust text is withheld,
     command-shaped text is flagged, and the JSON fields carry the same
     verdicts (``trust_score`` / ``withheld`` / ``flags``). ``handoff_health``
-    is the last handoff's server grade. Read-only: nothing is recorded."""
+    is the last handoff's server grade.
+
+    Records one pickup event when a handoff written by another agent is
+    served (per handoff, reader agent and ``session_id``); nothing else is
+    written."""
     _require(current_user, "memory:recall")
     notes: list[str] = []
-    agent, _ = effective_agent(request, current_user, agent_id, strict=False, warnings=notes)
+    agent, verified = effective_agent(request, current_user, agent_id, strict=False, warnings=notes)
     locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host)
     project, resolution = await _project_from_query(request, current_user, project_id, locator, hint_project)
     configured = normalize_project_id(hint_project) if hint_project and hint_project.strip() else None
     checkout = {"branch": branch, "head_commit": head_commit} if (branch or head_commit) else None
-    brief = await _service(request).brief(
+    service = _service(request)
+    brief = await service.brief(
         user_id=current_user.user_id,
         project_id=project,
         agent_id=agent,
@@ -583,6 +592,16 @@ async def session_brief(
         extra_warnings=notes,
     )
     brief["resolution"] = resolution
+    reader_session = (session_id or "").strip()
+    if agent and _AGENT_RE.match(agent) and (not reader_session or _SESSION_RE.match(reader_session)):
+        await service.record_pickup(
+            user_id=current_user.user_id,
+            project_id=project,
+            handoff=brief.get("handoff"),
+            reader_agent=agent,
+            reader_verified=verified,
+            reader_session=reader_session or None,
+        )
     return brief
 
 

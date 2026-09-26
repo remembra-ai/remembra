@@ -619,6 +619,7 @@ class RelayService:
             agent_id=agent_id,
             before=before,
         )
+        pickups = await self.pickups_for(user_id, [m["id"] for m in result["memories"] if m.get("memory_type") == "handoff"])
         items = []
         for mem in result["memories"]:
             meta = mem.get("metadata") or {}
@@ -638,6 +639,7 @@ class RelayService:
                     "failing": len(relay.get("failing") or []),
                     "open": len(relay.get("not_done") or []),
                     "health": stored_health(mem),
+                    "picked_up_by": pickups.get(mem["id"], []),
                     "detail": _trail_detail(mem, relay),
                 }
             )
@@ -899,6 +901,103 @@ class RelayService:
         brief["rendered"] = render_brief(brief)
         police_brief(brief)  # the JSON fields get the same verdicts as the rendered text
         return brief
+
+    # -- pickups (R-18) ---------------------------------------------------------
+
+    async def record_pickup(
+        self,
+        *,
+        user_id: str,
+        project_id: str | None,
+        handoff: dict[str, Any] | None,
+        reader_agent: str | None,
+        reader_verified: bool,
+        reader_session: str | None = None,
+        now: datetime | None = None,
+    ) -> bool:
+        """Record that ``reader_agent`` was served another agent's handoff in a brief.
+
+        One row per (handoff, reader agent, reader session): a repeated brief
+        is ignored. Nothing is recorded without a handoff, for a withheld
+        (low-trust) handoff, for a reader with no agent id, or when the reader
+        is the agent that wrote the handoff. The row holds ids and times only,
+        never content. Returns True when a new row was written.
+        """
+        if not handoff or not handoff.get("id") or not reader_agent or not project_id:
+            return False
+        if handoff.get("withheld"):
+            return False
+        meta = handoff.get("metadata") or {}
+        relay = meta.get("relay") if isinstance(meta, dict) else None
+        handoff_agent = (relay or {}).get("agent_id") or handoff.get("agent_id")
+        if handoff_agent and handoff_agent == reader_agent:
+            return False
+        at = (now or datetime.now(UTC)).astimezone(UTC)
+        created = _parse_iso(handoff.get("created_at"))
+        gap = max(0, int((at - created).total_seconds())) if created else None
+        try:
+            async with self.db.transaction():
+                cursor = await self.db.conn.execute(
+                    """
+                    INSERT OR IGNORE INTO relay_pickups (
+                        user_id, project_id, handoff_id, handoff_agent, reader_agent, reader_verified,
+                        reader_session, handoff_at, picked_up_at, gap_seconds
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        user_id,
+                        project_id,
+                        str(handoff["id"]),
+                        str(handoff_agent)[:128] if handoff_agent else None,
+                        reader_agent[:128],
+                        1 if reader_verified else 0,
+                        (reader_session or "")[:200],
+                        created.isoformat() if created else None,
+                        at.isoformat(),
+                        gap,
+                    ),
+                )
+                inserted = (cursor.rowcount or 0) > 0
+        except Exception as e:  # a pickup record must never fail the brief
+            log.warning("relay_pickup_record_failed", error=str(e))
+            return False
+        if inserted:
+            log.info("relay_pickup", project_id=project_id, handoff_id=handoff["id"], reader=reader_agent, gap_seconds=gap)
+        return inserted
+
+    async def pickups_for(self, user_id: str, handoff_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        """First pickup per reader agent for each handoff, oldest first."""
+        if not handoff_ids:
+            return {}
+        marks = ",".join("?" for _ in handoff_ids)
+        cursor = await self.db.conn.execute(
+            f"""
+            SELECT handoff_id, reader_agent, MAX(reader_verified), MIN(picked_up_at), MIN(gap_seconds)
+            FROM relay_pickups WHERE user_id = ? AND handoff_id IN ({marks})
+            GROUP BY handoff_id, reader_agent
+            ORDER BY MIN(julianday(picked_up_at))
+            """,  # noqa: S608 - placeholders only; values are bound
+            [user_id, *handoff_ids],
+        )
+        out: dict[str, list[dict[str, Any]]] = {}
+        for handoff_id, agent, verified, at, gap in await cursor.fetchall():
+            out.setdefault(handoff_id, []).append(
+                {"agent_id": agent, "agent_verified": bool(verified), "picked_up_at": at, "gap_seconds": gap}
+            )
+        return out
+
+
+def _parse_iso(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        dt = value
+    elif isinstance(value, str) and value:
+        try:
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    else:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
 def _same_session_facts(prev: dict[str, Any], new: dict[str, Any]) -> bool:

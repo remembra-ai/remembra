@@ -316,7 +316,9 @@ def cmd_brief(args: argparse.Namespace) -> int:
             save_session_state(ctx.home, ctx.agent, session_id, start)
         elif not session_id and not os.environ.get("REMEMBRA_SESSION_ID"):
             # No session id (AGENTS.md / manual use): start a fresh ad-hoc session here.
-            start_adhoc_session(ctx.home, ctx.agent or "unknown-agent", ctx.host, ctx.repo.toplevel or str(ctx.cwd), start)
+            session_id = start_adhoc_session(
+                ctx.home, ctx.agent or "unknown-agent", ctx.host, ctx.repo.toplevel or str(ctx.cwd), start
+            )
         params: dict[str, Any] = {"recent_n": args.recent}
         if ctx.agent:
             params["agent_id"] = ctx.agent
@@ -325,6 +327,9 @@ def cmd_brief(args: argparse.Namespace) -> int:
             params["branch"] = ctx.repo.branch
         if ctx.repo.head_commit:
             params["head_commit"] = ctx.repo.head_commit
+        pickup_session = session_id or os.environ.get("REMEMBRA_SESSION_ID")
+        if pickup_session:
+            params["session_id"] = pickup_session  # one pickup is recorded per reader session
         response = ctx.request("GET", "/api/v1/session/brief", params=params)
         if response.status_code >= 400:
             message = f"Remembra brief unavailable: {_http_error(response)}"

@@ -193,6 +193,8 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
   `--no-verify`, `core.hooksPath`, `--dangerously-skip-permissions`, `--yolo`, reads of `~/.ssh`,
   `.env` or `~/.claude.json`, and URLs outside the project's own repository. Markdown images are
   replaced by `[image removed: <host>]`.
+- **Pickups.** A brief that serves a handoff written by a different agent records one pickup (ids and
+  times, never content), per reader session. The trail shows *picked up by …* on that handoff.
 - **Stale.** `brief` sends your current branch and HEAD. When the handoff was recorded on another
   branch or commit, the brief adds *Checkout differs: … Its failing and next-step items may be stale.*
 
@@ -203,7 +205,7 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
 | POST | `/api/v1/projects/resolve` | `{git_remote?, root_commit?, root_path?, repo_name?, host?, hint_project?, bind?}` → `{project_id, created, persisted, fingerprint, kind, bound}` |
 | POST / GET / DELETE | `/api/v1/projects/links` | link projects (`from_project`, `to_project`, `relation`) |
 | POST | `/api/v1/session/close` | `{agent_id, session_id, project_id \| project:{locator}, facts:{…}, summary?, end_reason?}` → handoff id + rendered text |
-| GET | `/api/v1/session/brief` | `project_id` or locator params → brief JSON + `rendered` + `handoff_health` |
+| GET | `/api/v1/session/brief` | `project_id` or locator params (+ `session_id`, the reader's session) → brief JSON + `rendered` + `handoff_health`; records a pickup when it serves another agent's handoff |
 | GET | `/api/v1/trail` | handoffs + checkpoints across agents, newest first; `agent_id` filters; each item's `detail` holds its sections. Page with `before` (+ `before_id`), the oldest entry's `created_at` (and `id`): only older entries come back and `total` counts them, so new handoffs never shift a page |
 | GET | `/api/v1/trail/summary` | per-agent and per-project activity: last active, sessions in 7 days, a daily series (`days`, `tz_offset_minutes`) |
 | GET | `/api/v1/inbox/messages` | inbox messages across all agents (`status=open\|unread\|all`, `agent_id`, `limit`, `offset`) |

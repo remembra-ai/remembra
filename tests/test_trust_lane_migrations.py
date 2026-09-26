@@ -1,6 +1,6 @@
-"""Main-DB migration 6 (agent_inbox.trust_score, R-16).
+"""Main-DB migrations 6 (agent_inbox.trust_score, R-16) and 7 (relay_pickups, R-18).
 
-It is additive and must apply to a production-shaped database: one at
+Both are additive and must apply to a production-shaped database: one at
 schema 4 (feat/relay-launch before this lane) holding inbox rows, one where
 the inbox table does not exist yet, and one where feat/crew's version 5 has
 already altered agent_inbox (the branches merge in either order).
@@ -59,12 +59,13 @@ async def test_existing_inbox_rows_survive_and_get_a_null_score(tmp_path, monkey
     await _at_version_4(path, monkeypatch, with_inbox=True)
     conn = await _migrate(path)
     try:
-        assert 6 in {r[0] for r in conn.execute("SELECT version FROM schema_version")}
+        assert {6, 7} <= {r[0] for r in conn.execute("SELECT version FROM schema_version")}
         assert "trust_score" in _columns(conn, "agent_inbox")
         assert conn.execute("SELECT body, trust_score FROM agent_inbox WHERE inbox_id = 'inbox_old'").fetchone() == (
             "kept as is",
             None,
         )
+        assert _columns(conn, "relay_pickups") >= {"handoff_id", "reader_agent", "reader_session", "gap_seconds"}
     finally:
         conn.close()
 
@@ -85,11 +86,11 @@ async def test_applies_after_crew_version_5(tmp_path, monkeypatch):
     conn = await _migrate(path)
     try:
         assert {"project_id", "crew_id", "kind", "trust_score"} <= _columns(conn, "agent_inbox")
-        assert sorted(r[0] for r in conn.execute("SELECT version FROM schema_version")) == [1, 2, 3, 4, 5, 6]
+        assert sorted(r[0] for r in conn.execute("SELECT version FROM schema_version")) == [1, 2, 3, 4, 5, 6, 7]
     finally:
         conn.close()
 
 
 def test_versions_are_unique_and_leave_5_to_crew():
     versions = [v for v, _, _ in VERSIONED_MIGRATIONS]
-    assert len(versions) == len(set(versions)) and 5 not in versions and 6 in versions
+    assert len(versions) == len(set(versions)) and 5 not in versions and {6, 7} <= set(versions)
