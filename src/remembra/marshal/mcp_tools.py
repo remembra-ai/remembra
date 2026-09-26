@@ -54,9 +54,11 @@ Args:
 HELP_DESCRIPTION = """Answer a question about Remembra from its bundled docs, quoted, or say it can't confirm.
 
 The answer is the docs' own text with its page URL (the relay guide and the plans page), plus facts
-from the code (plan limits, crew mode, Windows). Refunds, compliance, security, data location,
-retention, subprocessors, training and uptime are never answered here: read the page it returns, quote
-it, or say you can't confirm. Show `rendered`; don't add prices, dates or promises that aren't in it.
+from the code (plan limits, crew mode, Windows). Refunds and cancelling, compliance, security, privacy
+(who sees the data, selling or sharing it), hosting and data location, retention, deleting account data,
+subprocessors, training and uptime are never answered here: read the page it returns, quote it, or say
+you can't confirm. Uninstalling is not deleting account data. Show `rendered`; don't add prices, dates or
+promises that aren't in it.
 
 Args:
     question: The user's question, in their words.

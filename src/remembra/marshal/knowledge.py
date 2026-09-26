@@ -6,10 +6,14 @@ sync by ``scripts/sync_marshal_pack.py``; a test fails when they drift).
 :func:`lookup` ranks their sections with BM25 (standard library only, no
 embeddings, no model) and returns at most three, each with its page URL and
 anchor. Nothing is paraphrased or generated: the answer is the page's own
-text. Questions about refunds, compliance, security, data location,
-retention, subprocessors, model training or uptime never get a quote from
-the pack; they get the governing page to read (``read_the_page``). A
-question the pack doesn't cover gets ``cant_confirm`` and the contact page.
+text. Questions about refunds and cancelling, compliance, security and
+safety, privacy (who sees the data, selling or sharing it), hosting and
+data location, retention and deleting account data, subprocessors, model
+training or uptime never get a quote from the pack, in any wording; they
+get the governing page to read (``read_the_page``). A data-deletion
+question never gets the uninstall steps (they leave the account's
+memories). A question the pack doesn't cover gets ``cant_confirm`` and the
+contact page.
 
 :func:`facts` is the code truth the pack's prose rests on: plan limits and
 list prices from :mod:`remembra.cloud.plans` (Free included; 1000 projects
@@ -44,20 +48,50 @@ READ_PAGES: dict[str, str] = {
     "privacy": "https://remembra.dev/privacy",
     "subprocessors": "https://remembra.dev/subprocessors",
 }
-# Topic words that are never answered from the pack: the governing page is linked instead.
+# What a user's data is called in a question ("my data", "my memories", "my handoffs", "my code").
+_DATA = r"(?:data|memor(?:y|ies)|handoffs?|information|info|code|personal \w+)"
+# Topics that are never answered from the pack, whole, in any wording: the governing page is linked instead.
+# A pack section that shares a few words with such a question does not answer it (a privacy question got
+# the brief's format; "delete everything you have about me" got the uninstall steps).
 SENSITIVE: dict[str, tuple[str, ...]] = {
-    r"refunds?": ("refunds", "pricing"),
+    # money: refunds, chargebacks, cancelling a plan
+    r"refunds?|money back|reimburs\w*|charge ?backs?"
+    r"|cancel\w* (?:my |the |a |your )?(?:subscription|plan|account|membership|billing|payment|trial)": ("refunds", "pricing"),
+    # certifications, security
     r"soc ?2|soc\b": ("security",),
     r"penetration|pen ?test": ("security",),
     r"encrypt\w*": ("security",),
+    r"secur(?:e|ed|ely|ity)\b": ("security",),
+    rf"{_DATA}\b[^.?!]{{0,30}}\bsafe(?:ly|ty)?\b|\bsafe(?:ly|ty)?\b[^.?!]{{0,30}}\b{_DATA}": ("security", "privacy"),
     r"gdpr|hipaa|iso ?27001|pci|complian\w*|certif\w*": ("security", "privacy"),
-    r"eu region|data (?:location|residency)|where is my data|region": ("privacy", "subprocessors"),
-    r"retention|retain\w*|delete my (?:data|account)": ("privacy",),
-    r"sub-?processors?": ("subprocessors",),
-    r"train(?:ing|s|ed)? (?:on|with)|model training|trains? on": ("privacy",),
     r"\bsla\b|uptime|guarantee\w*": ("security",),
+    # privacy: the policy, who sees what, selling or sharing it
+    rf"privacy|confidential\w*|private {_DATA}|{_DATA}\b[^.?!]{{0,20}}\bprivate\b": ("privacy",),
+    # who else sees it (an agent of the user's reading a brief is the product, not this)
+    r"who (?:else )?(?:can|could|will|would|has|have|gets?) (?:see|access|read|view)"
+    r"|(?:openai|anthropic|google|microsoft|staff|employees?|admins?|anyone|people at remembra|remembra's team)\b"
+    r"[^.?!]{0,30}\b(?:see|sees|read|reads|access|accesses|look at)\b": ("privacy", "subprocessors"),
+    r"\b(?:sell|sells|sold|selling)\b|third[- ]part(?:y|ies)|advertis\w*"
+    r"|(?:share|shares|shared|sharing|give|gives|pass(?:es|ed)?)\b[^.?!]{0,20}"
+    r"\b(?:with|to) (?:others|anyone|partners|companies)": ("privacy", "subprocessors"),
+    # where it is kept, and for how long
+    r"eu region|data (?:location|residency)|where is my data|region|countr(?:y|ies)|data ?cent(?:er|re)s?|which cloud"
+    rf"|where (?:are|is|do) (?:your|the|my|you) (?:servers?|{_DATA}|host)|\bhosted (?:in|on|by|where)"
+    rf"|(?:servers?|{_DATA})\b[^.?!]{{0,30}}\b(?:hosted|located|stored|kept)\b": ("privacy", "subprocessors"),
+    r"retention|retain\w*|delete my (?:data|account)": ("privacy",),
+    # deleting what the account holds (never the uninstall steps: they leave the account's memories)
+    rf"(?:delet|eras|remov|wip|purg|forget)\w*\b[^.?!]{{0,40}}(?:\bmy (?:account|{_DATA}|everything)"
+    rf"|\babout me\b|\byou (?:have|hold|store|keep)\b|\b(?:from|on) your (?:servers?|side|end|database)"
+    rf"|\ball (?:of )?my {_DATA}|\baccount data)": ("privacy",),
+    r"sub-?processors?": ("subprocessors",),
+    # model training, in any wording ("AI training", "train models on", "used to train")
+    r"\btrain(?:s|ed|ing|er)?\b": ("privacy",),
 }
 _SENSITIVE_RE = [(re.compile(rf"\b(?:{pattern})", re.I), pages) for pattern, pages in SENSITIVE.items()]
+# Deleting stored data in any wording. The uninstall steps only clear this machine (the key, the queue, the
+# log) and leave every memory in the account, so they are never the answer to one of these.
+_DELETES_DATA = re.compile(rf"\b(?:delet|eras|wip|purg|forget)\w*\b[^.?!]{{0,40}}\b{_DATA}", re.I)
+UNINSTALL_ANCHOR = "uninstall"
 _PLAN_WORDS = frozenset(
     re.findall(
         r"\S+",
@@ -227,6 +261,8 @@ def lookup(question: str) -> dict[str, Any]:
             chosen = [s for score, s in ranked[:MAX_SECTIONS] if score >= top_score * 0.6]
     if not chosen and wants_plan_facts(question):
         chosen = [s for s in sections if s.page == "plans-and-credits.md" and s.title == "Plans"]
+    if _DELETES_DATA.search(question) and any(s.anchor == UNINSTALL_ANCHOR for s in chosen):
+        return {"answer_status": "read_the_page", "sections": [], "pages": [READ_PAGES["privacy"]], "facts": []}
     if not chosen and not stated:
         return {"answer_status": "cant_confirm", "sections": [], "pages": [cmd.CONTACT_URL], "facts": []}
     return {"answer_status": "answered", "sections": [_quote(s) for s in chosen], "pages": [], "facts": stated}
