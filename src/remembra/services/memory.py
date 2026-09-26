@@ -370,6 +370,21 @@ def metadata_filters_match(metadata: dict[str, Any], filters: dict[str, str]) ->
     return True
 
 
+# Memory types a relay-structured continuity record is stored as.
+CONTINUITY_RECORD_TYPES = ("handoff", "checkpoint")
+
+
+def is_relay_record(memory_type: str | None, metadata: dict[str, Any] | None) -> bool:
+    """True for a relay-structured handoff or checkpoint (the continuity record).
+
+    Its ``relay`` block is written by the server alone (clients' ``relay`` keys
+    are stripped on every write path), so the block is a trustworthy marker.
+    Such a record never gets a TTL, and TTL cleanup skips it
+    (:data:`remembra.storage.database.RELAY_RECORD_SQL`).
+    """
+    return memory_type in CONTINUITY_RECORD_TYPES and isinstance((metadata or {}).get("relay"), dict)
+
+
 def parse_ttl(ttl: str | None) -> timedelta | None:
     """
     Parse TTL string like '30d', '1y', '2w' into timedelta.
@@ -714,6 +729,9 @@ class MemoryService:
         now = utcnow()
         expires_at = self._resolve_expiry(request.expires_at, request.ttl, now, self.settings.default_ttl_days)
         self._apply_metadata_type(request)
+        if expires_at is not None and is_relay_record(request.memory_type, request.metadata):
+            # The continuity record is permanent: no explicit TTL and no server default.
+            expires_at = None
 
         # REL-17: one time budget for the whole store; REL-4: everything this
         # request writes is rolled back if it fails hard part-way.
@@ -1034,6 +1052,8 @@ class MemoryService:
         memory_dicts: list[dict[str, Any]] = []
         for index, item in enumerate(items):
             expires_at = self._resolve_expiry(item.expires_at, item.ttl, now, self.settings.default_ttl_days)
+            if is_relay_record(item.memory_type, item.metadata):
+                expires_at = None
             memory = Memory(
                 id=str(uuid.uuid4()),
                 user_id=user_id,

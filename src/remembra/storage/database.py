@@ -296,6 +296,15 @@ def _safe_json_loads(data: str | None, default: Any = None) -> Any:
         return default if default is not None else []
 
 
+# Relay-structured handoffs and checkpoints (a server-written ``relay`` object
+# in metadata; see ``remembra.services.memory.is_relay_record``) are the
+# continuity record: TTL cleanup never deletes or archives them. Always 0 or 1
+# (never NULL), so ``AND NOT`` keeps every other row, malformed metadata included.
+RELAY_RECORD_SQL = (
+    "(CASE WHEN memory_type IN ('handoff', 'checkpoint') AND json_valid(metadata)"
+    " THEN COALESCE(json_type(metadata, '$.relay'), '') = 'object' ELSE 0 END)"
+)
+
 # SQL schemas
 SCHEMA_SQL = """
 -- Memories metadata (vector lives in Qdrant, metadata here)
@@ -1913,6 +1922,10 @@ class Database:
         """
         Get IDs of expired memories (expires_at < now).
 
+        Pinned memories and relay-structured handoffs/checkpoints
+        (:data:`RELAY_RECORD_SQL`) are never returned: TTL cleanup must not
+        remove them.
+
         Args:
             user_id: Filter by user (optional)
             project_id: Project namespace (omit for all projects)
@@ -1920,11 +1933,12 @@ class Database:
         """
         check_time = (before or utcnow()).isoformat()
 
-        query = """
+        query = f"""
             SELECT id FROM memories
             WHERE expires_at IS NOT NULL AND expires_at < ?
               AND (pinned IS NULL OR pinned = 0)
-        """
+              AND NOT {RELAY_RECORD_SQL}
+        """  # noqa: S608 - constant fragment; values are bound
         params: list[Any] = [check_time]
 
         if user_id:
@@ -2039,13 +2053,13 @@ class Database:
         project_id: str | None = None,
     ) -> int:
         """
-        Delete all expired memories.
+        Delete all expired memories (never relay-structured handoffs/checkpoints).
 
         Returns count of deleted memories.
         """
         now = utcnow().isoformat()
 
-        query = "SELECT id FROM memories WHERE expires_at IS NOT NULL AND expires_at < ?"
+        query = f"SELECT id FROM memories WHERE expires_at IS NOT NULL AND expires_at < ? AND NOT {RELAY_RECORD_SQL}"  # noqa: S608
         params: list[Any] = [now]
 
         if user_id:

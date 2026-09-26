@@ -43,11 +43,14 @@ RELAY_KEY_FIELD = "relay_key"
 MAX_LINKED_IN_BRIEF = 8
 FACTS_SOURCES = ("relay-cli:git+transcript", "relay-cli:git", "agent-declared")
 
-# Keys a handoff's metadata carries that only the relay may write. Client
-# metadata on the generic memory endpoints is stripped of them (see
-# :func:`strip_reserved_metadata`), so a handoff cannot be forged with a
-# "verified" relay block through POST /memories or PATCH.
-RESERVED_METADATA_KEYS = ("relay", RELAY_KEY_FIELD)
+# Keys only the server may write into a memory's metadata. Client metadata on
+# the generic memory endpoints (store, batch, PATCH, supersede, status upsert,
+# import) is stripped of them (see :func:`strip_reserved_metadata`), so a
+# handoff cannot be forged with a "verified" relay block, and the trust fields
+# ``health``, ``quality`` and ``confidence`` are only ever server-computed
+# (never self-declared by an agent).
+SERVER_TRUST_FIELDS = ("health", "quality", "confidence")
+RESERVED_METADATA_KEYS = ("relay", RELAY_KEY_FIELD, *SERVER_TRUST_FIELDS)
 
 # Serialises close-outs for the same (user, project, agent+session) in this
 # process, so two concurrent closes of one session can't each supersede the
@@ -67,7 +70,7 @@ def _close_lock_for(user_id: str, project_id: str, key: str) -> asyncio.Lock:
 
 
 def strip_reserved_metadata(metadata: dict[str, Any] | None) -> dict[str, Any] | None:
-    """``metadata`` without the relay-only keys (a copy; None stays None)."""
+    """``metadata`` without the server-only keys (a copy; None stays None)."""
     if not metadata:
         return metadata
     if not any(k in metadata for k in RESERVED_METADATA_KEYS):

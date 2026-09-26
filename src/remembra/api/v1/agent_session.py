@@ -22,6 +22,7 @@ from remembra.cloud.limits import gate_write, record_relay_usage
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
 from remembra.services.agent_session import AgentSessionService
+from remembra.services.relay import strip_reserved_metadata
 
 router = APIRouter(tags=["agent-session"])
 
@@ -115,7 +116,7 @@ async def upsert_status(
             project_id=project,
             key=body.key,
             value=value,
-            metadata=body.metadata,
+            metadata=strip_reserved_metadata(body.metadata),
             ttl=body.ttl,
             trust_score=trust_score,
             checksum=checksum,

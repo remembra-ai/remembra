@@ -106,3 +106,28 @@ def test_reset_is_scoped_not_user_wide() -> None:
     assert len(lt.search("x")) == 1
     # And it deleted by id, never by user_id (the data-loss path).
     assert fake.forgot, "reset must delete the session's memories by id"
+
+
+def test_long_term_quality_survives_the_server_reserved_key() -> None:
+    """The server drops client ``quality`` (a reserved trust field); the adapter stores
+    CrewAI's score as ``crewai_quality`` and hands it back as ``quality``."""
+
+    @dataclass
+    class _LTM:
+        task: str
+        expected_output: str
+        agent: str
+        quality: float
+        datetime: str
+        metadata: dict[str, Any]
+
+    fake = _FakeClient()
+    st = _storage(fake, "long_term")
+    st.save(_LTM("write report", "a report", "writer", 0.8, "2026-09-25", {"suggestions": ["cite"], "quality": 0.8}))
+    stored = fake.store_calls[0]["metadata"]
+    assert "quality" not in stored and stored["crewai_quality"] == 0.8
+    assert stored["suggestions"] == ["cite"]
+    results = st.search("report")
+    assert results[0]["metadata"]["quality"] == 0.8
+    assert "crewai_quality" not in results[0]["metadata"]
+    assert results[0]["metadata"]["memory_type"] == "long_term"

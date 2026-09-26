@@ -5,7 +5,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser
+from remembra.auth.middleware import AuthenticatedUser, CurrentUser, ensure_project_access, has_permission
 from remembra.core.limiter import limiter
 from remembra.extraction.conflicts import ConflictManager, ConflictStatus
 
@@ -28,6 +28,17 @@ def get_conflict_manager(request: Request) -> ConflictManager:
 
 
 ConflictManagerDep = Annotated[ConflictManager, Depends(get_conflict_manager)]
+
+
+def _allowed_projects(user: AuthenticatedUser) -> list[str] | None:
+    """The key's project allow-list (None = unrestricted). Conflicts quote memory
+    content, so a project-restricted key only sees its projects' conflicts."""
+    return list(user.project_ids) if user.project_ids else None
+
+
+def _require(user: AuthenticatedUser, permission: str) -> None:
+    if not has_permission(user, permission):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Permission denied: {permission} required")
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +89,10 @@ async def list_conflicts(
     ),
     limit: int = Query(50, ge=1, le=200),
 ) -> ConflictListResponse:
-    """List memory conflicts for the current user."""
+    """List memory conflicts for the current user (in the key's projects)."""
+    _require(current_user, "memory:recall")
+    if project_id:
+        ensure_project_access(current_user, project_id)
     status_filter = None
     if conflict_status:
         try:
@@ -94,6 +108,7 @@ async def list_conflicts(
         project_id=project_id,
         status=status_filter,
         limit=limit,
+        project_ids=_allowed_projects(current_user),
     )
     return ConflictListResponse(conflicts=conflicts, total=len(conflicts))
 
@@ -109,8 +124,9 @@ async def conflict_stats(
     manager: ConflictManagerDep,
     current_user: CurrentUser,
 ) -> ConflictStatsResponse:
-    """Get summary statistics of memory conflicts."""
-    stats = await manager.get_stats(current_user.user_id)
+    """Get summary statistics of memory conflicts (in the key's projects)."""
+    _require(current_user, "memory:recall")
+    stats = await manager.get_stats(current_user.user_id, project_ids=_allowed_projects(current_user))
     return ConflictStatsResponse(**stats)
 
 
@@ -126,7 +142,8 @@ async def get_conflict(
     current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Get details of a specific conflict."""
-    result = await manager.get_conflict(conflict_id, current_user.user_id)
+    _require(current_user, "memory:recall")
+    result = await manager.get_conflict(conflict_id, current_user.user_id, project_ids=_allowed_projects(current_user))
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -148,10 +165,12 @@ async def resolve_conflict(
     current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Mark a conflict as resolved."""
+    _require(current_user, "memory:store")
     result = await manager.resolve(
         conflict_id=conflict_id,
         user_id=current_user.user_id,
         resolved_memory_id=body.resolved_memory_id,
+        project_ids=_allowed_projects(current_user),
     )
     if result is None:
         raise HTTPException(
@@ -173,9 +192,11 @@ async def dismiss_conflict(
     current_user: CurrentUser,
 ) -> dict[str, Any]:
     """Dismiss a conflict as not needing resolution."""
+    _require(current_user, "memory:store")
     result = await manager.dismiss(
         conflict_id=conflict_id,
         user_id=current_user.user_id,
+        project_ids=_allowed_projects(current_user),
     )
     if result is None:
         raise HTTPException(

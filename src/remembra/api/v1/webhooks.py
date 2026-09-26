@@ -31,6 +31,18 @@ def get_webhook_manager(request: Request) -> WebhookManager:
 WebhookManagerDep = Annotated[WebhookManager, Depends(get_webhook_manager)]
 
 
+async def require_account_wide_credential(current_user: CurrentUser) -> None:
+    """Webhooks receive events (stored facts, recall queries) from every project
+    and agent of the account, so only an unrestricted credential may manage them:
+    a key limited to projects, or bound to one agent, would otherwise read beyond
+    its scope through a webhook."""
+    if current_user.project_ids or getattr(current_user, "agent_id", None):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Webhooks deliver events from every project; manage them with an unrestricted key or the dashboard.",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
@@ -80,7 +92,7 @@ class DeliveryResponse(BaseModel):
     "",
     status_code=status.HTTP_201_CREATED,
     summary="Register a webhook",
-    dependencies=[require_webhook_manage()],
+    dependencies=[require_webhook_manage(), Depends(require_account_wide_credential)],
 )
 @limiter.limit("10/minute")
 async def register_webhook(
@@ -109,7 +121,7 @@ async def register_webhook(
     "",
     response_model=WebhookListResponse,
     summary="List webhooks",
-    dependencies=[require_webhook_manage()],
+    dependencies=[require_webhook_manage(), Depends(require_account_wide_credential)],
 )
 @limiter.limit("30/minute")
 async def list_webhooks(
@@ -125,7 +137,7 @@ async def list_webhooks(
 @router.get(
     "/{webhook_id}",
     summary="Get webhook details",
-    dependencies=[require_webhook_manage()],
+    dependencies=[require_webhook_manage(), Depends(require_account_wide_credential)],
 )
 @limiter.limit("30/minute")
 async def get_webhook(
@@ -147,7 +159,7 @@ async def get_webhook(
 @router.patch(
     "/{webhook_id}",
     summary="Update a webhook",
-    dependencies=[require_webhook_manage()],
+    dependencies=[require_webhook_manage(), Depends(require_account_wide_credential)],
 )
 @limiter.limit("10/minute")
 async def update_webhook(
@@ -183,7 +195,7 @@ async def update_webhook(
 @router.delete(
     "/{webhook_id}",
     summary="Delete a webhook",
-    dependencies=[require_webhook_manage()],
+    dependencies=[require_webhook_manage(), Depends(require_account_wide_credential)],
 )
 @limiter.limit("10/minute")
 async def delete_webhook(
@@ -206,7 +218,7 @@ async def delete_webhook(
     "/{webhook_id}/deliveries",
     response_model=DeliveryResponse,
     summary="Get webhook delivery history",
-    dependencies=[require_webhook_manage()],
+    dependencies=[require_webhook_manage(), Depends(require_account_wide_credential)],
 )
 @limiter.limit("30/minute")
 async def get_deliveries(

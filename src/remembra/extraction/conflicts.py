@@ -175,16 +175,28 @@ class ConflictManager:
     # Queries
     # -----------------------------------------------------------------------
 
+    @staticmethod
+    def _project_scope(project_ids: list[str] | None) -> tuple[str, list[Any]]:
+        """SQL keeping conflicts in the caller's projects (None = unrestricted; [] matches nothing)."""
+        if project_ids is None:
+            return "", []
+        if not project_ids:
+            return " AND 0", []
+        return f" AND project_id IN ({', '.join('?' for _ in project_ids)})", list(project_ids)
+
     async def list_conflicts(
         self,
         user_id: str,
         project_id: str | None = None,
         status: ConflictStatus | None = None,
         limit: int = 50,
+        *,
+        project_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Return conflicts for a user, optionally filtered."""
-        query = "SELECT * FROM memory_conflicts WHERE user_id = ?"
-        params: list[Any] = [user_id]
+        """Return conflicts for a user, optionally filtered (``project_ids``: the caller's allow-list)."""
+        scope_sql, scope_params = self._project_scope(project_ids)
+        query = "SELECT * FROM memory_conflicts WHERE user_id = ?" + scope_sql
+        params: list[Any] = [user_id, *scope_params]
 
         if project_id:
             query += " AND project_id = ?"
@@ -202,11 +214,14 @@ class ConflictManager:
         cols = [d[0] for d in cursor.description]
         return [dict(zip(cols, row, strict=False)) for row in rows]
 
-    async def get_conflict(self, conflict_id: str, user_id: str) -> dict[str, Any] | None:
-        """Get a single conflict by ID with ownership check."""
+    async def get_conflict(
+        self, conflict_id: str, user_id: str, *, project_ids: list[str] | None = None
+    ) -> dict[str, Any] | None:
+        """Get a single conflict by ID with ownership (and project allow-list) check."""
+        scope_sql, scope_params = self._project_scope(project_ids)
         cursor = await self._db.conn.execute(
-            "SELECT * FROM memory_conflicts WHERE id = ? AND user_id = ?",
-            (conflict_id, user_id),
+            "SELECT * FROM memory_conflicts WHERE id = ? AND user_id = ?" + scope_sql,
+            (conflict_id, user_id, *scope_params),
         )
         row = await cursor.fetchone()
         if row is None:
@@ -223,21 +238,25 @@ class ConflictManager:
         conflict_id: str,
         user_id: str,
         resolved_memory_id: str | None = None,
+        *,
+        project_ids: list[str] | None = None,
     ) -> dict[str, Any] | None:
-        """Mark a conflict as resolved."""
+        """Mark a conflict as resolved (None when it is not the caller's or outside ``project_ids``)."""
         now = datetime.now(UTC).isoformat()
+        scope_sql, scope_params = self._project_scope(project_ids)
         cursor = await self._db.conn.execute(
             """
             UPDATE memory_conflicts
             SET status = ?, resolved_at = ?, resolved_memory_id = ?
-            WHERE id = ? AND user_id = ?
-            """,
+            WHERE id = ? AND user_id = ?"""
+            + scope_sql,
             (
                 ConflictStatus.RESOLVED.value,
                 now,
                 resolved_memory_id,
                 conflict_id,
                 user_id,
+                *scope_params,
             ),
         )
         await self._db.conn.commit()
@@ -245,20 +264,22 @@ class ConflictManager:
             return None
         return await self.get_conflict(conflict_id, user_id)
 
-    async def dismiss(self, conflict_id: str, user_id: str) -> dict[str, Any] | None:
-        """Dismiss a conflict (mark as not needing resolution)."""
+    async def dismiss(self, conflict_id: str, user_id: str, *, project_ids: list[str] | None = None) -> dict[str, Any] | None:
+        """Dismiss a conflict (mark as not needing resolution; None when outside ``project_ids``)."""
         now = datetime.now(UTC).isoformat()
+        scope_sql, scope_params = self._project_scope(project_ids)
         cursor = await self._db.conn.execute(
             """
             UPDATE memory_conflicts
             SET status = ?, resolved_at = ?
-            WHERE id = ? AND user_id = ?
-            """,
+            WHERE id = ? AND user_id = ?"""
+            + scope_sql,
             (
                 ConflictStatus.DISMISSED.value,
                 now,
                 conflict_id,
                 user_id,
+                *scope_params,
             ),
         )
         await self._db.conn.commit()
@@ -266,8 +287,9 @@ class ConflictManager:
             return None
         return await self.get_conflict(conflict_id, user_id)
 
-    async def get_stats(self, user_id: str) -> dict[str, Any]:
-        """Summary statistics for a user's conflicts."""
+    async def get_stats(self, user_id: str, *, project_ids: list[str] | None = None) -> dict[str, Any]:
+        """Summary statistics for a user's conflicts (in ``project_ids`` when given)."""
+        scope_sql, scope_params = self._project_scope(project_ids)
         cursor = await self._db.conn.execute(
             """
             SELECT
@@ -279,9 +301,9 @@ class ConflictManager:
                 SUM(CASE WHEN strategy_applied = 'version' THEN 1 ELSE 0 END) as strategy_version,
                 SUM(CASE WHEN strategy_applied = 'flag' THEN 1 ELSE 0 END) as strategy_flag
             FROM memory_conflicts
-            WHERE user_id = ?
-            """,
-            (user_id,),
+            WHERE user_id = ?"""
+            + scope_sql,
+            (user_id, *scope_params),
         )
         row = await cursor.fetchone()
         if row is None:

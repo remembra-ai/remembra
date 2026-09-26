@@ -158,6 +158,9 @@ async def _rest(
         role="editor",
         scopes=permissions,
         project_ids=list(call.grant.project_ids),
+        # The grant is bound to one agent: the REST routes treat it like an
+        # agent-scoped key (it reads and acks only that agent's inbox).
+        agent_id=call.grant.agent_id,
     )
     transport = httpx.ASGITransport(app=call.app, client=("127.0.0.1", 0))
     headers = {"X-Forwarded-For": call.client_ip, "User-Agent": f"remembra-connector/{__version__}"}
@@ -212,19 +215,23 @@ async def session_brief(
     recent_n: int = 10,
 ) -> str:
     """Where work stands: the latest handoff an agent left, current status values,
-    the most recent memories by time, and an agent's unread inbox.
+    the most recent memories by time, and this connection's unread inbox.
 
     Args:
         project_id: One of this connection's projects (default: the first one).
-        agent_id: Whose inbox to include, e.g. "claude-code" (default: this connection's agent).
+        agent_id: This connection's agent (the default). A connection reads only
+            its own agent's inbox; another agent id is refused.
         recent_n: Recent memories to include (0-50, default 10).
     """
 
     async def body(call: ConnectorCall) -> dict[str, Any]:
         project = _project(call, project_id)
+        requested = (agent_id or "").strip()
+        if requested and requested != call.grant.agent_id:
+            raise ToolFailure(f"This connection reads only its own agent's inbox ('{call.grant.agent_id}').", 404)
         params = {
             "project_id": project,
-            "agent_id": (agent_id or call.grant.agent_id).strip(),
+            "agent_id": call.grant.agent_id,
             "recent_n": max(0, min(recent_n, 50)),
         }
         brief = await _rest(call, "GET", "/api/v1/session/brief", permissions=["memory:recall"], params=params)
@@ -323,6 +330,7 @@ async def send_to_inbox(
             "subject": subject,
             "body": body,
             "from_agent": call.grant.agent_id,  # the grant's label; the caller can't spoof a sender
+            "project_id": project,
             "metadata": {"project_id": project, "via": "connector", "connection_id": call.grant.grant_id},
             "expires_at": _expires_at(expires_in),
         }
