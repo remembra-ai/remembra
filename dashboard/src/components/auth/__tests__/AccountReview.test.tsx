@@ -11,6 +11,7 @@ const review = normalizeReview({
   pending: true,
   can_review: true,
   origin: 'google',
+  version: 'v1',
   items: {
     keys: [
       { id: 'k1', name: 'laptop', role: 'admin', project_ids: ['widget'], agent_id: 'codex', before_verification: true },
@@ -35,25 +36,38 @@ describe('AccountReview screen', () => {
       expect(html).toContain(text);
     }
     expect(html).not.toContain('secret-path'); // webhook paths can carry secrets
-    expect(html).toContain('Keep all 7');
+    // "Keep all" keeps 6: 2FA from before is kept only with a code, and the screen says so.
+    expect(html).toContain('Keep all 6');
+    expect(html).toContain('7 items');
+    expect(html).toContain('Turns off when you finish, unless you enter a code from your app.');
+    expect(html).toContain('one-time-code');
+    expect(html).toContain('>Keep<');
     expect(html).toContain('Remove password');
-    expect(html).toContain('added since'); // the key made after the email was confirmed
     expect(html.match(/>Revoke</g)?.length).toBe(3); // two keys + one app
     expect(html).toContain('Later');
-    // Plain copy: no jargon, never "Forgot password".
-    expect(html).not.toMatch(/forgot password|squat|pre-verification/i);
+    // Plain copy: no jargon or internal labels, never "Forgot password", no contradiction.
+    expect(html).not.toMatch(/forgot password|squat|pre-verification|account\.check|added since|before that/i);
+    expect(html).toContain('These are set up on your account and all still work.');
   });
 
-  it('offers "Done" when nothing is left', () => {
-    const empty = normalizeReview({
+  it('says "Keep it" for one item and "Finish" when only 2FA is left', () => {
+    const one = normalizeReview({
       pending: true,
       can_review: true,
-      items: { keys: [], connections: [], webhooks: [], identities: [], two_factor: false, password: false },
+      version: 'v1',
+      items: { keys: [], connections: [], webhooks: [], identities: [], two_factor: false, password: true },
     });
-    const html = renderToStaticMarkup(<AccountReview jwt="t" review={empty} onToken={noop} onDone={noop} onLater={noop} />);
-    expect(html).toContain('Nothing left to check.');
-    expect(html).toContain('>Done<');
-    expect(html).not.toContain('Later');
+    expect(renderToStaticMarkup(<AccountReview jwt="t" review={one} onToken={noop} onDone={noop} onLater={noop} />)).toContain('>Keep it<');
+    const onlyTwoFactor = normalizeReview({
+      pending: true,
+      can_review: true,
+      version: 'v1',
+      items: { keys: [], connections: [], webhooks: [], identities: [], two_factor: true, password: false },
+    });
+    const html = renderToStaticMarkup(<AccountReview jwt="t" review={onlyTwoFactor} onToken={noop} onDone={noop} onLater={noop} />);
+    expect(html).toContain('>Finish<');
+    expect(html).toContain('Two-factor sign-in turns off unless you keep it with a code.');
+    expect(html).not.toMatch(/Nothing left to check|Everything you did not keep is gone/);
   });
 
   it('blocks the dashboard in App until kept or put off for the session', () => {

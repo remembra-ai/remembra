@@ -421,7 +421,7 @@ function App() {
             localStorage.setItem('remembra_jwt_token', token);
             api.setJwtToken(token);
           }}
-          onDone={() => {
+          onDone={(outcome) => {
             setReview(NO_REVIEW);
             // Finishing the check can change what the account may open (an owner address).
             const token = localStorage.getItem('remembra_jwt_token');
@@ -432,7 +432,7 @@ function App() {
                 if (me) setCurrentUser((prev) => (prev ? { ...prev, is_admin: me.is_admin === true } : prev));
               })
               .catch(() => undefined);
-            toast.success('Done. We emailed you what you kept.');
+            toast.success(outcome.kept.length || outcome.removed.length ? 'Done. We emailed you what you kept.' : 'Done.');
           }}
           onLater={() => {
             rememberDeferred(currentUser.id);

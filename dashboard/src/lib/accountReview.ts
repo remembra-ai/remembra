@@ -1,7 +1,8 @@
 // The one-time account check shown after the first proof that the signed-in
-// person owns the account's email (Sign in with Google, or an emailed password
-// reset). Everything set up before keeps working until the owner keeps it
-// (one click) or revokes single items. See remembra.auth.account_review.
+// person owns the account's email (Sign in with Google or GitHub, or an emailed
+// password reset). Everything set up before keeps working until the owner keeps
+// it (one click) or revokes single items. A check with nothing in it finishes on
+// the server and never shows. See remembra.auth.account_review.
 
 import { API_V1 } from '../config';
 
@@ -55,15 +56,28 @@ export interface ReviewItems {
   password: boolean;
 }
 
+export type ReviewOrigin = 'google' | 'github' | 'password_reset';
+
 export interface AccountReview {
   pending: boolean;
   canReview: boolean;
-  origin: 'google' | 'password_reset' | null;
+  origin: ReviewOrigin | null;
   verifiedAt: string | null;
   items: ReviewItems | null;
+  /** Fingerprint of the listed items; "Keep all" sends it so only what was shown is kept. */
+  version: string | null;
 }
 
-export const NO_REVIEW: AccountReview = { pending: false, canReview: false, origin: null, verifiedAt: null, items: null };
+export const NO_REVIEW: AccountReview = {
+  pending: false,
+  canReview: false,
+  origin: null,
+  verifiedAt: null,
+  items: null,
+  version: null,
+};
+
+const ORIGINS: readonly ReviewOrigin[] = ['google', 'github', 'password_reset'];
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
@@ -127,25 +141,38 @@ export function normalizeReview(raw: unknown): AccountReview {
           password: rawItems.password === true,
         }
       : null;
-  const origin = data.origin === 'google' || data.origin === 'password_reset' ? data.origin : null;
-  return { pending: true, canReview: canReview && items !== null, origin, verifiedAt: str(data.verified_at), items };
+  const origin = ORIGINS.find((o) => o === data.origin) ?? null;
+  const version = str(data.version);
+  return {
+    pending: true,
+    canReview: canReview && items !== null && version !== null,
+    origin,
+    verifiedAt: str(data.verified_at),
+    items,
+    version,
+  };
 }
 
+/** Everything listed, 2FA included. */
 export function itemCount(items: ReviewItems | null): number {
   if (!items) return 0;
+  return keptCount(items) + (items.two_factor ? 1 : 0);
+}
+
+/** What "Keep all" keeps: everything except 2FA from before, which needs a current code to keep. */
+export function keptCount(items: ReviewItems | null): number {
+  if (!items) return 0;
   return (
-    items.keys.length +
-    items.connections.length +
-    items.webhooks.length +
-    items.identities.length +
-    (items.two_factor ? 1 : 0) +
-    (items.password ? 1 : 0)
+    items.keys.length + items.connections.length + items.webhooks.length + items.identities.length + (items.password ? 1 : 0)
   );
 }
 
-/** The check blocks the dashboard only for a session that may act on it, and not after "Later" this session. */
+/**
+ * The check blocks the dashboard only for a session that may act on it, only
+ * when something is listed, and not after "Later" this session.
+ */
 export function shouldShowReview(review: AccountReview, deferred: boolean): boolean {
-  return review.pending && review.canReview && !deferred;
+  return review.pending && review.canReview && itemCount(review.items) > 0 && !deferred;
 }
 
 /** "Later" lasts for this browser session (sessionStorage), keyed to the account. */
@@ -215,13 +242,44 @@ export async function revokeReviewItem(jwt: string, kind: ReviewKind, id?: strin
   };
 }
 
-export async function completeReview(jwt: string): Promise<void> {
+export interface KeepResult {
+  review: AccountReview;
+}
+
+/** Keep 2FA set up before the email was confirmed: only with a current code from the authenticator. */
+export async function keepTwoFactor(jwt: string, code: string): Promise<KeepResult> {
+  const response = await fetch(`${API_V1}/auth/review/keep`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kind: 'two_factor', code }),
+  });
+  if (!response.ok) throw new Error(await detailOf(response, 'That code did not work. Try the current one.'));
+  const data = (await response.json()) as { review?: unknown };
+  return { review: normalizeReview(data.review) };
+}
+
+export type CompleteResult =
+  | { done: true; kept: string[]; removed: string[] }
+  /** The list changed since it was shown (or the check finished elsewhere): here is the current one. */
+  | { done: false; review: AccountReview; message: string };
+
+/** "Keep all": keeps exactly the list shown (its version). A changed list comes back to be shown again. */
+export async function completeReview(jwt: string, version: string): Promise<CompleteResult> {
   const response = await fetch(`${API_V1}/auth/review/complete`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${jwt}` },
+    headers: { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ version }),
   });
-  // 409: already finished (another tab); nothing left to do.
-  if (!response.ok && response.status !== 409) throw new Error(await detailOf(response, 'Could not save. Try again.'));
+  if (response.status === 409) {
+    const message = await detailOf(response, 'The list changed. Check it again.');
+    const review = await fetchReview(jwt);
+    // Finished in another tab: nothing left to do.
+    if (!review.pending) return { done: true, kept: [], removed: [] };
+    return { done: false, review, message };
+  }
+  if (!response.ok) throw new Error(await detailOf(response, 'Could not save. Try again.'));
+  const data = (await response.json()) as { kept?: unknown; removed?: unknown };
+  return { done: true, kept: strs(data.kept), removed: strs(data.removed) };
 }
 
 export async function deferReview(jwt: string): Promise<void> {

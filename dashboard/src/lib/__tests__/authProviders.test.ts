@@ -74,7 +74,9 @@ describe('oauth callback fragment', () => {
         expect(copy.length).toBeLessThan(140);
       }
     }
-    expect(oauthErrorMessage('account_exists_link_required', 'github')).toContain('connect GitHub in Settings');
+    expect(oauthErrorMessage('account_exists_link_required', 'github')).toBe(
+      'You already have an account with this email. Sign in with Google or your password first. Then add GitHub in Settings.',
+    );
     expect(oauthErrorMessage('email_in_use', 'google')).toContain('already used by another Remembra account');
     expect(oauthErrorMessage('identity_in_use', 'github')).toContain('different Remembra account');
     expect(oauthErrorMessage('access_denied', 'google')).toBe('Sign-in with Google was cancelled.');
