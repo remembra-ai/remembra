@@ -2653,9 +2653,13 @@ class CrewSessions:
         now: datetime,
         *,
         baton_ref: str | None = None,
+        baton_facts: Mapping[str, Any] | None = None,
         handoff: bool = True,
     ) -> bool:
-        """Session → ``lost`` and the lost synthesis (§10.2), in the caller's transaction. False if the state moved."""
+        """Session → ``lost`` and the lost synthesis (§10.2), in the caller's transaction. False if the state moved.
+
+        ``baton_facts`` are crewd's facts from when it saved ``baton_ref`` (the orphan leave): they count the
+        files the ref holds; the report itself stays server-inferred."""
         if reason not in schemas.LOST_REASONS:
             raise ValueError(f"unknown lost reason {reason!r}")
         live_before = await live_session_count(tx.conn, row["crew_id"])
@@ -2676,7 +2680,7 @@ class CrewSessions:
             now=now,
         )
         if baton_ref:
-            await self._baton_ref_created(tx, row, baton_ref, {}, now)
+            await self._baton_ref_created(tx, row, baton_ref, baton_facts or {}, now)
         if row["state"] == "quota_blocked":
             await self._emit_mode_change(tx, row["crew_id"], live_before, Actor.system(), now)
             return True  # the quota stall already reserved the work and wrote the report
@@ -2731,7 +2735,7 @@ class CrewSessions:
                 }
             if reason in ("process_exited", "orphaned"):
                 if row["state"] != "lost":
-                    await self.mark_lost(tx, row, "process_exited", now, baton_ref=baton_ref, handoff=False)
+                    await self.mark_lost(tx, row, "process_exited", now, baton_ref=baton_ref, baton_facts=cleaned, handoff=False)
                 return {"state": "lost", "already": False, "seq": await self._last_seq(tx.conn, row["crew_id"])}
             if baton_ref:
                 await self._baton_ref_created(tx, row, baton_ref, cleaned, now)
@@ -2881,6 +2885,16 @@ class CrewSessions:
             summary="crew assembled" if after == "multi" else "crew back to solo",
             now=now,
         )
+        if after == "multi":
+            # No-zone bootstrap (D37, WP-5 seam): the join that makes the crew multi applies suggested zones
+            # when the crew has none (a no-op when zones exist, the setting is off or no tree is stored yet;
+            # the tree upload re-checks).
+            from remembra.crew import zones as crew_zones
+
+            owner = await _one(tx.conn, "SELECT owner_user_id FROM crews WHERE id = ?", (crew_id,))
+            limits = await self.limits_for(str(owner["owner_user_id"])) if owner else None
+            ops = crew_zones.CrewOps(log=self.log, limits=limits)
+            await crew_zones.maybe_bootstrap(ops, tx, crew_id, actor=Actor.system())
 
     # -- human actions (D27; the router enforces the human principal and role) -------------------------------
 
