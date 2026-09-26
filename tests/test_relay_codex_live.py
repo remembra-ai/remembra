@@ -359,12 +359,20 @@ def test_a_sub_agent_thread_gets_no_brief_and_leaves_no_handoff(server, tmp_path
     """A sub-agent Codex starts is read as one from its own rollout, and gets no brief or handoff.
 
     Live: the model asks Codex's multi-agent tool for a sub-agent while the
-    parent turn waits. The rollout Codex writes for it starts with a
-    session_meta the relay reads as ``subagent``; the parent's is not skipped.
-    The parent gets its brief and leaves the only handoff; the sub-agent's
-    prompt has no brief. codex-cli 0.155.0-alpha.16.4 runs no hooks for the
-    sub-agent thread under ``codex exec``; if a version does, relay.log must
-    show each of its hooks skipped.
+    parent turn waits. codex-cli 0.155.0-alpha.16.4 runs the sub-agent's
+    UserPromptSubmit hook (its SessionStart and SessionEnd do not fire under
+    ``codex exec``) with the PARENT's ``session_id``, the sub-agent's own
+    thread id as ``agent_id`` and the sub-agent's own rollout as
+    ``transcript_path``. That rollout starts with a session_meta the relay
+    reads as ``subagent``; the parent's is not skipped. The parent gets its
+    brief and leaves the only handoff; the sub-agent's prompt has no brief.
+
+    In the run, the sub-agent's ``brief --once`` already finds the brief
+    delivered for the shared session id. So the sub-agent payload Codex sent
+    is replayed through ``brief --once`` and ``close`` in a HOME without that
+    record: relay.log shows both skipped, naming the sub-agent's thread, and
+    nothing is printed or sent. The parent's own prompt payload, replayed the
+    same way, gets its brief.
     """
     scripts = {
         "Delegate the check.": [("spawn", "Check the totals."), ("exec", "sleep 6"), ("say", "Delegated.")],
@@ -385,15 +393,54 @@ def test_a_sub_agent_thread_gets_no_brief_and_leaves_no_handoff(server, tmp_path
         rollouts = sorted((rig.codex_home / "sessions").rglob("rollout-*.jsonl"))
         kinds = {p: session_skip_reason({"transcript_path": str(p)}) for p in rollouts}
         assert sorted(kinds.values(), key=str) == [None, "subagent"], kinds
-        sub_ids = {str((read_session_meta(p) or {}).get("id")) for p, kind in kinds.items() if kind == "subagent"}
+        sub_rollout = next(p for p, kind in kinds.items() if kind == "subagent")
+        sub_id = str((read_session_meta(sub_rollout) or {}).get("id"))
+
+        # Which hooks Codex ran for the sub-agent: matched by the rollout they name, not the session id.
+        def of_sub_agent(payload: dict[str, Any]) -> bool:
+            return os.path.realpath(str(payload.get("transcript_path") or "")) == os.path.realpath(sub_rollout)
+
+        captured = rig.captured()
+        parent_id = captured["SessionStart"][0]["session_id"]
+        assert not of_sub_agent(captured["SessionStart"][0]) and parent_id != sub_id
+        sub_hooks = [(event, p) for event, payloads in captured.items() for p in payloads if of_sub_agent(p)]
+        assert "UserPromptSubmit" in {event for event, _ in sub_hooks}, captured
+        for event, payload in sub_hooks:
+            assert payload["session_id"] == parent_id and payload.get("agent_id") == sub_id, (event, payload)
+        sub_prompt = next(p for event, p in sub_hooks if event == "UserPromptSubmit")
+        parent_prompt = next(p for p in captured["UserPromptSubmit"] if not of_sub_agent(p))
+        assert parent_prompt["session_id"] == parent_id and not parent_prompt.get("agent_id")
 
         assert len(rig.trail("codex")) == 1
         time.sleep(3)  # a sub-agent's detached close, had one started, would have landed by now
         assert len(rig.trail("codex")) == 1
         log_path = rig.home / ".remembra" / "relay" / "relay.log"
         log = log_path.read_text() if log_path.exists() else ""
-        for event, payloads in rig.captured().items():
-            for payload in payloads:
-                if payload["session_id"] in sub_ids:
-                    verb = "close" if event == "SessionEnd" else "brief"
-                    assert f"skipped {verb}: codex subagent session {payload['session_id']}" in log, (event, log)
+        thread = f"thread {sub_id} of session {parent_id}"
+        for event, _ in sub_hooks:
+            if event != "UserPromptSubmit":  # a version that runs them: each must show as skipped
+                verb = "close" if event == "SessionEnd" else "brief"
+                assert f"skipped {verb}: codex subagent {thread}" in log, (event, log)
+
+        # The skip itself, on the payload Codex sent: a HOME with no brief recorded for the shared session id.
+        replay = tmp_path / "replay-home"
+        replay.mkdir()
+        sub_end = {k: v for k, v in sub_prompt.items() if k != "prompt"}
+        sub_end.update(hook_event_name="SessionEnd", reason="other")
+        brief = relay(replay, rig.server, "brief", "--hook", "codex", "--once", stdin=json.dumps(sub_prompt), cwd=rig.repo)
+        close = relay(replay, rig.server, "close", "--hook", "codex", stdin=json.dumps(sub_end), cwd=rig.repo)
+        for out in (brief, close):
+            assert (out.returncode, out.stdout, out.stderr) == (0, "", ""), out
+        replay_relay = replay / ".remembra" / "relay"
+        assert [line.split(" ", 2)[2] for line in (replay_relay / "relay.log").read_text().splitlines()] == [
+            f"skipped brief: codex subagent {thread}",
+            f"skipped close: codex subagent {thread}",
+        ]
+        assert not (replay_relay / "last-detached-close.log").exists()  # no detached close started
+        assert not (replay_relay / "sessions").exists()  # no brief recorded for the parent's session
+
+        # The same replay for the parent's own prompt: it goes on and gets its brief.
+        control = tmp_path / "control-home"
+        control.mkdir()
+        out = relay(control, rig.server, "brief", "--hook", "codex", "--once", stdin=json.dumps(parent_prompt), cwd=rig.repo)
+        assert out.returncode == 0 and _brief_count([out.stdout]) == 1, out.stdout + out.stderr

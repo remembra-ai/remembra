@@ -103,12 +103,16 @@ Qwen Code and Cursor do not wait for it at all. For these `close` hands the work
 process and returns at once; that process logs to `~/.remembra/relay/last-detached-close.log`.
 
 **Codex automations and sub-agents.** Codex Desktop runs the hooks for its scheduled automations too,
-and a sub-agent thread a session spawns can run them as well. The relay reads the kind of thread from the
-first line of its rollout and does nothing for automations and sub-agents: no brief in their prompt, no
-handoff in the trail, one line in `~/.remembra/relay/relay.log`
-(`skipped brief: codex automation session <id>`). Threads you start, voice chats included, work as before.
-To keep automation handoffs and briefs, set `REMEMBRA_RELAY_INCLUDE_AUTOMATIONS=1` in the environment
-Codex runs its hooks with. Sub-agents are always skipped; the session that spawned them leaves the handoff.
+and a sub-agent thread a session spawns runs them as well. The relay reads the kind of thread from the
+first line of its rollout and does nothing for an automation run that starts its own thread, or for a
+sub-agent: no brief in their prompt, no handoff in the trail, one line in `~/.remembra/relay/relay.log`
+(`skipped brief: codex automation session <id>`, or
+`skipped brief: codex subagent thread <sub-agent id> of session <parent session id>`, since a sub-agent's
+hooks carry the session id of the session that spawned it). Threads you start, voice chats included, work
+as before. A heartbeat automation, which posts into a thread that already exists, is not skipped: the
+thread holds your own work, so its turns share that thread's brief and handoff. To keep automation
+handoffs and briefs, set `REMEMBRA_RELAY_INCLUDE_AUTOMATIONS=1` in the environment Codex runs its hooks
+with. Sub-agents are always skipped; the session that spawned them leaves the handoff.
 
 **Usage limits.** Codex has no hook for its usage limit. When a Codex session's last turn stopped on the
 limit, the handoff says `ended: usage_limit` (the brief and the trail show `stopped: usage_limit`, as for a

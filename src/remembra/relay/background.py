@@ -1,13 +1,21 @@
 """Codex threads that get no brief and leave no handoff: automations and sub-agents.
 
 Codex Desktop runs scheduled automations (dozens a day on a busy machine) and
-spawns sub-agent threads. With the relay hooks trusted, each automation runs
-SessionStart (``brief``) and SessionEnd (``close``), and a sub-agent thread
-can run them too (``codex exec`` 0.155.0-alpha.16.4 runs none for its
-sub-agents; see tests/test_relay_codex_live.py): the trail fills with
+spawns sub-agent threads. With the relay hooks trusted, an automation run that
+gets its own thread (a cron automation, ``thread_source: "automation"``) runs
+SessionStart (``brief``) and SessionEnd (``close``): the trail fills with
 automation handoffs that bury the sessions people work in, the next brief
 points at an automation run, and each automation gets a project brief in its
-prompt.
+prompt. A sub-agent thread runs hooks too: under ``codex exec``
+0.155.0-alpha.16.4 its UserPromptSubmit hook fires with the PARENT's
+``session_id``, the sub-agent's own thread id as ``agent_id`` and the
+sub-agent's own rollout as ``transcript_path`` (see
+tests/test_relay_codex_live.py). A heartbeat automation is NOT skipped: it
+posts its turns into an existing thread (one someone started, or a voice
+chat), whose rollout starts the way that thread started, so any hook a
+heartbeat turn runs is handled as that thread's own (the thread holds the
+person's own work; telling a heartbeat turn apart would need a per-turn
+signal the first line cannot give).
 
 Codex's hook payload does not say what kind of thread it is. The rollout it
 names (``transcript_path``) does: its first line is a ``session_meta`` record
@@ -18,10 +26,12 @@ sub-agent thread) and, for a sub-agent, ``parent_thread_id``. Only that first
 line is read, and at most :data:`FIRST_LINE_MAX_BYTES` of it (Codex's is about
 20 KB: it carries the built-in instructions). The path comes from the agent's
 own hook payload and is not limited to one directory (``CODEX_HOME`` can be
-anywhere), but only a regular file is read, opened without blocking, so a
-FIFO or device named there cannot stall the hook. Anything unexpected (no
-file, not a regular file, a first line that is too long, not JSON or not a
-``session_meta``) means the session is not skipped; nothing here raises.
+anywhere), so only a regular file is read: anything else is refused before it
+is opened (a device named there never reaches its driver), and the open is
+non-blocking, so a FIFO swapped in after that check cannot stall the hook.
+Anything unexpected (no file, not a regular file, a first line that is too
+long, not JSON or not a ``session_meta``) means the session is not skipped;
+nothing here raises.
 
 ``REMEMBRA_RELAY_INCLUDE_AUTOMATIONS=1`` keeps automation sessions (brief and
 handoff) for people who want them. Sub-agent threads are skipped either way:
@@ -57,14 +67,22 @@ def read_first_line(path: str | os.PathLike[str], max_bytes: int = FIRST_LINE_MA
     None for a missing or unreadable path, anything but a regular file, an
     empty or blank first line, and a first line longer than ``max_bytes`` (at
     most ``max_bytes + 1`` bytes are read). Never raises.
+
+    Anything but a regular file is refused before it is opened: opening a
+    device reaches its driver (a serial port resets the board on it, a
+    watchdog arms). The open is non-blocking and the opened file is checked
+    again, so a FIFO or device swapped in between is still neither waited on
+    nor read.
     """
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_BINARY", 0)
     try:
+        if not stat.S_ISREG(os.stat(path).st_mode):  # follows symlinks, as the open does
+            return None
         fd = os.open(path, flags)
     except (OSError, ValueError, TypeError):
         return None
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        if not stat.S_ISREG(os.fstat(fd).st_mode):  # replaced between the stat and the open
             return None
         line = bytearray()
         while True:
@@ -153,9 +171,13 @@ def skip_hook_session(
     """The reason a ``<command> --hook`` run does nothing for this session, or None when it goes on.
 
     Applies to adapters whose transcripts are Codex rollouts. A skipped run
-    writes one line to relay.log (``skipped brief: codex automation session
-    <id>``) and nothing else: no output, no request, no queued handoff.
-    Automations go on when :func:`include_automations`. Never raises.
+    writes one line to relay.log and nothing else: no output, no request, no
+    queued handoff. The line names the session (``skipped brief: codex
+    automation session <id>``), or, when the payload carries an ``agent_id``
+    other than its ``session_id`` (a sub-agent's hook carries its parent's
+    session id), the thread first: ``skipped brief: codex subagent thread
+    <agent_id> of session <session_id>``. Automations go on when
+    :func:`include_automations`. Never raises.
     """
     try:
         if adapter.spec.transcript_format != CODEX_ROLLOUT:
@@ -164,8 +186,17 @@ def skip_hook_session(
         reason = session_skip_reason(payload, fields.get("transcript"))
         if reason is None or (reason == AUTOMATION and include_automations(environ)):
             return None
-        session = (fields.get("session_id") or "without an id")[:40]
-        outbox.log(home, f"skipped {command}: {adapter.spec.name} {reason} session {session}")
+        session = _log_id(fields.get("session_id")) or "without an id"
+        thread = _log_id(payload.get("agent_id"))
+        who = f"thread {thread} of session {session}" if thread and thread != session else f"session {session}"
+        outbox.log(home, f"skipped {command}: {adapter.spec.name} {reason} {who}")
         return reason
     except Exception:
         return None
+
+
+def _log_id(value: object) -> str | None:
+    """An id from a hook payload as relay.log prints it: stripped, at most 40 characters; None when absent."""
+    if not isinstance(value, str):
+        return None
+    return value.strip()[:40] or None

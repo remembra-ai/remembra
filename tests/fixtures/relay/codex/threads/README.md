@@ -7,6 +7,9 @@ rollout starts with: a `session_meta` and a `task_started` event. The
 0.155.0-alpha.16.4) writes for each kind of thread: `thread_source`, `source`
 (a string, or `{"subagent": {"thread_spawn": {...}}}` for a sub-agent),
 `originator`, and for a sub-agent `parent_thread_id` and `agent_nickname`.
+A sub-agent's `session_id` is its parent's (`...a009`), not its own `id`: Codex
+writes it that way, and a sub-agent's hooks carry that parent session id with
+the sub-agent's own id as `agent_id` (see tests/test_relay_codex_live.py).
 
 | File | Kind | Relay |
 |---|---|---|
