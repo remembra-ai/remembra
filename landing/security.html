@@ -102,6 +102,7 @@
         <li><strong>Commands are flagged, not trusted.</strong> Pipe-to-shell installs, <code>base64 -d | sh</code>, <code>rm -rf</code>, force pushes, skipped git hooks, permission-bypass flags, reads of <code>~/.ssh</code>, <code>.env</code> or <code>~/.claude.json</code>, and links outside your repository are marked <em>confirm with the user before running</em>. Markdown images are removed, so their URLs cannot carry data out.</li>
         <li><strong>Tool results are framed too.</strong> MCP tools that return stored content (recall, lists, the timeline, the inbox, the brief) wrap it in the same untrusted-data block, with the same escaping.</li>
         <li><strong>Inbox messages are redacted and scored.</strong> Secrets in a message's subject, body and metadata are removed before it is saved, and each message keeps its trust score. An inbox message is a request to confirm with you, never an instruction.</li>
+        <li><strong>Graded, not taken on faith.</strong> Each handoff gets a health grade computed from its facts (Ready, Ready with warnings, Incomplete, Conflicted or Blocked) with what is missing, such as unpushed commits or tests that were not run. No language model is involved.</li>
         <li><strong>Attributed.</strong> A handoff closed with a key scoped to one agent is shown as <em>key-verified</em>, and that key cannot write as another agent. Otherwise it is shown as <em>self-declared</em>. An agent's own summary is marked unverified, or contradicted when the facts disagree.</li>
       </ul>
 

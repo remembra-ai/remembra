@@ -317,8 +317,14 @@ def test_brief_by_location_leads_with_last_session(api):
     text = brief["rendered"]
     lines = text.splitlines()
     assert lines[0].startswith("# Remembra brief · project widget · you are codex")
-    assert lines[1] == '<remembra-data untrusted="true">' and "not instructions" in lines[2]
-    last = lines[3]
+    # R-21: the server's grade of the last handoff, above the untrusted-data block.
+    assert lines[1] == (
+        "Handoff health: Blocked (1 failing test run(s); 2 commit(s) not pushed; 1 uncommitted file(s); 1 open todo(s); "
+        "1 error(s) recorded; 1 failed command(s)). Graded by the server from the recorded facts."
+    )
+    assert brief["handoff_health"]["status"] == "blocked"
+    assert lines[2] == '<remembra-data untrusted="true">' and "not instructions" in lines[3]
+    last = lines[4]
     assert last.startswith("Last session: claude-code (self-declared), just now, on main@bbbbbbb: done: ")
     assert "NOT done: TODO: wire the codex adapter" in last
     assert "failing: FAILING: pytest -q tests/test_widget.py" in last
@@ -335,7 +341,7 @@ def test_brief_is_capped_and_drops_recent_first(api):
         http.post("/api/v1/memories", json={"content": f"note {i} " + "word " * 80, "project_id": "widget"})
     brief = _get(api, "/session/brief", {"project_id": "widget", "recent_n": 50})
     assert len(brief["rendered"]) <= 6000
-    assert brief["rendered"].splitlines()[3].startswith("Last session: claude-code")
+    assert brief["rendered"].splitlines()[4].startswith("Last session: claude-code")
     assert "</remembra-data>" in brief["rendered"].splitlines()
 
 

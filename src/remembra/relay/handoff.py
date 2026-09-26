@@ -627,6 +627,160 @@ def handoff_verdict(handoff: dict[str, Any], allowed: tuple[str, ...] = ()) -> L
 
 
 # ---------------------------------------------------------------------------
+# Handoff health (R-21)
+# ---------------------------------------------------------------------------
+
+HEALTH_RULES_VERSION = 1
+HEALTH_READY = "ready"
+HEALTH_WARNINGS = "ready_with_warnings"
+HEALTH_INCOMPLETE = "incomplete"
+HEALTH_CONFLICTED = "conflicted"
+HEALTH_BLOCKED = "blocked"
+HEALTH_LABELS = {
+    HEALTH_READY: "Ready",
+    HEALTH_WARNINGS: "Ready with warnings",
+    HEALTH_INCOMPLETE: "Incomplete",
+    HEALTH_CONFLICTED: "Conflicted",
+    HEALTH_BLOCKED: "Blocked",
+}
+_PROBE_NAME_RE = re.compile(r"^[a-z][a-z0-9_-]{0,19}$")
+
+
+def _failed_commands(facts: dict[str, Any], test_cmds: set[str]) -> int:
+    last_exit: dict[str, Any] = {}
+    for cmd in facts.get("commands") or []:
+        last_exit[str(cmd.get("cmd") or "")] = cmd.get("exit_code")
+    return sum(
+        1
+        for text, code in last_exit.items()
+        if isinstance(code, int) and code != 0 and text and text not in test_cmds and not is_probe_command(text)
+    )
+
+
+def assess_handoff(facts: dict[str, Any], grounding: dict[str, Any] | None, trust: float = 1.0) -> dict[str, Any]:
+    """Grade a handoff from its recorded facts. Pure and deterministic; no LLM.
+
+    Returns ``{status, label, missing, warnings, rules_version}``. ``status``
+    is the first that applies:
+
+    * ``blocked``: a test run's latest result failed, or the recorded text
+      matched prompt-injection patterns (the handoff is withheld from briefs);
+    * ``conflicted``: the agent's summary contradicts the facts (each
+      contradiction is in ``warnings``, with its text);
+    * ``incomplete``: git probes did not finish, or no git state was recorded;
+    * ``ready_with_warnings``: anything left for the next agent (unpushed or
+      unrecorded push state, uncommitted files, open todos, tests not run on
+      changed work, errors, failed commands);
+    * ``ready``: none of the above.
+
+    ``missing`` holds only server-written text (counts and fixed phrases), so it
+    can be shown outside the untrusted-data block; ``warnings`` may quote the
+    agent's claims.
+    """
+    grounding = grounding or {}
+    commits = facts.get("commits") or []
+    files = facts.get("files_changed") or []
+    uncommitted = facts.get("uncommitted_files") or []
+    todos = [t for t in facts.get("todos_open") or [] if str(t).strip()]
+    errors = [e for e in facts.get("errors") or [] if str(e).strip()]
+    tests = latest_tests(facts.get("tests") or [])
+    unpushed = facts.get("unpushed_commits")
+    incomplete = sorted({str(x) if _PROBE_NAME_RE.match(str(x)) else "other" for x in facts.get("incomplete") or []})
+    worked = bool(commits or files or uncommitted)
+
+    blocked: list[str] = []
+    conflicted: list[str] = []
+    gaps: list[str] = []
+    missing: list[str] = []
+    warnings: list[str] = []
+
+    if trust < BRIEF_TRUST_FLOOR:
+        blocked.append("review with the user: the recorded text matched prompt-injection patterns")
+    failing = [t for t in tests if t.get("passed") is False]
+    if failing:
+        blocked.append(f"{len(failing)} failing test run(s)")
+
+    issues = [str(i) for i in grounding.get("issues") or []]
+    contradictions = [i for i in issues if "(unverifiable)" not in i]
+    if grounding.get("status") == "contradicted" and contradictions:
+        conflicted.append(f"the agent's summary contradicts the recorded facts ({len(contradictions)} claim(s))")
+        warnings.extend(f"summary contradicted: {clip(i, 200)}" for i in contradictions)
+    warnings.extend(f"summary claim not checkable: {clip(i, 200)}" for i in issues if "(unverifiable)" in i)
+
+    if incomplete:
+        gaps.append(f"git facts incomplete ({', '.join(incomplete)} did not finish)")
+    if not facts.get("branch") and not facts.get("head_commit") and not commits:
+        gaps.append("no git state recorded")
+
+    if isinstance(unpushed, int) and unpushed > 0:
+        missing.append(f"{unpushed} commit(s) not pushed")
+    elif facts.get("no_upstream") and commits:
+        missing.append("branch has no upstream: commits not pushed")
+    elif unpushed is None and commits and "upstream" not in incomplete:
+        missing.append("push state not recorded")
+    if uncommitted:
+        missing.append(f"{len(uncommitted)} uncommitted file(s)")
+    if todos:
+        missing.append(f"{len(todos)} open todo(s)")
+    if worked and not tests:
+        missing.append("tests not run")
+    if errors:
+        missing.append(f"{len(errors)} error(s) recorded")
+    failed_cmds = _failed_commands(facts, {str(t.get("cmd") or "") for t in tests})
+    if failed_cmds:
+        missing.append(f"{failed_cmds} failed command(s)")
+
+    if blocked:
+        status = HEALTH_BLOCKED
+    elif conflicted:
+        status = HEALTH_CONFLICTED
+    elif gaps:
+        status = HEALTH_INCOMPLETE
+    elif missing:
+        status = HEALTH_WARNINGS
+    else:
+        status = HEALTH_READY
+    return {
+        "status": status,
+        "label": HEALTH_LABELS[status],
+        "missing": [*blocked, *conflicted, *gaps, *missing],
+        "warnings": warnings,
+        "rules_version": HEALTH_RULES_VERSION,
+    }
+
+
+def stored_health(handoff: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The server-written health grade of a relay handoff (None for legacy or free-form handoffs)."""
+    relay = _relay_meta(handoff)
+    health = (relay or {}).get("health")
+    if not isinstance(health, dict) or health.get("status") not in HEALTH_LABELS:
+        return None
+    return {
+        "status": health["status"],
+        "label": HEALTH_LABELS[health["status"]],
+        "missing": [clip(m, 160) for m in health.get("missing") or [] if isinstance(m, str)][:12],
+        "warnings": [clip(w, 240) for w in health.get("warnings") or [] if isinstance(w, str)][:12],
+        "rules_version": health.get("rules_version"),
+    }
+
+
+def health_line(handoff: dict[str, Any] | None, verdict: LineVerdict | None) -> str | None:
+    """The brief's top line: the last handoff's server grade (server-written text only)."""
+    if not handoff:
+        return None
+    if verdict is not None and verdict.withheld:
+        return (
+            f"Handoff health: {HEALTH_LABELS[HEALTH_BLOCKED]} (review with the user: the recorded text matched "
+            "prompt-injection patterns)."
+        )
+    health = stored_health(handoff)
+    if health is None:
+        return "Handoff health: not graded (this handoff was not recorded by the relay's close-out)."
+    detail = f" ({'; '.join(health['missing'][:6])})" if health["missing"] else ""
+    return f"Handoff health: {health['label']}{detail}. Graded by the server from the recorded facts."
+
+
+# ---------------------------------------------------------------------------
 # Brief rendering
 # ---------------------------------------------------------------------------
 
@@ -743,7 +897,7 @@ def _recent_line(mem: dict[str, Any], now: datetime, allowed: tuple[str, ...]) -
 
 
 def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: int = MAX_BRIEF_CHARS) -> str:
-    """Compact text brief: last session, inbox, status, linked projects, recent memories.
+    """Compact text brief: handoff health, last session, inbox, status, linked projects, recent memories.
 
     Everything recorded by agents or tools (the handoff, inbox subjects,
     status values, linked headlines, recent memories) sits inside ONE
@@ -752,6 +906,7 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
     recorded line goes through the same policy (:func:`assess_text`): below
     :data:`BRIEF_TRUST_FLOOR` it is replaced by ``withheld (LOW TRUST …, id …)``,
     and command-shaped text keeps its content with :data:`COMMAND_FLAG`.
+    The last handoff's server grade (R-21) is the line above the block.
     Capped at ``max_chars`` (~1500 tokens); recent memories are dropped first
     and the block is always closed.
     """
@@ -761,6 +916,7 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
         f"# Remembra brief · project {brief.get('project_id') or '(all)'} · you are {brief.get('agent_id') or '(no agent id)'}"
     )
     handoff = brief.get("handoff")
+    health = health_line(handoff, handoff_verdict(handoff, allowed) if handoff else None)
     data: list[str] = render_last_session(handoff, now, brief.get("checkout"), allowed).split("\n")
 
     inbox = brief.get("inbox")
@@ -780,13 +936,14 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
 
     tail = [f"Note: {clip(w, 300)}" for w in (brief.get("warnings") or [])[:4]]
     tail.append("Before you finish: run `remembra-relay close` or call close_session so the next agent can pick up.")
+    top = [header, *([health] if health else [])]
 
     def data_body(recent: list[str]) -> str:
         lines = data + (["Recent (newest first):", *recent] if recent else [])
         return neutralize("\n".join(lines))
 
     def assemble(body: str) -> str:
-        return "\n".join([header, DATA_OPEN, DATA_PREAMBLE, body, DATA_CLOSE, *tail])
+        return "\n".join([*top, DATA_OPEN, DATA_PREAMBLE, body, DATA_CLOSE, *tail])
 
     text = assemble(data_body(recent_lines))
     while len(text) > max_chars and recent_lines:

@@ -27,6 +27,7 @@ from remembra.core.time import utcnow
 from remembra.models.memory import StoreRequest
 from remembra.relay.handoff import (
     HANDOFF_FORMAT_VERSION,
+    assess_handoff,
     build_sections,
     check_summary_grounding,
     handoff_headline,
@@ -35,6 +36,7 @@ from remembra.relay.handoff import (
     redact,
     render_brief,
     render_handoff,
+    stored_health,
 )
 from remembra.relay.identity import KIND_GIT, KIND_PATH, KIND_ROOT, Fingerprint, ProjectLocator, slugify_project
 from remembra.security.untrusted import repo_url_prefixes
@@ -432,7 +434,9 @@ class RelayService:
         text AND the structured metadata are clean. ``screen`` post-processes
         the rendered text (sanitizer) and returns ``(text, trust_score, checksum)``.
         Returns ``{handoff_id, changed, superseded, rendered, headline, sections,
-        grounding, redactions, status}``.
+        grounding, health, redactions, status}``; ``health`` is the server's
+        grade (:func:`~remembra.relay.handoff.assess_handoff`), also stored in
+        the relay block.
         """
         if self.memory_service is None:
             raise RuntimeError("close_session requires a memory service")
@@ -459,6 +463,7 @@ class RelayService:
         if screen is not None:
             text, trust_score, checksum = screen(text)
 
+        health = assess_handoff(facts, grounding, trust=float(trust_score))
         key = relay_key(agent_id, session_id)
         facts_source = facts.get("facts_source")
         relay_meta: dict[str, Any] = {
@@ -489,6 +494,9 @@ class RelayService:
             "headline": sections["headline"],
             "end_reason": end_reason,
             "grounding": grounding,
+            # Server-computed from the facts above (never accepted from a client:
+            # "health" is a reserved metadata key on every generic write path).
+            "health": health,
             "closed_at": closed_at.isoformat(),
         }
         metadata = {
@@ -509,7 +517,9 @@ class RelayService:
                 prev_relay: dict[str, Any] = raw_relay if isinstance(raw_relay, dict) else {}
                 prev_body = (current[0].get("content") or "").split("\n", 1)[1:]
                 if _same_session_facts(prev_relay, relay_meta) and prev_body == text.strip().split("\n", 1)[1:]:
-                    return self._close_result(current[0]["id"], False, [], current[0]["content"], sections, grounding, counts)
+                    return self._close_result(
+                        current[0]["id"], False, [], current[0]["content"], sections, grounding, counts, health
+                    )
             request = StoreRequest(
                 content=text,
                 user_id=user_id,
@@ -550,7 +560,7 @@ class RelayService:
             except Exception as e:  # the handoff is stored; a status hiccup must not fail the close
                 log.warning("relay_status_upsert_failed", key=status_key, error=str(e))
         log.info("relay_session_closed", project_id=project_id, agent_id=agent_id, handoff_id=new_id, superseded=len(superseded))
-        result = self._close_result(new_id, True, superseded, text, sections, grounding, counts)
+        result = self._close_result(new_id, True, superseded, text, sections, grounding, counts, health)
         result["status"] = status_updates
         return result
 
@@ -563,6 +573,7 @@ class RelayService:
         sections: dict[str, Any],
         grounding: dict[str, Any],
         counts: dict[str, int],
+        health: dict[str, Any],
     ) -> dict[str, Any]:
         return {
             "handoff_id": handoff_id,
@@ -572,6 +583,7 @@ class RelayService:
             "headline": sections["headline"],
             "sections": {k: sections[k] for k in ("done", "not_done", "failing", "next")},
             "grounding": grounding,
+            "health": health,
             "redactions": counts,
             "status": [],
         }
@@ -625,6 +637,7 @@ class RelayService:
                     "headline": handoff_headline(mem),
                     "failing": len(relay.get("failing") or []),
                     "open": len(relay.get("not_done") or []),
+                    "health": stored_health(mem),
                     "detail": _trail_detail(mem, relay),
                 }
             )
@@ -882,6 +895,7 @@ class RelayService:
         # URLs into the project's own repository are not flagged in the brief.
         remotes = (await self.registry.fingerprint_values(user_id, project_id)).get(KIND_GIT, []) if project_id else []
         brief["repo_url_prefixes"] = list(repo_url_prefixes(remotes))
+        brief["handoff_health"] = stored_health(brief.get("handoff"))
         brief["rendered"] = render_brief(brief)
         police_brief(brief)  # the JSON fields get the same verdicts as the rendered text
         return brief

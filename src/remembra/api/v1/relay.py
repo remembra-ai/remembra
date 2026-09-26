@@ -447,6 +447,10 @@ async def close_session(
     facts. Idempotent per (agent_id, session_id): closing again updates the same
     handoff (the previous version is superseded, never duplicated).
 
+    ``health`` in the response is the server's grade of the handoff (Ready,
+    Ready with warnings, Incomplete, Conflicted, Blocked) with the ``missing``
+    list, computed deterministically from the facts and stored with it.
+
     A close is a relay event: it never uses smart credits (the handoff is stored
     without LLM enrichment); it counts toward the plan's relay burst limit and
     soft monthly cap."""
@@ -558,7 +562,8 @@ async def session_brief(
 
     Every recorded line passes one trust policy: low-trust text is withheld,
     command-shaped text is flagged, and the JSON fields carry the same
-    verdicts (``trust_score`` / ``withheld`` / ``flags``). Read-only: nothing is recorded."""
+    verdicts (``trust_score`` / ``withheld`` / ``flags``). ``handoff_health``
+    is the last handoff's server grade. Read-only: nothing is recorded."""
     _require(current_user, "memory:recall")
     notes: list[str] = []
     agent, _ = effective_agent(request, current_user, agent_id, strict=False, warnings=notes)

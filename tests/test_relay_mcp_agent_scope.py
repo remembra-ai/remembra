@@ -87,9 +87,10 @@ def test_mcp_close_then_compact_brief_for_hookless_agent(mcp_env, monkeypatch):
     assert brief["project_id"] == "parser" and brief["handoff_id"] == again["handoff_id"]
     assert set(brief) == {"status", "project_id", "agent_id", "brief", "handoff_id", "inbox_unread", "warnings"}
     lines = brief["brief"].splitlines()
-    assert lines[1] == '<remembra-data untrusted="true">'
-    assert lines[3].startswith("Last session: kimi (self-declared), just now, on dev: ")
-    assert "suggested next step (from kimi, unverified): port the tokenizer" in lines[3]
+    assert lines[1] == "Handoff health: Ready. Graded by the server from the recorded facts."  # R-21
+    assert lines[2] == '<remembra-data untrusted="true">'
+    assert lines[4].startswith("Last session: kimi (self-declared), just now, on dev: ")
+    assert "suggested next step (from kimi, unverified): port the tokenizer" in lines[4]
 
 
 def test_mcp_repo_binds_to_configured_project_and_close_follows_the_brief(mcp_env):

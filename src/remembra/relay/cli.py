@@ -419,6 +419,14 @@ def build_close_payload(ctx: Context, args: argparse.Namespace) -> dict[str, Any
     return payload
 
 
+def health_summary(health: Any) -> str | None:
+    """``Handoff: Ready with warnings - tests not run; 2 commit(s) not pushed`` (None without a grade)."""
+    if not isinstance(health, dict) or not health.get("label"):
+        return None
+    missing = [str(m) for m in health.get("missing") or [] if isinstance(m, str)]
+    return f"Handoff: {health['label']}" + (f" - {'; '.join(missing)}" if missing else "")
+
+
 def cmd_close(args: argparse.Namespace) -> int:
     try:
         ctx = Context(args)
@@ -436,6 +444,9 @@ def cmd_close(args: argparse.Namespace) -> int:
         result = response.json()
         if not ctx.adapter:  # interactive use; hooks keep stdout clean (some require JSON-only stdout)
             print(f"Remembra handoff {result.get('handoff_id')} · project {result.get('project_id')} · {result.get('headline')}")
+            health = health_summary(result.get("health"))
+            if health:
+                print(health)
     except Exception as e:  # never break the agent's shutdown
         _err(f"close failed: {e.__class__.__name__}: {e}")
     return 0

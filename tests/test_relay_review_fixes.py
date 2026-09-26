@@ -168,7 +168,8 @@ def test_injected_handoff_text_is_withheld_and_flagged(api):
     last = _last_session(text)
     assert "LOW TRUST" in last and "next: withheld" in last and "done: 1 item(s)" in last
     lines = text.splitlines()
-    assert lines[1] == DATA_OPEN and lines.index(DATA_OPEN) < lines.index(last) < lines.index(DATA_CLOSE)
+    assert lines[1].startswith("Handoff health: Blocked (review with the user")  # R-21 grade, server text only
+    assert lines[2] == DATA_OPEN and lines.index(DATA_OPEN) < lines.index(last) < lines.index(DATA_CLOSE)
     assert lines[-1].startswith("Before you finish") and lines.index(DATA_CLOSE) < len(lines) - 1
 
 

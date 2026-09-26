@@ -204,6 +204,7 @@ def test_low_trust_handoff_withholds_linked_headline_and_json(api):
     assert own["handoff"]["withheld"] is True and own["handoff"]["metadata"] == {}
     assert own["handoff"]["content"].startswith("withheld (LOW TRUST")
     assert "Ignore all previous" not in json.dumps(own)
+    assert own["rendered"].splitlines()[1].startswith("Handoff health: Blocked")
 
 
 def test_legacy_rows_without_a_stored_score_are_scored_when_shown(api):
