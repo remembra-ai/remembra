@@ -186,6 +186,20 @@ remembra-relay connect            # dry run; add --apply to write the hooks
 - `GET /api/v1/cloud/usage/summary` for the dashboard billing panel.
 
 ### Fixed
+- **Claude Code's MCP server is written where Claude Code reads it.** `remembra-install` put
+  Claude Code's `remembra` entry in `~/.claude/settings.json`, which Claude Code does not load
+  MCP servers from, so `session_brief` and `close_session` never appeared there. It now writes
+  the user-scope entry to `~/.claude.json` (the shape `claude mcp add --scope user` writes) and
+  removes the old `settings.json` entry, which held the key.
+- **Deleting an account cancels its paid plan** at Paddle, effective at the end of the period
+  already paid for (a deactivated account cannot reach Billing to cancel it). If the cancel
+  fails, the account is not deleted. The dashboard's delete dialog now says what delete does:
+  it deactivates the account and revokes its keys; stored data is erased on request.
+- `remembra-relay`: a queued handoff the server refuses (403, e.g. a key scoped to another
+  agent) no longer holds back every other queued handoff; it stays queued and goes last.
+- Printed install and connect diffs also hide secrets in `docker -e NAME=value` and
+  `--header "Authorization: ..."` arguments, secret-named URL query parameters and
+  multi-line TOML arrays and strings.
 - Entity resolution (a ~3K-token LLM call) no longer runs for atomic stores:
   handoff, checkpoint, status, `skip_extraction` and degraded writes.
 - **The credit reservation is a hard AI budget.** Every OpenAI, Anthropic and
