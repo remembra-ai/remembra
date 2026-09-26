@@ -169,7 +169,9 @@ remembra-crew verify --agent codex     # asks you to run one prompt, then checks
 Only a passed round trip switches that agent from observe to enforce.
 
 Finally, in the dashboard add an email address or a webhook for notifications, so collisions, tamper
-attempts, bypasses and batons waiting for pickup reach you in real time.
+attempts, bypasses and batons waiting for pickup reach you in real time. Your own login email works at
+once; any other address first gets a confirmation code, and nothing is sent to it until you enter the
+code in the dashboard. A webhook must answer a signed challenge before it is saved.
 
 ## Everyday use
 
@@ -217,8 +219,9 @@ project to **observe** (log would-be denials instead of refusing).
 
 **Bypass codes.** There is no environment variable an agent can set to switch Crew mode off. When you
 need to push past the gate yourself, issue a code in the project's **Policy** panel: it is single use,
-scoped to one session and valid for 15 minutes, and the panel shows the exact command
-(`REMEMBRA_BYPASS=<code> git push`). When the server cannot be reached, `remembra-crew bypass --session <callsign>` asks for
+scoped to one session and one surface (`commit`, `push`, or `write:<zone>` for edits in that zone
+only), valid for up to 15 minutes, and the panel shows the exact command
+(`REMEMBRA_BYPASS=<code> git push`). A code issued for `push` does not open a commit or an edit. When the server cannot be reached, `remembra-crew bypass --session <callsign>` asks for
 confirmation at an interactive terminal. Every use is an audit entry, a moment and an alert.
 
 ## Removing it from a machine
