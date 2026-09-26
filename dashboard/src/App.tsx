@@ -19,16 +19,18 @@ import { ForgotPassword } from './pages/ForgotPassword';
 import { InviteAccept } from './pages/InviteAccept';
 import { OAuthCallback } from './pages/OAuthCallback';
 import { VerifyEmail } from './pages/VerifyEmail';
+import { Pay } from './pages/Pay';
 import { confirmDashboardEmail, takePendingVerifyToken } from './lib/verifyEmail';
 import { toast } from 'sonner';
 import { api } from './lib/api';
 import { API_V1 } from './config';
 import { AuthFrame } from './brand/AuthFrame';
 import { appPath } from './lib/authProviders';
+import { checkoutMessage, isCheckoutReturn, waitForPaidPlan, withoutCheckoutParam } from './lib/paddle';
 
 type AuthMode = 'login' | 'signup' | 'forgot-password' | 'reset-password' | 'api-key' | 'invite';
 /** Pages that handle a link from outside (provider redirect, email) whether or not signed in. */
-type Landing = 'oauth-callback' | 'verify-email';
+type Landing = 'oauth-callback' | 'verify-email' | 'pay';
 
 function App() {
   // Dark by default for every visitor. An explicit choice made with the theme
@@ -74,6 +76,7 @@ function App() {
     const path = appPath();
     if (path === '/oauth/callback') return 'oauth-callback';
     if (path === '/verify-email') return 'verify-email';
+    if (path === '/pay') return 'pay';
     return null;
   });
   const [currentUser, setCurrentUser] = useState<{ id: string; email: string; name?: string; is_admin?: boolean } | null>(() => {
@@ -272,6 +275,14 @@ function App() {
     );
   }
 
+  if (landing === 'pay') {
+    return (
+      <div className={darkMode ? 'dark' : ''}>
+        <Pay />
+      </div>
+    );
+  }
+
   if (landing === 'verify-email') {
     return (
       <div className={darkMode ? 'dark' : ''}>
@@ -450,8 +461,9 @@ function AuthenticatedShell({
   onCloseNewMemory: () => void;
   onTabChange: (tab: TabType) => void;
 }) {
-  const { inbox } = useRelayData();
+  const { inbox, usage } = useRelayData();
   const tab: TabType = activeTab === 'admin' && !isAdmin ? 'home' : activeTab;
+  useCheckoutReturn(usage.refresh);
   return (
     <AppLayout
       activeTab={tab}
@@ -479,6 +491,34 @@ function AuthenticatedShell({
       )}
     </AppLayout>
   );
+}
+
+/**
+ * Paddle sends a buyer to /?checkout=success after paying. Drop the flag from
+ * the address bar (a reload must not announce it again), wait for the webhook
+ * to move the account to the paid plan, then say which plan it is on and
+ * refresh the plan everywhere it shows.
+ */
+function useCheckoutReturn(refreshUsage: () => void) {
+  useEffect(() => {
+    if (!isCheckoutReturn(window.location.search)) return;
+    window.history.replaceState(window.history.state, '', withoutCheckoutParam(window.location.href));
+    let cancelled = false;
+    const pending = toast.loading('Payment received. Confirming your plan…');
+    waitForPaidPlan(() => api.getUsageSummary()).then((summary) => {
+      if (cancelled) return;
+      const message = checkoutMessage(summary);
+      if (message.tone === 'success') toast.success(message.text, { id: pending });
+      else toast.info(message.text, { id: pending, duration: 10000 });
+      refreshUsage();
+    });
+    return () => {
+      cancelled = true;
+      toast.dismiss(pending);
+    };
+    // Runs once, for the URL Paddle sent the buyer to.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 }
 
 export default App;

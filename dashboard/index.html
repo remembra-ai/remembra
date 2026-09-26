@@ -31,8 +31,8 @@
   </head>
   <body>
     <div id="root"></div>
-    <!-- Paddle.js for billing checkout -->
-    <script src="https://cdn.paddle.com/paddle/v2/paddle.js" onerror="console.warn('Paddle.js failed to load - checkout will use fallback')"></script>
+    <!-- Paddle.js for checkout (Billing and /pay). No inline handler: the CSP in nginx.conf allows none. -->
+    <script src="https://cdn.paddle.com/paddle/v2/paddle.js"></script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

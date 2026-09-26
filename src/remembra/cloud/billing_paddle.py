@@ -35,6 +35,12 @@ logger = logging.getLogger(__name__)
 PADDLE_API_BASE = "https://api.paddle.com"
 PADDLE_SANDBOX_API_BASE = "https://sandbox-api.paddle.com"
 
+# The dashboard serves both pages a Paddle checkout needs (dashboard/src/pages/Pay.tsx and
+# the ?checkout=success handler in dashboard/src/App.tsx). Settings.public_dashboard_url
+# overrides the origin (see remembra.api.v1.billing.dashboard_origin).
+DEFAULT_DASHBOARD_ORIGIN = "https://app.remembra.dev"
+DEFAULT_PAYMENT_LINK = f"{DEFAULT_DASHBOARD_ORIGIN}/pay"
+
 
 class PaddleBillingManager:
     """Manages Paddle billing for Remembra Cloud.
@@ -43,7 +49,11 @@ class PaddleBillingManager:
         api_key: Paddle API key
         webhook_secret: Paddle webhook signing secret
         sandbox: If True, use sandbox environment
-        success_url: URL to redirect after successful checkout
+        payment_link: The page Paddle sends a buyer to for a server-created
+            transaction (Paddle's ``checkout.url``; it appends ``?_ptxn=<id>``).
+            It must load Paddle.js on an approved domain: the dashboard's /pay.
+            It is not where a buyer lands after paying; Paddle.js's
+            ``successUrl`` sets that.
         cancel_url: URL to redirect on checkout cancellation (not used in overlay)
     """
 
@@ -52,13 +62,13 @@ class PaddleBillingManager:
         api_key: str,
         webhook_secret: str,
         sandbox: bool = False,
-        success_url: str = "https://remembra.dev/dashboard?checkout=success",
+        payment_link: str = DEFAULT_PAYMENT_LINK,
         cancel_url: str = "https://remembra.dev/pricing?checkout=cancelled",
     ) -> None:
         self._api_key = api_key
         self._webhook_secret = webhook_secret
         self._sandbox = sandbox
-        self._success_url = success_url
+        self._payment_link = payment_link
         self._cancel_url = cancel_url
         self._api_base = PADDLE_SANDBOX_API_BASE if sandbox else PADDLE_API_BASE
 
@@ -194,7 +204,7 @@ class PaddleBillingManager:
                 "founding": founding,
             },
             "checkout": {
-                "url": self._success_url,
+                "url": self._payment_link,
             },
         }
 

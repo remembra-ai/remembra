@@ -10,6 +10,7 @@ from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from remembra.auth.middleware import CurrentUser
+from remembra.cloud.billing_paddle import DEFAULT_DASHBOARD_ORIGIN
 from remembra.cloud.paddle_config import CheckoutUnavailableError, get_paddle_config
 from remembra.cloud.plans import (
     FOUNDING_ANNUAL_PRICE_CENTS,
@@ -201,7 +202,26 @@ class ClientConfigResponse(BaseModel):
     provider: str
     client_token: str | None = None
     prices: dict[str, str] = Field(default_factory=dict, description="Plan -> price_id mapping")
-    success_url: str = "https://remembra.dev/dashboard?checkout=success"
+    success_url: str = Field(
+        f"{DEFAULT_DASHBOARD_ORIGIN}/?checkout=success",
+        description="Where Paddle.js sends the buyer after paying: the dashboard, which confirms the plan",
+    )
+
+
+def dashboard_origin(settings: Any) -> str:
+    """The dashboard's public origin: Settings.public_dashboard_url, else app.remembra.dev."""
+    configured = getattr(settings, "public_dashboard_url", None)
+    return (configured if isinstance(configured, str) and configured.strip() else DEFAULT_DASHBOARD_ORIGIN).strip().rstrip("/")
+
+
+def checkout_success_url(settings: Any) -> str:
+    """After a successful checkout the buyer lands on the dashboard home, which shows the new plan."""
+    return f"{dashboard_origin(settings)}/?checkout=success"
+
+
+def payment_link_url(settings: Any) -> str:
+    """The dashboard page that loads Paddle.js and opens a transaction from ``?_ptxn=``."""
+    return f"{dashboard_origin(settings)}/pay"
 
 
 @router.get(
@@ -250,7 +270,7 @@ async def get_client_config(
             provider="paddle",
             client_token=paddle_settings.client_token,
             prices=prices,
-            success_url="https://remembra.dev/dashboard?checkout=success",
+            success_url=checkout_success_url(settings),
         )
 
     return ClientConfigResponse(provider=provider)
@@ -283,6 +303,7 @@ async def create_checkout(
             api_key=paddle_settings.api_key,
             webhook_secret=paddle_settings.webhook_secret or "",
             sandbox=paddle_settings.sandbox,
+            payment_link=payment_link_url(settings),
         )
 
         plan_name = body.plan.strip().lower()

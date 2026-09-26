@@ -18,17 +18,7 @@ import { clampSeats, creditsView, formatUsd, parseSeatDraft, planLine, resetLabe
 import { useResource } from '../hooks/useResource';
 import { Card, CardHeader, ErrorNotice, Pill, Skeleton } from './relay/ui';
 import { DegradedNotice, PixelMeter } from './credits/Credits';
-
-interface PaddleGlobal {
-  Initialized?: boolean;
-  Initialize: (opts: { token: string }) => void;
-  Checkout: { open: (opts: Record<string, unknown>) => void };
-}
-
-function paddle(): PaddleGlobal | null {
-  const p = (window as unknown as { Paddle?: PaddleGlobal }).Paddle;
-  return p && typeof p.Checkout?.open === 'function' ? p : null;
-}
+import { initPaddle, paddleGlobal, successUrl } from '../lib/paddle';
 
 function userEmail(): string | undefined {
   try {
@@ -46,11 +36,8 @@ function userEmail(): string | undefined {
  */
 async function startCheckout(plan: string, cycle: BillingCycle, seats: number | undefined, perSeat: boolean): Promise<void> {
   const config = await api.getBillingClientConfig().catch(() => null);
-  const P = paddle();
-  if (P && config?.client_token && !P.Initialized) {
-    P.Initialize({ token: config.client_token });
-    P.Initialized = true;
-  }
+  const P = paddleGlobal();
+  if (P) initPaddle(P, config, window.location.origin);
   const priceKey = cycle === 'yearly' ? `${plan}_annual` : plan;
   const clientPrice = !perSeat && plan !== 'founding' ? config?.prices?.[priceKey] : undefined;
   if (P && config?.provider === 'paddle' && clientPrice) {
@@ -59,7 +46,7 @@ async function startCheckout(plan: string, cycle: BillingCycle, seats: number | 
       items: [{ priceId: clientPrice, quantity: 1 }],
       ...(email ? { customer: { email } } : {}),
       customData: { remembra_user_id: api.getUserId(), plan },
-      settings: { successUrl: config.success_url || 'https://remembra.dev/dashboard?checkout=success' },
+      settings: { successUrl: successUrl(config, window.location.origin) },
     });
     return;
   }
