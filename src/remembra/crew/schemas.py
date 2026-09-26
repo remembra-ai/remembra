@@ -2916,6 +2916,8 @@ REQUEST_SHAPES: Final[Mapping[str, Shape]] = {
             "error_details_class": _opt(_s(64)),
             "facts": _any(MAX_CHECKPOINT_FACTS_BYTES),
             "baton_ref": _opt(BATON_REF),
+            # D14: classifies rate_limit (usage limit vs transient 429); used for that only, never stored
+            "last_assistant_message": _opt(_s(2000)),
         },
     ),
     "Reason": Shape("ReasonRequest", {"reason": _s(280)}),

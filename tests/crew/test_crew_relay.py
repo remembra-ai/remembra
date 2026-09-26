@@ -7,6 +7,7 @@ SQLite main database, a real ``MemoryService`` (fake vector store/embedder only)
 
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -25,6 +26,8 @@ from tests.crew import wp8_seed as crew_seed
 
 USER = "default_user"
 PROJECT = "yaadbooks"
+TOKEN_A = "rcs_token-of-cc-1"
+CREW_TOKEN = {"X-Remembra-Crew-Session": TOKEN_A}  # proves cs_a on a relay close (§11.2)
 
 
 @pytest.fixture()
@@ -87,7 +90,14 @@ async def _world(db: CrewDatabase) -> str:
         db, crew_id, "zn_billing", "billing", globs=["src/app/billing/**"], frozen_by=USER, frozen_note="owner edits"
     )
     await crew_seed.session(
-        db, crew_id, "cs_a", user_id=USER, callsign="cc-1", client_session_id="sess-a", current_task_id="tsk_14"
+        db,
+        crew_id,
+        "cs_a",
+        user_id=USER,
+        callsign="cc-1",
+        client_session_id="sess-a",
+        current_task_id="tsk_14",
+        token_hash=hashlib.sha256(TOKEN_A.encode()).hexdigest(),
     )
     await crew_seed.session(
         db,
@@ -396,6 +406,7 @@ def test_close_of_a_joined_session_leaves_the_crew_and_keeps_the_baton(api, crew
         api,
         "/session/close",
         {"agent_id": "claude-code", "session_id": "sess-a", "project_id": PROJECT, "facts": DIRTY_FACTS, "end_reason": "clear"},
+        headers=CREW_TOKEN,
     )
     result = body["crew"]
     assert result["crew_id"] == crew_id and result["crew_session_id"] == "cs_a" and result["session_left"] is True
@@ -409,6 +420,11 @@ def test_close_of_a_joined_session_leaves_the_crew_and_keeps_the_baton(api, crew
         "claim.reserved",
         "task.stalled",
         "report.submitted",
+        # Needs-you baton_available + crew baton_reserved per baton (the deploy claim, T-14)
+        "inbox.item_created",
+        "inbox.item_created",
+        "inbox.item_created",
+        "inbox.item_created",
         "session.left",
     ]
     assert events[0]["payload"] == {
@@ -437,7 +453,7 @@ def test_close_of_a_joined_session_leaves_the_crew_and_keeps_the_baton(api, crew
     # every event matches the closed contract, the chain verifies, and they were published after COMMIT
     report_chain = run(api, verify_crew_chain, db.conn, crew_id)
     assert report_chain.ok, report_chain.errors
-    assert [e["type"] for e in crew["published"]][-6:] == [e["type"] for e in events]
+    assert [e["type"] for e in crew["published"]][-10:] == [e["type"] for e in events]
     for envelope in crew["published"]:
         assert schemas.validate_envelope(envelope) == []
 
@@ -446,6 +462,7 @@ def test_close_of_a_joined_session_leaves_the_crew_and_keeps_the_baton(api, crew
         api,
         "/session/close",
         {"agent_id": "claude-code", "session_id": "sess-a", "project_id": PROJECT, "facts": DIRTY_FACTS, "end_reason": "clear"},
+        headers=CREW_TOKEN,
     )
     assert again["changed"] is False and again["handoff_id"] == body["handoff_id"]
     assert again["crew"]["seqs"] == [] and again["crew"]["session_left"] is False
@@ -468,6 +485,7 @@ def test_clean_close_releases_claims_and_switches_the_crew_to_solo(api, crew):
         api,
         "/session/close",
         {"agent_id": "claude-code", "session_id": "sess-a", "project_id": PROJECT, "facts": {"branch": "main"}},
+        headers=CREW_TOKEN,
     )
     assert body["crew"]["claims_released"] == ["clm_pos", "clm_deploy"] and body["crew"]["claims_reserved"] == []
     assert body["crew"]["tasks_stalled"] == []
@@ -609,7 +627,11 @@ def test_trail_merges_crew_checkpoints_reports_and_batons_by_time(api, crew):
     assert by_id["bat_1"]["headline"] == "baton adopt: T-12 cc-2 → codex-1" and by_id["bat_1"]["agent_id"] == "codex"
     assert by_id["rpt_12"]["headline"] == "stalled report for T-12 by cc-2: partial (current)"
     assert by_id["rpt_12"]["crew"]["report"]["kind"] == "stalled"
-    assert by_id["ckp_a1"]["failing"] == 1 and by_id["ckp_a1"]["session_id"] == "sess-a"
+    # the client session id keys a relay close: never exposed through crew trail items (§11.2)
+    assert by_id["ckp_a1"]["failing"] == 1 and by_id["ckp_a1"]["session_id"] is None
+    assert by_id["ckp_a1"]["crew"]["crew_session_id"] == "cs_a"
+    assert all(i["session_id"] is None for i in trail["items"] if i.get("source") == "crew")
+    assert sum(1 for i in trail["items"] if i.get("source") == "crew") == 4
     assert by_id["ckp_a1"]["headline"] == "checkpoint (commit) by cc-1"
 
     page1 = _get(api, "/trail", {"project_id": PROJECT, "limit": 2})

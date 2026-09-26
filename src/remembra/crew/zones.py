@@ -943,6 +943,9 @@ async def upload_zones_file(
         old = await _diff_base(tx.conn, crew_id, new)
         live = await _live_slugs(tx.conn, crew_id)
         diff = P.diff_policy(old, new, live_claim_slugs=live, current_enforcement=settings["enforcement"])
+        if not principal.is_human:
+            # an agent upload may not add or tighten a zone into a crew-wide lock on its own (zone squat)
+            diff = P.hold_agent_tightening(old, new, diff)
         interim = P.interim_policy(old, new, diff, current_enforcement=settings["enforcement"]) if diff.loosening else new
         # the cap applies to what is applied now (the interim policy while approval is pending)
         await _check_zone_cap(ops, tx.conn, crew_id, interim.slugs, replaces_repo=True)
@@ -1130,6 +1133,34 @@ async def get_zone(conn: aiosqlite.Connection, zone_id: str) -> dict[str, Any]:
     return row
 
 
+async def _agent_zone_check(
+    conn: aiosqlite.Connection, crew_id: str, zone: P.ZoneDef, prev: P.ZoneDef | None, *, zone_id: str | None = None
+) -> None:
+    """An agent's server zone must not lock the crew out: 403 ``human_only`` for a zone squat.
+
+    Agents cannot, on their own, make a zone ``protected``, ``reserve_for`` or ``fail_closed``,
+    give it globs that cover the repo root, or lay it over another zone's paths (a zone over
+    existing zones turns them into its children and denies their unclaimed paths). Removing any
+    of these is human-only too (archive, loosening), so an agent squat could never be undone by
+    the agents it locked out. A human does these from the dashboard.
+    """
+    why = P.agent_zone_concern(zone, prev)
+    if why is not None:
+        raise CrewOpError(403, "human_only", f"An agent cannot set {why} on a zone; a human does that from the dashboard.")
+    added = [g for g in zone.include if prev is None or g not in prev.include]
+    if not added:
+        return
+    for other in await load_zone_rows(conn, crew_id):
+        if (zone_id is not None and str(other["id"]) == zone_id) or other["slug"] == zone.slug:
+            continue
+        if P.any_overlap(added, [str(g) for g in _arr(other.get("include_globs"))]):
+            raise CrewOpError(
+                403,
+                "human_only",
+                f"The zone would overlap zone {other['slug']}; a human lays zones over other zones from the dashboard.",
+            )
+
+
 async def create_zone(ops: CrewOps, crew_id: str, principal: Principal, body: Mapping[str, Any]) -> dict[str, Any]:
     """``POST /crews/{id}/zones``: a server zone (``source`` dashboard for humans, api for keys)."""
     slug = body.get("slug")
@@ -1143,6 +1174,8 @@ async def create_zone(ops: CrewOps, crew_id: str, principal: Principal, body: Ma
         existing = await fetchone(tx.conn, "SELECT * FROM crew_zones WHERE crew_id = ? AND slug = ?", (crew_id, slug))
         if existing is not None and existing["archived_at"] is None:
             raise CrewOpError(409, "zone_exists", f"Zone {slug} already exists.")
+        if not principal.is_human:
+            await _agent_zone_check(tx.conn, crew_id, zone, None)
         await _check_zone_cap(ops, tx.conn, crew_id, [slug])
         parent_id = await _parent_id(tx.conn, crew_id, zone.parent)
         now = now_iso()
@@ -1228,6 +1261,8 @@ async def patch_zone(
         items = P.diff_zone(before, after, live_claim=live)
         if any(i.loosening for i in items) and not principal.is_human:
             raise CrewOpError(403, "human_only", "Loosening a zone needs a dashboard login.")
+        if items and not principal.is_human:
+            await _agent_zone_check(tx.conn, crew_id, after, before, zone_id=str(row["id"]))
         if not items:
             return {"applied": True, "zone": zone_detail(row)}
         parent_id = await _parent_id(tx.conn, crew_id, after.parent, child_id=str(row["id"]))

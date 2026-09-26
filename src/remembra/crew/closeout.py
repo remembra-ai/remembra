@@ -7,8 +7,13 @@ records the crew side in one ``crew.db`` transaction:
 
 * ``handoff.created`` (idempotent per handoff id, so a repeated identical close
   emits nothing new);
-* if the caller has a live crew session (keyed ``(crew, user, agent, client
-  session id)``, §2), the session **leaves**:
+* if the caller **proves** a live crew session (keyed ``(crew, user, agent, client
+  session id)``, §2) with its session token (``X-Remembra-Crew-Session``, §11.2:
+  leave needs the token) and that session has no crewd host, the session **leaves**.
+  A session with a host is left by crewd's own ``POST /sessions/{sid}/leave``
+  (§8.2 SessionEnd step 4, which carries the baton ref), so the relay close
+  (step 1) only records the handoff; a close without the token never ends,
+  reserves or releases anything:
 
   - each exclusive claim it holds is **reserved** (``ended_dirty``) when the
     close reports uncommitted files, the claim's task is not done, or the end
@@ -21,6 +26,10 @@ records the crew side in one ``crew.db`` transaction:
   - a stalled task that reached ``in_progress`` without a current report gets
     a ``partial`` report built from the handoff sections, so the "always a
     report" invariant holds (§5.6);
+  - commons micro-leases expire (never a baton); queued claims behind what
+    was released are promoted (§5.1);
+  - Needs-you ``baton_available`` and crew ``baton_reserved`` items for every
+    baton left behind (the same items the session service raises);
   - ``session.left`` with the released and reserved claim ids, and
     ``crew.mode_changed`` when the crew drops from multi to solo.
 
@@ -33,6 +42,7 @@ published after COMMIT).
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
@@ -101,12 +111,15 @@ async def on_relay_close(
     sections: Mapping[str, Any],
     facts_source: str,
     leave: bool = True,
+    session_token: str | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any] | None:
     """Record the crew side of a relay close. Returns a summary, or None when the project has no crew.
 
     ``leave=False`` records only ``handoff.created`` (for server-written handoffs of a
-    session that has not left, e.g. a stall handoff the crew outbox applies).
+    session that has not left, e.g. a stall handoff the crew outbox applies). The leave
+    part runs only when ``session_token`` proves the crew session and the session has no
+    crewd host (see the module docstring); ``leave_skipped`` in the result says why not.
     """
     db = events.db
     crew = await _fetchone(db, "SELECT * FROM crews WHERE owner_user_id = ? AND project_id = ?", (user_id, project_id))
@@ -125,6 +138,7 @@ async def on_relay_close(
         "tasks_stalled": [],
         "reports_created": [],
         "session_left": False,
+        "leave_skipped": None,
     }
     async with events.transaction() as tx:
         session = await _fetchone(
@@ -173,7 +187,14 @@ async def on_relay_close(
         if not emitted.replayed:
             result["seqs"].append(emitted.seq)
         if leave and session is not None and session["state"] != "ended":
-            await _leave(tx, crew, session, actor, end_reason, facts, sections, source, handoff_id, now, stamp, result)
+            if not _proves(session, session_token):
+                result["leave_skipped"] = "session_token_required"
+            elif session.get("host_id"):
+                result["leave_skipped"] = "left_by_crewd"
+            else:
+                await _leave(
+                    events, tx, crew, session, actor, end_reason, facts, sections, source, handoff_id, now, stamp, result
+                )
     log.info(
         "crew_relay_close",
         crew_id=crew_id,
@@ -185,7 +206,16 @@ async def on_relay_close(
     return result
 
 
+def _proves(session: Mapping[str, Any], token: str | None) -> bool:
+    """The caller holds this crew session's token (sha256 match, constant time)."""
+    if not token or len(token) > 512:
+        return False
+    digest = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return hmac.compare_digest(str(session.get("token_hash") or ""), digest)
+
+
 async def _leave(
+    events: CrewEventLog,
     tx: EventTx,
     crew: Mapping[str, Any],
     session: Mapping[str, Any],
@@ -229,7 +259,31 @@ async def _leave(
     for claim in claims:
         task = tasks.get(claim.get("task_id") or "")
         unfinished_task = task is not None and task["status"] not in FINISHED_TASK_STATUSES
-        reserve = claim["state"] in HELD_CLAIM_STATES and claim["mode"] == "exclusive" and (dirty or unfinished_task)
+        micro = claim.get("source") == "micro_lease"
+        reserve = (
+            claim["state"] in HELD_CLAIM_STATES and claim["mode"] == "exclusive" and (dirty or unfinished_task) and not micro
+        )
+        if micro and claim["state"] in HELD_CLAIM_STATES:
+            # a commons micro-lease ends with the session: it is never a baton
+            await conn.execute(
+                """UPDATE crew_claims SET state = 'expired', ended_at = ?, end_reason = 'session_ended',
+                       offered_to = NULL, offer_expires_at = NULL, version = version + 1, updated_at = ?
+                   WHERE id = ? AND crew_id = ?""",
+                (stamp, stamp, claim["id"], crew_id),
+            )
+            row = await _fetchone(conn, "SELECT * FROM crew_claims WHERE id = ?", (claim["id"],))
+            assert row is not None
+            ev = await tx.emit(
+                crew_id=crew_id,
+                type="claim.expired",
+                actor=actor,
+                payload={"claim": views.claim_view(row, now)},
+                summary=f"micro-lease {claim['id']} ended: {callsign} left",
+                refs={"claim_id": claim["id"], "zone_id": claim.get("zone_id"), "session_id": sid},
+                now=now,
+            )
+            result["seqs"].append(ev.seq)
+            continue
         if reserve:
             expires = None if claim.get("task_id") else now_iso(now + reserve_ttl)
             await conn.execute(
@@ -331,7 +385,20 @@ async def _leave(
             result["seqs"].append(ev.seq)
             result["reports_created"].append(report_id)
 
-    # 3) the session leaves
+    # 3) baton items for what was left behind, and the queue behind what was released
+    from remembra.crew import claims as crew_claims
+    from remembra.crew.sessions import CrewSessions
+
+    reserved_keys = {str(r.get("task_id") or r["id"]) for r in claims if r["id"] in result["claims_reserved"]}
+    service = CrewSessions(events.db, events)  # type: ignore[arg-type]
+    first = len(tx.emitted)
+    for key in sorted(reserved_keys | set(result["tasks_stalled"])):
+        await service._raise_baton_items(tx, session, key, "ended_dirty", now)
+    if result["claims_released"]:
+        await crew_claims.promote_queue_in(tx, crew_id)
+    result["seqs"].extend(int(e["seq"]) for e in tx.emitted[first:])
+
+    # 4) the session leaves
     await conn.execute(
         "UPDATE crew_sessions SET state = 'ended', ended_at = ?, end_reason = ?, last_seen_at = ? WHERE id = ? AND crew_id = ?",
         (stamp, reason, stamp, sid, crew_id),

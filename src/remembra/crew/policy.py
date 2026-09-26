@@ -738,6 +738,73 @@ def diff_policy(
     return PolicyDiff(tuple(items))
 
 
+_GLOB_WILDCARDS = frozenset("*?[{")
+
+
+def glob_is_anchored(glob: str) -> bool:
+    """The glob's first path segment is literal (``src/x/**``, ``README.md``): it cannot cover the repo root."""
+    first = glob.split("/", 1)[0]
+    return bool(first) and not any(ch in _GLOB_WILDCARDS for ch in first)
+
+
+def glob_is_literal(glob: str) -> bool:
+    """No wildcard at all: the glob names exactly one path."""
+    return not any(ch in _GLOB_WILDCARDS for ch in glob)
+
+
+def agent_zone_concern(zone: ZoneDef, prev: ZoneDef | None = None) -> str | None:
+    """Why an **agent** may not add ``zone`` (or change ``prev`` into it) without a human; None when it may.
+
+    Tightening fields lock other sessions out (``protected`` and ``reserve_for`` deny every other
+    agent, ``fail_closed`` denies even offline), and a glob that is not anchored under a literal
+    top-level name covers the repo root. One agent call must never be able to lock the whole
+    crew out (a zone squat), so these wait for a human like loosening changes do (D9, D28).
+    """
+    for fld in _AGENT_HELD_FIELDS:
+        why = _field_concern(fld, zone, prev)
+        if why is not None:
+            return why
+    return None
+
+
+_AGENT_HELD_FIELDS = ("protected", "reserve_for", "fail_closed", "globs")
+
+
+def _field_concern(fld: str, zone: ZoneDef, prev: ZoneDef | None) -> str | None:
+    if fld == "protected":
+        return "protected" if zone.protected and not (prev is not None and prev.protected) else None
+    if fld == "reserve_for":
+        before = prev.reserve_for if prev is not None else None
+        return "reserve_for" if zone.reserve_for is not None and zone.reserve_for != before else None
+    if fld == "fail_closed":
+        return "fail_closed" if zone.fail_closed and not (prev is not None and prev.fail_closed) else None
+    added = set(zone.include) - set(prev.include if prev is not None else ())
+    return "repo-wide globs" if any(not glob_is_anchored(g) for g in added) else None
+
+
+def hold_agent_tightening(old: Policy, new: Policy, diff: PolicyDiff) -> PolicyDiff:
+    """``diff`` with every zone addition or tightening an agent may not make alone marked as needing approval.
+
+    The marked items take the loosening path (held at the old value by :func:`interim_policy`,
+    a pending change with a Needs-you card until a human approves).
+    """
+    old_by, new_by = {z.slug: z for z in old.zones}, {z.slug: z for z in new.zones}
+    items: list[DiffItem] = []
+    for item in diff.items:
+        kind, _, name = item.target.partition(":")
+        if kind == "zone" and not item.loosening and name in new_by:
+            cur, prev = new_by[name], old_by.get(name)
+            why: str | None = None
+            if item.op == "add":
+                why = agent_zone_concern(cur, None)
+            elif item.op == "change" and item.field in _AGENT_HELD_FIELDS and prev is not None:
+                why = _field_concern(str(item.field), cur, prev)
+            if why is not None:
+                item = replace(item, loosening=True, reason=f"agent-set {why} needs a human")
+        items.append(item)
+    return PolicyDiff(tuple(items))
+
+
 def interim_policy(old: Policy, new: Policy, diff: PolicyDiff, *, current_enforcement: str | None = None) -> Policy:
     """``new`` with every loosening item held back at its ``old`` value (applies while approval is pending)."""
     zones = {z.slug: z for z in new.zones}
@@ -750,6 +817,9 @@ def interim_policy(old: Policy, new: Policy, diff: PolicyDiff, *, current_enforc
     for item in diff.loosening_items:
         kind, _, name = item.target.partition(":")
         if kind == "zone":
+            if item.op == "add":
+                zones.pop(name, None)  # a held addition (agent-set tightening) waits for the human
+                continue
             prev = old_by[name]
             if item.op == "remove":
                 zones[name] = prev
@@ -771,7 +841,7 @@ def interim_policy(old: Policy, new: Policy, diff: PolicyDiff, *, current_enforc
         elif item.target == "enforcement":
             enforcement = old.enforcement if old.enforcement is not None else current_enforcement
     # A re-added parent keeps its children valid; a child whose parent vanished stays top-level.
-    final = [zones[s] for s in dict.fromkeys(order)]
+    final = [zones[s] for s in dict.fromkeys(order) if s in zones]
     slugs = {z.slug for z in final}
     final = [z if z.parent is None or z.parent in slugs else replace(z, parent=None) for z in final]
     return Policy(tuple(final), tuple(commons.items()), tuple(ignore), enforcement)

@@ -4757,7 +4757,9 @@ def _target_facts(t: Target, ctx: _Ctx) -> tuple[dict[str, Any], dict[str, Any]]
         elif fp.get("state") in ("dirty", "committed"):
             facts["dirty_in_other_checkout"] = True
             info.setdefault("dirty_session", sid)
-    if not is_dir:
+    if not is_dir and not zi.match(rel, ci):
+        # file claims cover only paths outside every zone: a zone path is governed by its zone's claims
+        # (protected, frozen, reserve_for, task-for-parent), never by a path glob that happens to match it
         _file_claim_facts(rel, ci, ctx, facts, info)
     # zones
     if is_dir:

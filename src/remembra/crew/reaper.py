@@ -377,6 +377,8 @@ class CrewReaper:
                 await self.sessions._resolve_baton_items(
                     tx, claim["crew_id"], [claim.get("task_id") or claim["id"]], Actor.system(), now
                 )
+                # a non-task reservation that ends frees its target: queued claims move up (§10.2, §5.1)
+                await self.sessions._promote_queue(tx, claim["crew_id"])
         for claim in await _all(
             self.sessions.conn, "SELECT * FROM crew_claims WHERE state = 'reserved' AND task_id IS NOT NULL ORDER BY updated_at"
         ):
@@ -480,9 +482,21 @@ def build_sessions_service(app: FastAPI) -> CrewSessions:
     db = startup.crew_db(app)
     if not isinstance(db, CrewDatabase):
         raise RuntimeError("crew mode: app.state.crew_db must be a remembra.crew.db.CrewDatabase")
-    service = CrewSessions(db, event_log, limits_for=limits_for, audit=audit_sink(app))
+    service = CrewSessions(db, event_log, limits_for=limits_for, audit=audit_sink(app), pii=_pii_scrubber(app))
     app.state.crew_sessions = service
     return service
+
+
+def _pii_scrubber(app: FastAPI) -> Any:
+    """The per-request PII scrub the relay routes use, for stall/leave facts (§11.2 redaction)."""
+    from types import SimpleNamespace
+    from typing import cast
+
+    from fastapi import Request
+
+    from remembra.api.v1.relay import pii_scrubber
+
+    return pii_scrubber(cast(Request, SimpleNamespace(app=app)))
 
 
 def audit_sink(app: FastAPI) -> Any:

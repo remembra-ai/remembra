@@ -741,7 +741,7 @@ class CrewCore:
         }
         items: list[dict[str, Any]] = []
         total = 0
-        select = "SELECT x.*, s.agent_id AS s_agent, s.callsign AS s_callsign, s.session_id AS s_client"
+        select = "SELECT x.*, s.agent_id AS s_agent, s.callsign AS s_callsign"
         sources = (
             (
                 "crew_checkpoint",
@@ -858,7 +858,8 @@ def _trail_item(
         "memory_type": kind,
         "source": "crew",
         "agent_id": row.get("s_agent"),
-        "session_id": row.get("s_client"),
+        # never the client session id: it keys the relay close of that session (§11.2); crew.crew_session_id is enough
+        "session_id": None,
         "created_at": row["created_at"],
         "branch": None,
         "head_commit": None,

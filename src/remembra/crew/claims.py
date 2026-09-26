@@ -104,10 +104,13 @@ async def authenticate_session(
     user_id: str,
     crew_id: str | None = None,
     session_id: str | None = None,
+    agent_id: str | None = None,
 ) -> dict[str, Any]:
     """The session behind a session token, owned by ``user_id`` (and in ``crew_id`` / equal to ``session_id``).
 
-    401 ``invalid_session`` for a missing, unknown, foreign or ended token (one answer for all).
+    ``agent_id`` is the calling key's agent scope (``AuthenticatedUser.agent_id``): an agent-scoped
+    key acts only as sessions of its own agent (§11.2), whatever token it carries.
+    401 ``invalid_session`` for a missing, unknown, foreign, other-agent or ended token (one answer for all).
     """
     if not token or len(token) > 512:
         raise CrewOpError(401, "session_required", f"A crew session token is required ({SESSION_HEADER} header).")
@@ -118,6 +121,7 @@ async def authenticate_session(
         and row["state"] != "ended"
         and (crew_id is None or row["crew_id"] == crew_id)
         and (session_id is None or row["id"] == session_id)
+        and (agent_id is None or row["agent_id"] == agent_id)
     )
     if not ok or row is None:
         raise CrewOpError(401, "invalid_session", "The crew session token is not valid for this request.")
@@ -489,8 +493,43 @@ class ClaimOutcome:
         }
 
 
+async def _check_agent_glob(conn: aiosqlite.Connection, crew_id: str, glob: str, source: str) -> None:
+    """File claims by an agent (§5.1, ``undeclared_policy: file_claim``) are for paths that no zone covers.
+
+    A path glob must be anchored under a literal top-level name (no ``**`` / ``*.md`` squats on the
+    whole repo) and must not overlap any zone, the built-in ``crew-policy`` zone included: zone
+    paths are claimed through their zone, where protected, frozen, ``reserve_for`` and
+    task-for-parent rules apply. The one exception is a serialize micro-lease on a commons file
+    (§5.2 row 12): a literal path that a commons entry names.
+    """
+    if not P.glob_is_anchored(glob):
+        raise CrewOpError(
+            422, "glob_too_broad", "A path_glob claim must start with a literal top-level folder or file name (no ** or *)."
+        )
+    if source == "micro_lease":
+        if P.glob_is_literal(glob) and any(
+            G.glob_match(str(c.get("glob") or ""), glob) for c in await active_commons(conn, crew_id)
+        ):
+            return
+        raise CrewOpError(422, "invalid_claim", "A micro-lease is taken on one commons file.")
+    for z in await load_zone_rows(conn, crew_id):
+        if P.any_overlap([glob], _globs(z)):
+            raise CrewOpError(
+                422,
+                "zone_path",
+                f"path_glob overlaps zone {z['slug']}: claim the zone instead (file claims are for paths outside every zone).",
+            )
+
+
 async def _resolve_target(
-    conn: aiosqlite.Connection, crew_id: str, *, zone_id: str | None, path_glob: str | None, resource: str | None
+    conn: aiosqlite.Connection,
+    crew_id: str,
+    *,
+    zone_id: str | None,
+    path_glob: str | None,
+    resource: str | None,
+    principal: Principal | None = None,
+    source: str = "mcp",
 ) -> Target:
     given = [x for x in (zone_id, path_glob, resource) if x]
     if len(given) != 1:
@@ -504,6 +543,8 @@ async def _resolve_target(
         reason = P.check_glob(path_glob)
         if reason:
             raise CrewOpError(422, "invalid_claim", f"path_glob {reason}.")
+        if principal is not None and not principal.is_human:
+            await _check_agent_glob(conn, crew_id, path_glob, source)
         return Target(path_glob=path_glob)
     return Target(resource=resource)
 
@@ -573,7 +614,9 @@ async def request_claim(
             _session_live(session)
             if settings.get("require_verified_agents_for_claims") and not session.get("agent_verified"):
                 raise CrewOpError(403, "unverified_agent", "This crew only accepts claims from key-verified agents.")
-        target = await _resolve_target(conn, crew_id, zone_id=zone_id, path_glob=path_glob, resource=resource)
+        target = await _resolve_target(
+            conn, crew_id, zone_id=zone_id, path_glob=path_glob, resource=resource, principal=principal, source=source
+        )
         await _check_task(conn, crew_id, task_id)
         _zone_rules(target, principal, settings, task_id, source)
         now = utcnow()
@@ -587,8 +630,14 @@ async def request_claim(
         for r in own:
             if not (_mine(r, principal) and target.same(r)):
                 continue
-            if r["state"] in ("active", "offered", "queued"):
-                return ClaimOutcome("existing" if r["state"] != "queued" else "queued", r)
+            if r["state"] == "queued":
+                # a blocker may have ended on a path that did not run the queue: promote now (never brick a waiter)
+                if str(r["id"]) in await promote_queue(ops, tx, crew_id):
+                    fresh = await _reload(conn, str(r["id"]))
+                    return ClaimOutcome("granted", fresh)
+                return ClaimOutcome("queued", r)
+            if r["state"] in ("active", "offered"):
+                return ClaimOutcome("existing", r)
             if r["state"] == "reserved" and r.get("reserved_for") in (None, principal.session_id):
                 row = await _retake(ops, tx, crew_id, r, principal, settings, now)
                 return ClaimOutcome("retaken", row, seq=None)
@@ -760,15 +809,23 @@ async def _hoarding_check(tx: EventTx, crew_id: str, session: Mapping[str, Any],
         "SELECT COALESCE(SUM(files_estimate), 0) AS n FROM crew_zones WHERE crew_id = ? AND archived_at IS NULL AND builtin = 0",
         (crew_id,),
     )
+    # file claims (path globs) count as areas too: a glob squat must raise the same alarm as a zone squat
+    globs = await fetchone(
+        tx.conn,
+        """SELECT COUNT(*) AS n FROM crew_claims WHERE holder_session_id = ? AND zone_id IS NULL AND path_glob IS NOT NULL
+             AND source != 'micro_lease' AND mode != 'watch' AND state IN ('active','offered')""",
+        (session["id"],),
+    )
     held_files = sum(int(r["files_estimate"] or 0) for r in rows)
     all_files = int(total["n"]) if total else 0
-    if len(rows) > HOARD_ZONES or (all_files > 0 and held_files > HOARD_FILES_FRACTION * all_files):
+    areas = len(rows) + (int(globs["n"]) if globs else 0)
+    if areas > HOARD_ZONES or (all_files > 0 and held_files > HOARD_FILES_FRACTION * all_files):
         await raise_inbox_item(
             tx,
             crew_id,
             audience="project",
             kind="zone_hoarding",
-            title=f"{session['callsign']} holds {len(rows)} zones",
+            title=f"{session['callsign']} holds {areas} zones or file claims",
             dedupe_key=f"hoarding:{session['id']}",
             ref_type="session",
             ref_id=str(session["id"]),
@@ -854,6 +911,15 @@ async def promote_queue(ops: CrewOps, tx: EventTx, crew_id: str) -> list[str]:
         granted.append(str(q["id"]))
     _wake(ops, granted)
     return granted
+
+
+async def promote_queue_in(tx: EventTx, crew_id: str) -> list[str]:
+    """:func:`promote_queue` for services that hold only the transaction (sessions, tasks, close-out, reaper).
+
+    Every path that ends, expires or releases a claim calls this in the same transaction, so a
+    queued claim becomes active as soon as its blocker ends (§5.1 ``queued ─blocker ends─▶ active``).
+    """
+    return await promote_queue(CrewOps(tx._log), tx, crew_id)
 
 
 async def _end(tx: EventTx, row: Mapping[str, Any], state: str, end_reason: str) -> dict[str, Any]:
@@ -961,6 +1027,7 @@ async def handover(
             raise CrewOpError(422, "cross_crew_reference", "The referenced session is not part of this crew.")
         if target["id"] == principal.session_id or target["state"] in NOT_LIVE_SESSION_STATES:
             raise CrewOpError(422, "invalid_handover", "Hand over to another live session.")
+        await check_taker_zones(tx.conn, [row], target, human_granted=False)
         now = utcnow()
         await tx.conn.execute(
             "UPDATE crew_claims SET state = 'offered', offered_to = ?, offer_expires_at = ?, version = version "
@@ -1073,6 +1140,7 @@ async def accept_handover(ops: CrewOps, claim: Mapping[str, Any], principal: Pri
             raise CrewOpError(409, "offer_expired", "The handover offer expired.")
         session = await _session(tx.conn, str(session["id"])) or session
         _session_live(session)
+        await check_taker_zones(tx.conn, [row], session, human_granted=False)
         settings = load_settings((await crew_row(tx.conn, crew_id))["settings"])
         if row["mode"] == "exclusive" and await _over_cap(tx.conn, session, settings):
             raise CrewOpError(409, "claim_cap", "Claim limit reached: release a claim before accepting.")
@@ -1143,6 +1211,12 @@ async def record_baton_offer(
         tx.conn, "SELECT * FROM crew_baton_offers WHERE claim_id = ? AND to_session = ?", (claim_id, to_session)
     )
     if existing is not None:
+        if via == "human" and existing["via"] != "human" and existing["used_at"] is None:
+            # a human hand-over upgrades an earlier brief offer: it is now a human grant (protected zones, D33)
+            await tx.conn.execute("UPDATE crew_baton_offers SET via = 'human' WHERE id = ?", (existing["id"],))
+            fresh = await fetchone(tx.conn, "SELECT * FROM crew_baton_offers WHERE id = ?", (existing["id"],))
+            assert fresh is not None
+            return fresh
         return existing
     offer_id = new_id("offer")
     await tx.conn.execute(
@@ -1171,6 +1245,35 @@ def _same_checkout(a: Mapping[str, Any] | None, b: Mapping[str, Any] | None) -> 
     if a.get("checkout_fp") and a.get("checkout_fp") == b.get("checkout_fp"):
         return True
     return bool(a.get("worktree_id")) and a.get("worktree_id") == b.get("worktree_id")
+
+
+async def check_taker_zones(
+    conn: aiosqlite.Connection,
+    claims: Sequence[Mapping[str, Any]],
+    session: Mapping[str, Any],
+    *,
+    human_granted: bool,
+) -> None:
+    """The zone rules (§5.1) for a session taking over claims it did not request: adopt, handover, task adopt.
+
+    A baton never launders a zone rule: the built-in ``crew-policy`` zone is never taken; a
+    frozen zone is not taken while frozen; ``reserve_for`` still needs that **key-verified**
+    agent; a ``protected`` zone moves only when a human offered or assigned it to this session
+    (``human_granted``). Raises :class:`CrewOpError` (403/423) naming the zone slug only.
+    """
+    zone_ids = sorted({str(c["zone_id"]) for c in claims if c.get("zone_id")})
+    if not zone_ids:
+        return
+    marks = ",".join("?" for _ in zone_ids)
+    for zone in await fetchall(conn, f"SELECT * FROM crew_zones WHERE id IN ({marks}) ORDER BY slug", zone_ids):
+        if zone["builtin"]:
+            raise CrewOpError(423, "crew_policy", "The crew-policy zone is never claimable.")
+        if is_frozen(zone):
+            raise CrewOpError(423, "frozen", f"Zone {zone['slug']} is frozen by a human.")
+        if zone.get("reserve_for") and (session.get("agent_id") != zone["reserve_for"] or not session.get("agent_verified")):
+            raise CrewOpError(403, "reserved_for_agent", f"Zone {zone['slug']} is reserved for a key-verified agent.")
+        if zone["protected"] and not human_granted:
+            raise CrewOpError(423, "protected", f"Zone {zone['slug']} is protected; only a human can hand it to this session.")
 
 
 async def adopt(ops: CrewOps, claim: Mapping[str, Any], principal: Principal, *, task_id: str | None = None) -> dict[str, Any]:
@@ -1214,7 +1317,7 @@ async def adopt(ops: CrewOps, claim: Mapping[str, Any], principal: Principal, *,
         offer = await fetchone(
             conn,
             f"SELECT * FROM crew_baton_offers WHERE claim_id IN ({marks}) AND to_session = ?"
-            " AND used_at IS NULL ORDER BY created_at",
+            " AND used_at IS NULL ORDER BY CASE via WHEN 'human' THEN 0 WHEN 'reserved_for' THEN 1 ELSE 2 END, created_at",
             (*ids, session["id"]),
         )
         from_session = await _session(conn, row.get("holder_session_id"))
@@ -1234,6 +1337,9 @@ async def adopt(ops: CrewOps, claim: Mapping[str, Any], principal: Principal, *,
                 "This baton was not offered to this session. Work elsewhere, or ask the owner to hand it over "
                 "from the dashboard.",
             )
+        # the baton does not bypass the zone: reserve_for, protected (human grant only), frozen, crew-policy
+        human_granted = (offer is not None and offer["via"] == "human") or row.get("reserved_for") == session["id"]
+        await check_taker_zones(conn, group, session, human_granted=human_granted)
         exclusive = sum(1 for r in group if r["mode"] == "exclusive")
         if exclusive and await _over_cap(conn, session, settings, adding=exclusive):
             raise CrewOpError(409, "claim_cap", "Claim limit reached: release a claim before adopting this baton.")
@@ -1669,9 +1775,13 @@ def register_hooks() -> None:
     from remembra.crew import startup
 
     async def start(app: Any, rt: Any) -> None:
+        from remembra.crew import collisions
+
         event_log = getattr(app.state, "crew_events", None)
         if event_log is None:
             raise RuntimeError("crew.claims needs app.state.crew_events (crew.bus hook)")
+        # heartbeat footprints → collision detection (§5.3), in the heartbeat transaction
+        collisions.register_heartbeat_sink()
         ops = CrewOps(event_log)
         startup._spawn(app, rt, sweep_loop(ops), "crew-claims-sweeper")
 
@@ -1950,16 +2060,22 @@ async def server_guard(
     results: dict[tuple[str | None, str | None], G.ClaimResult] = {}
     auto_claimed: list[dict[str, Any]] = []
     for key, req in requested.items():
-        outcome = await request_claim(
-            ops,
-            crew_id,
-            caller,
-            zone_id=req.zone_id,
-            path_glob=req.path_glob,
-            mode=req.mode,
-            source="first_write",
-            reason="auto-claim (server guard)",
-        )
+        try:
+            outcome = await request_claim(
+                ops,
+                crew_id,
+                caller,
+                zone_id=req.zone_id,
+                path_glob=req.path_glob,
+                mode=req.mode,
+                source="first_write",
+                reason="auto-claim (server guard)",
+            )
+        except CrewOpError:
+            # a zone rule refuses this session the claim (reserve_for, protected, frozen, task-for-parent):
+            # the write is denied like any other conflict, never an error of the guard itself
+            results[key] = G.ClaimResult("conflict", winner_session_id=None)
+            continue
         if outcome.status in ("granted", "existing", "retaken") and outcome.claim is not None:
             results[key] = G.ClaimResult("granted", claim_id=str(outcome.claim["id"]))
             auto_claimed.append(claim_view(outcome.claim))
@@ -1984,16 +2100,19 @@ async def server_guard(
             if "schema_claim" in v.effects:
                 extra.append((None, f"schema:{S.DEFAULT_SCHEMA_DB}", "first_write"))
             for glob, resource, source in extra:
-                outcome = await request_claim(
-                    ops,
-                    crew_id,
-                    caller,
-                    path_glob=glob,
-                    resource=resource,
-                    mode="exclusive",
-                    source=source,
-                    reason="serialized write",
-                )
+                try:
+                    outcome = await request_claim(
+                        ops,
+                        crew_id,
+                        caller,
+                        path_glob=glob,
+                        resource=resource,
+                        mode="exclusive",
+                        source=source,
+                        reason="serialized write",
+                    )
+                except CrewOpError:
+                    outcome = ClaimOutcome("denied", None, [], "conflict")
                 if outcome.claim is not None and outcome.status != "denied":
                     auto_claimed.append(claim_view(outcome.claim))
                 elif mode == "enforce":
@@ -2067,6 +2186,7 @@ __all__ = [
     "accept_handover",
     "adopt",
     "authenticate_session",
+    "check_taker_zones",
     "claim_view",
     "decline_handover",
     "handover",
@@ -2074,6 +2194,7 @@ __all__ = [
     "list_claims",
     "override",
     "promote_queue",
+    "promote_queue_in",
     "record_baton_offer",
     "release_claim",
     "release_session_claims",

@@ -855,13 +855,18 @@ class SqlTaskClaims:
         sql += " AND state IN ('active','offered','reserved')" if not baton else " AND state IN ('active','offered')"
         now = now_iso()
         out: list[str] = []
+        freed = False
         for c in await fetchall(conn, sql, params):
             if baton:
+                # An explicit release hands the baton on (§5.1 release(baton) → reserved → adopt): it is reserved
+                # for the next authorised pickup, not for the releaser, or no live crew could ever adopt it.
+                # A stall (lost, quota, ...) keeps it for the holder, which re-takes it on recovery (§10.2).
                 await conn.execute(
-                    "UPDATE crew_claims SET state = 'reserved', reserve_reason = ?, reserved_for = holder_session_id,"
+                    "UPDATE crew_claims SET state = 'reserved', reserve_reason = ?,"
+                    " reserved_for = CASE WHEN ? = 'baton' THEN NULL ELSE holder_session_id END,"
                     " reserve_expires_at = NULL, offered_to = NULL, offer_expires_at = NULL, baton_ref = COALESCE(?, baton_ref),"
                     " version = version + 1, updated_at = ? WHERE id = ?",
-                    (reserve_reason, baton_ref, now, c["id"]),
+                    (reserve_reason, reserve_reason, baton_ref, now, c["id"]),
                 )
             else:
                 await conn.execute(
@@ -869,6 +874,7 @@ class SqlTaskClaims:
                     " updated_at = ? WHERE id = ?",
                     (now, now, c["id"]),
                 )
+                freed = True
             row = await fetchone(conn, "SELECT * FROM crew_claims WHERE id = ?", (c["id"],))
             assert row is not None
             refs = {
@@ -896,6 +902,11 @@ class SqlTaskClaims:
                     refs=refs,
                 )
             out.append(str(row["id"]))
+        if freed:
+            # the task released its zones: whoever queued behind them gets them now (§5.1, FIFO)
+            from remembra.crew.claims import promote_queue_in
+
+            await promote_queue_in(tx, crew_id)
         return out
 
     async def adopt(
@@ -1930,14 +1941,14 @@ class TaskService:
             offer = await fetchone(
                 tx.conn,
                 f"SELECT * FROM crew_baton_offers WHERE crew_id = ? AND to_session = ? AND used_at IS NULL"  # noqa: S608
-                f" AND claim_id IN ({marks}) ORDER BY created_at LIMIT 1",
+                f" AND claim_id IN ({marks}) ORDER BY CASE via WHEN 'human' THEN 0 ELSE 1 END, created_at LIMIT 1",
                 (crew_id, sid, *claim_ids),
             )
         if offer is None:
             offer = await fetchone(
                 tx.conn,
                 "SELECT * FROM crew_baton_offers WHERE crew_id = ? AND to_session = ? AND task_id = ? AND used_at IS NULL"
-                " ORDER BY created_at LIMIT 1",
+                " ORDER BY CASE via WHEN 'human' THEN 0 ELSE 1 END, created_at LIMIT 1",
                 (crew_id, sid, task["id"]),
             )
         if offer is not None:
@@ -1962,6 +1973,7 @@ class TaskService:
             kind, offer_id = await self._authorise_adopt(tx, crew_id, task, session, settings)
             if kind == "reserved_for" and task.get("owner_session_id") == session["id"]:
                 return await self._recover_in_tx(tx, crew_id, task, caller)
+            await self._check_adopter_zones(tx, crew_id, task_id, session, offer_id)
             prev_id = task.get("owner_session_id")
             prev = await load_session(tx.conn, crew_id, str(prev_id)) if prev_id else None
             cross = not (
@@ -2002,6 +2014,26 @@ class TaskService:
             )
             await resolve_inbox_items(tx, crew_id, [f"baton:{task_id}"], resolved_by=str(session["id"]))
         return TaskResult(detail, seq, {"claims": claims, "baton": baton, "cross_checkout": cross})
+
+    async def _check_adopter_zones(
+        self, tx: EventTx, crew_id: str, task_id: str, session: Mapping[str, Any], offer_id: str | None
+    ) -> None:
+        """A task baton does not bypass its zones (§5.1): reserve_for, protected (human grant), frozen, crew-policy."""
+        from remembra.crew.claims import check_taker_zones
+        from remembra.crew.zones import CrewOpError
+
+        claims = await fetchall(
+            tx.conn,
+            "SELECT * FROM crew_claims WHERE crew_id = ? AND task_id = ? AND holder_kind = 'session'"
+            " AND state IN ('active','offered','reserved')",
+            (crew_id, task_id),
+        )
+        offer = await fetchone(tx.conn, "SELECT via FROM crew_baton_offers WHERE id = ?", (offer_id,)) if offer_id else None
+        granted = (offer is not None and offer["via"] == "human") or any(c.get("reserved_for") == session["id"] for c in claims)
+        try:
+            await check_taker_zones(tx.conn, claims, session, human_granted=granted)
+        except CrewOpError as e:
+            raise _err(e.status, e.error, e.message)
 
     async def _check_wip(
         self, tx: EventTx, crew_id: str, session: Mapping[str, Any], task_id: str, settings: Mapping[str, Any]

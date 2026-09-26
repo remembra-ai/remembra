@@ -41,7 +41,8 @@ async def env(tmp_path):
         "commons:\n  package.json: plain\n",
         "  vault:\n    include: [vault/**]\n    protected: true\ncommons:\n  package.json: plain\n  yarn.lock: serialize\n",
     )
-    await Z.upload_zones_file(ops, CREW, Z.Principal.for_session(a), yaml_text=yml, sha="s1", branch="main")
+    # a human sets up the protected zone (an agent upload would hold it for approval)
+    await Z.upload_zones_file(ops, CREW, HUMAN, yaml_text=yml, sha="s1", branch="main")
     try:
         yield db, ops, audit, Z.Principal.for_session(a), Z.Principal.for_session(b)
     finally:

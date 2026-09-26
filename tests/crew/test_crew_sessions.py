@@ -384,7 +384,7 @@ async def test_recovery_after_quota_needs_new_activity_and_restores_everything(m
     hp = await host(env)
     a, zone, task, claim = await _holder_with_task(env, host_pair=hp)
     env.clock.advance(30)
-    await env.svc.stall(a.session, error="rate_limit", facts={"uncommitted_files": ["x"]}, baton_ref=None)
+    await env.svc.stall(a.session, error="billing_error", facts={"uncommitted_files": ["x"]}, baton_ref=None)
     env.clock.advance(60)
     # activity from before the stall does not clear it (D14)
     res = await env.svc.heartbeat(

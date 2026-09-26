@@ -372,7 +372,8 @@ async def test_release_after_start_stalls_with_a_baton_and_a_current_report(env)
     res = await svc.release(CREW, t["id"], Caller.for_session(s))
     assert res.task["status"] == "stalled" and res.task["status_before_stall"] == "in_progress"
     claim = await db.fetchone("SELECT * FROM crew_claims")
-    assert (claim["state"], claim["reserve_reason"], claim["reserved_for"]) == ("reserved", "baton", s["id"])
+    # released on purpose: reserved for the next authorised pickup, not for the releaser (§5.1)
+    assert (claim["state"], claim["reserve_reason"], claim["reserved_for"]) == ("reserved", "baton", None)
     report = await db.fetchone("SELECT * FROM crew_reports WHERE is_current = 1")
     assert report["kind"] == "stalled" and report["facts_source"] == "server-inferred"
     assert res.task["current_report_id"] == report["id"]

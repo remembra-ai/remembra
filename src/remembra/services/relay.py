@@ -433,6 +433,7 @@ class RelayService:
         screen: Any | None = None,
         scrub: Callable[[str], str] | None = None,
         server_facts: bool = False,
+        crew_session_token: str | None = None,
     ) -> dict[str, Any]:
         """Store (or update) the ONE handoff for ``(agent_id, session_id)``.
 
@@ -441,7 +442,10 @@ class RelayService:
         "server-inferred"`` kept; a client close claiming it is recorded as
         ``agent-declared``. With Crew mode on (``crew_events``) the close also
         records the crew side (:func:`remembra.crew.closeout.on_relay_close`)
-        and the result carries ``crew`` (None when the project has no crew).
+        and the result carries ``crew`` (None when the project has no crew). The
+        crew session leaves only when ``crew_session_token`` (the caller's
+        ``X-Remembra-Crew-Session`` header) proves it; otherwise only
+        ``handoff.created`` is recorded.
 
         Every input string passes ``redact_secrets`` and then ``scrub`` (the
         API passes the PII policy) before anything is built, so the rendered
@@ -543,6 +547,7 @@ class RelayService:
                         facts,
                         sections,
                         relay_meta["facts_source"],
+                        crew_session_token,
                     )
                     return unchanged
             request = StoreRequest(
@@ -598,6 +603,7 @@ class RelayService:
             facts,
             sections,
             relay_meta["facts_source"],
+            crew_session_token,
         )
         return result
 
@@ -613,6 +619,7 @@ class RelayService:
         facts: dict[str, Any],
         sections: dict[str, Any],
         facts_source: str,
+        crew_session_token: str | None = None,
     ) -> dict[str, Any] | None:
         """The crew side of a close (Crew mode only). The handoff is already stored, so a crew
         failure is logged and reported in the result instead of failing the close."""
@@ -633,6 +640,7 @@ class RelayService:
                 facts=facts,
                 sections=sections,
                 facts_source=facts_source,
+                session_token=crew_session_token,
             )
         except Exception as e:
             log.error(

@@ -108,8 +108,8 @@ async def test_loosening_lands_pending_and_old_policy_stays_until_a_human_approv
 
 async def test_reject_keeps_policy_and_newer_upload_supersedes(env):
     db, ops, _, agent = env
-    await Z.upload_zones_file(
-        ops, CREW, agent, yaml_text="zones:\n  pos: {include: [src/pos/**], protected: true}\n", sha="a", branch="main"
+    await Z.upload_zones_file(  # a human protects pos (an agent's protection would wait for approval)
+        ops, CREW, HUMAN, yaml_text="zones:\n  pos: {include: [src/pos/**], protected: true}\n", sha="a", branch="main"
     )
     first = await Z.upload_zones_file(ops, CREW, agent, yaml_text="zones:\n  pos: [src/pos/**]\n", sha="b", branch="main")
     assert first["result"] == "pending"
@@ -173,8 +173,11 @@ async def test_invalid_file_and_zone_cap(env):
 
 async def test_server_zone_crud_and_human_only_loosening(env):
     db, ops, audit, agent = env
-    detail = await Z.create_zone(ops, CREW, agent, {"slug": "pos", "include": ["src/pos/**"], "protected": True})
-    assert detail["source"] == "api" and detail["protected"] is True
+    with pytest.raises(Z.CrewOpError) as err:  # an agent cannot create a protected zone (zone squat)
+        await Z.create_zone(ops, CREW, agent, {"slug": "pos", "include": ["src/pos/**"], "protected": True})
+    assert err.value.status == 403 and err.value.error == "human_only"
+    detail = await Z.create_zone(ops, CREW, HUMAN, {"slug": "pos", "include": ["src/pos/**"], "protected": True})
+    assert detail["source"] == "dashboard" and detail["protected"] is True
     with pytest.raises(Z.CrewOpError) as err:
         await Z.create_zone(ops, CREW, agent, {"slug": "pos", "include": ["x/**"]})
     assert err.value.error == "zone_exists"

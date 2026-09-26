@@ -113,7 +113,8 @@ async def _session_for_token(request: Request, user: AuthenticatedUser, session_
     crew = await _crew_db(request).fetchone("SELECT project_id FROM crews WHERE id = ?", (row["crew_id"],))
     if crew is None or not project_visible(user, crew["project_id"]):
         raise not_found()
-    if not tokens_match(token, row["token_hash"]):
+    # an agent-scoped key acts only as sessions of its own agent (§11.2), whatever token it carries
+    if not tokens_match(token, row["token_hash"]) or (user.agent_id is not None and row["agent_id"] != user.agent_id):
         raise crew_error(
             status.HTTP_401_UNAUTHORIZED, "session_token_invalid", f"Send this session's token in {SESSION_TOKEN_HEADER}."
         )
@@ -333,7 +334,13 @@ async def stall_session(
     if replay is not None:
         return replay
     try:
-        result = await _service(request).stall(row, error=body["error"], facts=body["facts"], baton_ref=body.get("baton_ref"))
+        result = await _service(request).stall(
+            row,
+            error=body["error"],
+            facts=body["facts"],
+            baton_ref=body.get("baton_ref"),
+            last_assistant_message=body.get("last_assistant_message"),
+        )
     except SessionError as e:
         raise _session_error(e)
     await _remember(request, principal, "stall", idempotency_key, body, result)
