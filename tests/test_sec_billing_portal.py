@@ -260,6 +260,92 @@ async def test_an_account_keeps_its_own_customer_when_an_event_carries_anothers(
         assert (await c.meter.get_tenant(other))["billing_flag"] is None
 
 
+def _renewal(txn: str, sub: str, price: str, customer: str) -> dict[str, Any]:
+    """A later payment of a subscription, as Paddle sends it: no custom_data (the account is found by the subscription)."""
+    from tests.test_paddle_subscription_ownership import _purchase
+
+    return {**_purchase(txn, sub, price, {}, customer=customer), "custom_data": None}
+
+
+def _updated(sub: str, price: str, customer: str) -> dict[str, Any]:
+    return {"id": sub, "status": "active", "customer_id": customer, "items": [{"price": {"id": price}, "quantity": 1}]}
+
+
+async def test_renewals_of_accounts_one_payer_pays_for_are_not_flagged(tmp_path) -> None:
+    """Review regression: one Paddle customer paying for several accounts is supported, and 0.16.0 recorded the
+    shared customer on each. After the upgrade every routine renewal flagged both accounts and sent the owner a
+    critical alert, again after each clear. A renewal that attaches nothing new is not a conflict."""
+    from tests.test_paddle_subscription_ownership import RecordingAlerts, _hook
+
+    alerts = RecordingAlerts()
+    async with cost_app(tmp_path) as c:
+        _paddle(c, **PRICES)
+        c.h.app.state.alerts = alerts
+        c.h.app.state.tasks = None
+        # The state 0.16.0 left: both accounts record the shared customer, each its own subscription.
+        payer = await c.h.create_user("payer@example.com", verified=True)
+        second = await c.h.create_user("second@example.com", verified=True)
+        await c.meter.apply_subscription(payer, PlanTier.SOLO, customer_id="ctm_shared", subscription_id="sub_payer")
+        await c.meter.apply_subscription(second, PlanTier.PRO, customer_id="ctm_shared", subscription_id="sub_second")
+
+        for cycle in range(2):
+            for sub, price in (("sub_payer", "pri_solo_m"), ("sub_second", "pri_pro_m")):
+                paid = await _hook(c, "transaction.completed", _renewal(f"txn_{cycle}_{sub}", sub, price, "ctm_shared"))
+                assert paid["applied"] == "applied", paid
+                assert (await _hook(c, "subscription.updated", _updated(sub, price, "ctm_shared")))["applied"] in (
+                    "applied",
+                    "no_change",
+                )
+            for uid, plan in ((payer, "solo"), (second, "pro")):
+                tenant = await c.meter.get_tenant(uid)
+                assert (tenant["plan"], tenant["stripe_customer_id"], tenant["billing_flag"]) == (plan, "ctm_shared", None)
+        assert [e for e, *_ in alerts.sent if e.startswith("paddle_customer_conflict")] == []
+
+
+async def test_a_conflict_is_flagged_once_per_subscription_and_never_replaces_another_flag(tmp_path) -> None:
+    """A NEW subscription paid as another account's customer is still flagged (BILL-6). Its renewals are not flagged
+    again after the owner clears the flag, and a flag already waiting on the account is kept."""
+    from tests.test_paddle_subscription_ownership import RecordingAlerts, _bound, _hook, _purchase
+
+    alerts = RecordingAlerts()
+    async with cost_app(tmp_path) as c:
+        _paddle(c, **PRICES)
+        c.h.app.state.alerts = alerts
+        c.h.app.state.tasks = None
+        holder = await c.h.create_user("holder@example.com", verified=True)
+        await c.meter.apply_subscription(holder, PlanTier.SOLO, customer_id="ctm_holder", subscription_id="sub_holder")
+
+        buyer = await c.h.create_user("buyer@example.com", verified=True)
+        await _hook(c, "transaction.completed", _purchase("txn_b1", "sub_b", "pri_solo_m", _bound(buyer), customer="ctm_holder"))
+        tenant = await c.meter.get_tenant(buyer)
+        assert (tenant["billing_flag"], tenant["stripe_customer_id"]) == ("paddle_customer_conflict", None)
+        conflicts = [e for e, *_ in alerts.sent if e.startswith("paddle_customer_conflict")]
+        assert conflicts == [f"paddle_customer_conflict:{buyer}:ctm_holder"]
+
+        # The owner reviews it and clears the flag (DELETE /admin/billing-flags/{id}); the next renewals stay quiet.
+        await c.meter.set_billing_flag(buyer, None)
+        for n in range(2):
+            renewed = await _hook(c, "transaction.completed", _renewal(f"txn_b_r{n}", "sub_b", "pri_solo_m", "ctm_holder"))
+            assert renewed["applied"] == "applied"
+        tenant = await c.meter.get_tenant(buyer)
+        assert (tenant["plan"], tenant["billing_flag"], tenant["stripe_customer_id"]) == ("solo", None, None)
+        assert len([e for e, *_ in alerts.sent if e.startswith("paddle_customer_conflict")]) == 1
+
+        # Another account with a flag waiting for review buys as the holder's customer: its flag is kept, the
+        # owner is still told, and the id is not recorded.
+        flagged = await c.h.create_user("flagged@example.com", verified=True)
+        await c.meter.register_tenant(flagged, PlanTier.FREE)
+        await c.meter.set_billing_flag(flagged, "founding_over_cap")
+        await _hook(
+            c, "transaction.completed", _purchase("txn_f1", "sub_f", "pri_solo_m", _bound(flagged), customer="ctm_holder")
+        )
+        tenant = await c.meter.get_tenant(flagged)
+        assert (tenant["plan"], tenant["billing_flag"], tenant["stripe_customer_id"]) == ("solo", "founding_over_cap", None)
+        event, message, details = alerts.sent[-1]
+        assert event == f"paddle_customer_conflict:{flagged}:ctm_holder"
+        assert details["kept_flag"] == "founding_over_cap" and "founding_over_cap" in message
+
+
 # ---------------------------------------------------------------------------
 # BILL-1 review regression: a server checkout is paid under the account's own
 # verified email, so the owner's portal (which requires that email) opens.

@@ -264,7 +264,9 @@ redact command-line credentials from handoffs stored before this release.
 
 - **Billing.** The Paddle billing portal opens only for a Paddle customer whose email is the account's
   verified email, and a customer id that another account already holds is never recorded (the account is
-  flagged instead). Checkout and the billing portal need a dashboard sign-in, not an API key; an API-key
+  flagged instead, once per subscription, and a flag already waiting on the account is kept). One payer paying
+  for several accounts, which 0.16.0 recorded on each of them, is not a conflict: their renewals change
+  nothing. Checkout and the billing portal need a dashboard sign-in, not an API key; an API-key
   session in the dashboard shows "Sign in with email" instead of the billing buttons. New purchases stay on
   the account's own email. Paddle events are applied once each and in order, and a paid renewal that arrives
   late still records the period it paid for. A yearly plan's next credit bank unlocks only once its renewal is

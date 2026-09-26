@@ -969,7 +969,7 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
         return "flagged"
 
     before = dict(tenant) if tenant else None
-    customer_holders = await _other_customer_holders(meter, user_id, result)
+    customer_holders = await _other_customer_holders(meter, user_id, tenant, result)
     await meter.apply_subscription(
         user_id,
         plan,
@@ -984,8 +984,12 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
         bank_unlock_at=_new_bank_unlock(tenant, result, plan),
         paid_through=result.paid_through,
     )
-    if customer_holders:
+    if customer_holders and not _renews_recorded_subscription(tenant, event_sub):
         await _flag_customer_conflict(request, meter, user_id, tenant, result, customer_holders)
+    elif customer_holders:
+        # A renewal of the subscription this account already records: the conflict was flagged
+        # (and the owner alerted) when that subscription was first applied. The id stays unrecorded.
+        log.info("paddle_customer_on_another_account_renewal", user_id=user_id, subscription_id=event_sub)
     if not result.founding and (tenant or {}).get("founding") and result.plan_from_price:
         # The held subscription moved off the Founding price (a plan change in
         # the portal): the lock ends, with the same 14-day grace as a lapse.
@@ -1058,12 +1062,24 @@ def _holds_legacy(tenant: dict[str, Any] | None, event_sub: str | None, plan: Pl
     return str(tenant.get("plan") or "") == plan.value
 
 
-async def _other_customer_holders(meter: Any, user_id: str, result: Any) -> list[str]:
-    """Other accounts that already hold the event's Paddle customer id (BILL-6); empty when none or no id."""
+async def _other_customer_holders(meter: Any, user_id: str, tenant: dict[str, Any] | None, result: Any) -> list[str]:
+    """Other accounts that already hold the event's Paddle customer id (BILL-6).
+
+    Empty when the event has no customer id, and when this account already
+    records that id: nothing new would be attached. One payer paying for
+    several accounts is supported, and 0.16.0 recorded the shared customer on
+    each of them; their renewals are not conflicts.
+    """
     customer_id = result.paddle_customer_id
-    if not customer_id:
+    if not customer_id or str((tenant or {}).get("stripe_customer_id") or "") == str(customer_id):
         return []
     return [u for u in await meter.tenants_for_billing(customer_id=str(customer_id)) if u != user_id]
+
+
+def _renews_recorded_subscription(tenant: dict[str, Any] | None, event_sub: str | None) -> bool:
+    """Whether the event is for the subscription the account already records (a renewal or update of it)."""
+    recorded = (tenant or {}).get("stripe_subscription_id")
+    return bool(event_sub) and bool(recorded) and str(recorded) == str(event_sub)
 
 
 async def _flag_customer_conflict(
@@ -1078,25 +1094,33 @@ async def _flag_customer_conflict(
     when it had none), is flagged, and the owner is alerted once.
     """
     log.error("paddle_customer_on_another_account", user_id=user_id, subscription_id=result.paddle_subscription_id)
-    if (tenant or {}).get("billing_flag") == "paddle_customer_conflict":
+    existing = (tenant or {}).get("billing_flag")
+    if existing == "paddle_customer_conflict":
         return
-    await _flag_account(
-        request,
-        meter,
-        user_id,
-        "paddle_customer_conflict",
+    message = (
         "A Paddle payment for this account was made as a Paddle customer that another Remembra account already holds "
         "(one payer email paying for both accounts, or a buyer who typed the other account's email at checkout). "
         "The plan was applied, but the customer id was not recorded on this account, so its portal will not open "
-        "that customer. Check both accounts in Paddle; move or refund the subscription if it is not the same payer.",
-        {
-            "customer_id": result.paddle_customer_id,
-            "other_accounts": others,
-            "subscription_id": result.paddle_subscription_id,
-            "transaction_id": result.transaction_id,
-        },
-        event=f"paddle_customer_conflict:{user_id}:{result.paddle_customer_id}",
+        "that customer. Check both accounts in Paddle; move or refund the subscription if it is not the same payer."
     )
+    details = {
+        "customer_id": result.paddle_customer_id,
+        "other_accounts": others,
+        "subscription_id": result.paddle_subscription_id,
+        "transaction_id": result.transaction_id,
+    }
+    event = f"paddle_customer_conflict:{user_id}:{result.paddle_customer_id}"
+    if existing:
+        # Another flag is waiting for review on this account: keep it (the owner clears one flag at a
+        # time) and only alert about this one.
+        await _operator_alert(
+            request,
+            event,
+            message + f" The account's existing billing flag ({existing}) was kept.",
+            {"user_id": user_id, "flag": "paddle_customer_conflict", "kept_flag": existing, **details},
+        )
+        return
+    await _flag_account(request, meter, user_id, "paddle_customer_conflict", message, details, event=event)
 
 
 async def _account_deleted(db: Any, user_id: str) -> bool:
