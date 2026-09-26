@@ -106,9 +106,27 @@ class ReadinessChecker:
             cursor = await asyncio.wait_for(self.db.conn.execute("SELECT 1"), timeout=2.0)
             await cursor.fetchone()
             version = await self.db.get_schema_version() if hasattr(self.db, "get_schema_version") else None
-            return {"status": OK, "schema_version": version}
+            result: dict[str, Any] = {"status": OK, "schema_version": version}
+            result.update(await self._applied_versions())
+            return result
         except Exception as e:
             return {"status": DEGRADED, "reason": "unreachable", "error_type": type(e).__name__}
+
+    async def _applied_versions(self) -> dict[str, Any]:
+        """Every applied main-DB migration, and any the code has that is not applied.
+
+        ``schema_version`` is the highest applied version, which cannot show a lower one
+        added later (v5, Crew mode's, reaches databases already at 9).
+        """
+        try:
+            from remembra.storage.database import main_migrations
+
+            cursor = await asyncio.wait_for(self.db.conn.execute("SELECT version FROM schema_version ORDER BY version"), 2.0)
+            applied = [int(r[0]) for r in await cursor.fetchall()]
+        except Exception:  # no version table (a stand-in database)
+            return {}
+        known = [m[0] for m in main_migrations().migrations]
+        return {"applied_versions": applied, "missing_versions": [v for v in known if v not in applied]}
 
     async def _check_crew(self) -> dict[str, Any]:
         state = self.app_state

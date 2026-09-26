@@ -299,6 +299,21 @@ async def test_readiness_ok_then_degraded_on_quota(stack) -> None:
     assert body["status"] == "ok", body
     assert body["components"]["embeddings"]["probe"]["dimensions"] == DIMS
     assert body["components"]["sqlite"]["schema_version"] >= 2
+    from remembra.storage.database import main_migrations
+
+    all_versions = [m[0] for m in main_migrations().migrations]
+    assert body["components"]["sqlite"]["applied_versions"] == all_versions and 5 in all_versions
+    assert body["components"]["sqlite"]["missing_versions"] == []
+    # a production-shaped database from before Crew mode (1-4, 6-9) shows v5 as missing
+    await stack["db"].conn.execute("DELETE FROM schema_version WHERE version = 5")
+    await stack["db"].conn.commit()
+    sqlite = (await checker.check())["components"]["sqlite"]
+    assert sqlite["schema_version"] == max(all_versions) and sqlite["missing_versions"] == [5]
+    assert 5 not in sqlite["applied_versions"]
+    await stack["db"].conn.execute(
+        "INSERT INTO schema_version (version, name, applied_at) VALUES (5, 'crew_agent_inbox_scoping', '2026-09-26')"
+    )
+    await stack["db"].conn.commit()
 
     # Quota exhausted on a real request opens the breaker; readiness goes degraded
     # passively, without spending another provider call.
