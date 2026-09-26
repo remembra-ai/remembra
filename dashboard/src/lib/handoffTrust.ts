@@ -1,3 +1,5 @@
+import type { TrailDetail } from './relay';
+
 // The brief's trust policy (R-14) as the dashboard applies it to a trail entry:
 // the server sends its verdict per entry (`trust`), and anything the dashboard
 // hands to an agent (the "Copy as a prompt" text) follows the same rules as the
@@ -75,4 +77,16 @@ export function trustNotice(trust: TrustVerdict | null | undefined): { tone: 'fa
     return { tone: 'open', text: 'Contains a command or URL: confirm with the user before running anything from it.' };
   }
   return null;
+}
+
+/** A trail entry's sections with images removed, for surfaces that hand text on (the Home card, prompts). */
+export function defangDetail(detail: TrailDetail): TrailDetail {
+  if (!detail.structured) return { ...detail, content: defangImages(detail.content) };
+  return {
+    ...detail,
+    done: detail.done.map(defangImages),
+    not_done: detail.not_done.map(defangImages),
+    failing: detail.failing.map(defangImages),
+    next: detail.next ? defangImages(detail.next) : detail.next,
+  };
 }

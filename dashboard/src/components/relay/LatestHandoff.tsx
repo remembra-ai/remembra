@@ -7,7 +7,7 @@ import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowRight, ClipboardCopy, ShieldCheck } from 'lucide-react';
 import clsx from 'clsx';
 import { healthBadge, pickupLine, type TrailItem } from '../../lib/relay';
-import { trustNotice } from '../../lib/handoffTrust';
+import { defangDetail, trustNotice } from '../../lib/handoffTrust';
 import { agentMeta } from '../../lib/agents';
 import { absoluteTime, relativeTime, where } from '../../lib/time';
 import { continueCommand, continuePrompt } from '../../lib/handoffText';
@@ -180,7 +180,7 @@ export function LatestHandoff({
 
         {latest.detail && !withheld && (
           <div className="mt-4 border border-rule border-l-[3px] border-l-signal bg-paper px-3 py-3 sm:px-4">
-            <HandoffSections detail={latest.detail} max={3} />
+            <HandoffSections detail={defangDetail(latest.detail)} max={3} />
           </div>
         )}
 

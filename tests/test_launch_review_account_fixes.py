@@ -268,6 +268,8 @@ async def test_a_team_owner_confirms_the_team_ends_and_the_account_is_emailed(tm
         assert r.status_code == 200, r.text
         body = r.json()
         assert sent == [("lead@example.com", body["deleted_at"][:10], body["erasure_after"][:10], 0)]
+        # The dashboard shows this message on the sign-in screen: the erase date and how to undo.
+        assert body["erasure_after"][:10] in body["message"] and "email support@remembra.dev" in body["message"]
 
         assert (await _delete(c, solo, "solo-owner@example.com")).status_code == 200
 

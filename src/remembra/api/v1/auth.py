@@ -934,7 +934,8 @@ async def delete_account(
         message=(
             "Your account is deleted and you are signed out everywhere. "
             + ("Your subscription is cancelled and will not charge again. " if cancelled else "")
-            + f"All your data is erased permanently after {erase_after.date().isoformat()}."
+            + f"All your data is erased permanently after {erase_after.date().isoformat()}. "
+            + f"To undo the deletion before then, email {SUPPORT_EMAIL}."
         ),
         deleted_at=deleted_at.isoformat(),
         erasure_after=erase_after.isoformat(),
