@@ -1167,10 +1167,13 @@ class Crewd:
         if deltas.get("to_seq") is not None:
             sess["cursor"] = int(deltas["to_seq"])
         inject = got.get("inject_text")
+        current = sess.get("inject") if isinstance(sess.get("inject"), dict) else None
         if inject:
-            sess["inject"] = {"id": _sha(str(inject), 12), "text": str(inject)[:300]}
-        elif sess.get("inject"):
-            sess["inject"] = None
+            ident = _sha(str(inject), 12)
+            if current is None or current.get("id") != ident:
+                sess["inject"] = {"id": ident, "text": str(inject)[:300]}
+        elif current is not None and sess.get("inject_delivered") == current.get("id"):
+            sess["inject"] = None  # delivered once (PreToolUse context, the turn line or a rewake); kept until then
         self.persist(key)
 
     # -- activity (from the gate) ----------------------------------------------------------

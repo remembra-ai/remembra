@@ -7,6 +7,7 @@ The gate is invoked by the agent's hooks and by the git hooks::
     <py> -I ~/.remembra/crew/bin/crew-gate.py turn       --hook claude-code   # UserPromptSubmit
     <py> -I ~/.remembra/crew/bin/crew-gate.py stop       --hook claude-code   # Stop (D16)
     <py> -I ~/.remembra/crew/bin/crew-gate.py precompact --hook claude-code   # PreCompact
+    <py> -I ~/.remembra/crew/bin/crew-gate.py wake       --hook claude-code   # asyncRewake waiter (exit 2 wakes the agent)
     <py> -I ~/.remembra/crew/bin/crew-gate.py precommit | trailer <msgfile> | prepush <remote> <url>  # git gates
 
 Rules it follows (all from the spec; tests pin each one):
@@ -966,6 +967,8 @@ def render_turn_for(ctx: HookContext, session: dict[str, Any], snapshot: Mapping
         turn.setdefault("delivered_inject", []).append(pending_inject["id"])
         turn["delivered_inject"] = turn["delivered_inject"][-50:]
     write_json(ctx.layout.turn_file(key), turn)
+    if pending_inject:
+        rpc_send(ctx.layout, "delivered", {"key": key, "inject_id": pending_inject["id"]})
     return text
 
 
@@ -1069,6 +1072,37 @@ def cmd_stop(ctx: HookContext) -> int:
     except Exception as e:
         _err(f"stop error ({e.__class__.__name__})")
     return 0
+
+
+def cmd_wake(ctx: HookContext) -> int:
+    """asyncRewake waiter (S0: promoted to L0). Exit 0 at once when nothing is queued; otherwise print the
+    one queued server- or human-generated item (ids-only template) on stderr and exit 2, which wakes an
+    idle agent. Idempotent: an item is delivered once, so the Stop that follows a rewake is a no-op."""
+    session = ctx.session()
+    if session is None:
+        return 0
+    try:
+        from remembra.crew import schemas as S
+
+        inject = session.get("inject")
+        if not isinstance(inject, dict) or not inject.get("text") or not inject.get("id"):
+            return 0
+        key = ctx.key or ""
+        turn = read_json(ctx.layout.turn_file(key)) or {}
+        if inject["id"] in (turn.get("delivered_inject") or []):
+            return 0
+        text = S.clip_item(str(inject["text"]), S.TEXT_CAPS["pretool_context"])
+        if S.check_agent_text(text, "pretool_context"):
+            return 0
+        turn.setdefault("delivered_inject", []).append(inject["id"])
+        turn["delivered_inject"] = turn["delivered_inject"][-50:]
+        write_json(ctx.layout.turn_file(key), turn)
+        rpc_send(ctx.layout, "delivered", {"key": key, "inject_id": inject["id"]})
+        sys.stderr.write(text + "\n")
+        return 2
+    except Exception as e:
+        _err(f"wake error ({e.__class__.__name__})")
+        return 0
 
 
 def cmd_precompact(ctx: HookContext) -> int:
@@ -1452,6 +1486,7 @@ HOOK_COMMANDS: Final = {
     "turn": cmd_turn,
     "stop": cmd_stop,
     "precompact": cmd_precompact,
+    "wake": cmd_wake,
 }
 
 

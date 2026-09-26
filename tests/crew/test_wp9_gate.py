@@ -431,3 +431,148 @@ async def test_gate_latency_with_a_fresh_snapshot(tmp_path):
         # whole subprocess including interpreter start; the spec's p95 ≤90 ms applies with a CI guard of 2x
         assert p95 <= 0.18, f"p95 {p95 * 1000:.0f} ms, cold {times[-1] * 1000:.0f} ms"
         assert read_json(layout.session_file(session_key("claude-code", "sess-a")))["session_id"] == a["session_id"]
+
+
+# ---------------------------------------------------------------------------
+# Urgent items, news, rewake, fencing horizon, human bypass
+# ---------------------------------------------------------------------------
+
+
+async def test_urgent_items_news_and_rewake(tmp_path, sleeper):
+    repo = make_repo(tmp_path / "repo")
+    wt_b = add_worktree(repo, tmp_path / "wt-b", "b")
+    me = os.getpid()
+    async with crew_server(tmp_path) as srv:
+        layout, d = await _start_crewd(tmp_path, srv, alive={sleeper})
+        a = await d.join(peer(me), {"adapter": "claude-code", "client_session_id": "sess-a", "cwd": str(repo), "agent_pid": me})
+        b = await d.join(
+            peer(sleeper), {"adapter": "claude-code", "client_session_id": "sess-b", "cwd": str(wt_b), "agent_pid": sleeper}
+        )
+        # a human (dashboard login) asks A for a checkpoint: delivered as inject_text on A's heartbeat
+        res = await srv.h.client.post(
+            f"/api/v1/sessions/{a['session_id']}/request-checkpoint",
+            json={"reason": "now"},
+            headers=srv.h.jwt(srv.owner, "owner@example.com"),
+        )
+        assert res.status_code == 200, res.text
+        await d.heartbeat()
+        assert "checkpoint" in d.sessions[a["key"]]["inject"]["text"]
+        # asyncRewake waiter: exit 2 with the item on stderr, once
+        woke = await arun_gate(layout, "wake", {"session_id": "sess-a", "cwd": str(repo)})
+        assert woke.returncode == 2 and "checkpoint" in woke.stderr and woke.stdout == ""
+        assert (await arun_gate(layout, "wake", {"session_id": "sess-a", "cwd": str(repo)})).returncode == 0
+        await d.drain()
+        assert d.sessions[a["key"]]["inject_delivered"] == d.sessions[a["key"]]["inject"]["id"]
+        # a second human item arrives: now delivered mid-turn as PreToolUse additionalContext on an allowed write
+        d.sessions[a["key"]]["inject"] = {"id": "manual-2", "text": "Crew: Mani paused zone review; hold pushes."}
+        d.persist(a["key"])
+        res = await arun_gate(
+            layout, "pretool", pretool("sess-a", repo, "Write", {"file_path": str(repo / "README.md"), "content": "x"})
+        )
+        assert S.validate_hook_stdout("PreToolUse", res.stdout) == [], res.stdout
+        hso = json.loads(res.stdout)["hookSpecificOutput"]
+        assert "permissionDecision" not in hso and "hold pushes" in hso["additionalContext"]
+        # news: B runs out of credits; A's next turn names it (server template, ids and callsigns only)
+        await d.stall(peer(sleeper), {"key": b["key"], "error": "billing_error"})
+        await d.heartbeat()
+        turn = await arun_gate(layout, "turn", {"session_id": "sess-a", "cwd": str(repo), "prompt": "next"})
+        ctx = json.loads(turn.stdout)["hookSpecificOutput"]["additionalContext"]
+        assert "NEW:" in ctx and b["callsign"] in ctx
+
+
+async def test_fencing_horizon_and_server_outage(tmp_path):
+    repo = make_repo(tmp_path / "repo")
+    me = os.getpid()
+    async with crew_server(tmp_path) as srv:
+        layout, d = await _start_crewd(tmp_path, srv)
+        a = await d.join(peer(me), {"adapter": "claude-code", "client_session_id": "sess-a", "cwd": str(repo), "agent_pid": me})
+        pos = next(z for z in d.snapshots[a["crew_id"]]["zones"] if z["slug"] == "pos")
+        assert (await d.claim(peer(me), {"key": a["key"], "zone_id": pos["id"]}))["result"] == "granted"
+        await d.sync_snapshot(a["crew_id"])
+        write = pretool("sess-a", repo, "Write", {"file_path": str(repo / "src/app/pos/split.ts"), "content": "x"})
+        assert (await arun_gate(layout, "pretool", write)).stdout == ""
+        # the lease could not be renewed: 30 s before expiry is past the 60 s fence margin (D31)
+        from remembra.relay.crew.snapshot import format_ts
+
+        snap = read_json(layout.snapshot_file(a["crew_id"]))
+        for c in snap["claims"]:
+            if c["zone_id"] == pos["id"]:
+                c["lease_expires_at"] = format_ts(time.time() - snap["skew_s"] + 30)
+        layout.snapshot_file(a["crew_id"]).write_text(json.dumps(snap))
+        d.server_reachable, d.server_outage = False, False
+        d.write_status()
+        res = await arun_gate(layout, "pretool", write)
+        out = json.loads(res.stdout)["hookSpecificOutput"]
+        assert out["permissionDecision"] == "deny" and "reconnecting" in out["permissionDecisionReason"]
+        # a server outage (5xx and /health failing) keeps the holder's own claims writable
+        d.server_outage = True
+        d.write_status()
+        assert (await arun_gate(layout, "pretool", write)).stdout == ""
+
+
+async def test_note_result_tells_network_loss_from_server_outage(tmp_path):
+    from remembra.relay.crew.crewd import Resp
+
+    repo = make_repo(tmp_path / "repo")
+    async with crew_server(tmp_path) as srv:
+        layout, d = await _start_crewd(tmp_path, srv)
+        api = d.api_for_cfg(srv.config_loader()("claude-code", None), "claude-code")
+        await d.note_result(api, Resp(503, {}))
+        assert (d.server_reachable, d.server_outage) == (False, False)  # /health answers: not an outage
+        real = api.call
+
+        async def health_down(method, path, **kw):
+            if path == "/health":
+                return Resp(500, {})
+            return await real(method, path, **kw)
+
+        api.call = health_down  # type: ignore[method-assign]
+        await d.note_result(api, Resp(503, {}))
+        assert (d.server_reachable, d.server_outage) == (False, True)
+        assert read_json(layout.status_file)["server_outage"] is True
+        await d.note_result(api, None)
+        assert (d.server_reachable, d.server_outage) == (False, False)
+        await d.note_result(api, Resp(200, {}))
+        assert d.server_reachable is True
+        assert repo.exists()
+
+
+async def test_human_bypass_is_single_use_and_not_for_agents(tmp_path, sleeper, monkeypatch):
+    from remembra.relay.crew import crewd as crewd_mod
+    from remembra.relay.crew.crewd import CrewdError, Peer
+
+    repo = make_repo(tmp_path / "repo")
+    wt_b = add_worktree(repo, tmp_path / "wt-b", "b")
+    me = os.getpid()
+    async with crew_server(tmp_path) as srv:
+        layout, d = await _start_crewd(tmp_path, srv, alive={sleeper})
+        a = await d.join(
+            peer(sleeper), {"adapter": "claude-code", "client_session_id": "sess-a", "cwd": str(repo), "agent_pid": sleeper}
+        )
+        b = await d.join(peer(me), {"adapter": "claude-code", "client_session_id": "sess-b", "cwd": str(wt_b), "agent_pid": me})
+        pos = next(z for z in d.snapshots[a["crew_id"]]["zones"] if z["slug"] == "pos")
+        assert (await d.claim(peer(sleeper), {"key": a["key"], "zone_id": pos["id"]}))["result"] == "granted"
+        await d.sync_snapshot(a["crew_id"])
+        human = Peer(424242, os.getuid(), (424242, 1))
+        # no controlling terminal (an agent's Bash tool): refused
+        with pytest.raises(CrewdError) as e:
+            await d.bypass(human, {"session": b["callsign"]})
+        assert e.value.code == "tty_required"
+        monkeypatch.setattr(crewd_mod, "has_controlling_tty", lambda pid: True)
+        # a process inside a session's tree cannot grant itself one, even with a TTY
+        with pytest.raises(CrewdError) as e:
+            await d.bypass(peer(me), {"session": b["callsign"]})
+        assert e.value.code == "agent_process"
+        # server reachable: a human-issued code is required
+        with pytest.raises(CrewdError) as e:
+            await d.bypass(human, {"session": b["callsign"]})
+        assert e.value.code == "code_required"
+        d.server_reachable = False
+        granted = await d.bypass(human, {"session": b["callsign"], "minutes": 5})
+        assert granted["ok"] and granted["via"] == "offline_tty"
+        write = pretool("sess-b", wt_b, "Write", {"file_path": str(wt_b / "src/app/pos/split.ts"), "content": "x"})
+        assert (await arun_gate(layout, "pretool", write, cwd=wt_b)).stdout == ""  # used once
+        res = await arun_gate(layout, "pretool", write, cwd=wt_b)
+        assert json.loads(res.stdout)["hookSpecificOutput"]["permissionDecision"] == "deny"
+        audit = [json.loads(line) for line in (layout.log_dir / "audit.jsonl").read_text().splitlines()]
+        assert [r["action"] for r in audit] == ["bypass_granted", "bypass_used"]

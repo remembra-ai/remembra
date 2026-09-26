@@ -274,3 +274,55 @@ def _alive(pid: int) -> bool:
         return bool(res.stdout.strip()) and not res.stdout.strip().startswith("Z")
     except OSError:
         return True
+
+
+def test_live_cli_claims_zones_watch_and_stopfailure(tmp_path, live):
+    repo = make_repo(tmp_path / "repo")
+    layout = Layout(tmp_path / "home")
+    vendor_gate(layout, crewd_argv=[PY, "-m", "remembra.relay.crew.crewd"])
+    me = str(os.getpid())
+    try:
+        start = cli(
+            layout,
+            live,
+            "start",
+            "--hook",
+            "claude-code",
+            "--agent-pid",
+            me,
+            stdin=json.dumps({"session_id": "live-b", "cwd": str(repo), "source": "startup"}),
+        )
+        assert start.returncode == 0 and "unavailable" not in start.stdout, start.stdout + start.stderr
+        claimed = cli(layout, live, "claim", "reports", cwd=repo)
+        assert claimed.returncode == 0 and claimed.stdout.startswith("GRANTED reports"), claimed.stdout + claimed.stderr
+        released = cli(layout, live, "release", "reports", cwd=repo)
+        assert released.returncode == 0 and released.stdout.startswith("RELEASED reports"), released.stdout + released.stderr
+        refused = cli(layout, live, "claim", "**/*.md", cwd=repo)  # a repo-wide path glob is refused by the server
+        assert refused.returncode == 1 and refused.stdout.startswith("REFUSED"), refused.stdout
+        zones = cli(layout, live, "zones", cwd=repo)
+        assert zones.returncode == 0 and "- pos (exclusive" in zones.stdout, zones.stdout + zones.stderr
+        watch = cli(layout, live, "watch", "--once", "--since", "0", cwd=repo)
+        assert watch.returncode == 0 and "session.joined" in watch.stdout and "claim.granted" in watch.stdout, watch.stdout
+        # humans only: without a terminal the bypass is refused
+        by = cli(layout, live, "bypass", "--session", "cc-1")
+        assert by.returncode == 1 and "interactive terminal" in by.stdout
+        # StopFailure (billing_error): the hook hands off; crewd saves the baton and blocks the session
+        (repo / "src/app/reports/export.ts").write_text("half done\n")
+        res = cli(
+            layout,
+            live,
+            "stall",
+            "--hook",
+            "claude-code",
+            stdin=json.dumps(
+                {"session_id": "live-b", "error": "billing_error", "last_assistant_message": "Credit balance is too low"}
+            ),
+        )
+        assert res.returncode == 0 and res.stdout == ""
+        key = session_key("claude-code", "live-b")
+        assert wait_for(lambda: (read_json(layout.session_file(key)) or {}).get("state") == "quota_blocked", timeout=30)
+        assert "refs/remembra/baton/" in git(repo, "for-each-ref", "--format=%(refname)", "refs/remembra/")
+    finally:
+        status = read_json(layout.status_file) or {}
+        if status.get("pid") and _alive(int(status["pid"])):
+            os.kill(int(status["pid"]), signal.SIGTERM)
