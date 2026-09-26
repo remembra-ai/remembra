@@ -505,8 +505,10 @@ reads the flag once at startup. What it switches is described in
 [Crew mode: the feature flag](relay/crew.md#the-feature-flag).
 
 Deploying the Crew mode code changes one thing even with the flag off: the
-main database gets migration **v5** (additive columns on `agent_inbox`,
-backfilled once). Production is at schema 9 (versions 1-4 and 6-9, released
+main database gets migration **v5** (additive columns on `agent_inbox`; a
+row's own `metadata.project_id` is copied into the new `project_id` column,
+and untagged rows stay untagged, visible only to unrestricted keys and
+dashboard logins). Production is at schema 9 (versions 1-4 and 6-9, released
 before Crew mode), so the first boot of this release applies only v5, after
 the pre-migration backup. Releases from before Crew mode run on the resulting
 database unchanged.

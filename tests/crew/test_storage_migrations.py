@@ -198,7 +198,9 @@ async def _relay_memory(db: Database, mid: str, owner: str, project: str, agent:
     )
 
 
-async def test_v5_on_v4_db_with_rows_backfills_only_unambiguous_projects(tmp_path: Path) -> None:
+async def test_v5_on_v4_db_copies_only_the_projects_rows_already_carried(tmp_path: Path) -> None:
+    """v5 copies a row's own ``metadata.project_id`` into the column and never infers one:
+    relay memories (``metadata.agent_id`` is caller-writable) and agent keys are ignored."""
     db = await _v4_database(tmp_path)
     try:
         # Owner u1: codex only ever worked on yaadbooks; gemini on two projects.
@@ -238,12 +240,12 @@ async def test_v5_on_v4_db_with_rows_backfills_only_unambiguous_projects(tmp_pat
         got = dict(sync_rows(tmp_path / "legacy.db", "SELECT inbox_id, project_id FROM agent_inbox"))
         assert got == {
             "i_meta": "explicit",
-            "i_one": "yaadbooks",
-            "i_from": "yaadbooks",
+            "i_one": None,
+            "i_from": None,
             "i_ambiguous": None,
             "i_union": None,
             "i_unknown": None,
-            "i_key": "posapp",
+            "i_key": None,
             "i_open_key": None,
             "i_tenant": None,
             "i_blank_meta": None,
@@ -252,6 +254,37 @@ async def test_v5_on_v4_db_with_rows_backfills_only_unambiguous_projects(tmp_pat
         assert set(sync_rows(tmp_path / "legacy.db", "SELECT DISTINCT kind, sender_kind, sender_verified FROM agent_inbox")) == {
             ("directive", "agent", 0)
         }
+    finally:
+        await db.close()
+
+
+async def test_legacy_untagged_row_stays_invisible_to_project_keys_after_v5(tmp_path: Path) -> None:
+    """Production shape (schema 1-4, 6-9): a key restricted to ``alpha`` plants a relay memory
+    saying codex works in alpha. After v5 the owner's untagged claude->codex row is still
+    owner-only (Phase 0 scoping), not pulled into alpha."""
+    db = await _v4_database(tmp_path)
+    try:
+        assert sync_rows(tmp_path / "legacy.db", "SELECT version FROM schema_version ORDER BY version") == [
+            (v,) for v, _, _ in main_migrations().migrations if v != 5
+        ]
+        await _relay_memory(db, "planted", "u1", "alpha", "codex")
+        await _inbox_row(db, "i_payroll", "u1", "claude", "codex")
+        await db.conn.commit()
+        inbox = InboxManager(db)
+        assert await inbox.get_for_agent("u1", "codex", "all", project_ids=["alpha"]) == []
+
+        await db._apply_versioned_migrations()
+
+        assert sync_rows(tmp_path / "legacy.db", "SELECT version FROM schema_version ORDER BY version") == [
+            (v,) for v, _, _ in main_migrations().migrations
+        ]
+        assert sync_rows(tmp_path / "legacy.db", "SELECT project_id FROM agent_inbox WHERE inbox_id = 'i_payroll'") == [
+            (None,)
+        ]
+        inbox = InboxManager(db)  # a fresh process sees the v5 column
+        assert await inbox.get_for_agent("u1", "codex", "all", project_ids=["alpha"]) == []
+        assert await inbox.get_one("u1", "i_payroll", project_ids=["alpha"]) is None
+        assert [r["inbox_id"] for r in await inbox.get_for_agent("u1", "codex", "all")] == ["i_payroll"]
     finally:
         await db.close()
 

@@ -64,8 +64,10 @@ release.
   place and chain links and lose their content, so the chain still verifies.
 
 ### Upgrading
-- The main database gets one additive migration, **v5** (project and crew columns on the agent inbox,
-  backfilled once), even with Crew mode off. A database at schema 9 applies only v5 on first boot, after
+- The main database gets one additive migration, **v5** (project and crew columns on the agent inbox),
+  even with Crew mode off. A message's own `metadata.project_id` is copied into the new column; untagged
+  messages stay untagged (visible only to unrestricted keys and dashboard logins), and no project is
+  guessed for them. A database at schema 9 applies only v5 on first boot, after
   the pre-migration backup. `crew.db` is created only when Crew mode is on. See
   [Deploying: Crew mode](docs/DEPLOYING.md#crew-mode).
 

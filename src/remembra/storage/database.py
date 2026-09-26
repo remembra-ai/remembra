@@ -167,19 +167,16 @@ async def _table_exists(conn: Any, name: str) -> bool:
 
 
 async def backfill_agent_inbox_projects(conn: Any) -> int:
-    """Give unscoped ``agent_inbox`` rows a ``project_id`` where it is unambiguous (v5).
+    """Copy each unscoped ``agent_inbox`` row's text ``metadata.project_id`` into the column (v5).
 
-    1. A row whose ``metadata.project_id`` is a non-empty string keeps that
-       project: the session brief already scoped inbox rows by it, so those rows
-       stay visible to exactly the keys that saw them before.
-    2. Otherwise the row's ``to_agent`` and ``from_agent`` are mapped to the
-       projects each agent is known to work in for that owner: relay memories
-       (``metadata.agent_id``) and agent-bound API keys restricted to projects.
-       Only when the union of both agents' projects is exactly one project is it
-       assigned.
-
-    Everything else stays NULL, which (§11) makes it visible only to unrestricted
-    keys and dashboard logins. Returns the number of rows given a project.
+    Only a project the row already carried is copied: the session brief and the
+    Phase 0 inbox filter already scoped the row by it, so it stays visible to
+    exactly the keys that saw it before. No project is ever inferred (from the
+    agents' memories or keys): ``memories.metadata.agent_id`` is caller-writable,
+    so a key restricted to one project could plant it and pull the owner's
+    untagged rows into its project. Every other row stays NULL, which (§11) makes
+    it visible only to unrestricted keys and dashboard logins. Returns the number
+    of rows given a project.
     """
     cursor = await conn.execute(
         """
@@ -192,56 +189,6 @@ async def backfill_agent_inbox_projects(conn: Any) -> int:
         """
     )
     updated = max(cursor.rowcount or 0, 0)
-
-    cursor = await conn.execute("SELECT DISTINCT owner_user_id, to_agent, from_agent FROM agent_inbox WHERE project_id IS NULL")
-    combos = [(row[0], row[1], row[2]) for row in await cursor.fetchall()]
-    if not combos:
-        return updated
-    owners = sorted({c[0] for c in combos})
-
-    known: dict[tuple[str, str], set[str]] = {}
-    marks = ", ".join("?" for _ in owners)
-    cursor = await conn.execute(
-        f"""
-        SELECT DISTINCT user_id, trim(json_extract(metadata, '$.agent_id')) AS agent, project_id
-          FROM memories
-         WHERE user_id IN ({marks})
-           AND json_valid(metadata)
-           AND json_type(metadata, '$.agent_id') = 'text'
-           AND project_id IS NOT NULL AND project_id != ''
-        """,
-        owners,
-    )
-    for user_id, agent, project_id in await cursor.fetchall():
-        if agent:
-            known.setdefault((user_id, agent), set()).add(project_id)
-
-    if await _table_exists(conn, "api_key_roles"):
-        cursor = await conn.execute(
-            f"""
-            SELECT k.user_id, trim(k.agent_id), r.project_ids
-              FROM api_keys k JOIN api_key_roles r ON r.api_key_id = k.id
-             WHERE k.user_id IN ({marks}) AND k.agent_id IS NOT NULL AND trim(k.agent_id) != ''
-            """,
-            owners,
-        )
-        for user_id, agent, project_ids in await cursor.fetchall():
-            projects = {p.strip() for p in (project_ids or "").split(",") if p.strip()}
-            if projects:  # an unrestricted key says nothing about the agent's project
-                known.setdefault((user_id, agent), set()).update(projects)
-
-    for owner, to_agent, from_agent in combos:
-        projects = known.get((owner, (to_agent or "").strip()), set()) | known.get((owner, (from_agent or "").strip()), set())
-        if len(projects) != 1:
-            continue
-        cursor = await conn.execute(
-            """
-            UPDATE agent_inbox SET project_id = ?
-             WHERE project_id IS NULL AND owner_user_id = ? AND to_agent = ? AND from_agent = ?
-            """,
-            (next(iter(projects)), owner, to_agent, from_agent),
-        )
-        updated += max(cursor.rowcount or 0, 0)
     log.info("agent_inbox_project_backfill", rows=updated)
     return updated
 
