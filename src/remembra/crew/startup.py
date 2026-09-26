@@ -9,9 +9,12 @@ tears down.
 Other work packages add their background pieces **here**, not in ``main.py``:
 
 * append their module path to :data:`HOOK_MODULES` (one line), and
-* in that module call :func:`add_hook` at import time, e.g. WP-1 opens ``crew.db``
-  at ``order=0`` and sets ``app.state.crew_db``; WP-4 adds the reaper at
-  ``order=40``.
+* in that module define ``register_hooks()`` calling :func:`add_hook` (and call it
+  at import time too); :func:`start` calls ``register_hooks()`` on every start, so
+  the hooks are present even when the module was imported earlier. WP-1's
+  :mod:`remembra.crew.db_hook` opens ``crew.db`` at ``order=0`` (sets
+  ``app.state.crew_db``) and runs the outbox worker at ``order=35``; WP-4 adds
+  the reaper at ``order=40``.
 
 Built-in hooks (this module):
 
@@ -47,7 +50,7 @@ StartFn = Callable[[FastAPI, "CrewRuntime"], Awaitable[None]]
 StopFn = Callable[[FastAPI, "CrewRuntime"], Awaitable[None]]
 
 # Modules whose import registers hooks (other WPs add one line each).
-HOOK_MODULES: tuple[str, ...] = ()
+HOOK_MODULES: tuple[str, ...] = ("remembra.crew.db_hook",)
 
 TAILER_ENV: Final = "REMEMBRA_CREW_DB_TAILER"
 
@@ -166,7 +169,10 @@ add_hook("crew.retention", order=30, start=_start_retention, stop=_stop_retentio
 async def start(app: FastAPI, *, tailer: bool | None = None) -> CrewRuntime:
     """Import hook modules and start every hook in order. On failure, stop what started and re-raise."""
     for module in HOOK_MODULES:
-        importlib.import_module(module)
+        mod = importlib.import_module(module)
+        register_hooks = getattr(mod, "register_hooks", None)
+        if callable(register_hooks):
+            register_hooks()
     rt = CrewRuntime(tailer_enabled=tailer_enabled_from_env() if tailer is None else tailer)
     app.state.crew_runtime = rt
     try:

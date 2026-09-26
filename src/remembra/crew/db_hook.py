@@ -1,0 +1,116 @@
+"""Crew startup hooks owned by WP-1: open ``crew.db`` and run the cross-database outbox worker.
+
+Registered through :mod:`remembra.crew.startup` (listed in ``HOOK_MODULES``; §14 interface):
+
+* ``crew.db`` (order 0): opens ``crew.db`` next to the main database
+  (:func:`remembra.crew.db.open_crew_db` on ``settings.database_url``, or
+  ``$REMEMBRA_CREW_DB_PATH``), applies ``CREW_MIGRATIONS`` and sets
+  ``app.state.crew_db``; closes it on shutdown. An app that already set
+  ``app.state.crew_db`` (tests, an embedding host) keeps its own database and
+  this hook neither replaces nor closes it.
+* ``crew.outbox`` (order 35): starts :class:`remembra.crew.outbox.CrewOutboxWorker`
+  over ``crew.db`` with the production handlers (memory promotions through
+  ``app.state.memory_service``, relay handoffs through ``RelayService`` on
+  ``app.state.db``) and exposes it as ``app.state.crew_outbox`` so producers can
+  ``wake()`` it after enqueueing; stops it on shutdown. It needs the main
+  lifespan's ``db`` and ``memory_service`` and fails startup loudly without them,
+  because queued effects would otherwise stay ``pending`` forever.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Final, cast
+
+import structlog
+
+from remembra.crew import startup
+from remembra.crew.db import CrewDatabase, open_crew_db
+from remembra.crew.outbox import CrewOutboxWorker, default_handlers
+from remembra.crew.store import CrewStore
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI, Request
+
+log = structlog.get_logger(__name__)
+
+CREW_DB_ORDER: Final = 0
+OUTBOX_ORDER: Final = 35
+_OWNED: Final = "crew_db_owned"
+_WORKER: Final = "crew_outbox_worker"
+
+
+async def _start_crew_db(app: FastAPI, rt: startup.CrewRuntime) -> None:
+    if getattr(app.state, "crew_db", None) is not None:
+        rt.extras[_OWNED] = False
+        log.info("crew_db_provided_by_app")
+        return
+    from remembra.config import get_settings
+
+    db = await open_crew_db(get_settings().database_url)
+    app.state.crew_db = db
+    rt.extras[_OWNED] = True
+
+
+async def _stop_crew_db(app: FastAPI, rt: startup.CrewRuntime) -> None:
+    if not rt.extras.pop(_OWNED, False):
+        return
+    db: CrewDatabase | None = getattr(app.state, "crew_db", None)
+    app.state.crew_db = None
+    if db is not None:
+        await db.close()
+
+
+def _relay_filters(app: FastAPI) -> tuple[Any, Any]:
+    """The relay close-out filters the /relay routes use (sanitizer screen, per-value PII scrub).
+
+    Both helpers only read ``request.app.state``, so a stand-in carrying the app is enough.
+    """
+    from remembra.api.v1.agent_session import screen_text
+    from remembra.api.v1.relay import pii_scrubber
+
+    request = cast("Request", SimpleNamespace(app=app))
+    return (lambda text: screen_text(request, text, apply_pii=False)), pii_scrubber(request)
+
+
+async def _start_outbox(app: FastAPI, rt: startup.CrewRuntime) -> None:
+    from remembra.services.relay import RelayService
+
+    main_db = getattr(app.state, "db", None)
+    memory_service = getattr(app.state, "memory_service", None)
+    if main_db is None or memory_service is None:
+        raise RuntimeError(
+            "crew mode: the outbox worker needs app.state.db and app.state.memory_service (set by the main lifespan)"
+        )
+    screen, scrub = _relay_filters(app)
+    handlers = default_handlers(
+        main_db=main_db,
+        memory_service=memory_service,
+        relay_service=RelayService(db=main_db, memory_service=memory_service),
+        screen=screen,
+        scrub=scrub,
+    )
+    crew = startup.crew_db(app)
+    if not isinstance(crew, CrewDatabase):
+        raise RuntimeError("crew mode: app.state.crew_db must be a remembra.crew.db.CrewDatabase for the outbox worker")
+    worker = CrewOutboxWorker(CrewStore(crew), handlers)
+    worker.start()
+    rt.extras[_WORKER] = worker
+    app.state.crew_outbox = worker
+    log.info("crew_outbox_worker_started", kinds=sorted(handlers))
+
+
+async def _stop_outbox(app: FastAPI, rt: startup.CrewRuntime) -> None:
+    worker: CrewOutboxWorker | None = rt.extras.pop(_WORKER, None)
+    app.state.crew_outbox = None
+    if worker is not None:
+        await worker.stop()
+
+
+def register_hooks() -> None:
+    """Add (or re-add, by name) the ``crew.db`` and ``crew.outbox`` hooks. Called by ``startup.start``."""
+    startup.add_hook("crew.db", order=CREW_DB_ORDER, start=_start_crew_db, stop=_stop_crew_db)
+    startup.add_hook("crew.outbox", order=OUTBOX_ORDER, start=_start_outbox, stop=_stop_outbox)
+
+
+register_hooks()
