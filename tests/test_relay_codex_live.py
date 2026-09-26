@@ -34,6 +34,7 @@ from typing import Any
 
 import pytest
 
+from remembra.relay.background import read_session_meta, session_skip_reason
 from remembra.relay.facts import parse_codex_rollout
 from tests.codex_live_harness import (
     FIXTURE_HOME,
@@ -303,3 +304,96 @@ def test_usage_limit_stop_reaches_the_relay(server, tmp_path):  # noqa: F811
         rollout = Path(end["transcript_path"])
         assert parse_codex_rollout(rollout).usage_limit
         _record(rig, "rollout_usage_limit.jsonl", scrub_rollout(rollout.read_text(), rig.replacements()))
+
+
+_KIND_PROBE = """\
+import json, sys
+from pathlib import Path
+from remembra.relay.background import read_session_meta, session_skip_reason
+source = Path(sys.argv[1])
+payload = json.loads(source.read_text())
+meta = read_session_meta(payload["transcript_path"]) or {}
+found = {"event": payload["hook_event_name"], "thread_source": meta.get("thread_source"), "skip": session_skip_reason(payload)}
+(Path(sys.argv[2]) / (source.name + ".json")).write_text(json.dumps(found))
+"""
+
+
+def test_every_hook_can_read_the_thread_kind_from_the_rollout(server, tmp_path):  # noqa: F811
+    """The skip for automations and sub-agents (remembra.relay.background) reads the rollout's first line.
+
+    Live: when each hook fires, SessionStart included, the rollout it names
+    already starts with its session_meta, so the kind is read before the brief
+    is printed. A user thread (all ``codex exec`` can start) keeps its brief
+    and its handoff, and relay.log records no skip.
+    """
+    with MockResponses({"Say hi.": [("say", "Hi.")]}) as mock:
+        rig = Rig(tmp_path, server, mock)
+        _claude_closes(rig)
+        kinds = tmp_path / "kinds"
+        kinds.mkdir()
+        probe = tmp_path / "kind_probe.py"
+        probe.write_text(_KIND_PROBE)
+        # Read the kind BEFORE the relay runs, from the payload Codex sent this hook.
+        rig.hook.write_text(
+            "#!/bin/sh\n"
+            f'f=$(mktemp "{rig.payloads}/payload.XXXXXX")\n'
+            'cat > "$f"\n'
+            f'"{sys.executable}" "{probe}" "$f" "{kinds}"\n'
+            f'exec "{sys.executable}" -m remembra.relay.cli "$@" < "$f"\n'
+        )
+        rig.connect()
+        trust_hooks(rig.codex, rig.env, rig.repo, rig.config)
+        before = len(mock.requests)
+        rig.exec("Say hi.")
+        assert _brief_count(MockResponses.developer_texts(mock.requests[before])) == 1
+        assert rig.trail("codex"), "codex handoff missing"
+        seen = [json.loads(p.read_text()) for p in kinds.iterdir()]
+        by_event = {k["event"]: k for k in seen}
+        assert set(by_event) == {"SessionStart", "UserPromptSubmit", "SessionEnd"}, seen
+        assert all(k["thread_source"] == "user" and k["skip"] is None for k in seen), seen
+        log = rig.home / ".remembra" / "relay" / "relay.log"
+        assert "skipped" not in (log.read_text() if log.exists() else "")
+
+
+def test_a_sub_agent_thread_gets_no_brief_and_leaves_no_handoff(server, tmp_path):  # noqa: F811
+    """A sub-agent Codex starts is read as one from its own rollout, and gets no brief or handoff.
+
+    Live: the model asks Codex's multi-agent tool for a sub-agent while the
+    parent turn waits. The rollout Codex writes for it starts with a
+    session_meta the relay reads as ``subagent``; the parent's is not skipped.
+    The parent gets its brief and leaves the only handoff; the sub-agent's
+    prompt has no brief. codex-cli 0.155.0-alpha.16.4 runs no hooks for the
+    sub-agent thread under ``codex exec``; if a version does, relay.log must
+    show each of its hooks skipped.
+    """
+    scripts = {
+        "Delegate the check.": [("spawn", "Check the totals."), ("exec", "sleep 6"), ("say", "Delegated.")],
+        "Check the totals.": [("say", "Totals checked.")],
+    }
+    with MockResponses(scripts) as mock:
+        rig = Rig(tmp_path, server, mock)
+        _claude_closes(rig)
+        rig.connect()
+        trust_hooks(rig.codex, rig.env, rig.repo, rig.config)
+        rig.exec("Delegate the check.")
+        parent_turn = [r for r in mock.requests if MockResponses.prompt_of(r) == ("Delegate the check.", 0)]
+        sub_turn = [r for r in mock.requests if MockResponses.prompt_of(r) == ("Check the totals.", 0)]
+        assert len(parent_turn) == 1 and len(sub_turn) == 1, [MockResponses.prompt_of(r) for r in mock.requests]
+        assert _brief_count(MockResponses.developer_texts(parent_turn[0])) == 1
+        assert _brief_count(MockResponses.developer_texts(sub_turn[0])) == 0
+
+        rollouts = sorted((rig.codex_home / "sessions").rglob("rollout-*.jsonl"))
+        kinds = {p: session_skip_reason({"transcript_path": str(p)}) for p in rollouts}
+        assert sorted(kinds.values(), key=str) == [None, "subagent"], kinds
+        sub_ids = {str((read_session_meta(p) or {}).get("id")) for p, kind in kinds.items() if kind == "subagent"}
+
+        assert len(rig.trail("codex")) == 1
+        time.sleep(3)  # a sub-agent's detached close, had one started, would have landed by now
+        assert len(rig.trail("codex")) == 1
+        log_path = rig.home / ".remembra" / "relay" / "relay.log"
+        log = log_path.read_text() if log_path.exists() else ""
+        for event, payloads in rig.captured().items():
+            for payload in payloads:
+                if payload["session_id"] in sub_ids:
+                    verb = "close" if event == "SessionEnd" else "brief"
+                    assert f"skipped {verb}: codex subagent session {payload['session_id']}" in log, (event, log)

@@ -58,8 +58,8 @@ from typing import Any
 import httpx
 
 from remembra.client.project import normalize_project_id, parse_project_aliases
+from remembra.relay import background, outbox
 from remembra.relay import facts as factlib
-from remembra.relay import outbox
 from remembra.relay.adapters import REGISTRY, Adapter, agents_md, backup_and_write, get_adapter, relay_command
 from remembra.relay.config import RelayConfig, load_config, load_config_from_source
 
@@ -584,6 +584,8 @@ def cmd_brief(args: argparse.Namespace) -> int:
         if once:
             if not hook_session or brief_delivered(home, once_key, hook_session):
                 return 0
+        if adapter and background.skip_hook_session(adapter, payload, "brief", home):
+            return 0  # a Codex automation or sub-agent thread: no brief in its prompt, no pickup recorded
         ctx = Context(args, payload=payload)
         if not args.format and ctx.adapter:
             mode = ctx.adapter.spec.output
@@ -825,9 +827,16 @@ def cmd_close(args: argparse.Namespace) -> int:
     try:
         adapter = get_adapter(getattr(args, "hook", None))
         hook_payload: dict[str, Any] | None = None
-        if adapter and adapter.spec.detach_close and not args.foreground and not args.dry_run:
+        if adapter:
             hook_payload = read_hook_payload()
-            if spawn_detached_close(args, hook_payload):
+            home = Path(os.environ.get("HOME") or Path.home())
+            skipped = background.skip_hook_session(adapter, hook_payload, "close", home)
+            if skipped:  # a Codex automation or sub-agent thread: nothing sent, queued or detached
+                if args.dry_run:
+                    _err(f"close skipped: a {adapter.spec.name} {skipped} session leaves no handoff")
+                return 0
+        if adapter and adapter.spec.detach_close and not args.foreground and not args.dry_run:
+            if spawn_detached_close(args, hook_payload or {}):
                 return 0
         ctx = Context(args, payload=hook_payload)
         payload = build_close_payload(ctx, args)

@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Relay: Codex automations and sub-agents no longer fill the trail.** Codex Desktop runs the relay hooks for
+  every scheduled automation (dozens a day), and sub-agent threads can run them too, so each one got a project
+  brief in its prompt and left a handoff that buried the sessions people work in, and the next brief pointed at
+  an automation run. The relay now reads the kind of thread from the first line of the Codex session file: for
+  an automation or a sub-agent, `brief` and `close` do nothing (nothing sent, nothing queued) and write one
+  line to `relay.log`. Threads you start, voice chats included, and `remembra-relay close` typed by hand work
+  as before. Set `REMEMBRA_RELAY_INCLUDE_AUTOMATIONS=1` to keep automation handoffs.
 - **Sign in with Google or GitHub on older accounts.** An account whose email was never verified (accounts
   made before email verification existed) is now linked when Google, or GitHub with a verified primary email,
   confirms the address: the email becomes verified and the user is signed in. A one-time account check then

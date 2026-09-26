@@ -102,6 +102,14 @@ auto-restoring a thread): it prints the brief only if that session has not had o
 Qwen Code and Cursor do not wait for it at all. For these `close` hands the work to a detached background
 process and returns at once; that process logs to `~/.remembra/relay/last-detached-close.log`.
 
+**Codex automations and sub-agents.** Codex Desktop runs the hooks for its scheduled automations too,
+and a sub-agent thread a session spawns can run them as well. The relay reads the kind of thread from the
+first line of its rollout and does nothing for automations and sub-agents: no brief in their prompt, no
+handoff in the trail, one line in `~/.remembra/relay/relay.log`
+(`skipped brief: codex automation session <id>`). Threads you start, voice chats included, work as before.
+To keep automation handoffs and briefs, set `REMEMBRA_RELAY_INCLUDE_AUTOMATIONS=1` in the environment
+Codex runs its hooks with. Sub-agents are always skipped; the session that spawned them leaves the handoff.
+
 **Usage limits.** Codex has no hook for its usage limit. When a Codex session's last turn stopped on the
 limit, the handoff says `ended: usage_limit` (the brief and the trail show `stopped: usage_limit`, as for a
 Claude Code StopFailure) and lists Codex's limit message first under "Failing / errors", so the next agent
