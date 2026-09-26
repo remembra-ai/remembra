@@ -259,14 +259,25 @@ def price_line(
     *,
     seats: int | None = None,
     founding: bool = False,
+    founding_held: bool = True,
 ) -> str:
-    """What the plan costs, from the catalog (per seat for Team)."""
+    """What the plan costs, from the catalog (per seat for Team).
+
+    ``founding`` means the subscription is billed at the Founding 100 price
+    (Solo, annual only); it is ignored for any other plan or interval.
+    ``founding_held`` is whether the account holds one of the 100 Founding
+    seats: a Founding charge that arrived after the offer was full is quoted
+    at what was charged, without the lifetime lock.
+    """
     limits = get_plan(tier)
     yearly = BillingInterval.parse(str(interval)) == BillingInterval.YEAR if interval else False
     if limits.tier == PlanTier.FREE:
         return "Free"
-    if founding and limits.tier == PlanTier.SOLO:
-        return f"{money(FOUNDING_ANNUAL_PRICE_CENTS)}/year (Founding 100, price locked for life)"
+    if founding and limits.tier == PlanTier.SOLO and yearly:
+        price = f"{money(FOUNDING_ANNUAL_PRICE_CENTS)}/year"
+        if founding_held:
+            return f"{price} (Founding 100, price locked for life)"
+        return f"{price}, the Founding 100 price (the offer was full when this payment arrived; we will contact you about it)"
     cents = limits.price_annual_cents if yearly and limits.price_annual_cents is not None else limits.price_monthly_cents
     if cents is None:
         return "Custom contract"
@@ -443,6 +454,7 @@ def plan_changed(
     seats: int | None,
     founding: bool,
     memory_cap: int,
+    founding_held: bool = True,
 ) -> RenderedEmail:
     limits = get_plan(new_tier).scaled(seats)
     name = get_plan(new_tier).display_name
@@ -450,7 +462,8 @@ def plan_changed(
         intro = f"Your plan changed from {plan_name(old_tier)} to {name}."
     else:
         intro = f"Your {name} plan was updated."
-    facts = [("Plan", name), ("Price", price_line(new_tier, interval, seats=seats, founding=founding))]
+    price = price_line(new_tier, interval, seats=seats, founding=founding, founding_held=founding_held)
+    facts = [("Plan", name), ("Price", price)]
     if get_plan(new_tier).per_seat:
         facts.append(("Seats", str(limits.max_users)))
     facts += _plan_facts(limits, memory_cap, _credit_line(limits, interval))
@@ -476,17 +489,23 @@ def payment_failed(
     tier: PlanTier,
     interval: BillingInterval | None,
     seats: int | None,
-    founding: bool,
+    founding: bool | None,
+    founding_held: bool = True,
 ) -> RenderedEmail:
+    """``founding`` None: not known whether the Founding or the regular price is due, so no price is quoted."""
     name = plan_name(tier)
+    price = (
+        ""
+        if founding is None
+        else f" ({price_line(tier, interval, seats=seats, founding=founding, founding_held=founding_held)})"
+    )
     return render(
         "payment_failed",
         subject=f"Remembra: the payment for your {name} plan failed",
         heading="Your payment didn't go through",
         blocks=[
             P(
-                f"We couldn't collect the payment for your {name} plan "
-                f"({price_line(tier, interval, seats=seats, founding=founding)}). Your plan keeps working for now, "
+                f"We couldn't collect the payment for your {name} plan{price}. Your plan keeps working for now, "
                 "and Paddle, our reseller, will try the payment again."
             ),
             P("Please check or update your payment method:"),

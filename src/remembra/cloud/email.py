@@ -369,6 +369,7 @@ class EmailService:
         seats: int | None,
         founding: bool,
         memory_cap: int,
+        founding_held: bool = True,
     ) -> EmailResult:
         return await self.send_rendered(
             to,
@@ -379,16 +380,31 @@ class EmailService:
                 interval=interval,
                 seats=seats,
                 founding=founding,
+                founding_held=founding_held,
                 memory_cap=memory_cap,
             ),
         )
 
     async def send_payment_failed_email(
-        self, to: str, *, tier: PlanTier, interval: BillingInterval | None, seats: int | None, founding: bool
+        self,
+        to: str,
+        *,
+        tier: PlanTier,
+        interval: BillingInterval | None,
+        seats: int | None,
+        founding: bool | None,
+        founding_held: bool = True,
     ) -> EmailResult:
         return await self.send_rendered(
             to,
-            templates.payment_failed(dashboard=self.dashboard, tier=tier, interval=interval, seats=seats, founding=founding),
+            templates.payment_failed(
+                dashboard=self.dashboard,
+                tier=tier,
+                interval=interval,
+                seats=seats,
+                founding=founding,
+                founding_held=founding_held,
+            ),
         )
 
     async def send_subscription_cancelled_email(self, to: str, *, old_tier: PlanTier, memory_cap: int) -> EmailResult:

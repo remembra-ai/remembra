@@ -13,6 +13,10 @@ provider configured every helper is a no-op.
   same plan send nothing) or "subscription ended" (a cancel to Free).
 - :func:`notify_payment_failed` on ``subscription.past_due``, once per
   subscription per day even if Paddle redelivers the event.
+
+Prices quoted come from the event's Paddle price, never from the tenant's
+sticky ``founding`` column alone (a former Founding 100 member who later pays
+Solo monthly is not on the Founding price).
 """
 
 from __future__ import annotations
@@ -141,11 +145,21 @@ def _plan_changed(
     return old_seats is not None and new_seats != old_seats
 
 
-def notify_billing_change(state: Any, user_id: str, before: dict[str, Any] | None, *, cancelled: bool = False) -> None:
+def notify_billing_change(
+    state: Any,
+    user_id: str,
+    before: dict[str, Any] | None,
+    *,
+    cancelled: bool = False,
+    founding: bool = False,
+) -> None:
     """Email the account when a billing event changed its plan, interval or seats.
 
     ``before`` is the tenant row as it was before the event was applied. A
-    renewal (same plan, interval and seats) sends nothing.
+    renewal (same plan, interval and seats) sends nothing. ``founding`` is
+    whether the event's price is the Founding 100 price: the tenant's
+    ``founding`` column is a sticky redemption record (it outlives a cancel),
+    so it only says whether that price is locked in, never what is charged now.
     """
 
     async def run() -> None:
@@ -173,7 +187,8 @@ def notify_billing_change(state: Any, user_id: str, before: dict[str, Any] | Non
                 new_tier=new_tier,
                 interval=new_interval,
                 seats=new_seats,
-                founding=bool((after or {}).get("founding")),
+                founding=founding,
+                founding_held=bool((after or {}).get("founding")),
                 memory_cap=account.memory_cap,
             )
 
@@ -182,7 +197,12 @@ def notify_billing_change(state: Any, user_id: str, before: dict[str, Any] | Non
     _spawn(state, run(), "email:billing_change")
 
 
-def notify_payment_failed(state: Any, user_id: str, subscription_id: str | None) -> None:
+def notify_payment_failed(state: Any, user_id: str, subscription_id: str | None, *, founding: bool | None = None) -> None:
+    """Email the account that a payment failed, once per subscription per day.
+
+    ``founding`` is whether the past-due subscription is on the Founding 100
+    price, from the event's items; None when the event named no known price.
+    """
     key = subscription_id or f"user:{user_id}"
     now = time.monotonic()
     for stale in [k for k, sent in _payment_failed_sent.items() if now - sent > PAYMENT_FAILED_DEDUPE_SECONDS]:
@@ -201,9 +221,16 @@ def notify_payment_failed(state: Any, user_id: str, subscription_id: str | None)
         if tier == PlanTier.FREE:
             return
 
+        held = bool((tenant or {}).get("founding"))
+        price_founding = founding
+        if price_founding is None:
+            # The event named no price. A Founding 100 holder on Solo annual may
+            # pay $108 or $120 (a later regular subscription): say neither.
+            price_founding = None if held and tier == PlanTier.SOLO and interval == BillingInterval.YEAR else False
+
         async def send(service: EmailService, to: str) -> EmailResult:
             return await service.send_payment_failed_email(
-                to, tier=tier, interval=interval, seats=seats, founding=bool((tenant or {}).get("founding"))
+                to, tier=tier, interval=interval, seats=seats, founding=price_founding, founding_held=held
             )
 
         await _send("payment_failed", state, user_id, send)

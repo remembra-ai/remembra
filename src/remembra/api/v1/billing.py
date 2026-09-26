@@ -643,7 +643,15 @@ async def _apply_paddle_result(request: Request, result: Any) -> str:
 
     log.info("paddle_plan_applied", user_id=user_id, plan=plan.value, action=result.action)
     # Tell the customer when the plan, interval or seats changed (renewals send nothing).
-    notify.notify_billing_change(request.app.state, user_id, before, cancelled=result.action == "cancel_subscription")
+    # The price quoted is the one this event charged, not the sticky Founding
+    # 100 redemption record on the account.
+    notify.notify_billing_change(
+        request.app.state,
+        user_id,
+        before,
+        cancelled=result.action == "cancel_subscription",
+        founding=result.founding,
+    )
     return "applied"
 
 
@@ -657,7 +665,12 @@ async def _notify_payment_failed(request: Request, meter: Any, result: Any) -> N
         return
     if meter.active_subscription_id(await meter.get_tenant(user_id)) != result.paddle_subscription_id:
         return  # not the subscription this account's plan comes from
-    notify.notify_payment_failed(request.app.state, str(user_id), result.paddle_subscription_id)
+    notify.notify_payment_failed(
+        request.app.state,
+        str(user_id),
+        result.paddle_subscription_id,
+        founding=result.founding if result.plan_from_price else None,
+    )
 
 
 async def _resolve_paddle_account(request: Request, meter: Any, result: Any) -> str | None:

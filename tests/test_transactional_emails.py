@@ -171,6 +171,9 @@ def test_key_created_names_the_key_but_never_contains_it() -> None:
         (PlanTier.SOLO, BillingInterval.MONTH, None, False, "$12/month"),
         (PlanTier.SOLO, BillingInterval.YEAR, None, False, "$120/year"),
         (PlanTier.SOLO, BillingInterval.YEAR, None, True, "$108/year (Founding 100"),
+        # The Founding price is annual only: a Founding flag never turns a monthly price into $108/year.
+        (PlanTier.SOLO, BillingInterval.MONTH, None, True, "$12/month"),
+        (PlanTier.PRO, BillingInterval.YEAR, None, True, "$290/year"),
         (PlanTier.PRO, BillingInterval.MONTH, None, False, "$29/month"),
         (PlanTier.PRO, BillingInterval.YEAR, None, False, "$290/year"),
         (PlanTier.TEAM, BillingInterval.MONTH, 3, False, "$15 per seat/month x 3 seats = $45/month"),
@@ -190,6 +193,8 @@ def test_plan_changed_prices_come_from_the_catalog(tier, interval, seats, foundi
     )
     _assert_clean(email)
     assert expected in email.text
+    if not expected.startswith("$108"):
+        assert "Founding" not in email.text and "$108" not in email.text
     assert f"{limits.scaled(seats).max_smart_credits_per_month:,} a month" in email.text  # pooled for Team seats
     assert email.subject == f"Remembra: you're on {limits.display_name} now"
 
@@ -448,6 +453,147 @@ async def test_legacy_renewal_filling_in_the_interval_sends_nothing(tmp_path, ou
         await outbox.wait(1)
         [changed] = outbox.of("plan_changed")
         assert "Your Pro (legacy $49) plan was updated." in changed.text
+
+
+def test_founding_price_without_a_seat_is_quoted_without_the_lifetime_lock() -> None:
+    line = tpl.price_line(PlanTier.SOLO, BillingInterval.YEAR, founding=True, founding_held=False)
+    assert line.startswith("$108/year, the Founding 100 price") and "the offer was full" in line
+    assert "locked for life" not in line and "$120" not in line
+
+
+def test_payment_failed_with_an_unknown_price_quotes_none() -> None:
+    email = tpl.payment_failed(dashboard=DASH, tier=PlanTier.SOLO, interval=BillingInterval.YEAR, seats=None, founding=None)
+    _assert_clean(email)
+    assert "payment for your Solo plan. Your plan keeps working" in email.text
+    assert "$" not in email.text.split("Your plan keeps working")[0]
+
+
+@pytest.fixture()
+def fresh_payment_dedupe(monkeypatch) -> None:
+    from remembra.cloud import notify
+
+    monkeypatch.setattr(notify, "_payment_failed_sent", {})
+
+
+def _past_due(sub: str, customer: str, price: str | None) -> dict[str, Any]:
+    data: dict[str, Any] = {"id": sub, "customer_id": customer, "status": "past_due"}
+    if price is not None:
+        data["items"] = [{"price": {"id": price}, "quantity": 1}]
+    return data
+
+
+def _updated(sub: str, customer: str, price: str) -> dict[str, Any]:
+    return {"id": sub, "status": "active", "customer_id": customer, "items": [{"price": {"id": price}, "quantity": 1}]}
+
+
+async def test_former_founding_member_is_quoted_the_price_paddle_charges(tmp_path, outbox, fresh_payment_dedupe) -> None:
+    """The tenant's founding column is sticky; the emails quote the event's price, not the redemption record."""
+    async with cost_app(tmp_path, resend_api_key=RESEND_TEST_KEY, public_dashboard_url=DASH) as c:
+        _paddle(c, **PRICES)
+        c.h.app.state.tasks = None
+        uid = await c.h.create_user("founder@example.com", verified=True)
+
+        # A real Founding 100 purchase: $108/year, locked for life.
+        await _hook(c, "transaction.completed", _purchase("txn_f1", "sub_f1", "pri_founding", _bound(uid), customer="ctm_f"))
+        await outbox.wait(1)
+        [founded] = outbox.of("plan_changed")
+        _message_ok(founded)
+        assert "$108/year (Founding 100, price locked for life)" in founded.text
+        await _hook(c, "subscription.past_due", _past_due("sub_f1", "ctm_f", "pri_founding"))
+        await outbox.wait(2)
+        [failed] = outbox.of("payment_failed")
+        _message_ok(failed)
+        assert "Solo plan ($108/year (Founding 100, price locked for life))" in failed.text
+
+        # Cancelled: the redemption record stays (the seat is not released).
+        await _hook(c, "subscription.canceled", {"id": "sub_f1", "customer_id": "ctm_f", "status": "canceled"})
+        await outbox.wait(3)
+        tenant = await c.meter.get_tenant(uid)
+        assert tenant["plan"] == "free" and tenant["founding"] == 1
+
+        # Back on Solo monthly at the regular price: $12/month, no Founding line.
+        await _hook(c, "transaction.completed", _purchase("txn_m1", "sub_m1", "pri_solo_m", _bound(uid), customer="ctm_f"))
+        await outbox.wait(4)
+        monthly = outbox.of("plan_changed")[-1]
+        _message_ok(monthly)
+        assert "Price:" in monthly.text and "$12/month" in monthly.text
+        assert "Founding" not in monthly.text and "$108" not in monthly.text
+        assert (await c.meter.get_tenant(uid))["founding"] == 1  # still sticky
+        await _hook(c, "subscription.past_due", _past_due("sub_m1", "ctm_f", "pri_solo_m"))
+        await outbox.wait(5)
+        failed_monthly = outbox.of("payment_failed")[-1]
+        assert "Solo plan ($12/month)" in failed_monthly.text and "Founding" not in failed_monthly.text
+
+        # Solo annual at the regular $120 price.
+        await _hook(
+            c,
+            "subscription.updated",
+            _updated("sub_m1", "ctm_f", "pri_solo_y"),
+        )
+        await outbox.wait(6)
+        yearly = outbox.of("plan_changed")[-1]
+        assert "$120/year" in yearly.text and "Founding" not in yearly.text and "$108" not in yearly.text
+
+        # Past due again on the same subscription the next day (dedupe cleared): the event names the $120 price.
+        from remembra.cloud import notify
+
+        notify._payment_failed_sent.clear()
+        await _hook(c, "subscription.past_due", _past_due("sub_m1", "ctm_f", "pri_solo_y"))
+        await outbox.wait(7)
+        failed_yearly = outbox.of("payment_failed")[-1]
+        assert "Solo plan ($120/year)" in failed_yearly.text and "Founding" not in failed_yearly.text
+
+        # A past-due event without items cannot say which of $108 and $120 is due: no price is quoted.
+        notify._payment_failed_sent.clear()
+        await _hook(c, "subscription.past_due", _past_due("sub_m1", "ctm_f", None))
+        await outbox.wait(8)
+        unknown = outbox.of("payment_failed")[-1]
+        _message_ok(unknown)
+        assert "payment for your Solo plan. Your plan keeps working" in unknown.text
+        assert "$108" not in unknown.text and "$120" not in unknown.text
+
+        # Back to Pro from Solo: $29/month, whatever the sticky flag says.
+        await _hook(
+            c,
+            "subscription.updated",
+            _updated("sub_m1", "ctm_f", "pri_pro_m"),
+        )
+        await outbox.wait(9)
+        pro = outbox.of("plan_changed")[-1]
+        assert "from Solo to Pro" in pro.text and "$29/month" in pro.text and "Founding" not in pro.text
+        assert [m.to for m in outbox.sent] == ["founder@example.com"] * 9
+
+
+async def test_founding_charge_over_the_cap_is_quoted_at_what_was_charged(tmp_path, outbox, fresh_payment_dedupe) -> None:
+    """Seat 101 raced the cap: Paddle charged $108, the account holds no seat, the email says so (not $120, not locked)."""
+    from remembra.core.time import utcnow
+
+    async with cost_app(tmp_path, resend_api_key=RESEND_TEST_KEY, public_dashboard_url=DASH) as c:
+        _paddle(c, **PRICES)
+        c.h.app.state.tasks = None
+        now = utcnow().isoformat()
+        await c.h.db.conn.executemany(
+            "INSERT INTO cloud_tenants (user_id, plan, founding, created_at, updated_at) VALUES (?, 'solo', 1, ?, ?)",
+            [(f"f{i}", now, now) for i in range(100)],
+        )
+        await c.h.db.conn.commit()
+        uid = await c.h.create_user("late@example.com", verified=True)
+
+        await _hook(c, "transaction.completed", _purchase("txn_late", "sub_late", "pri_founding", _bound(uid), customer="ctm_l"))
+        tenant = await c.meter.get_tenant(uid)
+        assert tenant["billing_flag"] == "founding_over_cap_refund_due" and not tenant["founding"]
+        assert await c.meter.founding_redemptions() == 100
+        await outbox.wait(1)
+        [changed] = outbox.of("plan_changed")
+        _message_ok(changed)
+        assert "$108/year, the Founding 100 price (the offer was full" in changed.text
+        assert "locked for life" not in changed.text and "$120" not in changed.text
+
+        await _hook(c, "subscription.past_due", _past_due("sub_late", "ctm_l", "pri_founding"))
+        await outbox.wait(2)
+        [failed] = outbox.of("payment_failed")
+        _message_ok(failed)
+        assert "$108/year, the Founding 100 price" in failed.text and "locked for life" not in failed.text
 
 
 async def test_api_signup_tenant_welcome_has_no_key(tmp_path, outbox) -> None:
