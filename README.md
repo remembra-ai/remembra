@@ -241,19 +241,11 @@ const result = await memory.recall('preferences');
 
 ---
 
-## 📊 Benchmark Results
+## 📊 Benchmarks
 
-Tested on the [LoCoMo benchmark](https://github.com/snap-research/locomo) (Snap Research, ACL 2024) — the standard academic benchmark for AI memory systems.
+One small [LoCoMo](https://github.com/snap-research/locomo) run, not a benchmark result: in March 2026 we ran 1 of the 10 LoCoMo conversations, 199 questions, judged by gpt-4o-mini. **76% overall.** The 47 adversarial questions, whose answer is not in the conversation, all scored 0, because Remembra did not detect them; the other 152 questions scored 100%. The numbers are in [`benchmarks/results_20260307_040346_summary.json`](benchmarks/results_20260307_040346_summary.json). A run over all 10 conversations has not been done yet.
 
-| Category | Accuracy | Questions |
-|----------|----------|-----------|
-| **Single-hop** (direct recall) | **100%** | 37 |
-| **Multi-hop** (cross-session reasoning) | **100%** | 32 |
-| **Temporal** (time-based queries) | **100%** | 13 |
-| **Open-domain** (world knowledge + memory) | **100%** | 70 |
-| **Overall (memory categories)** | **100%** | **152** |
-
-> Scored with LLM judge (GPT-4o-mini). Adversarial detection not yet implemented. Run your own: `python benchmarks/locomo_runner.py --data /tmp/locomo/data/locomo10.json`
+Run it yourself: `python benchmarks/locomo_runner.py --data /tmp/locomo/data/locomo10.json`
 
 ---
 

@@ -5,10 +5,13 @@
 * The example brief is exactly what ``render_last_session`` prints for the
   facts described next to it, so the example cannot drift from the product.
 * The MCP tool count and list match the tools the MCP server registers.
+* Benchmark scores (README and docs/benchmarks.md) state the sample size and
+  the overall result from the one result file in benchmarks/.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -113,3 +116,47 @@ def test_readme_drops_the_claims_research_found_wrong() -> None:
     for claim in ("first agent continuity", "no competitor", "zero external calls", "first-mover", "fully supported"):
         assert claim not in lowered, claim
     assert not re.search(r"\bsigned\b|can.t be forged", README, re.I)
+
+
+BENCH = ROOT / "benchmarks" / "results_20260307_040346_summary.json"
+
+
+def _benchmark_problems(text: str, run: dict) -> list[str]:
+    """Sections that claim a 100% score without the sample size and the overall result beside it.
+
+    The README once said "100%" on "the LoCoMo benchmark" for 1 of 10 conversations,
+    minus the adversarial category it scored 0 on.
+    """
+    adversarial = run["categories"]["adversarial"]["count"]
+    must = [
+        "1 of the 10",
+        f"{round(run['overall_accuracy'])}%",
+        f"{run['total_questions']} questions",
+        str(adversarial),
+        str(run["total_questions"] - adversarial),
+        BENCH.name,
+    ]
+    problems = []
+    for section in re.split(r"\n(?=#{1,3} )", text):
+        if "100%" in section:
+            problems += [f"{section.splitlines()[0]}: missing {m!r}" for m in must if m not in section]
+    if "the standard academic benchmark" in text:
+        problems.append("calls one conversation 'the standard academic benchmark'")
+    return problems
+
+
+def test_benchmark_claims_match_the_only_result_file() -> None:
+    run = json.loads(BENCH.read_text())
+    assert run["conversations_ingested"] == 1 and run["total_questions"] == 199  # what the wording says
+    docs = (ROOT / "docs" / "benchmarks.md").read_text()
+    for name, text in (("README.md", README), ("docs/benchmarks.md", docs)):
+        assert "100%" in text, f"{name}: the benchmark section is gone; retire this test with it"
+        assert _benchmark_problems(text, run) == [], name
+
+
+def test_benchmark_check_catches_an_unqualified_score() -> None:
+    run = json.loads(BENCH.read_text())
+    old = "## Benchmark Results\n\nTested on LoCoMo, the standard academic benchmark.\n\n| Overall | **100%** | 152 |\n"
+    problems = _benchmark_problems(old, run)
+    assert any("1 of the 10" in p for p in problems) and any("76%" in p for p in problems)
+    assert any("standard academic" in p for p in problems)

@@ -1,18 +1,14 @@
 # Benchmarks
 
-Remembra achieves **100% accuracy** across all four core memory categories on our internal benchmark suite.
+One small run so far, not a benchmark result: in March 2026 we ran 1 of the 10 [LoCoMo](https://github.com/snap-research/locomo) conversations against Remembra Cloud, 199 questions, judged by gpt-4o-mini.
 
-## Results Summary
+| | Questions | Score |
+|---|---|---|
+| All questions | 199 | **76%** |
+| Adversarial (the answer is not in the conversation) | 47 | 0% |
+| The other four categories | 152 | 100% |
 
-| Category | Score | What it tests |
-|----------|-------|---------------|
-| **Single-hop Recall** | 100% | Direct fact retrieval from stored memories |
-| **Multi-hop Reasoning** | 100% | Synthesizing facts across multiple memories |
-| **Temporal Queries** | 100% | Time-based reasoning ("When did X happen?") |
-| **Open-domain** | 100% | Combining memory with world knowledge |
-
-!!! info "Benchmark Details"
-    152 questions across 4 categories, scored with LLM judge (GPT-4o-mini).
+The adversarial questions all scored 0 because Remembra did not detect them. One conversation is too small a sample to compare with published LoCoMo results, and a run over all 10 has not been done yet. The numbers are in [`benchmarks/results_20260307_040346_summary.json`](https://github.com/remembra-ai/remembra/blob/main/benchmarks/results_20260307_040346_summary.json).
 
 ---
 
@@ -107,25 +103,30 @@ OPENAI_API_KEY=sk-... python benchmarks/locomo_runner.py \
 
 ### Sample Output
 
+The March 2026 run above (one conversation), as the runner prints it:
+
 ```
 ======================================================================
   LOCOMO BENCHMARK RESULTS — Remembra
 ======================================================================
-  Server:          http://localhost:8787
+  Server:          https://api.remembra.dev
   Scoring:         llm-judge
-  Conversations:   10
-  Total Questions: 1986
+  Judge Model:     gpt-4o-mini
+  Conversations:   1
+  Total Questions:  199
+  Ingestion Time:  631.6s
+  Evaluation Time: 263.8s
 ----------------------------------------------------------------------
-  Category           Count   Accuracy    Avg Latency
+  Category             Count   Accuracy    Avg Latency
 ----------------------------------------------------------------------
-  multi-hop            282      95.4%       142.3ms
-  single-hop           841      97.8%       98.7ms
-  temporal             321      94.1%       156.2ms
-  open-domain           96      91.6%       201.4ms
-  adversarial          446      88.3%       112.9ms
+  multi-hop               32    100.00%       883.5ms
+  single-hop              37    100.00%       885.0ms
+  temporal                13    100.00%       870.4ms
+  open-domain             70    100.00%       867.7ms
+  adversarial             47      0.00%       883.4ms
 ----------------------------------------------------------------------
-  OVERALL             1986      94.2%
-  OVERALL (excl adv)  1540      95.7%
+  OVERALL                199     76.38%
+  OVERALL (excl adv)            100.00%
 ======================================================================
 ```
 
