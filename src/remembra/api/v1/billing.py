@@ -418,9 +418,11 @@ async def create_checkout(
                 detail="User email not found. Please update your profile.",
             )
 
+        seat_hold = None
         if founding and meter is not None:
             # Taken before the buyer pays, so seat 101 is refused here, not after payment.
-            if not await meter.hold_founding_seat(current_user.user_id):
+            seat_hold = await meter.hold_founding_seat(current_user.user_id)
+            if seat_hold is None:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail="Founding 100 is sold out. Solo is $12/mo or $120/yr.",
@@ -438,12 +440,12 @@ async def create_checkout(
                 founding=founding,
             )
         except CheckoutUnavailableError as e:
-            if founding and meter is not None:
-                await meter.release_founding_hold(current_user.user_id)
+            if seat_hold is not None and meter is not None:
+                await meter.release_founding_hold(seat_hold)  # a lapsed founder keeps the 14-day grace
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e)) from e
         except httpx.HTTPError as e:
-            if founding and meter is not None:
-                await meter.release_founding_hold(current_user.user_id)
+            if seat_hold is not None and meter is not None:
+                await meter.release_founding_hold(seat_hold)
             raise _provider_unavailable("checkout", e) from e
         if founding and meter is not None and result.get("transaction_id"):
             await meter.set_founding_hold_transaction(current_user.user_id, str(result["transaction_id"]))

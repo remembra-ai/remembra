@@ -212,6 +212,68 @@ async def test_a_lapsed_founder_keeps_the_seat_14_days_then_it_reopens(tmp_path,
         assert patch_index < txn_index
 
 
+@pytest.mark.parametrize("failure", [httpx.ConnectError("paddle down"), 500])
+async def test_a_failed_buy_back_keeps_the_lapsed_founders_seat_and_grace(tmp_path, monkeypatch, alerts, failure) -> None:
+    _clock(monkeypatch, NOW)
+    paddle = _paddle_mock.install(monkeypatch)
+    async with cost_app(tmp_path) as c:
+        await _app(c, alerts)
+        await _founders(c, 99)
+        founder = await c.h.create_user("founder@example.com")
+        assert (await _checkout_founding(c, founder, "founder@example.com")).status_code == 200
+        await _hook(c, "transaction.completed", _founding_purchase("txn_f", "sub_f", founder, "ctm_f"))
+        await _hook(c, "subscription.canceled", {"id": "sub_f", "customer_id": "ctm_f", "status": "canceled"})
+        cursor = await c.h.db.conn.execute("SELECT kind, until FROM founding_holds WHERE user_id = ?", (founder,))
+        lapsed = tuple(await cursor.fetchone())
+        assert lapsed[0] == "lapsed"
+
+        # Day 3: the founder buys back while Paddle cannot create the transaction.
+        _clock(monkeypatch, NOW + timedelta(days=3))
+        paddle.failures["POST /transactions"] = failure
+        r = await _checkout_founding(c, founder, "founder@example.com")
+        assert r.status_code == 502, r.text
+        cursor = await c.h.db.conn.execute("SELECT kind, until FROM founding_holds WHERE user_id = ?", (founder,))
+        assert tuple(await cursor.fetchone()) == lapsed  # the 14-day grace is back, unchanged
+        assert await _seats(c) == {"max_redemptions": 100, "taken": 100, "remaining": 0, "available": False}
+        newcomer = await c.h.create_user("new@example.com")
+        assert (await _checkout_founding(c, newcomer, "new@example.com")).status_code == 409
+
+        # Paddle recovers: the founder's retry succeeds and the payment restores the price.
+        paddle.failures.clear()
+        assert (await _checkout_founding(c, founder, "founder@example.com")).status_code == 200
+        await _hook(c, "transaction.completed", _founding_purchase("txn_f2", "sub_f2", founder, "ctm_f"))
+        assert (await c.meter.get_account(founder)).founding is True
+        assert (await c.meter.get_tenant(founder))["billing_flag"] is None
+
+
+async def test_a_failed_checkout_only_undoes_its_own_hold(tmp_path, monkeypatch) -> None:
+    """A retry that fails does not drop the hold an earlier, still-open checkout of the same buyer holds."""
+    _clock(monkeypatch, NOW)
+    paddle = _paddle_mock.install(monkeypatch)
+    async with cost_app(tmp_path) as c:
+        await _app(c, RecordingAlerts())
+        await _founders(c, 99)
+        buyer = await c.h.create_user("buyer@example.com")
+        assert (await _checkout_founding(c, buyer, "buyer@example.com")).status_code == 200
+        cursor = await c.h.db.conn.execute("SELECT kind, until, transaction_id FROM founding_holds WHERE user_id = ?", (buyer,))
+        first = tuple(await cursor.fetchone())
+        assert first[0] == "pending" and first[2] == "txn_mock_1"
+
+        _clock(monkeypatch, NOW + timedelta(minutes=30))
+        paddle.failures["POST /transactions"] = 500
+        assert (await _checkout_founding(c, buyer, "buyer@example.com")).status_code == 502
+        cursor = await c.h.db.conn.execute("SELECT kind, until, transaction_id FROM founding_holds WHERE user_id = ?", (buyer,))
+        assert tuple(await cursor.fetchone()) == first
+
+        # A fresh buyer with no earlier hold: the failed checkout leaves no row behind.
+        other = await c.h.create_user("other@example.com")
+        await c.h.db.conn.execute("DELETE FROM founding_holds WHERE user_id = ?", (buyer,))
+        await c.h.db.conn.commit()
+        assert (await _checkout_founding(c, other, "other@example.com")).status_code == 502
+        cursor = await c.h.db.conn.execute("SELECT COUNT(*) FROM founding_holds")
+        assert (await cursor.fetchone())[0] == 0
+
+
 async def test_founders_already_on_free_become_lapsed_once(tmp_path, monkeypatch) -> None:
     _clock(monkeypatch, NOW)
     async with cost_app(tmp_path) as c:

@@ -63,6 +63,17 @@ _FOUNDING_LAPSE_MIGRATION = "2026_09_founding_lapse_holds"
 FOUNDING_CHECKOUT_HOLD = timedelta(hours=2)
 # A founder whose subscription ends keeps the seat (and the price) this long.
 FOUNDING_LAPSE_GRACE = timedelta(days=14)
+
+
+@dataclass(frozen=True)
+class FoundingSeatHold:
+    """A Founding seat held for one checkout, and the ``founding_holds`` row it replaced (kind, until, txn, created)."""
+
+    user_id: str
+    until: str
+    prior: tuple[str, str, str | None, str] | None
+
+
 # cloud_tenants.signup_source for tenants created by POST /api/v1/cloud/signup.
 TENANT_SIGNUP_SOURCE = "cloud_signup"
 
@@ -1160,21 +1171,25 @@ class UsageMeter:
                 "UPDATE cloud_tenants SET founding = 0, updated_at = ? WHERE user_id = ?", (now.isoformat(), user_id)
             )
 
-    async def hold_founding_seat(self, user_id: str) -> bool:
-        """Reserve a Founding 100 seat for a checkout (atomic). False when all 100 are taken.
+    async def hold_founding_seat(self, user_id: str) -> FoundingSeatHold | None:
+        """Reserve a Founding 100 seat for a checkout (atomic). None when all 100 are taken.
 
         Checkouts in progress count against the cap, so the 101st buyer is
         refused before paying instead of after. A founder inside the 14-day
-        lapse grace already holds a seat and may buy the price back.
+        lapse grace already holds a seat and may buy the price back. The
+        returned hold remembers the row it replaced, so a checkout that cannot
+        be created gives it back (:meth:`release_founding_hold`).
         """
         now = now_utc()
         async with self._tx():
-            cursor = await self._db.conn.execute("SELECT kind, until FROM founding_holds WHERE user_id = ?", (user_id,))
+            cursor = await self._db.conn.execute(
+                "SELECT kind, until, transaction_id, created_at FROM founding_holds WHERE user_id = ?", (user_id,)
+            )
             existing = await cursor.fetchone()
             until = now + FOUNDING_CHECKOUT_HOLD
             live = existing is not None and (_parse_dt(existing[1]) or now) > now
             if not live and await self._founding_seats_taken(now, excluding=user_id) >= FOUNDING_MAX_REDEMPTIONS:
-                return False
+                return None
             if live and existing is not None:
                 until = max(until, _parse_dt(existing[1]) or until)
             await self._db.conn.execute(
@@ -1184,7 +1199,8 @@ class UsageMeter:
                 """,
                 (user_id, until.isoformat(), now.isoformat()),
             )
-        return True
+        prior = (str(existing[0]), str(existing[1]), existing[2], str(existing[3])) if existing is not None else None
+        return FoundingSeatHold(user_id=user_id, until=until.isoformat(), prior=prior)
 
     async def set_founding_hold_transaction(self, user_id: str, transaction_id: str) -> None:
         await self._db.conn.execute(
@@ -1192,10 +1208,27 @@ class UsageMeter:
         )
         await self._db.conn.commit()
 
-    async def release_founding_hold(self, user_id: str) -> None:
-        """Drop a checkout hold that will not be paid (the Paddle transaction could not be created)."""
-        await self._db.conn.execute("DELETE FROM founding_holds WHERE user_id = ? AND kind = 'pending'", (user_id,))
-        await self._db.conn.commit()
+    async def release_founding_hold(self, hold: FoundingSeatHold) -> None:
+        """Undo ``hold`` because its checkout will not be paid (the Paddle transaction could not be created).
+
+        The row it replaced comes back: a lapsed founder keeps the 14-day
+        grace and an earlier open checkout keeps its hold. A hold this request
+        did not set (a later checkout replaced it, or a payment claimed the
+        seat) is left alone.
+        """
+        async with self._tx():
+            if hold.prior is None:
+                await self._db.conn.execute(
+                    "DELETE FROM founding_holds WHERE user_id = ? AND kind = 'pending' AND until = ?",
+                    (hold.user_id, hold.until),
+                )
+            else:
+                kind, until, transaction_id, created_at = hold.prior
+                await self._db.conn.execute(
+                    "UPDATE founding_holds SET kind = ?, until = ?, transaction_id = ?, created_at = ?"
+                    " WHERE user_id = ? AND kind = 'pending' AND until = ?",
+                    (kind, until, transaction_id, created_at, hold.user_id, hold.until),
+                )
 
     async def claim_founding(self, user_id: str) -> bool:
         """Mark ``user_id`` as holding the Founding 100 price if it has a seat (atomic). True if it holds one.
