@@ -74,6 +74,44 @@ plans: every store and usage call of those accounts returns 500. So:
    they would act for the whole account). Review deploy-window buyers of new
    plans by hand; redeploying relay-launch later re-runs the migration.
 
+## Social sign-in (GitHub, Google)
+
+The API is the OAuth client. The provider sends the browser back to the API,
+and the API then sends it to the dashboard's `/oauth/callback` page with a
+one-time login code. Register exactly these redirect URIs (they are
+`<REMEMBRA_PUBLIC_URL>/api/v1/auth/oauth/<provider>/callback`):
+
+| Provider | Where | Value |
+|---|---|---|
+| GitHub | github.com → Settings → Developer settings → **OAuth Apps** → *Authorization callback URL* | `https://api.remembra.dev/api/v1/auth/oauth/github/callback` |
+| Google | Google Cloud console → APIs & Services → Credentials → **OAuth client ID** (type *Web application*) → *Authorized redirect URIs* | `https://api.remembra.dev/api/v1/auth/oauth/google/callback` |
+
+- GitHub asks for the `user:email` scope, Google for `openid email profile`.
+  Google needs no *Authorized JavaScript origins*: the exchange is server side.
+- A GitHub OAuth App takes one callback URL, so use a separate app for any
+  staging host. Google takes several redirect URIs on one client.
+- Set on the API (Coolify app `remembra-api`): `REMEMBRA_PUBLIC_URL=https://api.remembra.dev`,
+  `REMEMBRA_PUBLIC_DASHBOARD_URL=https://app.remembra.dev`, and
+  `REMEMBRA_GITHUB_CLIENT_ID` / `_SECRET`, `REMEMBRA_GOOGLE_CLIENT_ID` / `_SECRET`.
+  A provider appears on the sign-in page only when its id, its secret and both
+  public URLs are set.
+- The dashboard and the API must be the same site (`app.` and `api.` of
+  `remembra.dev`), or the browser does not send the cookie that binds the login
+  code to it.
+- The landing page is `<REMEMBRA_PUBLIC_DASHBOARD_URL>/oauth/callback`. It
+  loads on app.remembra.dev (nginx falls back to the SPA) and on the API host
+  itself (the image also serves the dashboard; the connector's own `/oauth/*`
+  routes are unaffected).
+
+Verify after setting the variables:
+
+```bash
+curl -s https://api.remembra.dev/api/v1/auth/providers                         # lists github / google
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://api.remembra.dev/api/v1/auth/oauth/github/start
+#   302 https://github.com/login/oauth/authorize?...redirect_uri=https%3A%2F%2Fapi.remembra.dev%2Fapi%2Fv1%2Fauth%2Foauth%2Fgithub%2Fcallback...
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' https://app.remembra.dev/oauth/callback   # 200 text/html
+```
+
 ## Health, readiness, metrics
 
 | Endpoint | Purpose | Status codes |

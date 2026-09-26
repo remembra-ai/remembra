@@ -870,6 +870,15 @@ def create_app() -> FastAPI:
             # Serve index.html for SPA routes
             @app.get("/{full_path:path}", include_in_schema=False)
             async def serve_spa(full_path: str) -> Response:
+                # Dashboard pages that live under a reserved prefix. Social
+                # sign-in ends on <public_dashboard_url>/oauth/callback#code=…;
+                # when the dashboard is this host (the image serves it), that
+                # page must be the SPA, not the JSON 404 below. The connector's
+                # own /oauth/* routes are registered before this catch-all.
+                if full_path.rstrip("/") in SPA_PAGES_UNDER_RESERVED_PREFIXES:
+                    index_page = static_path / "index.html"
+                    if index_page.exists():
+                        return FileResponse(index_page)
                 # Don't intercept API routes, metrics, or WebSocket — these must
                 # 404 as JSON rather than fall through to the SPA index.html.
                 api_paths = (
@@ -905,6 +914,11 @@ def create_app() -> FastAPI:
             log.info("static_files_enabled", path=str(static_path))
 
     return app
+
+
+# Dashboard (SPA) routes whose path starts with a prefix the SPA fallback
+# otherwise reserves for the API (dashboard/src/App.tsx `landing`).
+SPA_PAGES_UNDER_RESERVED_PREFIXES: frozenset[str] = frozenset({"oauth/callback"})
 
 
 def _safe_static_file(static_root: Path, requested: str) -> Path | None:
