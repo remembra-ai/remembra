@@ -185,8 +185,10 @@ CONNECT_STEP = "remembra-relay connect --apply"
 def _install_blocks(page_html: str) -> list[tuple[str, str, str, str]]:
     """(comment line before, the key-first lead line, the command block, the meta line after) per install block."""
     out = []
+    # The hero's terminal block sits in the first panel of the "terminal | your agent" tabs.
     block = re.compile(
         r'(?P<gate>[^\n]*)\n\s*<p class="cmd-meta cmd-lead">(?P<lead>.*?)</p>\s*'
+        r'(?:<div class="cmd-tabs"[^>]*>.*?</div>\s*<div class="cmd-panel"[^>]*>\s*)?'
         r'<div class="cmd"(?P<body>.*?)</div>\s*<p class="cmd-meta">(?P<meta>.*?)</p>',
         re.S,
     )
@@ -199,7 +201,8 @@ def test_every_install_block_has_the_key_step_the_setup_guide_and_the_release_ga
     page_html = (LANDING / "index.html").read_text()
     blocks = _install_blocks(page_html)
     assert len(blocks) == 2  # the hero and the Start band
-    assert len(re.findall(r'class="cmd[ "]', page_html)) == len(blocks)
+    assert len(re.findall(r'class="cmd"', page_html)) == len(blocks)
+    assert len(re.findall(r'class="cmd cmd-prompt"', page_html)) == 1  # the hero's "your agent" prompt
     for gate, lead, body, meta in blocks:
         assert gate == RELAY_GATE
         # The key comes first, above the commands, then the commands save it and write the hooks.
@@ -979,20 +982,28 @@ def test_every_docs_link_is_built_from_a_docs_page_and_gated_until_deployed() ->
     assert "https://docs.remembra.dev/guides/relay/" in links
     assert "https://docs.remembra.dev/integrations/claude-and-chatgpt-apps/" in links
     gates = " ".join(predeploy.gates())
-    for url in links:
+    assert "https://docs.remembra.dev/reference/plans-and-credits/" in links  # from setup.md and llms.txt
+    for url, where in links.items():
         src = predeploy.source_for(url)
         assert src is not None, f"{url} has no page in docs/ that mkdocs.yml builds"
         # Pages the docs site had long before this relaunch; the online predeploy run still fetches them.
-        if src not in ("index.md", "getting-started/docker.md", "getting-started/agent-setup.md", "integrations/mcp-server.md"):
+        # The agent files (setup.md, llms*.txt) carry no gate comments: the online run fetches their links.
+        on_a_page = any(name.endswith(".html") for name in where)
+        if on_a_page and src not in (
+            "index.md",
+            "getting-started/docker.md",
+            "getting-started/agent-setup.md",
+            "integrations/mcp-server.md",
+        ):
             assert f"docs.remembra.dev deployed with {src}" in gates, url
 
 
 def test_predeploy_check_fails_on_a_docs_link_that_is_not_live() -> None:
     predeploy = _script("site_predeploy")
-    lines, problems = predeploy.check(online=True, fetch=lambda url: 404 if "relay" in url else 200, latest=lambda: "0.16.0")
+    lines, problems = predeploy.check(online=True, fetch=lambda url: 404 if "relay" in url else 200, latest=lambda: "0.16.1")
     assert problems == [
         "https://docs.remembra.dev/guides/relay/ is not live yet (HTTP 404): "
-        "deploy the docs site first (index.html, crew.html, changelog.html)"
+        "deploy the docs site first (index.html, crew.html, changelog.html, setup.md, llms.txt, llms-full.txt)"
     ]
     assert any("Crew mode switch" in line for line in lines)
     _, none = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.1")
@@ -1102,13 +1113,18 @@ def test_legal_pages_name_the_billing_provider_the_code_uses() -> None:
 
 def test_predeploy_check_fails_while_pypi_is_behind_the_install_gate() -> None:
     predeploy = _script("site_predeploy")
-    assert predeploy.required_release() == "0.16"  # from the <!-- requires ... remembra>=0.16 --> gates
+    gated = [v for text in predeploy.gates() for v in predeploy.MIN_RELEASE.findall(text)]
+    assert max(gated) == "0.16"  # the <!-- requires ... remembra>=0.16 --> gates on the install blocks
+    # setup.md's doctor line (`pipx run --spec 'remembra>=0.16.1'`) raises the bar: doctor ships in 0.16.1
+    assert predeploy.required_release() == "0.16.1"
     lines, problems = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.13.2")
-    assert problems == ["PyPI has remembra 0.13.2; the install lines need remembra>=0.16: release it first"]
-    assert "PyPI: remembra 0.13.2 (the install lines need remembra>=0.16)" in lines
+    assert problems == ["PyPI has remembra 0.13.2; the install lines need remembra>=0.16.1: release it first"]
+    assert "PyPI: remembra 0.13.2 (the install lines need remembra>=0.16.1)" in lines
     _, unreachable = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: None)
-    assert unreachable == ["PyPI could not be reached to confirm remembra>=0.16 is released"]
-    _, ok = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.0")
+    assert unreachable == ["PyPI could not be reached to confirm remembra>=0.16.1 is released"]
+    _, behind = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.0")
+    assert behind == ["PyPI has remembra 0.16.0; the install lines need remembra>=0.16.1: release it first"]
+    _, ok = predeploy.check(online=True, fetch=lambda url: 200, latest=lambda: "0.16.1")
     assert ok == []
 
 
@@ -1291,3 +1307,379 @@ def test_every_page_offers_sign_in_next_to_start_free() -> None:
         assert f'{signin}\n      <a class="btn-nav" href="https://app.remembra.dev/signup">Start free</a>' in bar, page.name
         menu = re.search(r'<nav class="menu-panel".*?</nav>', head, re.S).group(0)
         assert re.findall(r"<a [^>]*>([^<]+)</a>", menu)[0] == "Sign in", page.name
+
+
+# ---------------------------------------------------------------------------
+# Marshal M1: the "terminal | your agent" tabs, setup.md and llms.txt
+# ---------------------------------------------------------------------------
+
+SETUP_PROMPT = (
+    "Set up Remembra Relay on this machine. Read https://remembra.dev/setup.md first and follow it. "
+    "Ask me before each step that installs or writes anything. I will type my API key into remembra-install's "
+    "hidden prompt myself; never ask me to paste a key into this chat."
+)
+TABS_HARNESS = Path(__file__).resolve().parent / "js" / "site_tabs_harness.js"
+AGENT_FILES = ("setup.md", "llms.txt", "llms-full.txt")
+KEY_SHAPED = re.compile(r"rem_[A-Za-z0-9_-]{16,}")
+
+
+def _attrs(tag_html: str) -> dict[str, str]:
+    return dict(re.findall(r'([\w-]+)="([^"]*)"', tag_html))
+
+
+def _visible(fragment: str) -> str:
+    """Text a sighted visitor reads: aria-hidden glyphs left out."""
+    return _text(re.sub(r'<span[^>]*aria-hidden="true"[^>]*>.*?</span>', "", fragment, flags=re.S))
+
+
+def test_hero_tabs_are_a_tablist_of_two_tags_over_two_panels() -> None:
+    home = (LANDING / "index.html").read_text()
+    tablist = re.search(r'<div class="cmd-tabs" role="tablist" aria-label="Set up from" data-cmd-tabs>(.*?)</div>', home, re.S)
+    assert tablist
+    tabs = re.findall(r"<button ([^>]*)>(.*?)</button>", tablist.group(1), re.S)
+    assert [_visible(label) for _, label in tabs] == ["terminal", "your agent"]
+    first, second = (_attrs(a) for a, _ in tabs)
+    assert first == {
+        "class": "tag solid",
+        "type": "button",
+        "role": "tab",
+        "id": "cmd-tab-terminal",
+        "aria-selected": "true",
+        "aria-controls": "cmd-panel-terminal",
+        "tabindex": "0",
+    }
+    assert second == {
+        "class": "tag",
+        "type": "button",
+        "role": "tab",
+        "id": "cmd-tab-agent",
+        "aria-selected": "false",
+        "aria-controls": "cmd-panel-agent",
+        "tabindex": "-1",
+    }
+    # the prompt glyphs are decoration: `$` for the terminal, `>` for an agent
+    assert [re.findall(r'<span class="glyph" aria-hidden="true">([^<]*)</span>', label) for _, label in tabs] == [["$"], ["&gt;"]]
+    assert '<div class="cmd-panel" role="tabpanel" id="cmd-panel-terminal" aria-labelledby="cmd-tab-terminal">' in home
+    assert '<div class="cmd-panel" role="tabpanel" id="cmd-panel-agent" aria-labelledby="cmd-tab-agent" hidden>' in home
+    # key first, then the tabs, then the terminal block, then the prompt block
+    order = [
+        home.index('class="cmd-meta cmd-lead"'),
+        tablist.start(),
+        home.index('<div class="cmd" role="group" aria-label="Install commands">'),
+        home.index('<div class="cmd cmd-prompt"'),
+    ]
+    assert order == sorted(order)
+    # behaviour lives in site.js, never inline, so the CSP hashes stay valid
+    assert not re.search(r"\son[a-z]+=", home)
+    site_js = (LANDING / "site.js").read_text()
+    assert 'querySelectorAll("[data-cmd-tabs]")' in site_js and '"ArrowRight"' in site_js and '"ArrowLeft"' in site_js
+    assert '<script src="/site.js" defer></script>' in home
+
+
+def test_your_agent_tab_copies_the_setup_prompt() -> None:
+    home = (LANDING / "index.html").read_text()
+    panel = re.search(r'<div class="cmd-panel" role="tabpanel" id="cmd-panel-agent"[^>]*>(.*?)\n        </div>', home, re.S)
+    assert panel
+    block = re.search(
+        r'<div class="cmd cmd-prompt" role="group" aria-label="Setup prompt for your agent">(.*?)</div>', panel.group(1), re.S
+    )
+    assert block
+    assert html.unescape(re.search(r'data-copy="([^"]*)"', block.group(1)).group(1)) == SETUP_PROMPT
+    assert _text(re.search(r"<code>.*?</code>", block.group(1), re.S).group(0)) == f"> {SETUP_PROMPT}"
+    meta = re.search(r'<p class="cmd-meta">(.*?)</p>', panel.group(1), re.S).group(1)
+    assert _text(meta) == "Your agent reads remembra.dev/setup.md and asks before each step Get a free key Setup guide"
+    assert re.findall(r'href="([^"]+)"', meta) == ["/setup.md", "https://app.remembra.dev/signup", RELAY_GUIDE]
+    # the file the prompt names is served
+    target, _ = _resolve("/setup.md", _nginx(), _nginx().load(LANDING / "nginx.conf"))
+    assert target == LANDING / "setup.md"
+
+
+def test_tabs_are_built_from_the_tag_and_hold_a_phone_touch_target() -> None:
+    css = (LANDING / "site.css").read_text()
+    rules = re.findall(r"^\.cmd-tabs[^{]*\{[^}]*\}", css, re.M)
+    assert rules and all("#" not in rule and "rgb" not in rule for rule in rules)  # tokens only, no new colours
+    assert ".cmd-tabs .tag.solid { background: var(--signal); }" in css  # the chosen tab: orange because you chose
+    phone = css.split("@media (max-width: 520px)", 1)[1].split("@media", 1)[0]
+    assert ".cmd-tabs .tag { min-height: 44px;" in phone
+    assert ".cmd-prompt code span { white-space: normal; }" in css  # the prompt wraps inside its block
+
+
+class _Subtree(HTMLParser):
+    """The first element with a given class, as a {"t", "a", "c"} tree for a Node harness."""
+
+    def __init__(self, cls: str) -> None:
+        super().__init__()
+        self.cls = cls
+        self.stack: list[dict[str, Any]] = []
+        self.root: dict[str, Any] | None = None
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        node: dict[str, Any] = {"t": tag, "a": {k: v or "" for k, v in attrs}, "c": []}
+        if self.stack:
+            self.stack[-1]["c"].append(node)
+        elif self.root is None and self.cls in node["a"].get("class", "").split():
+            self.root = node
+        else:
+            return
+        if tag not in VOID_TAGS:
+            self.stack.append(node)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.stack and self.stack[-1]["t"] == tag:
+            self.stack.pop()
+
+    def handle_data(self, data: str) -> None:
+        if self.stack:
+            self.stack[-1]["c"].append(data)
+
+
+def _tabs(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    assert NODE is not None
+    parser = _Subtree("hero-copy")
+    parser.feed((LANDING / "index.html").read_text())
+    assert parser.root is not None
+    payload = {"script": str(LANDING / "site.js"), "dom": parser.root, "steps": steps}
+    run = subprocess.run([NODE, str(TABS_HARNESS)], input=json.dumps(payload), capture_output=True, text=True, timeout=60)
+    assert run.returncode == 0, run.stderr
+    snaps: list[dict[str, Any]] = json.loads(run.stdout)
+    return snaps
+
+
+def _key(sel: str, key: str) -> dict[str, Any]:
+    return {"do": "key", "sel": sel, "key": key}
+
+
+def _chosen(s: dict[str, Any]) -> tuple[str, str, list[bool]]:
+    """(selected tab, the tab in the Tab order, each panel's hidden state) of a snapshot."""
+    selected = [t["id"] for t in s["tabs"] if t["selected"] == "true"]
+    tabbable = [t["id"] for t in s["tabs"] if t["tabindex"] == "0"]
+    solid = [t["id"] for t in s["tabs"] if t["solid"]]
+    assert len(selected) == 1 and selected == tabbable == solid, s["tabs"]
+    return selected[0], s["focused"], [p["hidden"] for p in s["panels"]]
+
+
+@needs_node
+def test_site_js_switches_the_tabs_with_arrow_keys_home_end_and_clicks() -> None:
+    term, agent = "#cmd-tab-terminal", "#cmd-tab-agent"
+    snaps = _tabs(
+        [
+            SNAP,
+            _key(term, "ArrowRight"),
+            SNAP,
+            _key(agent, "ArrowRight"),  # wraps back to the first tab
+            SNAP,
+            _key(term, "ArrowLeft"),  # wraps to the last
+            SNAP,
+            _key(agent, "Home"),
+            SNAP,
+            _key(term, "End"),
+            SNAP,
+            _key(agent, "ArrowUp"),
+            SNAP,
+            _key(term, "ArrowDown"),
+            SNAP,
+            _key(agent, "a"),  # any other key does nothing, and is not swallowed
+            SNAP,
+            {"do": "click", "sel": term},
+            SNAP,
+        ]
+    )
+    states = [_chosen(s)[0] for s in snaps]
+    t, a = "cmd-tab-terminal", "cmd-tab-agent"
+    assert states == [t, a, t, a, t, a, t, a, a, t]
+    assert [_chosen(s)[2] for s in snaps][:2] == [[False, True], [True, False]]  # one panel shown at a time
+    assert all(_chosen(s)[2] == ([False, True] if st == t else [True, False]) for s, st in zip(snaps, states, strict=True))
+    assert [s["focused"] for s in snaps[1:8]] == [a, t, a, t, a, t, a]  # the keyboard moves focus with the choice
+    assert snaps[1]["lastKeyPrevented"] is True  # the page does not scroll on an arrow key
+    assert snaps[8]["lastKeyPrevented"] is False
+    assert [t["controls"] for t in snaps[0]["tabs"]] == ["cmd-panel-terminal", "cmd-panel-agent"]
+
+
+@needs_node
+def test_the_agent_tab_copy_button_copies_the_prompt() -> None:
+    (before, after) = _tabs(
+        [{"do": "click", "sel": "#cmd-tab-agent"}, SNAP, {"do": "click", "sel": "#cmd-panel-agent .copy"}, SNAP]
+    )
+    assert before["clipboard"] == []
+    assert after["clipboard"] == [SETUP_PROMPT]
+    assert "Copied to clipboard." in after["copyStatus"]
+    (terminal,) = _tabs([{"do": "click", "sel": "#cmd-panel-terminal .copy"}, SNAP])
+    assert terminal["clipboard"] == [f"{INSTALL_STEP}\n{KEY_STEP}\n{CONNECT_STEP}"]
+
+
+def _setup() -> str:
+    return (LANDING / "setup.md").read_text()
+
+
+def _bash_lines(markdown: str) -> list[str]:
+    return [
+        line.strip() for block in re.findall(r"```bash\n(.*?)```", markdown, re.S) for line in block.splitlines() if line.strip()
+    ]
+
+
+def test_setup_md_is_key_first_and_asks_before_each_write() -> None:
+    text = _setup()
+    lines = text.splitlines()
+    assert lines[0] == "# Set up Remembra Relay on this machine"
+    assert lines[2].startswith("Ask the user before each step that installs or writes anything.")
+    steps = re.findall(r"^## (\d+)\. ", text, re.M)
+    assert steps == [str(n) for n in range(1, 12)]
+    order = [
+        text.index("https://app.remembra.dev/signup"),
+        text.index(f"\n{INSTALL_STEP}\n"),
+        text.index(f"\n{KEY_STEP}\n"),
+        text.index("\nremembra-relay connect\n"),  # the dry run first
+        text.index(f"\n{CONNECT_STEP}\n"),
+        text.index("run `/hooks`"),
+        text.index("\nremembra-relay status\n"),
+        text.index("\nremembra-relay doctor\n"),
+    ]
+    assert order == sorted(order)
+    # the key never passes through the agent
+    assert "Never ask for the API key in this chat." in text
+    assert "Do not ask them to paste it here." in text
+    assert "Ask the user to run this in their own terminal, not through you:" in text
+    assert "--api-key" not in text and not KEY_SHAPED.search(text)
+
+
+def test_setup_md_commands_are_ones_the_real_clis_accept() -> None:
+    """Every command in a bash block parses with the installed remembra-relay and remembra-install, except
+    `doctor`, which ships in remembra 0.16.1 (feat/marshal): it must be the dashboard's template."""
+    import shlex
+
+    from remembra.relay.cli import build_parser as relay_parser
+    from remembra.tools.agents import build_parser as install_parser
+
+    agents_ts = (ROOT_DIR / "dashboard" / "src" / "lib" / "agents.ts").read_text()
+    release = re.search(r"export const DOCTOR_RELEASE = '([\d.]+)';", agents_ts)
+    assert release and release.group(1) == "0.16.1"
+    uninstall = re.findall(r"\{ command: '([^']+)'", agents_ts.split("UNINSTALL_STEPS", 1)[1].split("];", 1)[0])
+    seen = {"relay": 0, "install": 0}
+    for line in _bash_lines(_setup()):
+        words = shlex.split(line)
+        if words[0] == "remembra-relay" and words[1] == "doctor":
+            assert line == "remembra-relay doctor"
+        elif words[0] == "remembra-relay":
+            relay_parser().parse_args(words[1:])
+            seen["relay"] += 1
+        elif words[0] == "remembra-install":
+            install_parser().parse_args(words[1:])
+            seen["install"] += 1
+        else:
+            assert line in (
+                INSTALL_STEP,
+                "uname -s",
+                'echo "$SHELL"',
+                "command -v claude codex cursor-agent cursor gemini qwen kimi pipx",
+                *uninstall,
+            ), line
+    assert seen["relay"] >= 5 and seen["install"] >= 2
+    assert f"`pipx run --spec 'remembra>={release.group(1)}' remembra-relay doctor`" in _setup()
+    # taking it off again: the dashboard's UNINSTALL_STEPS, in order
+    tail = _setup().split("## Taking it off again", 1)[1]
+    assert _bash_lines(tail) == uninstall
+
+
+def test_setup_md_says_what_the_adapters_say() -> None:
+    from remembra.relay.adapters import REGISTRY
+
+    text = _setup()
+    probe = re.search(r"^command -v (.*)$", text, re.M)
+    assert probe
+    bins = {b for adapter in REGISTRY.values() for b in adapter.spec.detect_bins}
+    assert bins <= set(probe.group(1).split())
+    unverified = [name for name, adapter in REGISTRY.items() if not adapter.spec.verified]
+    assert f"The names are {', '.join(f'`{n}`' for n in unverified[:-1])} and `{unverified[-1]}`." in text
+    codex = REGISTRY["codex"].spec
+    events = [codex.start_event, codex.prompt_event, codex.end_event]
+    assert len(events) == 3 and "trust 3 hooks" in text
+    assert f"trust {events[0]}, {events[1]} and {events[2]}" in text
+    assert "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust." in text
+    assert "Claude Code's and Codex's session hooks are verified." in text
+    # the same three lines as the hero, for someone who runs them by hand
+    block = text.split("## The same steps in the user's terminal", 1)[1]
+    assert _bash_lines(block.split("##", 1)[0]) == [INSTALL_STEP, KEY_STEP, CONNECT_STEP]
+
+
+def test_llms_full_is_the_pages_and_llms_txt_says_nothing_they_do_not() -> None:
+    llms = _script("site_llms")
+    assert (LANDING / "llms-full.txt").read_text() == llms.build(), "run python scripts/site_llms.py"
+    assert llms.unsupported() == []
+    assert llms.main(["--check"]) == 0
+    full = (LANDING / "llms-full.txt").read_text()
+    for name, url in llms.SOURCES:
+        assert f"Source: {url}" in full, name
+    assert "crew.html" not in {name for name, _ in llms.SOURCES}  # crew mode is not available yet
+    # the demo's example data and the hero's copy blocks are not claims
+    assert "invoices-api" not in full and "studio-laptop" not in full
+    assert SETUP_PROMPT in full  # the prompt the hero offers is on the page, so it is in the text
+
+
+def test_llms_check_catches_a_claim_no_page_makes() -> None:
+    llms = _script("site_llms")
+    fake = (
+        "# Remembra\n\n"
+        "> Remembra is SOC 2 certified. Handoffs, pickups, inbox, trail and search are always free.\n\n"
+        "- [Home](https://remembra.dev/): the home page\n"
+    )
+    assert llms.unsupported(fake) == ["Remembra is SOC 2 certified"]
+    assert llms.claims("- [Pricing](https://remembra.dev/pricing): plans\n## Docs\n") == []
+
+
+def test_llms_txt_follows_llmstxt_org_and_every_link_resolves() -> None:
+    predeploy = _script("site_predeploy")
+    text = (LANDING / "llms.txt").read_text()
+    lines = [line for line in text.splitlines() if line.strip()]
+    assert lines[0] == "# Remembra" and lines[1].startswith("> ")
+    assert re.findall(r"^## (.+)$", text, re.M) == ["Instructions for agents", "Setup", "Pages", "Docs", "Optional"]
+    links = re.findall(r"\]\((https?://[^)]+)\)", text)
+    assert "https://remembra.dev/setup.md" in links and "https://remembra.dev/llms-full.txt" in links
+    nginx = _nginx()
+    locations = nginx.load(LANDING / "nginx.conf")
+    for url in links:
+        parts = urlsplit(url)
+        if parts.netloc == "remembra.dev":
+            target, _ = _resolve(parts.path or "/", nginx, locations)
+            assert isinstance(target, Path) and target.is_file(), url
+        elif parts.netloc == "docs.remembra.dev":
+            assert predeploy.source_for(url) is not None, url
+        else:
+            assert url == "https://github.com/remembra-ai/remembra", url
+    assert "Quote prices only from https://remembra.dev/pricing. Never compute them." in text
+
+
+def test_agent_files_leave_out_unpublished_docs_keys_and_crew() -> None:
+    excluded = ("/bugs/", "/feedback/", "competitive-analysis", "DEPLOYING", "DEPLOYMENT", "remembra.dev/crew")
+    for name in AGENT_FILES:
+        text = (LANDING / name).read_text()
+        for path in excluded:
+            assert path not in text, (name, path)
+        assert not KEY_SHAPED.search(text), name
+        assert "--api-key" not in text, name
+
+
+def test_sitemap_lists_pages_and_the_agent_files_are_reachable_but_not_listed() -> None:
+    """The sitemap is for people's pages; llms.txt is how agents find setup.md and llms-full.txt. robots.txt must
+    not keep crawlers or agents from any of them."""
+    nginx = _nginx()
+    locations = nginx.load(LANDING / "nginx.conf")
+    sitemap = (LANDING / "sitemap.xml").read_text()
+    for loc in re.findall(r"<loc>https://remembra\.dev([^<]*)</loc>", sitemap):
+        target, _ = _resolve(loc or "/", nginx, locations)
+        assert isinstance(target, Path) and target.suffix == ".html", loc
+    robots = (LANDING / "robots.txt").read_text()
+    disallowed = re.findall(r"^Disallow:\s*(\S+)", robots, re.M)
+
+    def blocked(path: str) -> bool:
+        for rule in disallowed:
+            pattern = "^" + re.escape(rule).replace(r"\*", ".*").replace(r"\$", "$")
+            if re.match(pattern, path):
+                return True
+        return False
+
+    assert blocked("/api/v1/x") and blocked("/claims.json")  # the rule reader works
+    for name in AGENT_FILES:
+        assert f"remembra.dev/{name}" not in sitemap, name
+        assert not blocked(f"/{name}"), name
+        target, _ = _resolve(f"/{name}", nginx, locations)
+        assert target == LANDING / name

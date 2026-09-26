@@ -142,26 +142,37 @@ export function CopyCommand({
   label,
   className,
   toastText = 'Command copied',
+  prompt = '$',
+  scroll = false,
 }: {
   command: string;
   label: string;
   className?: string;
   toastText?: string;
+  /** `$` for a terminal command, `>` for text typed into an agent. */
+  prompt?: '$' | '>';
+  /** Keep the command on one line and scroll it inside the block (never the page) instead of wrapping it. */
+  scroll?: boolean;
 }) {
   const [copy, copied] = useCopy();
   return (
     <div role="group" aria-label={label} className={clsx('rr-cmd flex items-stretch rounded-[3px]', className)}>
-      <code className="flex min-w-0 flex-1 items-start gap-2 overflow-x-auto px-3 py-2.5 font-mono text-[13px] leading-relaxed [font-variant-ligatures:none]">
+      <code
+        className={clsx(
+          'flex min-w-0 flex-1 items-start gap-2 overflow-x-auto px-3 py-2.5 font-mono text-[13px] leading-relaxed [font-variant-ligatures:none]',
+          scroll && 'overscroll-x-contain',
+        )}
+      >
         <span aria-hidden="true" className="select-none text-signal">
-          $
+          {prompt}
         </span>
-        <span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{command}</span>
+        <span className={scroll ? 'whitespace-pre' : 'whitespace-pre-wrap [overflow-wrap:anywhere]'}>{command}</span>
       </code>
       <button
         type="button"
         onClick={() => copy(command, toastText)}
         aria-label={`Copy: ${label}`}
-        className="flex shrink-0 items-center gap-1.5 border-l border-white/15 px-3 font-mono text-xs text-head-ink transition-colors hover:bg-signal/20"
+        className="flex min-h-11 min-w-11 shrink-0 items-center justify-center gap-1.5 border-l border-white/15 px-3 font-mono text-xs text-head-ink transition-colors hover:bg-signal/20 sm:min-h-0"
       >
         {copied ? <Check className="h-3.5 w-3.5 text-signal" /> : <Copy className="h-3.5 w-3.5" />}
         <span className="hidden sm:inline">{copied ? 'Copied' : 'Copy'}</span>
