@@ -969,6 +969,14 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("action", nargs="?", choices=["show", "push"])
     sp.add_argument("--json", action="store_true")
 
+    # Installers (WP-10): parsed by their own modules; listed here for --help.
+    for name, helptext in (
+        ("connect", "install crew mode on this machine (dry run unless --apply; asks at a terminal)"),
+        ("verify", "round-trip check that an agent's crew hooks fire (switches it to enforce)"),
+    ):
+        sp = sub.add_parser(name, help=helptext, add_help=False)
+        sp.add_argument("rest", nargs=argparse.REMAINDER)
+
     sp = sub.add_parser("bypass", help=argparse.SUPPRESS)
     sp.add_argument("--session", required=True)
     sp.add_argument("--code")
@@ -997,8 +1005,27 @@ COMMANDS: Final = {
 }
 
 
+def _installer(name: str, argv: list[str]) -> int:
+    """``connect`` / ``verify`` run WP-10's own parsers (they own their options and consent rules)."""
+    if name == "connect":
+        from remembra.relay.crew import install
+
+        return int(install.main(argv))
+    from remembra.relay.crew import verify
+
+    return int(verify.main(argv))
+
+
+INSTALLER_COMMANDS: Final = ("connect", "verify")
+
+
 def main(argv: Sequence[str] | None = None, *, layout: Layout | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
+    if raw and raw[0] in INSTALLER_COMMANDS:
+        try:
+            return _installer(raw[0], raw[1:])
+        except SystemExit as e:
+            return int(e.code) if isinstance(e.code, int) else 2
     try:
         args = build_parser().parse_args(raw)
     except SystemExit as e:

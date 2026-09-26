@@ -106,6 +106,54 @@ def gate_path(home: Path) -> Path:
     return crew_home(home) / "bin" / "crew-gate.py"
 
 
+def gate_bundle_ops(
+    home: Path, python: str, crewd_argv: Sequence[str] | None, *, remove: bool
+) -> tuple[list[FileOp], list[Path]]:
+    """The gate's ``bin/lib`` decision core and ``bin/crewd.json`` (WP-9 ``vendor_gate`` layout), as file ops.
+
+    The launcher that :func:`gate_source_text` returns imports everything from ``bin/lib``, and its sha
+    header covers those files, so they are written with it (and removed with it). Returns the ops and
+    the directories to create 0700 first.
+    """
+    from remembra.relay.crew import gate as G
+
+    layout = G.Layout(Path(home))
+    lib = layout.lib
+    files = {} if remove else G.bundle_files()
+    ops: list[FileOp] = []
+    dirs: list[Path] = [lib] if files else []
+    for rel, content in sorted(files.items()):
+        path = lib / rel
+        ops.append(FileOp(path, _read(path), content.decode("utf-8"), 0o600, [], backup=False, quiet=True))
+        for depth in range(1, len(Path(rel).parts)):  # every level under lib, parents first, all 0700
+            directory = lib.joinpath(*Path(rel).parts[:depth])
+            if directory not in dirs:
+                dirs.append(directory)
+    if lib.is_dir():
+        for path in sorted(lib.rglob("*.py")):
+            if "__pycache__" not in path.parts and path.relative_to(lib).as_posix() not in files:
+                ops.append(FileOp(path, _read(path), None, None, [], backup=False, quiet=True))
+    cmd_path = layout.crewd_cmd
+    if remove:
+        if cmd_path.exists():
+            ops.append(FileOp(cmd_path, _read(cmd_path), None, None, [f"remove {cmd_path}"], backup=False))
+    else:
+        argv = list(crewd_argv) if crewd_argv else [python, "-m", "remembra.relay.crew.crewd"]
+        text = json.dumps({"argv": argv, "python": python}, separators=(",", ":"), sort_keys=True)
+        before = _read(cmd_path)
+        if before is not None and _same_json(before, text):
+            before = text  # same content, other formatting: no change
+        ops.append(FileOp(cmd_path, before, text, 0o600, [f"record how hooks respawn crewd ({cmd_path.name})"], backup=False))
+    return ops, dirs
+
+
+def _same_json(a: str, b: str) -> bool:
+    try:
+        return bool(json.loads(a) == json.loads(b))
+    except ValueError:
+        return False
+
+
 def manifest_path(home: Path) -> Path:
     return crew_home(home) / "install.json"
 
@@ -324,8 +372,18 @@ def build_plan(opts: ConnectOptions) -> InstallPlan:
             FileOp(gate, _read(gate), text, 0o600, [f"install the vendored crew gate at {gate}"], backup=False)
         )
         plan.ensure_dirs += [crew_home(home), crew_home(home) / "bin", crew_home(home) / "log"]
-    elif full_remove and gate.exists():
-        gate_section.ops.append(FileOp(gate, _read(gate), None, None, [f"remove {gate}"], backup=False))
+        if opts.gate_source is None:  # the packaged gate: its decision core goes to bin/lib next to it
+            bundle_ops, bundle_dirs = gate_bundle_ops(home, python, opts.crewd_command or default_crewd_command(), remove=False)
+            gate_section.ops += bundle_ops
+            plan.ensure_dirs += bundle_dirs
+            gate_section.notes.append(
+                f"the gate's decision core ({sum(1 for op in bundle_ops if op.quiet)} package source files)"
+                f" goes to {gate.parent / 'lib'}; package sources are listed without a diff"
+            )
+    elif full_remove:
+        if gate.exists():
+            gate_section.ops.append(FileOp(gate, _read(gate), None, None, [f"remove {gate}"], backup=False))
+        gate_section.ops += gate_bundle_ops(home, python, None, remove=True)[0]
     sections.append(gate_section)
 
     # 2. Agent hooks.
@@ -549,6 +607,10 @@ def show_plan(plan: InstallPlan, out: TextIO) -> None:
                 continue
             for line in op.summary:
                 print(f"  - {line}", file=out)
+            if op.quiet:
+                verb = "remove" if op.after is None else ("add" if op.before is None else "update")
+                print(f"  {verb}: {op.path}", file=out)
+                continue
             diff = op.diff()
             if diff:
                 print("  " + diff.replace("\n", "\n  ").rstrip(), file=out)

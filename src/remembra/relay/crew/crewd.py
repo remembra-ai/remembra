@@ -486,6 +486,23 @@ def githook_state(toplevel: str) -> tuple[str, list[str]]:
     return ("chained" if chained else "ok"), []
 
 
+def githook_state_repaired(home: Path, toplevel: str) -> tuple[str, list[str]]:
+    """:func:`githook_state`, after reinstalling missing crew git hooks in a repo whose owner consented
+    to them with ``remembra-crew connect --git-hooks`` (WP-10 ``install.ensure_git_hooks``). Without that
+    consent nothing is written and the hooks stay reported as missing."""
+    state, missing = githook_state(toplevel)
+    if state != "missing":
+        return state, missing
+    try:
+        from remembra.relay.crew.install import ensure_git_hooks
+
+        ensure_git_hooks(home, Path(toplevel))
+    except Exception as e:  # a failed repair is reported as githook.missing, never fatal
+        log.warning("git hook repair failed in %s: %s", toplevel, e.__class__.__name__)
+        return state, missing
+    return githook_state(toplevel)
+
+
 # ===========================================================================
 # The daemon
 # ===========================================================================
@@ -875,7 +892,7 @@ class Crewd:
             "unconfirmed_zone_ids": [],
             "bypass": None,
             "human_name": str(self.config.get("human_name") or "the owner"),
-            "githook_state": githook_state(facts.toplevel)[0],
+            "githook_state": githook_state_repaired(self.layout.home, facts.toplevel)[0],
             "ended": False,
             "last_checkpoint": {"at": self.clock(), "head": facts.head, "footprints": 0, "tests": ""},
             "last_dirty": [],
@@ -2091,7 +2108,7 @@ class Crewd:
 
     def check_githooks(self) -> None:
         for sess in list(self.sessions.values()):
-            state, missing = githook_state(str(sess["toplevel"]))
+            state, missing = githook_state_repaired(self.layout.home, str(sess["toplevel"]))
             prev = sess.get("githook_state")
             if state != prev:
                 sess["githook_state"] = state

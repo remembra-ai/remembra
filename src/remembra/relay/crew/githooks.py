@@ -108,6 +108,7 @@ class FileOp:
     summary: list[str] = field(default_factory=list)
     backup: bool = True
     force: bool = False  # write even when the text is unchanged (e.g. restore a lost executable bit)
+    quiet: bool = False  # the dry run lists the file without a diff (vendored package sources)
 
     @property
     def changed(self) -> bool:

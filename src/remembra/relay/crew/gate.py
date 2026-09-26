@@ -7,7 +7,7 @@ The gate is invoked by the agent's hooks and by the git hooks::
     <py> -I ~/.remembra/crew/bin/crew-gate.py turn       --hook claude-code   # UserPromptSubmit
     <py> -I ~/.remembra/crew/bin/crew-gate.py stop       --hook claude-code   # Stop (D16)
     <py> -I ~/.remembra/crew/bin/crew-gate.py precompact --hook claude-code   # PreCompact
-    <py> -I ~/.remembra/crew/bin/crew-gate.py wake       --hook claude-code   # asyncRewake waiter (exit 2 wakes the agent)
+    <py> -I ~/.remembra/crew/bin/crew-gate.py rewake     --hook claude-code   # asyncRewake waiter (exit 2 wakes the agent)
     <py> -I ~/.remembra/crew/bin/crew-gate.py precommit | trailer <msgfile> | prepush <remote> <url>  # git gates
 
 Rules it follows (all from the spec; tests pin each one):
@@ -1443,6 +1443,21 @@ def verify_gate(layout: Layout) -> GateCheck:
     return GateCheck(header_ok and actual == expected, expected, actual, True)
 
 
+def launcher_text(files: Mapping[str, bytes] | None = None) -> str:
+    """``bin/crew-gate.py`` exactly as :func:`vendor_gate` writes it: the sha header, then the launcher."""
+    sha = bundle_sha(LAUNCHER_BODY, bundle_files() if files is None else files)
+    return f"# crew-gate v{GATE_VERSION} sha256:{sha}\n{LAUNCHER_BODY}"
+
+
+def vendored_source() -> str:
+    """The text of ``bin/crew-gate.py`` for the installer (WP-10 ``remembra-crew connect``).
+
+    The launcher imports the decision core from ``bin/lib``; the installer writes those files from
+    :func:`bundle_files` next to it, so :func:`verify_gate` accepts the result.
+    """
+    return launcher_text()
+
+
 def vendor_gate(layout: Layout, *, crewd_argv: Sequence[str] | None = None, python: str | None = None) -> Path:
     """Install (or restore) ``bin/crew-gate.py`` and its ``lib/`` copy; returns the script path.
 
@@ -1451,7 +1466,6 @@ def vendor_gate(layout: Layout, *, crewd_argv: Sequence[str] | None = None, pyth
     """
     layout.ensure()
     files = bundle_files()
-    sha = bundle_sha(LAUNCHER_BODY, files)
     lib = layout.lib
     lib.mkdir(parents=True, exist_ok=True)
     os.chmod(layout.bin, 0o700)
@@ -1471,7 +1485,7 @@ def vendor_gate(layout: Layout, *, crewd_argv: Sequence[str] | None = None, pyth
         os.replace(tmp, dest)
     script = layout.gate_script
     tmp_script = script.with_name(script.name + ".tmp")
-    tmp_script.write_text(f"# crew-gate v{GATE_VERSION} sha256:{sha}\n{LAUNCHER_BODY}", encoding="utf-8")
+    tmp_script.write_text(launcher_text(files), encoding="utf-8")
     os.chmod(tmp_script, 0o600)
     os.replace(tmp_script, script)
     argv = list(crewd_argv) if crewd_argv else [python or sys.executable, "-m", "remembra.relay.crew.crewd"]
@@ -1498,6 +1512,7 @@ HOOK_COMMANDS: Final = {
     "stop": cmd_stop,
     "precompact": cmd_precompact,
     "wake": cmd_wake,
+    "rewake": cmd_wake,  # the verb `remembra-crew connect` installs (adapters/crew_hooks.GATE_VERBS)
 }
 
 
