@@ -79,8 +79,7 @@ function RelayKeyStep({ newKey, onKey }: { newKey: string | null; onKey: (key: s
   );
 }
 
-const STATUS: Record<Exclude<RowState, 'connected'>, string> = {
-  'codex-trust': 'needs you to trust 3 hooks: Codex Settings > Hooks > Trust · /hooks in the CLI',
+const STATUS: Record<Exclude<RowState, 'connected' | 'codex-trust'>, string> = {
   briefed: 'read a brief · waiting for its first handoff',
   waiting: 'waiting for its first handoff',
   unverified: 'waiting · adapter not yet verified',
@@ -140,8 +139,7 @@ export function AgentRow({
               `connected · last handoff ${relativeTime(activity.last_active, now)}`
             ) : trust ? (
               <>
-                <span className="font-bold text-fail">needs you</span> to trust 3 hooks: Codex Settings &gt; Hooks &gt; Trust ·{' '}
-                <code className="font-mono">/hooks</code> in the CLI
+                <span className="font-bold text-fail">needs you</span> to trust 3 hooks:
               </>
             ) : (
               STATUS[state === 'connected' ? 'waiting' : state]
@@ -178,6 +176,11 @@ export function AgentRow({
           </span>
         )}
       </div>
+      {trust && (
+        <p className="-mt-1 pb-2 pl-8 font-mono text-[11px] leading-relaxed text-ink-2">
+          Codex Settings &gt; Hooks &gt; Trust · <code className="font-mono">/hooks</code> in the CLI
+        </p>
+      )}
       {!activity && open && <WhySlip id={slipId} agentId={agentId} now={now} serverUrl={api.getApiBaseUrl()} />}
     </li>
   );

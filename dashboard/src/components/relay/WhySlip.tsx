@@ -169,7 +169,6 @@ export function SlipView({
       <div className="rr-win-bar">
         <i aria-hidden="true" />
         exchange check · {adapter}
-        <span>rules · no model</span>
       </div>
       <div className="min-w-0 px-3 py-2.5 font-mono text-[11px] leading-relaxed">
         <div aria-live="polite" aria-busy={outcome.pending}>

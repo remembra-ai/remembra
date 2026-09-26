@@ -74,7 +74,7 @@ describe('SlipView states', () => {
     expect(html).not.toContain('fix →');
     expect(html).not.toContain(SLIP_FOOTER);
     expect(html).toContain('rr-win-line');
-    expect(text(html)).toContain('exchange check · codex rules · no model');
+    expect(text(html)).toContain('exchange check · codex');
   });
 
   it('the Codex call: the trust step, marked inferred, its causes, the fix and the doctor lines', () => {
@@ -205,8 +205,10 @@ describe('ConnectChecklist rows', () => {
     expect(html).toContain('aria-label="Why is Codex waiting?"');
     expect(html).not.toContain('aria-label="Why is Claude Code waiting?"');
     const t = text(html);
-    expect(t).toContain('Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust · /hooks in the CLI');
-    expect(t).toContain('Not connected yet: Codex needs you to trust its 3 hooks');
+    const codex = text(/<li data-row-state="codex-trust">(.*?)<\/li>/s.exec(html)?.[1] ?? '');
+    expect(codex).toMatch(/^! Codex needs you to trust 3 hooks: Not connected yet: Codex needs you to trust its 3 hooks why\? command /);
+    expect(codex).toMatch(/Codex Settings > Hooks > Trust · \/hooks in the CLI$/);
+    expect(t.match(/needs you/g)).toHaveLength(2); // the Codex row only (its line and its screen-reader text)
   });
 
   it('drops the trust state once a Codex brief or close is on the trail', () => {
