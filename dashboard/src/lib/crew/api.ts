@@ -349,6 +349,9 @@ export function createCrewApi(transport: CrewApiTransport) {
     /** (H) Real-time email or signed https webhook target (§9.11). */
     addNotifyTarget: (kind: 'email' | 'webhook', target: string) =>
       post<Record<string, unknown>>('/notifications/targets', { kind, target }),
+    /** (H) Confirm an email target with the code mailed to it (a third-party address is never used unconfirmed). */
+    confirmNotifyTarget: (targetId: string, code: string) =>
+      post<Record<string, unknown>>(`/notifications/targets/${enc(targetId)}/confirm`, { code }),
   };
 }
 

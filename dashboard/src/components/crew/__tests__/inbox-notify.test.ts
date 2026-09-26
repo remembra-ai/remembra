@@ -105,6 +105,12 @@ describe('one primary action per item', () => {
       label: 'Hand baton to…',
       href: '#/crew?project=yaadbooks',
     });
+    // §10.3 false-deny storm: a bypass code or observe mode, both on the policy page
+    expect(primaryAction(item('fd', { kind: 'false_deny_alarm', primary_action: 'bypass', ref_type: 'session', ref_id: 'cs_b' }), 'yaadbooks')).toEqual({
+      type: 'link',
+      label: 'Bypass code or observe',
+      href: '#/crew?project=yaadbooks&view=policy',
+    });
     expect(primaryAction(item('g', { kind: 'zone_change_pending', primary_action: 'approve', ref_type: 'zone_change', ref_id: 'zch_1' }), 'yaadbooks')).toEqual({
       type: 'link',
       label: 'Review zone change',

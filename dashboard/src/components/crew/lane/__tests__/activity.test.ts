@@ -25,6 +25,11 @@ describe('activity marks', () => {
     expect(marksFor(pass, 'cs_a')).toEqual(['baton_in']);
     expect(touches(pass, 'cs_c')).toBe(true);
     expect(touches(pass, 'cs_b')).toBe(false);
+    // the adopter's checkout did not get the saved work: an alarm on its lane (a Needs-you item too)
+    const failed = event('baton.restored', 2, { payload: { to_session: 'cs_a', restored: false, status: 'dirty_tree' } });
+    expect(marksFor(failed, 'cs_a')).toEqual(['fail']);
+    expect(marksFor({ ...failed, payload: { ...failed.payload, restored: true } }, 'cs_a')).toEqual([]);
+    expect(marksFor(failed, 'cs_b')).toEqual([]);
   });
 
   it('picks alarms first when several marks share a minute', () => {

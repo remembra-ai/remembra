@@ -162,7 +162,7 @@ describe('filters', () => {
     expect(on.types).toEqual(['baton.', 'handoff.']);
     expect(groupActive(on, batons)).toBe(true);
     const kept = all.filter((e) => matchesFilters(e, on, s)).map((e) => e.type);
-    expect(kept.sort()).toEqual(['baton.passed', 'baton.ref_created', 'handoff.created']);
+    expect(kept.sort()).toEqual(['baton.passed', 'baton.ref_created', 'baton.restored', 'handoff.created']);
     expect(toggleGroup(on, batons).types).toEqual([]);
   });
 

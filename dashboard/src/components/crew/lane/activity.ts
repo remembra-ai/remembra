@@ -77,6 +77,9 @@ export function marksFor(event: LaneEvent, sessionId: string): MarkKind[] {
       const task = (p.task ?? {}) as Payload;
       return own || task.owner_session_id === sessionId ? ['done'] : [];
     }
+    case 'baton.restored':
+      // a baton whose saved work could not be restored into this lane's checkout (Needs-you item too)
+      return p.to_session === sessionId && p.restored === false ? ['fail'] : [];
     case 'baton.passed': {
       const out: MarkKind[] = [];
       if (p.from_session === sessionId) out.push('baton_out');
