@@ -55,6 +55,7 @@ HOOK_MODULES: tuple[str, ...] = (
     "remembra.crew.reaper",
     "remembra.crew.claims",
     "remembra.crew.reports",
+    "remembra.crew.notify",
 )
 
 TAILER_ENV: Final = "REMEMBRA_CREW_DB_TAILER"

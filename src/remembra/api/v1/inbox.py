@@ -7,6 +7,20 @@ Each row is scoped to the authenticated user (owner_user_id). The
 the caller (e.g. "trademind-trading", "charthustle-holding").
 
 Implements GitHub issue #9 (Agent inbox pattern for targeted pickup).
+
+Crew mode (spec §5.8, §6, §11.2):
+
+* **Project scoping.** Every route honours the key's project allow-list
+  (``AuthenticatedUser.project_ids``): a restricted key sees and acks only rows
+  tagged with one of its projects; rows with no project are invisible to it.
+  Reads take ``?project_id=`` (one project) and ``?scope=all|project|unscoped``.
+  A restricted key must send into one of its projects (the only one when it
+  has exactly one).
+* **Reserved senders.** ``mani``, ``human``, ``system``, ``remembra`` and the
+  kinds ``override`` / ``pause`` are server-set: an API key using them gets 422.
+  A dashboard login sends as ``human`` (``sender_kind='human'``). Rows carry
+  ``sender_kind``/``sender_verified``; an agent-scoped key is key-verified, any
+  other key is self-declared.
 """
 
 import logging
@@ -19,7 +33,15 @@ from pydantic import BaseModel, Field, field_validator
 from remembra.auth.middleware import AuthenticatedUser, get_current_user, require_memory_recall, require_memory_store
 from remembra.cloud.limits import record_relay_usage, relay_guard
 from remembra.core.limiter import limiter
-from remembra.inbox.manager import TERMINAL_STATUSES, InboxManager
+from remembra.crew.access import is_human
+from remembra.inbox.manager import (
+    RESERVED_KINDS,
+    TERMINAL_STATUSES,
+    InboxManager,
+    ReservedSenderError,
+    is_reserved_sender,
+    sender_label,
+)
 
 log = logging.getLogger(__name__)
 
@@ -42,6 +64,44 @@ def get_inbox_manager(request: Request) -> InboxManager:
 
 
 CurrentUserDep = Annotated[AuthenticatedUser, Depends(get_current_user)]
+ScopeQuery = Annotated[
+    Literal["all", "project", "unscoped"],
+    Query(description="all (default), project (only rows tagged with a project) or unscoped (rows with none)"),
+]
+ProjectQuery = Annotated[str | None, Query(max_length=128, description="Only rows of this project")]
+
+
+def _allowed_projects(user: AuthenticatedUser) -> list[str] | None:
+    """The caller's project allow-list (None = unrestricted)."""
+    return list(user.project_ids) if user.project_ids else None
+
+
+def _reserved_422(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={"error": "reserved_sender", "message": message},
+    )
+
+
+def _send_project(user: AuthenticatedUser, requested: str | None) -> str | None:
+    """The project a new row is tagged with; a restricted key must stay inside its allow-list."""
+    allowed = _allowed_projects(user)
+    project = (requested or "").strip() or None
+    if allowed is None:
+        return project
+    if project is None:
+        if len(allowed) == 1:
+            return allowed[0]
+        raise HTTPException(
+            status_code=422,
+            detail={"error": "project_required", "message": "This key is limited to several projects; pass project_id."},
+        )
+    if project not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"error": "project_forbidden", "message": "This key cannot send into that project."},
+        )
+    return project
 
 
 # ---------------------------------------------------------------------------
@@ -68,6 +128,16 @@ class SendInboxRequest(BaseModel):
         default=None,
         description="Optional expiry. Rows past this are filtered from get_inbox.",
     )
+    project_id: str | None = Field(
+        default=None,
+        max_length=128,
+        description="Project the message belongs to (required for keys limited to several projects).",
+    )
+    kind: str = Field(
+        default="directive",
+        pattern=r"^[a-z][a-z0-9_]{0,31}$",
+        description="Message kind. 'override' and 'pause' are server-set only.",
+    )
 
     @field_validator("to_agent", "subject", "from_agent")
     @classmethod
@@ -90,12 +160,30 @@ class InboxRow(BaseModel):
     ack_note: str | None = None
     ack_result: str | None = None
     expires_at: str | None = None
+    project_id: str | None = None
+    crew_id: str | None = None
+    kind: str = "directive"
+    sender_kind: str = "agent"
+    sender_verified: bool = False
+    sender_label: str | None = None
+
+
+def _inbox_row(row: dict[str, Any]) -> InboxRow:
+    data = {k: v for k, v in row.items() if k in InboxRow.model_fields}
+    data["kind"] = row.get("kind") or "directive"
+    data["sender_kind"] = row.get("sender_kind") or "agent"
+    data["sender_verified"] = bool(row.get("sender_verified"))
+    data["sender_label"] = sender_label(row)
+    return InboxRow(**data)
 
 
 class SendInboxResponse(BaseModel):
     inbox_id: str
     status: str
     created_at: str
+    project_id: str | None = None
+    sender_kind: str = "agent"
+    sender_verified: bool = False
 
 
 class AckInboxRequest(BaseModel):
@@ -139,18 +227,38 @@ async def send_to_inbox(
     An inbox message is a relay event: free on every plan (never uses smart
     credits), subject only to the plan's relay burst limit.
     """
+    human = is_human(current_user)
+    if human:
+        # A dashboard login is the human principal: server-set sender provenance.
+        from_agent = payload.from_agent or "human"
+        sender_kind = "human"
+    else:
+        # An agent-scoped key sends as its own agent, whatever the payload claims.
+        from_agent = getattr(current_user, "agent_id", None) or payload.from_agent or "unknown"
+        sender_kind = "agent"
+        if is_reserved_sender(from_agent):
+            raise _reserved_422(f"sender name '{from_agent}' is reserved for the server")
+        if payload.kind in RESERVED_KINDS:
+            raise _reserved_422(f"kind '{payload.kind}' is reserved for the server")
+    project_id = _send_project(current_user, payload.project_id)
     await relay_guard(request, response, current_user.user_id)
     try:
         row = await inbox.send(
             owner_user_id=current_user.user_id,
-            # An agent-scoped key sends as its own agent, whatever the payload claims.
-            from_agent=getattr(current_user, "agent_id", None) or payload.from_agent or "unknown",
+            from_agent=from_agent,
             to_agent=payload.to_agent,
             subject=payload.subject,
             body=payload.body,
             metadata=payload.metadata,
             expires_at=payload.expires_at,
+            project_id=project_id,
+            kind=payload.kind,
+            sender_kind=sender_kind,
+            # Key-verified only for an agent-scoped key (its agent id comes from the key).
+            sender_verified=human or bool(getattr(current_user, "agent_id", None)),
         )
+    except ReservedSenderError as e:
+        raise _reserved_422(str(e)) from e
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
     except Exception as e:
@@ -165,6 +273,9 @@ async def send_to_inbox(
         inbox_id=row["inbox_id"],
         status=row["status"],
         created_at=row["created_at"],
+        project_id=row.get("project_id"),
+        sender_kind=row.get("sender_kind") or sender_kind,
+        sender_verified=bool(row.get("sender_verified")),
     )
 
 
@@ -187,14 +298,19 @@ async def get_inbox(
         Query(alias="status", description="'unread' (default) or 'all'."),
     ] = "unread",
     limit: Annotated[int, Query(ge=1, le=200)] = 20,
+    project_id: ProjectQuery = None,
+    scope: ScopeQuery = "all",
 ) -> list[InboxRow]:
-    """Return inbox rows for `agent_id` (scoped to the authenticated user)."""
+    """Return inbox rows for `agent_id` (scoped to the authenticated user and the key's projects)."""
     try:
         rows = await inbox.get_for_agent(
             owner_user_id=current_user.user_id,
             agent_id=agent_id,
             status=status_filter,
             limit=limit,
+            project_ids=_allowed_projects(current_user),
+            project_id=project_id,
+            scope=scope,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
@@ -205,7 +321,7 @@ async def get_inbox(
             detail="Failed to read inbox. Please try again later.",
         ) from e
 
-    return [InboxRow(**row) for row in rows]
+    return [_inbox_row(row) for row in rows]
 
 
 class InboxListResponse(BaseModel):
@@ -248,6 +364,8 @@ async def list_inbox_messages(
     agent_id: Annotated[str | None, Query(max_length=128, description="Only messages to or from this agent")] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    project_id: ProjectQuery = None,
+    scope: ScopeQuery = "all",
 ) -> InboxListResponse:
     """Every message of the authenticated owner, newest first. Read-only: listing
     never marks anything read."""
@@ -258,6 +376,9 @@ async def list_inbox_messages(
             agent_id=agent_id,
             limit=limit,
             offset=offset,
+            project_ids=_allowed_projects(current_user),
+            project_id=project_id,
+            scope=scope,
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
@@ -268,7 +389,7 @@ async def list_inbox_messages(
             detail="Failed to read inbox. Please try again later.",
         ) from e
     return InboxListResponse(
-        items=[InboxRow(**row) for row in result["items"]],
+        items=[_inbox_row(row) for row in result["items"]],
         total=result["total"],
         status=status_filter,
         agent_id=(agent_id or "").strip() or None,
@@ -286,10 +407,14 @@ async def inbox_summary(
     request: Request,
     current_user: CurrentUserDep,
     inbox: Annotated[InboxManager, Depends(get_inbox_manager)],
+    project_id: ProjectQuery = None,
+    scope: ScopeQuery = "all",
 ) -> InboxSummaryResponse:
-    """Counts per agent id (as recipient and as sender) for the authenticated owner."""
+    """Counts per agent id (as recipient and as sender) for the authenticated owner and the key's projects."""
     try:
-        result = await inbox.summary(current_user.user_id)
+        result = await inbox.summary(
+            current_user.user_id, project_ids=_allowed_projects(current_user), project_id=project_id, scope=scope
+        )
     except Exception as e:
         log.exception("inbox_summary_failed user=%s", current_user.user_id)
         raise HTTPException(
@@ -320,6 +445,7 @@ async def ack_inbox(
             inbox_id=inbox_id,
             result=payload.result,
             note=payload.note,
+            project_ids=_allowed_projects(current_user),
         )
     except ValueError as e:
         # Missing row → 404; bad result value → 400
