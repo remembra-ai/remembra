@@ -297,6 +297,32 @@ async def test_socket_following_a_project_the_key_lost_is_closed_with_4003(tmp_p
             assert close["reason"] == "No access to project"
 
 
+async def test_project_change_through_the_keys_route_reaches_a_key_already_in_use(tmp_path):
+    """The re-check reads the key's current projects, not the cached ones (no cache drop, no restart).
+
+    The key authenticates the socket first, so it is in the validation cache when
+    the owner moves it to another project with PATCH /keys/{id}.
+    """
+    async with secure_app(tmp_path, [websocket.router], prefix="") as h:
+        _mount_rest(h)
+        uid = await h.create_user("owner@example.com", PASSWORD)
+        key, key_id = await h.api_key(uid, "viewer", project_ids=["alpha"])
+        with (
+            TestClient(h.app) as client,
+            client.websocket_connect("/ws?project_id=alpha", headers={"X-API-Key": key}) as ws,
+        ):
+            _next_event(ws, "connected")
+            assert _broadcast(client, uid, "before", project_id="alpha") == 1
+            assert _next_event(ws, "memory.updated")["data"]["new_content"] == "before"
+
+            r = client.patch(f"/api/v1/keys/{key_id}", json={"project_ids": ["beta"]}, headers=h.jwt(uid))
+            assert r.status_code == 200, r.text
+
+            assert _broadcast(client, uid, "SECRET-alpha", project_id="alpha") == 0
+            close = _expect_close(ws, websocket.CLOSE_FORBIDDEN)
+            assert close["reason"] == "No access to project"
+
+
 async def test_recheck_that_cannot_run_closes_with_1011_and_sends_nothing(tmp_path, monkeypatch):
     async with secure_app(tmp_path, [websocket.router], prefix="") as h:
         uid = await h.create_user("owner@example.com", PASSWORD)
