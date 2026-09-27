@@ -33,6 +33,7 @@ import structlog
 from remembra.core.time import utcnow
 from remembra.models.memory import StoreRequest
 from remembra.relay.handoff import assess_text, handoff_has_substance
+from remembra.security.secrets import scrub, scrub_value
 from remembra.storage.database import ENTITY_NAME_MATCH
 
 log = structlog.get_logger(__name__)
@@ -127,12 +128,17 @@ def _parse_metadata(raw: Any) -> dict[str, Any]:
 
 
 def serialize_memory_row(row: dict[str, Any]) -> dict[str, Any]:
-    """Lean, agent-facing view of a memory row with provenance surfaced."""
-    metadata = _parse_metadata(row.get("metadata"))
+    """Lean, agent-facing view of a memory row with provenance surfaced.
+
+    Credentials are redacted from the content and from every metadata string
+    (SEC-23): rows stored before metadata was scrubbed on write are clean when
+    read. The timeline, the trail and the brief all read rows through here.
+    """
+    metadata = scrub_value(_parse_metadata(row.get("metadata")))
     return {
         "id": row["id"],
         "project_id": row.get("project_id"),
-        "content": row.get("content") or "",
+        "content": scrub(row.get("content") or ""),
         "memory_type": row.get("memory_type") or metadata.get("memory_type"),
         "created_at": row.get("created_at"),
         "expires_at": row.get("expires_at"),
@@ -367,7 +373,12 @@ class AgentSessionService:
         return [dict(r) for r in await cursor.fetchall()]
 
     async def list_status(self, user_id: str, project_id: str) -> list[dict[str, Any]]:
-        """Current (non-superseded, non-expired) status values for a project."""
+        """Current (non-superseded, non-expired) status values for a project.
+
+        Keys and values are scrubbed of credentials as they are read (SEC-23),
+        so a value stored before status values were redacted on write is not
+        shown in full here or in the brief.
+        """
         items: list[dict[str, Any]] = []
         seen: set[str] = set()
         for row in await self._current_status_rows(user_id, project_id):
@@ -376,10 +387,11 @@ class AgentSessionService:
             if not key or key in seen:
                 continue
             seen.add(key)
+            value = metadata.get(STATUS_VALUE_FIELD, row.get("content"))
             items.append(
                 {
-                    "key": key,
-                    "value": metadata.get(STATUS_VALUE_FIELD, row.get("content")),
+                    "key": scrub(key) if isinstance(key, str) else key,
+                    "value": scrub(value) if isinstance(value, str) else scrub_value(value),
                     "memory_id": row["id"],
                     "updated_at": row.get("created_at"),
                     "expires_at": row.get("expires_at"),
@@ -413,14 +425,19 @@ class AgentSessionService:
         the history of the status stays queryable. Writing the value that is
         already current is a no-op (``changed: False``) — no new memory.
 
+        Credentials are redacted from the key and the value before anything is
+        compared or stored (SEC-23), and from every metadata string (the
+        ``Memory`` model): the stored ``status_value`` is the redacted value, so
+        re-sending the same secret-bearing value is still a no-op.
+
         ``before_write`` runs only when a new value will be stored, after the
         unchanged check and under the same lock (the plan gate: an unchanged
         re-send is never charged). If it raises, nothing is written.
         """
         if self.memory_service is None:
             raise RuntimeError("upsert_status requires a memory service")
-        key = normalize_status_key(key)
-        value = (value or "").strip()
+        key = scrub(normalize_status_key(key))
+        value = scrub((value or "").strip())
         if not value:
             raise ValueError("status value must not be empty")
 
@@ -509,17 +526,20 @@ class AgentSessionService:
 
         items = []
         for r in rows:
-            body = r["body"] or ""
+            # Messages are scrubbed on send; this covers rows stored before that (SEC-23). The whole
+            # body is scrubbed before it is cut to a preview, so a key cut in half is not shown either.
+            body = scrub(r["body"] or "")
+            subject = scrub(r["subject"] or "")
             trust = r["trust_score"]
             if trust is None:
                 # Written before messages were scored (or on a table without the
                 # column): score the whole message now, not just the preview.
-                trust = assess_text(r["from_agent"], r["subject"], body).trust
+                trust = assess_text(r["from_agent"], subject, body).trust
             items.append(
                 {
                     "inbox_id": r["inbox_id"],
                     "from_agent": r["from_agent"],
-                    "subject": r["subject"],
+                    "subject": subject,
                     "created_at": r["created_at"],
                     "body_preview": body[:INBOX_PREVIEW_CHARS] + ("..." if len(body) > INBOX_PREVIEW_CHARS else ""),
                     "trust_score": trust,
