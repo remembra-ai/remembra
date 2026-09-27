@@ -385,6 +385,10 @@ class UserManager:
             expires_at=datetime.fromtimestamp(payload["exp"], tz=UTC),
         )
 
+        # A WebSocket opened with this token is closed now, not when it next gets an event.
+        from remembra.api.v1.websocket import recheck_user_connections
+
+        await recheck_user_connections(user_id)
         log.info("user_logged_out", user_id=user_id)
         return True
 
@@ -611,6 +615,7 @@ async def revoke_user_access(db: Database, user_id: str) -> int:
 
     Used on account deactivation so neither dashboard sessions nor API keys keep
     working. Keys are soft-revoked (``active = FALSE``), never deleted.
+    Open WebSockets are closed by ``invalidate_user_sessions``, which runs last.
     Returns the number of keys revoked.
     """
     from remembra.auth import keys as keys_module

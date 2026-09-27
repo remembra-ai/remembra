@@ -267,10 +267,14 @@ async def authenticate_jwt(request: Request, token: str) -> AuthenticatedUser | 
     )
 
 
-async def authenticate_api_key(request: Request, api_key: str) -> AuthenticatedUser | None:
-    """Validate an API key and the owning account's active status."""
+async def authenticate_api_key(request: Request, api_key: str, *, record_use: bool = True) -> AuthenticatedUser | None:
+    """Validate an API key and the owning account's active status.
+
+    ``record_use=False`` re-checks a key already in use (an open WebSocket)
+    without moving its last-used time.
+    """
     key_manager = await get_api_key_manager(request)
-    key_info = await key_manager.validate_key(api_key)
+    key_info = await key_manager.validate_key(api_key, record_use=record_use)
     if not key_info:
         return None
     if not await _account_is_active(request, key_info["user_id"]):
