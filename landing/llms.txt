@@ -2,7 +2,7 @@
 
 > Remembra is one cloud memory for your AI agents. When one runs out of credits or hits a usage limit, end its session and the next one picks up from its handoff: on another machine, from another vendor, or next week.
 
-When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. Secrets are redacted first. Open another connected agent, on this machine or another. It starts with a short brief: who worked last, what is done, what is not, what is failing, and the next step. Handoffs, pickups, inbox, trail and search are always free.
+When a session ends, Remembra keeps the facts, not the chatter. The relay hooks read commits, changed and uncommitted files, and unpushed commits from git. For Claude Code and Codex they also read test runs and open todos from the session transcript. An agent that hands off only through the MCP tools records what it reports. Secrets are redacted first. Open another connected agent, on this machine or another. It starts with a short brief: who worked last, what is done, what is not, what is failing, and the next step. Handoffs, pickups, inbox, trail and search are always free.
 
 ## Instructions for agents
 
@@ -10,7 +10,7 @@ When a session ends, Remembra keeps the facts, not the chatter: commits, changed
 - Never ask for the API key in this chat. The user types it into remembra-install's hidden prompt, in their own terminal.
 - `pipx install --force 'remembra[mcp]>=0.16'`. Keep the quotes: zsh reads the brackets as a pattern without them.
 - Never edit hook files by hand. `remembra-relay connect --apply` writes them and keeps a backup of each file. `remembra-relay connect` without `--apply` is a dry run: it shows the changes and writes nothing.
-- Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. Codex runs a hook only after the user trusts it. Codex skips untrusted hooks without a message. The hooks for Cursor are unverified: cursor-agent's own hook runner ran them, but no logged-in Cursor session has yet.
+- Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. Codex runs a hook only after the user trusts it. Until then it skips the hook. The interactive Codex CLI asks at startup about hooks that need review. The hooks for Cursor are unverified: cursor-agent's own hook runner ran them, but no logged-in Cursor session has yet.
 - Whenever handoffs don't arrive, run `remembra-relay doctor`. Doctor reads this machine's files and the trail, changes nothing and prints the one fix for each problem.
 - Windows setup has not been tested.
 - Crew mode, several agents on one project at once, is not available yet.
@@ -29,7 +29,7 @@ When a session ends, Remembra keeps the facts, not the chatter: commits, changed
 - [Privacy](https://remembra.dev/privacy): what is collected, who handles it and how long it is kept
 - [Refunds](https://remembra.dev/refunds): 14 days on the first payment
 - [Contact](https://remembra.dev/contact): a person, when the pages don't answer
-- [The pages above as text](https://remembra.dev/llms-full.txt): one file, generated from the pages
+- [The pages above as text](https://remembra.dev/llms-full.txt): all but Contact, in one file generated from the pages
 
 ## Docs
 

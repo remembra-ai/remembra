@@ -153,17 +153,18 @@ recent = remembra.timeline(
     start=datetime.now() - timedelta(hours=2)
 )
 
-# "What did we decide about the API last week?"
-decisions = remembra.recall(
-    "API decisions",
-    time_range=("2026-03-08", "2026-03-15")
+# "What did we store last week?"
+last_week = remembra.timeline(
+    start="2026-03-08",
+    end="2026-03-15"
 )</code></pre>
 <h2>Pattern 5: Memory Spaces for Isolation</h2>
 <div>
 <h3>The Pattern</h3>
 <p>Use memory spaces to scope visibility. Not all agents need all memories.</p>
 </div>
-<pre><code># Production debugging agent - limited scope
+<pre><code># Agent(...) stands for your own agent framework.
+# Production debugging agent - limited scope
 debug_agent = Agent(
     memory_space="production-incidents",
     permissions=["read"]  # Can't modify production memories
@@ -175,14 +176,13 @@ dev_agent = Agent(
     permissions=["read", "write"]
 )
 
-# Cross-space sharing when needed
-remembra.share_memory(
+# Cross-space sharing when needed: the share_memory MCP tool
+share_memory(
     memory_id=incident_memory,
-    from_space="production-incidents",
-    to_space="development"
+    space_id=development_space_id
 )</code></pre>
 <h2>Example: Feature Development (illustrative)</h2>
-<p>Here's how these patterns combine in practice. Building the <code>remembra-doctor</code> diagnostic tool:</p>
+<p>Here's how these patterns could combine, told as if a crew of agents built the <code>remembra-doctor</code> diagnostic tool. It is not a record of how it was built: the real <code>remembra-doctor</code> was proposed by Codex in a March 15 agent survey and shipped that day.</p>
 <pre><code>1. Human: "Build a diagnostic tool for agent setups"
 
 2. Orchestrator (General):
@@ -195,36 +195,37 @@ remembra.share_memory(
    - Recalls: Task context
    - Searches: npm/PyPI for diagnostic patterns
    - Stores: "Common patterns: health checks, config validation,
-             network tests. Reference: pytest --doctor, npm doctor"
+             network tests. Reference: npm doctor, brew doctor"
 
 4. Orchestrator:
    - Recalls: Research findings
    - Stores: "Architecture: CLI command, check registry, 
-             colored output. File: cli/doctor.py"
+             colored output. File: tools/doctor.py"
    - Spawns: Coding agent
 
 5. Coding Agent (Codex):
    - Recalls: Architecture decisions, file location
    - Implements: Full diagnostic tool
-   - Stores: "remembra-doctor implemented. 5 check types:
-             config, command, health, auth, recall_test.
+   - Stores: "remembra-doctor implemented. 5 checks:
+             config, command, health, recall, remote.
              PR ready."
 
 6. Testing Agent:
    - Recalls: Implementation details
    - Writes: Integration tests
-   - Stores: "Tests passing. Edge case found: bridge not running"
+   - Stores: "Tests passing. Edge case found: a bad key
+             shows as a plain HTTP error"
 
 7. Coding Agent (recalled):
    - Recalls: Edge case from testing
-   - Fixes: Add bridge detection
-   - Stores: "Bridge check added. PR updated."
+   - Fixes: Label auth failures in the remote check
+   - Stores: "Auth failures labelled. PR updated."
 
 8. Docs Agent:
    - Recalls: Full feature context
    - Writes: Documentation with examples
    - Stores: "Docs complete: getting-started/agent-setup"</code></pre>
-<p>Eight handoffs, and each agent started from what the one before it stored.</p>
+<p>Seven handoffs after the human's request, and each agent started from what the one before it stored.</p>
 <h2>Key Takeaways</h2>
 <ol>
 <li><strong>Memory is the coordination layer</strong> — Shared persistent memory replaces complex agent-to-agent protocols.</li>

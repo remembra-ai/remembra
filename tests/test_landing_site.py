@@ -250,6 +250,10 @@ def test_trust_row_claims_only_what_a_handoff_records() -> None:
     assert "machine" not in trust
     assert "Give each agent its own scoped key and it can't write as another." in trust
     assert "records the agent, session and time" in trust
+    # P-022: redaction is pattern-based (security/secrets.py) and covers status values and metadata on write
+    assert "stripped out before anything is saved" not in trust
+    assert "before a note, handoff, status value or inbox message is saved, metadata included" in trust
+    assert "a password written as plain prose can still get through" in trust
 
 
 def test_lede_does_not_promise_a_handoff_after_a_closed_lid() -> None:
@@ -289,11 +293,15 @@ def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
     from remembra.tools.agents import AGENT_CONFIGS
 
     assert set(AGENT_CONFIGS) == {"claude-desktop", "claude-code", "codex", "cursor", "gemini", "windsurf"}
-    assert "remembra-install sets up those tools for Claude Code, Claude Desktop, Codex, Cursor and Gemini CLI." in note
+    assert (
+        "remembra-install --all sets up those tools for Claude Code, Claude Desktop (on macOS), Codex, Cursor and Gemini CLI,"
+        " for each one it finds." in note
+    )
     from remembra.tools.agents import UNVERIFIED_AGENTS
 
     assert set(UNVERIFIED_AGENTS) == {"windsurf"}  # --all leaves it out: the note must not claim it
-    assert "Windsurf, Qwen Code and Kimi you add by hand" in note
+    assert "Windsurf is unverified: remembra-install --agent windsurf writes its config, and --all leaves it out." in note
+    assert "Qwen Code and Kimi you add by hand" in note and "Windsurf, Qwen Code and Kimi you add by hand" not in note
     assert "guides/relay/#mcp-by-hand" in (LANDING / "index.html").read_text()
     assert "{#mcp-by-hand}" in (Path(__file__).resolve().parent.parent / "docs" / "guides" / "relay.md").read_text()
 
@@ -362,6 +370,9 @@ def test_pricing_numbers_are_the_plans_in_plans_py() -> None:
     free_plan = PLANS[PlanTier.FREE]
     free_text = _text(free)
     assert f"{free_plan.max_projects} projects" in free_text and f"{free_plan.max_memories:,} notes kept" in free_text
+    # P-029: the lower Free cap applies only once the notice date is set (plans.memory_cap); until then the old one
+    assert free_plan.pre_notice_max_memories is not None
+    assert f"({free_plan.pre_notice_max_memories:,} until 30 days after our notice email)" in free_text
     assert f"{free_plan.max_recalls_per_month:,} searches a month" in free_text
     assert f"fair use {free_plan.max_relay_events_per_month:,} a month" in free_text
     # Founding 100: Solo, yearly only, locked price
@@ -844,9 +855,12 @@ def test_connector_section_is_labelled_coming_and_says_it_is_not_live() -> None:
     note = _text(re.search(r'<p class="fine" id="connector-note">.*?</p>', section, re.S).group(0))
     assert note.startswith("Coming, not live yet:") and "not switched on at api.remembra.dev" in note
     assert "not yet verified it inside the live Claude and ChatGPT apps" in note
-    assert _text(re.search(r'<h2 id="anywhere-title">.*?</h2>', section, re.S).group(0)).startswith("Soon:")
+    assert _text(re.search(r'<h2 id="anywhere-title">.*?</h2>', section, re.S).group(0)).startswith("Coming:")
     assert "Once the connector is switched on" in _text(section) and "Add the Remembra connector" not in section
     assert "Nothing over the connector edits or deletes memories." in _text(section)
+    # P-016: Cursor's hooks are unverified, and an inbox note sits after the last session in the brief
+    assert "Cursor" not in _text(re.search(r'<h2 id="anywhere-title">.*?</h2>', section, re.S).group(0))
+    assert "first thing in its next session" not in section and "top of its next brief" not in section
     gate = home[: home.index('id="anywhere"')].rsplit("<section", 1)[0]
     assert (
         "<!-- beta: the connector is built and tested locally; not yet verified inside the live Claude and ChatGPT apps -->"
@@ -880,6 +894,8 @@ def test_crew_link_previews_and_plan_do_not_say_launch_while_off(monkeypatch: py
     off = _crew_preview_and_plan(crew)
     assert "launch" not in off.lower()
     assert "not available yet" in off and "What ships first" in off and "First release" in off
+    assert "2 to 3 weeks" not in off and "no date yet" in off  # P-050: the follow-up release has no date
+    assert "Confirmed for Claude Code" not in crew and "in the release after" not in crew  # P-048, P-049
     assert crew.count('<meta name="description"') == 1 and crew.count('<meta property="og:description"') == 1
     monkeypatch.setattr(partials, "CREW_LIVE", True)
     live = partials.render(crew)

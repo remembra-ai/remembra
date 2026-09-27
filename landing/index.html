@@ -248,7 +248,7 @@
           <li class="leg">
             <span class="n">WORK NORMALLY</span>
             <h3>Work normally</h3>
-            <p>Nothing new to learn. When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. Secrets are redacted first.</p>
+            <p>Nothing new to learn. When a session ends, Remembra keeps the facts, not the chatter. The relay hooks read commits, changed and uncommitted files, and unpushed commits from git. For Claude Code and Codex they also read test runs and open todos from the session transcript. An agent that hands off only through the MCP tools records what it reports. Secrets are redacted first.</p>
           </li>
           <li class="leg">
             <span class="n">SWITCH ANYTIME</span>
@@ -271,7 +271,7 @@
         <ul class="places" aria-label="Where your agents can run">
           <li>laptop</li><li>desktop</li><li>cloud VM</li><li>server</li>
         </ul>
-        <p class="fine" id="agents-note">Claude Code's and Codex's session hooks are verified: Codex with a prerelease of codex-cli 0.155 (<code>codex exec</code>, with a local stand-in for the model), and the same tests also pass on codex-cli 0.157.1; other Codex versions have not been run. Codex runs them only after you trust them, so open Codex and run <code>/hooks</code> once after connecting. The Gemini CLI, Qwen Code and Kimi Code hooks are verified too, each run the same way at one version (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1); Gemini CLI runs them only in folders you trust. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. <code>connect</code> is a dry run until you add <code>--apply</code>, and it leaves the unverified hooks out unless you also add <code>--include-unverified</code>. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent. <code>remembra-install</code> sets up those tools for Claude Code, Claude Desktop, Codex, Cursor and Gemini CLI. Windsurf, Qwen Code and Kimi you add by hand for now; the <a href="https://docs.remembra.dev/guides/relay/#mcp-by-hand">setup guide</a> has the block to paste.</p>
+        <p class="fine" id="agents-note">Claude Code's and Codex's session hooks are verified: Codex with a prerelease of codex-cli 0.155 (<code>codex exec</code>, with a local stand-in for the model), and the same tests also pass on codex-cli 0.157.1; other Codex versions have not been run. Codex runs them only after you trust them, so open Codex and run <code>/hooks</code> once after connecting. The Gemini CLI, Qwen Code and Kimi Code hooks are verified too, each run the same way at one version (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1); Gemini CLI runs them only in folders you trust. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. <code>connect</code> is a dry run until you add <code>--apply</code>, and it leaves the unverified hooks out unless you also add <code>--include-unverified</code>. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent. <code>remembra-install --all</code> sets up those tools for Claude Code, Claude Desktop (on macOS), Codex, Cursor and Gemini CLI, for each one it finds. Windsurf is unverified: <code>remembra-install --agent windsurf</code> writes its config, and <code>--all</code> leaves it out. Qwen Code and Kimi you add by hand for now; the <a href="https://docs.remembra.dev/guides/relay/#mcp-by-hand">setup guide</a> has the block to paste.</p>
       </div>
       <div>
         <div class="const" id="constellation">
@@ -394,8 +394,8 @@
     <div class="wrap anywhere">
       <div>
         <p class="eyebrow"><span class="n">04</span> Pick up from anywhere <span class="tag">Coming, not live yet</span></p>
-        <h2 id="anywhere-title">Soon: check on Codex, Cursor or Claude Code from your phone.</h2>
-        <p class="intro">Once the connector is switched on, you add it to the Claude apps or to ChatGPT, then ask where the work stands, read the trail, search your memory, or leave an agent an instruction. <b>It sees it first thing in its next session.</b></p>
+        <h2 id="anywhere-title">Coming: check on Claude Code or Codex from your phone.</h2>
+        <p class="intro">Once the connector is switched on and checked in the live apps, you add it to the Claude apps or to ChatGPT, then ask where the work stands, read the trail, search your memory, or leave an agent a message. <b>The message shows in that agent's next session brief.</b></p>
         <ul class="apps-list">
           <li><b>Claude</b><span>claude.ai, Claude Desktop and the Claude phone apps, as a custom connector.</span></li>
           <li><b>ChatGPT</b><span>On the web, in developer mode (Plus, Pro, Business, Enterprise and Education).</span></li>
@@ -409,7 +409,7 @@
           <p class="msg me">Where did we leave the invoices work?</p>
           <div class="msg"><span class="tool">session_brief</span><br>Claude Code handed off 1h ago on <b>feat/pdf-export</b>. Done: 3 commits pushed. Failing: 1 rounding test. Suggested next step: fix rounding in totals().</div>
           <p class="msg me">Tell claude-code to fix the rounding first thing tomorrow.</p>
-          <div class="msg"><span class="tool">send_to_inbox</span><br>Left in claude-code's inbox. It will be at the top of its next brief.</div>
+          <div class="msg"><span class="tool">send_to_inbox</span><br>Left in claude-code's inbox. It will show in its next brief.</div>
         </div>
       </div>
     </div>
@@ -454,7 +454,7 @@
       </div>
 
       <dl class="trust" aria-label="How your memory is protected">
-        <div><dt>Redacted</dt><dd>Keys, tokens and other secrets are stripped out before anything is saved.</dd></div>
+        <div><dt>Redacted</dt><dd>Keys, tokens and other secrets Remembra recognises are replaced before a note, handoff, status value or inbox message is saved, metadata included. It matches known patterns, so a password written as plain prose can still get through.</dd></div>
         <div><dt>Isolated</dt><dd>Every account's memory is walled off, and project-scoped keys only see their own projects.</dd></div>
         <div><dt>Attributed</dt><dd>A relay handoff records the agent, session and time that wrote it, and whether the client says its facts came from git or from the agent. Give each agent its own scoped key and it can't write as another.</dd></div>
         <div><dt>Open</dt><dd>The core is MIT-licensed open source. Read it, run it, <a href="https://docs.remembra.dev/getting-started/docker/">host it yourself</a>.</dd></div>
