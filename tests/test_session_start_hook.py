@@ -112,7 +112,7 @@ def test_hook_prints_real_brief_from_env_config(proxy, tmp_path):
     out = result.stdout
     assert "# Remembra brief · project clawbot · you are claude-code" in out  # the server's rendered brief
     assert "[SESSION END] clawbot handoff" in out
-    assert "Inbox: 1 unread" in out and "Review the brief endpoint" in out and "from codex" in out
+    assert "Inbox: 1 unread" in out and "Review the brief endpoint" in out and "from agent codex (self-declared)" in out
     assert "deploy:api: pushed, not deployed" in out
     assert "Decided to keep status upserts in SQLite" in out
     assert "Finished AGT API" not in out  # other project's handoff not shown
