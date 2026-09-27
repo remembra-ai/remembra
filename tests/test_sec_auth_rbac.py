@@ -136,8 +136,11 @@ async def test_permissions_listing_requires_admin_like_every_admin_route(tmp_pat
         body = r.json()
         assert body["permissions"] == [p.value for p in Permission]
         assert set(body["roles"]) == {"admin", "editor", "viewer"}
-        assert sorted(body["roles"]["admin"]) == sorted(p.value for p in Permission)
-        assert sorted(body["roles"]["viewer"]) == ["entity:read", "key:list", "memory:recall"]
+        # every permission except the two crew ones only a dashboard login holds (D27: crew:override, crew:admin)
+        assert sorted(body["roles"]["admin"]) == sorted(
+            p.value for p in Permission if p.value not in {"crew:override", "crew:admin"}
+        )
+        assert sorted(body["roles"]["viewer"]) == ["crew:read", "entity:read", "key:list", "memory:recall"]
 
 
 async def test_admin_audit_is_scoped_to_own_tenant(tmp_path):

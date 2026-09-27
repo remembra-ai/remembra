@@ -579,8 +579,11 @@ async def test_http_503_when_crew_db_is_not_registered(tmp_path):
 
 async def test_admin_permissions_endpoint_reports_the_enforced_mapping(tmp_path):
     async with secure_app(tmp_path, [admin.router]) as h:
-        res = await h.client.get("/api/v1/admin/permissions")
-        assert res.status_code == 200
+        assert (await h.client.get("/api/v1/admin/permissions")).status_code == 401  # admin only, like every admin route
+        uid = await h.create_user("perm@example.com")
+        admin_key, _ = await h.api_key(uid, "admin")
+        res = await h.client.get("/api/v1/admin/permissions", headers={"X-API-Key": admin_key})
+        assert res.status_code == 200, res.text
         body = res.json()
         assert "crew:override" in body["permissions"]
         assert "crew:override" not in body["roles"]["admin"]
