@@ -3,12 +3,15 @@
 Flow (the API is the OAuth client; the dashboard never sees provider tokens):
 
 1. ``GET /api/v1/auth/oauth/{provider}/start`` creates a single-use login
-   state (random ``state``, PKCE ``code_verifier``, OIDC ``nonce``) stored
-   hashed in ``oauth_login_states`` and bound to the browser with an HttpOnly
-   cookie, then redirects to the provider.
+   state (random ``state``, a random browser secret set as an HttpOnly
+   cookie, OIDC ``nonce``). The PKCE ``code_verifier`` is computed from the
+   state and the browser secret (:func:`pkce_verifier`), so it never needs
+   storing. ``oauth_login_states`` keeps SHA-256 hashes only: of the state,
+   the browser secret, the verifier and the nonce. Then it redirects to the
+   provider.
 2. ``GET /api/v1/auth/oauth/{provider}/callback`` consumes the state (it must
-   match the cookie), exchanges the code with the PKCE verifier, and reads a
-   VERIFIED email:
+   match the cookie), computes the verifier again, exchanges the code with it,
+   and reads a VERIFIED email:
 
    * GitHub: ``GET /user`` for the stable numeric id and ``GET /user/emails``
      (scope ``user:email``, so private addresses are visible) for the primary
@@ -20,23 +23,23 @@ Flow (the API is the OAuth client; the dashboard never sees provider tokens):
      (``@gmail.com`` or a Workspace ``hd``), per Google's guidance.
 
 3. The identity is resolved to ONE account: an existing identity link signs
-   in. Otherwise, when an account with that email exists:
+   in. Otherwise, when an account with that email exists, a provider identity
+   is linked to it by email only when BOTH the account's email is verified
+   AND the provider says its email is verified:
 
-   * its email was never verified: the identity is linked (Google or GitHub,
-     since the provider's verified email is the first proof anyone has of
-     that mailbox), the email is marked verified, the account's dashboard
-     sessions end, and a one-time review of the credentials set up before
-     opens (API keys and app connections keep working until the owner keeps
-     or revokes them; see :mod:`remembra.auth.account_review`). Only that
-     exact provider account may act on the review, so a pre-registered
-     account never hands the mailbox owner's sign-in to whoever registered
-     it, and the registrant never gets the owner's review;
+   * its email was never verified: refused (``account_exists_unverified``).
+     Nobody has proven that mailbox on this account, and the person who
+     registered it may be its real owner who has not clicked the link yet;
+     a provider's "verified" address is not allowed to take the account
+     over (GitHub never re-verifies addresses, so its primary can be stale).
+     The owner signs in with the password and connects the provider from
+     Settings, or proves the mailbox with an emailed password reset, which
+     opens the account check (:mod:`remembra.auth.account_review`);
    * its email is verified: Google links (it is authoritative for the
-     addresses it accepts). GitHub does not: GitHub never re-verifies
-     addresses, so its "verified" primary can belong to a former owner of a
-     mailbox the account's owner has proven since. GitHub is connected to
-     such an account only from a signed-in session (Settings,
-     ``POST /auth/oauth/{provider}/link``).
+     addresses it accepts). GitHub does not: its "verified" primary can
+     belong to a former owner of a mailbox the account's owner has proven
+     since. GitHub is connected to an existing account only from a
+     signed-in session (Settings, ``POST /auth/oauth/{provider}/link``).
 
    With no account for the email a new one is created with
    ``email_verified = true`` under the normal signup limits, unless another
@@ -51,7 +54,8 @@ Flow (the API is the OAuth client; the dashboard never sees provider tokens):
    'include'``) for the normal dashboard JWT; the exchange refuses (and burns)
    a code presented without the matching cookie, so a code minted in an
    attacker's browser cannot sign a victim in (login CSRF / session swap).
-   A TOTP code is required there when the account has 2FA on. The dashboard
+   A TOTP code is required there whenever the account has 2FA on, account
+   check or not (the same rule as password sign-in). The dashboard
    and the API must therefore be same-site (``app.`` / ``api.`` of one
    registrable domain), or the browser will not send the cookie.
 5. Connecting a provider from Settings (``POST /auth/oauth/{provider}/link``,
@@ -65,14 +69,19 @@ Flow (the API is the OAuth client; the dashboard never sees provider tokens):
    mailbox; connects in flight are cancelled whenever the account's sessions
    are cut off or a review opens.
 
-Provider access tokens, codes, states, verifiers and nonces are never logged
-and never stored in plaintext beyond the few minutes a flow is open.
+Nothing secret is logged or stored in plaintext. Provider access tokens are
+used once, in memory, and never stored. States, browser secrets, nonces,
+login codes and link tickets are stored as SHA-256 hashes, and so is the
+PKCE verifier (the callback computes it again from the state and the
+cookie). A flow row lasts 10 minutes; an expired row is deleted when the
+next flow starts.
 """
 
 from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import logging
 import secrets
 import sqlite3
@@ -105,15 +114,12 @@ ID_TOKEN_LEEWAY_SECONDS = 60
 JWKS_TTL_SECONDS = 3600
 JWKS_MIN_REFRESH_SECONDS = 30
 FROM_PAGES = ("login", "signup", "settings")
-# Providers whose verified email may link into an existing VERIFIED account.
-# Google is authoritative for the addresses it accepts (Gmail / Workspace);
-# GitHub is not (see _resolve_once).
+# Providers whose verified email may link into an existing account by email.
+# Only into an account whose email is verified (see _resolve_once). Google is
+# authoritative for the addresses it accepts (Gmail / Workspace); GitHub is not.
 EMAIL_LINK_PROVIDERS = frozenset({"google"})
-# Providers whose verified email may link into an existing account whose email
-# was NEVER verified. Nobody has proven that mailbox yet, so the provider's
-# proof is the best there is; the link opens the one-time account review
-# (remembra.auth.account_review) instead of trusting what was set up before.
-UNVERIFIED_LINK_PROVIDERS = frozenset({"google", "github"})
+# Domain separation for the PKCE verifier computed from a flow's secrets.
+_PKCE_CONTEXT = b"remembra-oauth-pkce-verifier-v1:"
 
 
 @dataclass(frozen=True)
@@ -176,13 +182,18 @@ class ProviderIdentity:
     subject: str
     email: str
     name: str | None
+    # The provider said this address is verified (GitHub: a verified primary;
+    # Google: ``email_verified``). Nothing is linked or created without it.
+    email_verified: bool
 
 
 @dataclass(frozen=True)
 class LoginState:
     provider: str
+    # Computed again from the state and the browser secret; never read from storage.
     code_verifier: str
-    nonce: str
+    # SHA-256 of the nonce sent to the provider (the nonce itself is not stored).
+    nonce_hash: str
     from_page: str
     # Set when a signed-in user is connecting this provider from Settings.
     link_user_id: str | None = None
@@ -292,6 +303,7 @@ CREATE TABLE IF NOT EXISTS user_identities (
 
 CREATE INDEX IF NOT EXISTS idx_user_identities_user ON user_identities(user_id);
 
+-- code_verifier and nonce hold SHA-256 hex digests (64 characters), never the values.
 CREATE TABLE IF NOT EXISTS oauth_login_states (
     state_hash TEXT PRIMARY KEY,
     provider TEXT NOT NULL,
@@ -350,6 +362,9 @@ async def ensure_schema(db: Any) -> None:
         cursor = await conn.execute(f"PRAGMA table_info({table})")
         if column not in {str(row[1]) for row in await cursor.fetchall()}:
             await conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+    # Flows started before verifiers and nonces were hashed kept both in
+    # plaintext. A hash is 64 hex characters; anything else is such a row.
+    await conn.execute("DELETE FROM oauth_login_states WHERE length(code_verifier) != 64 OR length(nonce) != 64")
     await conn.commit()
     _initialized.add(conn)
 
@@ -369,14 +384,26 @@ def pkce_challenge(verifier: str) -> str:
     return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
 
 
+def pkce_verifier(state: str, browser_secret: str) -> str:
+    """The flow's PKCE ``code_verifier``: HMAC-SHA256 of the state, keyed with the browser secret.
+
+    43 characters of ``[A-Za-z0-9_-]`` (a valid RFC 7636 verifier). Both
+    inputs are random and stored only as hashes (the state travels in the
+    redirect, the secret in the HttpOnly cookie), so the verifier is never
+    stored and the database alone cannot produce it.
+    """
+    digest = hmac.new(browser_secret.encode(), _PKCE_CONTEXT + state.encode(), hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+
+
 async def create_login_state(
     db: Any, provider: str, from_page: str, *, link: LinkTicket | None = None
 ) -> tuple[str, str, str, str]:
-    """New flow: returns ``(state, browser_secret, code_verifier, nonce)``; stores hashes."""
+    """New flow: returns ``(state, browser_secret, code_verifier, nonce)``; stores only their hashes."""
     await ensure_schema(db)
     state = secrets.token_urlsafe(32)
     browser_secret = secrets.token_urlsafe(32)
-    verifier = secrets.token_urlsafe(64)  # 86 chars of [A-Za-z0-9_-]: valid RFC 7636 verifier
+    verifier = pkce_verifier(state, browser_secret)
     nonce = secrets.token_urlsafe(32)
     now = time.time()
     await db.conn.execute("DELETE FROM oauth_login_states WHERE expires_at < ?", (now,))
@@ -387,8 +414,8 @@ async def create_login_state(
             _hash(state),
             provider,
             _hash(browser_secret),
-            verifier,
-            nonce,
+            _hash(verifier),
+            _hash(nonce),
             from_page,
             now + STATE_TTL_SECONDS,
             link.user_id if link else None,
@@ -418,16 +445,30 @@ async def consume_login_state(db: Any, provider: str, state: str | None, browser
     await db.conn.commit()
     if (deleted.rowcount or 0) != 1:  # a concurrent callback already used it
         raise SocialLoginError("invalid_state")
-    row_provider, browser_hash, verifier, nonce, from_page, expires_at, link_user_id, link_review_id, link_session_ms = row
+    (
+        row_provider,
+        browser_hash,
+        verifier_hash,
+        nonce_hash,
+        from_page,
+        expires_at,
+        link_user_id,
+        link_review_id,
+        link_session_ms,
+    ) = row
     if row_provider != provider or float(expires_at) < time.time():
         raise SocialLoginError("invalid_state")
-    if not browser_secret or not secrets.compare_digest(str(browser_hash), _hash(browser_secret)):
+    if not browser_secret or len(browser_secret) > 512 or not secrets.compare_digest(str(browser_hash), _hash(browser_secret)):
         # Login CSRF: the callback did not come from the browser that started the flow.
+        raise SocialLoginError("invalid_state")
+    verifier = pkce_verifier(state, browser_secret)
+    if not secrets.compare_digest(str(verifier_hash), _hash(verifier)):
+        # Not the verifier this flow was started with (a row from another version, or altered).
         raise SocialLoginError("invalid_state")
     return LoginState(
         provider=provider,
-        code_verifier=str(verifier),
-        nonce=str(nonce),
+        code_verifier=verifier,
+        nonce_hash=str(nonce_hash),
         from_page=str(from_page),
         link_user_id=str(link_user_id) if link_user_id else None,
         link_review_id=str(link_review_id) if link_review_id else None,
@@ -725,7 +766,7 @@ async def _github_identity(client: httpx.AsyncClient, access_token: str) -> Prov
     if not primary or primary.get("verified") is not True or "@" not in email or email.endswith(GITHUB_NOREPLY_SUFFIX):
         raise SocialLoginError("email_unverified")
     name = user.get("name") or user.get("login")
-    return ProviderIdentity(provider="github", subject=str(user["id"]), email=email, name=_clean_name(name))
+    return ProviderIdentity(provider="github", subject=str(user["id"]), email=email, name=_clean_name(name), email_verified=True)
 
 
 class _JwksCache:
@@ -773,8 +814,11 @@ class _JwksCache:
 google_jwks = _JwksCache()
 
 
-async def verify_google_id_token(client: httpx.AsyncClient, id_token: str, nonce: str) -> dict[str, Any]:
-    """Validate a Google ID token: RS256 signature (JWKS), iss, aud (+azp), exp/iat, nonce."""
+async def verify_google_id_token(client: httpx.AsyncClient, id_token: str, nonce_hash: str) -> dict[str, Any]:
+    """Validate a Google ID token: RS256 signature (JWKS), iss, aud (+azp), exp/iat, nonce.
+
+    ``nonce_hash`` is the SHA-256 of the nonce this flow sent (only the hash is stored).
+    """
     creds = provider_credentials("google")
     assert creds is not None
     client_id = creds[0]
@@ -804,7 +848,8 @@ async def verify_google_id_token(client: httpx.AsyncClient, id_token: str, nonce
     if isinstance(aud, list) and len(aud) > 1 and claims.get("azp") != client_id:
         log.warning("google_id_token_invalid", reason="azp")
         raise SocialLoginError("provider_error")
-    if not secrets.compare_digest(str(claims.get("nonce") or ""), nonce):
+    claimed_nonce = claims.get("nonce")
+    if not isinstance(claimed_nonce, str) or not claimed_nonce or not secrets.compare_digest(_hash(claimed_nonce), nonce_hash):
         log.warning("google_id_token_invalid", reason="nonce")
         raise SocialLoginError("invalid_state")
     return claims
@@ -824,6 +869,7 @@ def _google_identity(claims: dict[str, Any]) -> ProviderIdentity:
         subject=str(claims["sub"]),
         email=email,
         name=_clean_name(claims.get("name")),
+        email_verified=True,
     )
 
 
@@ -842,7 +888,7 @@ async def fetch_identity(provider: str, code: str, state: LoginState) -> Provide
             id_token = tokens.get("id_token")
             if not isinstance(id_token, str) or not id_token:
                 raise SocialLoginError("provider_error")
-            claims = await verify_google_id_token(client, id_token, state.nonce)
+            claims = await verify_google_id_token(client, id_token, state.nonce_hash)
             return _google_identity(claims)
     except httpx.HTTPError as e:
         log.warning("oauth_provider_unreachable", provider=provider, error_type=type(e).__name__)
@@ -865,6 +911,9 @@ def _clean_name(value: Any) -> str | None:
 
 async def resolve_account(db: Any, identity: ProviderIdentity, client_ip: str) -> tuple[str, bool]:
     """Sign in, link, or create exactly one account for ``identity``. Returns ``(user_id, created)``."""
+    if not identity.email_verified:
+        # The provider did not vouch for the address: it may not sign in, link or create anything.
+        raise SocialLoginError("email_unverified")
     await ensure_schema(db)
     for _attempt in range(2):
         try:
@@ -912,12 +961,15 @@ async def _resolve_once(db: Any, identity: ProviderIdentity, client_ip: str) -> 
             # The account is already linked to a DIFFERENT account at this provider.
             log.warning("oauth_link_refused_other_identity", provider=identity.provider, user_id=existing["id"])
             raise SocialLoginError("identity_conflict")
-        if not existing.get("email_verified") and identity.provider in UNVERIFIED_LINK_PROVIDERS:
-            # The provider just vouched that this person owns the mailbox; nobody
-            # had before, and whoever created the account may not (a
-            # pre-registered address). Link, verify, and open a review of
-            # everything set up before now: nothing is revoked or trusted blindly.
-            return await _link_unverified_account(db, identity, existing, client_ip), False
+        if not existing.get("email_verified"):
+            # Nobody has proven this mailbox on this account. Whoever registered
+            # it may be the real owner who has not clicked the link yet, and a
+            # provider's "verified" address can be stale (GitHub never
+            # re-verifies): a provider sign-in never takes such an account over.
+            # The owner signs in with the password and connects the provider
+            # from Settings, or proves the mailbox with an emailed reset.
+            log.warning("oauth_link_refused_account_unverified", provider=identity.provider, user_id=existing["id"])
+            raise SocialLoginError("account_exists_unverified")
         if identity.provider not in EMAIL_LINK_PROVIDERS:
             # The account's owner already proved this mailbox. GitHub never
             # re-verifies an address, so its "verified" primary may be a
@@ -945,51 +997,6 @@ async def _resolve_once(db: Any, identity: ProviderIdentity, client_ip: str) -> 
         return str(existing["id"]), False
 
     return await _create_account(db, identity, client_ip), True
-
-
-async def _link_unverified_account(db: Any, identity: ProviderIdentity, existing: dict[str, Any], client_ip: str) -> str:
-    """Provider sign-in (verified email) into an account whose email was never verified.
-
-    The identity is linked, the email marked verified and a review opened in
-    one transaction. Nothing is revoked: API keys, connections and webhooks
-    keep working until the owner reviews them (``remembra.auth.account_review``).
-    Every dashboard session issued before now ends (app connections keep
-    working), so a squatter's open session cannot act while the owner decides.
-    The review trusts exactly this provider account, nothing else.
-    """
-    from remembra.auth import account_review
-    from remembra.auth.users import email_verified_on_another_account
-    from remembra.security import state as security_state
-
-    user_id = str(existing["id"])
-    # One free account per verified email: an API-signup tenant (or another
-    # dashboard account) may already hold this address as verified.
-    if await email_verified_on_another_account(db, identity.email, exclude_user_id=user_id):
-        log.warning("oauth_link_refused_email_verified_elsewhere", provider=identity.provider, user_id=user_id)
-        raise SocialLoginError("email_in_use")
-    now = _now_iso()
-    async with db.transaction():
-        await db.conn.execute(
-            "INSERT INTO user_identities (provider, provider_user_id, user_id, email, created_at, last_login_at)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            (identity.provider, identity.subject, user_id, identity.email, now, now),
-        )
-        await db.conn.execute("UPDATE users SET email_verified = ?, updated_at = ? WHERE id = ?", (True, now, user_id))
-        review = await account_review.open_review(
-            db,
-            user_id,
-            origin=identity.provider,
-            verified_at=now,
-            totp_enabled=bool(existing.get("totp_enabled")),
-            proof_identity=(identity.provider, identity.subject),
-        )
-    log.info("oauth_identity_linked_unverified_account", provider=identity.provider, user_id=user_id)
-    await _audit_linked(db, user_id, identity, by="email_match_unverified_account", ip=client_ip)
-    await security_state.invalidate_user_sessions(db, user_id, keep_app_connections=True)
-    await account_review.audit_opened(db, review, ip=client_ip)
-    await account_review.finish_if_empty(db, review, ip=client_ip)
-    await _notify_linked(str(existing["email"]), identity)
-    return user_id
 
 
 async def link_identity(db: Any, identity: ProviderIdentity, state: LoginState, *, ip: str | None = None) -> None:

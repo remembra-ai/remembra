@@ -464,13 +464,13 @@ async def login(
     assert user is not None  # authenticate returns a user whenever error is falsy
 
     # A password set through an emailed reset proves the mailbox: such a
-    # session may finish a pending account review, and 2FA that was set up
-    # before the email was verified (possibly by someone else) does not
-    # stand in its way.
-    review_claims, skip_old_totp = await account_review.login_claims(db, user.id, provider=None)
+    # session may finish a pending account review. 2FA applies to it like to
+    # every other sign-in (the reset that proved the mailbox already turned
+    # off 2FA set up before the email was verified).
+    review_claims = await account_review.login_claims(db, user.id, provider=None)
 
     # Check if 2FA is enabled
-    if not skip_old_totp and await user_manager.is_totp_enabled(user.id):
+    if await user_manager.is_totp_enabled(user.id):
         if not body.totp_code:
             # Password correct but need 2FA code
             return LoginResponse(
