@@ -12,10 +12,15 @@ Relay fixes, three more verified agents and a doctor. Run `remembra-relay connec
 - **`remembra-relay doctor`** says where a brief or handoff went missing, from this machine's files and your trail,
   with one fix for each problem; it only reads. The local MCP server has the same checks as `remembra_doctor`, with
   `remembra_setup` and `remembra_help`. See [Doctor](../guides/relay.md#doctor).
-- **One project per repository.** Every git repository gets its own project, even with `REMEMBRA_PROJECT` set.
+- **One project per repository.** With 0.16.1 clients, every git repository the server has not seen before gets
+  its own project, even with `REMEMBRA_PROJECT` set; `REMEMBRA_RELAY_PROJECT` still keeps everything in one project
+  on purpose, and there are other exceptions (see
+  [Which project a repository uses](../guides/relay.md#which-project-a-repository-uses)).
   `remembra-relay projects split` separates repositories 0.16.0 put in one project (a dry run until `--apply`).
 - **Deleting by entity** (`DELETE /api/v1/memories?entity=…`, the SDKs' delete by entity) deleted every memory in
-  the account. It now deletes only the memories linked to that entity.
+  the account. It now deletes only the memories linked to that entity. The Python SDK sends it only to a server
+  that has the fix. The TypeScript SDK in the repository has the same check, but it is not on npm yet (npm is still
+  0.12.1): update the server before deleting by entity from TypeScript.
 - **Briefs** skip sessions that did nothing, list only this project's handoffs and checkpoints, and leave out Codex
   automation runs and sub-agents; a hook that another agent runs is filed under that agent.
 - **Security.** Billing and plan limits hold on every path, request bodies are capped before sign-in, credentials
@@ -46,7 +51,9 @@ Releases v0.11 to v0.15 are in [CHANGELOG.md](https://github.com/remembra-ai/rem
 
 ### Added
 - **Centralized Credentials** — API keys stored securely in `~/.remembra/credentials` (chmod 600). No more repeating `--api-key` on every command.
-- **Slim Recall Mode** — `recall(query, slim=True)` returns 90% smaller payloads for token-constrained agents.
+- **Slim Recall Mode** — In the MCP `recall_memories` tool, `slim=True` returns only the context string and a count
+  (context capped at 800 tokens). On the REST API and in the Python SDK, `slim=True` only caps the context at 800
+  tokens; memories and entities are still returned. The size saving was never measured.
 - **Bridge Lifecycle Management** — `remembra-bridge --stop` and `--status` commands for better control.
 
 ### Fixed
@@ -57,7 +64,9 @@ Releases v0.11 to v0.15 are in [CHANGELOG.md](https://github.com/remembra-ai/rem
 ## v0.10.0 (March 15, 2026)
 
 ### Added
-- **Universal Agent Installer** — `remembra-install --all` auto-detects and configures Claude, Codex, Cursor, Gemini, Windsurf
+- **Universal Agent Installer** — `remembra-install` can write configs for Claude Desktop, Claude Code, Codex, Cursor,
+  Windsurf and Gemini CLI. Today `--all` sets up the verified ones it detects; Windsurf is unverified and is written
+  only with `--agent windsurf`
 - **Setup Diagnostics** — `remembra-doctor <agent>` diagnoses connection issues with clear failure labels
 - **Local Bridge** — `remembra-bridge` tunnels sandboxed agents to your Remembra server
 - **Security Hardening** — RBAC enforcement, error sanitization, SSRF protection
@@ -74,7 +83,9 @@ Releases v0.11 to v0.15 are in [CHANGELOG.md](https://github.com/remembra-ai/rem
 - **Temporal Knowledge Graph** — Bi-temporal relationship model with `valid_from`, `valid_to`, and `superseded_by`. Enables point-in-time queries like "Where did Alice work in January 2022?"
 - **6 New MCP Tools** — `update_memory`, `search_entities`, `list_memories`, `share_memory`, `timeline`, `relationships_at` (5 → 11 tools total)
 - **Entity Graph Visualization** — Interactive force-directed graph with flowing particle effects on relationship edges
-- **Contradiction Detection** — New relationships automatically supersede old ones with full history preserved
+- **Contradiction Detection** — Planned for relationships, not shipped: a new `WORKS_AT` does not supersede the old
+  one, and a relationship gets an end date only when the stored text states one. Outdated facts are superseded at
+  the memory level instead (consolidation `SUPERSEDE`, since v0.16.0)
 - **SDK Client Methods** — `memory.update()` and `memory.list_entities()` in Python SDK
 
 ### Changed
@@ -107,7 +118,7 @@ Releases v0.11 to v0.15 are in [CHANGELOG.md](https://github.com/remembra-ai/rem
 
 ### Added
 - **Security Features Release** — Production hardening with AES-256-GCM encryption
-- **16 New Encryption Tests** — 272 total tests now passing
+- **16 New Encryption Tests** — 280 tests in the suite at this release
 
 ### Changed
 - **Documentation** — Updated all version references to v0.8.2
@@ -117,7 +128,10 @@ Releases v0.11 to v0.15 are in [CHANGELOG.md](https://github.com/remembra-ai/rem
 ## v0.8.1 (March 2026)
 
 ### Added
-- **Encryption at Rest (AES-256-GCM)** — Field-level encryption for memory content and metadata with PBKDF2 key derivation (480K iterations). Set `REMEMBRA_ENCRYPTION_KEY` to enable. Backwards-compatible with unencrypted data.
+- **Encryption at Rest (AES-256-GCM)** — Field-level encryption of memory content and string metadata in the vector
+  store, with PBKDF2 key derivation (480K iterations). Set `REMEMBRA_ENCRYPTION_KEY` to enable. Backwards-compatible
+  with unencrypted data. Not covered: the SQLite copy, and in the vector store the extracted facts, entity refs and
+  list values (see [Security](../guides/security.md#encryption-at-rest) for what is covered today).
 - **SECURITY.md** — Comprehensive security policy with architecture overview, compliance roadmap (SOC 2, HIPAA), and self-hosted hardening checklist
 
 ### Changed
@@ -147,8 +161,8 @@ Releases v0.11 to v0.15 are in [CHANGELOG.md](https://github.com/remembra-ai/rem
 ### Fixed
 - **Security: CORS Configuration** — Removed `allow_origins=["*"]`, now configurable via `REMEMBRA_CORS_ORIGINS`
 - **API: PATCH /memories/{id}** — Full implementation (was returning 501)
-- **API: Batch Operations** — `/store/batch` and `/recall/batch` now functional
-- **Streaming: SSE Endpoint** — `/ingest/stream` for conversation ingestion
+- **API: Batch Operations** — `POST /api/v1/memories/batch` and `POST /api/v1/memories/batch/recall` now functional
+- **Streaming: SSE Endpoint** — `POST /api/v1/ingest/conversation/stream` for conversation ingestion
 - **Observability: OpenTelemetry** — Tracing module fully implemented
 - **Production: CORS Origins** — Added `app.remembra.dev` and `remembra.dev` to allowed origins
 

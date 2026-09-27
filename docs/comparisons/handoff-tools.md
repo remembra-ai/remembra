@@ -1,8 +1,10 @@
 # Remembra and other handoff tools
 
-*Checked on 2026-09-25. "Not checked" means we have not verified it, so we don't claim it either way. Every fact about another project links to the page we read it on that day; star counts
-come from the GitHub API that day. Projects move fast, so check their pages before you decide. If we got
-something wrong about your project, open an issue and we will fix it.*
+*Checked on 2026-09-25 (US Eastern). "Not checked" means we have not verified it, so we don't claim it either way.
+Every fact about another project links to the page we read it on that day. Star counts for claude-mem,
+agentmemory, continues and relay-dev come from the GitHub API that day; catchup's and waybill's were read from
+their GitHub pages that day (the API gave the same numbers on 2026-09-26). Projects move fast, so check their
+pages before you decide. If we got something wrong about your project, open an issue and we will fix it.*
 
 Remembra Relay is not the only way to carry work from one coding agent to the next. Several good tools do some
 of it, most of them free and local. This page says what each one does, where Remembra Relay differs, and when
@@ -50,7 +52,8 @@ between machines. It is free and local-first.
 reads the session files of 16 agents and hands a session from one to another on the same machine. It is the
 tool to reach for when you hit a limit in one CLI and want to keep going in another right now.
 
-**catchup** ([repo](https://github.com/wilbeibi/catchup), 73 stars) does the same for 11 agents, locally.
+**catchup** ([repo](https://github.com/wilbeibi/catchup), 73 stars) does the same for 12 agents, locally (Amp
+was added on 2026-09-26).
 
 **waybill** ([repo](https://github.com/wardmos/waybill), 95 stars) writes a local handoff bundle from the diff,
 the commands run and the tests, and treats the bundle as untrusted when the next agent reads it.
@@ -68,15 +71,18 @@ same file leads to overwrites.
 
 ## Where Remembra Relay is different
 
-- **Facts from git, not a paraphrase.** The done, not done and failing sections are read from git and test
-  runs, not written by an LLM, and the agent's own summary is checked against them.
+- **Facts from git, not a paraphrase.** With the `remembra-relay` hooks, the done, not done and failing
+  sections come from git and, for Claude Code and Codex, the session's test runs, never from an LLM, and the
+  agent's own summary is checked against them. A handoff written through the `close_session` MCP tool (Cursor,
+  other MCP agents) holds the facts the agent declares, labeled *declared by the agent (not checked)*.
 - **Across machines and vendors, with no local engine.** State lives on your Remembra server, so a laptop,
   a server and a cloud VM see the same trail. The next agent can be Claude Code, Codex or any MCP client.
 - **Who wrote it.** With an agent-scoped key, a handoff is shown as key-verified, and that key cannot write as
   another agent.
 - **Untrusted by default.** Everything another agent recorded reaches the next one inside an untrusted-data
   block, and text that looks like prompt injection is withheld.
-- **A durable trail.** Handoffs don't expire; the trail keeps every one in order.
+- **A durable trail.** Relay handoffs don't expire, and the trail keeps the current handoff of every session
+  in order. A later close of the same session replaces the earlier one.
 
 ## When to pick something else
 

@@ -34,7 +34,9 @@ through the `session_brief` and `close_session` MCP tools in any other MCP agent
 
    "Last session" is the newest handoff that recorded any work. The line is followed by your unread inbox,
    status values, linked projects' latest handoffs, and this project's recent handoffs and checkpoints.
-   The brief is capped at about 1500 tokens. See [Reading the brief](#reading-the-brief).
+   The brief's text is capped at 6,000 characters (about 1,500 tokens). The `session_brief` MCP tool returns
+   only that text with `compact=true`; by default it also returns the structured JSON, which is larger. See
+   [Reading the brief](#reading-the-brief).
 
 ## Setup
 
@@ -156,14 +158,15 @@ Qwen Code, Kimi) or, for an agent the relay has no adapter for yet, does nothing
 under `~/.claude/projects` is always Claude Code's. `connect` points out relay hooks an import copied into
 another agent's config; they can be deleted there. Cursor runs Claude Code's PreCompact hook as its
 preCompact: that handoff is saved as the session still open, before a compaction. The same end of a session is
-saved once: Gemini CLI fires SessionEnd two or three times on exit, and a session can run several agents' copies
+saved once: Gemini CLI can fire SessionEnd more than once on exit, and a session can run several agents' copies
 of one hook. A session resumed and ended again is saved again: its transcript has grown, and for Kimi Code and
 cursor-agent, which send no transcript, only copies arriving within a few seconds count as the same end.
 
-**Codex: trust the hooks.** Codex runs a hook only after you trust it, and skips untrusted hooks without a
-message. After `connect --apply`, open Codex, run `/hooks` and trust the three `remembra-relay` hooks.
-When a hook's command changes (for example after `connect` rewrites it for a new install path), Codex marks it
-modified and skips it, again without a message, until you trust it again; `remembra-relay doctor` shows which. The UserPromptSubmit hook covers sessions where SessionStart does not fire (Codex
+**Codex: trust the hooks.** Codex runs a hook only after you trust it. After `connect --apply`, trust the
+three `remembra-relay` hooks: Settings > Hooks > Trust in the Codex app, or `/hooks` in the Codex CLI. Until
+then Codex skips them; the interactive CLI asks about hooks that need review at startup. When a hook's command
+changes (for example after `connect` rewrites it for a new install path), Codex marks it modified and skips it
+until you trust it again; `remembra-relay doctor` shows which. The UserPromptSubmit hook covers sessions where SessionStart does not fire (Codex
 auto-restoring a thread): it prints the brief only if that session has not had one.
 
 **Agents that do not wait for the end hook.** Codex stops a SessionEnd hook after 1 to 3 seconds and Qwen Code
@@ -210,7 +213,7 @@ own **Open MCP config file** opens `~/.config/devin/mcp_config.json`; add the bl
 list `remembra`).
 
 It does not write Qwen Code or Kimi Code yet. Add the server to them yourself. Qwen Code reads the same
-`mcpServers` block as Gemini CLI, in `~/.qwen/settings.json`:
+`mcpServers` block as Gemini CLI (per its docs), in `~/.qwen/settings.json`:
 
 ```json
 {
@@ -228,9 +231,8 @@ It does not write Qwen Code or Kimi Code yet. Add the server to them yourself. Q
 }
 ```
 
-Kimi Code reads the same `mcpServers` block from `~/.kimi-code/mcp.json` (its MCP docs). Qwen Code 0.24.6
-listed the Qwen block as connected (`qwen mcp list`); the Kimi Code one has not been run with Remembra yet, so
-tell us if it balks.
+Kimi Code reads the same `mcpServers` block from `~/.kimi-code/mcp.json` (its MCP docs). Neither the Qwen
+nor the Kimi Code block has been checked in a recorded run with Remembra yet, so tell us if it balks.
 
 A Codex sandbox with no network cannot reach the URL directly. Use `remembra-install-codex --start-bridge`
 there instead (it asks for the key like `remembra-install`): it points Codex at a local bridge that holds the key.
@@ -331,8 +333,9 @@ When nothing is left it prints none.
 
 ### Codex hook trust {#codex-trust}
 
-Codex runs a hook only after you trust it (Settings > Hooks in the app, `/hooks` in the CLI) and skips an
-untrusted hook without a message, so a Codex that never gets a brief usually has hooks nobody trusted.
+Codex runs a hook only after you trust it (Settings > Hooks > Trust in the Codex app, `/hooks` in the Codex
+CLI). Until then it skips the hook; the interactive CLI asks about hooks that need review at startup. A Codex
+that never gets a brief usually has hooks nobody trusted.
 Codex stores each trust as `[hooks.state."<hooks.json path>:<event>:<n>:<n>"] trusted_hash` in
 `~/.codex/config.toml`, a hash of that hook's command, timeout and matcher; when `connect` rewrites a hook
 (a new install path, for example) the old record no longer matches and Codex skips the hook until you trust it again. The doctor
@@ -343,9 +346,13 @@ can't read is reported as unchecked, never as trusted.
 
 **Inside your agent.** The local Remembra MCP server has the same doctor as the `remembra_doctor` tool (it
 returns the slip as `rendered` plus the findings), `remembra_setup` (the install and connect steps for this
-machine's OS and agents, with the ones already done marked) and `remembra_help` (answers quoted from this
-guide and the plans page, or "can't confirm"). In Claude Code the prompt `/mcp__remembra__doctor` runs it.
-None of them changes anything; your agent offers each fix and runs it only after you say yes.
+machine's OS and agents, with the ones already done marked) and `remembra_help`. In Claude Code the prompt
+`/mcp__remembra__doctor` runs the doctor. None of the three tools changes anything. Their descriptions and the
+doctor prompt tell your agent to offer each fix and run it only after you say yes. Remembra cannot enforce
+this, so your agent's own permission settings decide. `remembra_help` answers with quotes from this guide and
+the plans page, plus a few facts from the installed package (plan limits, crew mode, Windows). For refunds,
+security, privacy and similar topics it sends you to the page that governs them. Otherwise it says it can't
+confirm.
 
 ## CLI
 
@@ -389,9 +396,11 @@ idle or automated run), `close` sends nothing and writes one line to `~/.remembr
 leave a handoff anyway, pass `--summary` (or `--notes`, `--todo`, `--next`). Git state that could not be
 read in time counts as something, so such a close is still sent. So does a close that stopped rather than
 finished (a usage or billing limit, Claude Code's StopFailure; a close written before context compaction):
-that notice is the handoff, and the brief shows it (`stopped: rate_limit`). Once a session has sent a
-handoff, its later closes are always sent, even empty ones: the last close of a session replaces the
-earlier one, which would otherwise keep describing work that no longer exists. The check needs the git facts
+that notice is the handoff, and the brief shows it (`stopped: rate_limit`). Once `remembra-relay` on this
+machine has sent a handoff for a session (or saved it to send later), the session's later closes within 14 days
+of the last one are sent even when empty: the last close of a session replaces the earlier one, which would otherwise keep
+describing work that no longer exists. The record is a local file under `~/.remembra/relay/sessions`. If that
+file is removed, or an empty close comes more than 14 days later, nothing is sent. The check needs the git facts
 and the transcript, so for an agent whose `close` detaches it runs in the background process.
 
 ## Uninstall {#uninstall}
@@ -602,8 +611,9 @@ MCP tools that return stored content (`recall_memories`, `list_memories`, `timel
 | GET | `/api/v1/inbox/messages` | inbox messages across all agents (`status=open\|unread\|all`, `agent_id`, `limit`, `offset`) |
 | GET | `/api/v1/inbox/summary` | unread / open counts per agent |
 
-Closing again with the same `(agent_id, session_id)` updates that session's handoff: the previous version
-is superseded, never duplicated. Each close also sets the `last_agent:<project>` and `branch:<project>`
+Closing again with the same `(agent_id, session_id)` in the same project updates that session's handoff:
+the previous version is superseded, never duplicated. A close in a different project stores a separate handoff
+there. A close older than the stored one changes nothing. Each close also sets the `last_agent:<project>` and `branch:<project>`
 status keys.
 
 **Attribution.** A key created with `agent_id` (`POST /api/v1/keys {"agent_id": "codex"}`) is
@@ -625,7 +635,9 @@ contractor) must not be able to pull another project's repository into its own. 
 unrestricted key; a new location resolves to the hint (a new repository too, when the key may use it),
 or to the key's only project, without being recorded.
 
-Every stored string passes secret redaction and the server's PII policy, value by value (a blocked
-value becomes `[REDACTED:pii]`; a close is never rejected for PII). The location recorded with a handoff
-is covered too: its name, path and host, and the path fingerprint key, which repeats the path. The brief
-returns the location's repository key, never its fingerprint keys.
+Close-out strings pass secret redaction and the server's PII policy, value by value: the facts, the
+summary, the end reason, and the location's name, path and host and its path fingerprint key (which repeats
+the path). A blocked value becomes `[REDACTED:pii]`; a close is never rejected for PII. Git-remote and
+root-commit fingerprint keys are stored as identifiers, without that scrub. The brief's `handoff_location`
+field holds the repository key without the fingerprint keys, but the brief JSON also returns the handoff's
+stored metadata, and that includes `relay.location.fingerprints`.
