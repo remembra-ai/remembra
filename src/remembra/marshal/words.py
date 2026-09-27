@@ -65,7 +65,7 @@ SHARED_RULES: dict[str, dict[str, str]] = {
     },
     "CODEX_TRUST_MISSING": {
         "what": "Codex needs you to trust {hooks}: Codex Settings > Hooks > Trust.",
-        "detail": "Codex skips untrusted hooks without a message.",
+        "detail": "Codex runs a hook only after the user trusts it.",
         "fix": "Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust {events}.",
         "doc": "#codex-trust",
     },

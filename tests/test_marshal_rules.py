@@ -456,7 +456,7 @@ def test_codex_trust_missing(fh: FakeHome) -> None:
     assert f.fix is not None and f.fix.runs_where == "codex_ui" and f.fix.command is None
     # The same call and fix as the dashboard's slip and remembra_setup (remembra.marshal.words).
     assert f.what == (
-        "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Codex skips untrusted hooks without a message."
+        "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Codex runs a hook only after the user trusts it."
     )
     assert f.fix.text == (
         "Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd."
