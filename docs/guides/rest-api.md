@@ -409,20 +409,30 @@ POST /api/v1/temporal/cleanup
 POST /api/v1/keys
 ```
 
-**Headers:** Master key required
+**Auth:** a dashboard sign-in, an API key that holds `key:create` (it creates a
+key for its own account, never above its own role), or the master key in
+`X-API-Key` with a `user_id` in the body. Only the master key can create an
+`admin` key. See [Roles and Permissions](rbac.md).
 
 ```bash
-curl -H "Authorization: Bearer master_key_here" \
-     -X POST http://localhost:8787/api/v1/keys \
-     -d '{"user_id": "user_123", "name": "Production"}'
+curl -X POST http://localhost:8787/api/v1/keys \
+     -H "X-API-Key: $REMEMBRA_AUTH_MASTER_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{"user_id": "user_123", "name": "Production", "role": "editor"}'
 ```
 
 **Response:**
 ```json
 {
+  "id": "key_xyz",
   "key": "rem_abc123...",
-  "key_id": "key_xyz",
-  "name": "Production"
+  "user_id": "user_123",
+  "name": "Production",
+  "rate_limit_tier": "standard",
+  "role": "editor",
+  "project_ids": [],
+  "agent_id": null,
+  "message": "Store this key securely. It cannot be retrieved again."
 }
 ```
 
@@ -435,11 +445,16 @@ curl -H "Authorization: Bearer master_key_here" \
 GET /api/v1/keys
 ```
 
+Needs `key:list` (every role has it).
+
 ### Revoke API Key
 
 ```http
 DELETE /api/v1/keys/{key_id}
 ```
+
+Needs `key:revoke`. An API key can only revoke keys that hold no more access
+than itself. Add `?hard=true` to delete the key instead.
 
 ---
 

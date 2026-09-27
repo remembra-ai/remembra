@@ -17,7 +17,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, has_permission, resolve_project_access
+from remembra.auth.middleware import CurrentUser, has_permission, require_memory_store, resolve_project_access
 from remembra.cloud.limits import gate_write, record_relay_usage
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
@@ -90,7 +90,7 @@ class StatusUpsertRequest(BaseModel):
     ttl: str | None = Field(default=None, description="Optional TTL for this value, e.g. '30d'")
 
 
-@router.post("/session/status", summary="Set the current value for a status key")
+@router.post("/session/status", summary="Set the current value for a status key", dependencies=[require_memory_store()])
 @limiter.limit("60/minute")
 async def upsert_status(
     request: Request,
@@ -105,7 +105,6 @@ async def upsert_status(
     billed in smart credits (plan relay burst limit and memory cap apply).
     The plan gate runs only when the value changes: re-sending the current
     value counts against no cap, burst or daily limit."""
-    _require(current_user, "memory:store")
     project = resolve_project_access(current_user, body.project_id) or "default"
     value, trust_score, checksum = screen_text(request, body.value)
 

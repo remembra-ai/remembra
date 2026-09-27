@@ -106,10 +106,10 @@ async def list_registry(
 @limiter.limit("10/minute")
 async def activate_plugin(
     request: Request,
-    body: ActivatePluginRequest,
-    plugin_manager: PluginManagerDep,
     current_user: CurrentUser,
     _superadmin: RequireSuperadmin,
+    body: ActivatePluginRequest,
+    plugin_manager: PluginManagerDep,
 ) -> PluginInfo:
     """Activate a plugin from the registry with optional configuration.
 
@@ -163,10 +163,10 @@ async def activate_plugin(
 @limiter.limit("10/minute")
 async def deactivate_plugin(
     request: Request,
-    plugin_name: str,
-    plugin_manager: PluginManagerDep,
     current_user: CurrentUser,
     _superadmin: RequireSuperadmin,
+    plugin_name: str,
+    plugin_manager: PluginManagerDep,
 ) -> dict[str, Any]:
     """Deactivate and remove a running plugin."""
     removed = await plugin_manager.unregister(plugin_name)
@@ -185,11 +185,11 @@ async def deactivate_plugin(
 @limiter.limit("10/minute")
 async def toggle_plugin(
     request: Request,
+    current_user: CurrentUser,
+    _superadmin: RequireSuperadmin,
     plugin_name: str,
     body: TogglePluginRequest,
     plugin_manager: PluginManagerDep,
-    current_user: CurrentUser,
-    _superadmin: RequireSuperadmin,
 ) -> dict[str, Any]:
     """Enable or disable a plugin without removing it."""
     plugin = plugin_manager.get_plugin(plugin_name)

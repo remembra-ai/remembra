@@ -980,7 +980,8 @@ def test_pricing_names_every_limit_that_refuses_a_save() -> None:
     assert "notes-kept cap" in refused
     # a handoff is a POST /session/close, capped at 60 a minute per account in front of the plan's own burst
     relay_src = (Path(__file__).resolve().parents[1] / "src" / "remembra" / "api" / "v1" / "relay.py").read_text()
-    route = int(re.search(r'@router\.post\("/session/close".*?\n@limiter\.limit\("(\d+)/minute"\)', relay_src).group(1))
+    close_route = re.search(r'@router\.post\(\s*"/session/close".*?\)\n@limiter\.limit\("(\d+)/minute"\)', relay_src, re.S)
+    route = int(close_route.group(1))
     bursts = [min(p.relay_burst_per_min, route) for p in (free, solo, pro, team)]
     assert bursts[1] == bursts[2] == bursts[3]
     assert f"({bursts[0]} a minute on Free, {bursts[1]} on paid plans)" in faq

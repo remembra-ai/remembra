@@ -429,7 +429,7 @@ Using the master key:
 
 ```bash
 curl -X POST http://localhost:8787/api/v1/keys \
-  -H "Authorization: Bearer master_key_here" \
+  -H "X-API-Key: master_key_here" \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "user_123",

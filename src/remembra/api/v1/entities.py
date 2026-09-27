@@ -5,11 +5,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 
-from remembra.auth.middleware import CurrentUser, resolve_project_access
+from remembra.auth.middleware import CurrentUser, require_entity_read, resolve_project_access
 from remembra.core.limiter import limiter
 from remembra.storage.database import Database
 
-router = APIRouter(prefix="/entities", tags=["entities"])
+router = APIRouter(prefix="/entities", tags=["entities"], dependencies=[require_entity_read()])
 
 
 def get_database(request: Request) -> Database:

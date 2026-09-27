@@ -18,8 +18,8 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from remembra.auth.middleware import AuthenticatedUser, CurrentUser
-from remembra.auth.rbac import ROLE_LEVEL, SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
-from remembra.auth.scopes import RequireAdmin, RequireAuditExport
+from remembra.auth.rbac import ROLE_LEVEL, ROLE_PERMISSIONS, SYNTHETIC_KEY_IDS, KeyRole, Permission, Role, RoleManager
+from remembra.auth.scopes import RequireAdmin, RequireAuditExport, RequireAuditRead
 from remembra.auth.superadmin import RequireSuperadmin, is_superadmin
 from remembra.auth.users import UserManager
 from remembra.cloud.metering import UsageMeter
@@ -241,12 +241,12 @@ async def list_audit_events(
     request: Request,
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
-    _perm: RequireAuditExport,
+    _perm: RequireAuditRead,
     user_id: str | None = Query(None, description="Filter by user ID"),
     action: str | None = Query(None, description="Filter by action type"),
     limit: int = Query(100, ge=1, le=1000),
 ) -> AuditListResponse:
-    """List recent audit events. Requires admin:export permission."""
+    """List recent audit events. Requires admin:audit permission."""
     events = await audit_logger.get_recent_events(
         user_id=await _audit_scope(request, current_user, user_id),
         action=_parse_audit_action(action),
@@ -449,29 +449,10 @@ async def list_permissions(
     current_user: CurrentUser,
     _perm: RequireAdmin,
 ) -> dict[str, Any]:
-    """List all available permissions and default role mappings (admin only, like every route here)."""
+    """List all available permissions and the role table every route enforces (admin only, like every route here)."""
     return {
         "permissions": [p.value for p in Permission],
-        "roles": {
-            role.value: [p.value for p in perms]
-            for role, perms in {
-                Role.ADMIN: set(Permission),
-                Role.EDITOR: {
-                    Permission.MEMORY_STORE,
-                    Permission.MEMORY_RECALL,
-                    Permission.MEMORY_DELETE,
-                    Permission.KEY_LIST,
-                    Permission.ENTITY_READ,
-                    Permission.WEBHOOK_MANAGE,
-                    Permission.CONFLICT_MANAGE,
-                },
-                Role.VIEWER: {
-                    Permission.MEMORY_RECALL,
-                    Permission.KEY_LIST,
-                    Permission.ENTITY_READ,
-                },
-            }.items()
-        },
+        "roles": {role.value: sorted(p.value for p in perms) for role, perms in ROLE_PERMISSIONS.items()},
     }
 
 

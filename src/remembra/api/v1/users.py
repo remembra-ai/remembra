@@ -7,7 +7,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, has_permission, resolve_project_access
+from remembra.auth.middleware import CurrentUser, resolve_project_access
 from remembra.core.limiter import limiter
 from remembra.core.time import utcnow
 from remembra.storage.database import Database
@@ -145,21 +145,20 @@ async def get_user_profile(
     - **Top topics**: Most frequently mentioned themes/concepts
     - **Statistics**: Total counts of memories, entities, relationships
 
-    Security: Users can only access their own profile unless they have admin permissions.
+    Security: Users can only access their own profile.
 
     **Use cases:**
     - Agent context: "What do I know about this user?"
     - Dashboard: User profile overview
     - Analytics: User engagement metrics
     """
-    # Security: Only allow users to access their own profile
-    # (or admin users to access any profile)
+    # Security: a caller only ever reads its own profile. (No role grants reading
+    # another account's: admin keys belong to one account too.)
     if user_id != current_user.user_id:
-        if not has_permission(current_user, "admin:read"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Permission denied: can only access your own profile",
-            )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Permission denied: can only access your own profile",
+        )
 
     project_id = resolve_project_access(current_user, project_id)
 
