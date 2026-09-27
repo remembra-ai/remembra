@@ -312,6 +312,7 @@ team, space, import/export, inbox, conflict or temporal operations yet.
 | `memory_recall` | A recall runs through `POST /api/v1/memories/recall` |
 | `memory_update` | A memory is updated or superseded |
 | `memory_forget` | Memories are deleted, or `POST /api/v1/memories/cleanup-expired` removes expired ones |
+| `memory_decayed` | The sleep-time decay cleanup deletes an old note. It runs only when `REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_ENABLED=true`; it is off by default |
 | `key_created` | An API key is created |
 | `key_updated` | An API key is changed through `PATCH /api/v1/keys/{key_id}` |
 | `key_revoked`, `key_deleted_permanently` | An API key is revoked, or deleted with `?hard=true` |
