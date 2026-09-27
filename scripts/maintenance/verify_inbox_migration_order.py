@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the agent inbox across the production -> Crew mode upgrade, and back.
 
-Production (``--prod``, 4d335ce: 0.16.1) is at main-DB schema 10 (versions 1-4 and 6-10):
+Production (``--prod``, default f70abac: 0.16.1 plus copy fixes) is at main-DB schema 10 (versions 1-4 and 6-10):
 a row's project is its ``metadata.project_id`` tag, and rows carry the trust
 policy's ``trust_score`` (v6). This release (``--this``) adds Crew mode's
 version 5: ``agent_inbox.project_id``, ``crew_id``, ``kind``, ``sender_kind``
@@ -15,7 +15,7 @@ order on one throw-away SQLite file, each step with its own code tree from git:
 3. ``--prod`` again (the rollback image) reads and writes through the column;
 4. ``--this`` again: nothing to migrate, and the rollback's row is scoped.
 
-    python scripts/maintenance/verify_inbox_migration_order.py --prod 4d335ce --this HEAD
+    python scripts/maintenance/verify_inbox_migration_order.py --prod f70abac --this <release candidate sha>
 
 Exits non-zero if any invariant fails. Writes only to a temporary directory.
 """
@@ -33,6 +33,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+# The commit production runs (api.remembra.dev): main f70abac, 0.16.1 plus copy fixes, schema 10.
+PROD_DEFAULT = "f70abac"
 TAGGED = {
     "prod tagged alpha": "alpha",
     "prod argument beta": "beta",
@@ -111,7 +113,7 @@ def _run(tree: Path, stage: str, db_path: Path) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--prod", default="4d335ce")
+    parser.add_argument("--prod", default=PROD_DEFAULT, help=f"the deployed commit (default {PROD_DEFAULT})")
     parser.add_argument("--this", default="HEAD")
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parents[2]))
     parser.add_argument("--stage", help=argparse.SUPPRESS)

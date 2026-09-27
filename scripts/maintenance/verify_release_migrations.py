@@ -6,7 +6,7 @@ process, from a code tree exported from git (Qdrant in memory, no API keys, no
 network: the embedding provider points at a closed local port). Every database
 lives in a temporary directory.
 
-Production (``--prod``, 4d335ce: release 0.16.1) is at schema 10: versions
+Production (``--prod``, default f70abac: release 0.16.1 plus copy fixes) is at schema 10: versions
 1-4 and 6-10 (10 is ``account_reviews``). Crew mode's version 5
 (``crew_agent_inbox_scoping``) was merged after them, so the first boot of
 ``--this`` must apply 5 and nothing else, and the highest version stays 10.
@@ -33,7 +33,7 @@ Production (``--prod``, 4d335ce: release 0.16.1) is at schema 10: versions
    through the ``project_id`` column; ``--this`` then boots it again without a
    schema change.
 
-    python scripts/maintenance/verify_release_migrations.py --prod 4d335ce --this HEAD
+    python scripts/maintenance/verify_release_migrations.py --prod f70abac --this <release candidate sha>
 
 Exits non-zero if any invariant fails.
 """
@@ -53,9 +53,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+# The commit production runs (api.remembra.dev): main f70abac, 0.16.1 plus copy fixes, schema 10.
+PROD_DEFAULT = "f70abac"
 USERS = ("u_alice", "u_bob")
 CREW_VERSION = (5, "crew_agent_inbox_scoping")
-# Production's newest migration (0.16.1, 4d335ce): it must be there before and after the upgrade, unchanged.
+# Production's newest migration (0.16.1, f70abac): it must be there before and after the upgrade, unchanged.
 PROD_TOP_VERSION = (10, "account_reviews")
 PROD_VERSIONS = [1, 2, 3, 4, 6, 7, 8, 9, 10]
 ALL_VERSIONS = list(range(1, 11))
@@ -411,7 +413,11 @@ def _inbox_projects(snap: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--prod", default="4d335ce", help="the deployed commit (0.16.1, schema 10: versions 1-4 and 6-10)")
+    parser.add_argument(
+        "--prod",
+        default=PROD_DEFAULT,
+        help=f"the deployed commit (default {PROD_DEFAULT}: 0.16.1 plus copy fixes, schema 10: versions 1-4 and 6-10)",
+    )
     parser.add_argument("--this", default="HEAD")
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parents[2]))
     parser.add_argument("--keep", help="copy the databases (and backups) here for inspection")
