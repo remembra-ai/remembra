@@ -54,6 +54,7 @@ from remembra.crew.limits import enforce_rate_limit
 from remembra.crew.reaper import build_sessions_service
 from remembra.crew.sessions import SESSION_TOKEN_HEADER, CrewSessions, JoinRequest, SessionError, get_session
 from remembra.crew.store import now_iso
+from remembra.inbox.manager import is_reserved_sender
 
 router = APIRouter(tags=["crew-sessions"])
 
@@ -235,6 +236,14 @@ async def join_crew(
     agent_id, verified = effective_agent(request, user, body["agent_id"])
     if not agent_id or agent_id != body["agent_id"]:
         raise crew_error(422, "validation", f"agent_id must match the key's agent (or the {AGENT_HEADER} header).")
+    if is_reserved_sender(agent_id):
+        # its channel posts would be refused as a server-set sender: refuse the join and say how to fix it
+        raise crew_error(
+            422,
+            "reserved_sender",
+            f"agent id '{agent_id}' is reserved for the server: an agent id may not contain 'mani', 'human', 'system'"
+            " or 'remembra' as a word. Set REMEMBRA_AGENT_ID to another id (with a key bound to that id, if yours is).",
+        )
     project_id = await _resolve_join_project(request, user, body)
     req = JoinRequest(
         agent_id=agent_id,

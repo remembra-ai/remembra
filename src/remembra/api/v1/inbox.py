@@ -270,8 +270,15 @@ async def send_to_inbox(
         sender_kind = "human"
     else:
         # An agent-scoped key sends as its own agent, whatever the payload claims.
-        from_agent = getattr(current_user, "agent_id", None) or payload.from_agent or "unknown"
+        bound = getattr(current_user, "agent_id", None)
+        from_agent = bound or payload.from_agent or "unknown"
         sender_kind = "agent"
+        if bound and is_reserved_sender(bound):
+            raise _reserved_422(
+                f"this key is bound to agent id '{bound}', which is reserved for the server (an agent's name may not"
+                " contain 'mani', 'human', 'system' or 'remembra' as a word), and a key's bound id always wins:"
+                " create a key bound to another agent id, such as 'claude-code' or 'codex', and use that one."
+            )
         if is_reserved_sender(from_agent):
             raise _reserved_422(
                 f"sender name '{from_agent}' is reserved for the server: an agent's name may not contain"

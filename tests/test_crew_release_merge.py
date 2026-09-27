@@ -125,6 +125,34 @@ async def test_an_old_client_with_a_reserved_word_in_its_agent_id_is_told_what_t
     assert ok.status_code == 201, ok.text
 
 
+async def test_a_key_bound_to_a_reserved_agent_id_is_told_to_use_another_key(h: Harness) -> None:
+    """A key's bound agent id always wins over from_agent, so "set REMEMBRA_AGENT_ID" cannot help it."""
+    owner = await h.create_user("merge-reserved-bound@example.com")
+    key = await _key(h, owner, agent="mani-laptop")  # made before key creation refused reserved ids
+    resp = await h.client.post(
+        "/api/v1/inbox/send",
+        headers={"X-API-Key": key},
+        json={"to_agent": "claude-code", "subject": "s", "body": "b", "from_agent": "laptop"},
+    )
+    assert resp.status_code == 422 and resp.json()["detail"]["error"] == "reserved_sender", resp.text
+    message = resp.json()["detail"]["message"]
+    assert "bound to agent id 'mani-laptop'" in message and "create a key bound to another agent id" in message
+    assert "REMEMBRA_AGENT_ID" not in message
+
+
+async def test_keys_cannot_be_bound_to_a_reserved_agent_id(tmp_path) -> None:
+    from remembra.api.v1 import keys as keys_api
+
+    async with secure_app(tmp_path, [keys_api.router]) as harness:
+        owner = await harness.create_user("merge-reserved-key@example.com")
+        for name in ("mani-laptop", "System", "remembra-bridge"):
+            resp = await harness.client.post("/api/v1/keys", json={"name": "k", "agent_id": name}, headers=harness.jwt(owner))
+            assert resp.status_code == 422, resp.text
+            assert resp.json()["detail"]["error"] == "reserved_sender" and name in resp.json()["detail"]["message"]
+        ok = await harness.client.post("/api/v1/keys", json={"name": "k", "agent_id": "codex"}, headers=harness.jwt(owner))
+        assert ok.status_code == 201, ok.text
+
+
 async def test_idempotent_resend_returns_the_stored_row(h: Harness) -> None:
     manager: InboxManager = h.app.state.inbox_manager
     first = await manager.send("u1", "codex", "claude-code", "s", f"b {SECRET}", inbox_id="inbox_fixed")

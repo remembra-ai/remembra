@@ -145,6 +145,13 @@ async def test_join_token_rules_and_identity_over_http(tmp_path):
         assert res.status_code == 403 and res.json()["detail"]["error"] == "host_token_invalid"
         res = await h.client.post("/api/v1/crews/join", json={"agent_id": "x", "session_id": "q"}, headers=key)
         assert res.status_code == 422
+        # a reserved sender name as agent id: refused at join (its channel posts would be), with the fix
+        res = await h.client.post(
+            "/api/v1/crews/join", json=_join_body("s-6", agent_id="mani-laptop", adapter="claude-code"), headers=key
+        )
+        assert res.status_code == 422 and res.json()["detail"]["error"] == "reserved_sender", res.text
+        assert "REMEMBRA_AGENT_ID" in res.json()["detail"]["message"]
+        assert await db.fetchall("SELECT id FROM crew_sessions WHERE agent_id = 'mani-laptop'") == []
 
 
 async def test_join_by_locator_resolves_read_only(tmp_path):

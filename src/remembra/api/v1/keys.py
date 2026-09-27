@@ -19,6 +19,7 @@ from remembra.cloud import notify
 from remembra.cloud.limits import EnforceKeyLimit
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
+from remembra.inbox.manager import is_reserved_sender
 from remembra.security.audit import AuditLogger
 
 router = APIRouter(prefix="/keys", tags=["api-keys"])
@@ -314,6 +315,16 @@ async def create_api_key(
     # Support 'permission' alias for 'role' (dashboard compatibility)
     role_str = body.permission or body.role
     role = validate_role(role_str)
+    if body.agent_id and is_reserved_sender(body.agent_id):
+        # A key's agent id is the sender of everything it sends; the server-set names cannot be one.
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "error": "reserved_sender",
+                "message": f"agent id '{body.agent_id}' is reserved for the server: an agent id may not contain"
+                " 'mani', 'human', 'system' or 'remembra' as a word. Use another id, such as 'claude-code' or 'codex'.",
+            },
+        )
 
     inherited_scopes: list[str] | None = None
     if current_user:
