@@ -543,7 +543,7 @@ async def _resolve_target(
         reason = P.check_glob(path_glob)
         if reason:
             raise CrewOpError(422, "invalid_claim", f"path_glob {reason}.")
-        if principal is not None and not principal.is_human:
+        if principal is not None and not principal.is_privileged:
             await _check_agent_glob(conn, crew_id, path_glob, source)
         return Target(path_glob=path_glob)
     return Target(resource=resource)
@@ -563,7 +563,7 @@ def _zone_rules(target: Target, principal: Principal, settings: Mapping[str, Any
         return
     if zone["builtin"]:
         raise CrewOpError(423, "crew_policy", "The crew-policy zone is never claimable.")
-    if principal.is_human:
+    if principal.is_privileged:
         return
     if is_frozen(zone):
         raise CrewOpError(423, "frozen", f"Zone {zone['slug']} is frozen by a human.")
@@ -573,6 +573,8 @@ def _zone_rules(target: Target, principal: Principal, settings: Mapping[str, Any
         session = principal.session or {}
         if session.get("agent_id") != zone["reserve_for"] or not session.get("agent_verified"):
             raise CrewOpError(403, "reserved_for_agent", f"Zone {zone['slug']} is reserved for a key-verified agent.")
+    if principal.is_human:
+        return  # a crew member's own claim: the protections above apply, the agent task rules below do not
     if not zone["is_leaf"] and task_id is None:
         raise CrewOpError(422, "task_required", f"Zone {zone['slug']} has child zones: claim it with a task (crew_task start).")
     if source == "first_write" and settings.get("auto_claim_leaf_only", True) and not zone["is_leaf"]:

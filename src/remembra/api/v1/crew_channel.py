@@ -66,9 +66,10 @@ def crew_ref(access: CrewAccess) -> CrewRef:
 
 
 async def author_for(request: Request, access: CrewAccess) -> Author:
-    """The writer: the human for a dashboard login, else the crew session proven by its headers (401 otherwise)."""
+    """The writer: the human for a dashboard login (the (H) principal only as crew owner or admin), else the crew
+    session proven by its headers (401 otherwise)."""
     if access.human:
-        return Author.human(access.user.user_id)
+        return Author.human(access.user.user_id, privileged=access.privileged)
     try:
         return await authenticate_session(
             event_log(request).db.conn,

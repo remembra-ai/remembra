@@ -53,7 +53,7 @@ async def issue_code(
     ops: CrewOps, crew_id: str, human: Principal, *, session_id: str, scope: str, minutes: int
 ) -> dict[str, Any]:
     """Issue a code (human + step-up, route-enforced). Returns the plain code exactly once."""
-    if not human.is_human:
+    if not human.is_privileged:
         raise CrewOpError(403, "human_only", "Bypass codes are issued from a dashboard login only.")
     if not isinstance(minutes, int) or isinstance(minutes, bool) or not 1 <= minutes <= S.BYPASS_CODE_MAX_MINUTES:
         raise CrewOpError(422, "invalid_bypass", f"minutes must be between 1 and {S.BYPASS_CODE_MAX_MINUTES}.")

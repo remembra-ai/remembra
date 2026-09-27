@@ -122,7 +122,7 @@ async def resolve_caller(request: Request, access: CrewAccess, *, mutation: bool
             raise crew_error(403, "agent_mismatch", "This agent-scoped key cannot act as another agent's session.")
         return Caller.for_session(session)
     if access.human:
-        return Caller.for_human(access.user.user_id)
+        return Caller.for_human(access.user.user_id, privileged=access.privileged)
     if mutation:
         raise crew_error(
             403,

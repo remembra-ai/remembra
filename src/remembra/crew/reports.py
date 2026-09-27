@@ -680,7 +680,7 @@ class ReportService:
 
     async def review(self, crew_id: str, task_id: str, caller: Caller, decision: str, note: str | None) -> ReportResult:
         """(H) Approve (→ done) or reject (→ in_progress) the current report of a task in review."""
-        if not caller.human:
+        if not caller.is_privileged:
             raise _err(403, "human_only", "Only a human reviews reports.")
         if decision not in ("approve", "reject"):
             raise _err(422, "invalid_review", "decision must be approve or reject")
@@ -753,7 +753,7 @@ class ReportService:
 
     async def waive(self, crew_id: str, task_id: str, caller: Caller, criterion_id: Any, reason: Any) -> ReportResult:
         """(H, step-up) Waive one criterion, or ``"all"``: a ``waived`` report and ``done`` without evidence (D17)."""
-        if not caller.human:
+        if not caller.is_privileged:
             raise _err(403, "human_only", "Only a human can waive acceptance criteria.")
         if not isinstance(reason, str) or not reason.strip() or len(reason) > 280:
             raise _err(422, "invalid_waiver", "reason is required (at most 280 characters)")

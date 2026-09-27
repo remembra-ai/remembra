@@ -807,7 +807,7 @@ class CrewChannel:
         feed and ``since_seq`` replay no longer return it; mention deliveries to agent inboxes
         still queued carry a placeholder instead of the body.
         """
-        if not human.is_human:
+        if not human.is_privileged:
             raise NotAllowed("only a human can redact a message")
         async with self.log.transaction() as tx:
             row = await self._get(tx, message_id)
@@ -848,7 +848,7 @@ class CrewChannel:
 
     async def pin(self, message_id: str, human: Author, *, pinned: bool = True) -> dict[str, Any]:
         """Human-only pin/unpin. The closed event set has no pin event (§4.2), so this writes state only."""
-        if not human.is_human:
+        if not human.is_privileged:
             raise NotAllowed("only a human can pin a message")
         async with self.db.transaction():
             await self.db.conn.execute("UPDATE crew_messages SET pinned = ? WHERE id = ?", (1 if pinned else 0, message_id))

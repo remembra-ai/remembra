@@ -680,7 +680,7 @@ async def record_merge_conflict_risk(
 
 
 def _party(row: Mapping[str, Any], principal: Principal) -> bool:
-    return principal.is_human or principal.session_id in (row.get("session_a"), row.get("session_b"))
+    return principal.is_privileged or principal.session_id in (row.get("session_a"), row.get("session_b"))
 
 
 async def acknowledge(ops: CrewOps, collision: Mapping[str, Any], principal: Principal) -> dict[str, Any]:

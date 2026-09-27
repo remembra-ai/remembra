@@ -53,6 +53,11 @@ MAX_EVIDENCE_ITEM: Final = 280
 NEEDS_YOU_KIND: Final = "decision_to_confirm"
 
 
+def member_dedupe_key(user_id: str) -> str:
+    """Dedupe key of a crew member's (not the (H) principal's) proposals item: one live item per person."""
+    return f"human:{user_id}:{NEEDS_YOU_KIND}"
+
+
 class DecisionNotFound(InboxError):
     status = 404
     error = "not_found"
@@ -176,7 +181,8 @@ class CrewDecisions:
         supersedes_id: str | None = None,
         evidence: Any = None,
     ) -> dict[str, Any]:
-        """Create ``D-n``: in force for a human author, proposed for an agent. Returns the API view with ``seq``."""
+        """Create ``D-n``: in force for the (H) principal, proposed for an agent or a crew member. Returns the API
+        view with ``seq``."""
         clean_title = _flat(title, MAX_TITLE, "title")
         clean_decision = _flat(decision, MAX_DECISION, "decision")
         clean_rationale = _flat(rationale, MAX_RATIONALE, "rationale", required=False)
@@ -248,6 +254,7 @@ class CrewDecisions:
         decision_id = new_id("decision")
         now = now_iso()
         human = author.is_human
+        in_force = author.is_privileged  # a crew member proposes, like an agent (D27, §11.2)
         await tx.conn.execute(
             """
             INSERT INTO crew_decisions (id, crew_id, number, title, decision, rationale, alternatives, decided_by_kind,
@@ -270,20 +277,20 @@ class CrewDecisions:
                 task_id,
                 zone_id,
                 supersedes_id,
-                "in_force" if human else "proposed",
-                author.user_id if human else None,
-                now if human else None,
+                "in_force" if in_force else "proposed",
+                author.user_id if in_force else None,
+                now if in_force else None,
                 now,
                 # Riders (gap analysis §7): whether the proposer's identity was verified (a human
                 # login, or a key-verified agent), and the decider's (only a human decides).
                 1 if author.verified else 0,
-                1 if human else None,
+                1 if in_force else None,
                 json.dumps(evidence) if evidence else None,
             ),
         )
         row = await self._get(tx, decision_id)
         assert row is not None
-        if human:
+        if in_force:
             result = await tx.emit(
                 crew_id=crew.id,
                 type="decision.confirmed",
@@ -307,8 +314,9 @@ class CrewDecisions:
                 crew_id=crew.id,
                 audience="project",
                 kind=NEEDS_YOU_KIND,
-                origin="agent",
-                agent=author.agent_origin(),
+                origin="human" if human else "agent",
+                agent=None if human else author.agent_origin(),
+                dedupe_key=member_dedupe_key(author.user_id) if human else None,
                 title=lambda n: f"{label} proposed {n} decision{'s' if n != 1 else ''} to confirm",
                 ref_type="decision",
                 ref_id=decision_id,
@@ -460,7 +468,7 @@ class CrewDecisions:
 
     @staticmethod
     def _require_human(author: Author) -> None:
-        if not author.is_human:
+        if not author.is_privileged:
             raise NotAllowed("Only a human can confirm, reject or supersede a decision.")
 
     async def _get(self, tx: EventTx, decision_id: str) -> dict[str, Any] | None:
@@ -476,7 +484,7 @@ class CrewDecisions:
 
     async def _settle_needs_you(self, tx: EventTx, row: Mapping[str, Any], human: Author) -> None:
         """Resolve the proposer's coalesced Needs-you item once none of its decisions is still proposed."""
-        if row["decided_by_kind"] != "agent":
+        if row["decided_by_kind"] not in ("agent", "human"):
             return
         async with tx.conn.execute(
             "SELECT COUNT(*) FROM crew_decisions WHERE crew_id = ? AND decided_by = ? AND state = 'proposed'",
@@ -485,11 +493,14 @@ class CrewDecisions:
             pending = await cur.fetchone()
         if pending is not None and int(pending[0]) > 0:
             return
-        async with tx.conn.execute("SELECT user_id FROM crew_sessions WHERE id = ?", (row["decided_by"],)) as cur:
-            sess = await cur.fetchone()
-        if sess is None:
-            return
-        key = agent_dedupe_key(str(sess[0]), str(row["decided_by"]), NEEDS_YOU_KIND)
+        if row["decided_by_kind"] == "human":  # a crew member's proposals
+            key = member_dedupe_key(str(row["decided_by"]))
+        else:
+            async with tx.conn.execute("SELECT user_id FROM crew_sessions WHERE id = ?", (row["decided_by"],)) as cur:
+                sess = await cur.fetchone()
+            if sess is None:
+                return
+            key = agent_dedupe_key(str(sess[0]), str(row["decided_by"]), NEEDS_YOU_KIND)
         async with tx.conn.execute(
             "SELECT id FROM crew_inbox_items WHERE crew_id = ? AND dedupe_key = ? AND state IN ('open','seen','claimed')",
             (row["crew_id"], key),
@@ -511,9 +522,8 @@ class CrewDecisions:
         lines = [f"Decision D-{row['number']}: {row['title']}", str(row["decision"])]
         if row["rationale"]:
             lines.append(f"Rationale: {row['rationale']}")
-        lines.append(
-            "Confirmed by a human." if row["decided_by_kind"] == "agent" else "Decided by a human (in force immediately)."
-        )
+        direct = row["decided_by_kind"] == "human" and row["confirmed_by"] == row["decided_by"]
+        lines.append("Decided by a human (in force immediately)." if direct else "Confirmed by a human.")
         outbox_id = await store.enqueue_outbox(
             crew.id,
             KIND_MEMORY_PROMOTION,

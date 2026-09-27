@@ -98,15 +98,22 @@ class Caller:
     human: bool = False
     session: Mapping[str, Any] | None = None
     system: bool = False
+    # humans only: False for a crew member (``CrewAccess.privileged``), who gets no (H) shortcut (§11.2)
+    privileged: bool = True
 
     @classmethod
     def for_session(cls, session: Mapping[str, Any]) -> Caller:
         return cls(user_id=str(session["user_id"]), session=dict(session))
 
     @classmethod
-    def for_human(cls, user_id: str) -> Caller:
-        """Only for a principal the route checked with ``is_human`` (D27)."""
-        return cls(user_id=user_id, human=True)
+    def for_human(cls, user_id: str, *, privileged: bool = True) -> Caller:
+        """Only for a principal the route checked with ``is_human`` (D27); ``privileged`` is its crew role check."""
+        return cls(user_id=user_id, human=True, privileged=privileged)
+
+    @property
+    def is_privileged(self) -> bool:
+        """The (H) principal: a human with crew role owner or admin (D27, §11.2)."""
+        return self.human and self.privileged
 
     @classmethod
     def server(cls) -> Caller:
@@ -1372,8 +1379,8 @@ class TaskService:
         return out
 
     async def _require_owner(self, conn: Any, task: Mapping[str, Any], caller: Caller) -> None:
-        """The owner session, or the session accountable for it (the owner is its sub-agent), or a human."""
-        if caller.human or caller.system:
+        """The owner session, or the session accountable for it (the owner is its sub-agent), or the (H) principal."""
+        if caller.is_privileged or caller.system:
             return
         owner = task.get("owner_session_id")
         if caller.session_id is not None and (
@@ -1521,7 +1528,7 @@ class TaskService:
             acceptance_changed = False
             if "acceptance" in body:
                 new = validate_acceptance(body["acceptance"])
-                if task["acceptance_locked"] and not caller.human:
+                if task["acceptance_locked"] and not caller.is_privileged:
                     raise _err(
                         403,
                         "human_only",
@@ -1870,7 +1877,7 @@ class TaskService:
                 raise _err(412, "version_mismatch", f"version mismatch; current version is {task['version']}")
             if task["status"] in ("done", "cancelled"):
                 raise _err(409, "invalid_transition", f"{task_ref(task)} is already {task['status']}.")
-            if task.get("owner_session_id") and not (caller.human or caller.session_id == task["owner_session_id"]):
+            if task.get("owner_session_id") and not (caller.is_privileged or caller.session_id == task["owner_session_id"]):
                 raise _err(403, "not_task_owner", f"{task_ref(task)} is owned by another session; a human can cancel it.")
             owner = task.get("owner_session_id")
             await self.claims.release(
@@ -2192,7 +2199,7 @@ class TaskService:
 
     async def assign(self, crew_id: str, task_id: str, caller: Caller, to_session_id: Any) -> TaskResult:
         """(H) Hand a task to a live session: overrides dependencies, moves or grants its claims (``human_assign``)."""
-        if not caller.human:
+        if not caller.is_privileged:
             raise _err(403, "human_only", "Only a human can assign a task.")
         async with self.events.transaction() as tx:
             task = await load_task(tx.conn, crew_id, task_id)

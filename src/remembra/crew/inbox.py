@@ -101,10 +101,12 @@ class Author:
     callsign: str | None = None
     verified: bool = False
     parent_session_id: str | None = None  # a sub-agent's accountable parent session
+    # humans only: False for a crew member (``CrewAccess.privileged``): a person, but not the (H) principal (§11.2)
+    privileged: bool = True
 
     @classmethod
-    def human(cls, user_id: str) -> Author:
-        return cls(kind="human", user_id=user_id, verified=True)
+    def human(cls, user_id: str, *, privileged: bool = True) -> Author:
+        return cls(kind="human", user_id=user_id, verified=True, privileged=privileged)
 
     @classmethod
     def session(cls, row: Mapping[str, Any]) -> Author:
@@ -121,6 +123,11 @@ class Author:
     @property
     def is_human(self) -> bool:
         return self.kind == "human"
+
+    @property
+    def is_privileged(self) -> bool:
+        """The (H) principal: a human with crew role owner or admin (D27, §11.2)."""
+        return self.is_human and self.privileged
 
     @property
     def principal(self) -> str:

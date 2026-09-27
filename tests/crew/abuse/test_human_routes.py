@@ -412,6 +412,111 @@ def test_human_only_actions_behind_agent_routes(server: RedTeamServer) -> None:
         assert res.status_code == 422 and res.json()["detail"]["error"] == "reserved_sender", (kind, res.status_code, res.text)
 
 
+def _teammate_login(server: RedTeamServer, m: Matrix, role: str) -> dict[str, str]:
+    """Add the team's other user to the crew with ``role`` and return their fresh dashboard login."""
+    ok(server.http.post(f"{API}/crews/{m.cid}/members", json={"user_id": m.other_user, "role": role}, headers=server.login()))
+    res = server.http.post(f"{API}/auth/login", json={"email": "teammate@example.com", "password": "Str0ng!Passw0rd"})
+    assert res.status_code == 200, res.text
+    return {"Authorization": f"Bearer {res.json()['access_token']}"}
+
+
+def test_member_role_humans_get_no_human_shortcuts(server: RedTeamServer) -> None:
+    """D27 (§5.9, §11.2): a dashboard login is the human principal only with crew role owner or admin.
+
+    A teammate added as ``member`` acts as a person on the ordinary routes (messages, own
+    claims), but none of the human shortcuts those routes grant: loosening or removing a zone,
+    claiming a frozen, protected or reserved zone (directly or through an overlapping path
+    glob), putting a decision in force, or acting on a task or collision of other sessions.
+    """
+    m = Matrix(server)
+    c, s, cid = m.crew, server, m.cid
+    vault = c.zone("vault", ["src/app/vault/**"])
+    ledger = c.zone("ledger", ["src/app/ledger/**"])
+    till = c.zone("till", ["src/app/till/**"])
+    kiosk = c.zone("kiosk", ["src/app/kiosk/**"])
+    counter = c.zone("counter", ["src/app/counter/**"])
+    for zid in (vault, ledger):
+        z = ok(s.http.get(f"{API}/crews/{cid}/zones", headers=m.human))
+        version = next(x["version"] for x in z["zones"] if x["id"] == zid)
+        ok(s.http.patch(f"{API}/zones/{zid}", json={"protected": True}, headers={**m.human, "If-Match": str(version)}))
+    z = ok(s.http.get(f"{API}/crews/{cid}/zones", headers=m.human))
+    version = next(x["version"] for x in z["zones"] if x["id"] == kiosk)
+    ok(s.http.patch(f"{API}/zones/{kiosk}", json={"reserve_for": "codex"}, headers={**m.human, "If-Match": str(version)}))
+    ok(s.http.post(f"{API}/zones/{till}/freeze", json={"reason": "the owner is editing it"}, headers=m.human))
+    collision = m.collision()
+    member = _teammate_login(s, m, "member")
+    assert ok(s.http.get(f"{API}/crews/{cid}", headers=member))["role"] == "member"
+
+    def zone_rows() -> list[dict[str, Any]]:
+        return s.rows(
+            "SELECT slug, archived_at, protected, reserve_for, frozen_by, version FROM crew_zones"
+            " WHERE crew_id = ? ORDER BY slug",
+            (cid,),
+        )
+
+    zones_before = zone_rows()
+    vault_version = next(r["version"] for r in zones_before if r["slug"] == "vault")
+
+    res = s.http.patch(f"{API}/zones/{vault}", json={"protected": False}, headers={**member, "If-Match": str(vault_version)})
+    assert res.status_code == 403 and res.json()["detail"]["error"] == "crew_role_required", res.text
+    for zid in (ledger, till):  # a protected zone, and a zone the owner froze
+        res = s.http.delete(f"{API}/zones/{zid}", headers=member)
+        assert res.status_code == 403 and res.json()["detail"]["error"] == "crew_role_required", res.text
+    for zid, code, error in ((vault, 423, "protected"), (till, 423, "frozen"), (kiosk, 403, "reserved_for_agent")):
+        res = s.http.post(
+            f"{API}/crews/{cid}/claims",
+            json={"zone_id": zid, "mode": "exclusive", "wait": False, "source": "dashboard"},
+            headers=member,
+        )
+        assert res.status_code == code and res.json()["detail"]["error"] == error, (error, res.status_code, res.text)
+    res = s.http.post(
+        f"{API}/crews/{cid}/claims",
+        json={"path_glob": "src/app/vault/**", "mode": "exclusive", "wait": False, "source": "dashboard"},
+        headers=member,
+    )
+    assert res.status_code == 422 and res.json()["detail"]["error"] == "zone_path", res.text
+    assert zone_rows() == zones_before
+    assert not s.rows(
+        "SELECT id FROM crew_claims WHERE crew_id = ? AND holder_kind = 'human' AND holder_user_id = ?", (cid, m.other_user)
+    )
+
+    # a task another session owns, and a collision between two other sessions, are not the member's
+    res = s.http.post(f"{API}/tasks/{c.tid('t1')}/release", json={"baton": False}, headers=member)
+    assert res.status_code == 403 and res.json()["detail"]["error"] == "not_task_owner", res.text
+    res = s.http.post(f"{API}/collisions/{collision}/ack", headers=member)
+    assert res.status_code == 403 and res.json()["detail"]["error"] == "not_a_party", res.text
+
+    # the member's decision is a proposal the owner confirms, never in force on its own
+    d = ok(s.http.post(f"{API}/crews/{cid}/decisions", json={"title": "Pay", "decision": "Use Paddle"}, headers=member), 201)
+    assert d["state"] == "proposed", d
+    assert not s.events(cid, types=("decision.confirmed",))
+    confirmed = ok(s.http.post(f"{API}/decisions/{d['id']}/confirm", headers=s.login()))
+    assert confirmed["state"] == "in_force", confirmed
+
+    # ordinary actions stay open to the member as a person
+    said = ok(
+        s.http.post(
+            f"{API}/crews/{cid}/messages", json={"kind": "chat", "body": "on it", "client_msg_id": "mate-1"}, headers=member
+        )
+    )
+    assert said["message"]["author_kind"] == "human", said
+    claim = ok(
+        s.http.post(
+            f"{API}/crews/{cid}/claims",
+            json={"zone_id": counter, "mode": "exclusive", "wait": False, "source": "dashboard"},
+            headers=member,
+        ),
+        201,
+    )
+    assert claim["claim"]["holder_kind"] == "human", claim
+
+    # the same teammate as crew admin gets the human principal back
+    ok(s.http.delete(f"{API}/crews/{cid}/members/{m.other_user}", headers=s.login()))
+    admin = _teammate_login(s, m, "admin")
+    res = s.http.delete(f"{API}/zones/{ledger}", headers=admin)
+    assert res.status_code == 200 and res.json()["applied"] is True, res.text
+
+
 def test_every_l0_contract_route_is_mounted_by_the_real_app(server: RedTeamServer) -> None:
     """The route table of the running app covers the whole L0 contract, each with its access dependency."""
     assert audit_crew_routes(server.app.routes, require_all=True) == []

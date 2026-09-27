@@ -255,6 +255,15 @@ class CrewAccess:
     def crew_id(self) -> str:
         return self.crew.id
 
+    @property
+    def privileged(self) -> bool:
+        """The (H) principal of §11.2: a human (D27) **and** crew role owner or admin.
+
+        A dashboard login with crew role member acts as a person (messages, its own claims)
+        but gets none of the human shortcuts of the agent-reachable routes.
+        """
+        return self.human and self.role in HUMAN_CREW_ROLES
+
 
 @dataclass(frozen=True)
 class CrewEntity:

@@ -87,14 +87,16 @@ class Principal:
     user_id: str
     session: Mapping[str, Any] | None = None
     api_key_id: str | None = None
+    # humans only: False for a crew member (``CrewAccess.privileged``), who gets no (H) shortcut (§11.2)
+    privileged: bool = True
 
     @classmethod
     def system(cls) -> Principal:
         return cls("system", "system")
 
     @classmethod
-    def human(cls, user_id: str, *, api_key_id: str | None = "jwt_auth") -> Principal:
-        return cls("human", user_id, None, api_key_id)
+    def human(cls, user_id: str, *, api_key_id: str | None = "jwt_auth", privileged: bool = True) -> Principal:
+        return cls("human", user_id, None, api_key_id, privileged)
 
     @classmethod
     def for_session(cls, session: Mapping[str, Any], *, api_key_id: str | None = None) -> Principal:
@@ -103,6 +105,11 @@ class Principal:
     @property
     def is_human(self) -> bool:
         return self.kind == "human"
+
+    @property
+    def is_privileged(self) -> bool:
+        """The (H) principal: a human with crew role owner or admin (D27, §11.2)."""
+        return self.is_human and self.privileged
 
     @property
     def session_id(self) -> str | None:
@@ -937,8 +944,8 @@ async def upload_zones_file(
         old = await _diff_base(tx.conn, crew_id, new)
         live = await _live_slugs(tx.conn, crew_id)
         diff = P.diff_policy(old, new, live_claim_slugs=live, current_enforcement=settings["enforcement"])
-        if not principal.is_human:
-            # an agent upload may not add or tighten a zone into a crew-wide lock on its own (zone squat)
+        if not principal.is_privileged:
+            # an agent (or crew member) upload may not add or tighten a zone into a crew-wide lock on its own (zone squat)
             diff = P.hold_agent_tightening(old, new, diff)
         interim = P.interim_policy(old, new, diff, current_enforcement=settings["enforcement"]) if diff.loosening else new
         # the cap applies to what is applied now (the interim policy while approval is pending)
@@ -1168,7 +1175,7 @@ async def create_zone(ops: CrewOps, crew_id: str, principal: Principal, body: Ma
         existing = await fetchone(tx.conn, "SELECT * FROM crew_zones WHERE crew_id = ? AND slug = ?", (crew_id, slug))
         if existing is not None and existing["archived_at"] is None:
             raise CrewOpError(409, "zone_exists", f"Zone {slug} already exists.")
-        if not principal.is_human:
+        if not principal.is_privileged:
             await _agent_zone_check(tx.conn, crew_id, zone, None)
         await _check_zone_cap(ops, tx.conn, crew_id, [slug])
         parent_id = await _parent_id(tx.conn, crew_id, zone.parent)
@@ -1226,6 +1233,15 @@ async def _repo_policy(conn: aiosqlite.Connection, crew_id: str) -> P.Policy:
     )
 
 
+def _require_privileged(principal: Principal, agent_message: str) -> None:
+    """A loosening change: the (H) principal only. Agents get ``human_only``, crew members ``crew_role_required``."""
+    if principal.is_privileged:
+        return
+    if principal.is_human:
+        raise CrewOpError(403, "crew_role_required", "Loosening zone protection needs the crew role owner or admin.")
+    raise CrewOpError(403, "human_only", agent_message)
+
+
 async def patch_zone(
     ops: CrewOps, zone: Mapping[str, Any], principal: Principal, patch: Mapping[str, Any], *, if_match: int
 ) -> dict[str, Any]:
@@ -1253,9 +1269,9 @@ async def patch_zone(
             return {"applied": False, "export_patch": P.export_patch(repo, edited), "yaml": P.export_yaml(edited)}
         live = str(row["id"]) in await live_claim_zone_ids(tx.conn, crew_id)
         items = P.diff_zone(before, after, live_claim=live)
-        if any(i.loosening for i in items) and not principal.is_human:
-            raise CrewOpError(403, "human_only", "Loosening a zone needs a dashboard login.")
-        if items and not principal.is_human:
+        if any(i.loosening for i in items):
+            _require_privileged(principal, "Loosening a zone needs a dashboard login.")
+        if items and not principal.is_privileged:
             await _agent_zone_check(tx.conn, crew_id, after, before, zone_id=str(row["id"]))
         if not items:
             return {"applied": True, "zone": zone_detail(row)}
@@ -1295,8 +1311,7 @@ async def archive_zone(ops: CrewOps, zone: Mapping[str, Any], principal: Princip
             )
             edited = P.Policy(kept, repo.commons, repo.ignore, repo.enforcement)
             return {"applied": False, "export_patch": P.export_patch(repo, edited), "yaml": P.export_yaml(edited)}
-        if not principal.is_human:
-            raise CrewOpError(403, "human_only", "Removing a zone loosens protection and needs a dashboard login.")
+        _require_privileged(principal, "Removing a zone loosens protection and needs a dashboard login.")
         released = await _archive_zone_rows(ops, tx, crew_id, [str(row["id"])], actor, "zone_archived")
         res = SyncResult(archived=[str(row["id"])])
         res.updated.extend(await _restructure(tx, crew_id))

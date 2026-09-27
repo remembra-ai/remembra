@@ -67,9 +67,10 @@ async def crew_errors() -> AsyncIterator[None]:
 
 
 async def principal_for(request: Request, access: CrewAccess) -> Z.Principal:
-    """A human for a dashboard login; otherwise the crew session named by the session-token header."""
+    """A human for a dashboard login (the (H) principal only as crew owner or admin); otherwise the crew session
+    named by the session-token header."""
     if access.human:
-        return Z.Principal.human(access.user.user_id, api_key_id=access.user.api_key_id)
+        return Z.Principal.human(access.user.user_id, api_key_id=access.user.api_key_id, privileged=access.privileged)
     async with crew_errors():
         session = await authenticate_session(
             access_conn(request),
