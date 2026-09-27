@@ -168,7 +168,7 @@ def recall_with_org_context(query: str):
 def create_user_memory_key(user_id: str) -> str:
     response = requests.post(
         f"{REMEMBRA_URL}/api/v1/keys",
-        headers={"Authorization": f"Bearer {MASTER_KEY}"},
+        headers={"X-API-Key": MASTER_KEY},
         json={
             "user_id": user_id,
             "name": f"Key for {user_id}"

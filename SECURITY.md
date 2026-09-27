@@ -167,15 +167,36 @@ follow-up; until then volume-level encryption is the control for SQLite data.
 
 ### Role-Based Access Control (RBAC)
 
-Three built-in roles with 12 granular permissions:
+Every API key has one of three roles: `admin`, `editor` or `viewer`. This table
+is generated from `src/remembra/auth/rbac.py` (`permission_table()`), and a test
+fails when it no longer matches the code:
 
-| Role | Permissions | Use Case |
-|------|-------------|----------|
-| **Admin** | All 12 permissions | System administrators |
-| **Editor** | store, recall, delete, entity read, webhook manage | Application backends |
-| **Viewer** | recall, entity read, key list | Analytics, dashboards |
+<!-- permission-table:start -->
+| Permission | admin | editor | viewer | What it allows |
+|---|:---:|:---:|:---:|---|
+| `memory:store` | yes | yes | no | Store, change, pin, import and ingest memories; send recall feedback; write inbox messages, relay handoffs and session status; change spaces, teams and project links; recompute the brain layer; start audio capture |
+| `memory:recall` | yes | yes | yes | Recall, list, read and export memories; read spaces, inbox messages, relay briefs and trails, conflicts, timelines and brain insights |
+| `memory:delete` | yes | yes | no | Delete memories and clean up expired or decayed ones |
+| `key:create` | yes | yes | no | Create API keys (never above the caller's own role, never admin) and rename them |
+| `key:list` | yes | yes | yes | List the account's API keys |
+| `key:revoke` | yes | yes | no | Revoke or delete API keys (an API key only ones with no more access than itself) |
+| `webhook:manage` | yes | yes | no | Create, read, change and delete webhooks and read their deliveries |
+| `conflict:manage` | yes | yes | no | Resolve or dismiss memory conflicts |
+| `entity:read` | yes | yes | yes | Read entities, their relationships and the memories that mention them |
+| `admin:audit` | yes | no | no | Read the account's audit log |
+| `admin:export` | yes | no | no | Export the account's audit log as JSON or CSV |
+| `admin:users` | yes | no | no | Nothing yet: no route checks it |
+| `account:manage` | yes | yes | no | Redeem a promo code; email the verification link of an account created by API signup |
+<!-- permission-table:end -->
 
-Permissions can be customized per API key with scope overrides and project-level restrictions.
+- **Viewer keys are read-only.** Every route that changes data refuses them. A test sends a viewer key to every write route the API serves.
+- **Admin keys** are created only with the server's master key. An admin key can then give another of the account's keys the admin role. The dashboard creates editor and viewer keys. An API key can create keys only up to its own role, never admin.
+- **Scopes** narrow a key's role and never widen it. Only an admin key can set them (`POST /api/v1/admin/roles`).
+- **Project restrictions** limit a key to the projects it lists.
+- A change of role, scopes or projects applies from the key's next request.
+- A dashboard sign-in has the editor permissions.
+
+The [RBAC guide](https://docs.remembra.dev/guides/rbac/) has the details.
 
 ### Two-Factor Authentication (2FA)
 
@@ -187,8 +208,10 @@ Optional TOTP-based 2FA for dashboard access:
 
 ### JWT Tokens
 
+Dashboard sign-ins use JWTs:
+
 - Algorithm: HS256
-- Expiration: 7 days (configurable)
+- Expiration: 24 hours. This is fixed: the `REMEMBRA_JWT_EXPIRATION_HOURS` setting is not read yet.
 - Minimum secret length: 32 characters (enforced in production)
 - Token blacklist for secure logout
 
@@ -275,22 +298,27 @@ Anomalies are logged and can trigger webhook alerts for external monitoring.
 
 ## Audit Logging
 
-Complete audit trail of all operations. **Content is never logged** — only IDs and metadata.
+The audit log records the events below. **Content is never logged** — only IDs and metadata.
+
+It does not record ordinary sign-ins (successful or failed), rate-limit hits,
+entity changes, role changes made with `POST /api/v1/admin/roles`, or webhook,
+team, space, import/export, inbox, conflict or temporal operations yet.
 
 ### Tracked Events
 
-| Event | Description |
-|-------|-------------|
-| `MEMORY_STORE` | Memory created |
-| `MEMORY_RECALL` | Search query executed |
-| `MEMORY_FORGET` | Memory deleted |
-| `MEMORY_GET` | Memory retrieved by ID |
-| `KEY_CREATED` | API key generated |
-| `KEY_UPDATED` | API key modified |
-| `KEY_REVOKED` | API key deactivated |
-| `AUTH_SUCCESS` | Successful authentication |
-| `AUTH_FAILED` | Failed authentication attempt |
-| `AUTH_RATE_LIMITED` | Rate limit triggered |
+| Event | Written when |
+|-------|--------------|
+| `memory_store` | A memory is stored through the memory or ingest routes (the MCP connector uses them too) |
+| `memory_recall` | A recall runs through `POST /api/v1/memories/recall` |
+| `memory_update` | A memory is updated or superseded |
+| `memory_forget` | Memories are deleted, or `POST /api/v1/memories/cleanup-expired` removes expired ones |
+| `key_created` | An API key is created |
+| `key_updated` | An API key is changed through `PATCH /api/v1/keys/{key_id}` |
+| `key_revoked`, `key_deleted_permanently` | An API key is revoked, or deleted with `?hard=true` |
+| `relay_project_split`, `relay_project_split_undone` | A shared Relay project is split, or a split is undone |
+| `identity_linked`, `identity_unlinked` | A Google or GitHub sign-in is linked or unlinked |
+| `account_review_opened`, `account_review_updated`, `account_review_session`, `account_review_kept`, `account_review_revoked`, `account_review_deferred`, `account_review_completed` | An account check is opened or updated, a sign-in that may act on it happens, one of its items is kept or revoked, or it is put off or completed |
+| `account_erased` | An account is erased (the receipt keeps no account content) |
 
 ### Stored Fields
 
