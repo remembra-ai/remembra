@@ -3,7 +3,7 @@
 import contextvars
 import hmac
 import ipaddress
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import lru_cache
@@ -459,6 +459,44 @@ def resolve_project_access(
         status_code=status.HTTP_400_BAD_REQUEST,
         detail="This API key is restricted to multiple projects. Provide project_id explicitly.",
     )
+
+
+AGENT_HEADER = "X-Remembra-Agent-Id"
+
+
+def _agent_claim_text(value: Any) -> str | None:
+    """An agent id a request names, stripped (None when it names none)."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def enforce_agent_scope(user: AuthenticatedUser, claims: Iterable[tuple[Any, str]]) -> str | None:
+    """The agent an agent-scoped key writes as, after refusing any other agent the request names.
+
+    ``claims`` are ``(value, where)`` pairs, such as ``(body.agent_id, "request")`` or
+    ``(header, "X-Remembra-Agent-Id header")``. With an agent-scoped key, a non-empty
+    value that is not the key's agent is a 403, the same answer ``POST /session/close``
+    gives. Returns the key's agent, or None for an unscoped key (nothing is checked:
+    an unscoped key may name any agent).
+    """
+    scoped = getattr(user, "agent_id", None)
+    if not scoped:
+        return None
+    for value, where in claims:
+        other = _agent_claim_text(value)
+        if other and other != scoped:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"This API key is scoped to agent '{scoped}'; the {where} claims '{other}'.",
+            )
+    return str(scoped)
+
+
+def enforce_agent_scope_header(request: Request, user: AuthenticatedUser, *claims: tuple[Any, str]) -> str | None:
+    """:func:`enforce_agent_scope` over ``claims`` plus the ``X-Remembra-Agent-Id`` header."""
+    return enforce_agent_scope(user, [*claims, (request.headers.get(AGENT_HEADER), f"{AGENT_HEADER} header")])
 
 
 def resolve_project_or_default(user: AuthenticatedUser, project_id: str | None) -> str:

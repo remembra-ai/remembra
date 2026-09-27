@@ -281,10 +281,12 @@ def test_key_verified_versus_self_declared(api):
 
 def test_scoped_key_inbox_sender_is_the_key_agent(api):
     _as(api, agent_id="codex")
-    _post(api, "/inbox/send", {"to_agent": "claude-code", "subject": "hi", "body": "b", "from_agent": "claude-code"}, status=201)
+    # Naming another sender is refused (as on POST /session/close); naming none sends as the key's agent.
+    _post(api, "/inbox/send", {"to_agent": "claude-code", "subject": "hi", "body": "b", "from_agent": "claude-code"}, status=403)
+    _post(api, "/inbox/send", {"to_agent": "claude-code", "subject": "hi", "body": "b"}, status=201)
     _owner(api)
     brief = _get(api, "/session/brief", {"project_id": "widget", "agent_id": "claude-code"})
-    assert brief["inbox"]["items"][0]["from_agent"] == "codex"
+    assert [item["from_agent"] for item in brief["inbox"]["items"]] == ["codex"]
 
 
 # ---------------------------------------------------------------------------

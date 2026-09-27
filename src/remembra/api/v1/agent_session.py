@@ -17,7 +17,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
-from remembra.auth.middleware import CurrentUser, has_permission, resolve_project_access
+from remembra.auth.middleware import CurrentUser, enforce_agent_scope_header, has_permission, resolve_project_access
 from remembra.cloud.limits import gate_write, record_relay_usage
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
@@ -104,8 +104,16 @@ async def upsert_status(
     A status write is a relay event: stored atomically, never enriched, never
     billed in smart credits (plan relay burst limit and memory cap apply).
     The plan gate runs only when the value changes: re-sending the current
-    value counts against no cap, burst or daily limit."""
+    value counts against no cap, burst or daily limit.
+
+    With an agent-scoped key the value is stamped with the key's agent
+    (``metadata.agent_id``); naming another agent there or in the
+    ``X-Remembra-Agent-Id`` header is refused (403), as on ``POST /session/close``."""
     _require(current_user, "memory:store")
+    metadata = strip_reserved_metadata(body.metadata) or {}
+    scoped = enforce_agent_scope_header(request, current_user, (metadata.get("agent_id"), "request"))
+    if scoped:
+        metadata = {**metadata, "agent_id": scoped}
     project = resolve_project_access(current_user, body.project_id) or "default"
     value, trust_score, checksum = screen_text(request, body.value)
 
@@ -118,7 +126,7 @@ async def upsert_status(
             project_id=project,
             key=body.key,
             value=value,
-            metadata=strip_reserved_metadata(body.metadata),
+            metadata=metadata,
             ttl=body.ttl,
             trust_score=trust_score,
             checksum=checksum,
