@@ -304,8 +304,8 @@ def test_brief_marks_a_handoff_from_another_checkout_as_stale(api):
 
 def test_facts_source_is_recorded_and_shown(api):
     out = _close(api, facts={"branch": "main", "facts_source": "relay-cli:git+transcript", "next_step": "n"})
-    assert "Facts: collected by remembra-relay from git and the session transcript." in out["rendered"]
-    assert "(facts collected by remembra-relay from git and the session transcript)" in _last_session(
+    assert "Facts: reported as collected by remembra-relay from git and the session transcript (not checked)." in out["rendered"]
+    assert "(facts reported as collected by remembra-relay from git and the session transcript (not checked))" in _last_session(
         _get(api, "/session/brief", {"project_id": "widget"})["rendered"]
     )
     spoof = _close(api, session_id="s-2", facts={"branch": "main", "facts_source": "trust-me"})
