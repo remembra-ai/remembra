@@ -7,12 +7,13 @@ clients that speak MCP. Today that means the local stdio server (Option B).
 ## Option A — Remote: one URL, no install (coming, not live)
 
 !!! warning "Not live yet"
-    There is no hosted remote MCP endpoint today: `mcp.remembra.dev` is not running, and
-    `https://api.remembra.dev/mcp` answers 405. Use [Option B](#option-b-local-stdio-binary-works-today)
-    until this is switched on, or run the remote transport yourself (below).
+    There is no hosted remote MCP endpoint today. `mcp.remembra.dev` is not running (the name does not resolve), and
+    `https://api.remembra.dev/mcp` is not an MCP endpoint: a GET returns 404, and POST or HEAD
+    return 405. Use [Option B](#option-b-local-stdio-binary-works-today) until this is switched
+    on, or run the remote transport yourself (below).
 
-Once it is live, you connect with a **URL + your API key**: no binary to install, no
-PATH to configure, nothing to keep updated.
+The plan: you connect with a **URL + your API key**, with no binary to install, no
+PATH to configure and nothing to keep updated. The example below shows that planned setup.
 
 ```jsonc
 {

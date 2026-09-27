@@ -125,12 +125,14 @@ and you land in the dashboard. Repeat with Google.
 
 1. The button navigates to `GET /api/v1/auth/oauth/{provider}/start`. The API
    creates a single-use state (10 minutes) with a PKCE `S256` challenge and, for
-   Google, an OpenID `nonce`, stores only hashes, binds it to the browser with
-   an `HttpOnly`, `SameSite=Lax` cookie (`__Host-` prefixed over HTTPS), and
-   redirects to the provider.
+   Google, an OpenID `nonce`, binds it to the browser with an `HttpOnly`,
+   `SameSite=Lax` cookie (`__Host-` prefixed over HTTPS), and redirects to the
+   provider. The database keeps only SHA-256 hashes of the state, the browser
+   secret, the nonce and the PKCE verifier. The verifier itself is never stored:
+   the API computes it from the state and the cookie's secret.
 2. The provider redirects to `/api/v1/auth/oauth/{provider}/callback`. The API
-   checks the state and the cookie, exchanges the code with the PKCE verifier
-   and reads a **verified** email:
+   checks the state and the cookie, computes the PKCE verifier again, exchanges
+   the code with it and reads a **verified** email:
     - **GitHub:** `GET /user` for the numeric account id and `GET /user/emails`
       for the **primary** address, which must be `verified`. `users.noreply.github.com`
       addresses are refused.
@@ -138,16 +140,18 @@ and you land in the dashboard. Repeat with Google.
       (RS256), plus `iss`, `aud`, `exp`/`iat` and the `nonce`. `email_verified`
       must be true, and the address must be one Google is authoritative for:
       `@gmail.com`, or a Google Workspace account (`hd` claim).
-3. The API picks exactly one account:
+3. The API picks exactly one account. It connects the provider to an existing
+   account by email only when that account's email is verified **and** the
+   provider says its own email is verified:
     - the account already linked to this provider account signs in;
-    - else, an account with the same email whose email was **never verified**
-      is **linked** (Google, or GitHub with a verified primary email: nobody
-      had proven that mailbox before). The link verifies the email and opens
-      a one-time account check (see "Accounts made before email verification"
-      below); nothing is revoked and API keys and app connections keep working;
+    - else, an account with the same email whose email was **never verified**:
+      refused. Nothing is linked, the email stays unverified, no account check
+      opens, and nobody is signed out. The owner signs in with the password and
+      adds the provider in Settings, or proves the mailbox with an emailed
+      password reset (see "Accounts made before email verification" below);
     - else, **Google only**: an account with the same, already verified email
       is **linked**. The account owner gets an email saying Google sign-in was
-      added (for every link above);
+      added;
     - else **GitHub** is refused when an account with that verified email exists
       ("add GitHub in Settings"). GitHub never re-verifies addresses, so a
       "verified" primary email can belong to someone who no longer owns the
@@ -164,8 +168,8 @@ and you land in the dashboard. Repeat with Google.
    refuses and burns a code sent without the matching cookie. A code minted in
    someone else's browser (an attacker sending a victim a
    `/oauth/callback#code=...` link to sign them into the attacker's account)
-   therefore cannot be used. Accounts with 2FA must still enter their TOTP code
-   there, from the same browser.
+   therefore cannot be used. When the account has 2FA on, the TOTP code is
+   asked there, from the same browser, account check or not.
 
 Accounts created this way have no password. **Forgot password** sets one.
 
@@ -193,9 +197,9 @@ a provider is added. `GET /api/v1/auth/identities` lists connections and
 | GitHub primary email not verified, or a noreply address | "needs a verified primary email address" |
 | Google `email_verified` false | "did not confirm your email address" |
 | Google address that is neither Gmail nor Workspace | "Google cannot confirm who owns this email address" (sign up with email instead) |
-| Google or GitHub (verified email), and an account with that email exists but was never verified | Signed in and linked; the email becomes verified and the account check opens (below) |
-| Same case, but an API signup already verified that address | Refused (one free account per verified email) |
-| GitHub, and an account with that (verified) email already exists | Refused: "Sign in with Google or your password first. Then add GitHub in Settings." |
+| Google or GitHub, and an account with that email exists but its email was never verified | Refused: "You already have an account with this email. Sign in with your password first. Then add Google/GitHub in Settings." Nothing is linked, the email stays unverified, no account check opens |
+| Google, and an account with that (verified) email already exists | Signed in and linked; the owner is emailed |
+| GitHub, and an account with that (verified) email already exists | Refused: "You already have an account with this email. Sign in with Google or your password first. Then add GitHub in Settings." |
 | No account has the email, but an API signup already verified it | Refused (one free account per verified email) |
 | This Remembra account is already linked to a different GitHub / Google account | Refused |
 | Connecting a provider account that is already connected to another Remembra account | Refused |
@@ -212,42 +216,61 @@ unique on `(provider, provider_user_id)` and on `(user_id, provider)`, and
 Accounts made before email verification existed, and any account whose owner
 never clicked the link, have an unverified email. Anyone could have signed up
 with another person's address and a password and set things up on it. So the
-first proof that someone owns the mailbox (**Sign in with Google** or
-**GitHub** with a verified email, or an emailed **Forgot password** reset)
-does not wipe the account. It:
+first proof that someone owns the mailbox, an emailed **Forgot password**
+reset, does not wipe the account. It:
 
 1. marks the email verified (unless another account already verified it);
 2. signs out every dashboard session opened before (API keys and app
    connections such as Claude or ChatGPT keep working: no agent is
    disconnected), and cancels any "connect a sign-in method" flow in progress;
-3. opens a one-time **account check** (`account_reviews`, schema migration 10);
-4. shows the owner, right after sign-in, everything on the account: API keys
+3. turns off 2FA that was set up before that point (it may be someone else's).
+   This is written to the audit log and listed as removed in the email sent when
+   the check finishes. 2FA turned on after the mailbox was proven stays on
+   through later resets;
+4. opens a one-time **account check** (`account_reviews`, schema migration 10);
+5. shows the owner, right after sign-in, everything on the account: API keys
    (name, created, last used, access, projects, agent), app connections,
-   webhooks, every other sign-in link, 2FA turned on before verification, and
-   the password when it was set before verification. **Keep all** finishes in
-   one click and keeps exactly the list on screen (if anything changed
-   meanwhile, the new list is shown instead). Each item can be revoked on its
-   own, and the password removed. 2FA from before verification is kept only
-   by entering a current code from the authenticator; otherwise it is turned
-   off when the check finishes, so an authenticator the owner never had
-   cannot lock them out. "Later" hides the check for the browser session; it
-   comes back until it is done.
+   webhooks, every other sign-in link, and the password when it was set before
+   verification. **Keep all** finishes in one click and keeps exactly the list
+   on screen (if anything changed meanwhile, the new list is shown instead).
+   Each item can be revoked on its own, and the password removed. "Later"
+   hides the check for the browser session; it comes back until it is done.
+
+Sign in with Google or GitHub no longer opens an account check. Checks that a
+Google or GitHub sign-in opened before this change keep working. In such a
+check, 2FA from before verification stays on and is asked at every sign-in: an
+emailed password reset turns it off, or the owner can enter a current code in
+the check and keep it. Otherwise it is turned off when the check finishes.
 
 A check with nothing to list (say a reset on an account with no keys, apps,
-webhooks or 2FA) finishes by itself: no screen and no email.
+webhooks or sign-in links) finishes by itself: no screen and no email.
 
-Only a session that proved the mailbox can act on the check: a sign-in with
-the exact Google or GitHub account that opened it (or one connected from such
-a session, or a Google sign-in that matches the address later), or a password
-set through the emailed reset. Those sessions carry the check's id as the
+Only a session that proved the mailbox can act on the check: a password set
+through the emailed reset, a Google sign-in that matches the address during the
+check, or a sign-in method the owner connected from such a session. For a check
+opened by a Google or GitHub sign-in before this change, a sign-in with that
+exact provider account counts too. Those sessions carry the check's id as the
 `rvw` JWT claim. Any other session (a password or a sign-in link set up before
 verification) still signs in, but sees no check, cannot turn on 2FA, connect
 or disconnect a sign-in method, create API keys or webhooks, or connect a new
 app until it is done, and an owner address gets no superadmin rights or owner
-plan until then. 2FA set up before verification does not apply to the proven
-sessions (it is one of the items to check). Removing the password or a
-sign-in link signs out every other dashboard session; app connections are
-revoked only one by one.
+plan until then. Every sign-in that gives a dashboard session asks for the 2FA
+code when 2FA is on, with no exceptions during a check. Removing the password
+or a sign-in link signs out every other dashboard session.
+
+App connections and password resets:
+
+- A password reset during an open check disconnects every app connected since
+  the check opened. Their tokens stop working at once, and each one is written
+  to the audit log and listed as removed in the email sent when the check
+  finishes. Apps connected before the email was verified stay connected and
+  stay listed in the check, for the owner to keep or revoke.
+- A reset on an account whose email was never verified keeps its app
+  connections and lists them in the new check.
+- A reset on an account with a verified email and no open check disconnects
+  all apps, and so do changing the password and deactivating the account.
+- In every case, a sign-in still on an app's consent page is refused after a
+  reset.
 
 Every revoke, keep, "later", finish, trusted sign-in and change of trust is
 written to the audit log (`account_review_*`; connecting and disconnecting
@@ -261,15 +284,20 @@ API: `GET /api/v1/auth/review` (includes `version`),
 `POST /api/v1/auth/review/complete` (`{"version": ...}`, 409 when the list
 changed), `POST /api/v1/auth/review/defer` (dashboard session only).
 
-GitHub is linked by email only into an account nobody has verified yet. Into
-a verified account it is connected in Settings after signing in.
+GitHub is never connected to an existing account by email. It is connected in
+Settings, after signing in.
 
 Rate limits per client IP: `start` 20/minute, `callback` 30/minute, `exchange`
 10/minute, `providers` 60/minute, `link` 10/minute.
 
 ## Logs
 
-Provider tokens, codes, states, verifiers and nonces are never logged. The API
+Provider tokens, codes, states, verifiers and nonces are never logged. Provider
+access tokens are used once, in memory, and never stored. A sign-in flow lasts
+10 minutes; an expired flow's row, which holds only hashes, is deleted when the
+next sign-in starts. Flow rows that an earlier version stored in plaintext are
+deleted when the server starts, so a sign-in in progress during an upgrade has
+to be started again. The API
 redacts `code`/`state` query values from its own access log. Reverse proxies in
 front of it (Coolify's Traefik, Cloudflare) log full URLs by default; if they
 keep access logs, have them drop query strings for
