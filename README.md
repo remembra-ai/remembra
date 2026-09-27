@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Remembra Logo" width="140">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="landing/brand/lockup-horizontal-dark.svg">
+    <img src="landing/brand/lockup-horizontal.svg" alt="Remembra" width="320">
+  </picture>
 </p>
 
 <h1 align="center">Remembra Relay</h1>

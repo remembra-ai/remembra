@@ -21,14 +21,14 @@ theme:
   name: material
   palette:
     - scheme: default
-      primary: indigo
-      accent: purple
+      primary: black
+      accent: deep orange
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - scheme: slate
-      primary: indigo
-      accent: purple
+      primary: black
+      accent: deep orange
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -49,8 +49,8 @@ theme:
     - content.tabs.link
   icon:
     repo: fontawesome/brands/github
-  logo: assets/logo.png
-  favicon: assets/favicon.png
+  logo: assets/mark-dark.svg
+  favicon: assets/favicon-2026.png
 
 plugins:
   - search
