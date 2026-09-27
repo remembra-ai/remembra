@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { WITHDRAWN_NOTE, inboxCounts, isWithdrawn, mergeTrailPages, type InboxSummary, type TrailItem } from '../relay';
-import { INSTALL_COMMAND, PIPX_INSTALL, agentState, saveKeyCommand } from '../agents';
+import { PIPX_INSTALL, agentState, oneLineInstall, saveKeyCommand } from '../agents';
 
 function summary(agents: [string, number][]): InboxSummary {
   return {
@@ -99,11 +99,15 @@ describe('agentState', () => {
 describe('install commands', () => {
   it('pins the first release with remembra-relay, with the [mcp] extra', () => {
     expect(PIPX_INSTALL).toBe("pipx install --force 'remembra[mcp]>=0.16'");
-    expect(INSTALL_COMMAND).toBe("pipx install --force 'remembra[mcp]>=0.16' && remembra-relay connect");
+    // Every copyable first-run command saves the key first and ends by writing the hooks, never a dry run.
+    expect(oneLineInstall('https://api.remembra.dev')).toBe(
+      "pipx install --force 'remembra[mcp]>=0.16' && remembra-install --all --url https://api.remembra.dev && remembra-relay connect --apply",
+    );
   });
 
   it('prefills the server URL and asks for the key instead of taking it on the command line', () => {
     expect(saveKeyCommand('https://api.example.test')).toBe('remembra-install --all --url https://api.example.test');
-    expect(saveKeyCommand('')).toContain('--url https://api.remembra.dev');
+    // No server known: remembra-install keeps the machine's own, or Remembra Cloud on a first install.
+    expect(saveKeyCommand('')).toBe('remembra-install --all');
   });
 });

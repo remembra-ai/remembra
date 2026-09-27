@@ -6,6 +6,7 @@ credential literal is committed.
 
 from __future__ import annotations
 
+import base64
 import secrets
 import string
 
@@ -112,3 +113,164 @@ def test_file_paths_are_not_redacted(path: str) -> None:
 def test_slash_bearing_random_secret_is_still_redacted() -> None:
     secret = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYzk9sQ2Lm8Ew"
     assert secret not in redact_secrets(f"aws secret {secret}").text
+
+
+# ---------------------------------------------------------------------------
+# CLI-01: credentials typed on a command line (relay handoffs store failed
+# commands, test commands and error lines). Every value below is synthetic and
+# assembled at runtime.
+# ---------------------------------------------------------------------------
+
+
+def _hex(n: int) -> str:
+    return "".join(secrets.choice("0123456789abcdef") for _ in range(n))
+
+
+def _cli_cases() -> list[tuple[str, str, str]]:
+    """``(name, text, secret)``: the secret must not survive redaction."""
+    pw = "Pw" + _rand(12)  # machine-style password
+    weak = "hunter" + str(secrets.randbelow(90) + 10)  # human-style password: lower case + digits
+    basic = base64.b64encode(f"admin:{_rand(12)}".encode()).decode()
+    token = _rand(24)
+    do_token = "dop" + "_v1_" + _hex(64)
+    mailgun = "key" + "-" + _hex(32)
+    databricks = "dapi" + _hex(32)
+    return [
+        ("mysql_attached_p", f"mysql -u root -p{pw} appdb", pw),
+        ("mysql_attached_weak", f"mysql -h db.internal -u app -p{weak} -e 'select 1'", weak),
+        ("mysqldump_attached_p", f"mysqldump -p{pw} --all-databases > dump.sql", pw),
+        ("mariadb_attached_quoted", f"mariadb -uroot -p'{weak}' shop", weak),
+        ("curl_basic_u", f"curl -u admin:{pw} https://api.example.com/x", pw),
+        ("curl_basic_user_quoted", f"curl -s --user 'api:{pw}' https://api.example.com/v3", pw),
+        ("curl_basic_header", f"curl -H 'Authorization: Basic {basic}' https://x.example", basic),
+        ("git_extraheader_basic", f'git -c http.extraHeader="Authorization: Basic {basic}" fetch', basic),
+        ("docker_login_p", f"docker login -u me -p {pw} registry.example.com", pw),
+        ("podman_login_p", f"podman login quay.io -u me -p {weak}", weak),
+        ("password_space", f"./deploy.sh --password {pw}", pw),
+        ("password_space_weak", f"./deploy.sh --env prod --password {weak} --yes", weak),
+        ("password_equals", f"./deploy.sh --password={weak}", weak),
+        ("db_password_flag", f"psql-migrate --db-password '{pw}' up", pw),
+        ("vercel_token", f"vercel deploy --prod --token {token}", token),
+        ("api_key_flag", f"stripe listen --api-key {token}", token),
+        ("secret_flag", f"supabase secrets set --secret={pw}", pw),
+        ("do_token", f"doctl auth init -t {do_token}", do_token),
+        ("mailgun_key", f"curl -s --user 'api:{mailgun}' https://api.mailgun.net/v3", mailgun),
+        ("mailgun_bare", f"mailgun key is {mailgun} for the sandbox", mailgun),
+        ("databricks_token", f"databricks configure --host h {databricks}", databricks),
+        ("pgpassword", f"PGPASSWORD={pw} psql -h db -U app", pw),
+        ("pgpassword_weak", "PGPASSWORD=postgres psql -h localhost -U postgres", "=postgres "),
+        ("export_db_password", f"export DB_PASSWORD={weak}", weak),
+        ("mysql_pwd_env", f"MYSQL_PWD={pw} mysql -u root", pw),
+        ("github_token_env", f"GITHUB_TOKEN={token} gh pr list", token),
+        ("basic_auth_env", f"BASIC_AUTH=admin:{pw} ./smoke.sh", pw),
+        ("lowercase_env", f"db_password={weak} ./migrate", weak),
+        ("npmrc_auth_token", f"//registry.npmjs.org/:_authToken={pw}", pw),
+        ("sshpass", f"sshpass -p {pw} ssh deploy@host", pw),
+        ("redis_cli", f"redis-cli -h cache -a {pw} ping", pw),
+        ("mongosh", f"mongosh -u admin -p {pw} mongodb://db/app", pw),
+        ("openssl_passin", f"openssl pkcs12 -in cert.p12 -passin pass:{pw} -nodes", pw),
+        ("keytool_storepass", f"keytool -list -keystore app.jks -storepass {pw}", pw),
+        # Still redacted next to the false-positive fixes: numbers and paths are refused only where
+        # they read as counts or helpers, and --auth takes a value with a digit.
+        ("db_pass_long_number", "DB_PASS=48193027 ./migrate", "48193027"),
+        ("pgpassword_number", "PGPASSWORD=271828 psql -h db", "271828"),
+        ("smtp_pass_env", f"SMTP_PASS={weak} ./send.sh", weak),
+        ("auth_flag_token", f"./cli --auth {token}", token),
+        ("askpass_neighbour", f"SSH_ASKPASS=/usr/bin/true DB_PASSWORD={pw} ./x", pw),
+        # CLI-01 review residuals: an email-shaped user, vercel's short -t, an attached docker -pX,
+        # and backslash-continued (multi-line) commands.
+        ("curl_basic_email_user", f"curl -s -u dev@example.com:{pw} https://acme.atlassian.net/rest/api/3/myself", pw),
+        ("curl_basic_email_user_quoted", f"curl --user 'dev@example.com:{pw}' https://api.example.com", pw),
+        ("curl_basic_email_user_weak", f"curl -u ops.team+ci@example.co.uk:{weak} https://x.example", weak),
+        ("wget_basic_email_user", f"wget --user=dev@example.com:{pw} https://x.example/f", pw),
+        ("vercel_short_t", f"vercel deploy --prod -t {token}", token),
+        ("vercel_short_t_equals", f"vercel ls -t={token}", token),
+        ("docker_login_attached_p", f"docker login -u me -p{pw} ghcr.io", pw),
+        ("podman_login_attached_p_weak", f"podman login -u me -p{weak} quay.io", weak),
+        ("curl_multiline_u", f"curl -fsS \\\n  -X POST \\\n  -u admin:{pw} \\\n  https://api.example.com/x", pw),
+        ("docker_login_multiline_p", f"docker login \\\n  -u me \\\n  -p {pw} \\\n  registry.example.com", pw),
+        ("mysql_multiline_p", f"mysql \\\n  -h db.example.com \\\n  -u root \\\n  -p{weak} appdb", weak),
+    ]
+
+
+@pytest.mark.parametrize("case", _cli_cases(), ids=lambda c: c[0])
+def test_cli_credentials_are_redacted(case):
+    name, text, secret = case
+    result = redact_secrets(text)
+    assert secret not in result.text, (name, result.text)
+    assert "[REDACTED:" in result.text
+    assert redact_secrets(result.text).text == result.text  # idempotent
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "mkdir -p build/out && docker run -p 8080:80 nginx",
+        "ssh -p 2222 deploy@host 'uptime'",
+        "git add -p && git commit -m 'fix: password reset flow'",
+        "mysql -u root -p appdb",  # a spaced -p prompts for the password
+        "mysql -h db -P 3306 -u app appdb",  # -P is the port
+        "docker login -u me --password-stdin registry.example.com",
+        "vercel deploy --token $VERCEL_TOKEN",
+        'curl -u "$API_USER:$API_PASS" https://api.example.com',
+        'curl -H "Authorization: Bearer $TOKEN" https://api.example.com',
+        "REMEMBRA_AUTH_ENABLED=false REMEMBRA_RATE_LIMIT_ENABLED=false pytest -q -p no:cacheprovider",
+        "SECRET_REDACTION_ENABLED=true PASSWORD_MIN_LENGTH=12 TOKEN_TTL=3600 make test",
+        "env -u TYPESAFE_API_KEY python -m pytest -q --no-cov",
+        "export GITHUB_TOKEN=$(gh auth token)",
+        "docker build --secret id=npmrc,src=.npmrc -t app .",
+        "Use the --token flag or --password prompt to authenticate.",
+        "pg_dump --no-password -h db mydb > out.sql",
+        "llm --max-tokens 4096 --temperature 0.2",
+        "docker run -u 1000:1000 -e URL=https://example.com app",
+        # CLI-01 review false positives: test counts, askpass helpers, a named auth method. The
+        # redaction is irreversible (a memory's content is scrubbed when it is stored).
+        "CI summary: PASS=120 FAIL=0 SKIP=3",
+        "TESTS_PASS=128 TESTS_FAIL=2",
+        "pass=42 fail=0",
+        "export GIT_ASKPASS=/usr/bin/true",
+        "SSH_ASKPASS=/usr/lib/ssh/x11-ssh-askpass ssh-add",
+        "SSH_ASKPASS=ssh-askpass SUDO_ASKPASS=ksshaskpass sudo -A true",
+        "git -c core.askpass=/usr/bin/true fetch",
+        "the flag is --auth sso-google",
+        "gcloud auth login --auth saml-okta",
+        "export PASS_THRESHOLD=/opt/ci/thresholds.json",
+        "HOME_PWD=/home/app/src make",
+        # CLI-01 review: shapes next to the residual rules that carry no credential.
+        "curl -u dev@example.com https://api.example.com",  # no password: curl prompts
+        "curl -u admin https://host.example.com:8443/x",
+        "docker login -u me -p",
+        "vercel deploy --prod --target preview -t $VERCEL_TOKEN",
+    ],
+)
+def test_cli_commands_without_credentials_are_untouched(text):
+    result = redact_secrets(text)
+    assert result.text == text, result.text
+    assert not result.redacted
+
+
+def test_cli_rules_stay_linear_on_repeated_command_words():
+    """The command-line rules scan a bounded window after each command word, so a
+    50,000-character memory (the store limit) of repeated words stays fast."""
+    import time
+
+    size = 50_000
+    for unit in (
+        "curl -x ",
+        "mysql a ",
+        "docker login ",
+        "sshpass x ",
+        "A",
+        "PASS=",
+        '--token "',
+        "curl -u a",
+        "vercel -t ",
+        "curl \\\n ",
+        "docker login -p",
+        "ASKPASS=",
+        "--auth ",
+    ):
+        text = unit * (size // len(unit))
+        started = time.perf_counter()
+        redact_secrets(text)
+        assert time.perf_counter() - started < 2.0, unit

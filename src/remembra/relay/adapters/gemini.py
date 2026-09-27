@@ -1,25 +1,56 @@
-"""Gemini CLI (UNVERIFIED): ``~/.gemini/settings.json`` SessionStart / SessionEnd hooks.
+"""Gemini CLI (verified): ``~/.gemini/settings.json`` SessionStart / BeforeAgent / SessionEnd hooks.
 
 Docs: https://geminicli.com/docs/hooks/ and https://geminicli.com/docs/hooks/reference/
-(accessed 2026-09-25). Not run: gemini is not installed on the machine this
-was written on. The payload fixtures in tests/fixtures/relay/gemini/ are built
-from the reference, not recorded.
+(accessed 2026-09-25). Verified with Gemini CLI 0.61.0 (npm @google/gemini-cli),
+headless (``gemini -p``) and interactive in a pseudo-terminal, with a temp
+HOME and a local stand-in for the Gemini API (``GOOGLE_GEMINI_BASE_URL``, the
+CLI's "gateway" auth); no credentials were used. See
+tests/test_relay_gemini_live.py; the payloads it recorded are in
+tests/fixtures/relay/gemini/. Only that version has been run.
 
-From the docs:
+What the run showed:
 
 - Claude-compatible nesting under ``hooks``; each hook has ``type``,
-  ``command`` and ``timeout`` in MILLISECONDS (default 60000). We write
-  15000; a bare 15 would be 15 ms.
-- stdin JSON: ``session_id``, ``transcript_path``, ``cwd``,
-  ``hook_event_name``, ``timestamp``; SessionStart adds ``source``, SessionEnd
-  ``reason`` (exit / clear / logout / prompt_input_exit / other).
-- stdout must be JSON only, so the brief is emitted as
-  ``{"hookSpecificOutput": {"additionalContext": ...}}``.
-- Hooks also get ``GEMINI_SESSION_ID``, ``GEMINI_CWD`` and ``GEMINI_PROJECT_DIR``.
-- SessionEnd is best effort: "the CLI will not wait" for it, so ``close``
-  detaches and posts from a background process.
-- The transcript is Gemini's own chat format, which is not parsed; close-outs
-  use git facts.
+  ``command`` and ``timeout`` in MILLISECONDS. We write 15000; a bare 15
+  would be 15 ms. Settings files may hold comments.
+- stdin JSON: ``session_id``, ``transcript_path``
+  (``~/.gemini/tmp/<project>/chats/session-<time>-<id8>.jsonl``, Gemini's own
+  chat records, not parsed: close-outs use git facts), ``cwd``,
+  ``hook_event_name``, ``timestamp``; SessionStart adds ``source`` (startup /
+  resume / clear), SessionEnd ``reason`` (exit / clear / ...), BeforeAgent
+  ``prompt``. Hooks also get ``GEMINI_SESSION_ID``, ``GEMINI_CWD`` and
+  ``GEMINI_PROJECT_DIR``.
+- stdout must be JSON only. ``{"hookSpecificOutput": {"additionalContext": ...}}``
+  from SessionStart and BeforeAgent reaches the model as ``<hook_context>``
+  (with ``<`` and ``>`` HTML-escaped).
+- ``/clear`` ends the session (SessionEnd, reason clear) and starts a new one
+  (SessionStart, source clear) whose start output is thrown away. The
+  BeforeAgent hook runs ``brief --once``, so the new session gets its brief
+  with its first prompt; it prints nothing while a session has had one.
+- The interactive UI does not wait for SessionStart: its context is added to
+  the chat whenever the hook finishes, so a first prompt typed while the brief
+  is still being fetched, or given with ``gemini -i``, runs BeforeAgent at the
+  same time. Whichever of the two finishes first prints the brief and the
+  other prints nothing (``start_awaited``), so the first request carries it
+  exactly once.
+- ``--resume`` (same session id, SessionStart source resume) restores the
+  conversation without SessionStart's ``<hook_context>`` but with what
+  BeforeAgent added to a prompt. The resumed start prints the brief again when
+  SessionStart gave it before, and nothing when BeforeAgent did.
+- Interactive exit fires SessionEnd two or three times for one session, the
+  last copy orphaned with empty stdin: repeats are dropped (the close dedupe)
+  and so is the empty one. The CLI waits for SessionEnd, but ``close`` still
+  detaches, so a slow server never holds up the exit.
+- Every hook, the user-level ones in ``~/.gemini/settings.json`` included,
+  runs only in a trusted folder: ``connect`` prints that step. Headless
+  ``gemini -p`` in an untrusted folder exits before any hook fires.
+- ``$GEMINI_CLI_HOME`` replaces the home directory Gemini keeps ``.gemini``
+  in (settings and transcripts); ``connect`` follows it.
+
+Gemini CLI stopped serving personal Google accounts on 2026-06-18; this is for
+API-key, Vertex and enterprise users. Antigravity also keeps files in
+``~/.gemini``, so Gemini CLI is detected by its binary or its settings file,
+not the directory.
 """
 
 from __future__ import annotations
@@ -29,13 +60,16 @@ from pathlib import Path
 from remembra.relay.adapters.base import AdapterSpec, JsonHooksAdapter, PayloadMap
 from remembra.relay.adapters.crew_hooks import CrewHook, CrewSpec
 
+TESTED_VERSIONS = ("0.61.0",)
+
 SPEC = AdapterSpec(
     name="gemini",
     display="Gemini CLI",
-    verified=False,
+    verified=True,
     config_path=lambda home: Path(home) / ".gemini" / "settings.json",
     start_event="SessionStart",
     end_event="SessionEnd",
+    prompt_event="BeforeAgent",
     payload=PayloadMap(
         session_id=("session_id",),
         cwd=("cwd",),
@@ -46,10 +80,31 @@ SPEC = AdapterSpec(
     ),
     output="hook-json",
     detect_bins=("gemini",),
-    hook_timeouts={"start": 15, "end": 15},
+    detect_files=(".gemini/settings.json",),
+    home_env="GEMINI_CLI_HOME",  # a replacement HOME: $GEMINI_CLI_HOME/.gemini/settings.json
+    home_env_is_home=True,
+    hook_timeouts={"start": 15, "prompt": 15, "end": 15},
     timeout_unit="ms",
+    start_sources_without_context=("clear",),
+    # Interactive Gemini runs SessionStart in the background: a first prompt typed while the brief
+    # is still being fetched (or given with `gemini -i`) runs BeforeAgent alongside it.
+    start_awaited=False,
+    # `--resume` restores the prompts, BeforeAgent's context with them, but drops SessionStart's.
+    resume_keeps_brief_from=("BeforeAgent",),
     detach_close=True,
-    notes="Unverified: built from the Gemini CLI hook docs and doc-derived payloads; not yet run against gemini.",
+    dedupe_close_seconds=60,
+    # /quit fires SessionEnd three times, the third orphaned with empty stdin. The repeats are
+    # dropped by the close dedupe; the empty one would close without a reason.
+    drop_empty_payload_close=True,
+    setup_note=(
+        "Gemini CLI runs hooks, these user-level ones included, only in trusted folders: choose 'Trust folder'"
+        " when Gemini asks in a project (headless `gemini -p` needs --skip-trust or GEMINI_CLI_TRUST_WORKSPACE=true)."
+        " In an untrusted folder no brief is loaded and no handoff is saved."
+    ),
+    notes=(
+        f"Verified with Gemini CLI {', '.join(TESTED_VERSIONS)}, headless and interactive, with a local stand-in for"
+        " the model; other versions have not been run."
+    ),
 )
 
 ADAPTER = JsonHooksAdapter(SPEC)

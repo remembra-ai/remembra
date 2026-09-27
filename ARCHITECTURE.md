@@ -125,7 +125,7 @@ Based on their arxiv paper (2504.19413) and production system:
 | SQLite → Postgres migration | — | 📋 Planned |
 | Recall-quality regression gate in CI (LoCoMo runner exists) | `benchmarks/` | 📋 Planned |
 
-Deployment: see `docs/DEPLOYING.md` (production runs on Coolify, builds `Dockerfile.cloud`).
+Operations: see `docs/OPERATIONS.md` (production builds `Dockerfile.cloud`; the hosted service's own runbook is kept outside this repository).
 
 ---
 
@@ -289,8 +289,9 @@ print(result.context)  # "John is the CTO at Acme Corp."
 print(result.memories)  # [Memory(...)]
 
 # Forget
-memory.forget(user_id="user_123")  # Delete all
 memory.forget(memory_id="01HQXYZ...")  # Delete specific
+memory.forget(entity="John")  # Delete the memories linked to an entity
+memory.forget(all_memories=True)  # Delete everything in the account (explicit only)
 ```
 
 ---

@@ -716,7 +716,7 @@ class Settings(BaseSettings):
 
     # -----------------------------------------------------------------------
     # Reliability: provider failure handling, readiness, background work
-    # (2026-09-25 REL remediation — see docs/DEPLOYING.md)
+    # (2026-09-25 REL remediation — see docs/OPERATIONS.md)
     # -----------------------------------------------------------------------
     embedding_timeout_seconds: float = Field(20.0, description="Per-request timeout for embedding provider HTTP calls")
     embedding_breaker_failure_threshold: int = Field(

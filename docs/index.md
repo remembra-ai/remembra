@@ -5,29 +5,33 @@
 ## Remembra Relay
 
 When an agent's session ends, Remembra Relay saves a **handoff**: what was done, what is not done, what is
-failing and the next step, read from git and (for Claude Code) the session's test runs, not written by an LLM.
-When the next session starts, in any tool, on any machine, that agent gets a **brief**: a short summary of
+failing and the next step, read from git and (for Claude Code and Codex) the session's test runs, not written by an
+LLM. When the next session starts, in another tool or on another machine, that agent gets a **brief**: a short summary of
 where the work stands, led by the last handoff. Every handoff stays on the **trail**.
+
+First get a free key at [app.remembra.dev](https://app.remembra.dev/signup), then run:
 
 ```bash
 pipx install --force 'remembra[mcp]>=0.16'
 remembra-install --all
-remembra-relay connect
+remembra-relay connect --apply
 ```
 
-Get a free key at [app.remembra.dev](https://app.remembra.dev/signup), or [host the server yourself](getting-started/docker.md).
 `remembra-install` asks for the key at a hidden prompt, so it never goes on the command line or into your shell
-history. `connect` is a dry run that shows what it would change; add `--apply` to write the hooks. remembra 0.16.0 is the
-first release with `remembra-relay`.
+history. `connect --apply` writes the hooks and keeps a backup of each file; run `remembra-relay connect` alone first
+to see every change without writing. Codex runs the hooks only after you trust them: run `/hooks` in Codex once.
+[Hosting the server yourself](getting-started/docker.md)? Add `--url <your server>` to `remembra-install`. remembra 0.16.0 is the first
+release with `remembra-relay`.
 
 - [Relay guide](guides/relay.md): how handoffs, briefs and the trail work, and which agents are verified.
 - [Agent setup](getting-started/agent-setup.md): connect Claude Code, Codex, Cursor and other agents.
 - [Remembra and other handoff tools](comparisons/handoff-tools.md): how it compares with claude-mem, agentmemory and local tools.
 
 Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease;
-run `/hooks` in Codex once to trust them). The hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified:
-they follow each tool's docs but have not been run against it yet; those agents use the MCP tools `session_brief` and
-`close_session` until they are.
+run `/hooks` in Codex once to trust them). The Gemini CLI, Qwen Code and Kimi Code hooks are verified too (Gemini CLI
+0.61.0, Qwen Code 0.24.6 and Kimi Code 2.1.1, each run with a local stand-in for the model). The Cursor hooks are
+unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet; Cursor uses the MCP tools
+`session_brief` and `close_session` until it has.
 
 ---
 

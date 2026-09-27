@@ -5,18 +5,30 @@ repo_url: https://github.com/remembra-ai/remembra
 repo_name: remembra-ai/remembra
 edit_uri: edit/main/docs/
 
+# Never published on docs.remembra.dev: DEPLOYMENT.md, an old self-host note.
+# The other names (the hosted service's runbook, bug write-ups, feedback
+# transcripts, the competitor scan) moved to the private operations folder;
+# they stay listed so a copy put back by mistake is not published either.
+# tests/test_docs_exclusions.py checks the list and that no page links into it.
+exclude_docs: |
+  bugs/
+  feedback/
+  competitive-analysis-2026.md
+  DEPLOYING.md
+  DEPLOYMENT.md
+
 theme:
   name: material
   palette:
     - scheme: default
-      primary: indigo
-      accent: purple
+      primary: black
+      accent: deep orange
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - scheme: slate
-      primary: indigo
-      accent: purple
+      primary: black
+      accent: deep orange
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -37,8 +49,8 @@ theme:
     - content.tabs.link
   icon:
     repo: fontawesome/brands/github
-  logo: assets/logo.png
-  favicon: assets/favicon.png
+  logo: assets/mark-dark.svg
+  favicon: assets/favicon-2026.png
 
 plugins:
   - search
@@ -88,7 +100,7 @@ nav:
     - MCP Server: integrations/mcp-server.md
     - Claude Code: integrations/claude-code.md
     - Claude Desktop: integrations/claude-desktop.md
-    - Claude & ChatGPT Apps (Phone): integrations/claude-and-chatgpt-apps.md
+    - Claude & ChatGPT Apps (coming): integrations/claude-and-chatgpt-apps.md
     - Cursor: integrations/cursor.md
     - Windsurf: integrations/windsurf.md
     - Zed: integrations/zed.md
@@ -131,6 +143,7 @@ nav:
     - Multi-User App: examples/multi-user.md
   - Reference:
     - Configuration: reference/configuration.md
+    - Operations: OPERATIONS.md
     - Cloud Plans & Smart Credits: reference/plans-and-credits.md
     - API Reference: reference/api.md
     - Benchmarks: benchmarks.md

@@ -23,6 +23,7 @@ from remembra.cloud.limits import (
     record_recall_usage,
     record_relay_usage,
     record_store_usage,
+    release_memory_slot_holds,
 )
 from remembra.config import Settings, get_settings
 from remembra.core.http_errors import embedding_http_exception
@@ -789,6 +790,7 @@ async def bulk_import(
         if embeddings is not None and body.embeddings is not None:
             embeddings.append(body.embeddings[i])
     if not items:
+        await release_memory_slot_holds(request)  # nothing will be stored (BILL-10)
         return {"status": "ok", "stored": 0, "errors": policy_errors}
 
     try:
@@ -1262,6 +1264,7 @@ async def supersede_memory(
     audit_logger: AuditLoggerDep,
     sanitizer: SanitizerDep,
     current_user: CurrentUser,
+    response: Response,
 ) -> SupersedeResponse:
     """
     Explicitly supersede a memory with new information.
@@ -1292,11 +1295,24 @@ async def supersede_memory(
             detail="Permission denied: memory:store required",
         )
     # Ownership + project scope of the memory being superseded (SEC-14).
-    await _require_owned_memory(memory_service, memory_id, current_user)
+    old = await _require_owned_memory(memory_service, memory_id, current_user)
 
     # SECURITY: XSS sanitization for new content
     sanitization = sanitizer.analyze(body.new_content, source="user_input")
     sanitized_content = sanitization.content
+
+    # BILL-7: the replacement is a new embedded row (stored atomically; the old
+    # one stays and still counts), so it passes the same plan gate as a store:
+    # memory cap, per-store length, and the Free daily unenriched-write cap.
+    await gate_write(
+        request,
+        response,
+        current_user.user_id,
+        [sanitized_content],
+        atomic=[True],
+        project_ids=[old.get("project_id") or "default"],
+        memories_added=1,
+    )
 
     try:
         result = await memory_service.supersede(
@@ -1306,6 +1322,7 @@ async def supersede_memory(
             reason=body.reason,
             metadata=_client_metadata(current_user, body.metadata),
         )
+        await record_store_usage(request, current_user.user_id)
 
         # Audit log
         from remembra.security.audit import AuditAction
@@ -1555,18 +1572,35 @@ async def forget_memories(
     audit_logger: AuditLoggerDep,
     current_user: CurrentUser,
     memory_id: Annotated[str | None, Query(description="Delete a specific memory by ID")] = None,
-    entity: Annotated[str | None, Query(description="Delete all memories about an entity")] = None,
-    all_memories: Annotated[bool, Query(description="Delete all memories for the user")] = False,
-    project_id: Annotated[str | None, Query(description="Delete all memories in a specific project")] = None,
+    entity: Annotated[
+        str | None,
+        Query(
+            max_length=256,
+            description=(
+                "Delete your memories linked to this entity (exact canonical name or alias, any case); "
+                "with project_id, only in that project"
+            ),
+        ),
+    ] = None,
+    all_memories: Annotated[
+        bool, Query(description="Delete every memory, entity and relationship in your account (explicit only)")
+    ] = False,
+    project_id: Annotated[
+        str | None, Query(description="Delete all memories in this project, or limit an entity delete to it")
+    ] = None,
 ) -> ForgetResponse:
     """
     Delete memories matching the given filter.
 
-    At least one of `memory_id`, `entity`, `all_memories=true`, or `project_id` is required.
+    Give exactly one of `memory_id`, `entity` or `all_memories=true`, or only `project_id`:
 
-    For project-scoped API keys:
-    - Use `project_id` to delete all memories in your project
-    - Or delete by `memory_id` for individual deletions
+    - `memory_id`: that one memory.
+    - `entity`: your memories linked to the entity with that canonical name or alias
+      (exact match, any case), plus the entity itself once no memory mentions it.
+      Add `project_id` to limit it to one project.
+    - `project_id` alone: every memory in that project.
+    - `all_memories=true`: your whole account. Only this parameter deletes everything,
+      and a project-scoped key cannot use it.
 
     Note: Can only delete your own memories.
     Rate limit: 10 requests/minute.
@@ -1578,22 +1612,41 @@ async def forget_memories(
             detail="Permission denied: memory:delete required",
         )
 
+    if entity is not None and not entity.strip():
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="entity must not be blank",
+        )
+    entity = entity.strip() if entity else None
+    if project_id is not None and not project_id.strip():
+        # A blank project must not turn a project-limited entity delete into an every-project one.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="project_id must not be blank",
+        )
+
     if not any([memory_id, entity, all_memories, project_id]):
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="Provide at least one of: memory_id, entity, all_memories=true, project_id",
         )
+    if sum(bool(target) for target in (memory_id, entity, all_memories)) > 1:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Give only one of: memory_id, entity, all_memories=true",
+        )
 
     # SECURITY FIX: ALWAYS pass user_id to prevent IDOR (cross-user deletion)
-    # This ensures users can only delete their own memories
+    # This ensures users can only delete their own memories. It scopes the
+    # delete; the service never widens a delete because user_id is set.
     user_id = current_user.user_id
 
     # For project-scoped API keys doing bulk operations
     if current_user.project_ids:
-        if entity or all_memories:
+        if all_memories:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Project-scoped API keys cannot use entity or all_memories. Use project_id for bulk delete.",
+                detail="Project-scoped API keys cannot use all_memories. Use project_id for bulk delete.",
             )
         # If project_id provided, verify it's in the allowed projects
         if project_id and project_id not in current_user.project_ids:
@@ -1604,6 +1657,12 @@ async def forget_memories(
         # If no project_id but we have project_ids, use the first one (single-project key)
         if not project_id and not memory_id and len(current_user.project_ids) == 1:
             project_id = current_user.project_ids[0]
+        # An entity delete stays inside the key's projects.
+        if entity and not project_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="This API key is restricted to multiple projects. Provide project_id with entity.",
+            )
 
     if memory_id:
         memory = await memory_service.get(memory_id)
@@ -1615,18 +1674,28 @@ async def forget_memories(
         if memory.get("project_id"):
             resolve_project_access(current_user, memory["project_id"])
 
+    if memory_id:
+        audit_resource = memory_id
+    elif entity:
+        audit_resource = f"entity:{entity}" + (f"@project:{project_id}" if project_id else "")
+    elif project_id:
+        audit_resource = f"project:{project_id}"
+    else:
+        audit_resource = f"user:{user_id}"
+
     try:
         result = await memory_service.forget(
             memory_id=memory_id,
             user_id=user_id,
             entity=entity,
             project_id=project_id,
+            all_memories=all_memories,
         )
 
         # Audit log
         await audit_logger.log_memory_forget(
             user_id=current_user.user_id,
-            resource_id=memory_id or f"user:{user_id}" if user_id else f"entity:{entity}",
+            resource_id=audit_resource,
             api_key_id=current_user.api_key_id,
             ip_address=get_client_ip(request),
             success=True,
@@ -1641,7 +1710,7 @@ async def forget_memories(
             memory_deleted_event(
                 user_id=current_user.user_id,
                 memory_id=memory_id,
-                deleted_count=result.deleted_count if hasattr(result, "deleted_count") else 1,
+                deleted_count=result.deleted_memories,
             ),
         )
 
@@ -1651,7 +1720,7 @@ async def forget_memories(
             data={
                 "memory_id": memory_id,
                 "user_id": current_user.user_id,
-                "deleted_count": result.deleted_count if hasattr(result, "deleted_count") else 1,
+                "deleted_count": result.deleted_memories,
                 "entity": entity,
             },
             project_id="default",
@@ -1670,7 +1739,7 @@ async def forget_memories(
         )
         await audit_logger.log_memory_forget(
             user_id=current_user.user_id,
-            resource_id=memory_id,
+            resource_id=audit_resource,
             api_key_id=current_user.api_key_id,
             ip_address=get_client_ip(request),
             success=False,

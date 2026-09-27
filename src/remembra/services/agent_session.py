@@ -8,8 +8,9 @@ Claude Desktop, Codex, Gemini, Clawdbot) share one memory. It gives them:
   stored as ONE unit (never fact-split or merged), ``status`` must go through
   the upsert path so the previous value is superseded instead of piling up.
 * ``AgentSessionService.brief`` — what an agent needs at session start: the
-  latest handoff snapshot, its unread inbox, current status values, and the
-  most recent memories BY TIME (not semantic similarity).
+  latest handoff that recorded any work (empty ones are skipped and counted),
+  its unread inbox, current status values, and the project's latest handoffs
+  and checkpoints BY TIME (never the namespace's general memories).
 * ``AgentSessionService.upsert_status`` — store-by-key: the new value
   supersedes the prior value for the same (user, project, key).
 * ``AgentSessionService.timeline`` — chronological listing with a real
@@ -32,7 +33,8 @@ import structlog
 from remembra.core.time import utcnow
 from remembra.inbox.manager import sender_label
 from remembra.models.memory import StoreRequest
-from remembra.relay.handoff import assess_text
+from remembra.relay.handoff import assess_text, handoff_has_substance
+from remembra.storage.database import ENTITY_NAME_MATCH
 
 log = structlog.get_logger(__name__)
 
@@ -40,6 +42,10 @@ STATUS_KEY_FIELD = "status_key"
 STATUS_VALUE_FIELD = "status_value"
 MAX_STATUS_KEY_LEN = 128
 INBOX_PREVIEW_CHARS = 200
+# The brief's "Recent" block: at most this many of the project's latest handoffs and checkpoints.
+MAX_RECENT_IN_BRIEF = 5
+# Handoffs the brief looks through (newest first) for the last one that recorded any work.
+PICKUP_SCAN_LIMIT = 200
 
 # Serialises status upserts in this process so two concurrent writes for the
 # same key can't each supersede the other (leaving no current value).
@@ -243,18 +249,12 @@ class AgentSessionService:
             where += f" AND (memory_type IS NULL OR memory_type NOT IN ({','.join('?' for _ in exclude_types)}))"
             params.extend(exclude_types)
         if entity:
-            where += """
+            # Same match as a delete by entity (storage/database.py).
+            where += f"""
               AND id IN (
                 SELECT me.memory_id FROM memory_entities me
                 JOIN entities e ON e.id = me.entity_id
-                WHERE e.user_id = ?
-                  AND (
-                    lower(e.canonical_name) = lower(?)
-                    OR (
-                      e.aliases IS NOT NULL AND json_valid(e.aliases)
-                      AND EXISTS (SELECT 1 FROM json_each(e.aliases) WHERE lower(json_each.value) = lower(?))
-                    )
-                  )
+                WHERE {ENTITY_NAME_MATCH}
               )
             """
             params.extend([user_id, entity.strip(), entity.strip()])
@@ -295,6 +295,71 @@ class AgentSessionService:
         )
         row = await cursor.fetchone()
         return serialize_memory_row(dict(row)) if row else None
+
+    async def pickup_handoff(
+        self, user_id: str, project_id: str | None, scan: int = PICKUP_SCAN_LIMIT
+    ) -> tuple[dict[str, Any] | None, int]:
+        """The newest handoff that records something, and how many newer ones were skipped.
+
+        Ordered like :meth:`latest_handoff` (when the session ended). A handoff
+        with nothing in it (no commits, changes, tests, errors, todos, next step,
+        summary or notes: an idle or automated session) is skipped and counted,
+        so it never buries the last session that did work. Looks at the newest
+        ``scan`` handoffs; returns ``(None, skipped)`` when none of them has substance.
+        """
+        where, params = self._active_clause(user_id)
+        where += " AND memory_type = 'handoff'"
+        if project_id:
+            where += " AND project_id = ?"
+            params.append(project_id)
+        skipped = 0
+        page = 25
+        for offset in range(0, max(scan, 1), page):
+            cursor = await self.db.conn.execute(
+                f"SELECT {_ROW_COLUMNS} FROM memories WHERE {where} "
+                f"ORDER BY {HANDOFF_ENDED_JD} DESC, julianday(created_at) DESC, id DESC LIMIT ? OFFSET ?",
+                [*params, min(page, scan - offset), offset],
+            )
+            rows = await cursor.fetchall()
+            for row in rows:
+                memory = serialize_memory_row(dict(row))
+                if handoff_has_substance(memory):
+                    return memory, skipped
+                skipped += 1
+            if len(rows) < page:
+                break
+        return None, skipped
+
+    async def relay_recent(
+        self, user_id: str, project_id: str | None, limit: int, exclude_ids: set[str] | None = None
+    ) -> list[dict[str, Any]]:
+        """This project's latest handoffs (with substance) and checkpoints, newest first, at most ``limit``.
+
+        Only relay records of this one project: general memories of the
+        namespace (facts, notes from other work) are never listed, so they
+        cannot be read as this project's status. Nothing without a project.
+        """
+        if not project_id or limit <= 0:
+            return []
+        rows = (
+            await self.timeline(
+                user_id=user_id,
+                project_id=project_id,
+                memory_types=["handoff", "checkpoint"],
+                limit=max(limit * 4, 20),
+                newest_first=True,
+            )
+        )["memories"]
+        out: list[dict[str, Any]] = []
+        for memory in rows:
+            if memory["id"] in (exclude_ids or set()):
+                continue
+            if memory.get("memory_type") == "handoff" and not handoff_has_substance(memory):
+                continue
+            out.append(memory)
+            if len(out) >= limit:
+                break
+        return out
 
     async def _current_status_rows(self, user_id: str, project_id: str, key: str | None = None) -> list[dict[str, Any]]:
         where, params = self._active_clause(user_id)
@@ -532,20 +597,17 @@ class AgentSessionService:
         warnings: list[str] = []
         agent = (agent_id or "").strip() or None
 
-        handoff = await self.latest_handoff(user_id, project_id)
+        handoff, skipped = await self.pickup_handoff(user_id, project_id)
         status_items = await self.list_status(user_id, project_id) if project_id else []
         if not project_id:
-            warnings.append("No project_id given: recent memories span all projects and status items are omitted.")
+            warnings.append("No project_id given: the recent trail and status items are omitted.")
 
-        recent = (
-            await self.timeline(
-                user_id=user_id,
-                project_id=project_id,
-                exclude_types=("source", "handoff", "status"),
-                limit=recent_n,
-                newest_first=True,
-            )
-        )["memories"]
+        recent = await self.relay_recent(
+            user_id,
+            project_id,
+            min(recent_n, MAX_RECENT_IN_BRIEF),
+            exclude_ids={handoff["id"]} if handoff else None,
+        )
 
         if agent:
             inbox: dict[str, Any] | None = await self._inbox_summary(user_id, agent, inbox_limit, inbox_project_ids)
@@ -562,6 +624,7 @@ class AgentSessionService:
             "agent_id": agent,
             "generated_at": datetime.now(UTC).isoformat(),
             "handoff": handoff,
+            "handoffs_skipped": skipped,
             "inbox": inbox,
             "status_items": status_items,
             "recent": recent,

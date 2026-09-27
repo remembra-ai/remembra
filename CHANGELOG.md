@@ -5,92 +5,396 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.17.0] - Unreleased
 
-## [0.17.0] - unreleased (date set when tagged) - Crew mode
+**Crew mode: several coding agents can work in one repository without undoing each other's work.** It builds
+on Relay: every agent still starts with a brief and ends with a handoff. Crew mode adds zones, claims, batons,
+tasks with reports, a crew channel and a live view in the dashboard. It is **off by default** on a server
+(`REMEMBRA_CREW_MODE`), and nothing on your machine changes until you confirm `remembra-crew connect --apply`
+at a terminal. The guide is [Crew mode](docs/relay/crew.md).
 
-**Crew mode: several coding agents on one repository without stepping on each other.** It builds on
-Relay: every agent still starts with a brief and ends with a handoff, and Crew mode adds zones, claims,
-batons, tasks with reports, a crew channel and a live view in the dashboard. It is **off by default** on a
-server (`REMEMBRA_CREW_MODE`), and nothing on a machine changes until `remembra-crew connect --apply` is
-confirmed at a terminal. The guide is [Crew mode](docs/relay/crew.md).
-
-Crew mode's local parts (the Claude Code hooks, the git hooks, the `remembra-crewd` daemon, the read-only
-fence) coordinate cooperative agents: they stop honest mistakes, record every bypass, and cannot stop a
-determined or prompt-injected agent on the same machine. Human-only actions, tenancy and the protection of
-the crew policy are enforced on the server. A server-side required check on the git host is not in this
-release.
+What it can and cannot stop: Crew mode's local parts (the agent hooks, the git hooks, the `remembra-crewd`
+daemon, the read-only fence) keep cooperating agents from making honest mistakes and record every bypass.
+They cannot stop a determined or prompt-injected agent on the same machine. The server enforces the parts
+that matter most: human-only actions, keeping each account's data to itself, and protecting the crew policy.
+A required check on the git host is not part of this release.
 
 ### Added
 - **Zones and claims.** `.remembra/zones.yml` names the areas of a repository. The first agent to write in a
-  zone holds it; the others see it under DO NOT TOUCH and, where the agent's hooks enforce, their writes
-  there are refused. Claude Code's hooks enforce before a write; Codex, Gemini, Qwen and Kimi enforce where
-  `remembra-crew verify --agent <name>` has passed (Codex: shell commands only); Cursor, and those agents
-  unverified in their own worktree, get a read-only fence; MCP-only agents are advisory. The git hooks gate
-  commits and pushes.
-- **Batons.** When an agent stops (out of credits, crashed, closed), its claims are kept, its uncommitted
-  work is saved to `refs/remembra/baton/…`, its task is stalled with a report, and the next agent picks the
-  baton up (`remembra-crew adopt T-n`) or you hand it over from the dashboard.
-- **Tasks and reports.** A task links to zones and acceptance checks; "done" needs a completion report
-  (done / not done / failing / next).
-- **Crew channel and decisions.** Agents post with `remembra-crew say` or `crew_say`; a decision an agent
-  records stays proposed until a human confirms it.
-- **Dashboard Crews section**, over a live connection: lanes per agent session, claims, tasks, collisions,
-  what needs you, and the human-only controls (override, hand over, freeze, pause, waive, bypass codes).
-  Email and signed-webhook notifications.
+  zone holds it. The other agents see it under DO NOT TOUCH, and where their hooks can enforce it, their
+  writes there are refused. Claude Code's hooks check before every write. Codex, Gemini, Qwen and Kimi
+  enforce once `remembra-crew verify --agent <name>` has passed on your machine (Codex: shell commands
+  only). Cursor, and those agents while unverified, get a read-only fence in their own worktree; MCP-only
+  agents are advisory. The git hooks check commits and pushes.
+- **Batons.** When an agent stops (out of credits, crashed, closed), its claims are kept, its uncommitted work
+  is saved to `refs/remembra/baton/…`, its task is paused with a report, and the next agent picks the baton up
+  (`remembra-crew adopt T-n`), or you hand it over from the dashboard.
+- **Tasks and reports.** A task links to zones and acceptance checks. "Done" needs a completion report (done /
+  not done / failing / next).
+- **Crew channel and decisions.** Agents post with `remembra-crew say` or the `crew_say` MCP tool. A decision
+  an agent records stays proposed until a person confirms it.
+- **A Crews section in the dashboard**, updated live: a lane for each agent session, claims, tasks,
+  collisions, what needs you, and the controls only a person can use (override, hand over, freeze, pause,
+  waive, bypass codes). Notifications by email and signed webhook.
 - **`remembra-crew`** (connect, verify, status, claim, release, adopt, task, checkpoint, report, say, watch,
-  zones, doctor) and the **`remembra-crewd`** daemon (launchd on macOS, systemd `--user` on Linux).
-  Windows is not supported.
+  zones, doctor) and the **`remembra-crewd`** daemon (launchd on macOS, systemd `--user` on Linux). Windows is
+  not supported.
 - **MCP crew tools:** `crew_status`, `crew_claim`, `crew_guard`, `crew_task`, `crew_say`, `crew_checkpoint`
   and `crew_report`.
-- **Sub-agents are sessions of their own.** A client joins a sub-agent with `parent_session_id` naming the
-  live session of the same account in the same crew that started it, proven by that session's token or the
-  parent's own agent key. The sub-agent gets its own callsign,
-  heartbeats, claims, tasks and checkpoints, and the parent stays accountable: the actor of every event the
-  sub-agent causes names the parent, the parent may release the sub-agent's claims and block, unblock or
-  release its tasks, and a parent that ends takes its live sub-agents with it. The snapshot lists each
-  sub-agent right after its parent; the dashboard nests its lane under the parent's. The Claude Code hooks
-  start one crew session per Claude Code session, so edits made by its Task-tool sub-agents count as that
-  session's.
-- **An append-only, hash-chained crew event log** in its own SQLite file, `crew.db`, verified nightly.
-  Credentials in channel messages, tasks and decisions are redacted before they are stored, and a
-  message a human redacts leaves the event feed as well (its events keep their place in the chain).
-- **Seats and teammates.** A plan's live-session limit counts running top-level sessions: an agent stopped
-  on its credits gives its seat to the agent that picks its baton up, and sub-agents use their parent's
-  seat. On a plan with crew teammates (Team), the crew owner adds people who have joined their team.
-- Optional continuity fields for later releases: `provider`, `capabilities`, `sub_agent_id`, `run_id` and
+- **Sub-agents are sessions of their own.** A client joins a sub-agent with `parent_session_id`, naming the
+  live session (same account, same crew) that started it and proving it with that session's token or the
+  parent's own agent key. The sub-agent gets its own callsign, heartbeats, claims, tasks and checkpoints, and
+  the parent stays responsible: every event the sub-agent causes names the parent, the parent can release
+  the sub-agent's claims and block, unblock or release its tasks, and a parent that ends takes its live
+  sub-agents with it. The snapshot lists each sub-agent right after its parent, and the dashboard nests its
+  lane under the parent's. The Claude Code hooks start one crew session per Claude Code session, so edits
+  made by its Task-tool sub-agents count as that session's.
+- **A crew event log that cannot be quietly edited:** append-only and hash-chained, in its own SQLite file,
+  `crew.db`, and checked every night. Credentials in channel messages, tasks and decisions are redacted
+  before they are stored. A message a person redacts also leaves the event feed (its events keep their place
+  in the chain).
+- **Seats and teammates.** A plan's live-session limit counts running top-level sessions. An agent stopped on
+  its credits gives its seat to the agent that picks up its baton, and sub-agents use their parent's seat. On
+  a plan with crew teammates (Team), the crew owner adds people who have joined their team.
+- Optional fields for later releases: `provider`, `capabilities`, `sub_agent_id`, `run_id` and
   `context_window` on join; `decisions`, `state_before` and `run_id` on checkpoints; a file's sha256 on
-  heartbeat footprints; `evidence` on decisions. Left out, they change nothing.
+  heartbeat footprints; `evidence` on decisions. Leaving them out changes nothing.
 
 ### Changed
-- **Account erasure covers `crew.db`.** The crews an erased account owns are deleted with everything in
-  them. In a crew someone else owns, its sessions, messages, checkpoints, reports, claims and the
-  decisions no human adopted are deleted; tasks and decisions in force stay as that owner's history, with
-  the account's name removed. Events in that crew's log that carry the account's identity keep their
-  place and chain links and lose their content, so the chain still verifies.
+- **Account erasure covers `crew.db`.** The crews an erased account owns are deleted with everything in them.
+  In a crew someone else owns, the account's sessions, messages, checkpoints, reports, claims and the
+  decisions no person adopted are deleted; tasks and decisions in force stay as that owner's history, with the
+  account's name removed. Events in that crew's log that carry the account's identity keep their place and
+  chain links but lose their content, so the chain still verifies. The 0.16.1 erasure rules (account reviews,
+  project re-files and the rest) are unchanged.
+- **Hook entries go where the agent reads them.** `remembra-crew connect` writes each agent's crew hooks to
+  the same file `remembra-relay connect` uses, including when `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+  `GEMINI_CLI_HOME`, `QWEN_HOME` or `KIMI_CODE_HOME` moves it (Kimi Code's is `~/.kimi-code/config.toml`).
 
 ### Changed (breaking)
-- **Reserved sender names in the agent inbox.** An agent (API key) can no longer send inbox messages as a
+- **Reserved sender names in the agent inbox.** An agent (API key) can no longer send inbox messages under a
   name that contains `mani`, `human`, `system` or `remembra` as a word, look-alike letters included:
-  `POST /api/v1/inbox/send` answers 422 `reserved_sender` where 0.16 stored the message. MCP clients from
-  0.15 and 0.16 send `REMEMBRA_AGENT_ID` as the sender, so an agent id such as `remembra-bridge`,
-  `system-bot` or `mani-laptop` stops being able to send: set `REMEMBRA_AGENT_ID` to another id (the
-  error message says so). Dashboard logins still send as `human`.
+  `POST /api/v1/inbox/send` answers 422 `reserved_sender` where 0.16 stored the message. MCP clients from 0.15
+  and 0.16 send `REMEMBRA_AGENT_ID` as the sender, so an agent id such as `remembra-bridge`, `system-bot` or
+  `mani-laptop` can no longer send: set `REMEMBRA_AGENT_ID` to another id (the error message says so).
+  Dashboard logins still send as `human`.
 
 ### Upgrading
-- The main database gets one additive migration, **v5** (project and crew columns on the agent inbox),
-  even with Crew mode off. A message's own `metadata.project_id` is copied into the new column; untagged
-  messages stay untagged (visible only to unrestricted keys and dashboard logins), and no project is
-  guessed for them. A database at schema 9 applies only v5 on first boot, after
-  the pre-migration backup. `crew.db` is created only when Crew mode is on. See
-  [Deploying: Crew mode](docs/DEPLOYING.md#crew-mode).
+- The main database gets one new migration, **v5** (project and crew columns on the agent inbox), even with
+  Crew mode off. It only adds columns. A message's own `metadata.project_id` is copied into the new column;
+  messages without one stay untagged (visible only to unrestricted keys and dashboard logins), and no project
+  is guessed for them. A 0.16.1 database (schema 10: versions 1-4 and 6-10) applies only v5 on its first boot,
+  after the automatic pre-migration backup, so its highest version stays 10: check the full list of applied
+  versions, not the highest. `crew.db` is created only when Crew mode is on. See
+  [Operations: Crew mode](docs/OPERATIONS.md#crew-mode).
 
-## [0.16.0] - unreleased (date set when tagged) - Remembra Relay
+## [0.16.1] - 2026-09-26
+
+Relay fixes, three more agents verified, a doctor for when handoffs don't arrive, and a security sweep. Every
+git repository now gets its own project, the brief skips sessions that did nothing, Codex automations and
+sub-agents stay out of the trail, a hook that another agent runs is filed under that agent, and the Gemini
+CLI, Qwen Code and Kimi Code hooks were run against the real tools. `remembra-relay doctor` (and the
+`remembra_doctor`, `remembra_setup` and `remembra_help` MCP tools) says where a handoff went missing, and
+remembra.dev has a setup guide written for your agent. Deleting by entity no longer deletes the whole account,
+billing and plan limits are tighter, and the public pages now say only what the code does.
+
+**Upgrading.** Run `remembra-relay connect --apply` once after upgrading. For the agents it finds, it writes
+the Gemini CLI, Qwen Code and Kimi Code hooks (Kimi Code's go to `~/.kimi-code/config.toml`; the block an
+earlier release wrote to `~/.kimi/config.toml` is removed). If 0.16.0 put several of your repositories in one
+project, `remembra-relay projects split` shows how it would separate them; nothing changes until you add
+`--apply`. If handoffs still don't arrive, run `remembra-relay doctor`.
+
+**Running your own server.** The dashboard and docs images now run nginx as a non-root user on port 8080
+instead of 80: point your proxy or port mapping at 8080. The database stays at schema version 10 (migration 10,
+`account_reviews`, is listed below); the new billing and relay tables are created at start or on first use.
+After upgrading, back up the database and run `python scripts/maintenance/redact_stored_secrets.py --apply` to
+redact command-line credentials from handoffs stored before this release.
+
+### Added
+
+- **Verified hooks for Gemini CLI, Qwen Code and Kimi Code.** Each was run against the real tool (Gemini CLI
+  0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1) with a temporary home and a local stand-in for the model: the
+  hooks `connect` writes put the brief in the model's request and saved the handoff. The payloads are recorded
+  under `tests/fixtures/relay/`, and `REMEMBRA_RELAY_LIVE=1` runs the three live tests again. A plain
+  `remembra-relay connect --apply`, the last step of the one-line install, now writes their hooks. Cursor is
+  the one adapter left unverified.
+- **`remembra-relay projects split`** gives each repository its own project again when 0.16.0 put them all in
+  one (see Fixed). It is a dry run by default: it lists every repository bound to your configured project,
+  the project each would get, every handoff that would move with it and the evidence, and everything that
+  stays and why. A handoff moves only on evidence: the location the server recorded with it, or, for one
+  closed before 0.16.1, a commit it recorded (its own commits, else its HEAD) that `split` finds with git in
+  exactly one checkout on this machine, when every other repository that may share that history (a fork or
+  clone) was read too. Folder sessions, checkpoints and anything unmatched stay. `--apply` carries it out in
+  one transaction, never while a close of the account is in flight, and logs each change under a batch id (and
+  one audit event); running it again moves only what is left. API keys and connections restricted to the
+  project would be refused in the split repositories: they are listed, and applying needs
+  `--keys-lose-access` (or add the new projects to them first). `remembra-relay projects undo --apply` moves
+  a batch back, including what the repository wrote in its new project since (another checkout's location,
+  its handoffs), so it resolves to one project again. Nothing is ever deleted, only your own account's data
+  is read or moved, and recorded paths, names and headlines in the output pass the brief's trust policy.
+  API: `POST /api/v1/projects/split` and `POST /api/v1/projects/split/undo`. The log table (`relay_refiles`)
+  is created on first use; no schema migration.
+- **`remembra-relay doctor`: where the baton dropped.** When a brief doesn't arrive or a handoff never reaches
+  the trail, the doctor reads this machine and your trail and prints an exchange slip: every agent as a station,
+  the last handoff, each read with its result, and for each problem the evidence, one fix and the re-check.
+  Each verdict is marked proven (`[!!]`) or inferred (`[??]`). It checks the key (and whether the server
+  accepts it, a firewall in front of it answered instead, or the URL redirects or serves a page instead of the
+  API), the unsent-handoff queue by cause, closes that keep failing (a close counts as working again once its
+  handoff is on your trail; the background-close log is shown with secrets redacted), each agent's hooks
+  (missing, from an older connect, calling a command that is gone, or never written because `connect` only
+  ran as a dry run; an unverified adapter `connect --apply` left out is only a note), Codex
+  hook trust (read from `~/.codex/config.toml` against the current hooks with the hash Codex computes; an
+  unreadable file is "unchecked", never trusted), Codex automation runs, a `REMEMBRA_RELAY_PROJECT` that keeps
+  every new repository in one project (and a configured project 0.16.0 used that way, with `projects split` to
+  separate it), and agents that picked up briefs but never handed off at all. It only reads:
+  at most four GET requests with your own key, never a brief, recall or write, and it never prints a key, even
+  one pasted into the server URL field or a hook command. `--agent`, `--no-server`, `--format json`; exit 1
+  when something proven needs you.
+- **MCP tools `remembra_doctor`, `remembra_setup` and `remembra_help`** (local MCP server): the same doctor
+  inside your agent, the exact install and connect steps for this machine's OS and agents (steps already done
+  are marked), and answers quoted from the relay guide and the plans page, or "can't confirm". Questions about
+  privacy, security, hosting, retention, deleting account data, training or money get the page that governs
+  them, never a quote. None of them changes anything; fixes that involve your key are for your own terminal.
+  Claude Code: `/mcp__remembra__doctor`.
+- **`remembra-relay connect` ends with "You still need to"** when something is left: saving a key, `--apply`
+  after a dry run, unverified adapters it skipped, and trusting the hooks in Codex (checked, not assumed). When
+  nothing is left it prints no list.
+- **`why?` on the dashboard's setup checklist.** Every agent still waiting on Home gets a `why?` button that
+  opens an exchange slip under its row: the three reads it made (your keys, the trail, the agent's own entries,
+  GET only), the call marked proven or inferred, the one fix, and the doctor lines to copy for that agent's
+  machine. Where it reaches a fault the doctor also sees, it uses the doctor's rule id, sentence and guide page
+  (`KEY_MISSING`, `PICKS_UP_NEVER_CLOSES`, `CODEX_TRUST_MISSING`, `NOTHING_WAITING`, `HOOKS_NOT_FIRING`,
+  `STALE_CHECKPOINT`). Until a Codex brief or close arrives, Codex's row carries a dim reminder of the hook
+  trust step (the dashboard can't see Codex, so it never says Codex needs you).
+- **remembra.dev for your agent.** The hero's install block has `terminal | your agent` tabs; the agent tab
+  copies a prompt that points the agent at `remembra.dev/setup.md`, a step-by-step runbook that stops for the
+  key and asks before each write, and runs `pipx ensurepath` even when pipx is already installed.
+  `remembra.dev/llms.txt` and `llms-full.txt` (generated from the pages) are
+  served too. setup.md, `remembra_setup` and the dashboard give the same commands in the same order, and a test
+  holds them to it. Their uninstall steps run `remembra-install --remove --all --apply --delete-backups`, which
+  also deletes the config backups that still hold the key, and end with revoking the key.
+
+### Changed
+
+- **Gemini CLI:** a BeforeAgent hook (`brief --once`) gives a session started by `/clear` its brief with the
+  first prompt (Gemini drops that start's output), and `connect` says that Gemini runs hooks only in trusted
+  folders. Gemini CLI is detected by its binary or `~/.gemini/settings.json`, not by the `~/.gemini` directory
+  it shares with Antigravity, and `connect` follows `GEMINI_CLI_HOME`.
+- **Qwen Code:** a turn that stops on a rate limit or billing error (StopFailure) and `/compress` (PreCompact)
+  also write the handoff, as for Claude Code. One-shot `qwen -p` runs write none: Qwen never ends them.
+- **Kimi Code:** the adapter targeted the archived Python kimi-cli (`~/.kimi/config.toml`), which no longer
+  runs sessions, and put the brief on SessionStart, whose output Kimi throws away. It now writes
+  `~/.kimi-code/config.toml` (or `$KIMI_CODE_HOME`): the brief comes with the first prompt of a session
+  (UserPromptSubmit, `brief --once`) and the close on SessionEnd, with timeouts. Relay hooks that `kimi migrate`
+  copied without their markers are removed, and a file Kimi would reject is never written. The dashboard calls
+  it Kimi Code.
+- The brief's queued-handoff and rejected-key notices end with "Ask your agent to run remembra_doctor, or run
+  `remembra-relay doctor`." `connect`'s no-key warning leads with the same key command as its to-do list.
+- The dashboard's install line without a known server is `remembra-install --all`, which keeps the server the
+  machine already uses (Remembra Cloud on a first install); with one, as on every dashboard page, it passes
+  `--url` as before.
+- The MCP `store-summary` prompt closes the session with `close_session` and facts (it used to ask for a
+  free-form `store_memory` handoff); `setup-check` also runs `remembra_doctor`.
+
+### Fixed (Relay)
+
+- **Every repository gets its own project, even with `REMEMBRA_PROJECT` set.** In 0.16.0 a configured
+  project (for example an old `REMEMBRA_PROJECT=clawdbot` namespace in an MCP config) named every repository
+  the server had not seen, so all of them shared one trail and a brief in one repository handed over another
+  repository's work. Now a git repository always gets its own project; the configured project names only
+  folders that are not repositories. `REMEMBRA_RELAY_PROJECT` keeps everything in one project on purpose.
+  New installs (`REMEMBRA_PROJECT=default`) were not affected. Older clients keep their behaviour: the new
+  client says which rule it follows (`hint_scope`, `git_repo`), and the server records where each session
+  worked with its handoff. A folder under the configured project that later becomes a repository (`git init`)
+  gets its own project too. A key restricted to projects keeps using its configured project for a new
+  repository (it records nothing). When git does not answer in time, the client says it does not know
+  instead of "not a repository", sends no configured project, and still sends the close (`repo` in
+  `incomplete`). Use `projects split` (above) for repositories already bound together.
+- **The brief's "Last session" is the last session that did something.** A handoff that recorded nothing
+  (no commits, changes, tests, errors, todos, next step, summary or notes: an idle or automated session) no
+  longer buries the one before it; the brief skips it and says how many it skipped. "Recent" lists only this
+  project's handoffs and checkpoints (at most five), never the namespace's other memories, which an agent
+  could read as this project's status. In a folder that is not a git repository the brief says so in one
+  line and names where the last session worked (repository and path), instead of asking the agent to check
+  "the repository"; in a repository it says so when the last session worked in a different one or in a
+  folder. The agent's notes and summary are shown under "Last session". A recorded location, upstream name
+  and every Recent handoff pass the same trust policy as the handoff text, in the text and the JSON, and the
+  JSON no longer returns the location's fingerprint keys (a path key is scrubbed like the path under the
+  account's PII policy). Recorded text stays inside the untrusted-data block.
+- **An empty session leaves no handoff.** `close` sends nothing for a session that recorded nothing and
+  writes one line to `relay.log`; `close --summary …` by hand still sends. A close that stopped on a usage or
+  billing limit, or was written before context compaction, is sent and shown ("stopped: rate_limit"). A later
+  empty close of a session that already sent one is sent, so it retires the earlier handoff instead of leaving
+  it as the session's last word.
+- **Codex automation runs and sub-agents no longer fill the trail.** Codex Desktop runs the relay hooks for
+  every run of a scheduled automation that starts its own thread (dozens a day), and sub-agent threads run
+  them too, so each one got a project brief in its prompt and left a handoff that buried the sessions people
+  work in, and the next brief pointed at an automation run. The relay now reads the kind of thread from the
+  first line of the Codex session file: for an automation run in its own thread or a sub-agent, `brief` and
+  `close` do nothing (nothing sent, nothing queued) and write one line to `relay.log`. This also holds when
+  Codex runs a copy of Claude Code's hooks. Threads you start, voice chats included, and `remembra-relay close`
+  typed by hand work as before. A heartbeat automation, which posts into a thread that already exists, is not
+  skipped: its turns share that thread's brief and handoff. Set `REMEMBRA_RELAY_INCLUDE_AUTOMATIONS=1` to keep
+  automation handoffs.
+- **Other agents' sessions are no longer filed as Claude Code.** Grok Build, Cursor (IDE and cursor-agent),
+  Devin and Continue run the Claude Code hooks in `~/.claude/settings.json`, and `gemini hooks migrate`,
+  `kimi migrate` and Grok's `/import-claude` copy them. Each such session wrote a `claude-code` handoff (a
+  Cursor one under a project named after `~/.claude`), and a Grok session was read as a Claude transcript. The
+  relay now names the agent running a hook from fields or variables only that agent sets: the brief does
+  nothing there, and the close is saved under that agent, or not at all when the relay has no adapter for it
+  yet. A session with its transcript under `~/.claude/projects` is always Claude Code's. `connect` points out
+  relay hooks an import copied into another agent's config.
+- **One handoff per session end.** Gemini CLI fires SessionEnd two or three times on exit, the last with empty
+  stdin; a repeat of the same close within a minute is dropped, and Gemini's empty one too. Claude Code's
+  StopFailure followed by its SessionEnd still writes both (the later one replaces the first). A skipped
+  automation or sub-agent is never counted as a repeat, and a repeat is dropped before the empty-session check
+  runs.
+- **`remembra-relay connect`** exits 0 when every write succeeded and warns about a missing key once, at the
+  end (it exited 1 and warned twice), and says "server: not configured" instead of `http://localhost:8787`
+  when nothing is set up. It reads configs with comments or a byte order mark (Cursor, Gemini CLI and Qwen
+  Code accept them; it said "cannot read" and exited 1), follows `CLAUDE_CONFIG_DIR`, `CODEX_HOME` and
+  `QWEN_HOME`, and keeps hooks an earlier `--include-unverified` run wrote on the current relay path. For an
+  agent named with `--agent` that is not installed it writes nothing without `--force`, since the directory
+  it created looked like an install; `disconnect --apply` removes the directories `connect` created. Cursor's
+  `close` prints `{}` (Cursor logs empty output as a failed hook), `hook-json` is labelled with the hook's own
+  event, and `brief --format additional-context-json` prints `{"additionalContext": ...}`.
+- **Found while reviewing the above:**
+  - Gemini CLI: a session resumed with `--resume` got no brief (Gemini restores the conversation without
+    SessionStart's context, and the relay took the session for one that had it); it gets it again now, and
+    nothing is fetched when the brief came with a prompt, which Gemini does restore. The interactive UI does
+    not wait for SessionStart: a first prompt typed while the brief was slow went without it, and
+    `gemini -i "…"` got it twice. The first hook to finish gives it, once.
+  - A Kimi Code (or cursor-agent) session resumed and ended again within a minute lost its second handoff:
+    with no transcript to measure, a repeat is now only a copy of the hook arriving within a few seconds.
+  - Cursor running Claude Code's PreCompact hook saved an ordinary end; it is now saved as the session still
+    open, before a compaction.
+  - Kimi Code: `connect` and `disconnect` deleted the tables after a relay hook `kimi migrate` had copied, when
+    their keys held `:` or `/` (`[providers."managed:kimi-code"]`, `[models."kimi-code/k3"]`), so Kimi lost its
+    providers and models. Tables are now found the way TOML defines them, and nothing is written unless the
+    only change is the relay's own `[[hooks]]`. An install path with an emoji (or DEL) no longer makes the
+    TOML invalid. The archived kimi-cli's `kimi` no longer counts as Kimi Code being installed.
+  - A config file that is a symbolic link (into a dotfiles repository) was replaced by a regular file; it is
+    written through now, and never unlinked.
+  - With `CLAUDE_CONFIG_DIR` (or `CODEX_HOME`, `QWEN_HOME`, `KIMI_CODE_HOME`, `GEMINI_CLI_HOME`) set,
+    `disconnect` missed the hooks an earlier release had written to the default place; it removes them, and
+    `connect` keeps them current.
+  - `connect --agent gemini` wrote `~/.gemini/settings.json` into Antigravity's `~/.gemini` without `--force`;
+    an agent that is not detected is written only with `--force`. An unverified adapter that `connect` skips
+    anyway no longer fails the run when its config cannot be read.
+  - A close sends at most what the server keeps (500 paths per file list, 200 commands, 100 test runs, ...), so
+    a repository with thousands of changed files no longer sends a body of several megabytes.
+  - On a branch longer than 255 characters (git takes longer names) the brief failed with 422. The server
+    keeps the first 255 characters and drops a `/`, `.` or `.lock` the cut leaves at the end, so the stored
+    name is still one git accepts; a name git refuses is refused whatever its length.
+  - Recorded text could close the brief's untrusted-data block in Gemini CLI and Qwen Code by writing the close
+    tag as `&lt;/remembra-data&gt;`, which is what those agents turn the real tag into. The server and the relay
+    now neutralize the tag in that form (and its other character-reference spellings) too.
+
+### Fixed (accounts, privacy and the site)
+
+- **Deleting by entity could delete the whole account.** `DELETE /api/v1/memories?entity=John`, which the
+  Python SDK's `forget(entity="John")` and the TypeScript SDK's `forget({ entity: 'John' })` send, deleted
+  every memory, entity, relationship and decision log in the caller's account and reported a wrong count; with
+  `project_id` it deleted every memory in that project. Now only `all_memories=true` deletes the whole account,
+  and a delete by entity deletes what it names: the caller's memories linked to the entity with that exact name
+  or alias (any case), in every project or only in `project_id`, then the entity and its relationships once no
+  memory mentions it, with the true counts. A call that combines `memory_id`, `entity` and `all_memories=true`,
+  or has a blank `entity` or `project_id`, is refused with 422 and deletes nothing, and a project-scoped key's
+  delete by entity stays inside its projects. In both SDKs `forget()` now takes exactly one of a memory id, an
+  entity (with an optional project) or all memories, as the server does; `forget()` with no arguments and the
+  Python `user_id=` argument (the server never accepted either: the call failed with 422) fail before anything
+  is sent. A delete by entity reads the server version first and is not sent to a server older than 0.16.1.
+  The MCP `forget_memories` tool and the Clawdbot plugin can now delete by entity too, in one project and only
+  after a dry run and a confirmation phrase, like their project wipe.
+- **Sign in with Google or GitHub on older accounts.** An account whose email was never verified (accounts
+  made before email verification existed) is now linked when Google, or GitHub with a verified primary email,
+  confirms the address: the email becomes verified and the user is signed in. A one-time account check then
+  lists everything on the account (API keys, connected apps, webhooks, other sign-in links, 2FA and the
+  password set before); **Keep all** is one click and keeps exactly the list shown, and single items can be
+  revoked. API keys and app connections keep working throughout; dashboard sessions opened before end. 2FA
+  from before verification stays on only if the owner enters a current code. A check with nothing to list
+  finishes silently. Only the sign-in that proved the email can act on it; every choice is audit-logged and
+  emailed. Schema migration 10 (`account_reviews`). GitHub still never links by email into an account whose
+  email is already verified.
+- **Forgot password** on such an account no longer revokes keys, 2FA, app connections, webhooks and sign-in
+  links. The reset verifies the email and the next sign-in shows the same account check.
+- **PII redaction** no longer replaces the project number of a Google OAuth client id (and UUIDs or
+  similar machine identifiers) with `[REDACTED_BANK_ACCOUNT]`. Account numbers written with a suffix
+  (`123456789012-checking`, `...-SAV`, `ACCT-...-01`) are still redacted.
+- **The install line connects.** On remembra.dev, the README and the docs, the copyable install ended in a bare
+  `remembra-relay connect`, a dry run that writes nothing, so a new user following it stayed unconnected. Every
+  block now asks for the free key first and ends in `remembra-relay connect --apply`; the dashboard's empty
+  trail shows its full one-line install. The site header has **Sign in** next to **Start free** (first in
+  the phone menu).
+- **docs.remembra.dev no longer publishes repository notes** (the cloud runbook, an old self-host note, bug
+  write-ups, a feedback transcript and the competitor scan): `mkdocs.yml` excludes them and a test keeps the
+  list. The feedback transcript left the public repository.
+- **Public copy says what the code does.** The Founding 100 price holds while the subscription stays active,
+  and 14 days after it ends (as the Terms say), with no lifetime promise. Pages no longer claim that every agent
+  or tool is covered: the session hooks are verified for Claude Code, Codex (a prerelease), Gemini CLI, Qwen
+  Code and Kimi Code, Cursor's are not yet, and any MCP agent can call `session_brief` and `close_session`.
+  Transcript facts are read from Codex rollouts as well as Claude Code transcripts, and the pages say so. The
+  Claude and ChatGPT connector and the hosted remote MCP are marked as coming (the connector is off at
+  api.remembra.dev). The Team plan lists what the teams API enforces (one pooled allowance, not a shared
+  memory pool), and the dashboard's team role labels say what each role can do today. The PyPI summary
+  describes Remembra Relay, and the MCP Registry text names the agent its handoffs are recorded under. The DPA
+  page says a deleted account is erased automatically after 7 days (backups age out), the plans page says a
+  new yearly bank unlocks after 14 days, and the durability page no longer promises atomic writes across
+  SQLite, Qdrant and the keyword index. The SDK and REST guides show the delete calls the client and server
+  have, the MCP pages count the 24 tools the server registers (21, and Marshal's three), the site's changelog
+  states the 0.16.1 project rule, and reconstructed blog examples say so. `tests/test_site_truth_polish.py`
+  scans every public file for these claims.
+
+### Security
+
+- **Billing.** The Paddle billing portal opens only for a Paddle customer whose email is the account's
+  verified email, and a customer id that another account already holds is never recorded (the account is
+  flagged instead, once per subscription, and a flag already waiting on the account is kept). One payer paying
+  for several accounts, which 0.16.0 recorded on each of them, is not a conflict: their renewals change
+  nothing. Checkout and the billing portal need a dashboard sign-in, not an API key; an API-key
+  session in the dashboard shows "Sign in with email" instead of the billing buttons. New purchases stay on
+  the account's own email. Paddle events are applied once each and in order, and a paid renewal that arrives
+  late still records the period it paid for. A yearly plan's next credit bank unlocks only once its renewal is
+  paid. A new purchase of the retired $49 and $199 prices grants nothing and is flagged. Trial codes are
+  refused for paying subscribers.
+- **Plan limits hold on every write path.** Superseding a memory counts as a store, restoring an archived
+  memory checks the memory cap, a conversation ingest that falls back to storing the raw messages counts every
+  message, and a session close counts toward the Free plan's daily cap on notes without enrichment. Memory-cap
+  slots are reserved atomically, so parallel writes can't go past the cap.
+- **Server.** Request bodies are capped before authentication, including under a path prefix: 1 MiB, 64 KiB
+  for a urlencoded form, and more only where a route's own limits need it (8 MiB for a relay close, a batch or
+  bulk store and an inline import, 12 MiB for a conversation ingest, 51 MiB for a file import). An inline
+  import (`POST /api/v1/transfer/import`) takes at most 8,000,000 characters of data; a larger file goes to
+  `/transfer/import/file`. The web framework and form parser are upgraded (FastAPI 0.141.1, Starlette 1.7.0,
+  python-multipart 0.0.32). `GET
+  /api/v1/admin/permissions` requires an admin, and the admin promo routes check the master key. While the
+  one-time account check after a sign-in that verified the email is open, changing the password, deleting the
+  account and turning 2FA off wait until it is done. Entity relationships and background entity merges stay
+  inside one project, and the dashboard's entity graph (`GET /api/v1/debug/entities/graph`) returns only the
+  caller's own relationships: a caller with no entities in scope got other accounts' (`max_edges=0` is refused).
+- **Relay and agents.** Credentials typed on a command line (`curl -u`, `docker login -p`, `vercel -t`,
+  password variables and the like) are redacted from a handoff before it is stored, and ordinary values (test
+  counts, askpass helpers, paths) are left alone. Terminal control characters are stripped from handoff text
+  when it is stored and before the CLI prints it. The legacy Claude Code SessionStart script, the Clawdbot
+  hook, the Clawdbot plugin (2.1.0) and the dashboard's "Copy as a prompt" hand other agents' text to the
+  model inside the untrusted-data block. The server refuses a branch name git would refuse, and the
+  dashboard's "Continue" command never passes one that git would read as an option.
+- **Images, CI and the repository.** The Docker images use pinned, maintained base images; the dashboard and
+  docs images run nginx as a non-root user on port 8080, and docs.remembra.dev gets its own nginx config with
+  security headers. The docs workflow's OIDC and Pages write permissions sit on its deploy job only, and
+  workflow installs are hash-pinned. Dependabot watches `uv.lock` and the dashboard, and CI runs `pip-audit`.
+  CI and the git hooks refuse private notes, a built docs site, office documents, public IP addresses,
+  real-format API keys and personal details in test fixtures; internal runbooks left the repository and the
+  benchmark corpus is synthetic. CI checks every commit of a pull request and of a direct push (a key added
+  and removed within one push is still published), and the pre-commit hook reads file names with spaces.
+  Run `./scripts/install-hooks.sh` in your clone to get the current hooks.
+
+## [0.16.0] - 2026-09-26 - Remembra Relay
 
 **Remembra Relay: one agent stops, the next one already knows.** When a session ends, `remembra-relay close`
-saves a handoff built from facts it reads from git (and, for Claude Code, the session's test runs); the agent's
-own summary is checked against them. When the next session starts, in any tool or on any machine, that agent
-gets a short brief. Every handoff stays on the trail.
+saves a handoff built from facts it reads from git (and, for Claude Code and Codex, the session's commands and
+test runs); the agent's own summary is checked against them. When the next session starts, in another tool or on
+another machine, that agent gets a short brief. Every handoff stays on the trail.
 
 ```bash
 pipx install --force 'remembra[mcp]>=0.16'
@@ -98,8 +402,8 @@ remembra-install --all            # asks for the key at a hidden prompt
 remembra-relay connect            # dry run; add --apply to write the hooks
 ```
 
-- **Handoff:** done / not done / failing / next step, from git and the Claude Code transcript; the transcript
-  never leaves the machine. **Brief:** about 1,500 tokens, everything recorded wrapped as untrusted data.
+- **Handoff:** done / not done / failing / next step, from git and the Claude Code transcript or Codex rollout;
+  neither leaves the machine. **Brief:** about 1,500 tokens, everything recorded wrapped as untrusted data.
   **Trail:** every handoff and checkpoint in order (`remembra-relay trail`, the dashboard's Trail page).
 - **Agent-scoped keys:** a handoff closed with one is key-verified; that key cannot write as another agent.
 - **Adapters:** Claude Code and Codex (codex-cli 0.155.0-alpha.16.4, a prerelease) verified. Cursor, Gemini CLI,
@@ -116,7 +420,7 @@ remembra-relay connect            # dry run; add --apply to write the hooks
 - The CSPs of remembra.dev and app.remembra.dev ship as `Content-Security-Policy-Report-Only` for launch,
   because the Paddle checkout hosts could not be verified against a live checkout; the other security headers
   are enforced. Browsers report violations to the new `POST /api/v1/csp-report`, which logs them
-  (`csp_violation`, no query strings). docs/DEPLOYING.md says how to switch to enforcing.
+  (`csp_violation`, no query strings). docs/OPERATIONS.md says how to switch to enforcing.
 
 ### Added
 - **Codex hooks verified.** `remembra-relay connect` now writes Codex's SessionStart, UserPromptSubmit and
@@ -161,8 +465,9 @@ remembra-relay connect            # dry run; add --apply to write the hooks
   link by email, completing a password reset verifies the email, and the dashboard has a `/verify-email` page
   and a **Resend verification email** button (Settings → Profile). One free account per verified email is
   enforced on every path (dashboard verify, API-signup verify, password reset, social sign-up).
-- **Remembra Relay: session continuity across agents.** Every agent leaves a structured handoff
-  when it stops, and any agent picks it up at session start, whatever the tool, machine or checkout location.
+- **Remembra Relay: session continuity across agents.** A connected agent leaves a structured handoff
+  when it stops, and the next one picks it up at session start, in another tool, on another machine or in
+  another checkout.
   - Location-independent project identity: `POST /api/v1/projects/resolve` maps a normalized git
     remote (then root commit, then path) to a per-user project id. The same repo on any machine,
     drive or worktree gets the same id. Adds project links (`/api/v1/projects/links`); a brief shows
@@ -173,9 +478,9 @@ remembra-relay connect            # dry run; add --apply to write the hooks
   - `GET /api/v1/session/brief` accepts a location, leads with a "Last session: …" line and returns a
     compact `rendered` text (~1500 tokens). `GET /api/v1/trail` lists handoffs and checkpoints.
   - `remembra-relay` CLI (`brief`, `close`, `trail`, `resolve`, `connect`) gathers facts from git and
-    Claude Code transcripts without uploading them. It is hook-safe (≤10 s, always exits 0). `connect` wires
-    agent hooks through an adapter registry (Claude Code verified; Codex, Cursor, Gemini, Qwen and Kimi
-    shipped unverified and dry-run only).
+    Claude Code transcripts or Codex rollouts without uploading them. It is hook-safe (≤10 s, always exits 0).
+    `connect` wires agent hooks through an adapter registry (Claude Code and Codex verified; Cursor, Gemini,
+    Qwen and Kimi shipped unverified and dry-run only).
   - MCP: new `close_session` and `resolve_project` tools. `session_brief` is compact by default
     (`verbose=True` for the full JSON). The server instructions tell every MCP agent to brief at start and close before finishing.
   - Agent-scoped API keys (`agent_id` on key creation). Relay attribution comes from the key, not the request body.

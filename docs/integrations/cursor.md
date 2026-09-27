@@ -137,6 +137,6 @@ Update your config to use the absolute path as the `command`.
 
 ## Next Steps
 
-- [MCP Tool Reference](mcp-server.md) — Full documentation of all 5 tools and 2 resources
+- [MCP Tool Reference](mcp-server.md) — Full documentation of all 31 tools and 2 resources
 - [JavaScript SDK](../guides/javascript-sdk.md) — Use Remembra in your Node.js code
 - [REST API](../guides/rest-api.md) — Direct HTTP access

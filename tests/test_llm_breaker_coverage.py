@@ -81,7 +81,7 @@ async def _open_breaker_with_quota() -> None:
     """A quota error on the fact extractor opens the breaker every LLM client shares."""
     extractor = FactExtractor(ExtractionConfig(api_key="t"))
     _wire(extractor._get_client(), Upstream(429, QUOTA))
-    await extractor.extract("Mani moved to Kingston in 2024. He runs a contracting company.")
+    await extractor.extract("Mani moved to Lisbon in 2024. She runs a small bakery.")
     assert get_llm_breaker().state == CircuitState.OPEN
 
 
@@ -178,10 +178,10 @@ async def test_matcher_5xx_counts_toward_the_shared_breaker() -> None:
 # ---------------------------------------------------------------------------
 
 ENTITY_PAYLOAD = {
-    "entities": [{"name": "Mani", "type": "PERSON", "description": "contractor"}],
-    "relationships": [{"subject": "Mani", "predicate": "LIVES_IN", "object": "Kingston"}],
+    "entities": [{"name": "Mani", "type": "PERSON", "description": "baker"}],
+    "relationships": [{"subject": "Mani", "predicate": "LIVES_IN", "object": "Lisbon"}],
 }
-TEXT = "Mani lives in Kingston and runs a contracting company."
+TEXT = "Mani lives in Lisbon and runs a small bakery."
 
 
 async def test_entity_extractor_closed_breaker_extracts_and_meters() -> None:
@@ -195,7 +195,7 @@ async def test_entity_extractor_closed_breaker_extracts_and_meters() -> None:
     await job.wait_settled()
 
     assert [e.name for e in result.entities] == ["Mani"]
-    assert [(r.subject, r.predicate, r.object) for r in result.relationships] == [("Mani", "LIVES_IN", "Kingston")]
+    assert [(r.subject, r.predicate, r.object) for r in result.relationships] == [("Mani", "LIVES_IN", "Lisbon")]
     assert upstream.calls == 1
     assert job.usd == pytest.approx(USAGE_USD)
 

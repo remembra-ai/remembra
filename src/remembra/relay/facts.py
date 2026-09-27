@@ -33,6 +33,23 @@ MAX_COMMITS = 30
 MAX_COMMANDS = 60
 MAX_TRANSCRIPT_BYTES = 64 * 1024 * 1024
 CMD_CLIP = 300
+# The most items per list that POST /session/close keeps (the server's _LIST_CAPS in
+# remembra.api.v1.relay; a test holds the two equal). The close payload is cut to them
+# here, so a repository with thousands of changed files never sends a body the server
+# refuses: event lists keep their newest entries, the others their first.
+CLOSE_LIST_CAPS = {
+    "commits": 100,
+    "files_changed": 500,
+    "uncommitted_files": 500,
+    "commands": 200,
+    "tests": 100,
+    "errors": 50,
+    "todos_open": 100,
+    "incomplete": 10,
+}
+CLOSE_KEEP_NEWEST = frozenset({"commands", "tests", "errors"})
+CLOSE_TEXT_LISTS = frozenset({"files_changed", "uncommitted_files", "errors", "todos_open", "incomplete"})
+CLOSE_ITEM_CLIP = 1000  # characters per path (or other text item), as the server keeps them
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 _TEST_RE = re.compile(
@@ -92,6 +109,12 @@ def _scrub(value: str) -> str:
 def _clip(value: str, limit: int) -> str:
     value = " ".join((value or "").split())
     return value if len(value) <= limit else value[: limit - 1] + "…"
+
+
+def _scrub_clip(value: str, limit: int) -> str:
+    """Scrub, then clip (CLI-01): clipping first could cut a credential so that
+    the scrubber no longer recognizes the part that is kept."""
+    return _clip(_scrub(value), limit)
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +180,16 @@ class RepoInfo:
     branch: str | None = None
     head_commit: str | None = None
     is_git: bool = False
+    # git did not answer in time (the first probe timed out): whether this is a repository is unknown,
+    # which is not the same as "not a repository".
+    unknown: bool = False
+
+    @property
+    def git_repo(self) -> bool | None:
+        """True in a git repository, False outside one, None when git did not answer in time."""
+        if self.is_git:
+            return True
+        return None if self.unknown else False
 
     def locator(self, cwd: Path, host: str | None = None) -> dict[str, Any]:
         loc: dict[str, Any] = {
@@ -173,7 +206,7 @@ def repo_info(cwd: Path, deadline: Deadline) -> RepoInfo:
     git = Git(cwd, deadline)
     toplevel = git.line("rev-parse", "--show-toplevel")
     if not toplevel:
-        return RepoInfo(repo_name=cwd.name or None)
+        return RepoInfo(repo_name=cwd.name or None, unknown=git.timed_out)
     info = RepoInfo(toplevel=toplevel, is_git=True)
     branch = git.line("rev-parse", "--abbrev-ref", "HEAD")
     remote = _pick_remote(git, branch if branch and branch != "HEAD" else None)
@@ -390,10 +423,14 @@ def git_facts(
 
     ``incomplete`` lists the probes that did not finish in time (``log``,
     ``status``, ``diff``, ``upstream``): their facts are unknown, not empty.
+    ``repo`` means git did not even say whether this is a repository (the
+    first probe timed out): nothing about it is known.
     """
     info = info or repo_info(cwd, deadline)
     facts: dict[str, Any] = {}
     if not info.is_git:
+        if info.unknown:
+            facts["incomplete"] = ["repo"]
         return facts
     git = Git(cwd, deadline)
     incomplete: list[str] = []
@@ -505,13 +542,13 @@ def _result_text(content: Any) -> str:
 def _test_summary(output: str) -> str | None:
     for line in reversed([ln.strip(" =") for ln in output.splitlines() if ln.strip()]):
         if _TEST_SUMMARY_RE.search(line):
-            return _clip(line, 200)
+            return _scrub_clip(line, 200)
     return None
 
 
 def _last_meaningful_line(output: str) -> str:
     lines = [ln.strip() for ln in output.splitlines() if ln.strip() and not _EXIT_RE.match(ln)]
-    return _clip(lines[-1], 200) if lines else ""
+    return _scrub_clip(lines[-1], 200) if lines else ""
 
 
 def _iter_lines(path: Path) -> Iterable[str]:
@@ -581,17 +618,15 @@ def _finish(
             continue
         seen.add(cmd)
         detail = _last_meaningful_line(item["output"])
-        errors.append(f"`{_clip(cmd, 160)}` exited {item['exit_code']}" + (f": {detail}" if detail else ""))
+        errors.append(f"`{_scrub_clip(cmd, 160)}` exited {item['exit_code']}" + (f": {detail}" if detail else ""))
         if len(errors) >= 8:
             break
     errors.reverse()
 
-    facts.commands = [
-        {"cmd": _scrub(_clip(c["cmd"], CMD_CLIP)), "exit_code": c["exit_code"]} for c in command_log[-MAX_COMMANDS:]
-    ]
+    facts.commands = [{"cmd": _scrub_clip(c["cmd"], CMD_CLIP), "exit_code": c["exit_code"]} for c in command_log[-MAX_COMMANDS:]]
     facts.tests = [
         {
-            "cmd": _scrub(_clip(t["cmd"], CMD_CLIP)),
+            "cmd": _scrub_clip(t["cmd"], CMD_CLIP),
             "passed": t["passed"],
             "summary": _scrub(t["summary"]) if t["summary"] else None,
         }
@@ -599,7 +634,7 @@ def _finish(
     ]
     facts.errors = [_scrub(e) for e in errors]
     facts.files = list(dict.fromkeys(files))
-    facts.todos_open = [_scrub(_clip(t, 300)) for t in open_todos if t.strip()]
+    facts.todos_open = [_scrub_clip(t, 300) for t in open_todos if t.strip()]
     return facts
 
 
@@ -743,7 +778,7 @@ def _codex_error(payload: dict[str, Any]) -> str | None:
         return None
     message = error.get("message")
     if error.get("codex_error_info") == CODEX_USAGE_LIMIT_INFO or _codex_limit_text(message):
-        return _clip(str(message or "usage limit reached"), 300)
+        return _scrub_clip(str(message or "usage limit reached"), 300)
     return None
 
 
@@ -991,4 +1026,17 @@ def merge_facts(git: dict[str, Any], transcript: TranscriptFacts | None, root: s
         facts["tests"] = transcript.tests
         facts["errors"] = transcript.errors
         facts["todos_open"] = transcript.todos_open
+    return cap_close_lists(facts)
+
+
+def cap_close_lists(facts: dict[str, Any]) -> dict[str, Any]:
+    """The facts with every list cut to what ``/session/close`` keeps (:data:`CLOSE_LIST_CAPS`)."""
+    for name, cap in CLOSE_LIST_CAPS.items():
+        value = facts.get(name)
+        if not isinstance(value, list):
+            continue
+        value = value[-cap:] if name in CLOSE_KEEP_NEWEST else value[:cap]
+        if name in CLOSE_TEXT_LISTS:
+            value = [v[:CLOSE_ITEM_CLIP] for v in value if isinstance(v, str)]
+        facts[name] = value
     return facts

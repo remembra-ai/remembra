@@ -90,8 +90,8 @@ API_HEADERS=$(curl -fsS -D - -o /dev/null "$BASE/health")
 case "$PAGE_HEADERS" in *"script-src 'self'"*) ;; *) fail "the dashboard page has no script-src 'self' policy" ;; esac
 case "$API_HEADERS" in *"default-src 'none'"*) ;; *) fail "API responses lost default-src 'none'" ;; esac
 
-# What docs/DEPLOYING.md tells operators about the image.
-if docker exec "$APP" sh -c 'command -v sqlite3' >/dev/null 2>&1; then fail "the image now has a sqlite3 CLI: update docs/DEPLOYING.md"; fi
+# What docs/OPERATIONS.md tells operators about the image.
+if docker exec "$APP" sh -c 'command -v sqlite3' >/dev/null 2>&1; then fail "the image now has a sqlite3 CLI: update docs/OPERATIONS.md"; fi
 docker exec "$APP" python -c 'import sqlite3; c = sqlite3.connect("file:/data/remembra.db?mode=ro", uri=True); print("memories table rows:", c.execute("SELECT COUNT(*) FROM memories").fetchone()[0])' \
     || fail "python sqlite3 cannot read /data/remembra.db"
 

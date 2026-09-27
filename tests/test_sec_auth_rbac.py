@@ -118,6 +118,28 @@ async def test_low_privilege_key_cannot_revoke_broader_key(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+async def test_permissions_listing_requires_admin_like_every_admin_route(tmp_path):
+    """LIVE-1: GET /admin/permissions answered anyone; the module promises admin on every route."""
+    from remembra.auth.rbac import Permission
+
+    async with secure_app(tmp_path, ROUTERS) as h:
+        assert (await h.client.get("/api/v1/admin/permissions")).status_code == 401
+        uid = await h.create_user("perm@example.com")
+        assert (await h.client.get("/api/v1/admin/permissions", headers=h.jwt(uid))).status_code == 403
+        for role in ("viewer", "editor"):
+            key, _ = await h.api_key(uid, role)
+            r = await h.client.get("/api/v1/admin/permissions", headers={"X-API-Key": key})
+            assert r.status_code == 403, (role, r.text)
+        admin_key, _ = await h.api_key(uid, "admin")
+        r = await h.client.get("/api/v1/admin/permissions", headers={"X-API-Key": admin_key})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["permissions"] == [p.value for p in Permission]
+        assert set(body["roles"]) == {"admin", "editor", "viewer"}
+        assert sorted(body["roles"]["admin"]) == sorted(p.value for p in Permission)
+        assert sorted(body["roles"]["viewer"]) == ["entity:read", "key:list", "memory:recall"]
+
+
 async def test_admin_audit_is_scoped_to_own_tenant(tmp_path):
     async with secure_app(tmp_path, ROUTERS) as h:
         audit = h.app.state.audit_logger

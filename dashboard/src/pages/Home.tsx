@@ -189,7 +189,7 @@ export function Home({ userName }: { userName?: string }) {
             </div>
           )}
           {latest && <LatestHandoff latest={latest} previous={previous} arrivals={arrivals} now={now} />}
-          {loaded && !hasHandoffs && <ConnectChecklist agents={agents} now={now} />}
+          {loaded && !hasHandoffs && <ConnectChecklist agents={agents} now={now} trail={items} />}
 
           {loaded && items.length > 0 && (
             <Card labelledBy={sinceId}>
@@ -311,6 +311,7 @@ export function Home({ userName }: { userName?: string }) {
             <ConnectChecklist
               agents={agents}
               now={now}
+              trail={items}
               onDismiss={() => {
                 writeStorage(HIDE_CONNECT_KEY, '1');
                 setHideConnect(true);

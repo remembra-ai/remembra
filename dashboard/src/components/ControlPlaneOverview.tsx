@@ -133,7 +133,7 @@ export function ControlPlaneOverview({
           </div>
 
           <h2 className="max-w-2xl text-3xl font-semibold leading-tight tracking-tight text-[hsl(var(--foreground))] md:text-4xl">
-            Operate the shared brain behind every agent.
+            Operate the shared memory behind the agents you connect.
           </h2>
           <p className="mt-4 max-w-2xl text-sm leading-6 text-[hsl(var(--muted-foreground))] md:text-base">
             Project <span className="font-medium text-[hsl(var(--foreground))]">{currentProjectId}</span> is the memory bank for code agents, assistants, automations, and human workflows. Store context once, inspect why it returns, and route only the right truth to the right tool.

@@ -1,6 +1,8 @@
 """API key generation and management."""
 
 import hashlib
+import os
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import datetime
@@ -21,6 +23,22 @@ _KEY_CACHE_MAX_SIZE = 1000
 
 # Key format: rem_<32 bytes base64> = rem_abc123...
 KEY_PREFIX = "rem_"
+
+# SHA-256 lookups (see ``compute_lookup``) of API keys that were published and
+# can never be trusted again, whichever account holds them. A key listed here is
+# refused before any database read, and its row is deactivated when it is found.
+# LEAK-2: the key committed in public commit 5130dee (demo/demo_fast.py).
+# REMEMBRA_REVOKED_KEY_SHA256 (comma-separated) adds more without a release.
+PUBLISHED_KEY_LOOKUPS: frozenset[str] = frozenset({"a5b4e0bf0358aec048af37dd3956a5ccfcf952daec151984623406601f89e51a"})
+
+
+def revoked_key_lookups() -> frozenset[str]:
+    """Published keys plus any listed in REMEMBRA_REVOKED_KEY_SHA256."""
+    extra = os.environ.get("REMEMBRA_REVOKED_KEY_SHA256", "")
+    listed = {h.strip().lower() for h in extra.split(",") if re.fullmatch(r"[0-9a-fA-F]{64}", h.strip())}
+    return PUBLISHED_KEY_LOOKUPS | frozenset(listed)
+
+
 KEY_BYTES = 32  # 256 bits of entropy
 
 
@@ -192,6 +210,11 @@ class APIKeyManager:
 
         cache_key = self.compute_lookup(raw_key)
 
+        # 0) A published key never authenticates; switch its row off if we can find it.
+        if cache_key in revoked_key_lookups():
+            await self._deactivate_published_key(raw_key, cache_key)
+            return None
+
         # 1) In-memory cache (revalidate active flag against the DB)
         if cache_key in _key_cache:
             cached = _key_cache[cache_key]
@@ -229,6 +252,23 @@ class APIKeyManager:
 
         log.warning("api_key_validation_failed")
         return None
+
+    async def _deactivate_published_key(self, raw_key: str, cache_key: str) -> None:
+        """Deactivate the row of a published key (found by lookup hash or, for keys
+        that predate the lookup column, by the bounded legacy bcrypt scan)."""
+        _key_cache.pop(cache_key, None)
+        row = await self.db.get_active_api_key_by_lookup(cache_key)
+        if row is None:
+            for legacy_row in await self.db.get_unmigrated_active_api_keys():
+                if self.verify_key(raw_key, legacy_row["key_hash"]):
+                    row = legacy_row
+                    break
+        if row is None:
+            log.warning("api_key_published_refused")
+            return
+        await self.db.conn.execute("UPDATE api_keys SET active = 0 WHERE id = ?", (row["id"],))
+        await self.db.conn.commit()
+        log.warning("api_key_published_deactivated", key_id=row["id"], user_id=row.get("user_id"))
 
     async def list_keys(self, user_id: str) -> list[APIKeyInfo]:
         """List all API keys for a user (without actual keys)."""

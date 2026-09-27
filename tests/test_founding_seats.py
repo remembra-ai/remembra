@@ -342,6 +342,7 @@ async def test_checkout_and_portal_turn_paddle_failures_into_502(tmp_path, monke
         assert r.status_code == 502 and r.json()["detail"].startswith("Our billing provider")
 
         # The recorded customer id is used directly (no lookup by email).
+        paddle.customers["ctm_err"] = "err@example.com"
         await c.meter.register_tenant(uid, PlanTier.FREE, stripe_customer_id="ctm_err")
         paddle.failures["POST /customers/ctm_err/portal-sessions"] = failure
         assert (await c.h.client.post("/api/v1/billing/portal", headers=hdr)).status_code == 502
@@ -360,6 +361,8 @@ async def test_portal_without_a_billing_account_is_404_not_502(tmp_path, monkeyp
         # The email is sent as a query parameter, encoded ("+" survives).
         assert paddle.requests("GET", "/customers")[-1][2] == {"email": "new+tag@example.com"}
         paddle.customers_by_email["new+tag@example.com"] = "ctm_found"
+        # BILL-1: the customer found by the verified email opens only for a subscription naming this account.
+        paddle.add_subscription("sub_found", "ctm_found", custom_data={"remembra_user_id": uid})
         r = await c.h.client.post("/api/v1/billing/portal", headers=c.h.jwt(uid, "new+tag@example.com"))
         assert r.status_code == 200 and r.json()["portal_url"] == "https://portal.example/ctm_found"
 

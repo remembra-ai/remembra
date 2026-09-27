@@ -1,0 +1,10 @@
+# Advisories CI's dependency audit (.github/workflows/ci.yml, job "audit") may
+# ignore. The audit covers the exact locked set the production image installs.
+#
+# One advisory per line: its ID (PYSEC-, GHSA- or CVE-), two spaces, then
+#   # why it cannot be reached or fixed yet (reviewed YYYY-MM-DD)
+# e.g.
+#   PYSEC-2026-0000  # only reachable through <feature>, which is off (reviewed 2026-09-26)
+#
+# Remove an entry as soon as a fixed release is in uv.lock. Empty is the goal:
+# on 2026-09-26 the refreshed lock has no known advisory, so nothing is listed.

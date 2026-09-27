@@ -14,7 +14,7 @@ import {
   type PlansResponse,
   type UsageSummaryResponse,
 } from '../lib/api';
-import { checkoutRoute, foundingSeatNote, planRowAction } from '../lib/checkout';
+import { billingActionsNote, checkoutRoute, foundingSeatNote, planRowAction } from '../lib/checkout';
 import { absoluteTime } from '../lib/time';
 import { planIntentNote } from '../lib/planIntent';
 import { useRoute } from '../lib/nav';
@@ -32,7 +32,15 @@ import {
 import { useResource } from '../hooks/useResource';
 import { Card, CardHeader, ErrorNotice, Pill, Skeleton } from './relay/ui';
 import { DegradedNotice, PixelMeter } from './credits/Credits';
-import { initPaddle, paddleGlobal, rememberCheckout, sessionStore, successUrl } from '../lib/paddle';
+import {
+  initPaddle,
+  overlayCheckoutOptions,
+  paddleGlobal,
+  rememberCheckout,
+  sessionStore,
+  successUrl,
+  transactionCheckoutOptions,
+} from '../lib/paddle';
 
 function userEmail(): string | undefined {
   try {
@@ -71,18 +79,13 @@ async function startCheckout(
   if (P && route.kind === 'overlay') {
     const email = userEmail();
     rememberCheckout(sessionStore(), currentPlan, plan);
-    P.Checkout.open({
-      items: [{ priceId: route.priceId, quantity: 1 }],
-      ...(email ? { customer: { email } } : {}),
-      customData: route.customData,
-      settings: { successUrl: successUrl(config, window.location.origin) },
-    });
+    P.Checkout.open(overlayCheckoutOptions(route.priceId, route.customData, email, successUrl(config, window.location.origin)));
     return;
   }
   const response = await api.createCheckout(plan, cycle, perSeat ? seats : undefined);
   if (response.transaction_id && P) {
     rememberCheckout(sessionStore(), currentPlan, plan);
-    P.Checkout.open({ transactionId: response.transaction_id });
+    P.Checkout.open(transactionCheckoutOptions(response.transaction_id));
   } else if (response.checkout_url) {
     rememberCheckout(sessionStore(), currentPlan, plan);
     window.location.href = response.checkout_url;
@@ -119,7 +122,16 @@ function Stat({ label, value, note }: { label: string; value: string; note?: str
   );
 }
 
-function PeriodCard({ summary, onPortal, portalBusy }: { summary: UsageSummaryResponse; onPortal: () => void; portalBusy: boolean }) {
+function PeriodCard({
+  summary,
+  onPortal,
+  portalBusy,
+}: {
+  summary: UsageSummaryResponse;
+  /** Absent for a session that cannot open the portal (API-key sign-in). */
+  onPortal?: () => void;
+  portalBusy: boolean;
+}) {
   const titleId = useId();
   const view = creditsView(summary);
   const paid = summary.plan !== 'free';
@@ -130,7 +142,8 @@ function PeriodCard({ summary, onPortal, portalBusy }: { summary: UsageSummaryRe
         eyebrow={`This period · ${summary.credits.bank === 'yearly' ? 'yearly bank' : 'monthly'}`}
         title={planLine(summary)}
         action={
-          paid && (
+          paid &&
+          onPortal && (
             <button type="button" onClick={onPortal} disabled={portalBusy} className="rr-btn-ghost inline-flex items-center gap-1.5 px-3 py-2 text-sm">
               {portalBusy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <CreditCard className="h-4 w-4" aria-hidden="true" />}
               Manage subscription
@@ -317,7 +330,7 @@ function PlanRow({
 }: {
   plan: PlanCatalogEntry;
   cycle: BillingCycle;
-  action: 'current' | 'manage' | 'buy';
+  action: ReturnType<typeof planRowAction>;
   busy: boolean;
   onBuy: (plan: PlanCatalogEntry, seats: number | undefined) => void;
   onManage: () => void;
@@ -392,10 +405,27 @@ function PlanRow({
   );
 }
 
+/** An API-key session: billing needs an email sign-in (the server refuses keys), so offer that instead. */
+function SignInWithEmail({ note }: { note: string }) {
+  const signIn = () => {
+    api.clearAll(); // an API-key session has no server session to end
+    window.location.assign(import.meta.env.BASE_URL || '/');
+  };
+  return (
+    <div role="status" className="mt-3 flex flex-wrap items-center justify-between gap-3 border-l-[3px] border-signal bg-signal-wash px-3 py-2">
+      <p className="text-sm text-ink">{note}</p>
+      <button type="button" onClick={signIn} className="rr-btn-ghost inline-flex items-center gap-1.5 px-3 py-1.5 text-sm">
+        <Mail className="h-4 w-4" aria-hidden="true" /> Sign in with email
+      </button>
+    </div>
+  );
+}
+
 function PlansSection({
   plans,
   currentPlan,
   subscribed,
+  actionsNote,
   onPortal,
   onError,
 }: {
@@ -403,6 +433,8 @@ function PlansSection({
   currentPlan: string;
   /** Holds an active subscription (legacy $49 / $199 included): plan changes go through the portal. */
   subscribed: boolean;
+  /** Set when this session cannot open checkout or the portal (API-key sign-in): shown instead of the buttons. */
+  actionsNote: string | null;
   onPortal: () => void;
   onError: (message: string | null) => void;
 }) {
@@ -455,7 +487,8 @@ function PlansSection({
             Self-serve checkout is not configured on this server. Prices are shown for reference.
           </p>
         )}
-        {subscribed && (
+        {actionsNote && <SignInWithEmail note={actionsNote} />}
+        {subscribed && !actionsNote && (
           <p className="mt-3 border-l-[3px] border-signal px-3 py-2 text-sm text-ink-2">
             You already have a subscription. Switch plans or cancel from Manage subscription, so you are never billed for two.
           </p>
@@ -465,7 +498,7 @@ function PlansSection({
             {intentNote}
           </p>
         )}
-        {founding.available && !subscribed && (
+        {founding.available && !subscribed && !actionsNote && (
           <div
             className={clsx(
               'mt-4 flex flex-wrap items-center justify-between gap-3 border border-dashed border-signal px-4 py-3',
@@ -496,7 +529,7 @@ function PlansSection({
               key={plan.id}
               plan={plan}
               cycle={cycle}
-              action={planRowAction(plan.id, currentPlan, subscribed)}
+              action={planRowAction(plan.id, currentPlan, subscribed, !actionsNote)}
               busy={busy === plan.id}
               onBuy={(p, seats) => buy(p.id, p.per_seat, seats)}
               onManage={onPortal}
@@ -574,6 +607,7 @@ export function Billing() {
   const plans = useResource('billing-plans', () => api.getPlans());
   const [error, setError] = useState<string | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
+  const actionsNote = billingActionsNote(api.getAuthMode());
 
   const openPortal = async () => {
     setPortalBusy(true);
@@ -611,7 +645,7 @@ export function Billing() {
           {error}
         </p>
       )}
-      {summary.data && <PeriodCard summary={summary.data} onPortal={openPortal} portalBusy={portalBusy} />}
+      {summary.data && <PeriodCard summary={summary.data} onPortal={actionsNote ? undefined : openPortal} portalBusy={portalBusy} />}
       {!summary.data && summary.error != null && metered && (
         <div className="rr-card rounded-[3px]">
           <ErrorNotice error={summary.error} what="your usage" onRetry={summary.refresh} />
@@ -628,6 +662,7 @@ export function Billing() {
           plans={plans.data}
           currentPlan={currentPlan}
           subscribed={summary.data?.subscription_active === true}
+          actionsNote={actionsNote}
           onPortal={openPortal}
           onError={setError}
         />

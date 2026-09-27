@@ -76,6 +76,18 @@ if TYPE_CHECKING:
 _AGENT_HEADER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$")
 _warned_agent_ids: set[str] = set()
 
+# Servers before 0.16.1 deleted the whole account for DELETE /api/v1/memories?entity=...
+ENTITY_DELETE_MIN_SERVER = (0, 16, 1)
+_SERVER_VERSION_RE = re.compile(r"^\s*v?(\d+)\.(\d+)(?:\.(\d+))?")
+
+
+def _server_version(version: Any) -> tuple[int, int, int] | None:
+    """``(major, minor, patch)`` from a server version string, or None."""
+    match = _SERVER_VERSION_RE.match(str(version or ""))
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
+
 
 def _header_agent_id(agent: str | None) -> str | None:
     """The agent id to send in ``X-Remembra-Agent-Id``, or None.
@@ -538,47 +550,77 @@ class Memory:
     def forget(
         self,
         memory_id: str | None = None,
-        user_id: str | None = None,
+        *,
         entity: str | None = None,
+        project_id: str | None = None,
+        all_memories: bool = False,
     ) -> ForgetResult:
         """
         Forget (delete) memories.
 
-        GDPR-compliant deletion of memories. At least one filter
-        must be provided.
+        GDPR-compliant deletion. Give exactly one of ``memory_id``,
+        ``entity`` or ``all_memories=True``; nothing is sent otherwise. The
+        server deletes only the authenticated account's memories. To delete
+        every memory in one project use ``forget_project(project_id)``.
 
         Args:
-            memory_id: Delete a specific memory
-            user_id: Delete all memories for a user (defaults to current user)
-            entity: Delete all memories about an entity (coming soon)
+            memory_id: Delete this one memory.
+            entity: Delete the memories linked to the entity with this exact
+                name or alias (any case), in every project unless
+                ``project_id`` is given, then the entity itself once no memory
+                mentions it. Memories that name the entity but were never
+                linked to it (entity extraction off) are not deleted.
+            project_id: With ``entity`` only: limit the delete to this project.
+            all_memories: Delete every memory, entity and relationship in the
+                account. Only this flag deletes everything; it is never implied.
 
         Returns:
-            ForgetResult with counts of deleted items
+            ForgetResult with the counts the server deleted
+
+        Raises:
+            MemoryError: No target, more than one, a blank ``entity`` or
+                ``project_id``, or ``project_id`` without ``entity`` (nothing
+                is sent); ``entity`` against a server older than 0.16.1,
+                which would delete the whole account for it (nothing is
+                sent); or the server refused the delete.
 
         Example:
-            >>> result = memory.forget(user_id="user_123")
+            >>> memory.forget(memory_id="mem_abc123")
+            >>> result = memory.forget(entity="John", project_id="work")
             >>> print(f"Deleted {result.deleted_memories} memories")
         """
-        params: dict[str, str] = {}
+        if entity is not None and not entity.strip():
+            raise MemoryError("forget(entity=...) needs a non-blank entity name")
+        targets = [
+            name for name, given in (("memory_id", memory_id), ("entity", entity), ("all_memories", all_memories)) if given
+        ]
+        if len(targets) != 1:
+            raise MemoryError(
+                "forget() needs exactly one of memory_id, entity or all_memories=True"
+                + (f" (got {', '.join(targets)})" if targets else "")
+                + ". To delete one project use forget_project(project_id)."
+            )
+        if project_id is not None and not entity:
+            raise MemoryError("forget(project_id=...) only limits an entity delete. Use forget_project(project_id).")
+        if project_id is not None and not project_id.strip():
+            raise MemoryError("forget(project_id=...) needs a non-blank project id")
 
+        params: dict[str, str] = {}
         if memory_id:
             params["memory_id"] = memory_id
             # v0.12: Invalidate shadow cache for deleted memory
             if self._shadow_cache is not None:
                 self._shadow_cache.invalidate(memory_id)
-        elif user_id:
-            params["user_id"] = user_id
-            # Clear entire cache when bulk deleting by user
-            if self._shadow_cache is not None:
-                self._shadow_cache.clear()
         elif entity:
-            params["entity"] = entity
+            self._require_safe_entity_delete()
+            params["entity"] = entity.strip()
+            if project_id is not None:
+                params["project_id"] = self._project(project_id)
             # Clear cache on entity deletion (conservative)
             if self._shadow_cache is not None:
                 self._shadow_cache.clear()
         else:
-            # Default to current user
-            params["user_id"] = self.user_id
+            params["all_memories"] = "true"
             if self._shadow_cache is not None:
                 self._shadow_cache.clear()
 
@@ -589,6 +631,19 @@ class Memory:
             deleted_entities=data.get("deleted_entities", 0),
             deleted_relationships=data.get("deleted_relationships", 0),
         )
+
+    def _require_safe_entity_delete(self) -> None:
+        """Refuse a delete by entity when the server would delete the whole account for it (before 0.16.1)."""
+        try:
+            version = self.health().get("version")
+        except MemoryError as exc:
+            raise MemoryError(f"Not sent: could not read the server version before a delete by entity ({exc})") from exc
+        parsed = _server_version(version)
+        if parsed is None or parsed < ENTITY_DELETE_MIN_SERVER:
+            raise MemoryError(
+                f"Not sent: the server reports {version or 'no version'}, and a server before 0.16.1 deletes every "
+                "memory in the account for a delete by entity. Upgrade the server, or delete by memory_id."
+            )
 
     def health(self) -> dict[str, Any]:
         """

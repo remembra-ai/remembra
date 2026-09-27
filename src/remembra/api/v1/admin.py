@@ -444,8 +444,12 @@ async def remove_role(
     summary="List all available permissions",
 )
 @limiter.limit("60/minute")
-async def list_permissions(request: Request) -> dict[str, Any]:
-    """List all available permissions and default role mappings."""
+async def list_permissions(
+    request: Request,
+    current_user: CurrentUser,
+    _perm: RequireAdmin,
+) -> dict[str, Any]:
+    """List all available permissions and default role mappings (admin only, like every route here)."""
     return {
         "permissions": [p.value for p in Permission],
         # The enforced mapping (single source of truth): ADMIN excludes the human-only

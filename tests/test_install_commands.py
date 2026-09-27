@@ -51,10 +51,70 @@ def test_landing_and_relay_guide_use_the_dashboard_package_spec() -> None:
     assert pipx == MCP_INSTALL  # the hint remembra-mcp prints when the extra is missing
 
 
+def _first_run() -> list[str]:
+    """The public pages' first run: save the key first, then write the hooks (never a dry run last).
+
+    Same steps as the dashboard's oneLineInstall(), without --url: remembra-install defaults to Remembra
+    Cloud for a new user and keeps a self-hoster's saved server on a re-run, which a hard-coded --url on a
+    marketing page would overwrite. The dashboard knows the user's server, so it passes --url."""
+    ts = AGENTS_TS.read_text()
+    assert "${saveKeyCommand(serverUrl)} && remembra-relay connect --apply" in ts
+    return [_dashboard_pipx(), "remembra-install --all", "remembra-relay connect --apply"]
+
+
+def test_every_copyable_install_block_is_key_first_and_applies() -> None:
+    """A new visitor who copies the block and runs it ends up connected: the key is saved at a hidden
+    prompt, then connect --apply writes the hooks. A bare `connect` last is a dry run that writes nothing,
+    and the dashboard would show every agent as waiting."""
+    expected = _first_run()
+    seen = 0
+    for page in ("index.html", "crew.html", "changelog.html"):
+        text = (ROOT / "landing" / page).read_text()
+        for m in re.finditer(r'<div class="cmd" role="group" aria-label="Install commands">(.*?)</div>', text, re.S):
+            seen += 1
+            block = m.group(1)
+            shown = [
+                " ".join(html.unescape(re.sub(r"<[^>]+>", " ", ln)).replace("$", "", 1).split())
+                for ln in re.findall(r'<span class="ln">(.*?)</span></span>', block)
+            ]
+            assert shown == expected, (page, shown)
+            copy = re.search(r'data-copy="([^"]*)"', block)
+            if copy:
+                assert html.unescape(copy.group(1)).split("\n") == expected, page
+            if page != "changelog.html":
+                # The key comes first: the signup link sits right above the block.
+                before = text[: m.start()]
+                lead = before[before.rfind("<p ") :]
+                assert 'class="cmd-meta cmd-lead"' in lead and "https://app.remembra.dev/signup" in lead, page
+    assert seen == 4  # index hero, index closing band, crew, changelog
+    docs_home = (ROOT / "docs" / "index.md").read_text()
+    block = re.search(r"```bash\n(.*?)```", docs_home, re.S)
+    assert block and block.group(1).strip().splitlines() == expected
+    assert docs_home.index("app.remembra.dev/signup") < docs_home.index("```bash")
+
+
+def test_the_agent_setup_guide_runs_the_same_first_run_key_first() -> None:
+    """remembra.dev/setup.md, which the hero's "your agent" prompt points at: the key step comes before any
+    install, each of the three lines is its own step (the user runs remembra-install, at its hidden prompt),
+    and its one-block summary is the same three lines as every other page."""
+    expected = _first_run()
+    setup = (ROOT / "landing" / "setup.md").read_text()
+    blocks = [b.strip().splitlines() for b in re.findall(r"```bash\n(.*?)```", setup, re.S)]
+    assert expected in blocks  # the summary block
+    for line in expected:
+        assert [line] in blocks, line  # and each line as its own step
+    at = [setup.index(f"\n{line}\n") for line in expected]  # each as a command line of its own step
+    assert setup.index("https://app.remembra.dev/signup") < at[0] < at[1] < at[2]
+    llms = (ROOT / "landing" / "llms.txt").read_text()
+    assert f"`{expected[0]}`" in llms and "`remembra-relay connect --apply`" in llms
+
+
 def _pages() -> list[Path]:
-    """Every page a user copies an install line from: the landing site, the docs, README and CHANGELOG."""
+    """Every page a user (or their agent) copies an install line from: the landing site and the files it serves
+    to agents, the docs, README and CHANGELOG."""
     return [
         *sorted((ROOT / "landing").glob("*.html")),
+        *(ROOT / "landing" / name for name in ("setup.md", "llms.txt", "llms-full.txt")),
         *sorted((ROOT / "docs").rglob("*.md")),
         ROOT / "README.md",
         ROOT / "CHANGELOG.md",
@@ -67,6 +127,9 @@ def _lines(page: Path) -> list[str]:
         # One line per rendered command line: tags stripped, entities decoded.
         text = re.sub(r"</span>\s*<span class=\"ln\">", "\n", text)
         text = html.unescape(re.sub(r"<[^>]+>", " ", text))
+    elif page.parent.name == "landing":
+        # Agent files: an inline `command` in prose is a line of its own too.
+        text += "\n" + "\n".join(re.findall(r"`([^`\n]+)`", text))
     return [" ".join(line.split()) for line in text.splitlines()]
 
 
@@ -97,14 +160,21 @@ def test_no_install_command_puts_the_key_on_the_command_line() -> None:
                 raise AssertionError(where)
 
 
+VERIFIED = ["claude-code", "codex", "gemini", "kimi", "qwen"]  # sorted; Cursor is the one unverified adapter
+
+
 def test_every_page_names_the_same_verified_agents() -> None:
-    """Claude Code and Codex are the verified adapters (relay/adapters); no page may still call Codex unverified."""
+    """The verified adapters (relay/adapters) are named the same on the dashboard and every current page.
+
+    Claude Code and Codex, then Gemini CLI, Qwen Code and Kimi Code once each was run against the real
+    tool; no page may still call one of those unverified. The changelogs keep what each release said.
+    """
     from remembra.relay.adapters import REGISTRY
 
-    assert sorted(a.spec.name for a in REGISTRY.values() if a.spec.verified) == ["claude-code", "codex"]
+    assert sorted(a.spec.name for a in REGISTRY.values() if a.spec.verified) == VERIFIED
     dashboard = AGENTS_TS.read_text()
     verified_ids = re.findall(r"'?([\w-]+)'?: \{[^}]*verified: true", dashboard)
-    assert sorted(verified_ids) == ["claude-code", "codex"]
+    assert sorted(verified_ids) == VERIFIED
     stale = [
         "hooks for Codex, Cursor",
         "Codex, Cursor, Gemini CLI, Qwen Code, Kimi | unverified",
@@ -112,11 +182,22 @@ def test_every_page_names_the_same_verified_agents() -> None:
         "Codex, Cursor, Gemini CLI, Qwen Code and Kimi shipped unverified",
         "Claude Code's session hooks are verified. The hooks for Codex",
     ]
+    current = [
+        "Cursor, Gemini CLI, Qwen Code, Kimi | unverified",
+        "The hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified",
+        "hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified",
+    ]
     for page in _pages():
         text = " ".join(html.unescape(page.read_text()).split())
-        for phrase in stale:
+        for phrase in stale + ([] if "changelog" in page.name.lower() else current):
             assert phrase not in text, f"{page.relative_to(ROOT)}: {phrase}"
     for page in ("README.md", "docs/index.md", "docs/reference/changelog.md", "CHANGELOG.md", "landing/changelog.html"):
         text = " ".join(html.unescape((ROOT / page).read_text()).split())
         assert "Codex" in text and "codex-cli 0.155.0-alpha.16.4" in text, page
+    for page in ("README.md", "docs/index.md", "landing/index.html", "docs/guides/relay.md"):
+        text = " ".join(html.unescape((ROOT / page).read_text()).split())
+        assert all(v in text for v in ("Gemini CLI 0.61.0", "Qwen Code 0.24.6", "Kimi Code 2.1.1")), page
+        assert "The Cursor hooks are unverified" in text or "| Cursor IDE |" in text, page
+    for page in ("docs/reference/changelog.md", "CHANGELOG.md", "landing/changelog.html"):  # the 0.16 notes, as released
+        text = " ".join(html.unescape((ROOT / page).read_text()).split())
         assert "Cursor, Gemini CLI, Qwen Code" in text and "unverified" in text, page

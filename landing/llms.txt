@@ -1,0 +1,43 @@
+# Remembra
+
+> Remembra is one cloud memory for your AI agents. When one runs out of credits or hits a usage limit, end its session and the next one picks up from its handoff: on another machine, from another vendor, or next week.
+
+When a session ends, Remembra keeps the facts, not the chatter: commits, changed files, tests that passed or failed, what is still open. Secrets are redacted first. Open another connected agent, on this machine or another. It starts with a short brief: who worked last, what is done, what is not, what is failing, and the next step. Handoffs, pickups, inbox, trail and search are always free.
+
+## Instructions for agents
+
+- Set up Remembra Relay on this machine. Read https://remembra.dev/setup.md first and follow it. Ask the user before each step that installs or writes anything.
+- Never ask for the API key in this chat. The user types it into remembra-install's hidden prompt, in their own terminal.
+- `pipx install --force 'remembra[mcp]>=0.16'`. Keep the quotes: zsh reads the brackets as a pattern without them.
+- Never edit hook files by hand. `remembra-relay connect --apply` writes them and keeps a backup of each file. `remembra-relay connect` without `--apply` is a dry run: it shows the changes and writes nothing.
+- Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. Codex runs a hook only after the user trusts it. Codex skips untrusted hooks without a message. The hooks for Cursor are unverified: they follow Cursor's docs but have not been run against it yet.
+- Whenever handoffs don't arrive, run `remembra-relay doctor`. Doctor reads this machine's files and the trail, changes nothing and prints the one fix for each problem.
+- Windows setup has not been tested.
+- Crew mode, several agents on one project at once, is not available yet.
+- Quote prices only from https://remembra.dev/pricing. Never compute them.
+
+## Setup
+
+- [Setup guide for agents](https://remembra.dev/setup.md): every step in order, with the stops where the user acts
+
+## Pages
+
+- [Home](https://remembra.dev/): what Remembra Relay does and which agents it connects
+- [Pricing](https://remembra.dev/pricing): plans, limits and short answers
+- [Security](https://remembra.dev/security): what Remembra does today and what it doesn't do yet
+- [Subprocessors](https://remembra.dev/subprocessors): every company that handles data, what it gets and where
+- [Privacy](https://remembra.dev/privacy): what is collected, who handles it and how long it is kept
+- [Refunds](https://remembra.dev/refunds): 14 days on the first payment
+- [Contact](https://remembra.dev/contact): a person, when the pages don't answer
+- [The pages above as text](https://remembra.dev/llms-full.txt): one file, generated from the pages
+
+## Docs
+
+- [Relay guide](https://docs.remembra.dev/guides/relay/): setup, the CLI, reading the brief, uninstalling
+- [Plans and credits](https://docs.remembra.dev/reference/plans-and-credits/): limits and what uses credits
+- [Claude and ChatGPT apps](https://docs.remembra.dev/integrations/claude-and-chatgpt-apps/): the connector (coming, not live yet)
+
+## Optional
+
+- [Changelog](https://remembra.dev/changelog)
+- [Source code, MIT](https://github.com/remembra-ai/remembra)

@@ -1,27 +1,36 @@
-"""Cursor IDE agent hooks (UNVERIFIED): ``~/.cursor/hooks.json`` sessionStart / sessionEnd.
+"""Cursor, IDE and cursor-agent CLI (UNVERIFIED): ``~/.cursor/hooks.json`` sessionStart / sessionEnd.
 
-Docs: https://cursor.com/docs/agent/hooks (accessed 2026-09-25). Not run: no
-Cursor build with hooks was available where this was written. The payload
-fixtures in tests/fixtures/relay/cursor/ are built from the docs, not recorded.
-
-From the docs:
+Docs: https://cursor.com/docs/agent/hooks and https://cursor.com/docs/cli/changelog
+(accessed 2026-09-26). Run: cursor-agent 2026.09.26-dd393fe (the package the
+vendor's install script downloads), whose own hook code (the config loader and
+hook executor from its bundle) was driven by a harness exactly as the CLI's
+run loop calls it; a logged-in session could not be run, so the adapter stays
+unverified. The payloads in tests/fixtures/relay/cursor/ are that run's.
 
 - ``{"version": 1, "hooks": {"sessionStart": [{"command": ..., "timeout": N}]}}``,
-  ``timeout`` in seconds.
+  ``timeout`` in seconds. Both the IDE and the cursor-agent CLI run this file.
+  Cursor reads it as JSON with comments.
 - Every hook gets ``conversation_id``, ``generation_id``, ``model``,
   ``hook_event_name``, ``cursor_version``, ``workspace_roots``,
-  ``user_email`` and ``transcript_path`` (nullable). sessionStart and
-  sessionEnd add ``session_id``; sessionEnd adds ``reason`` (completed /
-  aborted / error / window_close / user_close) and ``duration_ms``.
-- sessionStart may return ``{"additional_context": ...}``, added to the
-  conversation's initial system context. Both hooks are fire-and-forget: the
-  agent loop does not wait for them. So the brief can miss the first turn, and
-  ``close`` detaches so a closing window does not cut it off.
-- Hooks get ``CURSOR_PROJECT_DIR`` (workspace root).
-
-The cursor-agent CLI: the docs say "the Cursor CLI also runs hooks", but it
-has not been run here. Treat the CLI as MCP-only (``session_brief`` /
-``close_session``) until it is.
+  ``user_email`` and ``transcript_path`` (null in the CLI run), and no
+  ``cwd``. sessionStart and sessionEnd add ``session_id`` (equal to
+  ``conversation_id``); sessionEnd adds ``reason`` and ``final_status``
+  (completed / aborted / error in the CLI; the IDE docs add window_close /
+  user_close) and ``duration_ms``. Hooks run in ``~/.cursor`` and get
+  ``CURSOR_PROJECT_DIR`` (the workspace root), ``CURSOR_VERSION`` and
+  ``CLAUDE_PROJECT_DIR``.
+- sessionStart may return ``{"additional_context": ...}``. The CLI fires it for
+  new chats only (not ``--resume`` / ``--continue``) and waits for that context
+  before its first request, so the brief reaches the first turn. The IDE docs
+  still call sessionStart fire-and-forget: there the brief may miss the first
+  turn. ``close`` detaches, so a closing window does not cut it off, and prints
+  ``{}``: Cursor logs a hook with empty stdout as failed.
+- Cursor also runs the user's Claude Code hooks (``~/.claude/settings.json``)
+  with this same payload; the relay files those under ``cursor``, not
+  ``claude-code`` (:mod:`remembra.relay.hosts`, marker ``cursor_version``).
+  Claude's SessionStart / SessionEnd / PreCompact run as Cursor's
+  sessionStart / sessionEnd / preCompact; preCompact carries ``trigger``
+  (auto / manual), so that close is filed as saved before a compaction.
 """
 
 from __future__ import annotations
@@ -36,7 +45,7 @@ from remembra.relay.adapters.crew_hooks import CrewHook, CrewSpec, ToolFields
 
 SPEC = AdapterSpec(
     name="cursor",
-    display="Cursor IDE (agent hooks)",
+    display="Cursor (IDE + cursor-agent)",
     verified=False,
     config_path=lambda home: Path(home) / ".cursor" / "hooks.json",
     start_event="sessionStart",
@@ -47,6 +56,9 @@ SPEC = AdapterSpec(
         transcript=("transcript_path",),
         reason=("reason",),
         env_cwd=("CURSOR_PROJECT_DIR",),
+        # Cursor runs Claude Code's PreCompact hook as its preCompact (with ``trigger``): routed
+        # here, that close is filed as "pre-compact:<trigger>", a session still open.
+        compact_events=("preCompact", "PreCompact"),
     ),
     output="cursor-json",
     detect_bins=("cursor-agent", "cursor"),
@@ -55,8 +67,8 @@ SPEC = AdapterSpec(
     timeout_unit="s",
     detach_close=True,
     notes=(
-        "Unverified: built from the Cursor hook docs and doc-derived payloads; not yet run in Cursor. "
-        "The cursor-agent CLI is untested: use the MCP tools there."
+        "Unverified: cursor-agent 2026.09.26's own hook runner fired these hooks (brief returned, close stored), "
+        "but no logged-in Cursor session has run them yet. The CLI gives a brief to new chats only, not --resume."
     ),
 )
 
@@ -70,7 +82,7 @@ class CursorHooksAdapter(Adapter):
         return entry
 
     def render(self, before: str | None, relay: str) -> tuple[str, list[str]]:
-        data = _load_json_object(before, str(self.spec.config_path))
+        data = _load_json_object(before, f"the {self.spec.display} config")
         new: dict[str, Any] = copy.deepcopy(data)
         new.setdefault("version", 1)
         hooks = new.setdefault("hooks", {})
@@ -92,7 +104,7 @@ class CursorHooksAdapter(Adapter):
         return json.dumps(new, indent=2, ensure_ascii=False) + "\n", summary
 
     def render_removal(self, before: str) -> tuple[str, list[str], bool]:
-        data = _load_json_object(before, str(self.spec.config_path))
+        data = _load_json_object(before, f"the {self.spec.display} config")
         hooks = data.get("hooks")
         if not isinstance(hooks, dict):
             return before, [], False

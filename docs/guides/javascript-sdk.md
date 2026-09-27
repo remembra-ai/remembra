@@ -145,18 +145,34 @@ console.log(detail.access_count);
 
 ### forget()
 
-Delete memories (GDPR-compliant).
+Delete memories. They leave the database and the vector store at once; copies in backups age out (see Retention on [remembra.dev/security](https://remembra.dev/security#retention)).
 
 ```typescript
 // By ID
 await memory.forget({ memoryId: '01HQ...' });
 
-// By entity
-await memory.forget({ entity: 'Acme Corp' });
+// The memories linked to an entity, in one project
+await memory.forget({ entity: 'John', projectId: 'work' });
 
-// All memories (careful!)
-await memory.forget({ all: true });
+// Everything in the account (explicit only)
+await memory.forget({ allMemories: true });
 ```
+
+Give exactly one of `memoryId`, `entity` or `allMemories: true`. Any other call throws a `ValidationError` and
+sends nothing: no call deletes everything unless it says `allMemories: true`. The server deletes only the
+memories of the account your API key belongs to.
+
+- `entity` deletes the memories that entity extraction linked to the entity with that exact name or alias (any
+  case; never a partial name), in every project, or only in `projectId` when you pass it. The entity and its
+  relationships go too once no memory mentions it. A memory that names the entity but was never linked to it
+  stays.
+- `allMemories: true` deletes every memory, entity and relationship in the account. A project-scoped API key
+  cannot use it.
+
+!!! warning "Servers before 0.16.1"
+    A server before 0.16.1 deleted every memory in the account for a delete by `entity`. `forget({ entity })`
+    reads the server version from `/health` first and throws a `RemembraError` with code `SERVER_TOO_OLD`,
+    deleting nothing, when the server is older than 0.16.1 or does not report a version.
 
 **Returns:** `ForgetResult`
 

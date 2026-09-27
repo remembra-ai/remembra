@@ -16,11 +16,22 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urlsplit
 
 KIND_GIT = "git"
 KIND_ROOT = "root"
 KIND_PATH = "path"
+
+# Which new locations a configured project (``hint_project``) may name. A client
+# that sends nothing gets ``all``: the 0.16.0 behaviour, where every location the
+# server had not seen joined the configured project. ``folders`` (sent by 0.16.1+
+# clients unless the user opted into one namespace with REMEMBRA_RELAY_PROJECT):
+# a git repository always gets its own project, and the configured project only
+# names locations that are not git repositories.
+HINT_SCOPE_ALL = "all"
+HINT_SCOPE_FOLDERS = "folders"
+HINT_SCOPES = (HINT_SCOPE_ALL, HINT_SCOPE_FOLDERS)
 
 _SCP_RE = re.compile(r"^(?:(?P<user>[^@/\s]+)@)?(?P<host>[A-Za-z0-9.\-]+):(?!//)(?P<path>.+)$")
 _SHA_RE = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
@@ -162,3 +173,45 @@ class ProjectLocator:
 
     def is_empty(self) -> bool:
         return not self.fingerprints()
+
+    def is_repository(self, git_repo: bool | None = None) -> bool:
+        """True for a git repository: it has a remote or a root commit, or the client said so
+        (``git_repo``: a repository with no commit and no remote yet has only its path)."""
+        return git_repo is True or any(fp.kind in (KIND_GIT, KIND_ROOT) for fp in self.fingerprints())
+
+
+def location_record(locator: ProjectLocator, git_repo: bool | None = None) -> dict[str, Any] | None:
+    """What a handoff keeps about where its session worked (None without any fingerprint).
+
+    ``fingerprints`` are the keys ``project_fingerprints`` uses, so a handoff can
+    be matched to a binding exactly; ``repository`` is the one naming the
+    repository (None for a folder); ``name``, ``root_path`` and ``host`` are
+    for people reading the brief. ``git_repo`` is True for a repository, False
+    for a folder the client said is not one, and None when that is unknown (a
+    path alone from a client that did not say, or whose git timed out).
+    """
+    keys = [fp.key for fp in locator.fingerprints()]
+    if not keys:
+        return None
+    repo: bool | None = True if locator.is_repository(git_repo) else (False if git_repo is False else None)
+    return {
+        "fingerprints": keys,
+        "repository": repository_key(keys),
+        "name": locator.display_name(),
+        "root_path": (locator.root_path or "").strip() or None,
+        "host": (locator.host or "").strip().lower() or None,
+        "git_repo": repo,
+    }
+
+
+def repository_key(fingerprint_keys: list[str] | tuple[str, ...] | set[str]) -> str | None:
+    """The key that names a repository among fingerprint keys: its git remote, else its root commit.
+
+    None for a folder (only a path). Two checkouts of one repository share it.
+    """
+    keys = list(fingerprint_keys)
+    for kind in (KIND_GIT, KIND_ROOT):
+        for key in keys:
+            if key.startswith(f"{kind}:"):
+                return key
+    return None

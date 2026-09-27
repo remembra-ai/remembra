@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkoutRoute, foundingSeatNote, planRowAction } from '../checkout';
+import { billingActionsNote, checkoutRoute, foundingSeatNote, planRowAction } from '../checkout';
 import type { BillingClientConfigResponse } from '../api';
 
 const config = (extra: Partial<BillingClientConfigResponse> = {}): BillingClientConfigResponse => ({
@@ -63,5 +63,20 @@ describe('foundingSeatNote', () => {
     );
     expect(foundingSeatNote({ ...offer, remaining: 12 }, day)).toBe('12 left');
     expect(foundingSeatNote({ ...offer, remaining: null }, day)).toBeNull();
+  });
+});
+
+describe('API-key sign-in (BILL-3 review)', () => {
+  it('shows plans but offers no checkout or portal to an API-key session', () => {
+    expect(planRowAction('pro', 'free', false, false)).toBe('view');
+    expect(planRowAction('pro', 'solo', true, false)).toBe('view');
+    expect(planRowAction('solo', 'solo', true, false)).toBe('current');
+    expect(planRowAction('pro', 'free', false, true)).toBe('buy');
+  });
+
+  it('tells an API-key session to sign in with email, and nobody else', () => {
+    expect(billingActionsNote('api_key')).toMatch(/sign in with your email/i);
+    expect(billingActionsNote('jwt')).toBeNull();
+    expect(billingActionsNote('none')).toBeNull();
   });
 });

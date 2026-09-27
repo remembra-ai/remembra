@@ -221,22 +221,47 @@ def canonical_json(text: str) -> str | None:
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
-_JSONC_TOKEN_RE = re.compile(r'"(?:[^"\\]|\\.)*"|//[^\n]*|/\*.*?\*/|,(?=\s*[}\]])', re.S)
+# Strings first in each alternation, so a "//" or "," inside a string is kept.
+_JSONC_COMMENT_RE = re.compile(r'"(?:[^"\\]|\\.)*"|//[^\n]*|/\*.*?\*/', re.S)
+_JSONC_TRAILING_COMMA_RE = re.compile(r'"(?:[^"\\]|\\.)*"|,(?=\s*[}\]])', re.S)
 
 
-def _strip_jsonc(text: str) -> str:
-    """JSON with ``//`` and ``/* */`` comments and trailing commas made plain JSON (strings untouched)."""
-    return _JSONC_TOKEN_RE.sub(lambda m: m.group(0) if m.group(0).startswith('"') else "", text)
+def _keep_strings(match: re.Match[str]) -> str:
+    return match.group(0) if match.group(0).startswith('"') else ""
+
+
+def strip_jsonc(text: str) -> str:
+    """JSON with ``//`` and ``/* */`` comments and trailing commas made plain JSON (strings untouched).
+
+    Comments go first, so a trailing comma followed by a comment is also removed.
+    """
+    return _JSONC_TRAILING_COMMA_RE.sub(_keep_strings, _JSONC_COMMENT_RE.sub(_keep_strings, text))
+
+
+def loads_jsonc(text: str) -> tuple[Any, bool]:
+    """``text`` parsed as JSON, and whether that needed :func:`strip_jsonc`.
+
+    A leading byte order mark is dropped. Comments and trailing commas are
+    accepted the way Cursor (``hooks.json``), Gemini CLI and Qwen Code
+    (``settings.json``) accept them. When neither reading parses, the error of
+    the plain-JSON reading is raised (``json.JSONDecodeError``, a ValueError),
+    so its message points at the first problem in the file as written.
+    """
+    text = text.removeprefix("﻿")
+    try:
+        return json.loads(text), False
+    except json.JSONDecodeError as plain:
+        try:
+            return json.loads(strip_jsonc(text)), True
+        except json.JSONDecodeError:
+            raise plain from None
 
 
 def _json_view(text: str, keys: tuple[str, ...]) -> str | None:
     try:
-        data = json.loads(text)
+        data, _ = loads_jsonc(text)
     except ValueError:
-        try:
-            data = json.loads(_strip_jsonc(text))
-        except ValueError:
-            return None
+        return None
     if not isinstance(data, (dict, list)):
         return None
     return json.dumps(_view(data, keys, in_block=False), indent=2, ensure_ascii=False) + "\n"

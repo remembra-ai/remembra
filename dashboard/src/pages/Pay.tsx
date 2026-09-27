@@ -3,7 +3,7 @@ import { AlertTriangle, CreditCard, Loader2 } from 'lucide-react';
 import { API_V1 } from '../config';
 import { BrandMark } from '../components/relay/ui';
 import type { BillingClientConfigResponse } from '../lib/api';
-import { initPaddle, paddleGlobal, paymentLinkTransaction } from '../lib/paddle';
+import { initPaddle, paddleGlobal, paymentLinkTransaction, transactionCheckoutOptions } from '../lib/paddle';
 
 type Phase = { kind: 'loading' } | { kind: 'open'; txn: string } | { kind: 'error'; message: string };
 
@@ -55,7 +55,7 @@ export function Pay() {
   }, [txn]);
 
   const reopen = () => {
-    if (phase.kind === 'open') paddleGlobal()?.Checkout.open({ transactionId: phase.txn });
+    if (phase.kind === 'open') paddleGlobal()?.Checkout.open(transactionCheckoutOptions(phase.txn));
   };
 
   return (

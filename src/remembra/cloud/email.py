@@ -490,3 +490,9 @@ class EmailService:
             to,
             templates.identity_linked(dashboard=self.dashboard, provider_name=provider_name, provider_email=provider_email),
         )
+
+    async def send_account_review_email(self, to: str, *, kept: list[str], removed: list[str]) -> EmailResult:
+        return await self.send_rendered(
+            to,
+            templates.account_review_done(dashboard=self.dashboard, kept=kept, removed=removed),
+        )

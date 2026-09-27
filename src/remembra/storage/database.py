@@ -20,6 +20,29 @@ from remembra.storage.sqlite_tx import AfterCommit, GuardedConnection, TxCoordin
 
 log = structlog.get_logger(__name__)
 
+# SQL condition on ``entities e``, bound as (user_id, name, name): the entity
+# belongs to the user and its canonical name or one of its aliases equals the
+# name, ignoring case. Never a substring or a LIKE pattern, so "%" or "Jo"
+# match nothing. The timeline's entity filter and a delete by entity share it.
+ENTITY_NAME_MATCH = """
+    e.user_id = ?
+    AND (
+        lower(e.canonical_name) = lower(?)
+        OR (
+            e.aliases IS NOT NULL AND json_valid(e.aliases)
+            AND EXISTS (SELECT 1 FROM json_each(e.aliases) WHERE lower(json_each.value) = lower(?))
+        )
+    )
+"""
+
+# Largest IN (...) list bound in one statement.
+_IN_CHUNK = 500
+
+
+def _chunks(ids: list[str]) -> list[list[str]]:
+    return [ids[i : i + _IN_CHUNK] for i in range(0, len(ids), _IN_CHUNK)]
+
+
 # How long a statement waits on a lock held by ANOTHER connection/process
 # (litestream checkpoints, CLI tools) before raising "database is locked".
 SQLITE_BUSY_TIMEOUT_MS = 5000
@@ -192,6 +215,27 @@ async def backfill_agent_inbox_projects(conn: Any) -> int:
     log.info("agent_inbox_project_backfill", rows=updated)
     return updated
 
+
+# One row per account whose mailbox was proven after credentials were set up
+# on it (migration 10). ``review_id`` is carried as the ``rvw`` claim of the
+# sessions that proved the mailbox; only those may finish the review.
+# ``trusted_identities`` is a JSON list of "provider:subject": the exact
+# provider accounts that proved the mailbox (never "any link at that provider").
+ACCOUNT_REVIEWS_DDL = """
+CREATE TABLE IF NOT EXISTS account_reviews (
+    user_id TEXT PRIMARY KEY,
+    review_id TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    verified_at TEXT NOT NULL,
+    verified_at_ms INTEGER NOT NULL,
+    password_status TEXT NOT NULL DEFAULT 'untrusted',
+    totp_status TEXT NOT NULL DEFAULT 'none',
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    completed_by TEXT,
+    trusted_identities TEXT NOT NULL DEFAULT '[]'
+)
+"""
 
 # Versioned migrations (REL-15). Each entry runs once, inside a transaction,
 # and is recorded in schema_version. Append only — never edit an applied entry.
@@ -366,6 +410,18 @@ VERSIONED_MIGRATIONS: list[Migration] = [
             # pool's rows from idx_memories_user and subtracts the relay-written
             # ones, found through this index instead of reading every row.
             "CREATE INDEX IF NOT EXISTS idx_memories_user_type ON memories(user_id, memory_type)",
+        ],
+    ),
+    (
+        10,
+        "account_reviews",
+        [
+            # The first proof that the account holder owns its mailbox (Sign in
+            # with Google on an account whose email was never verified, or an
+            # emailed password reset on one) opens a one-time review of the
+            # credentials set up before it. Nothing is revoked until the owner
+            # chooses; see remembra.auth.account_review.
+            ACCOUNT_REVIEWS_DDL,
         ],
     ),
 ]
@@ -1895,6 +1951,119 @@ class Database:
             )
         return cursor.rowcount
 
+    async def find_entity_memory_ids(self, user_id: str, name: str, project_id: str | None = None) -> list[str]:
+        """Ids of the user's memories linked to an entity called ``name``.
+
+        ``name`` matches an entity's canonical name or one of its aliases
+        exactly, ignoring case (``ENTITY_NAME_MATCH``). Only the user's own
+        entities and memories are considered; with ``project_id`` only memories
+        in that project.
+        """
+        name = name.strip()
+        if not user_id or not name:
+            return []
+        query = f"""
+            SELECT DISTINCT m.id
+            FROM memories m
+            JOIN memory_entities me ON me.memory_id = m.id
+            JOIN entities e ON e.id = me.entity_id
+            WHERE m.user_id = ? AND {ENTITY_NAME_MATCH}
+        """
+        params: list[Any] = [user_id, user_id, name, name]
+        if project_id:
+            query += " AND m.project_id = ?"
+            params.append(project_id)
+        cursor = await self.conn.execute(query + " ORDER BY m.id", params)
+        return [row[0] for row in await cursor.fetchall()]
+
+    async def delete_entity_memories(
+        self,
+        user_id: str,
+        name: str,
+        memory_ids: list[str],
+        project_id: str | None = None,
+    ) -> tuple[int, int, int]:
+        """Delete the user's memories about entity ``name``, then the entity if nothing else mentions it.
+
+        ``memory_ids`` comes from :meth:`find_entity_memory_ids`; only those of
+        them the user owns are deleted, with their entity links, FTS rows,
+        relay pickups and the relationships extracted from them. Each entity
+        called ``name`` (in ``project_id`` when given) that is left linked to
+        no memory is deleted with every relationship that touches it.
+        Everything commits or rolls back together.
+
+        Returns ``(memories, entities, relationships)`` deleted.
+        """
+        name = name.strip()
+        if not user_id or not name:
+            raise ValueError("delete_entity_memories requires a user_id and an entity name")
+
+        async with self.transaction():
+            owned: list[str] = []
+            for chunk in _chunks(list(dict.fromkeys(memory_ids))):
+                marks = ",".join("?" * len(chunk))
+                cursor = await self.conn.execute(
+                    f"SELECT id FROM memories WHERE user_id = ? AND id IN ({marks})", [user_id, *chunk]
+                )
+                owned.extend(row[0] for row in await cursor.fetchall())
+
+            # Entities called ``name`` whose every memory link is to a memory being deleted.
+            entity_query = f"SELECT e.id FROM entities e WHERE {ENTITY_NAME_MATCH}"
+            entity_params: list[Any] = [user_id, name, name]
+            if project_id:
+                entity_query += " AND e.project_id = ?"
+                entity_params.append(project_id)
+            cursor = await self.conn.execute(entity_query, entity_params)
+            candidates = [row[0] for row in await cursor.fetchall()]
+            doomed = set(owned)
+            orphaned: list[str] = []
+            for entity_id in candidates:
+                cursor = await self.conn.execute("SELECT memory_id FROM memory_entities WHERE entity_id = ?", (entity_id,))
+                if {row[0] for row in await cursor.fetchall()} <= doomed:
+                    orphaned.append(entity_id)
+
+            relationship_ids: set[str] = set()
+            for chunk in _chunks(owned):
+                marks = ",".join("?" * len(chunk))
+                cursor = await self.conn.execute(f"SELECT id FROM relationships WHERE source_memory_id IN ({marks})", chunk)
+                relationship_ids.update(row[0] for row in await cursor.fetchall())
+            for chunk in _chunks(orphaned):
+                marks = ",".join("?" * len(chunk))
+                cursor = await self.conn.execute(
+                    f"SELECT id FROM relationships WHERE from_entity_id IN ({marks}) OR to_entity_id IN ({marks})",
+                    [*chunk, *chunk],
+                )
+                relationship_ids.update(row[0] for row in await cursor.fetchall())
+
+            rel_list = sorted(relationship_ids)
+            for chunk in _chunks(rel_list):
+                marks = ",".join("?" * len(chunk))
+                # A surviving relationship may point at one being deleted as its successor (FK).
+                await self.conn.execute(
+                    f"UPDATE relationships SET superseded_by = NULL WHERE superseded_by IN ({marks})",
+                    chunk,
+                )
+            for chunk in _chunks(rel_list):
+                marks = ",".join("?" * len(chunk))
+                await self.conn.execute(f"DELETE FROM relationships WHERE id IN ({marks})", chunk)
+
+            deleted_memories = 0
+            for chunk in _chunks(owned):
+                marks = ",".join("?" * len(chunk))
+                await self.conn.execute(f"DELETE FROM memory_entities WHERE memory_id IN ({marks})", chunk)
+                await self.conn.execute(f"DELETE FROM memories_fts WHERE id IN ({marks})", chunk)
+                await self.conn.execute(f"DELETE FROM relay_pickups WHERE handoff_id IN ({marks})", chunk)
+                cursor = await self.conn.execute(f"DELETE FROM memories WHERE user_id = ? AND id IN ({marks})", [user_id, *chunk])
+                deleted_memories += cursor.rowcount
+
+            deleted_entities = 0
+            for chunk in _chunks(orphaned):
+                marks = ",".join("?" * len(chunk))
+                cursor = await self.conn.execute(f"DELETE FROM entities WHERE user_id = ? AND id IN ({marks})", [user_id, *chunk])
+                deleted_entities += cursor.rowcount
+
+        return deleted_memories, deleted_entities, len(rel_list)
+
     async def migrate_memory_relationships(
         self,
         old_memory_id: str,
@@ -2961,6 +3130,9 @@ class Database:
         entity_id: str,
         as_of: datetime | None = None,
         include_superseded: bool = False,
+        *,
+        user_id: str | None = None,
+        project_id: str | None = None,
     ) -> list[Relationship]:
         """Get relationships for an entity with temporal filtering.
 
@@ -2968,14 +3140,32 @@ class Database:
             entity_id: Entity to get relationships for
             as_of: Optional point-in-time filter. Returns relationships valid at this time.
             include_superseded: If True, include superseded relationships (default: False)
+            user_id: If set, only edges whose BOTH ends are this user's entities (TI-H1)
+            project_id: If set (with user_id), both ends must also be in this project
         """
-        cursor = await self.conn.execute(
+        if user_id:
+            # Scope by both endpoints: an edge is visible only if the caller could
+            # read each entity it names.
+            query = """
+                SELECT r.* FROM relationships r
+                JOIN entities fe ON fe.id = r.from_entity_id
+                JOIN entities te ON te.id = r.to_entity_id
+                WHERE (r.from_entity_id = ? OR r.to_entity_id = ?)
+                  AND fe.user_id = ? AND te.user_id = ?
             """
-            SELECT * FROM relationships 
-            WHERE from_entity_id = ? OR to_entity_id = ?
-            """,
-            (entity_id, entity_id),
-        )
+            params: list[Any] = [entity_id, entity_id, user_id, user_id]
+            if project_id:
+                query += " AND fe.project_id = ? AND te.project_id = ?"
+                params += [project_id, project_id]
+            cursor = await self.conn.execute(query, params)
+        else:
+            cursor = await self.conn.execute(
+                """
+                SELECT * FROM relationships 
+                WHERE from_entity_id = ? OR to_entity_id = ?
+                """,
+                (entity_id, entity_id),
+            )
         rows = await cursor.fetchall()
 
         relationships = []

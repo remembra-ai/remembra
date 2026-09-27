@@ -48,6 +48,23 @@ def test_every_write_model_redacts():
         assert "[REDACTED:resend_key]" in value and "[REDACTED:remembra_key]" in value
 
 
+def test_benign_test_summaries_and_helpers_are_stored_verbatim():
+    """CLI-01 review: the store-time scrub is irreversible, so counts, askpass helpers and a named
+    auth method must survive every write model unchanged."""
+    text = (
+        "CI summary: PASS=120 FAIL=0 SKIP=3; TESTS_PASS=128 TESTS_FAIL=2. export GIT_ASKPASS=/usr/bin/true, "
+        "SSH_ASKPASS=/usr/lib/ssh/x11-ssh-askpass; the flag is --auth sso-google"
+    )
+    produced = [
+        StoreRequest(content=text).content,
+        Memory(user_id="u", content=text).content,
+        Memory(user_id="u", content="x", extracted_facts=[text]).extracted_facts[0],
+        UpdateRequest(content=text).content,
+        SupersedeRequest(new_content=text, reason="r").new_content,
+    ]
+    assert produced == [text] * len(produced)
+
+
 def test_every_read_model_redacts():
     text = f"key {RESEND}"
     result = RecallResult(id="m", relevance=0.9, content=text, created_at=datetime.now(UTC))
@@ -178,3 +195,51 @@ async def test_cli_dry_run_reports_counts_without_values(tmp_path):
     assert report["applied"] is False and report["rows_with_secrets"] == 2
     assert report["counts_by_type"] == {"remembra_key": 1, "resend_key": 1, "stripe_key": 1}
     assert RESEND not in proc.stdout + proc.stderr
+
+
+async def test_scan_redacts_handoff_metadata_and_keeps_its_ids(tmp_path):
+    """CLI-01 backfill: a relay handoff keeps failed commands in its metadata (the trail's
+    Failing section), so the scan redacts metadata strings too, leaving ids intact."""
+    pw = "Pw" + FAKE["github_token"][4:16]
+    failing = f"`mysql -u root -p{pw} appdb` exited 1"
+    session = "S" + FAKE["openai_key"][8:44]  # a long random session id must survive (it keys the relay row)
+    relay_key = f"claude-code\x1f{session}"
+    metadata = {
+        "relay_key": relay_key,
+        "session_id": session,
+        "agent_id": "claude-code",
+        "relay": {"failing": [failing], "commits": [{"sha": "a" * 40, "subject": "fix: deploy"}], "branch": "main"},
+    }
+    db = Database(str(tmp_path / "meta.db"))
+    await db.connect()
+    await db.init_schema()
+    now = datetime.now(UTC).isoformat()
+    await db.conn.execute(
+        "INSERT INTO memories (id, user_id, project_id, content, extracted_facts, metadata, memory_type, created_at, updated_at)"
+        " VALUES ('h-meta', 'tenant-a', 'default', 'Failing / errors: see trail', NULL, ?, 'handoff', ?, ?)",
+        (json.dumps(metadata), now, now),
+    )
+    await db.conn.commit()
+    client = SimpleNamespace(set_payload=AsyncMock())
+    qdrant = SimpleNamespace(
+        _get_client=AsyncMock(return_value=client), _encryptor=FieldEncryptor(None), collection_name="memories"
+    )
+    try:
+        dry = await scan_and_redact(db, qdrant, apply=False)
+        assert dry.rows_with_secrets == 1 and dry.counts.get("password") == 1
+        raw = await (await db.conn.execute("SELECT metadata FROM memories WHERE id='h-meta'")).fetchone()
+        assert pw in raw[0]  # dry run changed nothing
+
+        applied = await scan_and_redact(db, qdrant, apply=True)
+        assert applied.rows_redacted == 1 and applied.qdrant_payloads_updated == 1
+        raw = await (await db.conn.execute("SELECT metadata FROM memories WHERE id='h-meta'")).fetchone()
+        stored = json.loads(raw[0])
+        assert pw not in raw[0]
+        assert stored["relay"]["failing"] == ["`mysql -u root -p[REDACTED:password] appdb` exited 1"]
+        assert stored["relay_key"] == relay_key and stored["session_id"] == session
+        assert stored["relay"]["commits"][0]["sha"] == "a" * 40
+        payload = client.set_payload.await_args.kwargs["payload"]
+        assert pw not in json.dumps(payload) and payload["metadata"]["relay"]["failing"] == stored["relay"]["failing"]
+        assert (await scan_and_redact(db, None, apply=False)).rows_with_secrets == 0
+    finally:
+        await db.close()

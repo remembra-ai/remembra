@@ -267,7 +267,7 @@ def price_line(
     (Solo, annual only); it is ignored for any other plan or interval.
     ``founding_held`` is whether the account holds one of the 100 Founding
     seats: a Founding charge that arrived after the offer was full is quoted
-    at what was charged, without the lifetime lock.
+    at what was charged, without the Founding price hold.
     """
     limits = get_plan(tier)
     yearly = BillingInterval.parse(str(interval)) == BillingInterval.YEAR if interval else False
@@ -276,7 +276,7 @@ def price_line(
     if founding and limits.tier == PlanTier.SOLO and yearly:
         price = f"{money(FOUNDING_ANNUAL_PRICE_CENTS)}/year"
         if founding_held:
-            return f"{price} (Founding 100, price locked for life)"
+            return f"{price} (Founding 100: the price holds while this subscription stays active)"
         return f"{price}, the Founding 100 price (the offer was full when this payment arrived; we will contact you about it)"
     cents = limits.price_annual_cents if yearly and limits.price_annual_cents is not None else limits.price_monthly_cents
     if cents is None:
@@ -402,9 +402,8 @@ def password_reset(*, dashboard: str | None, reset_url: str, expires_hours: int,
     if not email_verified:
         blocks.append(
             Small(
-                "This address was never verified, so a reset also treats you as the account's new owner: it revokes "
-                "the API keys, turns off two-factor sign-in and removes the app connections and sign-in links made "
-                "before, and pauses the webhooks until you turn them back on."
+                "Resetting also confirms this email address. The next time you sign in, you will see the API keys, "
+                "apps and sign-in methods set up before, and choose which to keep. They keep working until then."
             )
         )
     blocks.append(Small("If you did not ask for this, ignore this email. Your password stays the same."))
@@ -621,6 +620,30 @@ def identity_linked(*, dashboard: str | None, provider_name: str, provider_email
     )
 
 
+def account_review_done(*, dashboard: str | None, kept: Sequence[str], removed: Sequence[str]) -> RenderedEmail:
+    """Sent when the owner finishes reviewing what was set up before their email was confirmed."""
+    blocks: list[Block] = [
+        P("You finished checking your Remembra account. Here is what you kept and what was removed."),
+    ]
+    if kept:
+        blocks.append(P("Kept: " + "; ".join(kept) + "."))
+    else:
+        blocks.append(P("Kept: nothing."))
+    if removed:
+        blocks.append(P("Removed: " + "; ".join(removed) + "."))
+    blocks += [
+        Button("Review your API keys", dashboard_url(dashboard, tab=TAB_KEYS)),
+        Small("If you did not do this, sign in, revoke anything you do not recognise, and change your password."),
+    ]
+    return render(
+        "account_review_done",
+        subject="Remembra: your account check is done",
+        heading="Your account check is done",
+        blocks=blocks,
+        dashboard=dashboard or DEFAULT_DASHBOARD_URL,
+    )
+
+
 PRIVACY_RETENTION_URL = "https://remembra.dev/privacy#retention"
 
 
@@ -696,6 +719,11 @@ def sample_renders(dashboard: str = DEFAULT_DASHBOARD_URL) -> dict[str, Rendered
             expires_at="2026-10-03 14:30 UTC",
         ),
         "identity_linked": identity_linked(dashboard=dashboard, provider_name="GitHub", provider_email="me@example.com"),
+        "account_review_done": account_review_done(
+            dashboard=dashboard,
+            kept=["API key 'laptop' (editor, all projects)", "Two-factor sign-in"],
+            removed=["Password"],
+        ),
         "account_deleted": account_deleted(
             dashboard=dashboard, deleted_on="2026-09-26", erase_after="2026-10-03", subscriptions_cancelled=1
         ),

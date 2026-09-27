@@ -1,0 +1,20 @@
+{
+  "host": "devin",
+  "how": "written from the Devin CLI hook docs (docs.devin.ai/cli/extensibility/hooks: overview and lifecycle-hooks), not recorded: Devin needs a login. DEVIN_PROJECT_DIR is documented, unconfirmed at runtime.",
+  "hook_cwd": "/home/dev/work/widget",
+  "env": {
+    "DEVIN_PROJECT_DIR": "/home/dev/work/widget"
+  },
+  "payloads": {
+    "start": {
+      "hook_event_name": "SessionStart",
+      "session_id": "3f8d1c2a-7b6e-4d5c-9a8b-1c2d3e4f5a6b",
+      "source": "startup"
+    },
+    "end": {
+      "hook_event_name": "SessionEnd",
+      "session_id": "3f8d1c2a-7b6e-4d5c-9a8b-1c2d3e4f5a6b",
+      "reason": "exit"
+    }
+  }
+}

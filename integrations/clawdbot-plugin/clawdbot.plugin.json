@@ -1,7 +1,7 @@
 {
   "id": "remembra",
   "name": "Remembra",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Shared agent memory: session brief, inbox, status upsert, hybrid recall, timeline, guarded forget.",
   "configSchema": {
     "type": "object",

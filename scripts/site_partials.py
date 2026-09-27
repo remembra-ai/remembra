@@ -87,16 +87,18 @@ CREW_META_OFF = (
 DOCS = "https://docs.remembra.dev"
 GITHUB = "https://github.com/remembra-ai/remembra"
 SIGNUP = "https://app.remembra.dev/signup"
+# The dashboard opens on its sign-in screen for anyone signed out (and on Home for anyone signed in).
+SIGNIN = "https://app.remembra.dev/"
 
 HEAD = """<script>
   /* Dark for every visitor unless they chose light. Storage may be unavailable; the page works without it. */
   (function () { var t = "dark"; try { if (localStorage.getItem("remembra-theme") === "light") t = "light"; } catch (e) {} document.documentElement.setAttribute("data-theme", t); })();
 </script>
-<link rel="icon" href="/favicon.ico" sizes="48x48">
-<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
-<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
-<link rel="icon" type="image/svg+xml" href="/favicon.svg">
-<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" href="/favicon.ico?v=20260926" sizes="48x48">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=20260926">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png?v=20260926">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=20260926">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=20260926">
 <link rel="manifest" href="/site.webmanifest">
 <meta name="theme-color" content="#131416">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -131,6 +133,7 @@ NAV = [
     ("github", "GitHub", GITHUB, " nav-hide-lg"),
 ]
 MENU = [
+    ("signin", "Sign in", SIGNIN),
     ("how", "How it works", "/#how"),
     ("crew", "Crew mode", "/crew"),
     ("pricing", "Pricing", "/pricing"),
@@ -182,6 +185,7 @@ def header(page: str) -> str:
       {links}
       <button class="icon-btn theme-btn" type="button" data-theme-toggle aria-label="Switch to light theme">{SUN}{MOON}</button>
       <button class="icon-btn menu-btn" type="button" data-menu-toggle aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">{BARS}{CROSS}</button>
+      <a class="nav-link nav-signin" href="{SIGNIN}">Sign in</a>
       <a class="btn-nav" href="{SIGNUP}">Start free</a>
     </nav>
   </div>
@@ -198,7 +202,7 @@ def footer(page: str) -> str:
   <div class="ground"><div class="wrap foot">
     <div class="foot-brand">
       <a class="brand" href="/" aria-label="Remembra home">{lockup()}</a>
-      <p>One cloud memory for all your AI agents. The core is open source under the MIT license.</p>
+      <p>One cloud memory for your AI agents. The core is open source under the MIT license.</p>
       <p>&copy; 2026 DolphyTech</p>
     </div>
     <nav aria-label="Footer">

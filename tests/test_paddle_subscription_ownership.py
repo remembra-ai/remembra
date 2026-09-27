@@ -110,6 +110,7 @@ async def test_foreign_subscription_can_neither_replan_nor_cancel_the_account(tm
             },
         )
         assert canceled["applied"] == "unmatched"
+        # A later update of the cancelled subscription is a late delivery (BILL-2): nothing changes either.
         updated = await _hook(
             c,
             "subscription.updated",
@@ -121,7 +122,7 @@ async def test_foreign_subscription_can_neither_replan_nor_cancel_the_account(tm
                 "custom_data": {"remembra_user_id": victim},
             },
         )
-        assert updated["applied"] == "unmatched"
+        assert updated["applied"] == "stale"
         account = await c.meter.get_account(victim)
         assert (account.tier, account.seats) == (PlanTier.TEAM, 5)
 
@@ -212,10 +213,14 @@ async def test_second_subscription_is_flagged_not_applied_and_old_cancel_is_repo
         assert (await _hook(c, "subscription.canceled", cancel_old))["applied"] == "applied"
         assert (await _state(c, uid))[0] == "free"
         assert alerts.sent[-1][0] == f"paddle_second_subscription:{uid}:cancel"
-        # The next payment of the remaining subscription is applied (the account holds nothing active now).
+        # A payment of the cancelled second subscription is a late delivery (BILL-2) and changes nothing...
         renew_new_3 = _purchase("txn_new_3", "sub_new", "pri_solo_m", _bound(uid))
-        assert (await _hook(c, "transaction.completed", renew_new_3))["applied"] == "applied"
-        assert (await _state(c, uid))[:2] == ("solo", "sub_new")
+        assert (await _hook(c, "transaction.completed", renew_new_3))["applied"] == "stale"
+        assert (await _state(c, uid))[:2] == ("free", "sub_old")
+        # ...while a subscription still running is applied (the account holds nothing active now).
+        renew_third = _purchase("txn_third", "sub_third", "pri_solo_m", _bound(uid))
+        assert (await _hook(c, "transaction.completed", renew_third))["applied"] == "applied"
+        assert (await _state(c, uid))[:2] == ("solo", "sub_third")
 
 
 async def test_cancel_needs_the_held_subscription_id(tmp_path, alerts) -> None:

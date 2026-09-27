@@ -7,6 +7,8 @@ destroyed legitimate user-owned infra config (deploy IPs, server addresses)
 that Remembra must preserve verbatim for recall.
 """
 
+import pytest
+
 from remembra.security.pii_detector import PIIDetector, scan_for_pii, redact_pii
 
 
@@ -19,11 +21,11 @@ class TestIPv4NotRedacted:
     """IPv4 addresses must flow through unredacted in both scan and redact."""
 
     def test_bare_ipv4_not_flagged(self):
-        result = scan_for_pii("Server IP is 178.156.226.84")
+        result = scan_for_pii("Server IP is 203.0.113.10")
         assert not result.has_pii, f"IPv4 should not be flagged, got: {result.matches}"
 
     def test_bare_ipv4_not_redacted(self):
-        content = "Coolify server IP is 178.156.226.84 — deploy via ssh coolify"
+        content = "Build server IP is 203.0.113.10 — deploy via ssh build-host"
         assert redact_pii(content) == content
 
     def test_localhost_and_private_ranges_not_redacted(self):
@@ -32,12 +34,12 @@ class TestIPv4NotRedacted:
             assert redact_pii(content) == content, f"IP {ip} was redacted"
 
     def test_ipv4_in_url_not_redacted(self):
-        content = "http://178.156.226.84:8000/health"
+        content = "http://203.0.113.10:8000/health"
         assert redact_pii(content) == content
 
     def test_detector_redact_mode_leaves_ipv4_intact(self):
         detector = PIIDetector(enabled=True, mode="redact")
-        result = detector.scan("deploy to 178.156.226.84")
+        result = detector.scan("deploy to 203.0.113.10")
         # No PII → no redacted_content substitution
         assert not result.has_pii
         assert result.redacted_content is None
@@ -76,9 +78,9 @@ class TestRealPIIStillRedacted:
         assert "4111 1111 1111 1111" not in out
 
     def test_mixed_ip_and_password_only_redacts_password(self):
-        content = "server 178.156.226.84 password: s3cretValue99"
+        content = "server 203.0.113.10 password: s3cretValue99"
         out = redact_pii(content)
-        assert "178.156.226.84" in out, "IP should survive"
+        assert "203.0.113.10" in out, "IP should survive"
         assert "s3cretValue99" not in out, "Password should be redacted"
 
 
@@ -92,14 +94,14 @@ class TestStorePathRoundTrip:
 
     def test_owner_deploy_config_survives(self):
         detector = PIIDetector(enabled=True, mode="redact")
-        original = "Coolify server IP is 178.156.226.84 — deploy via ssh coolify"
+        original = "Build server IP is 203.0.113.10 — deploy via ssh build-host"
 
         pii_result = detector.scan(original, source="user_input")
         # Mirror the branch in memories.py: only substitute when has_pii+redacted_content
         stored = pii_result.redacted_content if (pii_result.has_pii and pii_result.redacted_content) else original
 
         assert stored == original
-        assert "178.156.226.84" in stored
+        assert "203.0.113.10" in stored
 
 
 def test_compact_dates_are_not_bank_accounts():
@@ -111,3 +113,49 @@ def test_compact_dates_are_not_bank_accounts():
 
 def test_long_account_numbers_still_redacted():
     assert "4000123456789" not in redact_pii("acct 4000123456789 on file")
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        # Live 2026-09-26: a Google OAuth client id lost its project number.
+        "GOOGLE_CLIENT_ID=629134551556-8v3kq0abcdefghijklmnopq.apps.googleusercontent.com",
+        "client 629134551556-8v3kq0abcdefghij.apps.googleusercontent.com is the web one",
+        "request 123e4567-e89b-12d3-a456-426614174000 and 12345678-1234-5678-1234-567812345678",
+        "image tag 20260926123456-a1b2c3 and digest 1234567890123-9f8e7d6c5b4a",
+        # A client id whose random part happens to have no digit: still the first label of a host name.
+        "629134551556-abcdefghijklmnopqrstuvwxyzabcdef.apps.googleusercontent.com",
+    ],
+)
+def test_hyphenated_identifiers_are_not_bank_accounts(text):
+    assert not any(m.type == "bank_account" for m in scan_for_pii(text).matches)
+    if "googleusercontent" in text:
+        assert redact_pii(text) == text  # nothing else in a client id looks like PII either
+
+
+@pytest.mark.parametrize(
+    ("text", "number"),
+    [
+        ("acct 4000123456789 on file", "4000123456789"),
+        ("account number: 000123456789.", "000123456789"),
+        ("routing 021000021, account 12345678901234", "12345678901234"),
+        ("branch-split 0012-345678901", "345678901"),
+        ("acct-12345678 (checking)", "12345678"),
+        ("wire to 9876543210123-", "9876543210123"),
+        # A word, code or number after the digits does not make them an identifier.
+        ("acct 123456789012-checking", "123456789012"),
+        ("Chase account 000123456789-SAV", "000123456789"),
+        ("NCB acct 354012345678-JMD savings", "354012345678"),
+        ("ACCT-000123456789-01", "000123456789"),
+        ("wire ref acct-12345678901-x", "12345678901"),
+        ("GB-12345678901234-abc", "12345678901234"),
+        ("statement 123456789012-checking.pdf", "123456789012"),
+        ("paid from 000123456789-USD", "000123456789"),
+        # An account label wins over any shape that follows.
+        ("acct 629134551556-8v3kq0abcdefg.apps.googleusercontent.com", "629134551556"),
+        ("account 12345678901-a1b2c3d4", "12345678901"),
+    ],
+)
+def test_real_bank_account_numbers_are_still_redacted(text, number):
+    redacted = redact_pii(text)
+    assert number not in redacted and "[REDACTED_BANK_ACCOUNT]" in redacted

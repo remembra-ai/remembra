@@ -116,27 +116,30 @@ def _seed_clawdbot(api) -> dict[str, Any]:
 
 def test_existing_namespace_survives_upgrade_to_location_briefs(api):
     handoff = _seed_clawdbot(api)
-    remote = "git@github.com:freshvybz/clawbot.git"
+    remote = "git@github.com:example-org/clawbot.git"
     brief = _get(api, "/session/brief", {"git_remote": remote, "hint_project": "clawdbot"})
     assert brief["project_id"] == "clawdbot"
     assert brief["handoff"]["id"] == handoff["handoff_id"]
-    assert len(brief["recent"]) == 1 and [s["key"] for s in brief["status_items"]][0] == "branch:clawdbot"
+    # The namespace's general memories are never listed as recent: only this project's handoffs and checkpoints.
+    assert brief["recent"] == [] and [s["key"] for s in brief["status_items"]][0] == "branch:clawdbot"
     assert "TODO: tier pricing" in _last_session(brief["rendered"])
 
     closed = _close(api, project={"git_remote": remote, "hint_project": "clawdbot"}, project_id=None, session_id="new-1")
     assert closed["project_id"] == "clawdbot" and closed["resolution"]["persisted"] is True
     # Bound now: later calls without any hint (another agent, another config) stay in clawdbot.
-    assert _get(api, "/session/brief", {"git_remote": "https://github.com/freshvybz/clawbot"})["project_id"] == "clawdbot"
+    assert _get(api, "/session/brief", {"git_remote": "https://github.com/example-org/clawbot"})["project_id"] == "clawdbot"
     assert _get(api, "/trail", {"git_remote": remote})["total"] == 2
 
 
 def test_hint_that_cannot_apply_is_reported_with_the_configured_projects_handoff(api):
     handoff = _seed_clawdbot(api)
-    _post(api, "/projects/resolve", {"git_remote": "https://github.com/freshvybz/clawbot"})  # bound to the slug
-    resolved = _post(api, "/projects/resolve", {"git_remote": "https://github.com/freshvybz/clawbot", "hint_project": "clawdbot"})
+    _post(api, "/projects/resolve", {"git_remote": "https://github.com/example-org/clawbot"})  # bound to the slug
+    resolved = _post(
+        api, "/projects/resolve", {"git_remote": "https://github.com/example-org/clawbot", "hint_project": "clawdbot"}
+    )
     assert resolved["project_id"] == "clawbot" and "not applied" in resolved["warnings"][0]
 
-    brief = _get(api, "/session/brief", {"git_remote": "https://github.com/freshvybz/clawbot", "hint_project": "clawdbot"})
+    brief = _get(api, "/session/brief", {"git_remote": "https://github.com/example-org/clawbot", "hint_project": "clawdbot"})
     assert brief["project_id"] == "clawbot"
     assert any("configured for 'clawdbot'" in w and "--bind" in w for w in brief["warnings"])
     configured = brief["linked_projects"][0]
@@ -265,12 +268,12 @@ def test_patch_cannot_rewrite_a_relay_handoff(api):
 
 def test_key_verified_versus_self_declared(api):
     _as(api, agent_id="codex")
-    _close(api, agent_id=None, session_id="k1")
+    _close(api, agent_id=None, session_id="k1", facts={"branch": "main", "next_step": "n"})
     assert _last_session(_get(api, "/session/brief", {"project_id": "widget"})["rendered"]).startswith(
         "Last session: codex (key-verified)"
     )
     _owner(api)
-    _close(api, agent_id="codex", session_id="k2")  # an unscoped caller naming the same agent
+    _close(api, agent_id="codex", session_id="k2", facts={"branch": "main", "next_step": "n"})  # an unscoped caller
     assert _last_session(_get(api, "/session/brief", {"project_id": "widget"})["rendered"]).startswith(
         "Last session: codex (self-declared)"
     )
@@ -298,7 +301,7 @@ def test_brief_marks_a_handoff_from_another_checkout_as_stale(api):
 
 
 def test_facts_source_is_recorded_and_shown(api):
-    out = _close(api, facts={"branch": "main", "facts_source": "relay-cli:git+transcript"})
+    out = _close(api, facts={"branch": "main", "facts_source": "relay-cli:git+transcript", "next_step": "n"})
     assert "Facts: collected by remembra-relay from git and the session transcript." in out["rendered"]
     assert "(facts collected by remembra-relay from git and the session transcript)" in _last_session(
         _get(api, "/session/brief", {"project_id": "widget"})["rendered"]

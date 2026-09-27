@@ -1,6 +1,8 @@
 """Relay endpoints: project identity, links, session close-out, trail, pickup brief.
 
 - ``POST   /api/v1/projects/resolve``  location (git remote / root commit / path) -> stable project id
+- ``POST   /api/v1/projects/split``    give each repository of a shared project its own (dry run by default)
+- ``POST   /api/v1/projects/split/undo`` reverse a split batch (dry run by default)
 - ``POST   /api/v1/projects/links``    link two projects (from, to, relation)
 - ``GET    /api/v1/projects/links``    links of a project (both directions)
 - ``DELETE /api/v1/projects/links``    remove a link
@@ -26,29 +28,75 @@ ids and times of a handoff served to a different agent, never its content.
 
 from __future__ import annotations
 
+import contextlib
 import re
 import uuid
 from collections.abc import Callable
 from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
+import structlog
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from remembra.api.v1.agent_session import screen_text
-from remembra.auth.middleware import AuthenticatedUser, CurrentUser, has_permission, resolve_project_access
+from remembra.auth.middleware import (
+    AuthenticatedUser,
+    CurrentUser,
+    get_client_ip,
+    has_permission,
+    resolve_project_access,
+)
 from remembra.client.project import normalize_project_id
-from remembra.cloud.limits import record_relay_usage, relay_guard
+from remembra.cloud.limits import hold_unenriched_writes, record_relay_usage, relay_guard
 from remembra.core.limiter import limiter
-from remembra.relay.identity import ProjectLocator
+from remembra.relay.identity import HINT_SCOPE_FOLDERS, ProjectLocator, location_record
+from remembra.security.audit import AuditAction
+from remembra.services import relay_split
 from remembra.services.relay import BindingNotAllowed, ProjectAccessDenied, RelayService
 
 router = APIRouter(tags=["relay"])
+log = structlog.get_logger(__name__)
 
 AGENT_HEADER = "X-Remembra-Agent-Id"
 _AGENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$")
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+=-]{0,199}$")
 _RELATION_RE = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
+HintScope = Literal["all", "folders"]  # see remembra.relay.identity.HINT_SCOPES
+# git check-ref-format --branch (CLI-02, CLI-07): the branch is printed by the relay CLI and pasted into
+# "git switch <branch>" by the dashboard, so a name git itself refuses (a leading "-" reads as an option,
+# control characters drive the terminal) is rejected instead of stored.
+_BRANCH_FORBIDDEN_RE = re.compile(r"[\x00-\x20\x7f-\x9f~^:?*\[\\]|\.\.|@\{|//|/\.")
+
+
+BRANCH_MAX_CHARS = 255
+BRANCH_ERROR = "branch must be a valid git branch name (see git check-ref-format --branch)"
+
+
+def valid_branch_name(value: str) -> bool:
+    """Whether ``value`` is a branch name git would accept (the relay CLI's ``(detached)`` label too)."""
+    return not (
+        value.startswith(("-", "/", "."))
+        or value.endswith(("/", ".", ".lock"))
+        or value == "@"
+        or _BRANCH_FORBIDDEN_RE.search(value)
+    )
+
+
+def clip_branch(value: str, limit: int = BRANCH_MAX_CHARS) -> str | None:
+    """A valid branch name cut to ``limit`` characters, still a name git would accept.
+
+    Git takes longer names than the server keeps. The cut can end the name in
+    ``/``, ``.`` or ``.lock``, which git refuses, so those are dropped from the
+    end; only the end rules can fail, since every other rule already held for
+    the whole name. None when nothing is left.
+    """
+    if len(value) <= limit:
+        return value
+    clipped = value[:limit]
+    while clipped.endswith(("/", ".", ".lock")):
+        clipped = clipped[: -len(".lock")] if clipped.endswith(".lock") else clipped[:-1]
+    return clipped or None
 
 
 CREW_SESSION_HEADER = "X-Remembra-Crew-Session"  # the one crew session-token header (crew routes use the same)
@@ -199,6 +247,9 @@ class LocatorIn(BaseModel):
     root_path: str | None = Field(default=None, max_length=4096, description="Absolute path of the working tree")
     repo_name: str | None = Field(default=None, max_length=200)
     host: str | None = Field(default=None, max_length=255, description="Machine name; qualifies path fingerprints")
+    git_repo: bool | None = Field(
+        default=None, description="Whether root_path is inside a git repository, as the client saw it (0.16.1+)"
+    )
 
     def locator(self) -> ProjectLocator:
         return ProjectLocator(
@@ -212,6 +263,13 @@ class LocatorIn(BaseModel):
 
 class ResolveRequest(LocatorIn):
     hint_project: str | None = Field(default=None, max_length=128, description="Project id to use for a new location")
+    hint_scope: HintScope | None = Field(
+        default=None,
+        description=(
+            "Which new locations hint_project may name: 'all' (the default, as in 0.16.0) or 'folders' (0.16.1+ "
+            "clients: a git repository always gets its own project, the hint only names a folder)"
+        ),
+    )
     bind: bool = Field(default=False, description="Re-bind an already-known location to hint_project")
 
 
@@ -266,7 +324,6 @@ _LIST_CAPS = {
     "incomplete": 10,
 }
 _STR_CAPS = {
-    "branch": 255,
     "head_commit": 64,
     "upstream": 255,
     "diff_stat": 300,
@@ -298,6 +355,15 @@ class FactsIn(BaseModel):
     )
     commit_evidence: str | None = Field(default=None, description="How commits were chosen (session-reflog, last-12h, ...)")
     incomplete: list[str] = Field(default_factory=list, description="git probes that did not finish (log, status, ...)")
+
+    @field_validator("branch")
+    @classmethod
+    def _branch(cls, v: str | None) -> str | None:
+        # The whole name is checked, then cut to what is stored (BRANCH_MAX_CHARS) so that the
+        # cut is a valid name too: a name git accepts never fails the close because it is long.
+        if v and not valid_branch_name(v):
+            raise ValueError(BRANCH_ERROR)
+        return clip_branch(v) if v else v
 
     @model_validator(mode="before")
     @classmethod
@@ -348,6 +414,39 @@ class CloseRequest(BaseModel):
         return _clip(v, 100)
 
 
+class CheckoutIn(BaseModel):
+    """A checkout the client read with git on its machine, for ``projects split``."""
+
+    git_remote: str | None = Field(default=None, max_length=2000)
+    root_commit: str | None = Field(default=None, max_length=64)
+    root_path: str | None = Field(default=None, max_length=4096)
+    repo_name: str | None = Field(default=None, max_length=200)
+    host: str | None = Field(default=None, max_length=255)
+    present: list[Annotated[str, Field(max_length=64)]] = Field(
+        default_factory=list,
+        max_length=20000,
+        description="Commits from the plan's commit_candidates that exist in this checkout (git cat-file)",
+    )
+
+
+class SplitRequest(BaseModel):
+    project: str = Field(..., min_length=1, max_length=128, description="The project several repositories share")
+    apply: bool = Field(default=False, description="Carry it out (default: dry run, nothing changes)")
+    checkouts: list[CheckoutIn] = Field(default_factory=list, max_length=200)
+    restricted_keys_lose_access: bool = Field(
+        default=False,
+        description=(
+            "Confirm that API keys and connections restricted to the project (listed in restricted_credentials) "
+            "lose the split repositories; without it, applying such a split is refused (409)"
+        ),
+    )
+
+
+class UndoSplitRequest(BaseModel):
+    batch_id: str | None = Field(default=None, max_length=80, description="The split to reverse (default: the latest)")
+    apply: bool = Field(default=False, description="Carry it out (default: dry run)")
+
+
 class LinkRequest(BaseModel):
     from_project: str = Field(..., min_length=1, max_length=128)
     to_project: str = Field(..., min_length=1, max_length=128)
@@ -360,7 +459,13 @@ class LinkRequest(BaseModel):
 
 
 async def _resolve(
-    request: Request, user: AuthenticatedUser, locator: LocatorIn, hint: str | None, bind: bool, create: bool
+    request: Request,
+    user: AuthenticatedUser,
+    locator: LocatorIn,
+    hint: str | None,
+    bind: bool,
+    create: bool,
+    hint_scope: str | None = None,
 ) -> dict[str, Any]:
     try:
         return await _service(request).registry.resolve(
@@ -370,6 +475,8 @@ async def _resolve(
             bind=bind,
             create=create,
             allowed_projects=user.project_ids,
+            hint_scope=hint_scope,
+            git_repo=locator.git_repo,
         )
     except (ProjectAccessDenied, BindingNotAllowed) as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e)) from e
@@ -391,7 +498,106 @@ async def resolve_project(request: Request, body: ResolveRequest, current_user: 
     can_write = has_permission(current_user, "memory:store")
     if body.bind and not can_write:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Permission denied: memory:store required to bind")
-    return await _resolve(request, current_user, body, body.hint_project, body.bind, create=can_write)
+    return await _resolve(request, current_user, body, body.hint_project, body.bind, create=can_write, hint_scope=body.hint_scope)
+
+
+# ---------------------------------------------------------------------------
+# Split a project several repositories share
+# ---------------------------------------------------------------------------
+
+
+def _split_allowed(user: AuthenticatedUser, write: bool) -> None:
+    _require(user, "memory:store" if write else "memory:recall")
+    if user.project_ids:
+        # Bindings are per account: a key restricted to projects never lists or moves them.
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(BindingNotAllowed()))
+
+
+async def _audit(request: Request, user: AuthenticatedUser, action: AuditAction, resource_id: str | None) -> None:
+    audit_logger = getattr(request.app.state, "audit_logger", None)
+    if audit_logger is None:
+        return
+    try:
+        await audit_logger.log(
+            user_id=user.user_id,
+            action=action,
+            api_key_id=getattr(user, "api_key_id", None),
+            resource_id=resource_id,
+            ip_address=get_client_ip(request),
+        )
+    except Exception as e:  # the change is committed and logged in relay_refiles; an audit hiccup must not hide that
+        log.warning("relay_split_audit_failed", action=action.value, error=str(e))
+
+
+@router.post("/projects/split", summary="Give each repository in a shared project its own project (dry run by default)")
+@limiter.limit("10/minute")
+async def split_project(request: Request, body: SplitRequest, current_user: CurrentUser) -> dict[str, Any]:
+    """Before 0.16.1 a configured project named every new repository, so all of
+    them share one trail. This lists every git repository bound to ``project``
+    for the caller, the project each would get, and each handoff that moves
+    with it and why (its recorded location, or a commit it recorded that the
+    client found in exactly one checkout: ``checkouts``); everything else
+    stays and is listed with the reason. ``apply`` carries it out, logs each
+    change under a ``batch_id`` and writes one audit event; running it again
+    moves only what is left and matched. Nothing is deleted;
+    ``POST /projects/split/undo`` reverses a batch. Only the caller's own
+    bindings and memories are read or changed; project-restricted keys are
+    refused. ``restricted_credentials`` lists the account's API keys and
+    connections restricted to ``project``, which would be refused in the split
+    repositories: applying then needs ``restricted_keys_lose_access`` (else
+    409, nothing changes). Recorded text in the result (paths, names,
+    headlines, branches) passes the brief's trust policy."""
+    _split_allowed(current_user, write=body.apply)
+    project = normalize_project_id(body.project)
+    checkouts = relay_split.checkouts_from([c.model_dump() for c in body.checkouts])
+    db = request.app.state.db
+    if not body.apply:
+        result = await relay_split.plan(db, current_user.user_id, project, checkouts)
+        result.pop("_repos", None)
+        return result
+    memory_service = getattr(request.app.state, "memory_service", None)
+    try:
+        # No close of this account runs meanwhile: one resolved before the split would store its
+        # handoff in the old project after it (see relay_split.UserGate).
+        async with relay_split.user_gate(current_user.user_id).exclusive():
+            result = await relay_split.apply(
+                db,
+                current_user.user_id,
+                project,
+                checkouts,
+                qdrant=getattr(memory_service, "qdrant", None),
+                restricted_keys_lose_access=body.restricted_keys_lose_access,
+            )
+    except relay_split.SplitNeedsConfirmation as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e)) from e
+    if result["applied"]:
+        await _audit(request, current_user, AuditAction.RELAY_PROJECT_SPLIT, result["batch_id"])
+    return result
+
+
+@router.post("/projects/split/undo", summary="Reverse a project split (dry run by default)")
+@limiter.limit("10/minute")
+async def undo_split(request: Request, body: UndoSplitRequest, current_user: CurrentUser) -> dict[str, Any]:
+    """Move back what one split batch (default: the latest not undone) moved,
+    where it is still where the split put it; anything changed since is
+    listed and left alone. ``apply`` carries it out (one audit event)."""
+    _split_allowed(current_user, write=body.apply)
+    memory_service = getattr(request.app.state, "memory_service", None)
+    gate = relay_split.user_gate(current_user.user_id).exclusive() if body.apply else contextlib.nullcontext()
+    try:
+        async with gate:
+            result = await relay_split.undo(
+                request.app.state.db,
+                current_user.user_id,
+                (body.batch_id or "").strip() or None,
+                apply_it=body.apply,
+                qdrant=getattr(memory_service, "qdrant", None),
+            )
+    except relay_split.SplitRefused as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e)) from e
+    if result["applied"]:
+        await _audit(request, current_user, AuditAction.RELAY_PROJECT_SPLIT_UNDONE, result["batch_id"])
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -488,33 +694,58 @@ async def close_session(
     elif not _SESSION_RE.match(session_id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid session_id characters")
 
-    resolution: dict[str, Any] | None = None
-    requested: str | None
-    if isinstance(body.project, ResolveRequest):
-        resolution = await _resolve(
-            request, current_user, body.project, body.project.hint_project, body.project.bind, create=True
-        )
-        requested = resolution["project_id"]
-    else:
-        raw = body.project if isinstance(body.project, str) else body.project_id
-        requested = normalize_project_id(raw) if raw and raw.strip() else None
-    project = resolve_project_access(current_user, requested) or "default"
+    # Resolve and store under the account's gate: a `projects split` waits for this close, so it never
+    # re-files the session's earlier handoff while this one is stored in the old project.
+    async with relay_split.user_gate(current_user.user_id).shared():
+        resolution: dict[str, Any] | None = None
+        requested: str | None
+        location: dict[str, Any] | None = None
+        if isinstance(body.project, ResolveRequest):
+            resolution = await _resolve(
+                request,
+                current_user,
+                body.project,
+                body.project.hint_project,
+                body.project.bind,
+                create=True,
+                hint_scope=body.project.hint_scope,
+            )
+            requested = resolution["project_id"]
+            location = location_record(body.project.locator(), body.project.git_repo)
+        else:
+            raw = body.project if isinstance(body.project, str) else body.project_id
+            requested = normalize_project_id(raw) if raw and raw.strip() else None
+        project = resolve_project_access(current_user, requested) or "default"
 
-    result = await _service(request).close_session(
-        user_id=current_user.user_id,
-        project_id=project,
-        agent_id=agent,
-        session_id=session_id,
-        facts=body.facts.model_dump(),
-        summary=body.summary,
-        end_reason=body.end_reason,
-        agent_verified=verified,
-        screen=lambda text: screen_text(request, text, apply_pii=False),
-        scrub=pii_scrubber(request),
-        closed_at=body.closed_at,
-        # Crew mode: the close ends the caller's crew session only with that session's token (§11.2)
-        crew_session_token=request.headers.get(CREW_SESSION_HEADER),
-    )
+        # BILL-8: a stored handoff is an embedded write without enrichment, so it
+        # counts toward the Free daily unenriched cap (429 past it) and the
+        # embedding spend; an unchanged re-close stores nothing and is given back.
+        hold = await hold_unenriched_writes(request, current_user.user_id)
+        try:
+            result = await _service(request).close_session(
+                user_id=current_user.user_id,
+                project_id=project,
+                agent_id=agent,
+                session_id=session_id,
+                facts=body.facts.model_dump(),
+                summary=body.summary,
+                end_reason=body.end_reason,
+                agent_verified=verified,
+                screen=lambda text: screen_text(request, text, apply_pii=False),
+                scrub=pii_scrubber(request),
+                closed_at=body.closed_at,
+                location=location,
+                # Crew mode: the close ends the caller's crew session only with that session's token (§11.2)
+                crew_session_token=request.headers.get(CREW_SESSION_HEADER),
+            )
+        except BaseException:
+            if hold is not None:
+                await hold.release()
+            raise
+    if hold is not None and result["changed"]:
+        await hold.commit([str(result.get("rendered") or "")])
+    elif hold is not None:
+        await hold.release()
     if result["changed"]:
         await record_relay_usage(request, current_user.user_id)
     return {
@@ -538,12 +769,13 @@ async def _project_from_query(
     project_id: str | None,
     locator: LocatorIn,
     hint_project: str | None,
+    hint_scope: str | None = None,
 ) -> tuple[str | None, dict[str, Any] | None]:
     """The project a read addresses. Never records a binding (a read has no side effects)."""
     if project_id:
         return resolve_project_access(user, project_id), None
     if not locator.locator().is_empty():
-        resolution = await _resolve(request, user, locator, hint_project, bind=False, create=False)
+        resolution = await _resolve(request, user, locator, hint_project, bind=False, create=False, hint_scope=hint_scope)
         return resolve_project_access(user, resolution["project_id"]), resolution
     if hint_project:
         return resolve_project_access(user, normalize_project_id(hint_project)), None
@@ -551,9 +783,22 @@ async def _project_from_query(
 
 
 def _locator_from_query(
-    git_remote: str | None, root_commit: str | None, root_path: str | None, repo_name: str | None, host: str | None
+    git_remote: str | None,
+    root_commit: str | None,
+    root_path: str | None,
+    repo_name: str | None,
+    host: str | None,
+    git_repo: bool | None = None,
 ) -> LocatorIn:
-    return LocatorIn(git_remote=git_remote, root_commit=root_commit, root_path=root_path, repo_name=repo_name, host=host)
+    return LocatorIn(
+        git_remote=git_remote, root_commit=root_commit, root_path=root_path, repo_name=repo_name, host=host, git_repo=git_repo
+    )
+
+
+HINT_SCOPE_QUERY = Query(
+    description="'folders' (0.16.1+ clients): hint_project names only a location that is not a git repository"
+)
+GIT_REPO_QUERY = Query(description="Whether the reader's working directory is a git repository (0.16.1+ clients)")
 
 
 @router.get("/session/brief", summary="Session-start brief for an agent (pickup)")
@@ -571,7 +816,10 @@ async def session_brief(
     repo_name: Annotated[str | None, Query(max_length=200)] = None,
     host: Annotated[str | None, Query(max_length=255)] = None,
     hint_project: Annotated[str | None, Query(max_length=128)] = None,
-    branch: Annotated[str | None, Query(max_length=255, description="The reader's current branch")] = None,
+    branch: Annotated[
+        str | None,
+        Query(max_length=4096, description="The reader's current branch (compared as stored: its first 255 characters)"),
+    ] = None,
     head_commit: Annotated[str | None, Query(max_length=64, description="The reader's current HEAD")] = None,
     session_id: Annotated[
         str | None,
@@ -580,15 +828,21 @@ async def session_brief(
             description="The reader's own session id (one pickup is recorded per session; Crew mode: baton offers made to it)",
         ),
     ] = None,
+    hint_scope: Annotated[HintScope | None, HINT_SCOPE_QUERY] = None,
+    git_repo: Annotated[bool | None, GIT_REPO_QUERY] = None,
 ) -> dict[str, Any]:
-    """Latest handoff ("Last session: ..."), unread inbox, status, linked
-    projects and recent memories by time, plus ``rendered`` — a compact
-    (~1500 token) text version. Pass ``project_id`` or a location
-    (``git_remote`` / ``root_commit`` / ``root_path``) to resolve it;
-    ``hint_project`` is the client's configured project (used for a location
-    seen for the first time, and reported when the location resolves
-    elsewhere). ``branch`` / ``head_commit`` mark a handoff recorded on
-    another checkout as possibly stale.
+    """Latest handoff that recorded any work ("Last session: ..."; newer empty
+    ones are skipped and counted in ``handoffs_skipped``), unread inbox,
+    status, linked projects and this project's recent handoffs and
+    checkpoints, plus ``rendered`` — a compact (~1500 token) text version.
+    Pass ``project_id`` or a location (``git_remote`` / ``root_commit`` /
+    ``root_path``) to resolve it; ``hint_project`` is the client's configured
+    project (used for a location seen for the first time, and reported when
+    the location resolves elsewhere; with ``hint_scope=folders`` only for a
+    location that is not a git repository). ``git_repo=false`` says the
+    reader is not in a git repository: the brief says so and names where the
+    last session worked. ``branch`` / ``head_commit`` mark a handoff recorded
+    on another checkout as possibly stale.
 
     Every recorded line passes one trust policy: low-trust text is withheld,
     command-shaped text is flagged, and the JSON fields carry the same
@@ -602,10 +856,23 @@ async def session_brief(
     _require(current_user, "memory:recall")
     notes: list[str] = []
     agent, verified = effective_agent(request, current_user, agent_id, strict=False, warnings=notes)
-    locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host)
-    project, resolution = await _project_from_query(request, current_user, project_id, locator, hint_project)
+    locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host, git_repo)
+    project, resolution = await _project_from_query(request, current_user, project_id, locator, hint_project, hint_scope)
     configured = normalize_project_id(hint_project) if hint_project and hint_project.strip() else None
+    where = locator.locator()
+    if hint_scope == HINT_SCOPE_FOLDERS and where.is_repository(git_repo):
+        configured = None  # the configured project names folders only: never list it for a repository
+    if branch:
+        branch = clip_branch(branch) if valid_branch_name(branch) else branch[:BRANCH_MAX_CHARS]
     checkout = {"branch": branch, "head_commit": head_commit} if (branch or head_commit) else None
+    reader: dict[str, Any] | None = None
+    if not where.is_empty() or git_repo is not None:
+        # A path alone from a client that did not say (0.16.0, a remote MCP caller) is unknown, not "no repository".
+        reader = {
+            "git_repo": True if where.is_repository(git_repo) else (False if git_repo is False else None),
+            "fingerprints": [fp.key for fp in where.fingerprints()],
+            "host": (host or "").strip().lower() or None,
+        }
     service = _service(request)
     brief = await service.brief(
         user_id=current_user.user_id,
@@ -618,6 +885,8 @@ async def session_brief(
         checkout=checkout,
         extra_warnings=notes,
         client_session_id=session_id.strip() if session_id and _SESSION_RE.match(session_id.strip()) else None,
+        reader=reader,
+        hint_scope=hint_scope,
     )
     brief["resolution"] = resolution
     reader_session = (session_id or "").strip()
@@ -657,13 +926,17 @@ async def trail(
     repo_name: Annotated[str | None, Query(max_length=200)] = None,
     host: Annotated[str | None, Query(max_length=255)] = None,
     hint_project: Annotated[str | None, Query(max_length=128)] = None,
+    hint_scope: Annotated[HintScope | None, HINT_SCOPE_QUERY] = None,
+    git_repo: Annotated[bool | None, GIT_REPO_QUERY] = None,
 ) -> dict[str, Any]:
     """Read-only: a location the server has not seen resolves (hint first) without being recorded."""
     _require(current_user, "memory:recall")
     agent_filter = _clean_agent(agent_id, "agent_id")
     cursor = _trail_cursor(before, before_id)
-    locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host)
-    resolved, resolution = await _project_from_query(request, current_user, project_id or project, locator, hint_project)
+    locator = _locator_from_query(git_remote, root_commit, root_path, repo_name, host, git_repo)
+    resolved, resolution = await _project_from_query(
+        request, current_user, project_id or project, locator, hint_project, hint_scope
+    )
     result = await _service(request).trail(
         current_user.user_id,
         resolved,

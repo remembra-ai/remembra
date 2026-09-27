@@ -111,7 +111,7 @@ def test_docs_home_leads_with_the_relay_install() -> None:
     assert block is not None and block.group(1).splitlines() == [
         INSTALL_STEP,
         "remembra-install --all",
-        "remembra-relay connect",
+        "remembra-relay connect --apply",
     ]
     assert "guides/relay.md" in first and "getting-started/agent-setup.md" in first
     assert "v0.13" not in first

@@ -65,6 +65,11 @@ coolify_key*
 google-tts-credentials.json
 config/master_config.json
 
+# Private notes: never in this public repo (hooks/pre-push and CI refuse them too;
+# they live in the private audits folder)
+docs/audits/
+*-fixlog.md
+
 # Docker volumes (local dev)
 .qdrant_data/
 .postgres_data/
@@ -73,8 +78,10 @@ config/master_config.json
 *.log
 logs/
 
-# MkDocs build output
-# site/ - Now tracked for Coolify deployment
+# MkDocs build output: docs.Dockerfile and the Pages workflow build it from docs/
+# on every deploy, so it is never committed (a committed copy went stale)
+site/
+.vercel/
 
 # Distribution
 *.tar.gz

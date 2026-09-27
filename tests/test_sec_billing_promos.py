@@ -179,3 +179,122 @@ async def test_redeem_endpoint_applies_trial_once_and_trial_expires(tmp_path, mo
         assert await meter.get_tenant_plan(uid) == PlanTier.FREE  # trials end
     finally:
         await ctx.__aexit__(None, None, None)
+
+
+# ---------------------------------------------------------------------------
+# BILL-12: a paying subscriber cannot turn a trial code into a trial that never ends
+# ---------------------------------------------------------------------------
+
+
+async def test_a_subscriber_cannot_redeem_a_trial_code_but_a_free_account_can(tmp_path, monkeypatch):
+    from remembra.cloud import promocodes
+    from remembra.cloud.plans import BillingInterval
+
+    monkeypatch.setitem(promocodes.PROMO_CODES, "FUTUREPRO", _trial("FUTUREPRO", cap=None, days=30))
+    ctx, h = await _app(tmp_path, secret=SECRET)
+    try:
+        meter = h.app.state.usage_meter
+        await meter.init_schema()
+        subscriber = await h.create_user("solo-annual@example.com")
+        await meter.apply_subscription(subscriber, PlanTier.SOLO, interval=BillingInterval.YEAR, subscription_id="sub_solo_y")
+        before = await meter.get_tenant(subscriber)
+        r = await h.client.post(
+            "/api/v1/cloud/promo/redeem", json={"code": "FUTUREPRO"}, headers=h.jwt(subscriber, "solo-annual@example.com")
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["success"] is False and "subscription" in r.json()["error"]
+        after = await meter.get_tenant(subscriber)
+        assert (after["plan"], after["promo_expires_at"]) == (before["plan"], before["promo_expires_at"]) == ("solo", None)
+        # The refused attempt did not use up the account's one redemption.
+        assert await promocodes.PromoCodeManager(h.db).redemption_count("FUTUREPRO") == 0
+
+        free = await h.create_user("free-trial@example.com")
+        free_hdr = h.jwt(free, "free-trial@example.com")
+        r = await h.client.post("/api/v1/cloud/promo/redeem", json={"code": "FUTUREPRO"}, headers=free_hdr)
+        assert r.status_code == 200 and r.json()["success"] is True, r.text
+        assert await meter.get_tenant_plan(free) == PlanTier.PRO
+
+        # A subscriber whose subscription ended (back on Free) may use a trial again.
+        await meter.apply_subscription(subscriber, PlanTier.FREE)
+        r = await h.client.post(
+            "/api/v1/cloud/promo/redeem", json={"code": "FUTUREPRO"}, headers=h.jwt(subscriber, "solo-annual@example.com")
+        )
+        assert r.json()["success"] is True, r.text
+    finally:
+        await ctx.__aexit__(None, None, None)
+
+
+# ---------------------------------------------------------------------------
+# LIVE-2: the admin promo routes run the master-key check
+# ---------------------------------------------------------------------------
+
+
+async def test_admin_promo_routes_require_the_master_key(tmp_path, monkeypatch):
+    """They passed the Annotated alias RequireMasterKey to Depends(), so FastAPI
+    asked for ?args=&kwargs= (422 for everyone, 500 with both) and the master-key
+    check never ran: one "fix" away from publishing every code's stats."""
+    from remembra.cloud import promocodes
+    from tests.security_harness import MASTER_KEY
+
+    monkeypatch.setitem(promocodes.PROMO_CODES, "TESTSTATS", _trial("TESTSTATS", cap=5))
+    ctx, h = await _app(tmp_path, secret=SECRET)
+    try:
+        uid = await h.create_user("promo-admin@example.com")
+        user_key, _ = await h.api_key(uid, "admin")
+        for path in ("/api/v1/cloud/promo/list", "/api/v1/cloud/promo/TESTSTATS/stats"):
+            assert (await h.client.get(path)).status_code == 401, path
+            assert (await h.client.get(path, params={"args": 1, "kwargs": 1})).status_code == 401, path
+            assert (await h.client.get(path, headers={"X-API-Key": user_key})).status_code == 401, path
+            assert (await h.client.get(path, headers=h.jwt(uid))).status_code == 401, path
+        r = await h.client.get("/api/v1/cloud/promo/list", headers={"X-API-Key": MASTER_KEY})
+        assert r.status_code == 200, r.text
+        assert "TESTSTATS" in {c["code"] for c in r.json()["codes"]}
+        r = await h.client.get("/api/v1/cloud/promo/TESTSTATS/stats", headers={"X-API-Key": MASTER_KEY})
+        assert r.status_code == 200, r.text
+        assert r.json()["code"] == "TESTSTATS" and r.json()["max_redemptions"] == 5
+        r = await h.client.get("/api/v1/cloud/promo/NOPE/stats", headers={"X-API-Key": MASTER_KEY})
+        assert r.status_code == 404
+    finally:
+        await ctx.__aexit__(None, None, None)
+
+
+def test_no_route_hands_depends_an_annotated_alias():
+    """Depends(SomeAnnotatedAlias) silently becomes (*args, **kwargs) query
+    parameters and never runs the check. Use Depends(the_function) or a
+    `_: Alias` parameter. Checked in the source (every module) and in the
+    served OpenAPI schema."""
+    import ast
+    from pathlib import Path
+
+    from remembra.main import create_app
+
+    src = Path(__file__).resolve().parents[1] / "src" / "remembra"
+    trees = {path: ast.parse(path.read_text()) for path in src.rglob("*.py")}
+
+    def is_annotated(node: ast.AST | None) -> bool:
+        return isinstance(node, ast.Subscript) and getattr(node.value, "id", getattr(node.value, "attr", None)) == "Annotated"
+
+    aliases = {
+        target.id
+        for tree in trees.values()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Assign) and is_annotated(node.value)
+        for target in node.targets
+        if isinstance(target, ast.Name)
+    }
+    assert {"RequireMasterKey", "CurrentUser", "RequireAdmin"} <= aliases
+    offenders = [
+        f"{path.relative_to(src.parent)}:{node.lineno}"
+        for path, tree in trees.items()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", getattr(node.func, "attr", None)) in {"Depends", "Security"}
+        and node.args
+        and getattr(node.args[0], "id", getattr(node.args[0], "attr", None)) in aliases
+    ]
+    assert offenders == []
+
+    for path, operations in create_app().openapi()["paths"].items():
+        for method, operation in operations.items():
+            query = {p["name"] for p in operation.get("parameters", []) if p.get("in") == "query"}
+            assert not query & {"args", "kwargs"}, f"{method.upper()} {path} takes {sorted(query)}"

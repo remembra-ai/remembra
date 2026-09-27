@@ -34,7 +34,13 @@ def _as(api: dict[str, Any], **kwargs: Any) -> None:
 def _close(api: dict[str, Any], agent: str = "claude-code", session: str = "s1", project: str = "widget", **facts: Any) -> str:
     res = api["http"].post(
         "/api/v1/session/close",
-        json={"agent_id": agent, "session_id": session, "project_id": project, "facts": {"branch": "main", **facts}},
+        # A next step: a handoff that records nothing is never served as the last session.
+        json={
+            "agent_id": agent,
+            "session_id": session,
+            "project_id": project,
+            "facts": {"branch": "main", "next_step": "carry on", **facts},
+        },
     )
     assert res.status_code == 200, res.text
     return str(res.json()["handoff_id"])

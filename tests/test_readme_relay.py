@@ -21,11 +21,13 @@ from remembra.relay import handoff as h
 ROOT = Path(__file__).resolve().parent.parent
 README = (ROOT / "README.md").read_text()
 MCP_SERVER = (ROOT / "src" / "remembra" / "mcp" / "server.py").read_text()
+# server.py registers Marshal's read-only tools from here (_register_marshal).
+MARSHAL_TOOLS = (ROOT / "src" / "remembra" / "marshal" / "mcp_tools.py").read_text()
 
 INSTALL = [
     "pipx install --force 'remembra[mcp]>=0.16'",
     "remembra-install --all",  # asks for the key at a hidden prompt: never on the command line
-    "remembra-relay connect",
+    "remembra-relay connect --apply",  # writes the hooks: a bare `connect` is a dry run
 ]
 
 
@@ -36,9 +38,10 @@ def _first_screen() -> str:
 def test_first_screen_leads_with_relay_install_and_the_contradiction() -> None:
     first = _first_screen()
     assert '<h1 align="center">Remembra Relay</h1>' in first
-    block = re.search(r"## Install\n\n```bash\n(.*?)\n```", first, re.S)
+    block = re.search(r"## Install\n\n(?P<lead>[^\n]*)\n\n```bash\n(?P<cmds>.*?)\n```", first, re.S)
     assert block is not None
-    assert block.group(1).splitlines() == INSTALL
+    assert "app.remembra.dev/signup" in block.group("lead")  # the key comes first
+    assert block.group("cmds").splitlines() == INSTALL
     assert "the agent's summary contradicts these recorded facts" in first
 
 
@@ -101,7 +104,10 @@ def test_readme_names_every_mcp_tool_and_the_real_count() -> None:
                 re.match(r"\s*(?:async\s+)?def\s+(\w+)", ln) for ln in lines[i : i + 60] if re.match(r"\s*(?:async\s+)?def\s", ln)
             )
             registered.append(name.group(1))
-    assert len(registered) == 28  # 21 memory/relay tools + 7 Crew mode tools
+    assert "_register_marshal()" in MCP_SERVER
+    registered += re.findall(r'@mcp\.tool\(\s*name="(\w+)"', MARSHAL_TOOLS)
+    # 21 memory/relay tools and 7 Crew mode tools in server.py, 3 from Marshal (remembra_doctor, remembra_setup, remembra_help)
+    assert len(registered) == 31
     assert f"**Available tools ({len(registered)}):**" in README
     for tool in registered:
         assert f"`{tool}`" in README, tool

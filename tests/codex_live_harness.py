@@ -57,8 +57,10 @@ class MockResponses:
 
     ``scripts[prompt]`` is a list of steps for that turn: ``("exec", "cmd")``
     asks Codex to run a shell command, ``("say", "text")`` ends the turn with a
-    message, ``("limit",)`` answers 429 ``usage_limit_reached``. The step is
-    chosen by how many tool results the turn already has.
+    message, ``("limit",)`` answers 429 ``usage_limit_reached``, ``("spawn",
+    "task")`` asks Codex to start a sub-agent thread with that first prompt
+    (its ``multi_agent_v1`` tool). The step is chosen by how many tool results
+    the turn already has.
     """
 
     def __init__(self, scripts: dict[str, list[tuple[str, ...]]]) -> None:
@@ -148,7 +150,17 @@ class MockResponses:
             }
             return 429, json.dumps(error).encode(), "application/json"
         tools = [t.get("name") for t in body.get("tools") or [] if isinstance(t, dict)]
-        if step[0] == "exec":
+        if step[0] == "spawn":
+            call = f"call_{len(self.requests)}"
+            item: dict[str, Any] = {
+                "type": "function_call",
+                "id": f"fc_{call}",
+                "call_id": call,
+                "namespace": "multi_agent_v1",
+                "name": "spawn_agent",
+                "arguments": json.dumps({"message": step[1]}),
+            }
+        elif step[0] == "exec":
             if "exec_command" in tools:
                 name, args = "exec_command", {"cmd": step[1]}
             elif "shell_command" in tools:
@@ -156,7 +168,7 @@ class MockResponses:
             else:
                 name, args = "shell", {"command": ["bash", "-lc", step[1]]}
             call = f"call_{len(self.requests)}"
-            item: dict[str, Any] = {
+            item = {
                 "type": "function_call",
                 "id": f"fc_{call}",
                 "call_id": call,

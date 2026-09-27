@@ -12,7 +12,7 @@ interface EmailVerificationStatusProps {
 /**
  * Profile: whether the account email is verified, and a way to get a new
  * verification link (the signup link expires after 24 hours). Verifying lifts
- * the unverified-email credit hold and lets Sign in with Google link to the account.
+ * the unverified-email credit hold.
  */
 export function EmailVerificationStatus({ verified, onVerified }: EmailVerificationStatusProps) {
   const [sending, setSending] = useState(false);
@@ -61,7 +61,7 @@ export function EmailVerificationStatus({ verified, onVerified }: EmailVerificat
         </button>
       </div>
       <p className="mt-2 text-xs text-amber-800/80 dark:text-amber-300/80">
-        Verifying proves you own this address. Sign in with Google can only connect to a verified account.
+        Open the link we email you to confirm this address is yours.
       </p>
       {notice && (
         <p

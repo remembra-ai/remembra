@@ -275,6 +275,7 @@ def test_extra_module_names_cover_every_package_of_the_extras() -> None:
 
     import_names = {
         "fastapi": "fastapi",
+        "starlette": "starlette",  # a direct floor since DEP-1
         "uvicorn": "uvicorn",
         "pydantic": "pydantic",
         "pydantic-settings": "pydantic_settings",

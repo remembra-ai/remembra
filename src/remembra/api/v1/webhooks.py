@@ -43,6 +43,13 @@ async def require_account_wide_credential(current_user: CurrentUser) -> None:
         )
 
 
+async def refuse_untrusted_session(request: Request, current_user: CurrentUser) -> None:
+    """A dashboard session that did not prove the mailbox adds or changes no webhook during an account review."""
+    from remembra.api.v1.auth import refuse_untrusted_session_during_review
+
+    await refuse_untrusted_session_during_review(request, current_user)
+
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
@@ -92,7 +99,11 @@ class DeliveryResponse(BaseModel):
     "",
     status_code=status.HTTP_201_CREATED,
     summary="Register a webhook",
-    dependencies=[require_webhook_manage(), Depends(require_account_wide_credential)],
+    dependencies=[
+        require_webhook_manage(),
+        Depends(require_account_wide_credential),
+        Depends(refuse_untrusted_session),
+    ],
 )
 @limiter.limit("10/minute")
 async def register_webhook(
@@ -159,7 +170,11 @@ async def get_webhook(
 @router.patch(
     "/{webhook_id}",
     summary="Update a webhook",
-    dependencies=[require_webhook_manage(), Depends(require_account_wide_credential)],
+    dependencies=[
+        require_webhook_manage(),
+        Depends(require_account_wide_credential),
+        Depends(refuse_untrusted_session),
+    ],
 )
 @limiter.limit("10/minute")
 async def update_webhook(

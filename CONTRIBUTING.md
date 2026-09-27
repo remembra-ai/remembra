@@ -54,6 +54,23 @@ ruff format .
 remembra-server --reload
 ```
 
+### Git hooks
+
+Install them once per clone (they cover every worktree of it):
+
+```bash
+./scripts/install-hooks.sh
+```
+
+- `pre-commit` blocks banned words in Markdown and a wrong maintainer name in `pyproject.toml`.
+- `pre-push` refuses a push that would publish private material: audit trackers under `docs/audits/`,
+  `*-fixlog.md` files, and the other kinds `scripts/ci/repo_hygiene.py` lists. It checks every commit the
+  push would add, not just the tip, because a file added in one commit and deleted in the next is still
+  published. Run the same check by hand with `python scripts/ci/repo_hygiene.py tree` (all tracked files)
+  or `python scripts/ci/repo_hygiene.py range origin/main..HEAD` (your commits); CI runs both.
+
+Private notes (audits, fix logs, runbooks with hosts or credentials) belong outside this repository.
+
 ## Code Style
 
 - We use [Ruff](https://github.com/astral-sh/ruff) for linting and formatting

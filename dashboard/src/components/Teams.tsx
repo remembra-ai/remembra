@@ -979,8 +979,8 @@ export function Teams() {
                     onChange={(e) => setInviteRole(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-[hsl(var(--muted))] border border-[hsl(var(--border))] text-[hsl(var(--foreground))] focus:outline-none focus:ring-2 focus:ring-signal"
                   >
-                    <option value="viewer">Viewer — Read-only access</option>
-                    <option value="member">Member — Can create and edit</option>
+                    <option value="viewer">Viewer — Can see the team and its members</option>
+                    <option value="member">Member — Can see the team and its members</option>
                     <option value="admin">Admin — Can manage team</option>
                   </select>
                 </div>

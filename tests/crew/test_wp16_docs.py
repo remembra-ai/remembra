@@ -1,6 +1,6 @@
 """WP-16: the Crew mode docs describe the code that ships, not a plan.
 
-``docs/relay/crew.md`` and ``docs/DEPLOYING.md`` are read the way a reader follows them: the
+``docs/relay/crew.md`` and ``docs/OPERATIONS.md`` are read the way a reader follows them: the
 zones.yml example is compiled by the server's parser, every ``remembra-crew`` command and option
 is parsed by the real CLI parsers, every ``python -m remembra.storage.snapshot`` command by the
 snapshot parser, every MCP tool named exists, and every environment variable named is read
@@ -22,8 +22,8 @@ from remembra.storage import snapshot
 
 ROOT = Path(__file__).resolve().parents[2]
 CREW_DOC = ROOT / "docs" / "relay" / "crew.md"
-DEPLOYING = ROOT / "docs" / "DEPLOYING.md"
-DOCS = (CREW_DOC, DEPLOYING)
+OPERATIONS = ROOT / "docs" / "OPERATIONS.md"
+DOCS = (CREW_DOC, OPERATIONS)
 
 
 def _code_blocks(text: str, lang: str | None = None) -> list[str]:
@@ -124,7 +124,7 @@ def test_environment_variables_named_in_the_docs_are_read_by_the_code() -> None:
     settings_env = {f"REMEMBRA_{f.upper()}" for f in Settings.model_fields}
     sections = {
         "crew.md": (None, None),
-        "DEPLOYING.md": ("## Backups (litestream)", "## Notes"),
+        "OPERATIONS.md": ("## Backups (litestream)", "## Health, readiness, metrics"),
         "configuration.md": ("## Crew mode", "## Embeddings"),
     }
     for doc in (*DOCS, ROOT / "docs" / "reference" / "configuration.md"):
@@ -158,6 +158,7 @@ def test_trust_model_states_the_honest_limit() -> None:
 
 def test_docs_are_in_the_site_navigation() -> None:
     assert "relay/crew.md" in (ROOT / "mkdocs.yml").read_text()
-    deploying = DEPLOYING.read_text()
+    operations = OPERATIONS.read_text()
     for heading in ("## Crew mode", "### Turning it on", "### Rollback plan"):
-        assert heading in deploying
+        assert heading in operations
+    assert not (ROOT / "docs" / "DEPLOYING.md").exists()  # the hosted runbook left the repository (LEAK-5)

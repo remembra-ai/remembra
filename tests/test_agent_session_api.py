@@ -203,6 +203,14 @@ async def test_session_brief_contents_and_ordering(env):
     await _seed(db, "src", "verbatim source", base + timedelta(hours=2), memory_type="source")
     await _seed(db, "m1", "first fact", base + timedelta(hours=2))
     await _seed(db, "m2", "second fact", base + timedelta(hours=3), metadata={"agent_id": "codex", "source_id": "src"})
+    await _seed(
+        db,
+        "cp",
+        "parser half done",
+        base + timedelta(hours=2, minutes=30),
+        memory_type="checkpoint",
+        metadata={"agent_id": "codex"},
+    )
     await _seed(db, "other", "other project fact", base + timedelta(hours=4), project_id="beta")
     await _seed(db, "expired", "expired fact", base, expires_at=utcnow() - timedelta(minutes=1))
     await c.post("/api/v1/session/status", json={"key": "sprint", "value": "AGT remediation", "project_id": "alpha"})
@@ -219,10 +227,11 @@ async def test_session_brief_contents_and_ordering(env):
     assert item["subject"] == "review" and item["from_agent"] == "codex"
     assert len(item["body_preview"]) == 203  # 200 chars + "..."
     assert [s["key"] for s in brief["status_items"]] == ["sprint"]
-    # recent: by time, newest first; no handoff/status/source/expired/other-project rows
-    assert [m["id"] for m in brief["recent"]] == ["m2", "m1"]
+    # recent: this project's handoffs and checkpoints by time, newest first, without the one shown as the
+    # last session; never general memories (m1, m2) or status/source/expired/other-project rows
+    assert [m["id"] for m in brief["recent"]] == ["cp", "h-old"]
     assert brief["recent"][0]["agent_id"] == "codex"
-    assert brief["recent"][0]["source_id"] == "src"
+    assert brief["handoffs_skipped"] == 0
     assert set(brief["known_agents"]) == {"codex", "claude-code", "gemini"}
     assert brief["warnings"] == []
 
@@ -255,8 +264,8 @@ async def test_session_brief_respects_project_restricted_key(env):
 
 async def test_session_brief_is_tenant_scoped(env):
     db = env["db"]
-    await _seed(db, "mine", "mine", utcnow())
-    await _seed(db, "theirs", "theirs", utcnow(), user_id="someone-else")
+    await _seed(db, "mine", "mine", utcnow(), memory_type="checkpoint")
+    await _seed(db, "theirs", "theirs", utcnow(), user_id="someone-else", memory_type="checkpoint")
     await env["inbox"].send(owner_user_id="someone-else", from_agent="x", to_agent="claude-code", subject="s", body="b")
     brief = (await env["client"].get("/api/v1/session/brief", params={"project_id": "alpha", "agent_id": "claude-code"})).json()
     assert [m["id"] for m in brief["recent"]] == ["mine"]

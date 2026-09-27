@@ -15,6 +15,7 @@ from remembra.auth.middleware import (
     require_memory_store,
     resolve_project_or_default,
 )
+from remembra.cloud.limits import gate_write, release_memory_slot_holds
 from remembra.core.limiter import limiter
 from remembra.core.time import utcnow
 from remembra.services.memory import MemoryService
@@ -576,8 +577,25 @@ async def restore_memory(
 
     ensure_project_access(current_user, memory["project_id"])
 
-    # Restore the memory
-    success = await db.restore_memory(memory_id)
+    # BILL-11: a restored memory is a row again (and is re-embedded), so it
+    # passes the plan gate like an atomic store: memory cap, project cap and
+    # the Free daily unenriched cap (429 leaves it archived).
+    await gate_write(
+        request,
+        None,
+        current_user.user_id,
+        [str(memory.get("content") or "")],
+        atomic=[True],
+        project_ids=[memory.get("project_id") or "default"],
+        memories_added=1,
+        enforce_content_limit=False,  # stored under the plan it was written on
+    )
+
+    # Restore the memory; its row counts toward the cap from here (BILL-10).
+    try:
+        success = await db.restore_memory(memory_id)
+    finally:
+        await release_memory_slot_holds(request)
 
     if not success:
         raise HTTPException(

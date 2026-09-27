@@ -1,0 +1,57 @@
+{
+  "host": "grok",
+  "how": "built from the source, not recorded: xai-org/grok-build @ f0e3be1, HookEventEnvelope::to_hook_json (xai-grok-hooks/src/event.rs), the envelope fields set in acp_session/hooks.rs, SessionEnd reasons from run_loop.rs, the environment from runner/command.rs (GROK_HOOK_NAME, also set, is left out). Grok Build could not be run here.",
+  "hook_cwd": "/home/dev/work/widget",
+  "env": {
+    "GROK_HOOK_EVENT": "session_end",
+    "GROK_SESSION_ID": "019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c",
+    "GROK_WORKSPACE_ROOT": "/home/dev/work/widget",
+    "CLAUDE_PROJECT_DIR": "/home/dev/work/widget"
+  },
+  "payloads": {
+    "start": {
+      "hookEventName": "session_start",
+      "sessionId": "019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c",
+      "cwd": "/home/dev/work/widget",
+      "workspaceRoot": "/home/dev/work/widget",
+      "timestamp": "2026-09-26T14:52:10.114820+00:00",
+      "transcriptPath": "/home/dev/.grok/sessions/%2Fhome%2Fdev%2Fwork%2Fwidget/019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c/updates.jsonl",
+      "permissionMode": "default",
+      "source": "startup",
+      "modelId": "grok-build",
+      "hook_event_name": "SessionStart",
+      "session_id": "019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c",
+      "transcript_path": "/home/dev/.grok/sessions/%2Fhome%2Fdev%2Fwork%2Fwidget/019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c/updates.jsonl",
+      "permission_mode": "default"
+    },
+    "end": {
+      "hookEventName": "session_end",
+      "sessionId": "019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c",
+      "cwd": "/home/dev/work/widget",
+      "workspaceRoot": "/home/dev/work/widget",
+      "timestamp": "2026-09-26T14:52:10.114820+00:00",
+      "transcriptPath": "/home/dev/.grok/sessions/%2Fhome%2Fdev%2Fwork%2Fwidget/019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c/updates.jsonl",
+      "permissionMode": "default",
+      "reason": "shutdown",
+      "hook_event_name": "SessionEnd",
+      "session_id": "019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c",
+      "transcript_path": "/home/dev/.grok/sessions/%2Fhome%2Fdev%2Fwork%2Fwidget/019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c/updates.jsonl",
+      "permission_mode": "default"
+    },
+    "subagent_end": {
+      "hookEventName": "session_end",
+      "sessionId": "019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c",
+      "cwd": "/home/dev/work/widget",
+      "workspaceRoot": "/home/dev/work/widget",
+      "timestamp": "2026-09-26T14:52:10.114820+00:00",
+      "transcriptPath": "/home/dev/.grok/sessions/%2Fhome%2Fdev%2Fwork%2Fwidget/019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c/updates.jsonl",
+      "permissionMode": "default",
+      "reason": "shutdown",
+      "subagentType": "explore",
+      "hook_event_name": "SessionEnd",
+      "session_id": "019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c",
+      "transcript_path": "/home/dev/.grok/sessions/%2Fhome%2Fdev%2Fwork%2Fwidget/019a2f4c-8e1d-7b3a-9c52-6d0e1f2a3b4c/updates.jsonl",
+      "permission_mode": "default"
+    }
+  }
+}

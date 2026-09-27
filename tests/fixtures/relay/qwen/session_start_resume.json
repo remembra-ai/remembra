@@ -1,0 +1,10 @@
+{
+  "session_id": "389870e3-a751-4caa-88ea-368a488c87e6",
+  "transcript_path": "/home/dev/.qwen/projects/-home-dev-work-widget/chats/389870e3-a751-4caa-88ea-368a488c87e6.jsonl",
+  "cwd": "/home/dev/work/widget",
+  "hook_event_name": "SessionStart",
+  "timestamp": "2026-09-26T17:43:35.527Z",
+  "permission_mode": "auto",
+  "source": "resume",
+  "model": "stand-in"
+}

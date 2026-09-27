@@ -100,31 +100,83 @@ class TestMemoryClient:
         assert len(result.memories) == 1
         assert result.memories[0].relevance == 0.92
 
-    @patch("remembra.client.memory.httpx.Client")
-    def test_forget_success(self, mock_client_class):
-        """Test successful memory deletion."""
-        # Setup mock
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "deleted_memories": 5,
-            "deleted_entities": 2,
-            "deleted_relationships": 3,
-        }
+    @staticmethod
+    def _server(mock_client_class, version="0.16.1"):
+        """A mocked server: GET /health reports ``version``; DELETE returns deletion counts."""
+
+        def respond(**kwargs):
+            response = MagicMock()
+            response.status_code = 200
+            if kwargs["method"] == "GET":
+                response.json.return_value = {"status": "ok", "version": version}
+            else:
+                response.json.return_value = {"deleted_memories": 5, "deleted_entities": 2, "deleted_relationships": 3}
+            return response
 
         mock_client = MagicMock()
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client.request.return_value = mock_response
+        mock_client.request.side_effect = respond
         mock_client_class.return_value = mock_client
+        return mock_client
 
-        # Test
-        memory = Memory(user_id="user_123")
-        result = memory.forget(user_id="user_123")
+    @patch("remembra.client.memory.httpx.Client")
+    def test_forget_success(self, mock_client_class):
+        """forget() sends exactly the filter the DELETE endpoint accepts and returns its counts."""
+        mock_client = self._server(mock_client_class)
+
+        memory = Memory(user_id="user_123", project_aliases={"old-work": "work"})
+        result = memory.forget(entity="John", project_id="old-work")
 
         assert isinstance(result, ForgetResult)
-        assert result.deleted_memories == 5
-        assert result.deleted_entities == 2
+        assert (result.deleted_memories, result.deleted_entities, result.deleted_relationships) == (5, 2, 3)
+        # The server version is checked first (an older server deletes the whole account for this).
+        health, call = (c.kwargs for c in mock_client.request.call_args_list)
+        assert health["method"] == "GET" and health["url"].endswith("/health")
+        assert call["method"] == "DELETE" and call["url"].endswith("/api/v1/memories")
+        assert call["params"] == {"entity": "John", "project_id": "work"}
+
+        memory.forget(memory_id="mem_1")
+        assert mock_client.request.call_args.kwargs["params"] == {"memory_id": "mem_1"}
+        # The whole account only on the explicit flag.
+        memory.forget(all_memories=True)
+        assert mock_client.request.call_args.kwargs["params"] == {"all_memories": "true"}
+
+    @patch("remembra.client.memory.httpx.Client")
+    def test_forget_sends_nothing_without_exactly_one_target(self, mock_client_class):
+        """No call is a silent account wipe: a missing or mixed target fails before any request."""
+        mock_client = MagicMock()
+        mock_client_class.return_value = mock_client
+        memory = Memory(user_id="user_123")
+
+        for kwargs in (
+            {},
+            {"all_memories": False},
+            {"entity": "   "},
+            {"memory_id": "mem_1", "entity": "John"},
+            {"entity": "John", "all_memories": True},
+            {"project_id": "work"},
+            {"all_memories": True, "project_id": "work"},
+            {"entity": "John", "project_id": " "},
+        ):
+            with pytest.raises(MemoryError):
+                memory.forget(**kwargs)
+        # user_id was never a delete filter the server accepts.
+        with pytest.raises(TypeError):
+            memory.forget(user_id="user_123")  # type: ignore[call-arg]
+        mock_client.request.assert_not_called()
+
+    @pytest.mark.parametrize("version", ["0.16.0", "0.9.9", "", None, "unknown"])
+    @patch("remembra.client.memory.httpx.Client")
+    def test_forget_by_entity_is_not_sent_to_a_server_that_would_wipe_the_account(self, mock_client_class, version):
+        """Before 0.16.1 the server deleted the whole account for a delete by entity."""
+        mock_client = self._server(mock_client_class, version=version)
+        memory = Memory(user_id="user_123")
+
+        with pytest.raises(MemoryError, match="0.16.1"):
+            memory.forget(entity="John")
+        assert [c.kwargs["method"] for c in mock_client.request.call_args_list] == ["GET"]
+        # Deleting one memory stays available.
+        memory.forget(memory_id="mem_1")
+        assert mock_client.request.call_args.kwargs["params"] == {"memory_id": "mem_1"}
 
     @patch("remembra.client.memory.httpx.Client")
     def test_request_error(self, mock_client_class):

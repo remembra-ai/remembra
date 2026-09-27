@@ -84,11 +84,16 @@ export interface RecallResult {
 // Forget
 // ============================================================================
 
+/** Give exactly one of `memoryId`, `entity` or `allMemories: true`. */
 export interface ForgetOptions {
-  /** Delete specific memory by ID */
+  /** Delete this one memory */
   memoryId?: string;
-  /** Delete all memories about an entity */
+  /** Delete the memories linked to the entity with this exact name or alias (any case) */
   entity?: string;
+  /** With `entity` only: limit the delete to this project */
+  projectId?: string;
+  /** Delete every memory, entity and relationship in the account. Never implied. */
+  allMemories?: boolean;
 }
 
 export interface ForgetResult {

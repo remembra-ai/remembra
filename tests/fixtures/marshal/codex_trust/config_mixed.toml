@@ -1,0 +1,20 @@
+model = "gpt-5"
+
+[mcp_servers.remembra]
+command = "remembra-mcp"
+
+[mcp_servers.remembra.env]
+REMEMBRA_API_KEY = "fixture-placeholder-not-a-key"
+
+[hooks.state."@HOOKS@:session_start:0:0"]
+trusted_hash = "sha256:9b7fe1c5d160d1a9d768bb1eaaf23814216b2c68bf516564e2ca24c547d8946b"
+
+[hooks.state."@HOOKS@:user_prompt_submit:0:0"]
+trusted_hash = "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+
+[hooks.state."@HOOKS@:session_end:0:0"]
+enabled = false
+trusted_hash = "sha256:6508d94a73366397571a73c75784b754262f9c1bba866f950830ad05e4cc213f"
+
+[hooks.state."/somewhere/else/hooks.json:session_end:0:1"]
+trusted_hash = "sha256:1111111111111111111111111111111111111111111111111111111111111111"

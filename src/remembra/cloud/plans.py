@@ -6,7 +6,7 @@ Owner-approved prices (2026-09):
   - free:        $0            relay free, 500 smart credits/mo (new accounts: 25 until
                                email verified, once that hold is enabled), 300 unenriched stores/day
   - solo:        $12/mo  or $120/yr   2,200 credits/mo, 50K memories
-  - founding:    Solo at $108/yr, price locked for life, annual only, first 100
+  - founding:    Solo at $108/yr, price held while subscribed (+14 days after it ends), annual only, first 100
   - pro:         $29/mo  or $290/yr   5,000 credits/mo, 125K memories
   - team:        $15/seat/mo or $150/seat/yr, 3-seat minimum, limits pooled per seat
   - enterprise:  custom contract ($399/mo floor)
@@ -77,7 +77,7 @@ class BillingInterval(StrEnum):
 # Tiers a customer can buy through self-serve checkout.
 SELF_SERVE_TIERS: tuple[PlanTier, ...] = (PlanTier.SOLO, PlanTier.PRO, PlanTier.TEAM)
 LEGACY_TIERS: frozenset[PlanTier] = frozenset({PlanTier.LEGACY_PRO, PlanTier.LEGACY_TEAM})
-# Founding 100: Solo, annual only, price locked for life.
+# Founding 100: Solo, annual only; the price holds while the subscription stays active, plus 14 days after it ends.
 FOUNDING_MAX_REDEMPTIONS = 100
 FOUNDING_ANNUAL_PRICE_CENTS = 10_800
 

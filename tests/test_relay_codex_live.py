@@ -34,6 +34,7 @@ from typing import Any
 
 import pytest
 
+from remembra.relay.background import read_session_meta, session_skip_reason
 from remembra.relay.facts import parse_codex_rollout
 from tests.codex_live_harness import (
     FIXTURE_HOME,
@@ -68,14 +69,14 @@ LIMIT = "Keep going on the totals fix."
 class Rig:
     """Temp HOME + CODEX_HOME + repo + hook-payload capture for one Codex setup."""
 
-    def __init__(self, tmp: Path, server_url: str, mock: MockResponses) -> None:
+    def __init__(self, tmp: Path, server_url: str, mock: MockResponses, codex_home: Path | None = None) -> None:
         assert CODEX is not None
         self.codex, self.version = CODEX
         self.tmp = tmp
         self.server = server_url
         self.home = tmp / "home"
         self.home.mkdir()
-        self.codex_home = self.home / ".codex"
+        self.codex_home = codex_home or self.home / ".codex"
         self.config = write_codex_config(self.codex_home, mock.base_url)
         self.payloads = tmp / "payloads"
         self.payloads.mkdir()
@@ -103,7 +104,8 @@ class Rig:
         }
 
     def connect(self) -> Any:
-        out = relay(self.home, self.server, "connect", "--agent", "codex", "--apply", "--relay-command", str(self.hook))
+        args = ("connect", "--agent", "codex", "--apply", "--relay-command", str(self.hook))
+        out = relay(self.home, self.server, *args, env={"CODEX_HOME": str(self.codex_home)})
         assert out.returncode == 0, out.stderr
         return out
 
@@ -303,3 +305,160 @@ def test_usage_limit_stop_reaches_the_relay(server, tmp_path):  # noqa: F811
         rollout = Path(end["transcript_path"])
         assert parse_codex_rollout(rollout).usage_limit
         _record(rig, "rollout_usage_limit.jsonl", scrub_rollout(rollout.read_text(), rig.replacements()))
+
+
+_KIND_PROBE = """\
+import json, sys
+from pathlib import Path
+from remembra.relay.background import read_session_meta, session_skip_reason
+source = Path(sys.argv[1])
+payload = json.loads(source.read_text())
+meta = read_session_meta(payload["transcript_path"]) or {}
+found = {"event": payload["hook_event_name"], "thread_source": meta.get("thread_source"), "skip": session_skip_reason(payload)}
+(Path(sys.argv[2]) / (source.name + ".json")).write_text(json.dumps(found))
+"""
+
+
+def test_every_hook_can_read_the_thread_kind_from_the_rollout(server, tmp_path):  # noqa: F811
+    """The skip for automations and sub-agents (remembra.relay.background) reads the rollout's first line.
+
+    Live: when each hook fires, SessionStart included, the rollout it names
+    already starts with its session_meta, so the kind is read before the brief
+    is printed. A user thread (all ``codex exec`` can start) keeps its brief
+    and its handoff, and relay.log records no skip.
+    """
+    with MockResponses({"Say hi.": [("say", "Hi.")]}) as mock:
+        rig = Rig(tmp_path, server, mock)
+        _claude_closes(rig)
+        kinds = tmp_path / "kinds"
+        kinds.mkdir()
+        probe = tmp_path / "kind_probe.py"
+        probe.write_text(_KIND_PROBE)
+        # Read the kind BEFORE the relay runs, from the payload Codex sent this hook.
+        rig.hook.write_text(
+            "#!/bin/sh\n"
+            f'f=$(mktemp "{rig.payloads}/payload.XXXXXX")\n'
+            'cat > "$f"\n'
+            f'"{sys.executable}" "{probe}" "$f" "{kinds}"\n'
+            f'exec "{sys.executable}" -m remembra.relay.cli "$@" < "$f"\n'
+        )
+        rig.connect()
+        trust_hooks(rig.codex, rig.env, rig.repo, rig.config)
+        before = len(mock.requests)
+        rig.exec("Say hi.")
+        assert _brief_count(MockResponses.developer_texts(mock.requests[before])) == 1
+        assert rig.trail("codex"), "codex handoff missing"
+        seen = [json.loads(p.read_text()) for p in kinds.iterdir()]
+        by_event = {k["event"]: k for k in seen}
+        assert set(by_event) == {"SessionStart", "UserPromptSubmit", "SessionEnd"}, seen
+        assert all(k["thread_source"] == "user" and k["skip"] is None for k in seen), seen
+        log = rig.home / ".remembra" / "relay" / "relay.log"
+        assert "skipped" not in (log.read_text() if log.exists() else "")
+
+
+def test_a_sub_agent_thread_gets_no_brief_and_leaves_no_handoff(server, tmp_path):  # noqa: F811
+    """A sub-agent Codex starts is read as one from its own rollout, and gets no brief or handoff.
+
+    Live: the model asks Codex's multi-agent tool for a sub-agent while the
+    parent turn waits. codex-cli 0.155.0-alpha.16.4 runs the sub-agent's
+    UserPromptSubmit hook (its SessionStart and SessionEnd do not fire under
+    ``codex exec``) with the PARENT's ``session_id``, the sub-agent's own
+    thread id as ``agent_id`` and the sub-agent's own rollout as
+    ``transcript_path``. That rollout starts with a session_meta the relay
+    reads as ``subagent``; the parent's is not skipped. The parent gets its
+    brief and leaves the only handoff; the sub-agent's prompt has no brief.
+
+    In the run, the sub-agent's ``brief --once`` already finds the brief
+    delivered for the shared session id. So the sub-agent payload Codex sent
+    is replayed through ``brief --once`` and ``close`` in a HOME without that
+    record: relay.log shows both skipped, naming the sub-agent's thread, and
+    nothing is printed or sent. The parent's own prompt payload, replayed the
+    same way, gets its brief.
+    """
+    scripts = {
+        "Delegate the check.": [("spawn", "Check the totals."), ("exec", "sleep 6"), ("say", "Delegated.")],
+        "Check the totals.": [("say", "Totals checked.")],
+    }
+    with MockResponses(scripts) as mock:
+        rig = Rig(tmp_path, server, mock)
+        _claude_closes(rig)
+        rig.connect()
+        trust_hooks(rig.codex, rig.env, rig.repo, rig.config)
+        rig.exec("Delegate the check.")
+        parent_turn = [r for r in mock.requests if MockResponses.prompt_of(r) == ("Delegate the check.", 0)]
+        sub_turn = [r for r in mock.requests if MockResponses.prompt_of(r) == ("Check the totals.", 0)]
+        assert len(parent_turn) == 1 and len(sub_turn) == 1, [MockResponses.prompt_of(r) for r in mock.requests]
+        assert _brief_count(MockResponses.developer_texts(parent_turn[0])) == 1
+        assert _brief_count(MockResponses.developer_texts(sub_turn[0])) == 0
+
+        rollouts = sorted((rig.codex_home / "sessions").rglob("rollout-*.jsonl"))
+        kinds = {p: session_skip_reason({"transcript_path": str(p)}) for p in rollouts}
+        assert sorted(kinds.values(), key=str) == [None, "subagent"], kinds
+        sub_rollout = next(p for p, kind in kinds.items() if kind == "subagent")
+        sub_id = str((read_session_meta(sub_rollout) or {}).get("id"))
+
+        # Which hooks Codex ran for the sub-agent: matched by the rollout they name, not the session id.
+        def of_sub_agent(payload: dict[str, Any]) -> bool:
+            return os.path.realpath(str(payload.get("transcript_path") or "")) == os.path.realpath(sub_rollout)
+
+        captured = rig.captured()
+        parent_id = captured["SessionStart"][0]["session_id"]
+        assert not of_sub_agent(captured["SessionStart"][0]) and parent_id != sub_id
+        sub_hooks = [(event, p) for event, payloads in captured.items() for p in payloads if of_sub_agent(p)]
+        assert "UserPromptSubmit" in {event for event, _ in sub_hooks}, captured
+        for event, payload in sub_hooks:
+            assert payload["session_id"] == parent_id and payload.get("agent_id") == sub_id, (event, payload)
+        sub_prompt = next(p for event, p in sub_hooks if event == "UserPromptSubmit")
+        parent_prompt = next(p for p in captured["UserPromptSubmit"] if not of_sub_agent(p))
+        assert parent_prompt["session_id"] == parent_id and not parent_prompt.get("agent_id")
+
+        assert len(rig.trail("codex")) == 1
+        time.sleep(3)  # a sub-agent's detached close, had one started, would have landed by now
+        assert len(rig.trail("codex")) == 1
+        log_path = rig.home / ".remembra" / "relay" / "relay.log"
+        log = log_path.read_text() if log_path.exists() else ""
+        thread = f"thread {sub_id} of session {parent_id}"
+        for event, _ in sub_hooks:
+            if event != "UserPromptSubmit":  # a version that runs them: each must show as skipped
+                verb = "close" if event == "SessionEnd" else "brief"
+                assert f"skipped {verb}: codex subagent {thread}" in log, (event, log)
+
+        # The skip itself, on the payload Codex sent: a HOME with no brief recorded for the shared session id.
+        replay = tmp_path / "replay-home"
+        replay.mkdir()
+        sub_end = {k: v for k, v in sub_prompt.items() if k != "prompt"}
+        sub_end.update(hook_event_name="SessionEnd", reason="other")
+        brief = relay(replay, rig.server, "brief", "--hook", "codex", "--once", stdin=json.dumps(sub_prompt), cwd=rig.repo)
+        close = relay(replay, rig.server, "close", "--hook", "codex", stdin=json.dumps(sub_end), cwd=rig.repo)
+        for out in (brief, close):
+            assert (out.returncode, out.stdout, out.stderr) == (0, "", ""), out
+        replay_relay = replay / ".remembra" / "relay"
+        assert [line.split(" ", 2)[2] for line in (replay_relay / "relay.log").read_text().splitlines()] == [
+            f"skipped brief: codex subagent {thread}",
+            f"skipped close: codex subagent {thread}",
+        ]
+        assert not (replay_relay / "last-detached-close.log").exists()  # no detached close started
+        assert not (replay_relay / "sessions").exists()  # no brief recorded for the parent's session
+
+        # The same replay for the parent's own prompt: it goes on and gets its brief.
+        control = tmp_path / "control-home"
+        control.mkdir()
+        out = relay(control, rig.server, "brief", "--hook", "codex", "--once", stdin=json.dumps(parent_prompt), cwd=rig.repo)
+        assert out.returncode == 0 and _brief_count([out.stdout]) == 1, out.stdout + out.stderr
+
+
+def test_connect_writes_the_hooks_into_codex_home(server, tmp_path):  # noqa: F811
+    """CODEX_HOME moves ~/.codex: connect writes hooks.json there, and Codex runs them from there."""
+    with MockResponses({"Say hi.": [("say", "Hi.")]}) as mock:
+        rig = Rig(tmp_path, server, mock, codex_home=tmp_path / "codex-elsewhere")
+        _claude_closes(rig)
+        connect = rig.connect()
+        assert f"-> {rig.codex_home / 'hooks.json'}" in connect.stdout
+        assert (rig.codex_home / "hooks.json").exists() and not (rig.home / ".codex").exists()
+        trust_hooks(rig.codex, rig.env, rig.repo, rig.config)
+        before = len(mock.requests)
+        rig.exec("Say hi.")
+        first = MockResponses.developer_texts(mock.requests[before])
+        assert _brief_count(first) == 1 and any("Last session: claude-code" in t for t in first), first
+        assert len(rig.trail("codex")) == 1
+        assert Path(rig.captured()["SessionEnd"][0]["transcript_path"]).is_relative_to(rig.codex_home)

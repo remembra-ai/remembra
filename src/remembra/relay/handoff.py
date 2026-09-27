@@ -27,21 +27,28 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from remembra.relay.identity import repository_key
 from remembra.security.secrets import redact_secrets
 from remembra.security.untrusted import (
     COMMAND_FLAG,
     DATA_CLOSE,
     DATA_OPEN,
     DATA_PREAMBLE,
+    DATA_PREAMBLE_NO_REPO,
     HIDDEN_FLAG,
     defang_markdown_images,
     detect_actionable,
     neutralize,
+    strip_controls,
     strip_hidden,
 )
 
 HANDOFF_FORMAT_VERSION = 1
+NOTES_LINE_PREFIX = "Notes (agent): "  # render_handoff's line for facts.notes
+SUMMARY_LINE_PREFIX = "Agent summary ["  # render_handoff's line for the summary (with its grounding verdict)
 MAX_BRIEF_CHARS = 6000  # ~1500 tokens
+MAX_NOTES_SHOWN = 400  # the Last session's notes line in a brief (the handoff keeps up to 1500 characters)
+MAX_SUMMARY_SHOWN = 500  # the Last session's summary line in a brief (verdict + summary)
 _SHA_TOKEN_RE = re.compile(r"(?<![0-9A-Za-z])([0-9a-f]{7,40})(?![0-9A-Za-z])")
 _PATH_TOKEN_RE = re.compile(
     r"(?<![\w/.-])((?:[\w.-]+/)+[\w.-]+\.[A-Za-z0-9]{1,8}|[\w-]+\.(?:py|ts|tsx|js|jsx|go|rs|md|toml|json|yml|yaml|sql|sh|swift|kt|java|rb|php|css|html))(?![\w/])"
@@ -61,12 +68,13 @@ _NEGATED_PUSH_RE = re.compile(r"\b(not|n't|never|un)\s*(yet\s+)?(pushed|deployed
 
 
 def redact(value: Any, counts: dict[str, int] | None = None, extra: Callable[[str], str] | None = None) -> Any:
-    """Return ``value`` with ``redact_secrets`` (then ``extra``, e.g. a PII
-    scrubber) applied to every string inside it."""
+    """Return ``value`` with terminal control characters removed (CLI-02), then
+    ``redact_secrets`` (then ``extra``, e.g. a PII scrubber) applied to every
+    string inside it."""
     if counts is None:
         counts = {}
     if isinstance(value, str):
-        result = redact_secrets(value)
+        result = redact_secrets(strip_controls(value))
         for kind, n in result.counts.items():
             counts[kind] = counts.get(kind, 0) + n
         text = result.text
@@ -89,8 +97,8 @@ def redact(value: Any, counts: dict[str, int] | None = None, extra: Callable[[st
 
 
 def clip(text: Any, limit: int) -> str:
-    """Single-line, whitespace-collapsed, clipped to ``limit`` chars."""
-    value = " ".join(str(text or "").split())
+    """Single-line, whitespace-collapsed, no control characters, clipped to ``limit`` chars."""
+    value = " ".join(strip_controls(str(text or "")).split())
     return value if len(value) <= limit else value[: max(0, limit - 1)].rstrip() + "…"
 
 
@@ -317,6 +325,8 @@ def build_sections(facts: dict[str, Any], next_step_hint: str | None = None) -> 
         not_done.append(f"{unpushed} commit(s) not pushed to {facts.get('upstream') or 'upstream'}")
     elif facts.get("no_upstream") and commits:
         not_done.append(f"branch {facts.get('branch') or '(detached)'} has no upstream: commits are not pushed")
+    if "repo" in incomplete:
+        not_done.append("repository state: unknown (git did not answer in time)")
     if "status" in incomplete:
         not_done.append("uncommitted changes: unknown (git status did not finish in time)")
     if "upstream" in incomplete:
@@ -361,7 +371,7 @@ def build_sections(facts: dict[str, Any], next_step_hint: str | None = None) -> 
 
     if commits:
         done_part = f"{len(commits)} commit(s), last: {clip(commits[-1].get('subject'), 70)}"
-    elif incomplete & {"log", "status"}:
+    elif incomplete & {"log", "status", "repo"}:
         done_part = "git facts incomplete (git timed out)"
     elif files or uncommitted:
         done_part = f"{len(set(files) | set(uncommitted))} file(s) changed, nothing committed"
@@ -427,7 +437,7 @@ def render_handoff(
     lines.append(f"Facts: {facts_source_label(facts.get('facts_source'))}.")
     notes = facts.get("notes")
     if notes and str(notes).strip():
-        lines.append(f"Notes (agent): {clip(notes, 1500)}")
+        lines.append(f"{NOTES_LINE_PREFIX}{clip(notes, 1500)}")
     if summary and summary.strip():
         verdict = grounding.get("status")
         if verdict == "contradicted":
@@ -435,7 +445,7 @@ def render_handoff(
         else:
             extra = list(grounding.get("issues") or [])
             flag = "unverified narrative; no checkable claim contradicted" + (f" ({'; '.join(extra)})" if extra else "")
-        lines.append(f"Agent summary [{clip(flag, 400)}]: {clip(summary, 1500)}")
+        lines.append(f"{SUMMARY_LINE_PREFIX}{clip(flag, 400)}]: {clip(summary, 1500)}")
     return "\n".join(lines)
 
 
@@ -472,6 +482,9 @@ def _relay_meta(handoff: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     relay = meta.get("relay")
     return relay if isinstance(relay, dict) else None
+
+
+relay_block = _relay_meta  # public name: the relay block of a handoff the relay itself wrote, else None
 
 
 def handoff_ended_at(handoff: dict[str, Any]) -> Any:
@@ -512,6 +525,69 @@ def end_reason_note(reason: Any) -> str | None:
     if value == PRE_COMPACT_REASON or value.startswith(PRE_COMPACT_REASON + ":"):
         return "still open (saved before context compaction)"
     return None
+
+
+def sections_have_substance(sections: dict[str, Any], *, summary: Any = None, notes: Any = None, end_reason: Any = None) -> bool:
+    """True when a handoff records anything for the next agent.
+
+    Anything in Done (commits, passing tests, changed files), Not done (todos,
+    uncommitted files, unpushed commits), Failing (failed tests or commands,
+    errors) or Next, an agent summary or notes, or an end reason that says the
+    work stopped rather than finished (a usage or billing limit, see
+    :data:`STOP_REASONS`, or a close written before context compaction): that
+    notice is the whole point of such a close. A session that recorded none of
+    these (an idle or automated run) left nothing to pick up.
+    """
+    if any(sections.get(name) for name in ("done", "not_done", "failing")):
+        return True
+    if str(sections.get("next") or "").strip():
+        return True
+    if end_reason_note(end_reason) is not None:
+        return True
+    return bool(str(summary or "").strip() or str(notes or "").strip())
+
+
+def handoff_has_substance(memory: dict[str, Any] | None) -> bool:
+    """Whether a stored handoff is worth showing as "Last session" (see :func:`sections_have_substance`).
+
+    A relay handoff is judged by its recorded sections, whether a summary was
+    given (its grounding verdict), its notes line and its end reason. A
+    free-form handoff (stored through the generic memory API) counts when it
+    has any text.
+    """
+    if not memory:
+        return False
+    relay = _relay_meta(memory)
+    content = str(memory.get("content") or "")
+    if relay is None:
+        return bool(content.strip())
+    summary_given = (relay.get("grounding") or {}).get("status") not in (None, "none")
+    notes = recorded_notes(content)
+    return sections_have_substance(relay, summary=summary_given or None, notes=notes or None, end_reason=relay.get("end_reason"))
+
+
+def recorded_notes(content: Any) -> str | None:
+    """The agent's notes as :func:`render_handoff` stored them (the ``Notes (agent):`` line), or None."""
+    for line in str(content or "").splitlines():
+        if line.startswith(NOTES_LINE_PREFIX):
+            return line[len(NOTES_LINE_PREFIX) :].strip() or None
+    return None
+
+
+def recorded_summary(content: Any) -> str | None:
+    """The agent's summary line as :func:`render_handoff` stored it, without its label:
+    ``[<grounding verdict>]: <summary>`` (the verdict says unverified or CONTRADICTED). None without one."""
+    for line in str(content or "").splitlines():
+        if line.startswith(SUMMARY_LINE_PREFIX):
+            return line[len(SUMMARY_LINE_PREFIX) - 1 :].strip() or None
+    return None
+
+
+def handoff_location(memory: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Where a relay handoff was recorded (``relay.location``), or None (free-form, or closed before 0.16.1)."""
+    relay = _relay_meta(memory)
+    location = (relay or {}).get("location")
+    return location if isinstance(location, dict) else None
 
 
 def handoff_headline(memory: dict[str, Any]) -> str:
@@ -673,15 +749,31 @@ def _verdict_for_item(text_parts: list[Any], item: dict[str, Any], allowed: tupl
     return assess_text(*text_parts, stored_trust=item.get("trust_score"), allowed_urls=allowed)
 
 
+def location_texts(location: Any) -> list[Any]:
+    """The client-written strings of a recorded location (``relay.location``): its name, path, host and
+    fingerprint keys (a path key repeats the path). They pass the same policy as the handoff's text."""
+    if not isinstance(location, dict):
+        return []
+    keys = location.get("fingerprints")
+    return [location.get("name"), location.get("root_path"), location.get("host"), *(keys if isinstance(keys, list) else [])]
+
+
 def handoff_verdict(handoff: dict[str, Any], allowed: tuple[str, ...] = ()) -> LineVerdict:
     """The policy verdict for a handoff: its whole stored text (every agent-written
-    field is in it), the row's and the relay block's stored scores."""
-    relay = _relay_meta(handoff)
+    field is in it), the row's and the relay block's stored scores.
+
+    The relay block also carries client-written strings the text does not
+    quote: the upstream name and the recorded location (path, name, host).
+    They are returned in the brief JSON with the handoff, so they are scored
+    with it: a low-trust location withholds the whole handoff everywhere
+    (rendered, JSON, trail, split).
+    """
+    relay = _relay_meta(handoff) or {}
     return assess_text(
         handoff.get("content"),
-        # The upstream name is in the relay block (and the brief JSON) even when the text does not quote it.
-        (relay or {}).get("upstream"),
-        stored_trust=_stored_trust(handoff.get("trust_score"), (relay or {}).get("trust_score")),
+        relay.get("upstream"),
+        *location_texts(relay.get("location")),
+        stored_trust=_stored_trust(handoff.get("trust_score"), relay.get("trust_score")),
         allowed_urls=allowed,
     )
 
@@ -707,7 +799,7 @@ HEALTH_LABELS = {
 # (:func:`remembra.relay.facts.git_facts`). The close API accepts any short
 # strings there, and the health line sits outside the untrusted-data block, so
 # any other name is shown only as "other".
-GIT_PROBE_NAMES = frozenset({"log", "status", "diff", "upstream"})
+GIT_PROBE_NAMES = frozenset({"repo", "log", "status", "diff", "upstream"})
 # Why a withheld handoff is graded Blocked (server text: shown above the untrusted block).
 WITHHELD_HEALTH_REASON = "review with the user: the recorded text matched prompt-injection patterns"
 
@@ -911,9 +1003,14 @@ def render_last_session(
     checkout: dict[str, Any] | None = None,
     allowed_urls: tuple[str, ...] = (),
 ) -> str:
-    """``Last session: <agent> (key-verified|self-declared), <when>, on <branch>@<sha>: done… / NOT done… / failing… / next…``."""
+    """``Last session: <agent> (key-verified|self-declared), <when>, on <branch>@<sha>: done… / NOT done… / failing… / next…``.
+
+    The agent's notes and summary (the ``Notes (agent):`` and ``Agent summary [<verdict>]:`` lines of the
+    stored text) follow on lines of their own, so a handoff whose only content is what the agent wrote
+    does not read like an idle session; then the checkout note.
+    """
     if not handoff:
-        return "Last session: none recorded for this project."
+        return "Last session: none recorded for this project."  # (the brief adds how many empty ones it skipped)
     relay = _relay_meta(handoff)
     when = relative_time(handoff.get("created_at"), now)
     verdict = handoff_verdict(handoff, allowed_urls)
@@ -971,6 +1068,15 @@ def render_last_session(
     grounding = relay.get("grounding") or {}
     if grounding.get("status") == "contradicted":
         line += " (the agent's summary contradicts these recorded facts)"
+    # The agent's own words count as substance (handoff_has_substance), so they are shown: a handoff whose
+    # notes or summary are its only content must not read like an idle session.
+    stored = handoff.get("content")
+    notes = recorded_notes(stored)
+    if notes:
+        line += f"\nNotes from {agent} (unverified): {item(notes, MAX_NOTES_SHOWN)}"
+    summary = recorded_summary(stored)
+    if summary:
+        line += f"\nSummary from {agent} {item(summary, MAX_SUMMARY_SHOWN)}"
     note = checkout_note(relay, checkout)
     if note:
         line += "\n" + show_text(note)
@@ -1015,16 +1121,123 @@ def _linked_line(link: dict[str, Any], now: datetime, allowed: tuple[str, ...]) 
     return f"- {link.get('project_id')} ({link.get('relation')}): {info}"
 
 
+def recent_verdict(mem: dict[str, Any], allowed: tuple[str, ...] = ()) -> LineVerdict:
+    """The policy verdict for a Recent item: a handoff is judged like "Last session"
+    (:func:`handoff_verdict`: its text, upstream and recorded location); anything else by its text."""
+    if mem.get("memory_type") == "handoff":
+        return handoff_verdict(mem, allowed)
+    return _verdict_for_item([mem.get("content")], mem, allowed)
+
+
 def _recent_line(mem: dict[str, Any], now: datetime, allowed: tuple[str, ...]) -> str:
     who = f" [{show_text(mem.get('agent_id'), limit=60)}]" if mem.get("agent_id") else ""
     kind = f" ({mem.get('memory_type')})" if mem.get("memory_type") else ""
-    verdict = _verdict_for_item([mem.get("content")], mem, allowed)
-    text = withheld_note(verdict, mem.get("id")) if verdict.withheld else show_text(mem.get("content"), verdict, 160)
+    verdict = recent_verdict(mem, allowed)
+    if verdict.withheld:
+        text = withheld_note(verdict, mem.get("id"))
+    elif mem.get("memory_type") == "handoff":
+        text = show_text(handoff_headline(mem), verdict, 160)  # the handoff's one-line headline, not its header
+    else:
+        text = show_text(mem.get("content"), verdict, 160)
     return f"- {relative_time(mem.get('created_at'), now)}{who}{kind}: {text}"
 
 
+def _repository_keys(keys: Any) -> dict[str, set[str]]:
+    """``{"git": {owner/repo, ...}, "root": {sha, ...}}`` from fingerprint keys."""
+    out: dict[str, set[str]] = {"git": set(), "root": set()}
+    for key in keys if isinstance(keys, list | tuple | set) else []:
+        kind, _, value = str(key).partition(":")
+        if kind == "git" and value:
+            out["git"].add(value.split("/", 1)[1] if "/" in value else value)
+        elif kind == "root" and value:
+            out["root"].add(value)
+    return out
+
+
+def same_repository(a: Any, b: Any) -> bool | None:
+    """Whether two fingerprint key lists name one repository: by remote (``owner/repo``) when both have
+    one, else by root commit; None when that cannot be told (a folder, or nothing to compare)."""
+    left, right = _repository_keys(a), _repository_keys(b)
+    for kind in ("git", "root"):
+        if left[kind] and right[kind]:
+            return bool(left[kind] & right[kind])
+    return None
+
+
+def describe_location(location: dict[str, Any], reader_host: Any = None) -> str:
+    """``widget at /Users/me/widget`` (``on host h`` when another machine), ``the folder /x (not a git
+    repository)``, or ``the directory /x`` when the client could not tell (``git_repo`` unknown)."""
+    path = str(location.get("root_path") or "").strip()
+    name = str(location.get("name") or "").strip()
+    if location.get("git_repo"):
+        text = f"{name} at {path}" if name and path else (name or path or "a repository")
+    elif location.get("git_repo") is False:
+        text = f"the folder {path} (not a git repository)" if path else "a folder (not a git repository)"
+    else:
+        text = f"the directory {path}" if path else "an unknown directory"
+    host = str(location.get("host") or "").strip()
+    if host and reader_host and host != str(reader_host).strip().lower():
+        text += f" on host {host}"
+    return text
+
+
+def location_line(handoff: dict[str, Any] | None, reader: dict[str, Any] | None, allowed: tuple[str, ...] = ()) -> str | None:
+    """Where the last session worked, when the reader needs to know.
+
+    A reader outside a git repository always gets one line: that this is not a
+    repository and where the last session worked (repository name and path it
+    recorded). A reader in a repository gets a line when the last session
+    recorded another repository, or a folder that is not a git repository (the
+    same path excepted: a folder that has become this repository since). None
+    otherwise, when the recorded location cannot be compared (a client that
+    could not tell whether it was in a repository), or for a withheld handoff.
+    """
+    reader = reader or {}
+    outside = reader.get("git_repo") is False
+    location = handoff_location(handoff) if handoff else None
+    where: str | None = None
+    if location is not None and handoff is not None and not handoff_verdict(handoff, allowed).withheld:
+        # The recorded name and path pass the same policy as every recorded line.
+        verdict = assess_text(*location_texts(location), allowed_urls=allowed)
+        if not verdict.withheld:
+            where = show_text(describe_location(location, reader.get("host")), verdict, 400)
+    if outside:
+        if not handoff:
+            return "This working directory is not a git repository."
+        if where is None and location is not None:
+            return "This working directory is not a git repository; where the last session worked is withheld (low trust)."
+        if where is None:
+            return (
+                "This working directory is not a git repository; where the last session worked was not recorded "
+                "(its handoff was written before Remembra 0.16.1)."
+            )
+        return f"This working directory is not a git repository; the last session worked in {where}."
+    if not where or not location or reader.get("git_repo") is not True:
+        return None
+    keys = location.get("fingerprints")
+    recorded = [str(k) for k in keys] if isinstance(keys, list) else []
+    if same_repository(recorded, reader.get("fingerprints")) is False:
+        return f"The last session worked in {where}, not in this repository."
+    if location.get("git_repo") is False and repository_key(recorded) is None and not _same_path(recorded, reader):
+        return f"The last session worked in {where}, not in this repository."
+    return None
+
+
+def _same_path(recorded: list[str], reader: dict[str, Any]) -> bool:
+    """True when a recorded location's path fingerprint is one of the reader's (the same directory)."""
+    paths = {k for k in recorded if k.startswith("path:")}
+    return bool(paths & {str(k) for k in reader.get("fingerprints") or []})
+
+
 def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: int = MAX_BRIEF_CHARS) -> str:
-    """Compact text brief: handoff health, last session, inbox, status, linked projects, recent memories.
+    """Compact text brief: handoff health, last session, inbox, status, linked projects, the recent trail.
+
+    "Last session" is the newest handoff that recorded any work (the service
+    skips empty ones and the brief says how many, ``handoffs_skipped``). A
+    reader outside a git repository (``reader.git_repo`` false) gets one line
+    saying so and naming where the last session worked, and a preamble that
+    does not point at a repository; a reader in another repository than the
+    one the last session recorded gets a line naming that one.
 
     Everything recorded by agents or tools (the handoff, inbox subjects,
     status values, linked headlines, recent memories) sits inside ONE
@@ -1052,7 +1265,19 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
     )
     handoff = brief.get("handoff")
     health = health_line(handoff, handoff_verdict(handoff, allowed) if handoff else None)
-    data: list[str] = render_last_session(handoff, now, brief.get("checkout"), allowed).split("\n")
+    reader = brief.get("reader") or {}
+    where = location_line(handoff, reader, allowed)
+    data: list[str] = [where] if where else []
+    skipped = brief.get("handoffs_skipped")
+    if handoff is None and isinstance(skipped, int) and skipped > 0:
+        data.append("Last session: none that recorded any work in this project.")
+    else:
+        data.extend(render_last_session(handoff, now, brief.get("checkout"), allowed).split("\n"))
+    if isinstance(skipped, int) and skipped > 0:
+        data.append(
+            f"Skipped {skipped} newer session{'s' if skipped != 1 else ''} that recorded nothing (no commits, changes,"
+            " tests, errors, todos, next step or summary: idle or automated runs)."
+        )
 
     inbox = brief.get("inbox")
     if inbox and inbox.get("available", True) and inbox.get("unread_count"):
@@ -1077,8 +1302,10 @@ def render_brief(brief: dict[str, Any], now: datetime | None = None, max_chars: 
         lines = data + (["Recent (newest first):", *recent] if recent else [])
         return neutralize("\n".join(lines))
 
+    preamble = DATA_PREAMBLE_NO_REPO if reader.get("git_repo") is False else DATA_PREAMBLE
+
     def assemble(body: str) -> str:
-        return "\n".join([*top, DATA_OPEN, DATA_PREAMBLE, body, DATA_CLOSE, *tail])
+        return "\n".join([*top, DATA_OPEN, preamble, body, DATA_CLOSE, *tail])
 
     text = assemble(data_body(recent_lines))
     while len(text) > max_chars and recent_lines:
@@ -1376,6 +1603,15 @@ def police_brief(brief: dict[str, Any]) -> None:
     """
     allowed = tuple(brief.get("repo_url_prefixes") or ())
     handoff = brief.get("handoff")
+    location = brief.get("handoff_location")
+    if isinstance(location, dict):
+        withheld = isinstance(handoff, dict) and handoff_verdict(handoff, allowed).withheld
+        verdict = assess_text(*location_texts(location), allowed_urls=allowed)
+        withheld = withheld or verdict.withheld
+        # The reader needs the repository key, not the fingerprint keys (a path key repeats the full path,
+        # which the account's PII policy may have redacted in root_path).
+        shown = {k: v for k, v in location.items() if k != "fingerprints"}
+        brief["handoff_location"] = None if withheld else {**_strip_hidden_deep(shown), **verdict.as_dict()}
     if "handoff_health" in brief:
         brief["handoff_health"] = police_health(
             brief.get("handoff_health"), handoff_verdict(handoff, allowed) if handoff else None, allowed
@@ -1421,7 +1657,7 @@ def police_brief(brief: dict[str, Any]) -> None:
             link["latest_handoff"] = {**_strip_hidden_deep(latest), **verdict.as_dict()}
     recent = []
     for mem in brief.get("recent") or []:
-        verdict = _verdict_for_item([mem.get("content")], mem, allowed)
+        verdict = recent_verdict(mem, allowed)
         if verdict.withheld:
             mem = {**mem, "content": withheld_note(verdict, mem.get("id")), "metadata": {}}
         recent.append({**_strip_hidden_deep(mem), **verdict.as_dict()})

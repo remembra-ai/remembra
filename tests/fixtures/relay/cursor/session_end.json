@@ -1,15 +1,17 @@
 {
-  "conversation_id": "c0a8012e-7f4b-4e1a-9d2c-5b6e7f8a9b0c",
-  "generation_id": "9a8b7c6d-5e4f-4a3b-2c1d-0e9f8a7b6c5d",
-  "model": "claude-sonnet",
-  "hook_event_name": "sessionEnd",
-  "cursor_version": "3.21.0",
-  "workspace_roots": ["/home/dev/work/widget"],
-  "user_email": null,
-  "transcript_path": "/home/dev/.cursor/projects/home-dev-work-widget/agent-transcripts/c0a8012e.txt",
-  "session_id": "c0a8012e-7f4b-4e1a-9d2c-5b6e7f8a9b0c",
-  "reason": "user_close",
-  "duration_ms": 1832400,
+  "conversation_id": "harness-1790433753406",
+  "generation_id": "harness-1790433753406",
+  "model": "auto",
+  "reason": "aborted",
+  "duration_ms": 257,
   "is_background_agent": false,
-  "final_status": "completed"
+  "final_status": "aborted",
+  "session_id": "harness-1790433753406",
+  "hook_event_name": "sessionEnd",
+  "cursor_version": "2026.09.26-dd393fe",
+  "workspace_roots": [
+    "/home/dev/work/widget"
+  ],
+  "user_email": null,
+  "transcript_path": null
 }

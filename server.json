@@ -37,7 +37,7 @@
         },
         {
           "name": "REMEMBRA_AGENT_ID",
-          "description": "Name this agent signs its handoffs with, e.g. claude-code, codex, cursor",
+          "description": "Name this agent's handoffs are recorded under, e.g. claude-code, codex, cursor",
           "isRequired": false,
           "isSecret": false,
           "format": "string"

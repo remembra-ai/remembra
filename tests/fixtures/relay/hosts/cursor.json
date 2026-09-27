@@ -1,0 +1,44 @@
+{
+  "host": "cursor",
+  "how": "recorded: cursor-agent 2026.09.26-dd393fe, its own hook runner (config loader + executor from the shipped bundle) driven by a harness as run-agent.tsx calls it; stdin and environment dumped by the hook. Paths replaced with /home/dev/...",
+  "hook_cwd": "/home/dev/.cursor",
+  "env": {
+    "CURSOR_PROJECT_DIR": "/home/dev/work/widget",
+    "CLAUDE_PROJECT_DIR": "/home/dev/work/widget",
+    "CURSOR_VERSION": "2026.09.26-dd393fe"
+  },
+  "payloads": {
+    "start": {
+      "conversation_id": "harness-1790433753406",
+      "generation_id": "harness-1790433753406",
+      "model": "auto",
+      "is_background_agent": false,
+      "composer_mode": "agent",
+      "session_id": "harness-1790433753406",
+      "hook_event_name": "sessionStart",
+      "cursor_version": "2026.09.26-dd393fe",
+      "workspace_roots": [
+        "/home/dev/work/widget"
+      ],
+      "user_email": null,
+      "transcript_path": null
+    },
+    "end": {
+      "conversation_id": "harness-1790433753406",
+      "generation_id": "harness-1790433753406",
+      "model": "auto",
+      "reason": "aborted",
+      "duration_ms": 257,
+      "is_background_agent": false,
+      "final_status": "aborted",
+      "session_id": "harness-1790433753406",
+      "hook_event_name": "sessionEnd",
+      "cursor_version": "2026.09.26-dd393fe",
+      "workspace_roots": [
+        "/home/dev/work/widget"
+      ],
+      "user_email": null,
+      "transcript_path": null
+    }
+  }
+}

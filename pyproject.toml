@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "remembra"
 version = "0.17.0"
-description = "Universal memory layer for AI applications. Self-host in minutes."
+description = "Remembra Relay: session handoffs between coding agents, built from git facts. Server, CLI, MCP."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -54,7 +54,11 @@ dependencies = [
 [project.optional-dependencies]
 # Full server dependencies
 server = [
-    "fastapi>=0.115.0",
+    # DEP-1: FastAPI parses form bodies before auth runs; these releases stop
+    # the form parser at its field cap (python-multipart CVE-2026-53539,
+    # Starlette CVE-2026-54283). 0.139.2 is the FastAPI that accepts Starlette 1.x.
+    "fastapi>=0.139.2",
+    "starlette>=1.3.1",
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.9.0",
     "pydantic-settings>=2.6.0",
@@ -69,8 +73,8 @@ server = [
     "tiktoken>=0.7.0",
     "bcrypt>=4.0.0",
     "slowapi>=0.1.9",
-    "python-multipart>=0.0.9",
-    "PyJWT>=2.8.0",
+    "python-multipart>=0.0.31",
+    "PyJWT>=2.13.0",  # DEP-2: PYSEC-2026-120, -175..-179
     "email-validator>=2.0.0",
 ]
 
@@ -112,7 +116,7 @@ anthropic = [
 
 # Encryption at rest (AES-256-GCM)
 encryption = [
-    "cryptography>=42.0.0",
+    "cryptography>=48.0.1",  # DEP-2: GHSA-537c-gmf6-5ccf and older advisories
 ]
 
 # Cloud / SaaS dependencies (billing, metering)
@@ -265,4 +269,19 @@ omit = ["*/tests/*"]
 dev = [
     "mkdocs>=1.6.1",
     "mkdocs-material>=9.7.3",
+]
+# CI's dependency audit (.github/workflows/ci.yml, job "audit"): installed from
+# this lock with hashes, so the auditor itself is pinned.
+audit = [
+    "pip-audit>=2.10.1",
+]
+
+# ---------------------------------------------------------------------------
+# uv: security floors for transitive dependencies (DEP-2). They bind the lock
+# only; they are not published as requirements of the package.
+# ---------------------------------------------------------------------------
+[tool.uv]
+constraint-dependencies = [
+    "idna>=3.15",  # PYSEC-2026-215
+    "urllib3>=2.7.0",  # PYSEC-2026-141, PYSEC-2026-142
 ]

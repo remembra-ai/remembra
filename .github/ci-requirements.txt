@@ -1,0 +1,32 @@
+# pipx for CI's wheel-install job (.github/workflows/ci.yml), pinned with
+# hashes: `pip install --require-hashes` refuses anything else (CI-1: no
+# workflow runs an unpinned pip install). Dependabot (pip, /.github) proposes
+# updates.
+#
+# Regenerate after changing the pin:
+#   printf 'pipx\n' > /tmp/ci.in
+#   uv pip compile --generate-hashes --universal --python-version 3.11 --no-header --no-annotate /tmp/ci.in -o .github/ci-requirements.txt
+argcomplete==3.7.2 \
+    --hash=sha256:6029205678bdd9c1c728a155f5f9ecf5812393f969eef58807641a2bc2aa5b19 \
+    --hash=sha256:aad8b69a0b9969edb62db0d1752354c0d50717b10e0cbb00e2a958381b9fc6b9
+click==8.5.0 \
+    --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360 \
+    --hash=sha256:ba0d2089de75ea0310e2dde03160e6ca10009947fb95a182f9b54021bb272e34
+colorama==0.4.6 ; sys_platform == 'win32' \
+    --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
+    --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
+filelock==4.0.4 \
+    --hash=sha256:0df72be195ca7892216d16f2edce8d9b93a571f02402972020a8cff84c594c7b \
+    --hash=sha256:90999ed63a26ccf86b93b959ab10cf1017f422d816be454ed54cbed263e71ab5
+packaging==26.3 \
+    --hash=sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79 \
+    --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
+pipx==1.17.6 \
+    --hash=sha256:3dc03ac614f52197dced6f2ef4bd8e3418f8c1381b3a4dbbf1164de99d8d7a55 \
+    --hash=sha256:7d069f69e9deef702082a188fedfdc3868fc62d9348ea94fccebe36af5c9eaa0
+platformdirs==4.12.0 \
+    --hash=sha256:095be5c143382b1bee917c4f3e9987a0d8d6a582261f1d061ad0c403b7695b5b \
+    --hash=sha256:f6fb2960f2f2eb0870f820f7e49e49e6c0f0589c637f34d33b260b07591327c9
+userpath==1.9.2 \
+    --hash=sha256:2cbf01a23d655a1ff8fc166dfb78da1b641d1ceabf0fe5f970767d380b14e89d \
+    --hash=sha256:6c52288dab069257cc831846d15d48133522455d4677ee69a9781f11dbefd815

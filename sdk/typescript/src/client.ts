@@ -55,6 +55,20 @@ import {
 } from './errors';
 
 const DEFAULT_URL = 'http://localhost:8787';
+// Servers before 0.16.1 deleted the whole account for DELETE /api/v1/memories?entity=...
+const ENTITY_DELETE_MIN_SERVER = [0, 16, 1];
+
+function serverVersion(version: unknown): number[] | null {
+  const match = /^\s*v?(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(version ?? ''));
+  return match ? [Number(match[1]), Number(match[2]), Number(match[3] ?? 0)] : null;
+}
+
+function olderThan(version: number[], minimum: number[]): boolean {
+  for (let i = 0; i < minimum.length; i++) {
+    if (version[i] !== minimum[i]) return version[i] < minimum[i];
+  }
+  return false;
+}
 const DEFAULT_TIMEOUT = 30000;
 const MAX_RETRIES = 3;
 const RETRY_DELAY = 1000;
@@ -277,31 +291,74 @@ export class Remembra {
 
   /**
    * Forget (delete) memories.
-   * 
-   * @param options - What to delete (memoryId, entity, or all)
+   *
+   * Give exactly one of `memoryId`, `entity` or `allMemories: true`; nothing
+   * is sent otherwise. The server deletes only the authenticated account's
+   * memories.
+   *
+   * - `memoryId`: that one memory.
+   * - `entity`: the memories linked to the entity with this exact name or
+   *   alias (any case), in every project unless `projectId` is given, then
+   *   the entity itself once no memory mentions it.
+   * - `allMemories: true`: every memory, entity and relationship in the
+   *   account. Only this option deletes everything; it is never implied.
+   *
+   * @param options - What to delete
    * @returns Deletion counts
-   * 
+   * @throws ValidationError when no target or more than one is given
+   * @throws RemembraError (code `SERVER_TOO_OLD`) for `entity` when the server is older than
+   *   0.16.1, which deletes the whole account for it; nothing is sent
+   *
    * @example
    * ```typescript
    * // Delete specific memory
    * await memory.forget({ memoryId: 'mem_123' });
-   * 
-   * // Delete all about an entity
-   * await memory.forget({ entity: 'John' });
+   *
+   * // Delete the memories about an entity in one project
+   * await memory.forget({ entity: 'John', projectId: 'work' });
    * ```
    */
-  async forget(options: ForgetOptions = {}): Promise<ForgetResult> {
+  async forget(options: ForgetOptions): Promise<ForgetResult> {
+    const { memoryId, entity, projectId, allMemories } = options ?? {};
+    if (entity !== undefined && !entity.trim()) {
+      throw new ValidationError('forget({ entity }) needs a non-blank entity name');
+    }
+    const targets = [memoryId, entity, allMemories === true].filter(Boolean).length;
+    if (targets !== 1) {
+      throw new ValidationError('forget() needs exactly one of memoryId, entity or allMemories: true');
+    }
+    if (projectId !== undefined && (!entity || !projectId.trim())) {
+      throw new ValidationError('forget({ projectId }) only limits an entity delete and must not be blank');
+    }
+
     const params: Record<string, string> = {};
-    
-    if (options.memoryId) {
-      params.memory_id = options.memoryId;
-    } else if (options.entity) {
-      params.entity = options.entity;
+    if (memoryId) {
+      params.memory_id = memoryId;
+    } else if (entity) {
+      await this.requireSafeEntityDelete();
+      params.entity = entity.trim();
+      if (projectId !== undefined) {
+        params.project_id = projectId.trim();
+      }
     } else {
-      params.user_id = this.userId;
+      params.all_memories = 'true';
     }
 
     return this.request<ForgetResult>('DELETE', '/api/v1/memories', { params });
+  }
+
+  /** Refuse a delete by entity when the server would delete the whole account for it (before 0.16.1). */
+  private async requireSafeEntityDelete(): Promise<void> {
+    const reported = (await this.health()).version;
+    const version = serverVersion(reported);
+    if (!version || olderThan(version, ENTITY_DELETE_MIN_SERVER)) {
+      throw new RemembraError(
+        `Not sent: the server reports ${reported || 'no version'}, and a server before 0.16.1 deletes every memory ` +
+          'in the account for a delete by entity. Upgrade the server, or delete by memoryId.',
+        undefined,
+        'SERVER_TOO_OLD',
+      );
+    }
   }
 
   // ===========================================================================

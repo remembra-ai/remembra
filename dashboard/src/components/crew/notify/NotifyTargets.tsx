@@ -163,7 +163,7 @@ export function NotifyTargets({ highlight = false }: { highlight?: boolean }) {
                 <PixelGlyph name={t.kind === 'email' ? 'mail' : 'wire'} size={13} className="text-ink-2" />
                 <span className="min-w-0 truncate font-mono text-[12px] text-ink">{t.target}</span>
                 <Pill tone={t.verified_at ? 'ok' : 'neutral'}>
-                  {t.verified_at ? (t.kind === 'webhook' ? 'signed · verified' : 'confirmed') : 'waiting for the code'}
+                  {t.verified_at ? (t.kind === 'webhook' ? 'verified (HMAC)' : 'confirmed') : 'waiting for the code'}
                 </Pill>
                 {!t.verified_at && t.kind === 'email' && <ConfirmEmail targetId={t.id} onDone={rules.refresh} />}
                 {t.verified_at && (

@@ -218,7 +218,7 @@ In every case:
   - In the TUI the rewake also fires UserPromptSubmit with a `<task-notification>` prompt. `gate turn` should treat
     that prompt as a wake-up, not as user input.
 
-### D14 (quota detection): **StopFailure is the primary signal, with a narrower quota test; the transcript detector stays on for Claude Code**
+### D14 (quota detection): **StopFailure is the primary signal, with a narrower quota test; the transcript detector stays on in Claude Code sessions**
 
 - Install the StopFailure hook (§8.2) as specified. It fires on every API-error turn end, fire-and-forget, and survives
   `-p` exit.
@@ -227,7 +227,7 @@ In every case:
   - `authentication_failed` and `oauth_org_not_allowed`: blocked. Stall with reason `auth`, not quota.
   - `rate_limit`: quota **only when** `last_assistant_message` starts with one of the usage-limit prefixes (`You've hit your`, `You're out of usage credits`, `Your org is out of usage`, `You've used`). Otherwise it is a transient 429: checkpoint only, no baton, no `quota_blocked`.
   - `server_error`, `overloaded`, `unknown`, `invalid_request`, `model_not_found`, `max_output_tokens`: checkpoint only. This matches §8.2.
-- **The transcript-tail detector stays enabled for Claude Code** until the real subscription usage-limit payload is
+- **The transcript-tail detector stays enabled in Claude Code sessions** until the real subscription usage-limit payload is
   captured, as the spec requires ("until StopFailure is V-live for that exact condition"). Reuse the same prefix list
   as its Claude Code limit patterns.
 - Do not rely on StopFailure/SessionEnd ordering. The server's `stall` and `leave` handlers must commute (§10.2

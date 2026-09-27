@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Remembra Logo" width="140">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="landing/brand/lockup-horizontal-dark.svg">
+    <img src="landing/brand/lockup-horizontal.svg" alt="Remembra" width="320">
+  </picture>
 </p>
 
 <h1 align="center">Remembra Relay</h1>
@@ -31,15 +34,24 @@
 
 ## Install
 
+First get a free key at [app.remembra.dev](https://app.remembra.dev/signup), then run:
+
 ```bash
 pipx install --force 'remembra[mcp]>=0.16'
 remembra-install --all
-remembra-relay connect
+remembra-relay connect --apply
 ```
 
-Get a free key at [app.remembra.dev](https://app.remembra.dev/signup), or [host the server yourself](https://docs.remembra.dev/getting-started/docker/).
 `remembra-install` asks for the key at a hidden prompt (or reads `REMEMBRA_API_KEY`) and shows its changes before it writes.
-`connect` is a dry run that shows exactly what it would change; add `--apply` to write the hooks. `remembra-relay` ships in remembra 0.16.0.
+`connect --apply` writes the hooks and keeps a backup of each file; run `remembra-relay connect` alone first to see every
+change without writing. Codex runs the hooks only after you trust them: run `/hooks` in Codex once.
+[Hosting the server yourself](https://docs.remembra.dev/getting-started/docker/)? Add `--url <your server>` to `remembra-install`.
+`remembra-relay` ships in remembra 0.16.0.
+
+**Handoffs not arriving?** `remembra-relay doctor` says where the baton dropped, from this machine's files and your
+trail, with one fix per problem; it only reads. Inside your agent the local MCP server has the same checks as
+read-only tools: `remembra_doctor`, `remembra_setup` (the install steps for this machine) and `remembra_help`.
+See [Doctor](https://docs.remembra.dev/guides/relay/#doctor).
 
 ## What the next agent sees
 
@@ -54,8 +66,8 @@ The done, not done and failing sections come from git and the session's test run
 
 ## How it works
 
-1. **Close.** When a session ends, `remembra-relay close` reads the branch, commits, changed and uncommitted files and unpushed commits from git, and for Claude Code the test runs and open items in the local transcript. The transcript never leaves your machine; secrets are redacted before anything does.
-2. **Brief.** When the next session starts, in any tool, `remembra-relay brief` (or the `session_brief` MCP tool) gives the agent who worked last, what is done, what is failing and the next step, in about 1,500 tokens. Everything another agent recorded is wrapped as untrusted data.
+1. **Close.** When a session ends, `remembra-relay close` reads the branch, commits, changed and uncommitted files and unpushed commits from git, and, for Claude Code and Codex, the commands, test runs and open items in the local transcript (Codex's is its rollout file). The transcript never leaves your machine; secrets are redacted before anything does.
+2. **Brief.** When the next session starts, in the same tool or another, `remembra-relay brief` (run by the verified session hooks) or the `session_brief` MCP tool (any MCP agent can call it) gives the agent who worked last, what is done, what is failing and the next step, in about 1,500 tokens. Everything another agent recorded is wrapped as untrusted data.
 3. **Trail.** Every handoff stays in order: `remembra-relay trail`, or the Trail page in the dashboard. A git log for your agents.
 
 The same repository on a laptop, a server or in a worktree is one project, because it is identified by its git remote. Give each agent its own scoped key and its handoffs show as key-verified.
@@ -66,10 +78,13 @@ The same repository on a laptop, a server or in a worktree is one project, becau
 |---|---|---|
 | Claude Code | **verified** | Hooks: brief at start, close at end, with test results from the transcript |
 | Codex | **verified** (codex-cli 0.155.0-alpha.16.4, a prerelease) | Hooks: brief at start, close at end, with commands and test runs from the rollout; trust them once with `/hooks` in Codex |
-| Cursor, Gemini CLI, Qwen Code, Kimi | unverified | MCP tools (`session_brief`, `close_session`) |
+| Gemini CLI | **verified** (Gemini CLI 0.61.0) | Hooks: brief at start (after `/clear`, with the first prompt), close at end; they run only in folders you trust |
+| Qwen Code | **verified** (Qwen Code 0.24.6) | Hooks: brief at start, close at end, on a rate-limit or billing stop and before `/compress`; `qwen -p` writes no handoff |
+| Kimi Code | **verified** (Kimi Code 2.1.1) | Hooks: brief with the first prompt, close when the TUI exits; `kimi -p` writes no handoff |
+| Cursor | unverified | MCP tools (`session_brief`, `close_session`) |
 | Any other MCP agent | none | MCP tools |
 
-Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease; no stable Codex release has been run yet). The hooks for Cursor, Gemini CLI, Qwen Code and Kimi are unverified: they follow each tool's docs but have not been run against it yet. `connect` leaves them out unless you add `--include-unverified`. Until they are tested, those agents read the brief and write their handoff through Remembra's MCP tools, as does any MCP agent.
+Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease; no stable Codex release has been run yet). The Gemini CLI, Qwen Code and Kimi Code hooks are verified too: each was run against the real tool at the version in the table, with a local stand-in for the model, and put the brief in the model's request and posted the handoff; other versions have not been run. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. `connect` leaves them out unless you add `--include-unverified`. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent.
 
 ## How it compares
 
@@ -81,7 +96,7 @@ Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155
 | Durable trail of sessions | Yes | No | No | No |
 | Enforced coordination between agents | Crew mode, in build | Claude-only agent teams | No | No |
 
-Details, with a source and date for every claim: [Remembra and other handoff tools](docs/comparisons/handoff-tools.md) and [the competitive landscape](docs/competitive-analysis-2026.md). claude-mem and agentmemory are larger projects that also carry memory between sessions; the comparison says where each is the better pick.
+Details, with a source and date for every claim: [Remembra and other handoff tools](docs/comparisons/handoff-tools.md). claude-mem and agentmemory are larger projects that also carry memory between sessions; the comparison says where each is the better pick.
 
 ## Pricing
 
@@ -136,9 +151,9 @@ curl -X POST http://localhost:8787/api/v1/memories/recall \
   -d '{"query": "Who runs Acme?", "user_id": "demo"}'
 ```
 
-### Connect ALL Your AI Agents (NEW in v0.10.0)
+### Connect your agents (since v0.10.0)
 
-**One command configures everything:**
+**One command configures the agents it detects:**
 
 ```bash
 pip install remembra
@@ -259,7 +274,7 @@ Run it yourself: `python benchmarks/locomo_runner.py --data /tmp/locomo/data/loc
 | [Python SDK](https://docs.remembra.dev/guides/python-sdk/) | Full Python reference |
 | [TypeScript SDK](https://docs.remembra.dev/guides/javascript-sdk/) | JavaScript/TypeScript guide |
 | [Remembra Relay](https://docs.remembra.dev/guides/relay/) | Handoffs, briefs and the trail across agents |
-| [MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Tool reference and setup guides for the 28 tools |
+| [MCP Server](https://docs.remembra.dev/integrations/mcp-server/) | Tool reference and setup guides for the 31 tools |
 | [REST API](https://docs.remembra.dev/guides/rest-api/) | API reference |
 | [Self-Hosting](https://docs.remembra.dev/getting-started/docker/) | Docker deployment guide |
 
@@ -267,14 +282,14 @@ Run it yourself: `python benchmarks/locomo_runner.py --data /tmp/locomo/data/loc
 
 ## 🛠️ MCP Server
 
-Give any AI coding tool persistent memory with one command. Works with **Claude Code**, **Cursor**, **VS Code + Copilot**, **Windsurf**, **JetBrains**, **Zed**, **OpenAI Codex**, and any MCP-compatible client.
+Give an MCP-capable coding agent persistent memory. Works with **Claude Code**, **Cursor**, **VS Code + Copilot**, **Windsurf**, **JetBrains**, **Zed**, **OpenAI Codex**, and any MCP-compatible client.
 
 ```bash
 pip install remembra[mcp]
 claude mcp add remembra -e REMEMBRA_URL=http://localhost:8787 -- remembra-mcp
 ```
 
-**Available tools (28):**
+**Available tools (31):**
 
 | Group | Tools |
 |------|-------|
@@ -284,6 +299,7 @@ claude mcp add remembra -e REMEMBRA_URL=http://localhost:8787 -- remembra-mcp
 | Entities and time | `search_entities`, `timeline`, `relationships_at` |
 | Sharing | `share_memory`, `list_spaces`, `create_space` |
 | Connection | `health_check` |
+| Setup and diagnosis (read-only) | `remembra_doctor`, `remembra_setup`, `remembra_help` |
 | Crew mode (when the server runs it) | `crew_status`, `crew_claim`, `crew_guard`, `crew_task`, `crew_say`, `crew_checkpoint`, `crew_report` |
 
 ---

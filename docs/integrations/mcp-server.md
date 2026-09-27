@@ -9,7 +9,7 @@ Use Remembra as persistent memory for AI assistants via the [Model Context Proto
 
 ## Quick Setup (v0.10.1)
 
-Configure all your AI tools with one command:
+Configure the AI tools it supports with one command:
 
 ```bash
 pip install "remembra[mcp]"
@@ -125,23 +125,35 @@ Delete memories from persistent storage. Prefer deleting one memory by id.
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `memory_id` | string | ❌ | Delete one memory by ID |
-| `entity` | string | ❌ | Not implemented server-side: returns `status: "not_supported"` and deletes nothing |
+| `entity` | string | ❌ | Delete the memories linked to the entity with this exact name or alias (any case) in ONE project, then the entity once nothing mentions it (guarded, see below) |
 | `all_memories` | bool | ❌ | Delete every memory in ONE project (guarded, see below) |
-| `project_id` | string | with `all_memories` | The project to wipe. There is no user-wide wipe via MCP |
-| `dry_run` | bool | ❌ | `all_memories` preview only. Default `true` |
-| `confirm` | string | with `all_memories` | Must equal `DELETE ALL MEMORIES IN <project_id>` |
+| `project_id` | string | with `all_memories` | The project to wipe, or the project of an `entity` delete (default: the configured project). There is no user-wide delete via MCP |
+| `dry_run` | bool | ❌ | `entity` and `all_memories`: preview only. Default `true` |
+| `confirm` | string | with `entity` or `all_memories` | Must equal `DELETE MEMORIES ABOUT <entity> IN <project_id>` or `DELETE ALL MEMORIES IN <project_id>` |
 
 !!! warning
     Exactly one of `memory_id`, `entity`, `all_memories` must be provided.
-    `all_memories` first returns a dry-run preview (`would_delete`, a sample,
-    and the exact `confirm_phrase`). It deletes only when called again with
-    `dry_run: false` and the matching `confirm` phrase.
+    `entity` and `all_memories` first return a dry-run preview (`would_delete`,
+    a sample, and the exact `confirm_phrase`). They delete only when called
+    again with `dry_run: false` and the matching `confirm` phrase. An `entity`
+    delete is refused, deleting nothing, when the API server is older than
+    0.16.1: those servers deleted the whole account for it.
 
 **Examples:**
 ```
 # Delete specific memory
 [Tool: forget_memories]
 memory_id: "mem_abc123"
+
+# Preview deleting what is stored about John in the configured project (deletes nothing)
+[Tool: forget_memories]
+entity: "John"
+
+# Confirmed delete by entity
+[Tool: forget_memories]
+entity: "John"
+dry_run: false
+confirm: "DELETE MEMORIES ABOUT John IN my-project"
 
 # Preview a project wipe (deletes nothing)
 [Tool: forget_memories]
@@ -531,8 +543,44 @@ full response lists only entities that are named in the returned memories
 (`entities_total` holds the unfiltered count).
 
 `get_inbox(summary=true)` returns subject, sender and a 200-character preview instead of full bodies.
+`ack_inbox(inbox_id, result?, note?)` marks an inbox item read after you act on it, or `done`, `blocked` or `rejected` with an optional note.
 `send_to_inbox` warns when the recipient is not in `REMEMBRA_KNOWN_AGENTS` and accepts `expires_in` (`12h`, `7d`, `2w`).
 `list_memories` accepts `offset` and returns `next_offset`.
+
+---
+
+## Marshal: read-only diagnosis tools
+
+These three never change anything and never return an API key. Each returns `rendered` (a monospace slip to
+show as it is) plus structured fields. On a remote transport (`sse`, `streamable-http`) `remembra_doctor` and
+`remembra_setup` answer `{"status": "local_only"}`: they read the machine the server runs on.
+
+| Tool | Purpose |
+|------|---------|
+| `remembra_doctor(agent?, check_server=true)` | Why briefs or handoffs aren't arriving on this machine: the key, the unsent-handoff queue, each agent's hooks, Codex hook trust, and (with `check_server`) at most four GETs of your trail. Each finding has `evidence`, `inferred`, and one `fix` with `runs_where` (`agent_ok`, `user_terminal`, `codex_ui`, `dashboard`). Same rules as `remembra-relay doctor`. |
+| `remembra_setup(agents?)` | The install and connect steps for this machine's OS and agents, each with its command (from a fixed set), where it runs, what it writes and whether it is already done. The key step is always the user's. |
+| `remembra_help(question)` | An answer quoted from the relay guide and the plans page (`answered`), the page to read for refunds, security, privacy and similar topics (`read_the_page`), or `cant_confirm`. |
+
+The `doctor` prompt (Claude Code: `/mcp__remembra__doctor`) runs `remembra_doctor` and walks the fixes one at a
+time. See [Doctor](../guides/relay.md#doctor).
+
+---
+
+## Crew mode tools <span class="md-tag">v0.17.0</span>
+
+For agents that work in one repository at the same time (see [Crew mode](../relay/crew.md)). They are always
+registered; on a server without Crew mode (`REMEMBRA_CREW_MODE` off) they answer that Crew mode is unavailable.
+Agents with crew hooks get the same checks from the hooks; for MCP-only agents these tools are advisory.
+
+| Tool | Purpose |
+|------|---------|
+| `crew_status(project_id?, git_remote?, root_path?, verbose=false)` | Call after `session_brief`: joins this project's crew (once) and shows who holds what, the tasks and what needs attention. |
+| `crew_claim(action="claim", zone?, paths?, mode="exclusive", task?, to?, baton?, reason?, wait_s=0)` | Claim a zone or paths before editing them, or `release`, `adopt`, `handover`, `accept` or `decline` one. |
+| `crew_guard(paths, command?, mcp_tool?)` | Ask before a write, a shell command or an MCP call: `ALLOW` or `DENY <reason>`. |
+| `crew_task(action="list", task?, title?, status?, zones?, acceptance?, phase?, note?)` | The crew task board: `list`, `create`, `start`, `update`, `block` or `release` a task. |
+| `crew_say(body, kind="chat", to="crew", thread?, wait_s=0)` | Post to the crew channel: a message, question, answer, release request or proposed decision (a decision stays proposed until a person confirms it). |
+| `crew_checkpoint(files_changed, summary?, commits?, tests?, next_step?, task?)` | Record progress after a commit or a test run; the crew sees it and overlaps are checked. |
+| `crew_report(task, sections, criteria_evidence?, commits?, tests?, summary?, release=true)` | The completion report (done / not done / failing / next) a task needs before it is done. |
 
 ---
 

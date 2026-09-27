@@ -266,8 +266,8 @@ repositories, `zones.yml` and the server's crew history are untouched.
 
 ## Running the server
 
-This section is for self-hosters and operators. Remembra Cloud's own procedure is in
-[Deploying](../DEPLOYING.md#crew-mode).
+This section is for self-hosters and operators. Deploying Crew mode, turning it on and rolling back step by
+step are in [Operations: Crew mode](../OPERATIONS.md#crew-mode).
 
 ### The feature flag
 
@@ -305,7 +305,7 @@ links, and loses its actor, references, summary and payload. The nightly chain c
 
 Back up **both** files. They sit in the same directory by default.
 
-- **Litestream (Remembra Cloud image).** `scripts/cloud-entrypoint.sh` replicates the main database to
+- **Litestream (optional, in the `Dockerfile.cloud` image).** `scripts/cloud-entrypoint.sh` replicates the main database to
   `LITESTREAM_REPLICA_URL` and `crew.db` to `LITESTREAM_CREW_REPLICA_URL`, which defaults to a sibling
   of the main replica (`s3://bucket/remembra` → `s3://bucket/remembra-crew`). On a boot with an empty
   volume it restores both. A failed `crew.db` restore stops the container when Crew mode is on, exactly

@@ -1,0 +1,25 @@
+{
+  "host": "kimi",
+  "how": "recorded: Kimi Code 2.1.1 (@moonshot-ai/kimi-code) against a local stand-in model; stdin dumped by the hook. Paths replaced.",
+  "hook_cwd": "/home/dev/work/widget",
+  "env": {},
+  "payloads": {
+    "start": {
+      "hook_event_name": "SessionStart",
+      "session_id": "session_9e7ffc77-aa85-4f14-9d59-55da3b0c856c",
+      "cwd": "/home/dev/work/widget",
+      "client_type": "kimi_code_cli",
+      "source": "startup",
+      "model": "local-mock",
+      "profile": "agent"
+    },
+    "end": {
+      "hook_event_name": "SessionEnd",
+      "session_id": "session_9e7ffc77-aa85-4f14-9d59-55da3b0c856c",
+      "cwd": "/home/dev/work/widget",
+      "client_type": "kimi_code_cli",
+      "reason": "exit",
+      "session_title": "say hi"
+    }
+  }
+}

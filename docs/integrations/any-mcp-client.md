@@ -80,13 +80,13 @@ Configure Remembra via environment variables in your MCP client config:
 
 ## Available Tools
 
-Once connected, your MCP client will have access to 5 tools:
+Once connected, your MCP client has 31 tools; the [MCP Tool Reference](mcp-server.md) lists them. The main ones:
 
 | Tool | Description |
 |------|-------------|
 | `store_memory` | Store information in persistent memory |
 | `recall_memories` | Search memory with natural language |
-| `forget_memories` | Delete memories (by ID, entity, or all) |
+| `forget_memories` | Delete one memory by ID, or the memories about one entity or every memory in one project (both with a confirmation phrase) |
 | `health_check` | Check server connection status |
 | `ingest_conversation` | Auto-extract memories from conversations |
 

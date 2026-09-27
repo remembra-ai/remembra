@@ -43,6 +43,37 @@ jobs:
         run: mypy src/remembra
 
   # ---------------------------------------------------------------------------
+  # Known advisories in the locked production dependencies (DEP-2)
+  # ---------------------------------------------------------------------------
+  # Audits exactly what Dockerfile.cloud installs from uv.lock (same extras).
+  # --strict also fails when a package cannot be audited. An advisory that
+  # cannot be fixed yet goes in pip-audit-allowlist.txt with a reason.
+  audit:
+    name: Dependency audit (uv.lock)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+
+      - name: Install uv and pip-audit (hash-pinned)
+        run: |
+          python -m pip install --require-hashes --no-deps -r .github/release-requirements.txt
+          uv export --frozen --only-group audit --no-emit-project -o /tmp/audit-tools.txt
+          python -m pip install --require-hashes --no-deps -r /tmp/audit-tools.txt
+
+      - name: pip-audit the production dependency set
+        run: |
+          ignores=$(grep -oE '^[A-Z]+-[A-Za-z0-9-]+' pip-audit-allowlist.txt | sed 's/^/--ignore-vuln /')
+          # shellcheck disable=SC2086  # one word per flag
+          uv export --frozen --no-dev --no-emit-project --extra server --extra cloud --extra encryption --extra rerank --extra mcp \
+            | pip-audit --disable-pip -r /dev/stdin --strict $ignores
+
+  # ---------------------------------------------------------------------------
   # Tests
   # ---------------------------------------------------------------------------
   test:
@@ -92,8 +123,9 @@ jobs:
           python-version: "3.11"
 
       - name: Build the wheel
+        # build and uv from the hash-pinned release tools (CI-1: no unpinned installs).
         run: |
-          pip install build
+          python -m pip install --require-hashes --no-deps -r .github/release-requirements.txt
           python -m build --wheel --outdir dist
 
       - name: Base install runs the relay and the installers
@@ -129,7 +161,7 @@ jobs:
 
       - name: "The dashboard's exact install command gives a remembra-mcp that starts"
         run: |
-          python -m pip install pipx
+          python -m pip install --require-hashes --no-deps -r .github/ci-requirements.txt
           # The package spec the dashboard one-liner copies (dashboard/src/lib/agents.ts), satisfied by
           # this build's wheel (--find-links) so it runs before the release is on PyPI.
           spec=$(sed -n "s/^export const PIPX_INSTALL = \"pipx install --force '\\(.*\\)'\";\$/\\1/p" dashboard/src/lib/agents.ts)
@@ -147,7 +179,7 @@ jobs:
         run: |
           python -m build --wheel --outdir dist packages/remembra-mcp
           python scripts/check_release_versions.py
-          pip install uv
+          # uv (and uvx) came from .github/release-requirements.txt in "Build the wheel".
           version=$(python -c 'import json; print(json.load(open("server.json"))["version"])')
           REMEMBRA_URL=http://127.0.0.1:9 REMEMBRA_API_KEY=rem_ci_check REMEMBRA_AGENT_ID=ci-check \
             python scripts/mcp_stdio_check.py --expect-tool session_brief --expect-tool close_session -- \
@@ -201,3 +233,34 @@ jobs:
 
       - name: Boot it against Qdrant and check /health
         run: bash scripts/ci/cloud_image_smoke.sh remembra-cloud:ci "${GITHUB_SHA}"
+
+  # ---------------------------------------------------------------------------
+  # Repository hygiene: nothing private in the public repo
+  # ---------------------------------------------------------------------------
+  # scripts/ci/repo_hygiene.py: the tracked tree, on a pull request every
+  # commit it adds, and on a push every commit the push added (a file added and
+  # later deleted is still published). hooks/pre-push runs the same check before
+  # anything leaves a laptop; the push step can only report what is already
+  # public (a key it finds must be revoked), so the hooks are the prevention.
+  hygiene:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.11"
+      - name: Tracked files
+        run: python scripts/ci/repo_hygiene.py tree
+      - name: Commits in this pull request
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: python scripts/ci/repo_hygiene.py range "origin/${BASE_REF}..HEAD"
+      - name: Commits in this push
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: python scripts/ci/repo_hygiene.py pushed "${BEFORE}" "${GITHUB_SHA}"

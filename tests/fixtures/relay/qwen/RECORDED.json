@@ -1,0 +1,22 @@
+{
+  "qwen_code": "0.24.6",
+  "recorded_by": "tests/test_relay_qwen_live.py",
+  "model": "local OpenAI-compatible stand-in (security.auth.selectedType openai, OPENAI_BASE_URL)",
+  "hook_env": [
+    "GEMINI_PROJECT_DIR",
+    "QWEN_CODE_AGENT_ID",
+    "QWEN_CODE_CLI",
+    "QWEN_CODE_MANAGED_NPM_PIN",
+    "QWEN_CODE_MANAGED_NPM_ROOT",
+    "QWEN_CODE_MESSAGING_SOCKET",
+    "QWEN_CODE_MESSAGING_TOKEN",
+    "QWEN_CODE_MODEL",
+    "QWEN_CODE_MODEL_IDENTITY",
+    "QWEN_CODE_PRIVATE_RELAUNCH_ENV_PROVENANCE",
+    "QWEN_CODE_PROJECT_DIR",
+    "QWEN_CODE_PROMPT_ID",
+    "QWEN_CODE_SESSION_ID",
+    "QWEN_CODE_STARTUP_VERSION",
+    "QWEN_PROJECT_DIR"
+  ]
+}

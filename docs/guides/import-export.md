@@ -2,6 +2,17 @@
 
 Remembra supports importing memories from various sources and exporting in multiple formats.
 
+## Two ways in
+
+| Route | Body | Size limit |
+|-------|------|------------|
+| `POST /api/v1/transfer/import/file?format=<format>` | the file, as multipart form field `file` | 50 MB |
+| `POST /api/v1/transfer/import` | JSON: `{"format": "...", "data": "<the file's text>"}` | 8 MiB request, 8,000,000 characters of `data` |
+
+Anything larger than the inline limit goes to `/transfer/import/file`. `format` is one of `json`, `jsonl`,
+`csv`, `chatgpt`, `claude`, `plaintext`; for plain text, `split_mode` (`paragraph`, `line`, `heading`, `none`)
+says where one memory ends. Both routes take an optional `project_id`.
+
 ## Import Sources
 
 ### ChatGPT Conversations
@@ -12,11 +23,9 @@ Import your ChatGPT conversation history:
 # Export from ChatGPT: Settings → Data Controls → Export Data
 # You'll receive a ZIP file with conversations.json
 
-curl -X POST http://localhost:8787/api/v1/transfer/import \
+curl -X POST "http://localhost:8787/api/v1/transfer/import/file?format=chatgpt" \
   -H "X-API-Key: your_api_key" \
-  -F "file=@conversations.json" \
-  -F "source=chatgpt" \
-  -F "user_id=user_123"
+  -F "file=@conversations.json"
 ```
 
 **Python SDK:**
@@ -35,11 +44,9 @@ print(f"Imported {result.count} memories")
 Import Claude conversation exports:
 
 ```bash
-curl -X POST http://localhost:8787/api/v1/transfer/import \
+curl -X POST "http://localhost:8787/api/v1/transfer/import/file?format=claude" \
   -H "X-API-Key: your_api_key" \
-  -F "file=@claude_conversations.json" \
-  -F "source=claude" \
-  -F "user_id=user_123"
+  -F "file=@claude_conversations.json"
 ```
 
 ### Plain Text
@@ -47,12 +54,9 @@ curl -X POST http://localhost:8787/api/v1/transfer/import \
 Import from plain text files (one memory per paragraph or line):
 
 ```bash
-curl -X POST http://localhost:8787/api/v1/transfer/import \
+curl -X POST "http://localhost:8787/api/v1/transfer/import/file?format=plaintext&split_mode=paragraph" \
   -H "X-API-Key: your_api_key" \
-  -F "file=@notes.txt" \
-  -F "source=plaintext" \
-  -F "user_id=user_123" \
-  -F "delimiter=paragraph"  # or "line"
+  -F "file=@notes.txt"  # split_mode: paragraph, line, heading or none
 ```
 
 ### JSON Format
@@ -74,11 +78,9 @@ Import structured JSON data:
 ```
 
 ```bash
-curl -X POST http://localhost:8787/api/v1/transfer/import \
+curl -X POST "http://localhost:8787/api/v1/transfer/import/file?format=json" \
   -H "X-API-Key: your_api_key" \
-  -F "file=@memories.json" \
-  -F "source=json" \
-  -F "user_id=user_123"
+  -F "file=@memories.json"
 ```
 
 ### JSONL (JSON Lines)
@@ -92,11 +94,9 @@ For large imports, use streaming JSONL format:
 ```
 
 ```bash
-curl -X POST http://localhost:8787/api/v1/transfer/import \
+curl -X POST "http://localhost:8787/api/v1/transfer/import/file?format=jsonl" \
   -H "X-API-Key: your_api_key" \
-  -F "file=@memories.jsonl" \
-  -F "source=jsonl" \
-  -F "user_id=user_123"
+  -F "file=@memories.jsonl"
 ```
 
 ### CSV
@@ -110,11 +110,9 @@ content,metadata.source,metadata.category
 ```
 
 ```bash
-curl -X POST http://localhost:8787/api/v1/transfer/import \
+curl -X POST "http://localhost:8787/api/v1/transfer/import/file?format=csv" \
   -H "X-API-Key: your_api_key" \
-  -F "file=@memories.csv" \
-  -F "source=csv" \
-  -F "user_id=user_123"
+  -F "file=@memories.csv"
 ```
 
 ## Export Formats
@@ -196,27 +194,12 @@ curl "http://localhost:8787/api/v1/transfer/export?format=json&include_entities=
 
 ## Bulk Operations
 
-### Import Progress
+### Large imports
 
-For large imports, track progress:
-
-```bash
-# Start async import
-curl -X POST http://localhost:8787/api/v1/transfer/import/async \
-  -H "X-API-Key: your_api_key" \
-  -F "file=@large_dataset.jsonl" \
-  -F "source=jsonl"
-
-# Response
-{"job_id": "import_abc123", "status": "processing"}
-
-# Check progress
-curl http://localhost:8787/api/v1/transfer/import/status/import_abc123 \
-  -H "X-API-Key: your_api_key"
-
-# Response
-{"job_id": "import_abc123", "status": "completed", "processed": 10000, "total": 10000}
-```
+An import runs in the request: `/transfer/import/file` takes a file up to 50 MB and answers with the
+counts (`imported`, `skipped`, `errors`). Split a larger export into several files. `POST /api/v1/memories/bulk`
+stores up to 100 pre-structured memories per call (an 8 MiB request, 50,000 characters each) without fact
+extraction.
 
 ## Data Migration
 
@@ -229,10 +212,9 @@ curl "http://source:8787/api/v1/transfer/export?format=jsonl" \
   -o backup.jsonl
 
 # Import to destination
-curl -X POST http://destination:8787/api/v1/transfer/import \
+curl -X POST "http://destination:8787/api/v1/transfer/import/file?format=jsonl" \
   -H "X-API-Key: dest_key" \
-  -F "file=@backup.jsonl" \
-  -F "source=jsonl"
+  -F "file=@backup.jsonl"
 ```
 
 ## Best Practices

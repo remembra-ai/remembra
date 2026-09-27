@@ -18,3 +18,55 @@ updates:
       interval: weekly
     commit-message:
       prefix: "ci(release-tools)"
+  # DEP-2: the server's own dependencies (uv.lock) and the dashboard's npm
+  # lock. Security updates are proposed as they are published; everything else
+  # arrives as one grouped PR a week. CI's `audit` job fails on any advisory in
+  # the locked production set, so a stale pin cannot go unnoticed.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(python)"
+  - package-ecosystem: npm
+    directory: /dashboard
+    schedule:
+      interval: weekly
+    groups:
+      dashboard:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(dashboard)"
+  # CTR-1: every Dockerfile names its base image by tag and @sha256 digest
+  # (tests/test_container_images.py). These keep the digests current: "/"
+  # covers Dockerfile, Dockerfile.cloud and docs.Dockerfile.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      base-images:
+        patterns: ["*"]
+    commit-message:
+      prefix: "deps(docker)"
+  - package-ecosystem: docker
+    directory: /dashboard
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(docker)"
+  - package-ecosystem: docker
+    directory: /landing
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(docker)"
+  - package-ecosystem: pip
+    directory: /scripts  # uv-requirements.txt: the hash-pinned uv of the image builds
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "deps(docker)"

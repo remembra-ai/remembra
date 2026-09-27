@@ -1,8 +1,10 @@
 # remembra.dev: the static site on nginx, with its own config.
 #
 # Coolify: build pack "Dockerfile", base directory /landing, Dockerfile
-# location /Dockerfile, exposed port 8080. See docs/DEPLOYING.md.
-FROM nginx:stable-alpine
+# location /Dockerfile, exposed port 8080. The static build pack would ignore
+# nginx.conf, so the app must use this Dockerfile.
+# Pinned by digest (CTR-1); Dependabot (docker, /landing) proposes updates.
+FROM nginx:1.30-alpine@sha256:985220252f3863977e468f611ef118ebd01421289dd86ee1ae99cb068c3bce2b
 
 COPY nginx.conf /etc/nginx/nginx.conf
 COPY remembra-headers.conf /etc/nginx/remembra-headers.conf

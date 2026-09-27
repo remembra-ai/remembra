@@ -13,6 +13,20 @@ supersedes it. The StopFailure payload names the error in ``error`` (seen on
 2.1.168, see tests/fixtures/claude_code); the hooks reference calls it
 ``error_type``, so both are read. StopFailure and SessionEnd can arrive in
 either order; both close the same session, and the last one wins.
+
+``CLAUDE_CONFIG_DIR`` moves ``~/.claude`` (settings and transcripts): the
+recorded payloads above came from a run with it set.
+
+Other agents run these hooks too: Grok Build loads ``~/.claude/settings.json``
+by default and ``/import-claude`` copies it; Cursor (IDE and cursor-agent)
+imports it and runs SessionStart / SessionEnd / PreCompact with its own
+payload, in ``~/.claude``; Devin reads it while ``read_config_from.claude`` is
+on; Continue's ``cn`` reads it; ``gemini hooks migrate`` and ``kimi migrate``
+copy it with ``--agent claude-code`` in the command. The relay tells those
+runs apart (:mod:`remembra.relay.hosts`): the brief does nothing, and the close
+is filed under the agent that ran it, or dropped when the relay has no adapter
+for that agent. A payload whose transcript is under this agent's own directory
+is always Claude Code's.
 """
 
 from __future__ import annotations
@@ -41,6 +55,7 @@ SPEC = AdapterSpec(
     detect_dirs=(".claude",),
     config_source="claude",
     hook_timeouts={"start": 15, "end": 15},
+    home_env="CLAUDE_CONFIG_DIR",
     notes="Verified against Claude Code hook docs and real JSONL transcripts.",
     extra_close_events=(CloseEvent("StopFailure", "|".join(LIMIT_ERRORS)), CloseEvent("PreCompact")),
 )

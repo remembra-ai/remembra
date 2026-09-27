@@ -300,7 +300,7 @@ def _claude_targets(opts: ConnectOptions) -> list[tuple[Path, str]]:
     """(settings file, note) for Claude Code: global, or project-level per repo."""
     spec = crew_specs()["claude-code"]
     if opts.scope == "global":
-        return [(REGISTRY["claude-code"].spec.config_path(opts.home), "")]
+        return [(REGISTRY["claude-code"].spec.config_file(opts.home), "")]
     targets = []
     for repo in opts.repos:
         top = githooks.inspect(repo).toplevel
@@ -405,7 +405,7 @@ def build_plan(opts: ConnectOptions) -> InstallPlan:
     else:
         for name in _selected_agents(opts, agent_section):
             spec = crew_specs()[name]
-            targets = _claude_targets(opts) if name == "claude-code" else [(REGISTRY[name].spec.config_path(home), "")]
+            targets = _claude_targets(opts) if name == "claude-code" else [(REGISTRY[name].spec.config_file(home), "")]
             for path, note in targets:
                 if note:
                     agent_section.notes.append(note)

@@ -1,6 +1,7 @@
 # Agent Setup
 
-Configure all your AI agents to share memory with one command.
+Configure the AI agents `remembra-install` supports on this machine (Claude Desktop, Claude Code, Codex, Cursor
+and Gemini CLI) to share memory with one command. Others you add by hand.
 
 ## Quick Setup (Recommended)
 
