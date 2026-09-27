@@ -276,6 +276,7 @@ def test_agents_note_calls_the_unrun_hooks_unverified() -> None:
     assert "Codex with a prerelease of codex-cli 0.155 (" in note and "codex exec" in note
     assert "with a local stand-in for the model)" in note
     assert "other Codex versions have not been run" in note and "live round trip" not in note
+    assert "the same tests also pass on codex-cli 0.157.1" in note
     # Gemini CLI, Qwen Code and Kimi Code: the one version each that was run (their TESTED_VERSIONS)
     from remembra.relay.adapters import gemini, kimi, qwen
 
@@ -977,8 +978,13 @@ def test_pricing_names_every_limit_that_refuses_a_save() -> None:
     assert f"the notes per request ({free.max_batch_items} on Free, {solo.max_batch_items} on paid plans)" in refused
     assert f"{free.max_unenriched_writes_per_day} unenriched saves a day" in refused
     assert "notes-kept cap" in refused
-    bursts = (free.relay_burst_per_min, solo.relay_burst_per_min, pro.relay_burst_per_min, team.relay_burst_per_min)
-    assert "({} a minute on Free, {} on Solo, {} on Pro and Team)".format(*bursts[:3]) in faq and bursts[2] == bursts[3]
+    # a handoff is a POST /session/close, capped at 60 a minute per account in front of the plan's own burst
+    relay_src = (Path(__file__).resolve().parents[1] / "src" / "remembra" / "api" / "v1" / "relay.py").read_text()
+    route = int(re.search(r'@router\.post\("/session/close".*?\n@limiter\.limit\("(\d+)/minute"\)', relay_src).group(1))
+    bursts = [min(p.relay_burst_per_min, route) for p in (free, solo, pro, team)]
+    assert bursts[1] == bursts[2] == bursts[3]
+    assert f"({bursts[0]} a minute on Free, {bursts[1]} on paid plans)" in faq
+    assert "30 saves a minute per account" in refused
     free_card = _text(re.search(r'<article class="plan" aria-labelledby="p-free">.*?</article>', page, re.S).group(0))
     assert f"Notes up to {free.max_content_chars:,} characters" in free_card
     plain = _text(re.search(r'<div class="plain">.*?</div>', page, re.S).group(0))
@@ -1154,8 +1160,8 @@ def test_codex_verification_copy_says_what_was_run() -> None:
         assert "local stand-in for the model" in text
         assert "live round trip" not in text
     assert "No stable Codex release has been run" in changelog
-    assert "no stable Codex release has been run yet" in guide
-    assert "| verified (codex-cli 0.155.0-alpha.16.4, a prerelease) |" in guide
+    assert "also passes on the stable 0.157.1" in guide
+    assert "| verified (codex-cli 0.155.0-alpha.16.4, a prerelease; also passes on 0.157.1) |" in guide
 
 
 # ---------------------------------------------------------------------------
@@ -1614,6 +1620,7 @@ def test_setup_md_says_what_the_adapters_say() -> None:
     assert len(events) == 3 and "trust 3 hooks" in text
     assert f"trust {events[0]}, {events[1]} and {events[2]}" in text
     assert "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust." in text
+    assert "marks it modified and skips it" in text and "asks again" not in text
     assert "Claude Code's and Codex's session hooks are verified." in text
     # the same three lines as the hero, for someone who runs them by hand
     block = text.split("## The same steps in the user's terminal", 1)[1]

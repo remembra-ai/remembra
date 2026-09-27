@@ -84,7 +84,7 @@ The same repository on a laptop, a server or in a worktree is one project, becau
 | Cursor | unverified | MCP tools (`session_brief`, `close_session`) |
 | Any other MCP agent | none | MCP tools |
 
-Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease; no stable Codex release has been run yet). The Gemini CLI, Qwen Code and Kimi Code hooks are verified too: each was run against the real tool at the version in the table, with a local stand-in for the model, and put the brief in the model's request and posted the handoff; other versions have not been run. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. `connect` leaves them out unless you add `--include-unverified`. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent.
+Claude Code's and Codex's session hooks are verified (Codex with codex-cli 0.155.0-alpha.16.4, a prerelease, and the same tests also pass on the stable 0.157.1). The Gemini CLI, Qwen Code and Kimi Code hooks are verified too: each was run against the real tool at the version in the table, with a local stand-in for the model, and put the brief in the model's request and posted the handoff; other versions have not been run. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. `connect` leaves them out unless you add `--include-unverified`. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent.
 
 ## How it compares
 
@@ -260,7 +260,7 @@ const result = await memory.recall('preferences');
 
 ## 📊 Benchmarks
 
-One small [LoCoMo](https://github.com/snap-research/locomo) run, not a benchmark result: in March 2026 we ran 1 of the 10 LoCoMo conversations, 199 questions, judged by gpt-4o-mini. **76% overall.** The 47 adversarial questions, whose answer is not in the conversation, all scored 0, because Remembra did not detect them; the other 152 questions scored 100%. The numbers are in [`benchmarks/results_20260307_040346_summary.json`](benchmarks/results_20260307_040346_summary.json). A run over all 10 conversations has not been done yet.
+No valid benchmark result has been published yet. In March 2026 we ran 1 of the 10 [LoCoMo](https://github.com/snap-research/locomo) conversations (199 questions), but that run's scores are not valid: its judge counted every INCORRECT verdict as correct, and it scored the raw recall context instead of an answer. Both bugs are fixed in the runner (commit a19fb29); a fresh run has not been done yet.
 
 Run it yourself: `python benchmarks/locomo_runner.py --data /tmp/locomo/data/locomo10.json`
 

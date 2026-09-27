@@ -18,10 +18,10 @@ when git disagrees. The next agent, in another tool or on another machine, gets 
 Every handoff stays on the trail. See the [Relay guide](../guides/relay.md).
 
 Today Claude Code's, Codex's, Gemini CLI's, Qwen Code's and Kimi Code's hooks are verified: Codex on codex-cli
-0.155.0-alpha.16.4, a prerelease (no other Codex version has been run), Gemini CLI on 0.61.0, Qwen Code on 0.24.6
-and Kimi Code on 2.1.1, each run against the real tool with a local stand-in for the model. The Cursor hooks follow
-Cursor's docs but have not been run against it yet; any MCP agent can call `session_brief` and `close_session`
-directly.
+0.155.0-alpha.16.4, a prerelease (the same tests also pass on 0.157.1), Gemini CLI on 0.61.0, Qwen Code on
+0.24.6 and Kimi Code on 2.1.1, each run against the real tool with a local stand-in for the model. The Cursor hooks
+are unverified: cursor-agent's own hook runner ran them, but no logged-in Cursor session has yet; any MCP agent can
+call `session_brief` and `close_session` directly.
 
 ## At a glance
 

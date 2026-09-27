@@ -19,7 +19,15 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS = ROOT / "docs"
-EXCLUDED = ["bugs/", "feedback/", "competitive-analysis-2026.md", "DEPLOYING.md", "DEPLOYMENT.md"]
+EXCLUDED = [
+    "bugs/",
+    "feedback/",
+    "ENTITY-RESOLUTION.md",
+    "guides/field-notes.md",
+    "competitive-analysis-2026.md",
+    "DEPLOYING.md",
+    "DEPLOYMENT.md",
+]
 
 
 def _exclude_patterns() -> list[str]:

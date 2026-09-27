@@ -28,7 +28,7 @@ echo "$SHELL"
 command -v claude codex cursor-agent cursor gemini qwen kimi pipx
 ```
 
-Tell the user which agents you found. Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. The hooks for Cursor are unverified: they follow Cursor's docs but have not been run against it yet.
+Tell the user which agents you found. Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. The hooks for Cursor are unverified: cursor-agent's own hook runner ran them, but no logged-in Cursor session has yet.
 
 ### 2. pipx
 
@@ -91,7 +91,7 @@ The name is `cursor`.
 
 ### 8. Codex: the user trusts the hooks
 
-Codex runs a hook only after the user trusts it. Codex skips untrusted hooks without a message. Tell the user: Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Open Codex Settings > Hooks, or run `/hooks` in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd. Codex asks again whenever a hook's command changes.
+Codex runs a hook only after the user trusts it. Codex skips untrusted hooks without a message. Tell the user: Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Open Codex Settings > Hooks, or run `/hooks` in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd. When a hook's command changes, Codex marks it modified and skips it, again without a message, until you trust it again. `remembra-relay doctor` shows which hooks need it.
 
 ### 9. Restart the agents
 
@@ -176,7 +176,7 @@ Across agents and machines
 
 Your memory lives in the cloud, not on one laptop. Start at your desk, keep going on a server, finish from home, with whichever agent still has credits.
 
-Claude Code's and Codex's session hooks are verified: Codex with a prerelease of codex-cli 0.155 (`codex exec`, with a local stand-in for the model); other Codex versions have not been run. Codex runs them only after you trust them, so open Codex and run `/hooks` once after connecting. The Gemini CLI, Qwen Code and Kimi Code hooks are verified too, each run the same way at one version (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1); Gemini CLI runs them only in folders you trust. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. `connect` is a dry run until you add `--apply`, and it leaves the unverified hooks out unless you also add `--include-unverified`. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent. `remembra-install` sets up those tools for Claude Code, Claude Desktop, Codex, Cursor and Gemini CLI. Windsurf, Qwen Code and Kimi you add by hand for now; the [setup guide](https://docs.remembra.dev/guides/relay/#mcp-by-hand) has the block to paste.
+Claude Code's and Codex's session hooks are verified: Codex with a prerelease of codex-cli 0.155 (`codex exec`, with a local stand-in for the model), and the same tests also pass on codex-cli 0.157.1; other Codex versions have not been run. Codex runs them only after you trust them, so open Codex and run `/hooks` once after connecting. The Gemini CLI, Qwen Code and Kimi Code hooks are verified too, each run the same way at one version (Gemini CLI 0.61.0, Qwen Code 0.24.6, Kimi Code 2.1.1); Gemini CLI runs them only in folders you trust. The Cursor hooks are unverified: Cursor's own hook runner ran them, but no logged-in Cursor session has yet. `connect` is a dry run until you add `--apply`, and it leaves the unverified hooks out unless you also add `--include-unverified`. Until they are tested, Cursor reads the brief and writes its handoff through Remembra's MCP tools, as does any MCP agent. `remembra-install` sets up those tools for Claude Code, Claude Desktop, Codex, Cursor and Gemini CLI. Windsurf, Qwen Code and Kimi you add by hand for now; the [setup guide](https://docs.remembra.dev/guides/relay/#mcp-by-hand) has the block to paste.
 
 The dashboard
 
@@ -215,9 +215,9 @@ Source: https://remembra.dev/pricing
 
 Pricing
 
-## Every handoff is free. Credits are only for new notes.
+## Every handoff is free. Credits are for AI work on notes.
 
-Handoffs, pickups, inbox, trail and search are always free. Smart credits are only for AI enrichment of new notes. Run out, and your notes still save.
+Handoffs, pickups, inbox, trail and search are always free. Smart credits pay for AI work on your notes: enriching new or edited notes and the background de-duplication pass. Run out, and your notes still save without enrichment (on Free, up to 300 a day).
 
 Yearly: 2 months free, and the whole year's credits in one bank. Twelve months of credits form a yearly bank you can spend in any month. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available.
 
@@ -257,7 +257,7 @@ That's $10/mo. 2 months free. · Billed monthly.
 26,400 credits for the year, in one bank · 2,200 credits every month
 
 - Handoffs, pickups, inbox and trail (fair use 25,000 a month)
-- Unlimited agents and projects
+- Unlimited agents, up to 1,000 projects
 - 50,000 searches a month
 - 50,000 notes kept
 - Notes up to 50,000 characters
@@ -298,7 +298,7 @@ That's $12.50/seat/mo. 3-seat minimum ($450/yr). · 3-seat minimum ($45/mo).
 
 Prices in US dollars, excluding tax. Sign up free, then pick a paid plan from Billing in your dashboard.
 
-Enterprise SSO, an SLA, audit logs, a dedicated instance or support for your own hosting. Custom pricing.
+Enterprise An SLA, audit logs, a dedicated instance or support for your own hosting, and custom limits. SSO on request. Custom pricing.
 
 [Talk to us](https://remembra.dev/contact)
 
@@ -320,7 +320,7 @@ Credits, in plain words
 
 One credit is about one normal note. A note up to 8,000 characters (a few pages) uses one credit, and 8,000 characters is the longest note Free takes. On paid plans, where notes run to 50,000 characters, a longer note uses one credit for each 8,000 characters. A fact-dense note on any plan can use more: the note's actual AI cost, when that is larger.
 
-Run out, and nothing breaks. Your notes still save and stay searchable, and your handoffs keep working; new notes just skip the AI enrichment until your credits renew. Nothing is rejected for credits, and your dashboard shows where you stand.
+Run out, and your notes still save. They stay searchable and simply skip the AI enrichment until your credits renew. On Free, saves without enrichment (handoffs included) are capped at 300 a day. Your dashboard shows where you stand.
 
 Self-hosting is free. The core is open source under the MIT license. Run it on your own server with your own AI key and there is nothing to meter.
 
@@ -345,9 +345,9 @@ Questions
 ### Short answers.
 
 - Do handoffs ever cost credits?:
-  No. Handoffs, checkpoints, pickups, the inbox, the trail and search never use credits on any plan, and the handoffs your agents leave when they close a session never count toward your notes-kept cap, however many sessions they close. A project that holds only handoffs does not use one of Free's 3 projects either. Each plan has a fair-use soft cap on handoff events a month; going over it is reported, not rejected. A per-minute burst limit (30 a minute on Free, 60 on Solo, 120 on Pro and Team) slows a runaway script, and on Free handoffs count toward the 300 unenriched saves a day.
+  No. Handoffs, checkpoints, pickups, the inbox, the trail and search never use credits on any plan, and the handoffs your agents leave when they close a session never count toward your notes-kept cap, however many sessions they close. A project that holds only handoffs does not use one of Free's 3 projects either. Each plan has a fair-use soft cap on handoff events a month; going over it is reported, not rejected. A per-minute burst limit (30 a minute on Free, 60 on paid plans) slows a runaway script, and on Free handoffs count toward the 300 unenriched saves a day.
 - What happens when my credits run out?:
-  Your notes keep saving without AI enrichment until your credits renew, and they stay searchable. Running out of credits never blocks a save. A save is refused only at your plan's limits: the notes-kept cap (session handoffs are not counted in it), the note length (8,000 characters on Free, 50,000 on paid plans), the project count (3 on Free; projects with only handoffs are not counted), the notes per request (10 on Free, 100 on paid plans), and on Free, 300 unenriched saves a day.
+  Your notes keep saving without AI enrichment until your credits renew, and they stay searchable. Running out of credits never blocks a save. A save is refused only at your plan's limits: the notes-kept cap (session handoffs are not counted in it), the note length (8,000 characters on Free, 50,000 on paid plans), the project count (3 on Free; projects with only handoffs are not counted), the notes per request (10 on Free, 100 on paid plans), on Free, 300 unenriched saves a day, and past the request limit of 30 saves a minute per account.
 - What changes on a yearly plan?:
   You pay for 10 months instead of 12, and the whole year's credits go into one bank to use in any month. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available. A refund or chargeback ends the plan and its credit bank at once, and cancels the subscription so it does not renew.
 - Can I get a refund?:

@@ -231,7 +231,8 @@ function HowCreditsWork() {
         <div>
           <p className="font-mono text-[11px] uppercase tracking-[0.08em] text-ink-3">When they run out</p>
           <p className="mt-1 text-sm text-ink-2">
-            Nothing is rejected. New memories are saved in degraded mode: stored and searchable, without enrichment, until credits come back.
+            Nothing is rejected for lack of credits on paid plans. New memories are saved without enrichment, still stored and searchable,
+            until credits come back. On Free, saves without enrichment are capped at 300 a day.
           </p>
         </div>
         <div>
@@ -506,8 +507,8 @@ function PlansSection({
             )}
           >
             <p className="text-sm text-ink-2">
-              <span className="font-semibold text-ink">Founding 100:</span> Solo for {formatUsd(founding.price_yearly)}/yr, price locked for
-              life, billed yearly.
+              <span className="font-semibold text-ink">Founding 100:</span> Solo for {formatUsd(founding.price_yearly)}/yr, price held while
+              you stay subscribed (and for 14 days after it ends), billed yearly.
               {foundingSeatNote(founding, absoluteTime) && (
                 <span className="font-mono text-xs text-ink-3"> {foundingSeatNote(founding, absoluteTime)}</span>
               )}
@@ -538,7 +539,7 @@ function PlansSection({
           <li className="grid gap-3 py-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
             <div>
               <p className="font-display text-xl font-bold text-ink">Enterprise</p>
-              <p className="mt-1 text-sm text-ink-2">SSO, custom limits, a contract and an SLA.</p>
+              <p className="mt-1 text-sm text-ink-2">Custom limits, a contract and an SLA. SSO on request.</p>
             </div>
             <a
               href="mailto:sales@dolphytech.com?subject=Remembra%20Enterprise"

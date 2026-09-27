@@ -27,4 +27,3 @@ In-depth guides for using Remembra effectively.
 ## Advanced
 
 - [Sleep-Time Compute](sleep-time-compute.md) — Background memory processing
-- [Field Notes](field-notes.md) — Tips from production deployments

@@ -53,7 +53,7 @@ def test_a_new_machine_gets_every_step_key_first(fh: FakeHome) -> None:
     assert write["needs_yes"] is True
     cursor = by_title["Only if you want them: Cursor's hooks"]
     assert cursor["command"] == "remembra-relay connect --apply --agent cursor --include-unverified"  # agentConnectCommand
-    assert cursor["needs_yes"] is True and "never been run against the real tool" in cursor["note"]
+    assert cursor["needs_yes"] is True and "no logged-in Cursor session has run them yet" in cursor["note"]
     trust = by_title["Trust the hooks in Codex"]
     assert trust["action"] == (
         "Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd."

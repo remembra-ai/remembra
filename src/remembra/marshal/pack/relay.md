@@ -81,8 +81,8 @@ config or credentials file with a key that other users on the machine can read.
 
 | Agent | Hooks | Status |
 |-------|-------|--------|
-| Claude Code | `~/.claude/settings.json` SessionStart → `brief`; SessionEnd, StopFailure (usage or billing limit) and PreCompact → `close` (transcript parsed) | verified |
-| Codex CLI | `~/.codex/hooks.json` SessionStart → `brief`, UserPromptSubmit → `brief --once`, SessionEnd → `close` (rollout parsed) | verified (codex-cli 0.155.0-alpha.16.4, a prerelease) |
+| Claude Code | `~/.claude/settings.json` SessionStart → `brief`; SessionEnd, StopFailure (usage or billing limit) and PreCompact → `close` (transcript parsed) | verified for SessionStart and SessionEnd; StopFailure recorded from Claude Code 2.1.168 against a mock API with real error bodies; PreCompact not yet captured from a real client |
+| Codex CLI | `~/.codex/hooks.json` SessionStart → `brief`, UserPromptSubmit → `brief --once`, SessionEnd → `close` (rollout parsed) | verified (codex-cli 0.155.0-alpha.16.4, a prerelease; also passes on 0.157.1) |
 | Cursor IDE | `~/.cursor/hooks.json` sessionStart / sessionEnd, IDE and cursor-agent (`additional_context` output) | unverified |
 | Gemini CLI | `~/.gemini/settings.json` SessionStart → `brief`, BeforeAgent → `brief --once`, SessionEnd → `close` (JSON-only stdout, timeouts in ms) | verified (Gemini CLI 0.61.0) |
 | Qwen Code | `~/.qwen/settings.json` SessionStart → `brief`; SessionEnd, StopFailure (rate limit or billing) and PreCompact → `close` (timeouts in seconds) | verified (Qwen Code 0.24.6) |
@@ -92,9 +92,10 @@ config or credentials file with a key that other users on the machine can read.
 transcripts; Codex in a round trip recorded under `tests/fixtures/relay/codex/`: a Claude Code close replayed
 through its verified hook path (not a live Claude Code session), then a real `codex exec` that got the brief,
 ran commands and left its own handoff. That run used a local stand-in for the model, and recorded hook trust
-the way `/hooks` records it (the hash Codex's app server reports), not through the `/hooks` screen. Only the
-Codex version in the table has been run; it is a prerelease (the build bundled in ChatGPT.app), and no stable
-Codex release has been run yet. Gemini CLI, Qwen Code and Kimi Code were each run the same way, at the version
+the way `/hooks` records it (the hash Codex's app server reports), not through the `/hooks` screen. Codex's
+recorded run is codex-cli 0.155.0-alpha.16.4, a prerelease (the build bundled in ChatGPT.app); the same round
+trip also passes on the stable 0.157.1, which is not yet recorded as fixtures. Other Codex versions have not been
+run. Gemini CLI, Qwen Code and Kimi Code were each run the same way, at the version
 in the table, with a temp home and a local stand-in for the model (no login): the hooks `connect` writes put
 the brief in the model's request and posted the handoff at the end, and the payloads are recorded under
 `tests/fixtures/relay/<agent>/`. Other versions of those tools have not been run. Cursor's payloads were
@@ -164,8 +165,8 @@ cursor-agent, which send no transcript, only copies arriving within a few second
 
 **Codex: trust the hooks.** Codex runs a hook only after you trust it, and skips untrusted hooks without a
 message. After `connect --apply`, open Codex, run `/hooks` and trust the three `remembra-relay` hooks.
-Codex asks again whenever a hook's command changes (for example after `connect` rewrites it for a new
-install path). The UserPromptSubmit hook covers sessions where SessionStart does not fire (Codex
+When a hook's command changes (for example after `connect` rewrites it for a new install path), Codex marks it
+modified and skips it, again without a message, until you trust it again; `remembra-relay doctor` shows which. The UserPromptSubmit hook covers sessions where SessionStart does not fire (Codex
 auto-restoring a thread): it prints the brief only if that session has not had one.
 
 **Agents that do not wait for the end hook.** Codex stops a SessionEnd hook after 1 to 3 seconds and Qwen Code
@@ -337,7 +338,7 @@ Codex runs a hook only after you trust it (Settings > Hooks in the app, `/hooks`
 untrusted hook without a message, so a Codex that never gets a brief usually has hooks nobody trusted.
 Codex stores each trust as `[hooks.state."<hooks.json path>:<event>:<n>:<n>"] trusted_hash` in
 `~/.codex/config.toml`, a hash of that hook's command, timeout and matcher; when `connect` rewrites a hook
-(a new install path, for example) the old record no longer matches and Codex asks again. The doctor
+(a new install path, for example) the old record no longer matches and Codex skips the hook until you trust it again. The doctor
 compares those records with the hooks in `~/.codex/hooks.json`, hashed the way Codex does (checked against
 codex-cli 0.155.0-alpha.16.4 and 0.157.1): a missing record is `CODEX_TRUST_MISSING`, a record for an older
 version of the hook `CODEX_TRUST_STALE`, `enabled = false` `CODEX_HOOK_DISABLED`. A `config.toml` it

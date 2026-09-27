@@ -198,8 +198,8 @@ curl "http://localhost:8787/api/v1/transfer/export?format=json&include_entities=
 
 An import runs in the request: `/transfer/import/file` takes a file up to 50 MB and answers with the
 counts (`imported`, `skipped`, `errors`). Split a larger export into several files. `POST /api/v1/memories/bulk`
-stores up to 100 pre-structured memories per call (an 8 MiB request, 50,000 characters each) without fact
-extraction.
+stores up to 100 pre-structured memories per call on paid plans (10 on Free), up to 50,000 characters each
+(8,000 on Free), in an 8 MiB request, without fact extraction.
 
 ## Data Migration
 

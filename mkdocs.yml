@@ -13,6 +13,8 @@ edit_uri: edit/main/docs/
 exclude_docs: |
   bugs/
   feedback/
+  ENTITY-RESOLUTION.md
+  guides/field-notes.md
   competitive-analysis-2026.md
   DEPLOYING.md
   DEPLOYMENT.md

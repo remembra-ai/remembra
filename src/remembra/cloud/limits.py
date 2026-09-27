@@ -54,6 +54,7 @@ from remembra.cloud.metering import AccountState, CreditPeriod, UsageMeter, now_
 from remembra.cloud.plans import (
     CREDIT_USD,
     OUT_OF_CREDITS_HINT,
+    PLANS,
     RESERVE_CREDITS_PER_CHUNK,
     PlanTier,
     estimate_chunks,
@@ -396,7 +397,11 @@ async def _project_guard(meter: UsageMeter, account: AccountState, writer_id: st
             detail=(
                 f"Project limit reached ({account.limits.max_projects} projects on the "
                 f"{account.limits.display_name} plan). Existing projects keep working; "
-                "Solo includes unlimited projects."
+                + (
+                    f"paid plans include up to {PLANS[PlanTier.SOLO].max_projects:,} projects."
+                    if account.limits.max_projects < PLANS[PlanTier.SOLO].max_projects
+                    else "contact us for a higher limit."
+                )
             ),
         )
 

@@ -143,7 +143,7 @@ memory.recall(
 | `enable_hybrid` | `bool` | Use semantic + keyword search |
 | `enable_rerank` | `bool` | Apply CrossEncoder reranking |
 | `as_of` | `datetime` | Historical query (time travel) |
-| `slim` | `bool` | Return only context string (90% smaller) |
+| `slim` | `bool` | Return only the context string, without metadata (a smaller payload) |
 
 **Example:**
 
