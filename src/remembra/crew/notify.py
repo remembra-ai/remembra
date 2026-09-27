@@ -73,7 +73,7 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any, Final
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -454,6 +454,20 @@ def target_view(row: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def masked_target(kind: str, target: str) -> str:
+    """A target a key may see: the webhook's origin (its path often carries a token), the email's domain."""
+    if kind == "webhook":
+        parts = urlsplit(target)
+        return f"{parts.scheme}://{parts.hostname or ''}/…" if parts.scheme and parts.hostname else "…"
+    local, at, domain = target.partition("@")
+    return f"{local[:1]}***@{domain}" if at and local else "…"
+
+
+def masked_target_view(row: Mapping[str, Any]) -> dict[str, Any]:
+    """:func:`target_view` for an API key: targets are managed from a dashboard login and shown masked to keys."""
+    return {**target_view(row), "target": masked_target(str(row["kind"]), str(row["target"]))}
+
+
 Resolver = Callable[[str], Awaitable["ResolvedTarget"]]
 
 
@@ -542,9 +556,10 @@ class NotifyTargets:
         self.email_backend = email_backend
         self.account_email = (account_email or "").strip().lower() or None
 
-    async def list(self, user_id: str) -> list[dict[str, Any]]:
+    async def list(self, user_id: str, *, masked: bool = False) -> list[dict[str, Any]]:
+        """The user's targets; ``masked`` (an API key reads them) shows each target without its path or mailbox."""
         rows = await self.db.fetchall("SELECT * FROM crew_notify_targets WHERE user_id = ? ORDER BY created_at, id", (user_id,))
-        return [target_view(r) for r in rows]
+        return [masked_target_view(r) if masked else target_view(r) for r in rows]
 
     async def add(self, user_id: str, kind: str, target: str) -> dict[str, Any]:
         """Add (or re-verify) a target. Webhooks must answer a signed challenge first; the secret is returned once."""

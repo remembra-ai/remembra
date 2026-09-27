@@ -29,6 +29,7 @@ from remembra.crew.notify import (
     WebhookSender,
     classify,
     list_notifications,
+    masked_target,
     notify_handler,
     quiet_until,
     render,
@@ -422,3 +423,11 @@ def test_deep_links_use_the_dashboard_crew_route(monkeypatch):
     )
     assert notify.deep_link("yaadbooks", 9, "task_done", {}).endswith("#/crew?project=yaadbooks&view=feed&seq=9")
     assert notify.deep_link("my proj/x", 3).endswith("#/crew?project=my+proj%2Fx&view=feed&seq=3")
+
+
+def test_a_masked_target_keeps_the_origin_or_domain_and_drops_the_secret_part() -> None:
+    assert masked_target("webhook", "https://hooks.slack.com/services/T000/B000/XXXXsecret") == "https://hooks.slack.com/…"
+    assert masked_target("webhook", "https://alerts.example.com:8443/hook?token=abc") == "https://alerts.example.com/…"
+    assert masked_target("webhook", "not a url") == "…"
+    assert masked_target("email", "owner-alerts@example.com") == "o***@example.com"
+    assert masked_target("email", "nobody") == "…"

@@ -273,6 +273,16 @@ async def test_notification_targets_rules_and_in_app_list(tmp_path):
         rules = (await h.client.get("/api/v1/notifications/rules", headers=human)).json()
         assert {r["kind"] for r in rules["defaults"] if r["realtime"]} >= {"handoff", "collision", "tamper", "zone_change"}
         assert [t["kind"] for t in rules["targets"]] == ["webhook"] and "signing_secret" not in rules["targets"][0]
+        assert rules["targets"][0]["target"] == "https://hooks.example.com/r"  # the person who manages them sees them
+        # human-managed, and not readable in full by a key: a webhook path often carries a token
+        for key in (
+            admin,
+            await agent_key(h, owner, "codex", role="editor"),
+            await agent_key(h, owner, None, role="viewer", project_ids=["some-other-project"]),
+        ):
+            seen = (await h.client.get("/api/v1/notifications/rules", headers=key)).json()["targets"]
+            assert [(t["kind"], t["target"]) for t in seen] == [("webhook", "https://hooks.example.com/…")], seen
+            assert seen[0]["id"] == rules["targets"][0]["id"] and "verified_at" in seen[0]
 
         a = await add_session(db, CREW_A, "cs_a", callsign="cc-1", user_id=owner)
         await h.app.state.crew_events.emit(

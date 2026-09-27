@@ -31,6 +31,7 @@ from remembra.crew.access import (
     crew_error,
     get_crew_conn,
     human_principal,
+    is_human,
     key_permissions,
     require_human,
 )
@@ -285,7 +286,8 @@ async def get_notification_rules(
     return {
         "defaults": default_rules_view(),
         "rules": rows,
-        "targets": await NotifyTargets(db).list(user.user_id),
+        # managed from a dashboard login only; a key (any agent holds one) sees them masked
+        "targets": await NotifyTargets(db).list(user.user_id, masked=not is_human(user)),
         "batch_window_s": BATCH_WINDOW_S,
         "quiet_hours_tz": DEFAULT_QUIET_TZ,
     }
