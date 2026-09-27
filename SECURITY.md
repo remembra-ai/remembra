@@ -83,7 +83,7 @@ Remembra implements multiple independent security layers. No single point of fai
 │     (13 pattern types, detect/redact/block modes)   │
 ├─────────────────────────────────────────────────────┤
 │      Encryption at Rest (partial — see below)       │
-│   (AES-256-GCM on vector-store content/metadata)    │
+│   (AES-256-GCM on vector-store memory text)         │
 ├─────────────────────────────────────────────────────┤
 │              Anomaly Detection                       │
 │    (rate anomalies, source anomalies, bulk ops)     │
@@ -109,8 +109,9 @@ is and is not covered:
 | Data | Where | Encrypted with `REMEMBRA_ENCRYPTION_KEY`? |
 |------|-------|-------------------------------------------|
 | Memory `content` | Qdrant point payload | Yes |
-| Memory `metadata` | Qdrant point payload | Yes |
-| Memory `extracted_facts`, entity refs | Qdrant point payload | **No** |
+| Memory `metadata` | Qdrant point payload | Yes: every string, also inside lists and nested objects. Keys, numbers, true/false and null are not |
+| Memory `extracted_facts`, entity refs | Qdrant point payload | Yes (every string). Points written before this was covered keep them in plaintext until `scripts/maintenance/reencrypt_payloads.py --apply` runs |
+| Filter fields: `user_id`, `project_id`, `memory_type`, `scope`, `scope_prefixes`, dates | Qdrant point payload | **No** (Qdrant filters on them) |
 | Memory `content`, `extracted_facts`, `metadata` | SQLite `memories` / `archived_memories` | **No** (plaintext) |
 | Keyword index | SQLite `memories_fts` (FTS5) | **No** (plaintext) |
 | Entities, relationships, communities | SQLite | **No** (plaintext) |
@@ -469,7 +470,7 @@ Earlier versions of this file gave target dates for SOC 2 Type I and Type II, a 
 [x] Set REMEMBRA_AUTH_ENABLED=true
 [x] Generate strong master key (32+ chars, random)
 [x] Set unique REMEMBRA_JWT_SECRET (32+ chars)
-[x] Set REMEMBRA_ENCRYPTION_KEY (encrypts Qdrant content/metadata payloads + TOTP secrets)
+[x] Set REMEMBRA_ENCRYPTION_KEY (encrypts the text fields of Qdrant payloads + TOTP secrets)
 [x] Encrypt the data volume holding the SQLite database and its backups (memory text is plaintext in SQLite)
 [x] Enable rate limiting (REMEMBRA_RATE_LIMIT_ENABLED=true)
 [x] Set PII mode to redact or block (REMEMBRA_PII_MODE=redact)
@@ -488,11 +489,14 @@ Earlier versions of this file gave target dates for SOC 2 Type I and Type II, a 
 
 ### Field-Level Encryption Scope
 
-Field-level encryption currently covers the vector-store payload (content and
-metadata) and TOTP secrets only. It travels with Qdrant snapshots and keeps
-those payloads opaque to anyone with raw Qdrant access. It does **not** cover
-the SQLite database, FTS index, extracted facts or entity graph, so it is not
-a substitute for disk/volume encryption of the SQLite data and its backups.
+Field-level encryption currently covers the text fields of the vector-store
+payload (content, the strings in metadata, extracted facts and entity refs)
+and TOTP secrets only. It travels with Qdrant snapshots, so anyone with raw
+Qdrant access sees ciphertext in those fields; the filter fields (ids, dates,
+memory type, scope) and the embedding vectors stay readable. It does **not**
+cover the SQLite database (which keeps its own copy of content, facts and
+metadata), the FTS index or the entity graph, so it is not a substitute for
+disk/volume encryption of the SQLite data and its backups.
 
 ### Why bcrypt for API Keys
 

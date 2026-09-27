@@ -96,15 +96,18 @@ async def _update_qdrant(
     qdrant: Any, memory_id: str, content: str, facts_json: str | None, metadata: dict[str, Any] | None = None
 ) -> None:
     """Overwrite the text fields of one Qdrant point (encrypted like QdrantStore.upsert)."""
+    from remembra.storage.qdrant import encrypt_text_fields
+
     client = await qdrant._get_client()
-    payload: dict[str, Any] = {"content": qdrant._encryptor.encrypt(content)}
+    fields: dict[str, Any] = {"content": content}
     if facts_json:
         try:
-            payload["extracted_facts"] = json.loads(facts_json)
+            fields["extracted_facts"] = json.loads(facts_json)
         except (TypeError, json.JSONDecodeError):
             pass
     if metadata is not None:
-        payload["metadata"] = qdrant._encryptor.encrypt_dict(metadata)
+        fields["metadata"] = metadata
+    payload = encrypt_text_fields(qdrant._encryptor, fields)
     await client.set_payload(collection_name=qdrant.collection_name, payload=payload, points=[memory_id])
 
 

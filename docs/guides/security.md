@@ -346,7 +346,9 @@ AES-256-GCM field-level encryption is available, **with a limited scope**.
 
 With `REMEMBRA_ENCRYPTION_KEY` set:
 
-- Memory `content` and `metadata` in the **Qdrant** point payload
+- The text fields of each **Qdrant** point payload: memory `content`, every
+  string in `metadata` (inside lists and nested objects too), each
+  `extracted_facts` entry and the strings of each entity ref
 - TOTP 2FA secrets in SQLite
 
 ### What is not encrypted
@@ -355,7 +357,8 @@ With `REMEMBRA_ENCRYPTION_KEY` set:
   (`memories`, `archived_memories`) — stored in plaintext
 - The SQLite FTS5 keyword index (`memories_fts`)
 - Entities, relationships and communities
-- `extracted_facts` and entity refs in the Qdrant payload
+- The Qdrant filter fields (`user_id`, `project_id`, `memory_type`, `scope`,
+  `scope_prefixes`, dates), and metadata keys, numbers, true/false and null
 - Embedding vectors
 
 The SQLite database and its backups (e.g. Litestream replicas) therefore hold
@@ -382,7 +385,12 @@ REMEMBRA_ENCRYPTION_KEY=your-generated-key-here
 - **Nonce:** 96-bit random nonce per operation
 
 Enabling it is backwards-compatible: new Qdrant payloads are encrypted and
-existing plaintext payloads are still read (auto-detected).
+existing plaintext payloads are still read (auto-detected). Existing payloads
+stay as they were written until you encrypt them: points written before the
+key was set, or before facts, entity refs and metadata lists were encrypted,
+hold that text in plaintext. To encrypt them in place, run
+`scripts/maintenance/reencrypt_payloads.py` (a dry run that reports counts;
+add `--apply` to write). Take a Qdrant snapshot first.
 
 Encryption requires the `cryptography` package:
 
