@@ -54,6 +54,8 @@ def test_deletion_copy_is_the_same_everywhere_and_matches_the_code() -> None:
     assert "There is no continuous backup yet." in DELETION
     for page in ("terms.html", "privacy.html", "security.html"):
         assert "continuous backup keeps" not in _text(LANDING / page)
+    security_md = " ".join((ROOT / "SECURITY.md").read_text().split())
+    assert "continuous backup history" not in security_md and "There is no continuous backup yet." in security_md
     # The operator doc keeps the litestream figure for when it is switched on (P-300): 24h of history,
     # checked hourly, so an erased copy can outlive the window by up to that hour.
     entrypoint = (ROOT / "scripts" / "cloud-entrypoint.sh").read_text()

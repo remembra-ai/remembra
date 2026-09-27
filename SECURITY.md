@@ -380,7 +380,7 @@ Strict-Transport-Security: max-age=31536000; includeSubDomains  (production)
 
 ### Deleting Data
 
-On Remembra Cloud, deleting an account in the dashboard cancels any subscription at once and ends every session; 7 days later everything the account holds is erased automatically. Until then, email support@remembra.dev to undo it. Backups are not edited; their copies age out (24 hours of continuous backup history, and the pre-deploy database copy until 3 newer deploys replace it). On a self-hosted server, an administrator can do it through the API.
+On Remembra Cloud, deleting an account in the dashboard cancels any subscription at once and ends every session; 7 days later everything the account holds is erased automatically. Until then, email support@remembra.dev to undo it. Backups are not edited. When a new version of the server is deployed, it copies the database as it starts. Each copy is deleted once 3 newer ones exist, so erased data can stay in those copies until 3 more deploys have happened. There is no continuous backup yet. On a self-hosted server, an administrator can do it through the API.
 
 Delete all of a user's memories:
 
@@ -417,7 +417,7 @@ Most security questionnaires ask about these. The honest answers, the same as on
 - **The metadata database is not field-encrypted.** Encryption at rest covers the vector store; the database that holds account records and a second copy of your notes does not have field-level encryption yet. One encryption key protects the vector store, and it is not rotated yet.
 - **API keys don't expire.** You revoke them yourself. An agent-scoped key fixes who a handoff is from, but it can read everything the account can; limit reads with project-scoped keys.
 - **No SSO or SAML** for the dashboard.
-- **Backups are not edited when an account is erased.** A deleted account is erased automatically 7 days later; the copies of it in backups age out instead (see [retention](https://remembra.dev/security#retention)).
+- **Backups are not edited when an account is erased.** A deleted account is erased automatically 7 days later; its copies in the backups taken at each deploy are deleted after 3 more deploys (see [retention](https://remembra.dev/security#retention)).
 
 Earlier versions of this file gave target dates for SOC 2 Type I and Type II, a HIPAA BAA and ISO 27001. Those dates are withdrawn. Remembra has no certification and does not offer a HIPAA BAA today.
 
