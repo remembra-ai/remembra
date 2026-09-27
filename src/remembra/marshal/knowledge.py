@@ -349,7 +349,11 @@ def facts() -> dict[str, Any]:
             "doctor": cmd.doctor(),
             "uninstall": [c for c, _ in cmd.UNINSTALL_STEPS],
         },
-        "crew": "Crew mode is planned for 0.17.0. It isn't available yet.",
+        # true for any server this package runs: the code ships, the server flag decides (default off)
+        "crew": (
+            f"Crew mode ships in remembra {__version__} and is off by default: a server turns it on with "
+            "REMEMBRA_CREW_MODE=true. Guide: https://docs.remembra.dev/relay/crew/"
+        ),
         "windows": "Windows setup is not tested.",
         "pricing_page": READ_PAGES["pricing"],
     }

@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 import yaml
 
+from remembra import __version__
 from remembra.cloud.plans import FOUNDING_ANNUAL_PRICE_CENTS, PLANS
 from remembra.marshal import knowledge, tools
 
@@ -23,6 +24,12 @@ EXCLUDED = (
     "quickstart",
     "crew.html",
     "server-card",
+)
+
+# The 0.17.0 package ships Crew mode (off unless the server sets REMEMBRA_CREW_MODE=true).
+CREW_FACT = (
+    f"Crew mode ships in remembra {__version__} and is off by default: a server turns it on with "
+    "REMEMBRA_CREW_MODE=true. Guide: https://docs.remembra.dev/relay/crew/"
 )
 
 
@@ -62,7 +69,7 @@ def test_facts_are_the_plan_catalog() -> None:
         assert row["projects"] == ("unlimited" if limits.max_projects == 1000 else limits.max_projects)
     assert by_tier["solo"]["projects"] == "unlimited" and by_tier["free"]["projects"] == 3
     assert facts["founding"]["annual_price_cents"] == FOUNDING_ANNUAL_PRICE_CENTS
-    assert facts["crew"] == "Crew mode is planned for 0.17.0. It isn't available yet."
+    assert facts["crew"] == CREW_FACT
     assert facts["windows"] == "Windows setup is not tested."
     assert facts["source"].startswith("package (remembra ")
 
@@ -204,7 +211,9 @@ def test_everything_else_is_cant_confirm(question: str) -> None:
 
 def test_code_facts_and_plan_questions() -> None:
     crew = tools.help_payload("Is crew mode available yet?")
-    assert crew["answer_status"] == "answered" and crew["facts"] == ["Crew mode is planned for 0.17.0. It isn't available yet."]
+    assert crew["answer_status"] == "answered" and crew["facts"] == [CREW_FACT]
+    crew = tools.help_payload("How do I use crew mode with several agents?")
+    assert crew["facts"] == [CREW_FACT] and "planned" not in crew["rendered"] and "isn't available" not in crew["rendered"]
     windows = tools.help_payload("Does it work on Windows?")
     assert "Windows setup is not tested." in windows["facts"]
     machines = tools.help_payload("Does Free cover 4 machines?")
