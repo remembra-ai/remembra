@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Building Remembra with AI Agents: A Meta Journey - Remembra Blog</title>
-<meta name="description" content="How we used Claude, Codex, and our own memory layer to build an AI memory product. A real-world case study in multi-agent collaboration.">
+<meta name="description" content="How we used Claude, Codex, and our own memory layer to build an AI memory product.">
 <link rel="canonical" href="https://remembra.dev/blog/building-remembra-with-ai-agents">
 <meta property="og:title" content="Building Remembra with AI Agents: A Meta Journey">
 <meta property="og:description" content="How we used Claude, Codex, and our own memory layer to build an AI memory product.">
@@ -68,7 +68,7 @@
   <div class="wrap" style="padding-bottom:clamp(56px,8vw,104px)">
     <article class="prose">
 <p class="note">Written in March 2026, before Remembra Relay. Commands, features and prices may have changed since; <a href="https://docs.remembra.dev/">the docs</a> and <a href="/pricing">pricing</a> are current.</p>
-<p>Remembra was built by AI agents using Remembra. That's not marketing speak—it's literally how this product came to be. Here's the story of multi-agent collaboration in action.</p>
+<p>Remembra was built with AI agents from its first commit. Clawdbot, running Claude, made the first commits on March 1, 2026. From March 2 it used Remembra itself as its memory, and Claude Code, Codex and Gemini joined later. The very first versions came before Remembra was usable. Here's how that multi-agent work went.</p>
 <h2>The Setup: Three Agents, One Mission</h2>
 <p>Our development workflow involves multiple AI agents working in concert:</p>
 <ul>
@@ -119,7 +119,7 @@ remembra.store(
 context = remembra.recall("async sync implementation status")
 # Returns: full context about the branch, progress, and next steps</code></pre>
 <h2>Cross-Agent Knowledge Transfer</h2>
-<p>The real power shows when different agents need the same information. When we spawned a documentation agent to write the API reference:</p>
+<p>The real power shows when different agents need the same information. Another reconstructed example, with made-up endpoint names: a documentation agent writing the API reference.</p>
 <div>
 <div>
 <div>📚 Docs Agent</div>
@@ -127,13 +127,13 @@ context = remembra.recall("async sync implementation status")
 Found 3 new endpoints added this week: <code>/api/v1/slim-recall</code>, <code>/api/v1/bridge/health</code>, and <code>/api/v1/credentials</code>. Let me document these...
 </div>
 </div>
-<p>The docs agent had never seen the code changes directly. But because the coding agents stored their work, the knowledge transferred automatically.</p>
+<p>The docs agent had never seen the code changes directly. Because the coding agents stored their work, it could recall it.</p>
 <h2>Lessons Learned</h2>
 <ol>
 <li><strong>Store continuously, not "when done"</strong> — Sessions can end abruptly. Store after every significant action.</li>
 <li><strong>Include specifics</strong> — "Working on feature" is useless. "Implemented X in Y file, next step is Z" is gold.</li>
 <li><strong>Recall before acting</strong> — Always check what's already known. Prevents duplicate work and contradictions.</li>
-<li><strong>Entity extraction matters</strong> — When we mention "async-sync branch", Remembra links it to the file, the agent who created it, and related memories.</li>
+<li><strong>Entity extraction matters</strong> — When memories name the same thing, such as the "async-sync branch", entity extraction can link them, so a recall finds the related ones.</li>
 </ol>
 <h2>The Meta Result</h2>
 <p>Remembra v0.10.0 shipped with:</p>

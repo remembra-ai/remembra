@@ -531,4 +531,8 @@ def test_the_changelog_states_the_0_16_1_project_rule() -> None:
     pools on purpose. The 0.16.0 entry may describe the old rule only as the old rule."""
     page = _text((LANDING / "changelog.html").read_text())
     assert "A repository the server has not seen joins the project you configured" not in page
-    assert "From 0.16.1 every git repository gets its own project" in page
+    assert "From 0.16.1 every git repository the server has not seen before gets its own project" in page
+    # P-138, P-142, P-143, P-144: the dated entries name real routes and say what shipped, and no more
+    assert "/store/batch" not in page and "POST /api/v1/memories/batch/recall" in page
+    assert "90% smaller" not in page and "auto-supersede" not in page and "Complete audit trail" not in page
+    assert "a fact that does not match its source is dropped" in page
