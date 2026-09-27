@@ -17,7 +17,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 
-from remembra.auth.middleware import CurrentUser, enforce_agent_scope_header, has_permission, require_memory_store, resolve_project_access
+from remembra.auth.middleware import (
+    CurrentUser,
+    enforce_agent_scope_header,
+    has_permission,
+    require_memory_store,
+    resolve_project_access,
+)
 from remembra.cloud.limits import gate_write, record_relay_usage
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
