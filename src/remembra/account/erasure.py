@@ -29,6 +29,11 @@ generic scan alone cannot tell whose row a crew table holds.
 What remains is one audit row, ``account_erased``, holding only a SHA-256 of
 the account id and row counts: no email, no content. Support can confirm an
 erasure by hashing the id a customer gives them (:func:`erasure_digest`).
+Another account's audit rows that name the account (an owner's
+``crew.member_added`` of ``<crew>:<user id>``) stay, with the id replaced by
+that same ``sha256:`` reference. Crew mode promotes crew records into the crew
+owner's memories; the owner keeps them, and the account's id leaves their
+metadata (a teammate's ``confirmed_by``), in SQLite and in the vector payload.
 
 Backups are not rewritten: copies age out on their own schedule (pre-deploy
 database copies after the newest ``pre_migration_backup_keep`` deploys, the
@@ -39,12 +44,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import re
 import secrets
 from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Final
 
 import structlog
 
@@ -85,7 +91,8 @@ class TableRule:
     value, normally that space's or team's owner. They run after
     ``deletes``, so they only reach rows the account does not own.
     Parameters: ``:uid`` (user id), ``:email`` (lower-case address),
-    ``:login_key`` (the login-lockout key of that address).
+    ``:login_key`` (the login-lockout key of that address), ``:erased``
+    (``sha256:<erasure_digest>``, the content-free reference to the account).
     """
 
     table: str
@@ -131,6 +138,28 @@ def _team_owner(table: str) -> str:
 
 def _by_user(table: str, column: str = "user_id") -> TableRule:
     return TableRule(table, deletes=(f"{column} = :uid",))
+
+
+# Metadata keys of a crew-promoted memory (``metadata.source = 'crew'``, written to the crew OWNER's
+# account by the crew outbox) that name the teammate who acted. The record is the owner's (an
+# in-force decision stays, as in crew.db); only the teammate's id goes.
+CREW_PROMOTED_ACTOR_KEYS: Final = ("confirmed_by", "decided_by", "proposed_by")
+
+
+def _crew_actor_where(key: str) -> str:
+    return (
+        f"instr(metadata, :uid) > 0 AND json_valid(metadata) AND json_extract(metadata, '$.source') = 'crew'"
+        f" AND json_extract(metadata, '$.{key}') = :uid"
+    )
+
+
+def _crew_promoted_memories(table: str) -> TableRule:
+    """The account's own rows go; in other accounts' crew-promoted rows its id leaves the metadata."""
+    return TableRule(
+        table,
+        deletes=("user_id = :uid",),
+        reassigns=tuple(("metadata", f"json_remove(metadata, '$.{k}')", _crew_actor_where(k)) for k in CREW_PROMOTED_ACTOR_KEYS),
+    )
 
 
 # Children before parents: a clause that selects parent ids must run while the
@@ -183,8 +212,8 @@ ERASURE_RULES: tuple[TableRule, ...] = (
     _by_user("teams", "owner_id"),
     _by_user("memory_spaces", "owner_id"),
     _by_user("memories_fts"),
-    _by_user("memories"),
-    _by_user("archived_memories"),
+    _crew_promoted_memories("memories"),
+    _crew_promoted_memories("archived_memories"),
     _by_user("pending_embeddings"),
     _by_user("entities"),
     _by_user("communities"),
@@ -220,7 +249,16 @@ ERASURE_RULES: tuple[TableRule, ...] = (
     _by_user("account_reviews"),
     _by_user("promo_redemptions"),
     _by_user("reindex_jobs"),
-    _by_user("audit_log"),
+    # The account's own audit rows go; another account's row that names it (an owner's crew.member_added of
+    # "<crew>:<user id>", the details of a crew action) stays, with the id replaced by its erasure reference.
+    TableRule(
+        "audit_log",
+        deletes=("user_id = :uid",),
+        reassigns=(
+            ("resource_id", "replace(resource_id, :uid, :erased)", "instr(resource_id, :uid) > 0"),
+            ("error_message", "replace(error_message, :uid, :erased)", "instr(error_message, :uid) > 0"),
+        ),
+    ),
     _by_user("cloud_credit_reservations"),
     _by_user("cloud_memory_holds"),
     _by_user("cloud_credit_periods"),
@@ -332,6 +370,7 @@ async def erase_rows(
         "uid": user_id,
         "email": email.strip().lower() if email else None,  # NULL never matches
         "login_key": security_state.account_key("login", email) if email else "",
+        "erased": f"sha256:{erasure_digest(user_id)}",  # what other accounts' rows say instead of the id
     }
     schema = await _schema(conn)
     counts: dict[str, int] = {}
@@ -494,6 +533,31 @@ class AccountEraser:
             receipt.rows[f"{extra.name}:{table}"] = n
         receipt.unregistered_tables.extend(f"{extra.name}:{t}" for t in unregistered)
 
+    async def _clear_promoted_actor_payloads(self, user_id: str) -> None:
+        """Remove the account's id from other accounts' crew-promoted memories in the vector payload.
+
+        The SQLite rows are rewritten by the ``memories`` rule in the main transaction; the payload
+        carries the same metadata, so it is rewritten first (a failure leaves every row for the retry).
+        """
+        where = " OR ".join(f"({_crew_actor_where(k)})" for k in CREW_PROMOTED_ACTOR_KEYS)
+        cursor = await self._db.conn.execute(
+            f"SELECT id, metadata FROM memories WHERE user_id != :uid AND ({where})",  # noqa: S608
+            {"uid": user_id},
+        )
+        rows = [(str(r[0]), str(r[1])) for r in await cursor.fetchall()]
+        if not rows:
+            return
+        present = await self._qdrant.existing_ids([mid for mid, _ in rows])
+        for memory_id, raw in rows:
+            if memory_id not in present:
+                continue
+            metadata = json.loads(raw)
+            for key in CREW_PROMOTED_ACTOR_KEYS:
+                if metadata.get(key) == user_id:
+                    metadata.pop(key)
+            await self._qdrant.set_metadata(memory_id, metadata)
+        log.info("account_erasure_promoted_actor_cleared", digest=erasure_digest(user_id)[:16], memories=len(rows))
+
     async def _reindex_collections(self) -> set[str]:
         """Collections recorded by reindex jobs (rollback copies may have been renamed by config since)."""
         try:
@@ -529,6 +593,7 @@ class AccountEraser:
         if self._qdrant is not None:
             also = await self._reindex_collections()
             receipt.vectors = int(await self._qdrant.delete_by_user_everywhere(user_id, also=also))
+            await self._clear_promoted_actor_payloads(user_id)
         for extra in list(self._extra):
             await self._erase_extra(extra, user_id, email, receipt)
         async with self._db.transaction():

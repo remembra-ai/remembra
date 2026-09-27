@@ -566,3 +566,74 @@ def test_every_crew_table_says_what_it_holds_per_user() -> None:
     assert set(CREW_TABLE_HOLDINGS) == set(CREW_TABLES)
     for table, text in CREW_TABLE_HOLDINGS.items():
         assert text.split(":", 1)[0] in ("own", "shared", "crew-only"), table
+
+
+class _FakeQdrant:
+    """The eraser's view of the vector store: points by id, each with a metadata payload."""
+
+    def __init__(self, points: dict[str, dict[str, Any]]) -> None:
+        self.points = points
+        self.set_calls: list[str] = []
+
+    async def delete_by_user_everywhere(self, user_id: str, also: Any = ()) -> int:
+        return 0
+
+    async def existing_ids(self, memory_ids: list[str]) -> set[str]:
+        return {m for m in memory_ids if m in self.points}
+
+    async def set_metadata(self, memory_id: str, metadata: dict[str, Any]) -> None:
+        self.set_calls.append(memory_id)
+        self.points[memory_id] = dict(metadata)
+
+
+async def test_erasure_clears_the_members_id_from_the_owners_promoted_memory_and_audit_rows(tmp_path: Path) -> None:
+    """A teammate's in-force decision is promoted into the crew owner's memories (metadata.confirmed_by) and the
+    owner's audit log names the teammate (crew.member_added resource_id). Erasing the teammate keeps both records
+    (the owner's) and removes the teammate's id from them, in SQLite and in the vector payload."""
+    from datetime import UTC, datetime
+
+    from remembra.account.erasure import erasure_digest
+
+    world = await _real_crews(tmp_path)
+    env, crew_b = world["env"], world["crew_b"]
+    main = Database(f"sqlite+aiosqlite:///{tmp_path / 'main.db'}")
+    await main.connect()
+    await main.init_schema()
+    try:
+        meta = {"source": "crew", "crew_id": crew_b, "crew_decision_id": world["adopted"], "decision_ref": "D-2",
+                "confirmed_by": VICTIM, "decided_by_kind": "human"}  # fmt: skip
+        content = "Decision D-2: rule\nRound half-up\nDecided by a human (in force immediately)."
+        await main.save_memory_metadata(
+            "mem_decision", BYSTANDER, "yaadbooks", content, [], meta, datetime.now(UTC), memory_type="decision"
+        )
+        await main.save_memory_metadata(
+            "mem_other", BYSTANDER, "yaadbooks", "unrelated", [], {"source": "user", "note": VICTIM}, datetime.now(UTC)
+        )
+        await main.log_audit_event("audit_added", BYSTANDER, "crew.member_added", resource_id=f"{crew_b}:{VICTIM}")
+        await main.log_audit_event(
+            "audit_claim", BYSTANDER, "crew.claim_overridden", resource_id="clm_1",
+            error_message=json.dumps({"holder_user_id": VICTIM, "reason": "stuck"}),
+        )  # fmt: skip
+        qdrant = _FakeQdrant({"mem_decision": dict(meta)})
+
+        await AccountEraser(main, qdrant, extra_databases=[crew_extra_database(env.db)]).erase(VICTIM)
+
+        erased = f"sha256:{erasure_digest(VICTIM)}"
+        rows = await main.conn.execute_fetchall("SELECT id, user_id, content, metadata FROM memories ORDER BY id")
+        decision = next(r for r in rows if r[0] == "mem_decision")
+        assert decision[1] == BYSTANDER and "Round half-up" in decision[2]  # the owner's record stays
+        kept = json.loads(decision[3])
+        assert "confirmed_by" not in kept and kept["crew_decision_id"] == world["adopted"] and kept["source"] == "crew"
+        assert qdrant.set_calls == ["mem_decision"] and "confirmed_by" not in qdrant.points["mem_decision"]
+        # only crew-promoted records are rewritten: a note the owner wrote themselves is theirs, as written
+        assert json.loads(next(r for r in rows if r[0] == "mem_other")[3])["note"] == VICTIM
+        audit = {
+            r[0]: tuple(r)
+            for r in await main.conn.execute_fetchall("SELECT id, user_id, resource_id, error_message FROM audit_log")
+        }
+        assert audit["audit_added"][1] == BYSTANDER and audit["audit_added"][2] == f"{crew_b}:{erased}"
+        assert VICTIM not in audit["audit_claim"][3] and erased in audit["audit_claim"][3]
+        assert not any(VICTIM in json.dumps(r) for r in audit.values())
+    finally:
+        await env.db.close()
+        await main.close()
