@@ -17,7 +17,7 @@ from typing import Any
 
 import structlog
 
-from remembra.security.secrets import redact_secrets
+from remembra.security.secrets import redact_secrets, redact_value
 
 log = structlog.get_logger(__name__)
 
@@ -74,42 +74,9 @@ def _redact_facts(raw: str | None) -> tuple[str | None, dict[str, int]]:
     return (json.dumps(cleaned) if counts else raw), counts
 
 
-# Metadata values that identify things (the relay row key, session and agent ids,
-# commit shas, checksums): a long random session id reads like a token, and
-# rewriting it would break the lookups that use it.
-_METADATA_ID_KEYS = frozenset(
-    {
-        "relay_key",
-        "session_id",
-        "agent_id",
-        "user_id",
-        "project_id",
-        "memory_id",
-        "source_id",
-        "id",
-        "sha",
-        "head_commit",
-        "checksum",
-        "content_checksum",
-    }
-)
-
-
-def _redact_value(value: Any, counts: dict[str, int]) -> Any:
-    if isinstance(value, str):
-        result = redact_secrets(value)
-        for kind, n in result.counts.items():
-            counts[kind] = counts.get(kind, 0) + n
-        return result.text
-    if isinstance(value, dict):
-        return {k: v if k in _METADATA_ID_KEYS else _redact_value(v, counts) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_redact_value(v, counts) for v in value]
-    return value
-
-
 def _redact_metadata(raw: str | None) -> tuple[str | None, dict[str, Any] | None, dict[str, int]]:
-    """``(metadata_json, metadata, counts)`` with credentials redacted from its string values (keys and ids kept)."""
+    """``(metadata_json, metadata, counts)`` with credentials redacted from its strings, as a write redacts them
+    (:func:`~remembra.security.secrets.redact_value`: ids skip the high-entropy fallback)."""
     if not raw:
         return raw, None, {}
     try:
@@ -119,7 +86,7 @@ def _redact_metadata(raw: str | None) -> tuple[str | None, dict[str, Any] | None
     if not isinstance(metadata, dict):
         return raw, None, {}
     counts: dict[str, int] = {}
-    cleaned = _redact_value(metadata, counts)
+    cleaned = redact_value(metadata, counts)
     if not counts:
         return raw, None, {}
     return json.dumps(cleaned), cleaned, counts
