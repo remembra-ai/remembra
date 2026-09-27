@@ -6,11 +6,12 @@ process, from a code tree exported from git (Qdrant in memory, no API keys, no
 network: the embedding provider points at a closed local port). Every database
 lives in a temporary directory.
 
-Production (``--prod``, ce067fd) is at schema 9: versions 1-4 and 6-9. Crew
-mode's version 5 (``crew_agent_inbox_scoping``) was merged after them, so the
-first boot of ``--this`` must apply 5 and nothing else.
+Production (``--prod``, 4d335ce: release 0.16.1) is at schema 10: versions
+1-4 and 6-10 (10 is ``account_reviews``). Crew mode's version 5
+(``crew_agent_inbox_scoping``) was merged after them, so the first boot of
+``--this`` must apply 5 and nothing else, and the highest version stays 10.
 
-1. Fresh: ``--this`` boots an empty database. Versions 1-9 apply, no backup is
+1. Fresh: ``--this`` boots an empty database. Versions 1-10 apply, no backup is
    written, and the schema (tables, columns, indexes, versions) equals the
    upgraded one from step 2.
 2. Upgrade: ``--prod`` creates its schema and the script fills every table
@@ -19,9 +20,11 @@ first boot of ``--this`` must apply 5 and nothing else.
    plus a row with malformed metadata, then generic rows in every other table).
    ``--this`` then boots it: exactly version 5 applies; a pre-migration backup
    is written first (it holds exactly the pre-upgrade rows and versions 1-4,
-   6-9); every old row keeps every old value (nothing deleted, no column
-   dropped, nothing rewritten); v5's backfill gives each inbox row the
-   expected project; a second boot changes nothing and writes no new backup.
+   6-10); every old row keeps every old value (nothing deleted, no column
+   dropped, nothing rewritten); v5's backfill copies a row's own
+   ``metadata.project_id`` into the column and leaves every other row NULL
+   (no project is inferred, f904916); a second boot changes nothing and writes
+   no new backup.
 3. Crew mode on: ``--this`` boots with ``REMEMBRA_CREW_MODE=true``. ``crew.db``
    is created next to the main database at the latest crew schema version and
    the main database is unchanged.
@@ -30,7 +33,7 @@ first boot of ``--this`` must apply 5 and nothing else.
    through the ``project_id`` column; ``--this`` then boots it again without a
    schema change.
 
-    python scripts/maintenance/verify_release_migrations.py --prod ce067fd --this HEAD
+    python scripts/maintenance/verify_release_migrations.py --prod 4d335ce --this HEAD
 
 Exits non-zero if any invariant fails.
 """
@@ -52,14 +55,17 @@ from typing import Any
 
 USERS = ("u_alice", "u_bob")
 CREW_VERSION = (5, "crew_agent_inbox_scoping")
-PROD_VERSIONS = [1, 2, 3, 4, 6, 7, 8, 9]
-ALL_VERSIONS = list(range(1, 10))
+# Production's newest migration (0.16.1, 4d335ce): it must be there before and after the upgrade, unchanged.
+PROD_TOP_VERSION = (10, "account_reviews")
+PROD_VERSIONS = [1, 2, 3, 4, 6, 7, 8, 9, 10]
+ALL_VERSIONS = list(range(1, 11))
 # Inbox subject -> the project v5 must give the row (None: stays unscoped, visible to unrestricted keys only).
+# v5 copies only a project the row itself carried (f904916): nothing is inferred from memories or keys.
 EXPECTED_INBOX_PROJECTS: dict[str, str | None] = {
     "review PR 12": "alpha",  # metadata.project_id tag (older clients)
     "tagged via project_id": "beta",  # the deployed project_id argument (metadata tag + no column yet)
     "bob only": "beta",  # other account, tagged
-    "untagged note": "alpha",  # untagged; both agents' only known project for this owner is alpha
+    "untagged note": None,  # untagged: stays NULL even though both agents' only known project is alpha
     "unknown agents": None,  # untagged; neither agent is known to work in any project
     "malformed metadata": None,  # metadata is not JSON: read as untagged, never an error
 }
@@ -405,7 +411,7 @@ def _inbox_projects(snap: dict[str, Any]) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--prod", default="ce067fd", help="the deployed commit (schema 9: versions 1-4 and 6-9)")
+    parser.add_argument("--prod", default="4d335ce", help="the deployed commit (0.16.1, schema 10: versions 1-4 and 6-10)")
     parser.add_argument("--this", default="HEAD")
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parents[2]))
     parser.add_argument("--keep", help="copy the databases (and backups) here for inspection")
@@ -445,10 +451,13 @@ def main() -> int:
             failures.append("fresh: a pre-migration backup was written for an empty database")
         if _versions(fresh_snap) != ALL_VERSIONS:
             failures.append(f"fresh: versions {_versions(fresh_snap)}, expected {ALL_VERSIONS}")
+        for version in (CREW_VERSION, PROD_TOP_VERSION):
+            if version not in [tuple(v) for v in fresh_snap["versions"]]:
+                failures.append(f"fresh: version {version[0]} is not {version}: {fresh_snap['versions']}")
         if (fresh_dir / "crew.db").exists():
             failures.append("fresh: crew.db was created with Crew mode off")
 
-        # (2) production-shaped database at the deployed schema 9
+        # (2) production-shaped database at the deployed schema 10
         prod_dir = base / "db_prod"
         prod_dir.mkdir()
         db = prod_dir / "data" / "remembra.db"
@@ -458,6 +467,8 @@ def main() -> int:
         report["prod_versions"] = prod_snap["versions"]
         if _versions(prod_snap) != PROD_VERSIONS:
             failures.append(f"prod: versions {_versions(prod_snap)}, expected production's {PROD_VERSIONS}")
+        if PROD_TOP_VERSION not in [tuple(v) for v in prod_snap["versions"]]:
+            failures.append(f"prod: version 10 is not {PROD_TOP_VERSION}: {prod_snap['versions']}")
         report["prod_rows"] = {t: len(v["rows"]) for t, v in prod_snap["tables"].items()}
         report["prod_empty_tables"] = sorted(
             t for t, v in prod_snap["tables"].items() if not v["rows"] and t not in ("schema_version", "cloud_migrations")
@@ -477,6 +488,12 @@ def main() -> int:
             failures.append(f"upgrade: applied {applied_now} (versions now {_versions(up_snap)}); expected only 5")
         if CREW_VERSION not in [tuple(v) for v in up_snap["versions"]]:
             failures.append(f"upgrade: version 5 is not {CREW_VERSION}: {up_snap['versions']}")
+        if max(_versions(up_snap), default=0) != PROD_TOP_VERSION[0]:
+            failures.append(f"upgrade: the highest version is {max(_versions(up_snap), default=0)}, expected 10")
+        if "account_reviews" not in up_snap["tables"] or up_snap["tables"]["account_reviews"] != prod_snap["tables"].get(
+            "account_reviews"
+        ):
+            failures.append("upgrade: account_reviews (migration 10) is not kept exactly as production had it")
         intended: list[str] = []
         failures += _lost(prod_snap, up_snap, "upgrade", intended)
         report["intended_data_migrations"] = intended

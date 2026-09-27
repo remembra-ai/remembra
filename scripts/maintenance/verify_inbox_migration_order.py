@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the agent inbox across the production -> Crew mode upgrade, and back.
 
-Production (``--prod``, ce067fd) is at main-DB schema 9 (versions 1-4 and 6-9):
+Production (``--prod``, 4d335ce: 0.16.1) is at main-DB schema 10 (versions 1-4 and 6-10):
 a row's project is its ``metadata.project_id`` tag, and rows carry the trust
 policy's ``trust_score`` (v6). This release (``--this``) adds Crew mode's
 version 5: ``agent_inbox.project_id``, ``crew_id``, ``kind``, ``sender_kind``
@@ -15,7 +15,7 @@ order on one throw-away SQLite file, each step with its own code tree from git:
 3. ``--prod`` again (the rollback image) reads and writes through the column;
 4. ``--this`` again: nothing to migrate, and the rollback's row is scoped.
 
-    python scripts/maintenance/verify_inbox_migration_order.py --prod ce067fd --this HEAD
+    python scripts/maintenance/verify_inbox_migration_order.py --prod 4d335ce --this HEAD
 
 Exits non-zero if any invariant fails. Writes only to a temporary directory.
 """
@@ -40,7 +40,7 @@ TAGGED = {
     "this post-v5": "beta",
     "prod after rollback": "alpha",
 }
-PROD_VERSIONS = [1, 2, 3, 4, 6, 7, 8, 9]
+PROD_VERSIONS = [1, 2, 3, 4, 6, 7, 8, 9, 10]
 
 
 async def _stage(stage: str, db_path: str) -> dict[str, Any]:
@@ -111,7 +111,7 @@ def _run(tree: Path, stage: str, db_path: Path) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--prod", default="ce067fd")
+    parser.add_argument("--prod", default="4d335ce")
     parser.add_argument("--this", default="HEAD")
     parser.add_argument("--repo", default=str(Path(__file__).resolve().parents[2]))
     parser.add_argument("--stage", help=argparse.SUPPRESS)
@@ -139,8 +139,9 @@ def main() -> int:
     if [v for v, _ in prod["schema_version"]] != PROD_VERSIONS or "project_id" in prod["columns"]:
         failures.append(f"prod is not at production's schema: {prod['schema_version']}")
     applied = {v: n for v, n in this["schema_version"]}
-    if sorted(applied) != list(range(1, 10)) or applied.get(5) != "crew_agent_inbox_scoping":
-        failures.append(f"v5 did not apply after 6-9: {this['schema_version']}")
+    names = (applied.get(5), applied.get(10))
+    if sorted(applied) != list(range(1, 11)) or names != ("crew_agent_inbox_scoping", "account_reviews"):
+        failures.append(f"v5 did not apply after 6-10: {this['schema_version']}")
     if this.get("alpha_view") != ["prod tagged alpha"]:
         failures.append(f"restricted view after v5 is {this.get('alpha_view')}")
     if this.get("codex_only_view") != ["prod tagged beta"]:
