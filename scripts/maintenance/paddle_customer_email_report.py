@@ -8,11 +8,22 @@ account found" and must use the link in the Paddle receipt. Run this once
 before shipping the fix, then handle each ``mismatch`` row by hand (support,
 or update the Paddle customer's email after checking who pays).
 
-    python scripts/maintenance/paddle_customer_email_report.py --db /data/remembra.db
+Before the deploy the API container still runs the previous image, which does
+not have this file (the image copies scripts/maintenance/ at build time), so
+copy it in and run it from there. It needs only the standard library, httpx
+and the installed remembra package (0.16.0's has everything it uses):
+
+    CTR=<the remembra-api container>
+    docker cp scripts/maintenance/paddle_customer_email_report.py "$CTR:/tmp/"
+    docker exec "$CTR" python /tmp/paddle_customer_email_report.py --db /data/remembra.db
+
+Once an image with this file is live:
+
+    docker exec "$CTR" python scripts/maintenance/paddle_customer_email_report.py --db /data/remembra.db
 
 Reads cloud_tenants and users (SQLite, opened read-only) and asks the Paddle
-API (PADDLE_API_KEY, PADDLE_SANDBOX from the server's environment) for each
-recorded customer. Nothing is written anywhere. Emails are masked unless
+API (PADDLE_API_KEY or REMEMBRA_PADDLE_API_KEY, and PADDLE_SANDBOX, from the
+server's environment) for each recorded customer. Nothing is written anywhere. Emails are masked unless
 --show-emails is given. Output: one JSON object per account, then a summary
 on stderr.
 

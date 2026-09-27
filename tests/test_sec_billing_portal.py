@@ -484,3 +484,50 @@ async def test_the_owner_report_lists_accounts_whose_paddle_customer_has_another
         assert {method for method, *_ in paddle.calls} == {"GET"}
         full = await module.build_report(accounts[:1], billing, show_emails=True)
         assert "***" not in str(full[0]["login_email"])
+
+
+def test_the_owner_report_runs_as_a_copy_outside_the_repository(tmp_path) -> None:
+    """Whole-release review: the deploy step ran scripts/maintenance/paddle_customer_email_report.py inside the
+    running API container, whose (previous) image does not have the file. The documented step copies it into the
+    container (/tmp) and runs it there: the copy must work on its own, from any directory, with only the installed
+    package, and it must be read-only."""
+    import shutil
+    import sqlite3
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    script = root / "scripts" / "maintenance" / "paddle_customer_email_report.py"
+    doc = script.read_text()
+    assert 'docker cp scripts/maintenance/paddle_customer_email_report.py "$CTR:/tmp/"' in doc
+    assert 'docker exec "$CTR" python /tmp/paddle_customer_email_report.py --db /data/remembra.db' in doc
+
+    container_tmp = tmp_path / "tmp"
+    container_tmp.mkdir()
+    copy = Path(shutil.copy(script, container_tmp))
+    db = tmp_path / "remembra.db"
+    conn = sqlite3.connect(db)
+    conn.executescript(
+        "CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT, email_verified INTEGER, is_active INTEGER);"
+        "CREATE TABLE cloud_tenants (user_id TEXT PRIMARY KEY, plan TEXT, stripe_customer_id TEXT);"
+        "INSERT INTO users VALUES ('u1', 'free@example.com', 1, 1);"
+        "INSERT INTO cloud_tenants VALUES ('u1', 'free', NULL);"
+    )
+    conn.commit()
+    conn.close()
+    before = db.read_bytes()
+    env = {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(tmp_path),
+        "PYTHONPATH": str(root / "src"),  # the installed package, as in the container
+        "PADDLE_API_KEY": "pdl_sdbx_apikey_test_not_real",
+        "PADDLE_SANDBOX": "true",
+    }
+    done = subprocess.run(
+        [sys.executable, str(copy), "--db", str(db)], cwd=container_tmp, env=env, capture_output=True, text=True, timeout=60
+    )
+    assert done.returncode == 0, done.stderr
+    assert done.stdout == ""  # no account records a Paddle customer: no row, and no Paddle call
+    assert '"accounts": 0' in done.stderr
+    assert db.read_bytes() == before
