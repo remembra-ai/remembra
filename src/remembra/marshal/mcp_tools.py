@@ -18,9 +18,10 @@ from mcp.types import ToolAnnotations
 
 from remembra.marshal import tools
 
+# Already the last sentence of the crew contract text (remembra.crew.schemas.MCP_INSTRUCTIONS), which the
+# server starts with; register() appends it only to instructions that lack it.
 INSTRUCTIONS_SENTENCE = (
-    " If Remembra itself misbehaves (no brief, handoffs not arriving, a rejected key), call remembra_doctor and show"
-    " its rendered slip; never run a fix without the user's yes."
+    " If Remembra misbehaves, call remembra_doctor and show its rendered slip; never run a fix without the user's yes."
 )
 
 DOCTOR_DESCRIPTION = """Say why Remembra handoffs or briefs aren't arriving on this machine, from evidence. Reads only.
