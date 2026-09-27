@@ -311,7 +311,7 @@ What it checks:
 | `HOOKS_INCOMPLETE`, `HOOKS_STALE_COMMAND`, `CONFIG_UNREADABLE` | hooks from an older connect; hooks that call a command that is gone; a config it can't parse |
 | `CODEX_TRUST_MISSING`, `CODEX_TRUST_STALE`, `CODEX_HOOK_DISABLED`, `CODEX_TRUST_UNCHECKED` | Codex has no trust record for a hook, one for an older version of it, the hook turned off, or `config.toml` could not be read (never counted as trusted) |
 | `CODEX_AUTOMATIONS` | Codex automation runs in the last 7 days, and whether this install skips them |
-| `LEGACY_NAMESPACE`, `MCP_PROJECT_SPLIT` | `REMEMBRA_PROJECT` sends every new repository to one project; agents' MCP servers use different projects |
+| `LEGACY_NAMESPACE`, `MCP_PROJECT_SPLIT` | `REMEMBRA_RELAY_PROJECT` keeps every new location, repositories included, in one project; or a configured `REMEMBRA_PROJECT`, which names only folders now (0.16.0 put every new repository in it: `remembra-relay projects split` shows how to separate them); agents' MCP servers use different projects |
 | `PICKS_UP_NEVER_CLOSES` | the agent reads briefs but no handoff from it has ever arrived |
 | `NOTHING_WAITING`, `HOOKS_NOT_FIRING` | hooks written but nothing from that agent yet, and no handoff was waiting for it; others handed off and nothing from it arrives (only a note when it handed off before: a quiet week is often a week it wasn't used) |
 | `STALE_CHECKPOINT` | its last session ended on a checkpoint more than an hour ago, with no handoff after it |

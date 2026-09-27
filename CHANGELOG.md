@@ -61,8 +61,9 @@ redact command-line credentials from handoffs stored before this release.
   (missing, from an older connect, calling a command that is gone, or never written because `connect` only
   ran as a dry run; an unverified adapter `connect --apply` left out is only a note), Codex
   hook trust (read from `~/.codex/config.toml` against the current hooks with the hash Codex computes; an
-  unreadable file is "unchecked", never trusted), Codex automation runs, a `REMEMBRA_PROJECT` that sends every
-  new repository to one project, and agents that picked up briefs but never handed off at all. It only reads:
+  unreadable file is "unchecked", never trusted), Codex automation runs, a `REMEMBRA_RELAY_PROJECT` that keeps
+  every new repository in one project (and a configured project 0.16.0 used that way, with `projects split` to
+  separate it), and agents that picked up briefs but never handed off at all. It only reads:
   at most four GET requests with your own key, never a brief, recall or write, and it never prints a key, even
   one pasted into the server URL field or a hook command. `--agent`, `--no-server`, `--format json`; exit 1
   when something proven needs you.

@@ -330,12 +330,37 @@ def test_legacy_namespace_and_split_projects(fh: FakeHome) -> None:
     report = run(fh, check_server=False)
     legacy = only(report, "LEGACY_NAMESPACE")
     assert (legacy.severity, legacy.inferred) == ("info", False) and legacy.marker == ""
-    assert "joins project alpha" in legacy.what  # ~/.claude.json holds the key, so its project is the one used
+    # 0.16.1: a configured project names only folders; a new repository gets its own project (whole-release review:
+    # the doctor still said every new repository joined it, and pointed at resolve --bind, not projects split).
+    assert (
+        legacy.what == "Project alpha names only folders that aren't git repositories; each new repository gets its own project."
+    )
+    assert legacy.evidence == ("project alpha configured in ~/.claude.json",)  # ~/.claude.json holds the key
+    assert "One namespace" not in legacy.what and "joins project" not in legacy.what
+    assert legacy.fix is not None and legacy.fix.command == "remembra-relay projects split" and not legacy.to_do
+    assert "0.16.0" in (legacy.caveat or "")
     split = only(report, "MCP_PROJECT_SPLIT")
     assert (split.severity, split.inferred) == ("warn", False)
     assert split.evidence == ("claude-code reads alpha · codex reads beta · gemini reads alpha",)
+    # REMEMBRA_RELAY_PROJECT is the one setting that keeps every new repository in one project.
     env = run(fh, check_server=False, REMEMBRA_RELAY_PROJECT="one-place")
-    assert "configured in REMEMBRA_RELAY_PROJECT" in only(env, "LEGACY_NAMESPACE").evidence[0]
+    one = only(env, "LEGACY_NAMESPACE")
+    assert one.evidence == ("project one-place configured in REMEMBRA_RELAY_PROJECT",)
+    assert one.what.startswith("One namespace:") and "repositories included, joins project one-place" in one.what
+    assert "resolve --project <name> --bind" in (one.fix.text if one.fix else "")
+
+
+def test_remembra_project_alone_is_no_one_namespace_claim(fh: FakeHome) -> None:
+    fh.credentials()
+    fh.hooks("claude-code")
+    only_env = only(run(fh, check_server=False, REMEMBRA_PROJECT="team"), "LEGACY_NAMESPACE")
+    assert only_env.evidence == ("project team configured in REMEMBRA_PROJECT",)
+    assert only_env.what.startswith("Project team names only folders") and "One namespace" not in only_env.what
+    text = run(fh, check_server=False, REMEMBRA_PROJECT="team").text()
+    assert "joins project team" not in text and "remembra-relay projects split" in text
+    # "default" (a plain install) is no configured project at all.
+    assert "LEGACY_NAMESPACE" not in ids(run(fh, check_server=False, REMEMBRA_PROJECT="default"))
+    assert "LEGACY_NAMESPACE" not in ids(run(fh, check_server=False))
 
 
 # ---------------------------------------------------------------------------

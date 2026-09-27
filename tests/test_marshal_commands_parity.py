@@ -75,6 +75,7 @@ def test_the_relay_guide_and_help_pack_use_the_same_lines() -> None:
         commands.agent_connect("kimi"),
         commands.key_step("https://memory.example.org"),
         commands.resolve_bind("widget"),
+        commands.PROJECTS_SPLIT,
         commands.status_json(),
         commands.doctor(),
         commands.doctor("codex"),

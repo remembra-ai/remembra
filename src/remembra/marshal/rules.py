@@ -880,19 +880,43 @@ def rule_codex_automations(sig: Signals) -> list[Finding]:
 def rule_namespace(sig: Signals) -> list[Finding]:
     out: list[Finding] = []
     if sig.namespace is not None:
+        # REMEMBRA_RELAY_PROJECT is the only setting that still keeps repositories together (hint_scope=all).
         project, where = sig.namespace
         out.append(
             Finding(
                 "LEGACY_NAMESPACE",
                 INFO,
                 None,
-                f"One namespace: every repository this machine hasn't bound yet joins project {project}.",
+                f"One namespace: every location this machine hasn't bound yet, repositories included, joins project {project}.",
                 (f"project {project} configured in {where}",),
                 fix=Fix(
                     kind="none",
-                    text="Keep it to share one project. To give a repository its own, run in it:"
-                    " remembra-relay resolve --project <name> --bind.",
+                    text="Keep it to share one project. Unset REMEMBRA_RELAY_PROJECT to give each new repository its"
+                    " own; to give one repository its own now, run in it: remembra-relay resolve --project <name>"
+                    " --bind.",
                     runs_where="none",
+                ),
+                doc=DOC_PROJECT,
+            )
+        )
+    elif sig.folder_project is not None:
+        # REMEMBRA_PROJECT (the MCP env, credentials) names only folders since 0.16.1 (hint_scope=folders); what
+        # is left of 0.16.0's one namespace are the repositories it already bound there.
+        project, where = sig.folder_project
+        out.append(
+            Finding(
+                "LEGACY_NAMESPACE",
+                INFO,
+                None,
+                f"Project {project} names only folders that aren't git repositories; each new repository gets its own project.",
+                (f"project {project} configured in {where}",),
+                caveat="remembra 0.16.0 put every new repository in it; those stay there until you split them.",
+                fix=Fix(
+                    kind="command",
+                    text="If 0.16.0 put several repositories in it, this shows how each would get its own"
+                    " (a dry run; nothing changes until you add --apply):",
+                    command=cmd.PROJECTS_SPLIT,
+                    runs_where="agent_ok",
                 ),
                 doc=DOC_PROJECT,
             )

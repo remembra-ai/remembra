@@ -352,7 +352,7 @@ class Signals:
     agents: Mapping[str, AgentSignals]
     codex: CodexSignals
     close_log: CloseLog | None
-    namespace: tuple[str, str] | None  # (project, where it is configured)
+    namespace: tuple[str, str] | None  # (project, "REMEMBRA_RELAY_PROJECT"): one project for every new location
     mcp_projects: Mapping[str, str]
     server: ServerSignals | None
     check_server: bool
@@ -361,6 +361,9 @@ class Signals:
     server_url: str
     missing_key_source: str | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
+    # (project, where it is configured): REMEMBRA_PROJECT, the MCP env or credentials. Since 0.16.1 it names
+    # only folders that are not git repositories (0.16.0 put every new repository in it).
+    folder_project: tuple[str, str] | None = None
 
     def key_for(self, agent: str) -> KeyCheck | None:
         for key in self.keys:
@@ -745,14 +748,25 @@ def _repo(cwd: Path) -> tuple[str, str | None] | None:
 
 
 def _namespace(config: RelayConfig, environ: Mapping[str, str], home: Path) -> tuple[str, str] | None:
+    """``REMEMBRA_RELAY_PROJECT``: the one setting that keeps every new location, repositories included, in
+    one project (what the relay client's ``single_namespace`` sends as ``hint_scope=all``)."""
     aliases = parse_project_aliases(config.project_aliases)
     relay_project = environ.get("REMEMBRA_RELAY_PROJECT")
     if relay_project and relay_project.strip():
         project = normalize_project_id(relay_project, aliases)
         if project and project != "default":
             return project, "REMEMBRA_RELAY_PROJECT"
+    return None
+
+
+def _folder_project(config: RelayConfig, environ: Mapping[str, str], home: Path) -> tuple[str, str] | None:
+    """The configured project (``REMEMBRA_PROJECT``, the MCP env or credentials; ``default`` does not count).
+
+    The relay client sends it with ``hint_scope=folders``: it names only a folder that is not a git
+    repository, and a new repository gets its own project.
+    """
     if config.project and config.project.strip():
-        project = normalize_project_id(config.project, aliases)
+        project = normalize_project_id(config.project, parse_project_aliases(config.project_aliases))
         if project and project != "default":
             where = "REMEMBRA_PROJECT" if environ.get("REMEMBRA_PROJECT") else _source(config, home)
             return project, where
@@ -1209,6 +1223,7 @@ def collect(
         codex=codex,
         close_log=_close_log(home),
         namespace=_namespace(primary, env, home),
+        folder_project=_folder_project(primary, env, home),
         mcp_projects={k: v for k, v in mcp_projects.items() if v},
         server=server,
         check_server=check_server,

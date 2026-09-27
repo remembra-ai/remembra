@@ -123,6 +123,10 @@ def resolve_bind(project_id: str) -> str:
     return f"remembra-relay resolve --project {project_id} --bind"
 
 
+# A dry run: lists the repositories 0.16.0 bound to the configured project and where each would go.
+PROJECTS_SPLIT = "remembra-relay projects split"
+
+
 def status_json() -> str:
     return "remembra-relay status --format json"
 
@@ -153,6 +157,7 @@ ALLOWED: tuple[re.Pattern[str], ...] = (
     re.compile(rf"^remembra-relay close --agent {_A}$"),
     re.compile(r"^remembra-relay resolve --project [A-Za-z0-9][A-Za-z0-9._-]{0,127} --bind$"),
     re.compile(r"^remembra-relay status --format json$"),
+    re.compile("^" + re.escape(PROJECTS_SPLIT) + "$"),
     re.compile(rf"^remembra-relay doctor(?: --agent {_A})?$"),
     re.compile(rf"^pipx run --spec 'remembra>={re.escape(DOCTOR_MIN_VERSION)}' remembra-relay doctor(?: --agent {_A})?$"),
     re.compile(r"^rm ~/\.remembra/relay/outbox/[A-Za-z0-9_-][A-Za-z0-9._-]{0,199}\.json$"),
