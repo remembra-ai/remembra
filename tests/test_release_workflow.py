@@ -220,3 +220,13 @@ def test_docs_workflow_builds_with_read_only_rights_and_pinned_tools():
     for step in build["steps"]:
         if "actions/checkout" in str(step.get("uses")):
             assert (step.get("with") or {}).get("persist-credentials") is False
+
+
+def test_crew_e2e_runs_with_read_only_rights_and_no_stored_token():
+    """It installs unpinned dependencies (pip install -e, npm ci) on push, pull requests and a schedule."""
+    workflow = _load(ROOT / ".github" / "workflows" / "crew-e2e.yml")
+    assert workflow["permissions"] == {"contents": "read"}
+    assert all("permissions" not in job for job in workflow["jobs"].values())
+    checkouts = [s for _, s in _steps(workflow) if "actions/checkout" in str(s.get("uses"))]
+    assert len(checkouts) == 3
+    assert all((s.get("with") or {}).get("persist-credentials") is False for s in checkouts)
