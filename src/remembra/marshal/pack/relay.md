@@ -6,6 +6,9 @@ tool, on another machine or in another checkout, picks that up at session start:
 through the session hooks where they are verified (see the table under [Setup](#setup)), and
 through the `session_brief` and `close_session` MCP tools in any other MCP agent.
 
+!!! tip "Several agents on one repository at once?"
+    [Crew mode](../relay/crew.md) builds on Relay: zones, claims, batons that carry the work, and a live view.
+
 ## How it works
 
 1. **Project identity.** A project is identified by the repository, not by the folder it sits in.
