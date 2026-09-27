@@ -77,6 +77,10 @@ def _prune(target_dir: Path, keep: int) -> list[Path]:
             removed.append(old)
         except OSError as exc:  # a stale backup we cannot delete must not block startup
             log.warning("pre_migration_backup_prune_failed", path=str(old), error=str(exc))
+            continue
+        for suffix in ("-wal", "-shm", "-journal"):  # left when an older (WAL-mode) copy was opened
+            with contextlib.suppress(OSError):
+                Path(f"{old}{suffix}").unlink()
     return removed
 
 
@@ -129,6 +133,9 @@ def pre_migration_backup(
             copy = sqlite3.connect(str(partial))
             try:
                 source.backup(copy)
+                # The copy inherits WAL mode; a self-contained rollback-journal file is what a backup
+                # should be (reading a WAL copy, even read-only, leaves -wal/-shm files next to it).
+                copy.execute("PRAGMA journal_mode=DELETE")
                 result = copy.execute("PRAGMA quick_check").fetchone()
             finally:
                 copy.close()

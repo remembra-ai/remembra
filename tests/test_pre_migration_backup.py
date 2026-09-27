@@ -69,6 +69,35 @@ def test_backup_includes_rows_still_in_the_wal(tmp_path):
     assert _count(dest, "notes") == 4
 
 
+def test_backup_is_a_self_contained_file_not_a_wal_database(tmp_path):
+    """A copy of a WAL database stays in WAL mode unless switched: reading it (even read-only) then leaves
+    -wal/-shm files next to it that pruning never removed."""
+    db = tmp_path / "remembra.db"
+    _make_db(db, rows=4)
+    dest = pre_migration_backup(str(db), label="wal1")
+    assert dest is not None
+    with open(dest, "rb") as fh:
+        header = fh.read(20)
+    assert header[18:20] == b"\x01\x01"  # rollback journal (WAL would be 02 02)
+    conn = sqlite3.connect(f"file:{dest}?mode=ro", uri=True)
+    assert conn.execute("SELECT COUNT(*) FROM notes").fetchone()[0] == 4
+    conn.close()
+    assert sorted(p.name for p in dest.parent.iterdir()) == [dest.name]
+
+
+def test_pruning_removes_the_side_files_of_a_pruned_backup(tmp_path):
+    db = tmp_path / "remembra.db"
+    _make_db(db)
+    first = pre_migration_backup(str(db), label="old1", keep=1)
+    assert first is not None
+    for suffix in ("-wal", "-shm", "-journal"):  # left by an earlier release's WAL-mode copy being read
+        Path(f"{first}{suffix}").write_bytes(b"x")
+    os.utime(first, (1, 1))
+    second = pre_migration_backup(str(db), label="new1", keep=1)
+    assert second is not None
+    assert sorted(p.name for p in second.parent.iterdir()) == [second.name]
+
+
 def test_same_build_is_backed_up_once(tmp_path):
     db = tmp_path / "remembra.db"
     _make_db(db)
