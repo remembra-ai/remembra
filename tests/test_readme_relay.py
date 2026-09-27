@@ -121,6 +121,19 @@ def test_readme_drops_the_claims_research_found_wrong() -> None:
     for claim in ("first agent continuity", "no competitor", "zero external calls", "first-mover", "fully supported"):
         assert claim not in lowered, claim
     assert not re.search(r"\bsigned\b|can.t be forged", README, re.I)
+    # The 2026-09-27 truth audit (P-156, P-160, P-164, P-166, P-168, P-171): no timing nobody measured, no
+    # anomaly monitoring (nothing runs the detector), no "built from git" for MCP closes, no source for every cell.
+    for claim in (
+        "(2 minutes)",
+        "no api keys needed",
+        "anomaly monitoring",
+        '"my husband" → same person',
+        "handoff built from what git says happened",
+        "the transcript never leaves your machine; secrets are redacted before anything does",
+        "a source and date for every claim",
+        "**windsurf**, **jetbrains**",
+    ):
+        assert claim not in lowered, claim
 
 
 BENCH = ROOT / "benchmarks" / "results_20260307_040346_summary.json"
