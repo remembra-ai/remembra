@@ -1,8 +1,9 @@
 # LangChain
 
 Give any LangChain app persistent, cross-session memory backed by Remembra —
-chat history that survives restarts, with entity resolution, semantic recall,
-and per-session isolation.
+chat history that survives restarts, with semantic recall and per-session
+isolation. Messages are stored as written, so no facts or entities are
+extracted from them.
 
 ## Install
 
@@ -84,7 +85,7 @@ history.clear()   # removes conversation_abc's messages; conversation_xyz is una
 
 ## Notes & limits
 
-- **Isolation** is by `session_id` within a `(user_id, project)` namespace.
+- **Isolation** is by `session_id` within the account's project (with auth on, the account is the API key's).
   Use a distinct `session_id` per conversation.
 - **`messages` returns up to the 50 most recent** messages of a session in one
   read (the recall API caps a single page at 50). `clear()` deletes *all*

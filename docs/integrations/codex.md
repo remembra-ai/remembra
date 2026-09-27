@@ -2,7 +2,7 @@
 
 Add persistent memory to OpenAI Codex in 2 minutes.
 
-Codex is OpenAI's coding agent (CLI and IDE extension). With Remembra, Codex remembers your project context, architecture decisions, and preferences across sessions.
+Codex is OpenAI's coding agent (CLI and IDE extension). With Remembra, Codex can store your project context, architecture decisions and preferences and recall them in later sessions, when it calls Remembra's memory tools.
 
 ## Prerequisites
 

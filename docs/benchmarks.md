@@ -97,7 +97,7 @@ OPENAI_API_KEY=sk-... python benchmarks/locomo_runner.py \
 
 ### Sample Output
 
-The March 2026 run above (one conversation), as the runner prints it:
+The March 2026 run above (one conversation), as the runner printed it. These scores are **not valid** (see the top of this page); the output only shows the format:
 
 ```
 ======================================================================

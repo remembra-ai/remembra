@@ -133,8 +133,8 @@ Returns:
 ### Configuration
 
 ```bash
-REMEMBRA_GRAPH_RETRIEVAL_ENABLED=true
-REMEMBRA_GRAPH_TRAVERSAL_DEPTH=2  # Max hops
+REMEMBRA_ENABLE_GRAPH_RETRIEVAL=true
+REMEMBRA_GRAPH_MAX_DEPTH=2  # Max hops
 ```
 
 ## Querying the Graph
@@ -142,25 +142,19 @@ REMEMBRA_GRAPH_TRAVERSAL_DEPTH=2  # Max hops
 ### List Entities
 
 ```python
-entities = memory.get_entities()
-for e in entities:
-    print(f"{e['name']} ({e['type']})")
+result = memory.list_entities()
+for e in result["entities"]:
+    print(f"{e['canonical_name']} ({e['type']})")
     print(f"  Aliases: {e['aliases']}")
 ```
 
-### Get Relationships
+### Relationships and Memories of an Entity
 
-```python
-rels = memory.get_entity_relationships("ent_123")
-for r in rels:
-    print(f"{r['source']} --{r['type']}--> {r['target']}")
-```
+The Python SDK has no methods for these. Use the REST API:
 
-### Find Entity Memories
-
-```python
-# All memories linked to an entity
-memories = memory.get_entity_memories("ent_123")
+```http
+GET /api/v1/entities/{entity_id}/relationships
+GET /api/v1/entities/{entity_id}/memories
 ```
 
 ## Dashboard Visualization
@@ -175,7 +169,7 @@ The dashboard includes an interactive graph view:
 
 ## Graph Storage
 
-Currently stored in SQLite for simplicity:
+Stored in SQLite. A simplified view of the tables:
 
 ```sql
 -- Entities table
@@ -247,5 +241,5 @@ memory.store("Mr. Kim replied...")
 
 - **Pronouns**: "He/she" not auto-resolved (context required)
 - **Scope**: Entities are per user+project
-- **Scale**: SQLite handles ~10k entities well; beyond that, consider Neo4j
+- **Scale**: Entities live in SQLite. Large graphs have not been measured; a Neo4j backend is planned, not supported
 - **Language**: Optimized for English entity patterns

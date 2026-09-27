@@ -13,7 +13,7 @@ Set automatic expiration on memories.
 memory.store("Meeting scheduled for next week", ttl="30d")
 
 # Expires in 1 week
-memory.store("Temporary API key: xyz123", ttl="1w")
+memory.store("Demo account is open this week", ttl="1w")
 
 # Expires in 24 hours
 memory.store("User is currently browsing products", ttl="24h")
@@ -44,46 +44,50 @@ A TTL runs from 1 second to 100 years. The server refuses any other value with 4
     never expired), and did not know `min` or `mo`. For months, write `mo`. For a TTL that an older server must
     read, use whole `h`, `d`, `w` or `y` values.
 
-### TTL Presets
+### Common TTL values
 
-```python
-from remembra import TTLPresets
+There are no named presets in the SDK; pass the value itself.
 
-memory.store("Session context", ttl=TTLPresets.SESSION)       # 24h
-memory.store("Conversation", ttl=TTLPresets.CONVERSATION)     # 7d
-memory.store("Short term", ttl=TTLPresets.SHORT_TERM)         # 30d
-memory.store("Long term", ttl=TTLPresets.LONG_TERM)           # 365d
-memory.store("Permanent", ttl=TTLPresets.PERMANENT)           # Never expires
-```
+| Use | TTL |
+|-----|-----|
+| Session context | `24h` |
+| Conversation summary | `7d` |
+| Short-term memory | `30d` |
+| Long-term fact | `1y` |
+| Permanent | no `ttl` |
 
 ### Server Default TTL
 
-Set a default TTL for all memories:
+Set a default TTL for every memory stored without one:
 
 ```bash
-REMEMBRA_DEFAULT_TTL_DAYS=365  # All memories expire after 1 year
+REMEMBRA_DEFAULT_TTL_DAYS=365  # memories stored without a ttl expire after 1 year
 ```
+
+Checkpoints (`memory_type="checkpoint"`) get `REMEMBRA_CHECKPOINT_DEFAULT_TTL` (default `7d`) instead.
 
 ### Cleanup Expired
 
-Expired memories are soft-deleted (marked expired) by default. Run cleanup to purge:
-
-```python
-# Preview what would be deleted
-result = memory.cleanup_expired(dry_run=True)
-print(f"Would delete {result['would_delete']} memories")
-
-# Actually delete
-memory.cleanup_expired(dry_run=False)
-```
-
-Or via API:
+An expired memory is hidden from recall at once, but it stays stored until a cleanup deletes it. The SDK has no
+cleanup method; use the API:
 
 ```bash
-curl -X POST http://localhost:8787/api/v1/temporal/cleanup \
-  -H "Content-Type: application/json" \
-  -d '{"dry_run": false}'
+# Preview (dry_run defaults to true)
+curl -X POST "http://localhost:8787/api/v1/temporal/cleanup" \
+  -H "X-API-Key: $REMEMBRA_API_KEY"
+
+# Delete expired memories
+curl -X POST "http://localhost:8787/api/v1/temporal/cleanup?dry_run=false" \
+  -H "X-API-Key: $REMEMBRA_API_KEY"
 ```
+
+With `dry_run=false` it deletes the expired memories (it needs `memory:delete`). Add `include_decayed=true` to
+also move decayed memories (see below) to the cold archive. `POST /api/v1/memories/cleanup-expired` deletes
+expired memories too, without a preview.
+
+The server can also run cleanup on a timer (`REMEMBRA_TEMPORAL_CLEANUP_ENABLED=true`, every
+`REMEMBRA_TEMPORAL_CLEANUP_INTERVAL_SECONDS`, default 3600). It is off by default, and it moves expired
+memories to the cold archive rather than deleting them.
 
 ---
 
@@ -91,66 +95,41 @@ curl -X POST http://localhost:8787/api/v1/temporal/cleanup \
 
 Older and unused memories rank lower in recall.
 
-### How Decay Works
+### The decay score in recall
+
+Recall returns a `decay_score` for each memory when the request sets `include_decay_score=true`:
 
 ```
-Decay Score = time_decay × access_boost × recency_boost
-
-where:
-- time_decay: Exponential decay based on age
-- access_boost: Higher score for frequently accessed memories
-- recency_boost: Higher score for recently accessed memories
+decay_score = 0.5 ^ (age_days / half_life) × (1 + 0.1 × ln(1 + accesses)) + recency_bonus
 ```
 
-### Decay Formula
+- **Half-life:** 30 days (`REMEMBRA_RANKING_RECENCY_DECAY_DAYS`): 0.5 after 30 days, with no accesses.
+- **Accesses:** one access multiplies it by about 1.07.
+- **Recency bonus:** up to 0.2 when the memory was accessed recently, fading on the same half-life.
+- There is no minimum. Scores approach 0.
 
-Based on Ebbinghaus forgetting curve:
+### The relevance score for pruning
 
-```python
-retention = e^(-time / half_life)
-```
-
-With defaults:
-- **Half-life**: 30 days (memory loses 50% score after 30 days)
-- **Access boost**: Each access increases score by 20%
-- **Minimum score**: 0.1 (never fully forgotten)
-
-### Configuration
+The `/temporal` decay endpoints and pruning use a separate relevance score with a steeper curve (about 0.15
+at 30 days for a memory at importance 0.5 that was never accessed). Memories below 0.1 are pruning
+candidates. Cleanup prunes nothing unless you run it with `include_decayed=true`. The sleep-time worker's decay
+cleanup is separate and off by default; see [Sleep-Time Compute](sleep-time-compute.md#decay-cleanup).
 
 ```bash
-# Enable/disable decay
-REMEMBRA_DECAY_ENABLED=true
-
-# Days until 50% decay
-REMEMBRA_DECAY_HALF_LIFE_DAYS=30
-
-# Boost per access
-REMEMBRA_ACCESS_BOOST_WEIGHT=0.2
-```
-
-### Viewing Decay
-
-```python
-# Get memories with decay scores
-memories = memory.get_memories_with_decay()
-for m in memories:
-    print(f"{m['content'][:50]}... | decay: {m['decay_score']:.2f}")
-```
-
-Via API:
-
-```bash
-curl http://localhost:8787/api/v1/temporal/decay/report?user_id=user_123
+curl "http://localhost:8787/api/v1/temporal/decay/report?limit=50" \
+  -H "X-API-Key: $REMEMBRA_API_KEY"
 ```
 
 ### Decay Report
 
 ```json
 {
+  "user_id": "user_123",
+  "project_id": "default",
   "total_memories": 100,
-  "healthy": 85,      // decay_score > 0.7
-  "decaying": 10,     // 0.3 < decay_score < 0.7
-  "expired": 5,       // decay_score < 0.3
+  "prune_candidates": 5,
+  "average_relevance": 0.62,
+  "config": {"prune_threshold": 0.1, "...": "..."},
   "memories": [...]
 }
 ```
@@ -174,36 +153,34 @@ from datetime import datetime, timedelta
 
 # What did we know about the user last month?
 last_month = datetime.now() - timedelta(days=30)
-context = memory.recall_as_of(
-    query="User preferences",
-    timestamp=last_month
-)
-
-# Or with recall()
-context = memory.recall(
+result = memory.recall(
     query="User preferences",
     as_of=last_month
 )
+print(result.context)
 ```
 
 Via API:
 
 ```bash
-curl -X POST http://localhost:8787/api/v1/recall \
+curl -X POST http://localhost:8787/api/v1/memories/recall \
+  -H "X-API-Key: $REMEMBRA_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
     "query": "User preferences",
-    "user_id": "user_123",
     "as_of": "2026-02-01T00:00:00Z"
   }'
 ```
 
 ### How It Works
 
-The query filters memories to only include those that:
+The query only includes memories that:
 
 1. Were created **before** the `as_of` timestamp
-2. Had not **expired** by the `as_of` timestamp
+2. Were valid then: a memory superseded since then is included if it was still current at `as_of`
+3. Have not expired
+
+Memories deleted since then are gone and cannot be shown.
 
 ---
 
@@ -252,24 +229,16 @@ memory.store(
 )
 
 # Later: audit what happened
-history = memory.recall_as_of(
+history = memory.recall(
     "User status",
-    timestamp=datetime(2026, 2, 15)
+    as_of=datetime(2026, 2, 15)
 )
 ```
 
 ### Pattern 4: Memory Refresh
 
-Re-store important facts to reset decay:
-
-```python
-# Refresh critical memories periodically
-important_memories = memory.get_memories_with_decay()
-for m in important_memories:
-    if m['decay_score'] < 0.5 and m['metadata'].get('important'):
-        # Re-store to reset decay
-        memory.store(m['content'], metadata=m['metadata'])
-```
+A memory that recall returns counts as accessed, which raises its decay score. To keep an important fact
+from ranking lower with age, store it again when it is still true.
 
 ---
 
@@ -279,16 +248,17 @@ for m in important_memories:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/v1/temporal/decay/report` | GET | View decay scores |
-| `/api/v1/temporal/memory/{id}/decay` | GET | Single memory decay |
-| `/api/v1/temporal/cleanup` | POST | Run cleanup job |
-| `/api/v1/cleanup-expired` | POST | Delete expired memories |
+| `/api/v1/temporal/decay/report` | GET | Relevance scores and pruning candidates |
+| `/api/v1/temporal/memory/{id}/decay` | GET | One memory's relevance score |
+| `/api/v1/temporal/cleanup` | POST | Preview or run cleanup (`dry_run`, `include_decayed`) |
+| `/api/v1/memories/cleanup-expired` | POST | Delete expired memories |
 
 ### Configuration Summary
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REMEMBRA_DEFAULT_TTL_DAYS` | None | Server-wide default TTL |
-| `REMEMBRA_DECAY_ENABLED` | true | Enable decay scoring |
-| `REMEMBRA_DECAY_HALF_LIFE_DAYS` | 30 | Days to 50% decay |
-| `REMEMBRA_ACCESS_BOOST_WEIGHT` | 0.2 | Boost per access |
+| `REMEMBRA_CHECKPOINT_DEFAULT_TTL` | `7d` | Default TTL for checkpoints |
+| `REMEMBRA_RANKING_RECENCY_DECAY_DAYS` | 30 | Half-life of the recall decay score and of ranking recency |
+| `REMEMBRA_TEMPORAL_CLEANUP_ENABLED` | false | Run cleanup on a timer (moves expired memories to the cold archive) |
+| `REMEMBRA_TEMPORAL_CLEANUP_INTERVAL_SECONDS` | 3600 | Seconds between timed cleanups |

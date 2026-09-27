@@ -2,7 +2,7 @@
 
 Add persistent memory to Cursor in 2 minutes.
 
-Cursor is an AI-powered code editor. With Remembra, Cursor's AI remembers your coding preferences, architecture decisions, and project context across sessions.
+Cursor is an AI-powered code editor. With Remembra, Cursor's AI can store your coding preferences, architecture decisions and project context and recall them in later sessions, when it calls Remembra's memory tools.
 
 ## Prerequisites
 
@@ -84,27 +84,9 @@ Cursor: Let me check the project context...
 
 ## Team Sharing
 
-Commit `.cursor/mcp.json` to your repo. Everyone who clones the project gets Remembra configured automatically — they just need the server running and `remembra[mcp]` installed.
-
-For team setups, use environment variable interpolation:
-
-```json
-{
-  "mcpServers": {
-    "remembra": {
-      "command": "remembra-mcp",
-      "env": {
-        "REMEMBRA_URL": "${REMEMBRA_URL:-http://localhost:8787}",
-        "REMEMBRA_API_KEY": "${REMEMBRA_API_KEY}",
-        "REMEMBRA_USER_ID": "${REMEMBRA_USER_ID:-default}",
-        "REMEMBRA_PROJECT": "${REMEMBRA_PROJECT:-my-project}"
-      }
-    }
-  }
-}
-```
-
-Each developer sets their own env vars; the shared config just wires it up.
+Don't commit a `.cursor/mcp.json` that holds an API key: anyone who can read the repository could use it. Instead,
+each developer runs `remembra-install --agent cursor`, which writes the `remembra` server with their own key to
+`~/.cursor/mcp.json` (user level, owner-only).
 
 ## Troubleshooting
 

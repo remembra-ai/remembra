@@ -24,7 +24,7 @@ http://localhost:8787/redoc
 
 ## OpenAPI Spec
 
-Download the OpenAPI 3.0 specification:
+Download the OpenAPI 3.1 specification:
 
 ```
 http://localhost:8787/openapi.json
@@ -32,33 +32,44 @@ http://localhost:8787/openapi.json
 
 ## Endpoints Overview
 
+Paths below are under `/api/v1`, except `/health`.
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/health` | Health check |
-| POST | `/store` | Store memories |
-| POST | `/recall` | Query memories |
+| POST | `/memories` | Store a memory |
+| POST | `/memories/recall` | Query memories |
 | GET | `/memories` | List memories |
-| PUT | `/memories/{id}` | Update memory |
-| DELETE | `/memories` | Delete memories |
-| GET | `/users/{user_id}/profile` | Get user profile (v0.12.0+) |
+| GET | `/memories/{id}` | Get one memory |
+| PATCH | `/memories/{id}` | Update a memory |
+| DELETE | `/memories` | Delete memories (`memory_id`, `entity` or `all_memories`) |
+| POST | `/memories/batch` | Store several memories in one call |
+| POST | `/memories/batch/recall` | Run several recalls in one call |
+| GET | `/users/me/profile` | Your profile (v0.12.0+) |
 | GET | `/entities` | List entities |
 | GET | `/entities/{id}` | Get entity |
 | GET | `/entities/{id}/relationships` | Entity relationships |
 | GET | `/entities/{id}/memories` | Entity memories |
 | POST | `/keys` | Create API key |
 | GET | `/keys` | List API keys |
-| DELETE | `/keys/{id}` | Revoke API key |
+| PATCH | `/keys/{id}` | Rename a key, or change its role or projects |
+| DELETE | `/keys/{id}` | Revoke API key (`?hard=true` deletes it) |
 | GET | `/temporal/decay/report` | Decay report |
-| POST | `/temporal/cleanup` | Run cleanup |
-| POST | `/cleanup-expired` | Remove expired |
+| POST | `/temporal/cleanup` | Preview or run cleanup |
+| POST | `/memories/cleanup-expired` | Remove expired memories |
+
+The full list is in the OpenAPI spec.
 
 ## Authentication
 
-Include API key in Authorization header:
+Send the API key in the `X-API-Key` header:
 
 ```
-Authorization: Bearer rem_your_api_key
+X-API-Key: rem_your_api_key
 ```
+
+A `rem_` key sent as `Authorization: Bearer rem_your_api_key` works too. Dashboard sign-ins use
+`Authorization: Bearer <JWT>`; they expire after a fixed 24 hours.
 
 ## Request/Response Format
 
@@ -70,13 +81,11 @@ Content-Type: application/json
 
 ## Error Format
 
+Errors use FastAPI's shape: a `detail` that is a string, or an object for some errors.
+
 ```json
 {
-  "error": {
-    "code": "error_code",
-    "message": "Human readable message",
-    "details": {}
-  }
+  "detail": "Permission denied: memory:store required"
 }
 ```
 
@@ -106,15 +115,18 @@ pip install remembra
 
 ```python
 from remembra import Memory
-memory = Memory(base_url="...", user_id="...")
+memory = Memory(base_url="...", api_key="rem_...")
 ```
 
 ### REST (Any Language)
 
 Use the REST API directly with any HTTP client.
 
-### JavaScript (Coming Soon)
+### JavaScript / TypeScript
 
 ```bash
 npm install remembra
 ```
+
+See the [JavaScript SDK guide](../guides/javascript-sdk.md). The package on npm is 0.12.1; the repository's SDK is
+0.13.2 and not published yet.

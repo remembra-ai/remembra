@@ -4,10 +4,12 @@ Connect your AI agents to the same Remembra memory pool. What one agent stores, 
 
 !!! success "New in v0.10.0: One-Command Setup"
     ```bash
-    pip install "remembra[mcp]"
+    pipx install --force 'remembra[mcp]>=0.16'
     remembra-install --all --project my-project   # asks for your API key
+    remembra-relay connect --apply                # handoffs at session start and end
     ```
-    This auto-detects and configures ALL your installed agents. See [Agent Setup Guide](../getting-started/agent-setup.md) for details.
+    `remembra-install` detects and configures Claude Code, Codex, Cursor and Gemini CLI, and Claude Desktop on
+    macOS. Others you add by hand. See [Agent Setup Guide](../getting-started/agent-setup.md) for details.
 
 ---
 
@@ -29,7 +31,7 @@ All agents share the same memory — no more siloed conversations.
 
 1. **Remembra server running** — Self-hosted or cloud at `https://api.remembra.dev`
 2. **API key** — Get from Remembra dashboard
-3. **User ID and Project ID** — For memory isolation
+3. **Project ID** — The project the agents share
 
 ### Install MCP Server
 

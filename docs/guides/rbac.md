@@ -97,6 +97,27 @@ curl -X POST http://localhost:8787/api/v1/keys \
   `?hard=true` to delete it. An API key can only revoke keys that hold no
   more access than itself.
 - A change of role or projects applies from the key's next request.
+- A viewer key cannot rename, revoke or delete any key, not even its own.
+
+## Real-time connections
+
+The real-time endpoint (`/api/v1/ws`, used by the dashboard) needs `memory:recall` and follows the same rules
+as every API request:
+
+- Revoking or permanently deleting a key closes every real-time connection opened with it at once, with close
+  code `4001` and the reason "Access revoked or expired".
+- Signing out closes the connection opened with that sign-in. Changing or resetting your password closes the
+  connections of your earlier dashboard sign-ins; connections opened with API keys stay open. Deactivating or
+  deleting an account closes all of its connections.
+- Before each event is sent, the server checks the connection's key or sign-in again. An idle connection is
+  checked every 30 seconds. If access has ended (a revoked key, an ended or expired sign-in, a deactivated
+  account), the event is not sent and the connection closes with `4001`. A dashboard sign-in expires 24 hours
+  after it began. If the key lost `memory:recall` or the project the connection follows, it closes with `4003`.
+  If the check itself fails (a database error, say), the event is not sent and the connection closes with
+  `1011`; clients may reconnect.
+- No event created after access is cut is sent. An event already being sent at that moment may still arrive.
+- The connection is closed at once only by the server process that handled the revocation. With several
+  processes, connections on the others get no further events and close within 30 seconds.
 
 ## Narrowing a key with scopes
 

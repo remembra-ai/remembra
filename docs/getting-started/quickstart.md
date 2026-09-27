@@ -4,7 +4,8 @@ Get Remembra running in minutes.
 
 ## Zero-Config Quick Start
 
-The fastest way to get started. One command installs Remembra, Qdrant, and Ollama via Docker Compose -- no API keys needed.
+The fastest way to get started. One command installs Remembra, Qdrant and Ollama via Docker Compose, with no
+API keys needed.
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart.sh | bash
@@ -12,11 +13,14 @@ curl -sSL https://raw.githubusercontent.com/remembra-ai/remembra/main/quickstart
 
 This script will:
 
-- Pull and start **Remembra**, **Qdrant** (vector database), and **Ollama** (local embeddings/extraction) containers
-- Configure everything to work together automatically
+- Pull and start **Remembra**, **Qdrant** (vector database) and **Ollama** (local embeddings) containers
+- Configure everything to work together automatically, with auth off
 - Start the Remembra server on `http://localhost:8787`
 
-No OpenAI or other API keys are required. Ollama runs entirely locally for both embeddings and entity extraction.
+No OpenAI or other API keys are required. Ollama runs locally for embeddings. LLM fact and entity extraction stay
+off until you add an OpenAI key (or configure an Ollama model for entity extraction; see
+[Entity Resolution](../guides/entity-resolution.md#ollama-local)). The first start downloads the images and the
+embedding model, so how long it takes depends on your connection.
 
 !!! tip "Already running?"
     Skip ahead to [Step 2: Verify It's Running](#step-2-verify-its-running) once the script completes.
@@ -28,11 +32,16 @@ No OpenAI or other API keys are required. Ollama runs entirely locally for both 
 Once Remembra is running, configure your AI agents to use it:
 
 ```bash
-pip install remembra
-remembra-install --all
+pipx install --force 'remembra[mcp]>=0.16'
+remembra-install --all --url http://localhost:8787
+remembra-relay connect --apply
 ```
 
-This auto-detects Claude Desktop, Claude Code, Codex, Cursor and Gemini CLI and configures them to share memory.
+`remembra-install` auto-detects Claude Code, Codex, Cursor and Gemini CLI, and Claude Desktop on macOS, and
+points them at your server. It asks for an API key. The quickstart server has auth off and ignores the key, so any
+value that looks like one (`rem_` and 20 or more letters or digits) works. `remembra-relay connect --apply` writes
+the relay hooks, so handoffs are saved when a session ends. Codex runs them only after you trust them (Settings >
+Hooks > Trust in the Codex app, or `/hooks` in the Codex CLI).
 
 **Verify setup:**
 ```bash
@@ -49,44 +58,48 @@ If you prefer to configure things yourself, choose one of the options below.
 
 ### Prerequisites
 
-- Docker (recommended) or Python 3.10+
-- OpenAI API key (for embeddings/extraction), or Ollama for a fully local setup
-
-=== "Docker"
-
-    ```bash
-    docker run -d \
-      -p 8787:8787 \
-      -e OPENAI_API_KEY=sk-your-key \
-      -v remembra-data:/app/data \
-      remembra/remembra
-    ```
+- Docker (recommended) or Python 3.11+
+- A Qdrant server (the Docker Compose file below starts one)
+- An OpenAI API key for embeddings and extraction, or Ollama for local embeddings
 
 === "Docker Compose"
 
     Create `docker-compose.yml`:
 
     ```yaml
-    version: '3.8'
     services:
       remembra:
         image: remembra/remembra
         ports:
           - "8787:8787"
         environment:
-          - OPENAI_API_KEY=${OPENAI_API_KEY}
+          - REMEMBRA_OPENAI_API_KEY=${REMEMBRA_OPENAI_API_KEY}
+          - REMEMBRA_QDRANT_URL=http://qdrant:6333
+          - REMEMBRA_AUTH_MASTER_KEY=${REMEMBRA_AUTH_MASTER_KEY}
+          - REMEMBRA_JWT_SECRET=${REMEMBRA_JWT_SECRET}  # 32+ random characters
         volumes:
-          - remembra-data:/app/data
+          - remembra-data:/data
+        depends_on:
+          - qdrant
+
+      qdrant:
+        image: qdrant/qdrant
+        volumes:
+          - qdrant-data:/qdrant/storage
 
     volumes:
       remembra-data:
+      qdrant-data:
     ```
 
     Then run:
 
     ```bash
-    docker-compose up -d
+    docker compose up -d
     ```
+
+    Settings are read with the `REMEMBRA_` prefix: a bare `OPENAI_API_KEY` is ignored. The server does not start
+    without a unique `REMEMBRA_JWT_SECRET` of 32 or more characters.
 
 === "From Source"
 
@@ -95,18 +108,21 @@ If you prefer to configure things yourself, choose one of the options below.
     cd remembra
     pip install -e ".[server]"
 
-    export OPENAI_API_KEY=sk-your-key
-    python -m remembra.server
+    export REMEMBRA_OPENAI_API_KEY=sk-your-key
+    export REMEMBRA_QDRANT_URL=http://localhost:6333   # a running Qdrant
+    export REMEMBRA_JWT_SECRET=$(openssl rand -hex 32)
+    remembra-server
     ```
 
 ## Step 2: Verify It's Running
 
 ```bash
 curl http://localhost:8787/health
-# {"status":"ok","version":"0.13.2","dependencies":{"qdrant":{"status":"ok"}}}
+# {"status":"ok","version":"0.16.1","dependencies":{"qdrant":{"status":"ok",...}}}
 ```
 
-Or open the dashboard: [http://localhost:8787](http://localhost:8787)
+With the Docker image, the dashboard is at [http://localhost:8787](http://localhost:8787). Installed with pip, the
+server serves only the API.
 
 ## Step 3: Install the SDK
 
@@ -122,7 +138,7 @@ from remembra import Memory
 # Connect to your Remembra instance
 memory = Memory(
     base_url="http://localhost:8787",
-    user_id="quickstart-user"
+    api_key="rem_...",  # when auth is on
 )
 
 # Store a memory
@@ -140,20 +156,26 @@ print("Memory stored!")
 
 ```python
 # Ask questions about your memories
-context = memory.recall("What do I know about Acme Corp?")
-print(context)
-# Output: "Sarah from Acme Corp is looking for AI solutions 
-#          for customer support. Budget: $50k/year. 
-#          Follow up scheduled for Tuesday."
+result = memory.recall("What do I know about Acme Corp?")
+print(result.context)
+# Output (with LLM extraction on), for example:
+#   "Sarah from Acme Corp is looking for AI solutions
+#    for customer support. Budget: $50k/year.
+#    Follow up scheduled for Tuesday."
 ```
 
 ## What Just Happened?
+
+With an OpenAI key set:
 
 1. **Smart Extraction**: Your messy text was transformed into clean facts
 2. **Entity Resolution**: "Sarah" was identified as a PERSON, "Acme Corp" as an ORG
 3. **Relationship Mapping**: Sarah → WORKS_AT → Acme Corp
 4. **Vector Storage**: Facts embedded and stored for semantic search
 5. **Recall**: Your query found the relevant memories
+
+Without one (the zero-config quickstart), the text is split into sentences and stored, and recall finds it by
+meaning and keywords.
 
 ## Next Steps
 
@@ -169,11 +191,11 @@ print(context)
 from remembra import Memory
 import openai
 
-memory = Memory(base_url="http://localhost:8787", user_id="user_123")
+memory = Memory(base_url="http://localhost:8787", api_key="rem_...")
 
 def chat(user_message: str) -> str:
     # Recall relevant context
-    context = memory.recall(user_message, limit=5)
+    context = memory.recall(user_message, limit=5).context
     
     # Build prompt with memory
     messages = [
@@ -201,4 +223,3 @@ print(chat("What do you know about me?"))  # Remembers Alex loves hiking!
 
 !!! tip "Pro Tip"
     Store important facts explicitly, not just conversation history. The extraction model works best with clear statements.
-ݽ8٧4uFշwN4

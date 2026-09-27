@@ -11,7 +11,7 @@ A memory is an atomic unit of information:
   "id": "mem_abc123",
   "content": "John works at Google as a senior engineer",
   "user_id": "user_123",
-  "project": "default",
+  "project_id": "default",
   "created_at": "2026-03-01T10:30:00Z",
   "updated_at": "2026-03-01T10:30:00Z",
   "expires_at": null,
@@ -56,14 +56,15 @@ Check against existing memories:
 | Scenario | Action |
 |----------|--------|
 | New information | ADD |
-| Updated fact | UPDATE (merge) |
 | Same fact exists | NOOP (skip) |
-| Contradiction | DELETE old + ADD new |
+| Updated or contradicted fact | SUPERSEDE: store the new fact, mark the old one superseded (kept, not deleted) |
+
+Before v0.16.0 the actions were ADD, UPDATE, DELETE and NOOP.
 
 ### 4. Storage
 
-- Vector embedding → Qdrant
-- Metadata → SQLite
+- Vector embedding, text and metadata → Qdrant
+- Text and metadata → SQLite
 - Entity links → SQLite graph
 
 ### 5. Retrieval
@@ -72,7 +73,7 @@ Recalled via semantic search + ranking.
 
 ### 6. Lifecycle End
 
-- **TTL expires** → Soft delete
+- **TTL expires** → Hidden from recall; deleted (or archived) when cleanup runs
 - **Decay drops** → Lower ranking
 - **Manual forget** → Hard delete
 
@@ -169,9 +170,10 @@ final_score = weighted_sum(
 |-------|-------------|--------|---------|
 | Active | Normal memory | Yes | Yes |
 | Decayed | Low decay score | Yes (low rank) | Yes |
-| Expired | Past TTL | No | No |
+| Superseded | Replaced by a newer memory | Only with `include_superseded` or `as_of` | Yes |
+| Expired | Past TTL, not yet cleaned up | No | Yes, by id |
 | Deleted | User forgot | No | No |
-| Archived | Soft deleted | Via as_of only | No |
+| Archived | Moved to the cold archive by cleanup | No (`/temporal/archive/search`) | No |
 
 ## Best Practices
 

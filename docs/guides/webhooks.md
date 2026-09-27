@@ -1,15 +1,20 @@
 # Webhooks
 
-Remembra's webhook system enables real-time integrations with external services. Get notified when memories are created, updated, or deleted.
+Remembra can send an HTTP POST to your URL when memories are stored, recalled or deleted.
 
 ## Overview
 
-Webhooks allow you to:
+Webhooks let you:
 
-- Sync memories to external systems (CRM, analytics, etc.)
+- Sync new memories to external systems (CRM, analytics, etc.)
 - Trigger workflows when new memories are stored
-- Build real-time dashboards
-- Audit and log all memory operations
+- Count recalls and deletions
+
+Webhooks are off by default on a self-hosted server. Turn them on with `REMEMBRA_WEBHOOKS_ENABLED=true`; while
+they are off, the webhook routes answer `503`.
+
+Managing webhooks needs `webhook:manage` (admin and editor keys, and dashboard sign-ins). A key limited to
+projects or bound to one agent is refused, because a webhook receives events from the whole account.
 
 ## Quick Start
 
@@ -21,10 +26,13 @@ curl -X POST http://localhost:8787/api/v1/webhooks \
   -H "X-API-Key: your_api_key" \
   -d '{
     "url": "https://your-server.com/webhook",
-    "events": ["memory.created", "memory.updated"],
+    "events": ["memory.stored", "memory.deleted"],
     "secret": "your_webhook_secret"
   }'
 ```
+
+The URL must be `http` or `https` and must resolve to a public address. Local and private addresses are refused,
+at registration and again at each delivery.
 
 ### 2. Handle Webhook Events
 
@@ -39,87 +47,82 @@ WEBHOOK_SECRET = "your_webhook_secret"
 @app.route("/webhook", methods=["POST"])
 def handle_webhook():
     # Verify signature
-    signature = request.headers.get("X-Remembra-Signature")
+    signature = request.headers.get("X-Remembra-Signature", "")
     payload = request.get_data()
-    
+
     expected = hmac.new(
         WEBHOOK_SECRET.encode(),
         payload,
         hashlib.sha256
     ).hexdigest()
-    
+
     if not hmac.compare_digest(f"sha256={expected}", signature):
         return "Invalid signature", 401
-    
+
     # Process event
     event = request.json
     print(f"Received: {event['type']}")
-    print(f"Memory ID: {event['data']['id']}")
-    
+    print(f"Data: {event['data']}")
+
     return "OK", 200
 ```
 
 ## Available Events
 
-| Event | Description |
-|-------|-------------|
-| `memory.created` | New memory stored |
-| `memory.updated` | Memory content updated |
-| `memory.deleted` | Memory deleted |
-| `memory.recalled` | Memory accessed via recall |
-| `entity.created` | New entity extracted |
-| `entity.merged` | Entities merged |
+| Event | Sent when | `data` |
+|-------|-----------|--------|
+| `memory.stored` | A store through `POST /api/v1/memories` creates a memory (a duplicate store sends nothing) | `memory_id`, `extracted_facts`, `entities` (names) |
+| `memory.recalled` | A recall runs through `POST /api/v1/memories/recall` | `query`, `result_count` |
+| `memory.deleted` | Memories are deleted through `DELETE /api/v1/memories` | `memory_id` (or null), `deleted_count` |
+
+Use `*` in `events` to subscribe to all of them. `entity.created` and `entity.merged` are accepted as event
+names, but the server does not send them yet. There is no event for a memory update.
+`GET /api/v1/webhooks/events/types` lists the names.
 
 ## Webhook Payload
 
 ```json
 {
-  "id": "evt_abc123",
-  "type": "memory.created",
-  "timestamp": "2026-03-02T12:00:00Z",
+  "id": "5f0c1b2e-...",
+  "type": "memory.stored",
+  "timestamp": "2026-03-02T12:00:00+00:00",
+  "user_id": "user_123",
+  "project_id": "default",
   "data": {
-    "id": "mem_xyz789",
-    "content": "User prefers dark mode",
-    "user_id": "user_123",
-    "project": "default",
-    "metadata": {},
-    "created_at": "2026-03-02T12:00:00Z"
+    "memory_id": "mem_xyz789",
+    "extracted_facts": ["User prefers dark mode"],
+    "entities": []
   }
 }
 ```
+
+Each request also carries `X-Remembra-Event` (the event type) and `X-Remembra-Delivery` (the delivery id).
 
 ## Security
 
 ### HMAC-SHA256 Signature
 
-Every webhook request includes an `X-Remembra-Signature` header:
+A webhook registered with a `secret` gets an `X-Remembra-Signature` header: `sha256=` and the HMAC-SHA256 of the
+raw body, keyed with the secret.
 
 ```
 X-Remembra-Signature: sha256=abc123...
 ```
 
-**Always verify this signature** before processing events to ensure requests come from Remembra.
+Without a secret, no signature is sent. **Register a secret and verify the signature** before processing events.
 
 ### Best Practices
 
 1. **Use HTTPS** - Only register HTTPS webhook URLs in production
 2. **Verify signatures** - Always validate the HMAC signature
-3. **Respond quickly** - Return 2xx within 30 seconds
+3. **Respond quickly** - Return 2xx within 10 seconds, the default delivery timeout (`REMEMBRA_WEBHOOK_TIMEOUT`)
 4. **Handle retries** - Implement idempotency for duplicate events
 
 ## Retry Policy
 
-Failed deliveries are retried with exponential backoff:
-
-| Attempt | Delay |
-|---------|-------|
-| 1 | Immediate |
-| 2 | 1 minute |
-| 3 | 5 minutes |
-| 4 | 30 minutes |
-| 5 | 2 hours |
-
-After 5 failed attempts, the webhook is disabled and you'll receive an email notification.
+A delivery that gets no 2xx answer is tried 3 times in total (`REMEMBRA_WEBHOOK_MAX_RETRIES`), waiting 2 seconds
+and then 4 seconds between tries. After that it is recorded as failed in the webhook's delivery history
+(`GET /api/v1/webhooks/{webhook_id}/deliveries`). The webhook is not disabled, and no email is sent.
 
 ## API Reference
 
@@ -133,9 +136,8 @@ POST /api/v1/webhooks
 ```json
 {
   "url": "https://example.com/webhook",
-  "events": ["memory.created", "memory.updated"],
-  "secret": "your_secret",
-  "enabled": true
+  "events": ["memory.stored", "memory.deleted"],
+  "secret": "your_secret"
 }
 ```
 
@@ -145,19 +147,23 @@ POST /api/v1/webhooks
 GET /api/v1/webhooks
 ```
 
-### Delete Webhook
+### Get, Change or Delete a Webhook
 
 ```http
+GET /api/v1/webhooks/{webhook_id}
+PATCH /api/v1/webhooks/{webhook_id}
 DELETE /api/v1/webhooks/{webhook_id}
 ```
 
-### Test Webhook
+`PATCH` takes `url`, `events` and `active`. Set `"active": false` to pause a webhook.
+
+### Delivery History
 
 ```http
-POST /api/v1/webhooks/{webhook_id}/test
+GET /api/v1/webhooks/{webhook_id}/deliveries
 ```
 
-Sends a test event to verify your endpoint is working.
+There is no test endpoint. To check your receiver, store a memory and look at the delivery history.
 
 ## Example: Slack Notifications
 
@@ -165,9 +171,10 @@ Sends a test event to verify your endpoint is working.
 import requests
 
 def handle_webhook(event):
-    if event["type"] == "memory.created":
+    if event["type"] == "memory.stored":
+        facts = "; ".join(event["data"]["extracted_facts"])
         slack_message = {
-            "text": f"🧠 New memory stored: {event['data']['content'][:100]}..."
+            "text": f"New memory stored: {facts[:100]}"
         }
         requests.post(
             "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK",
@@ -179,10 +186,11 @@ def handle_webhook(event):
 
 ### Webhook not receiving events
 
-1. Check the webhook is enabled: `GET /api/v1/webhooks`
-2. Verify the URL is accessible from the internet
+1. Check that webhooks are enabled on the server (`REMEMBRA_WEBHOOKS_ENABLED=true`) and that the webhook is
+   active: `GET /api/v1/webhooks`
+2. Verify the URL is reachable from the internet and resolves to a public address
 3. Check your server logs for incoming requests
-4. Use the test endpoint to send a test event
+4. Read the delivery history: `GET /api/v1/webhooks/{webhook_id}/deliveries`
 
 ### Signature verification failing
 

@@ -38,7 +38,7 @@ class RAGWithMemory:
     
     def query(self, question: str) -> str:
         # 1. Get user-specific context
-        user_context = self.memory.recall(question, limit=3)
+        user_context = self.memory.recall(question, limit=3).context
         
         # 2. Get document context (traditional RAG)
         doc_context = self.documents.retrieve(question, k=5)
@@ -96,7 +96,7 @@ class RemembraMemory(BaseMemory):
     
     def load_memory_variables(self, inputs: dict) -> dict:
         query = inputs.get("question", inputs.get("input", ""))
-        context = self.memory.recall(query, limit=5)
+        context = self.memory.recall(query, limit=5).context
         return {self.memory_key: context}
     
     def save_context(self, inputs: dict, outputs: dict) -> None:
@@ -104,7 +104,7 @@ class RemembraMemory(BaseMemory):
         self.memory.store(user_input)
     
     def clear(self) -> None:
-        self.memory.forget(all=True)
+        self.memory.forget(all_memories=True)
 
 # Usage with LangChain
 from langchain.chains import ConversationalRetrievalChain
@@ -133,7 +133,7 @@ class RemembraLlamaMemory(BaseMemory):
         )
     
     def get(self, query: str) -> str:
-        return self.memory.recall(query, limit=5)
+        return self.memory.recall(query, limit=5).context
     
     def put(self, message: str) -> None:
         self.memory.store(message)
@@ -176,7 +176,7 @@ def query_with_budget(question: str, token_budget: int = 3000):
     user_context = memory.recall(
         question,
         max_tokens=user_tokens
-    )
+    ).context
     
     doc_context = documents.retrieve(
         question,
@@ -250,7 +250,7 @@ documents.retrieve("How do refunds work?")
 
 ```python
 # User context should be concise
-user_context = memory.recall(query, limit=3, max_tokens=500)
+user_context = memory.recall(query, limit=3, max_tokens=500).context
 
 # Document context can be longer
 doc_context = documents.retrieve(query, k=5, max_tokens=2000)

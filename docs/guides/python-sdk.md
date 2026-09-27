@@ -15,16 +15,19 @@ from remembra import Memory
 
 memory = Memory(
     base_url="http://localhost:8787",
-    user_id="user_123",
-    project="my_app"  # Optional namespace
+    api_key="rem_...",       # when the server has auth on
+    project="my_app",        # optional namespace
 )
 
 # Store a memory
 memory.store("User prefers dark mode")
 
 # Recall memories
-context = memory.recall("What are user preferences?")
+result = memory.recall("What are user preferences?")
+print(result.context)
 ```
+
+The client is synchronous. There is no async client.
 
 ## Memory Class
 
@@ -33,20 +36,32 @@ context = memory.recall("What are user preferences?")
 ```python
 Memory(
     base_url: str = "http://localhost:8787",
-    user_id: str = None,
+    api_key: str | None = None,
+    user_id: str = "default",
     project: str = "default",
-    api_key: str = None,
-    timeout: float = 30.0
+    timeout: float = 30.0,
+    auto_expire_temporal: bool = False,
+    temporal_min_confidence: float = 0.6,
+    enable_shadow_ttl: bool = False,
+    shadow_ttl_max_entries: int = 10000,
+    agent_id: str | None = None,
+    session_id: str | None = None,
+    provenance: bool = True,
+    provenance_source: str = "sdk",
+    project_aliases: Mapping[str, str] | None = None,
 )
 ```
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `base_url` | Remembra server URL | `http://localhost:8787` |
-| `user_id` | Unique user identifier | Required |
+| `api_key` | API key (when the server has auth on) | `None` |
+| `user_id` | Sent with requests; with auth on, the server takes the user from the API key instead | `"default"` |
 | `project` | Project namespace | `"default"` |
-| `api_key` | API key (if auth enabled) | `None` |
 | `timeout` | Request timeout in seconds | `30.0` |
+| `auto_expire_temporal` | Give stores a TTL from temporal phrases (see Smart Auto-Forgetting) | `False` |
+| `enable_shadow_ttl` | Keep a local TTL cache you can check with `is_memory_valid()` | `False` |
+| `agent_id`, `session_id` | Provenance stamped on each store's metadata | `None` |
 
 ## Core Methods
 
@@ -111,78 +126,85 @@ memory.store(
 
 ### recall()
 
-Retrieve relevant memories using semantic search.
+Retrieve relevant memories using semantic and keyword search.
 
 ```python
 memory.recall(
-    query: str,
-    limit: int = 10,
+    query: str | None = None,
+    limit: int = 5,
     threshold: float = 0.4,
-    max_tokens: int = None,
-    enable_hybrid: bool = True,
-    enable_rerank: bool = False,
-    as_of: datetime = None
-    slim: bool = False  # NEW in v0.12.0
-) -> str
+    filters: dict[str, str] | None = None,
+    retrieval_mode: str | None = None,
+    scope: str | None = None,
+    as_of: str | datetime | None = None,
+    max_tokens: int | None = None,
+    slim: bool = False,
+    include_superseded: bool = False,
+    project_id: str | None = None,
+) -> RecallResult
 ```
 
 **Parameters:**
 
 | Name | Type | Description |
 |------|------|-------------|
-| `query` | `str` | Natural language query |
-| `limit` | `int` | Max memories to return | 
-| `threshold` | `float` | Minimum similarity (0-1) |
-| `max_tokens` | `int` | Truncate to fit context window |
-| `enable_hybrid` | `bool` | Use semantic + keyword search |
-| `enable_rerank` | `bool` | Apply CrossEncoder reranking |
-| `as_of` | `datetime` | Historical query (time travel) |
-| `slim` | `bool` | Return only the context string, without metadata (a smaller payload) |
+| `query` | `str` | Natural language query (optional when `filters` is given) |
+| `limit` | `int` | Max memories to return (1-50) |
+| `threshold` | `float` | Minimum cosine similarity (0-1) for vector hits; keyword and entity-graph hits are not subject to it |
+| `filters` | `dict` | Exact-match metadata filters, combined with AND |
+| `retrieval_mode` | `str` | `balanced`, `debug` (recent first), `operational`, `strategic` or `auto` |
+| `scope` | `str` | Only memories whose scope starts with this label |
+| `as_of` | `datetime` or ISO string | Historical query (time travel) |
+| `max_tokens` | `int` | Cap on the context string |
+| `slim` | `bool` | Caps the context at 800 tokens. Memories and entities are still returned |
+| `include_superseded` | `bool` | Also return memories replaced by newer ones |
+| `project_id` | `str` | Recall from this project instead of the client's |
 
 **Example:**
 
 ```python
 # Basic recall
-context = memory.recall("What do I know about the user?")
+result = memory.recall("What do I know about the user?")
+print(result.context)
 
 # With options
-context = memory.recall(
+result = memory.recall(
     "What projects is John working on?",
     limit=5,
     threshold=0.5,
-    max_tokens=2000
+    max_tokens=2000,
 )
+for m in result.memories:
+    print(m.id, m.relevance, m.content)
 
 # Historical query (see memories as of last week)
 from datetime import datetime, timedelta
 last_week = datetime.now() - timedelta(days=7)
-context = memory.recall("User status", as_of=last_week)
+result = memory.recall("User status", as_of=last_week)
 ```
 
-**Returns:**
-
-Formatted string of relevant memories, ready for LLM context injection.
+**Returns:** a `RecallResult` with `context` (a string ready for an LLM prompt), `memories` (each with `id`,
+`content`, `relevance`, `created_at`, `metadata`, `memory_type`), `entities`, and `degraded` when the server
+answered in a degraded mode.
 
 ### update()
 
-Update existing memories intelligently.
+Change a memory's content (and, optionally, its metadata).
 
 ```python
 memory.update(
     memory_id: str,
-    content: str
+    content: str,
+    metadata: dict | None = None,
 ) -> dict
 ```
 
 **Example:**
 
 ```python
-# Get memory ID from store response
 result = memory.store("John is a software engineer")
-memory_id = result["memories"][0]["id"]
 
-# Update it
-memory.update(memory_id, "John is a senior software engineer at Google")
+memory.update(result.id, "John is a senior software engineer at Google")
 ```
 
 ### forget()
@@ -232,113 +254,48 @@ print(result.deleted_memories, result.deleted_entities)
 memory.forget_project("my-project")
 ```
 
-## Advanced Methods
+## Other Methods
 
-### recall_as_of()
+| Method | What it does |
+|--------|--------------|
+| `get(memory_id)` | One memory by id |
+| `list(limit=20, offset=0, project_id=None)` | Memories in the project, newest first |
+| `timeline(start=None, end=None, entity=None, ...)` | Memories in a time range, oldest first by default |
+| `list_entities(entity_type=None, limit=100)` | Entities in the account's graph |
+| `ingest_conversation(messages, session_id=None, ...)` | Extract memories from a chat transcript |
+| `ingest_changelog(content=None, file_path=None, project_name=None)` | Store each release of a changelog as a memory |
+| `health()` | The server's `/health` response |
+| `is_memory_valid(memory_id)` | With `enable_shadow_ttl=True`: whether the local TTL cache says the memory has not expired |
 
-Time-travel queries for historical state.
+Relay and inbox methods (`session_brief`, `close_session`, `store_status`, `list_status`, `trail`,
+`send_to_inbox`, `get_inbox`, `ack_inbox`) are covered in the [Relay guide](relay.md).
 
-```python
-from datetime import datetime
+There are no SDK methods for expired-memory cleanup or decay scores. Use the REST API for those
+(`POST /api/v1/temporal/cleanup`, `GET /api/v1/temporal/decay/report`; see [Temporal](temporal.md)).
 
-# See memories as they existed on a specific date
-context = memory.recall_as_of(
-    query="User preferences",
-    timestamp=datetime(2026, 2, 15)
-)
-```
-
-### get_memories_with_decay()
-
-Get memories with decay score visibility.
-
-```python
-memories = memory.get_memories_with_decay()
-for m in memories:
-    print(f"{m['content']} - decay: {m['decay_score']}")
-```
-
-### cleanup_expired()
-
-Remove expired memories (manual trigger).
+**Example:**
 
 ```python
-result = memory.cleanup_expired(dry_run=True)
-print(f"Would delete {result['count']} memories")
-
-# Actually delete
-memory.cleanup_expired(dry_run=False)
-```
-
-### ingest_changelog()
-
-Import project changelogs as searchable memories.
-
-```python
-memory.ingest_changelog(
-    content_or_path="CHANGELOG.md",
-    project_name="my-project"
-)
-```
-
-## Entity Methods
-
-### get_entities()
-
-List all entities in the memory graph.
-
-```python
-entities = memory.get_entities()
-for entity in entities:
-    print(f"{entity['name']} ({entity['type']})")
-```
-
-### get_entity_relationships()
-
-Get relationships for an entity.
-
-```python
-relationships = memory.get_entity_relationships(entity_id="ent_123")
-for rel in relationships:
-    print(f"{rel['source']} --{rel['type']}--> {rel['target']}")
-```
-
-## Async Support
-
-All methods have async equivalents:
-
-```python
-from remembra import AsyncMemory
-
-memory = AsyncMemory(
-    base_url="http://localhost:8787",
-    user_id="user_123"
-)
-
-async def main():
-    await memory.store("Async memory!")
-    context = await memory.recall("async")
-    print(context)
+memory.ingest_changelog(file_path="CHANGELOG.md", project_name="my-project")
 ```
 
 ## Error Handling
 
+Every failed request raises `remembra.MemoryError`. Its `status_code` holds the HTTP status (`None` when the
+request never reached the server).
+
 ```python
-from remembra.exceptions import (
-    RemembraError,
-    AuthenticationError,
-    RateLimitError,
-    ValidationError
-)
+from remembra import MemoryError
 
 try:
     memory.store("content")
-except AuthenticationError:
-    print("Invalid API key")
-except RateLimitError as e:
-    print(f"Rate limited. Retry after {e.retry_after}s")
-except RemembraError as e:
-    print(f"Error: {e}")
+except MemoryError as e:
+    if e.status_code == 401:
+        print("Invalid API key")
+    elif e.status_code == 429:
+        print("Rate limited or over a plan limit")
+    else:
+        print(f"Error: {e}")
 ```
 
 ## Best Practices
@@ -391,38 +348,16 @@ memory.store(
 
 ## User Profiles API (v0.12.0)
 
-Get aggregated user intelligence including facts, metrics, and topics.
+Aggregated facts, entities, activity and top topics for your account. The SDK has no method for it; call the
+REST API:
 
-```python
-profile = memory.get_user_profile()
+```http
+GET /api/v1/users/me/profile
 ```
 
-**Returns:**
-
-```python
-{
-    "user_id": "user_123",
-    "memory_count": 47,
-    "entity_breakdown": {
-        "PERSON": 12,
-        "ORG": 8,
-        "LOCATION": 5
-    },
-    "top_topics": ["AI", "meetings", "projects"],
-    "last_active": "2026-03-22T15:30:00Z",
-    "aggregated_facts": [
-        "Works at Acme Corp as senior engineer",
-        "Prefers morning meetings",
-        "Uses dark mode"
-    ]
-}
-```
-
-**Use Cases:**
-
-- Personalization dashboards
-- User insights and analytics
-- Context pre-loading for AI assistants
+It returns `total_memories`, `total_entities`, `total_relationships`, `static_facts` (facts and top entities),
+`activity` (memories in the last 24 hours, 7 days and 30 days), `top_topics` and `last_active`. A key can read
+only its own account's profile.
 
 ---
 

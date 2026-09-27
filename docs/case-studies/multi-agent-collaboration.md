@@ -1,8 +1,9 @@
 # Case Study: How We Used Remembra to Build Remembra
 
 **Date:** March 15, 2026  
-**Duration:** 90 minutes  
-**Result:** Complete product redesign with working code
+**Duration:** about 100 minutes from linking the agents to the sprint plan; the code was committed about 2 hours
+10 minutes in  
+**Result:** An onboarding redesign, with a roadmap, a sprint plan and working code (v0.10.0)
 
 ---
 
@@ -16,11 +17,11 @@ We had a crazy idea: **What if we asked the AI agents themselves to redesign the
 
 ## The Setup
 
-We connected 5 AI agents from 3 different companies to a single Remembra memory pool:
+We connected 5 AI agents to a single Remembra memory pool. Their models came from 3 companies:
 
-| Agent | Company | Role |
-|-------|---------|------|
-| **Clawdbot** | Anthropic | Orchestrator, synthesizer |
+| Agent | Made by (model) | Role |
+|-------|-----------------|------|
+| **Clawdbot** | Open-source agent gateway by Peter Steinberger and the community (ran Anthropic's Claude Opus 4.5 that day) | Orchestrator, synthesizer |
 | **Claude Code** | Anthropic | Performance analysis, slim mode spec |
 | **Claude Desktop** | Anthropic | Connectivity testing |
 | **Codex CLI** | OpenAI | Architecture design, bash scripts |
@@ -32,7 +33,7 @@ All sharing the same memory at `api.remembra.dev`.
 
 ## The Process
 
-### Phase 1: Connect All Agents (20 min)
+### Phase 1: Connect All Agents (10:11 to 10:59 EDT, about 48 min)
 
 We configured each agent to connect to the same Remembra instance:
 - Same API URL
@@ -40,11 +41,13 @@ We configured each agent to connect to the same Remembra instance:
 - Same project ID
 - Same user ID
 
-**Critical learning:** All agents MUST use identical `REMEMBRA_PROJECT` and `REMEMBRA_USER_ID` — otherwise they're in different memory spaces.
+**What we learned then:** all agents must use the same `REMEMBRA_PROJECT`, or they are in different memory
+spaces. (`REMEMBRA_USER_ID` does not need to match: the server takes the user from the API key.)
 
-### Phase 2: Survey All Agents (30 min)
+### Phase 2: Survey the Agents (11:01 to 11:34 EDT)
 
-Each agent answered the same feedback survey:
+Four agents (Clawdbot, Claude Code, Codex and Gemini) answered the same feedback survey; Claude Desktop was used
+for connectivity tests:
 1. Verify connectivity (recall a shared memory)
 2. Rate setup difficulty (1-10)
 3. Top 3 frustrations
@@ -60,7 +63,7 @@ Each agent answered the same feedback survey:
 | Claude Code | 6/10 | 50KB payloads for simple queries |
 | Codex | 8/10 | Can't tell DNS from auth from config failures |
 
-### Phase 3: Collaborative Redesign (40 min)
+### Phase 3: Collaborative Redesign (sprint plan at 11:52 EDT)
 
 Each agent proposed solutions from their expertise:
 
@@ -85,7 +88,7 @@ Each agent proposed solutions from their expertise:
 
 ## The Results
 
-### Delivered in 90 Minutes:
+### Delivered that day:
 
 1. **Universal installer script** (Python) — Auto-detects 6 AI tools
 2. **Codex-specific installer** (Bash) — Handles sandbox networking
@@ -96,7 +99,7 @@ Each agent proposed solutions from their expertise:
 
 ### Consensus Features:
 
-Every agent agreed on these priorities:
+The four surveyed agents agreed on these priorities:
 1. A one-command installer (it shipped as `remembra-install`)
 2. `remembra doctor` — Self-diagnosing setup
 3. Centralized credentials — One file, all agents read
@@ -136,17 +139,15 @@ When 4 different agents independently identify the same problems, you know what 
 
 ## What We Shipped
 
-Based on this session, we're shipping:
+From this session:
 
-**v0.9.1** (Hotfix)
-- Fix store timeout (entity extraction bottleneck)
-- Add a slim recall response (`slim: true`)
-
-**v0.10.0** (Major)
+**v0.10.0** (committed at 12:22 EDT the same day)
 - Universal installer (`remembra-install`)
-- `remembra doctor` command
+- `remembra-doctor` command
 - Centralized credentials
 - Local bridge for sandboxed agents
+- A slim recall response (`slim: true`)
+- Setup docs, with tests
 
 ---
 
@@ -165,9 +166,9 @@ See [Multi-Agent Setup Guide](../guides/multi-agent-shared-memory.md) for detail
 
 ## The Bottom Line
 
-**5 AI agents. 3 companies. 1 shared memory. 90 minutes.**
+**5 AI agents. Models from 3 companies. 1 shared memory. About 100 minutes to a sprint plan.**
 
-Result: A complete product redesign with working code, roadmap, and sprint plan.
+Result: an onboarding redesign with working code, a roadmap and a sprint plan.
 
 This is what Remembra enables: agents from different vendors working from one shared memory.
 
