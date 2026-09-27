@@ -18,28 +18,40 @@ echo -e "${YELLOW}🔍 Running Remembra pre-commit checks...${NC}"
 
 ERRORS=0
 
+# Staged files are read NUL-separated (a name may hold spaces or newlines) and
+# from the index (":0:<path>", the staged content, not the working copy). The
+# loops read from process substitution, so ERRORS set inside them sticks.
+staged_files() {
+    git diff --cached --name-only -z --diff-filter=ACM
+}
+
+staged_blob() {
+    git cat-file blob ":0:$1" 2>/dev/null
+}
+
 # ============================================
 # CHECK 1: Banned words in staged .md files
 # ============================================
 BANNED_WORDS="suck|trash|garbage|shit|crap"
-STAGED_MD_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.md$' || true)
-
-if [ -n "$STAGED_MD_FILES" ]; then
-    echo "Checking markdown files for unprofessional content..."
-    
-    for file in $STAGED_MD_FILES; do
-        # Get the staged content (not the working copy)
-        MATCHES=$(git show ":$file" 2>/dev/null | grep -inE "\b($BANNED_WORDS)\b" || true)
-        
-        if [ -n "$MATCHES" ]; then
-            echo -e "${RED}❌ BLOCKED: Found banned words in $file${NC}"
-            echo "$MATCHES" | while read -r line; do
-                echo -e "   ${RED}→ $line${NC}"
-            done
-            ERRORS=1
-        fi
-    done
-fi
+ANNOUNCED=0
+while IFS= read -r -d '' file; do
+    case "$file" in
+        *.md) ;;
+        *) continue ;;
+    esac
+    if [ $ANNOUNCED -eq 0 ]; then
+        echo "Checking markdown files for unprofessional content..."
+        ANNOUNCED=1
+    fi
+    MATCHES=$(staged_blob "$file" | grep -inE "\b($BANNED_WORDS)\b" || true)
+    if [ -n "$MATCHES" ]; then
+        echo -e "${RED}❌ BLOCKED: Found banned words in $file${NC}"
+        echo "$MATCHES" | while read -r line; do
+            echo -e "   ${RED}→ $line${NC}"
+        done
+        ERRORS=1
+    fi
+done < <(staged_files)
 
 # ============================================
 # CHECK 2: pyproject.toml maintainer check
@@ -77,14 +89,13 @@ fi
 # "rem_" + 40 or more random characters (mixed case with digits). Tests build
 # fake keys at runtime; a real one must be revoked, not just deleted, because
 # a commit is published the moment it is pushed. The key is never printed.
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACM || true)
-for file in $STAGED_FILES; do
-    if git show ":$file" 2>/dev/null | grep -aoE '(^|[^A-Za-z0-9_])rem_[A-Za-z0-9_-]{40,}' | grep '[A-Z]' | grep '[a-z]' | grep -q '[0-9]'; then
+while IFS= read -r -d '' file; do
+    if staged_blob "$file" | grep -aoE '(^|[^A-Za-z0-9_])rem_[A-Za-z0-9_-]{40,}' | grep '[A-Z]' | grep '[a-z]' | grep -q '[0-9]'; then
         echo -e "${RED}❌ BLOCKED: $file contains what looks like a Remembra API key (rem_...)${NC}"
         echo -e "   ${YELLOW}Remove it and revoke the key on the server; tests assemble fake keys at runtime.${NC}"
         ERRORS=1
     fi
-done
+done < <(staged_files)
 
 # ============================================
 # FINAL RESULT

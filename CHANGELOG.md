@@ -300,7 +300,9 @@ redact command-line credentials from handoffs stored before this release.
   workflow installs are hash-pinned. Dependabot watches `uv.lock` and the dashboard, and CI runs `pip-audit`.
   CI and the git hooks refuse private notes, a built docs site, office documents, public IP addresses,
   real-format API keys and personal details in test fixtures; internal runbooks left the repository and the
-  benchmark corpus is synthetic.
+  benchmark corpus is synthetic. CI checks every commit of a pull request and of a direct push (a key added
+  and removed within one push is still published), and the pre-commit hook reads file names with spaces.
+  Run `./scripts/install-hooks.sh` in your clone to get the current hooks.
 
 ## [0.16.0] - 2026-09-26 - Remembra Relay
 

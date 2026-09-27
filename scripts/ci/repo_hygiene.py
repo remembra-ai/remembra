@@ -28,11 +28,15 @@ Modes:
 
     python scripts/ci/repo_hygiene.py tree                  # every tracked file (CI, tests)
     python scripts/ci/repo_hygiene.py range BASE..HEAD      # every commit in a range (CI on pull requests)
+    python scripts/ci/repo_hygiene.py pushed BEFORE AFTER   # every commit a push added (CI on push)
     python scripts/ci/repo_hygiene.py pre-push REMOTE [URL] # the commits a push would publish (hooks/pre-push)
 
 In pre-push mode git passes one line per ref on stdin; every commit the push
 would add to the remote is checked, not just the tip, because a commit that
 adds a private file and a later one that deletes it would both be published.
+The pushed mode is the same check after the fact, for a push that went
+straight to a branch (CI's push event: github.event.before and github.sha);
+it can only report what is already public, so a key it finds must be revoked.
 Exit status: 0 clean, 1 findings (listed on stderr), 2 usage error.
 
 Runs on the Python 3.9 that macOS ships, because the pre-push hook uses it.
@@ -536,6 +540,30 @@ def commits_in_range(root: Path, spec: str) -> list[str]:
     return [c for c in _git(root, "rev-list", "--reverse", spec).split() if c]
 
 
+def _known_commit(root: Path, sha: str) -> bool:
+    done = subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=root, capture_output=True)
+    return done.returncode == 0
+
+
+def commits_pushed(root: Path, before: str, after: str) -> list[str]:
+    """The commits a push that moved a branch from ``before`` to ``after`` added (CI on push).
+
+    ``before`` is the zero SHA for a new branch, and may be missing from the
+    clone after a force push: then every commit that no other remote branch
+    has is checked (remote branches that already contain ``after``, the pushed
+    branch itself among them, do not count).
+    """
+    root = _toplevel(Path(root))
+    if before and before != ZERO_SHA and _known_commit(root, before):
+        spec = [after, f"^{before}"]
+    else:
+        refs = _git(root, "for-each-ref", "--format=%(refname)", "refs/remotes/").split()
+        containing = set(_git(root, "for-each-ref", "--contains", after, "--format=%(refname)", "refs/remotes/").split())
+        others = [ref for ref in refs if ref not in containing]
+        spec = [after, "--not", *others] if others else [after]
+    return [c for c in _git(root, "rev-list", "--reverse", *spec).split() if c]
+
+
 def commits_to_push(root: Path, remote: str, ref_lines: Iterable[str]) -> list[str]:
     """The commits a push would add to the remote, from the lines git gives pre-push on stdin."""
     commits: list[str] = []
@@ -547,9 +575,7 @@ def commits_to_push(root: Path, remote: str, ref_lines: Iterable[str]) -> list[s
         _local_ref, local_sha, _remote_ref, remote_sha = parts
         if local_sha == ZERO_SHA:  # deleting a remote ref publishes nothing
             continue
-        known = remote_sha != ZERO_SHA and (
-            subprocess.run(["git", "cat-file", "-e", f"{remote_sha}^{{commit}}"], cwd=root, capture_output=True).returncode == 0
-        )
+        known = remote_sha != ZERO_SHA and _known_commit(root, remote_sha)
         if known:
             spec = [local_sha, f"^{remote_sha}"]
         else:
@@ -567,10 +593,10 @@ def commits_to_push(root: Path, remote: str, ref_lines: Iterable[str]) -> list[s
 # ---------------------------------------------------------------------------
 
 
-def _report(found: list[Finding], what: str) -> int:
+def _report(found: list[Finding], what: str, verb: str = "would publish") -> int:
     if not found:
         return 0
-    print(f"repo_hygiene: {what} would publish private material:", file=sys.stderr)
+    print(f"repo_hygiene: {what} {verb} private material:", file=sys.stderr)
     for f in found:
         print(f"  {f}", file=sys.stderr)
     print(
@@ -586,6 +612,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("tree", help="check every tracked file")
     rng = sub.add_parser("range", help="check every commit in a revision range")
     rng.add_argument("spec", help="for example origin/main..HEAD")
+    pushed = sub.add_parser("pushed", help="check every commit a push added (CI on push)")
+    pushed.add_argument("before", help="the branch's tip before the push (github.event.before; zero SHA if new)")
+    pushed.add_argument("after", help="the branch's tip after the push (github.sha)")
     push = sub.add_parser("pre-push", help="check what a push would publish (ref lines on stdin)")
     push.add_argument("remote")
     push.add_argument("url", nargs="?")
@@ -605,6 +634,16 @@ def main(argv: list[str] | None = None) -> int:
         return _report(check_tree(root), "the tracked tree")
     if args.mode == "range":
         return _report(check_commits(root, commits_in_range(root, args.spec)), f"the commits in {args.spec}")
+    if args.mode == "pushed":
+        found = check_commits(root, commits_pushed(root, args.before, args.after))
+        code = _report(found, f"the push {args.before[:12]}..{args.after[:12]}", "published")
+        if found:
+            print(
+                "These commits are already public: revoke any key listed above now (removing it in a later "
+                "commit does not unpublish it), then install the hooks (./scripts/install-hooks.sh).",
+                file=sys.stderr,
+            )
+        return code
     commits = commits_to_push(root, args.remote, sys.stdin.read().splitlines())
     return _report(check_commits(root, commits), f"this push to {args.remote}")
 

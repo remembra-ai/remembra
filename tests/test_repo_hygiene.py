@@ -501,3 +501,140 @@ def test_the_pre_commit_hook_refuses_a_staged_remembra_key(tmp_path: Path) -> No
     output = done.stdout + done.stderr
     assert "demo.py" in output and "Remembra API key" in output
     assert key not in output
+
+
+# ---------------------------------------------------------------------------
+# Whole-release review: a key added and removed within ONE direct push to main
+# ---------------------------------------------------------------------------
+
+
+def _ci_clone(tmp_path: Path, remote: Path) -> Path:
+    """What CI checks out on a push event: a full clone with every branch as a remote ref."""
+    clone = tmp_path / "ci"
+    subprocess.run(["git", "clone", "-q", str(remote), str(clone)], check=True, env=_env(tmp_path), capture_output=True)
+    return clone
+
+
+def _hygiene_run(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), *args], cwd=cwd, env=_env(cwd.parent), capture_output=True, text=True, timeout=60
+    )
+
+
+def test_ci_checks_every_commit_a_direct_push_added(tmp_path: Path) -> None:
+    """The owner pushes straight to main (no pull request). On a push CI ran only the tree check, so a key committed
+    and deleted again within the same push passed every CI guard. The push step checks before..after."""
+    remote = tmp_path / "remote.git"
+    work = tmp_path / "work"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True, env=_env(tmp_path))
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True, env=_env(tmp_path))
+    _git(work, "remote", "add", "origin", str(remote))
+    before = _commit(work, {"README.md": "public\n"}, "init")
+    _git(work, "push", "-q", "origin", "main")  # no hooks installed here, as on a machine without them
+    key = _fake_remembra_key()
+    _commit(work, {"demo/demo_fast.py": f'API_KEY = "{key}"\n'}, "demo")
+    after = _commit(work, {"demo/demo_fast.py": 'API_KEY = os.environ["REMEMBRA_API_KEY"]\n'}, "remove the key again")
+    _git(work, "push", "-q", "origin", "main")
+
+    ci = _ci_clone(tmp_path, remote)
+    assert _hygiene_run(ci, "tree").returncode == 0  # the finding: the tree is clean again
+    done = _hygiene_run(ci, "pushed", before, after)
+    assert done.returncode == 1, done.stderr
+    assert "demo/demo_fast.py:1: [api-key]" in done.stderr and "revoke" in done.stderr
+    assert key not in done.stderr + done.stdout
+    # A clean push passes, and so does a push of nothing new.
+    clean = _commit(work, {"docs/notes.md": "fine\n"}, "docs")
+    _git(work, "push", "-q", "origin", "main")
+    _git(ci, "pull", "-q", "origin", "main")
+    assert _hygiene_run(ci, "pushed", after, clean).returncode == 0
+    assert _hygiene_run(ci, "pushed", clean, clean).returncode == 0
+
+
+def test_the_push_check_on_a_new_branch_or_after_a_force_push(tmp_path: Path) -> None:
+    remote = tmp_path / "remote.git"
+    work = tmp_path / "work"
+    subprocess.run(["git", "init", "-q", "--bare", str(remote)], check=True, env=_env(tmp_path))
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True, env=_env(tmp_path))
+    _git(work, "remote", "add", "origin", str(remote))
+    _commit(work, {"README.md": "public\n"}, "init")
+    _git(work, "push", "-q", "origin", "main")
+    _git(work, "switch", "-q", "-c", "feat/x")
+    key = _fake_remembra_key()
+    _commit(work, {"demo/x.py": f'KEY = "{key}"\n'}, "add")
+    tip = _commit(work, {"demo/x.py": "KEY = None\n"}, "remove")
+    _git(work, "push", "-q", "origin", "feat/x")
+
+    ci = _ci_clone(tmp_path, remote)
+    # A new branch: GitHub sends the zero SHA as "before"; only what main does not have is checked.
+    done = _hygiene_run(ci, "pushed", "0" * 40, tip)
+    assert done.returncode == 1 and "demo/x.py:1: [api-key]" in done.stderr and "README.md" not in done.stderr
+    # A force push whose old tip this clone never had: the same fallback.
+    done = _hygiene_run(ci, "pushed", "f" * 40, tip)
+    assert done.returncode == 1 and "demo/x.py:1: [api-key]" in done.stderr
+
+
+def test_ci_runs_the_push_check_on_push_events() -> None:
+    import yaml
+
+    steps = yaml.safe_load((ROOT / ".github" / "workflows" / "ci.yml").read_text())["jobs"]["hygiene"]["steps"]
+    push = [s for s in steps if s.get("if") == "github.event_name == 'push'"]
+    assert len(push) == 1, steps
+    assert push[0]["env"] == {"BEFORE": "${{ github.event.before }}"}
+    assert push[0]["run"] == 'python scripts/ci/repo_hygiene.py pushed "${BEFORE}" "${GITHUB_SHA}"'
+    checkout = next(s for s in steps if str(s.get("uses", "")).startswith("actions/checkout@"))
+    assert checkout["with"]["fetch-depth"] == 0  # every branch, so a new branch is compared with the others
+
+
+# ---------------------------------------------------------------------------
+# Whole-release review: the pre-commit hook reads staged names NUL-separated
+# ---------------------------------------------------------------------------
+
+
+def _precommit_repo(tmp_path: Path) -> Path:
+    work = tmp_path / "work"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(work)], check=True, env=_env(tmp_path))
+    hook = work / ".git" / "hooks" / "pre-commit"
+    shutil.copy(ROOT / "hooks" / "pre-commit", hook)
+    hook.chmod(0o755)
+    _commit(work, {"README.md": "public\n"}, "init")
+    return work
+
+
+@pytest.mark.parametrize(
+    "names",
+    [
+        ["demo/probe with space.py"],  # the review's repro: the hook said "All pre-commit checks passed!"
+        ["demo/probe_demo.py", "demo/probe with space.py"],
+        ["demo/tab\there.py"],
+        ["demo/new\nline.py"],
+        ["0:starts-like-a-stage.py"],
+    ],
+)
+def test_the_pre_commit_hook_refuses_a_key_in_a_file_whose_name_has_spaces(tmp_path: Path, names: list[str]) -> None:
+    work = _precommit_repo(tmp_path)
+    key = _fake_remembra_key()
+    for name in names:
+        path = work / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f'API_KEY = "{key}"\n')
+        _git(work, "add", "--", name)
+    done = _git(work, "commit", "-q", "-m", "demo", check=False)
+    output = done.stdout + done.stderr
+    assert done.returncode != 0, output
+    assert output.count("looks like a Remembra API key") == len(names), output
+    assert key not in output
+
+
+def test_the_pre_commit_hook_checks_markdown_whose_name_has_spaces(tmp_path: Path) -> None:
+    work = _precommit_repo(tmp_path)
+    (work / "docs").mkdir()
+    banned = "tr" + "ash"  # one of the hook's banned words, not spelled out in this file
+    (work / "docs" / "release notes.md").write_text(f"This old code was {banned}.\n")
+    _git(work, "add", "docs/release notes.md")
+    done = _git(work, "commit", "-q", "-m", "notes", check=False)
+    assert done.returncode != 0 and "docs/release notes.md" in done.stdout + done.stderr
+    # A clean file with spaces in its name still commits.
+    (work / "docs" / "release notes.md").write_text("Fine notes.\n")
+    _git(work, "add", "docs/release notes.md")
+    done = _git(work, "commit", "-q", "-m", "notes", check=False)
+    assert done.returncode == 0, done.stdout + done.stderr

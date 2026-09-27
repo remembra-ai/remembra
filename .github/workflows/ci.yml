@@ -230,9 +230,11 @@ jobs:
   # ---------------------------------------------------------------------------
   # Repository hygiene: nothing private in the public repo
   # ---------------------------------------------------------------------------
-  # scripts/ci/repo_hygiene.py: the tracked tree, and on a pull request every
-  # commit it adds (a file added and later deleted is still published).
-  # hooks/pre-push runs the same check before anything leaves a laptop.
+  # scripts/ci/repo_hygiene.py: the tracked tree, on a pull request every
+  # commit it adds, and on a push every commit the push added (a file added and
+  # later deleted is still published). hooks/pre-push runs the same check before
+  # anything leaves a laptop; the push step can only report what is already
+  # public (a key it finds must be revoked), so the hooks are the prevention.
   hygiene:
     name: Repository hygiene
     runs-on: ubuntu-latest
@@ -250,3 +252,8 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         run: python scripts/ci/repo_hygiene.py range "origin/${BASE_REF}..HEAD"
+      - name: Commits in this push
+        if: github.event_name == 'push'
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: python scripts/ci/repo_hygiene.py pushed "${BEFORE}" "${GITHUB_SHA}"
