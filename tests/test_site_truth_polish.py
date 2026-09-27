@@ -103,9 +103,10 @@ def _mkdocs_excluded() -> list[str]:
 
 
 def _public_files() -> list[Path]:
-    """What reaches readers: the README, changelog and release notes, package and registry metadata, the
-    published docs, everything remembra.dev serves as text, the page sources kept in scripts/, and the
-    dashboard's screens (its sign-in page is public)."""
+    """What reaches readers: the README, changelog and release notes, ARCHITECTURE.md, the TypeScript SDK's
+    README (it ships in the npm package), package and registry metadata, the published docs, everything
+    remembra.dev serves as text, the page sources kept in scripts/, and the dashboard's screens (its sign-in
+    page is public)."""
     excluded = _mkdocs_excluded()
 
     def published(path: Path) -> bool:
@@ -115,6 +116,8 @@ def _public_files() -> list[Path]:
     files = [
         ROOT / "README.md",
         ROOT / "CHANGELOG.md",
+        ROOT / "ARCHITECTURE.md",
+        ROOT / "sdk" / "typescript" / "README.md",
         ROOT / "pyproject.toml",
         ROOT / "server.json",
         ROOT / "src" / "remembra" / "api" / "well_known" / "server-card.json",
@@ -153,6 +156,8 @@ def test_the_public_file_list_covers_the_site_and_the_registry_metadata() -> Non
         "server.json",
         "pyproject.toml",
         "packages/remembra-mcp/README.md",
+        "ARCHITECTURE.md",
+        "sdk/typescript/README.md",
         "dashboard/src/brand/AuthFrame.tsx",
     ):
         assert must in files, must
@@ -503,7 +508,7 @@ async def test_docs_state_the_mcp_tool_count_the_server_registers() -> None:
     tools, resources = await server.mcp.list_tools(), await server.mcp.list_resources()
     count = re.compile(
         r"\ball (\d+) tools and (\d+) resources\b|\bhas (\d+) tools\b|\bserver with (\d+) tools\b"
-        r"|tools \((\d+)\)|the (\d+) tools\b"
+        r"|tools \((\d+)\)|the (\d+) tools\b|, (\d+) tools\b"
     )
     stated = []
     for path in _public_files():

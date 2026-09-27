@@ -578,9 +578,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="Add (or --remove) the Remembra MCP server in your AI agents' configs. A dry run unless --apply.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Agents: Claude Desktop, Claude Code (user scope, ~/.claude.json), Codex,
-Cursor and Gemini CLI. --all configures each one whose config directory
-exists. Windsurf is unverified: only --agent windsurf writes it
+Agents: Claude Desktop (macOS only), Claude Code (user scope,
+~/.claude.json), Codex, Cursor and Gemini CLI. --all configures each one
+whose config directory exists. Windsurf is unverified: only --agent windsurf writes it
 (~/.codeium/windsurf/mcp_config.json). Qwen Code and Kimi are not written
 here yet; add remembra-mcp to them by hand:
 https://docs.remembra.dev/guides/relay/#mcp-by-hand
@@ -809,7 +809,7 @@ def main(argv: list[str] | None = None) -> int:
         )
     else:
         restart = "Restart your agents to load the new MCP config. " if agents else ""
-        print(f"\n{restart}Next: remembra-relay connect")
+        print(f"\n{restart}Next: remembra-relay connect --apply writes the session hooks (without --apply it shows the changes).")
     return 1 if (failed or problems) else 0
 
 

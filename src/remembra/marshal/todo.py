@@ -4,7 +4,7 @@
 key (the user types it into ``remembra-install``'s hidden prompt), running
 it again with ``--apply`` after a dry run, writing unverified adapters on
 purpose, and trusting the hooks inside Codex, which skips untrusted hooks
-without a message.
+(its interactive CLI asks about new or changed ones when it starts).
 
 The list is worked out after ``connect`` has run, from the files as they are
 now: each agent ``connect`` looked at is planned again with the same relay

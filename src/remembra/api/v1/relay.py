@@ -656,8 +656,10 @@ async def close_session(
     response: Response,
 ) -> dict[str, Any]:
     """Build the handoff (Done / Not done / Failing / Next) from the session's
-    facts. Idempotent per (agent_id, session_id): closing again updates the same
-    handoff (the previous version is superseded, never duplicated).
+    facts. Closing again with the same (agent_id, session_id) in the same
+    project updates that session's handoff, and the previous version is
+    superseded. A close in a different project stores a separate handoff there.
+    A close older than the stored one changes nothing.
 
     ``health`` in the response is the server's grade of the handoff (Ready,
     Ready with warnings, Incomplete, Conflicted, Blocked) with the ``missing``

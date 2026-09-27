@@ -77,7 +77,7 @@
       "expect": {
         "code": "KEY_NEVER_USED",
         "proven": true,
-        "verdict": "Your keys have never been used: the install never saved one, or no hook ran.",
+        "verdict": "Your keys have never been used: nothing sent with them has reached Remembra. The install never saved one, no hook ran, or its request was blocked or went to another server.",
         "lines": [
           "keys: 1 active · never used",
           "entries: claude-code: no handoffs or checkpoints yet",
@@ -273,7 +273,7 @@
         "code": "CODEX_TRUST_MISSING",
         "proven": false,
         "verdict": "Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust.",
-        "detail": "Codex skips untrusted hooks without a message. No brief or handoff from Codex has reached Remembra.",
+        "detail": "Codex runs a hook only after the user trusts it. No brief or handoff from Codex has reached Remembra.",
         "causes": [
           "Codex hooks not trusted yet",
           "connect ran as a dry run (the old homepage lines did this)",

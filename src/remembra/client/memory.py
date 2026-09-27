@@ -32,7 +32,7 @@ Usage:
     memory = Memory(
         base_url="http://localhost:8787",
         user_id="user_123",
-        enable_shadow_ttl=True,  # Cache TTLs client-side for lower latency
+        enable_shadow_ttl=True,  # Record expiry locally; check it with is_memory_valid()
     )
 """
 
@@ -143,7 +143,8 @@ class Memory:
         timeout: Request timeout in seconds (default: 30)
         auto_expire_temporal: Auto-detect temporal phrases and set TTL (v0.12+)
         temporal_min_confidence: Minimum confidence for temporal detection (0.0-1.0)
-        enable_shadow_ttl: Enable client-side TTL caching for lower latency (v0.12+)
+        enable_shadow_ttl: Record each stored memory's expiry locally, for is_memory_valid() (v0.12+).
+            The client does not skip any server call because of it.
         shadow_ttl_max_entries: Maximum entries in shadow TTL cache
         agent_id: Logical id of the agent using this client (e.g. "claude-code").
             Stamped on every store and used as the default inbox/brief agent.
@@ -566,9 +567,10 @@ class Memory:
         """
         Forget (delete) memories.
 
-        GDPR-compliant deletion. Give exactly one of ``memory_id``,
-        ``entity`` or ``all_memories=True``; nothing is sent otherwise. The
-        server deletes only the authenticated account's memories. To delete
+        Give exactly one of ``memory_id``, ``entity`` or ``all_memories=True``;
+        nothing is sent otherwise. The server deletes only the authenticated
+        account's memories, with their vectors, at once; conflict records that
+        quote the text stay until the account is erased. To delete
         every memory in one project use ``forget_project(project_id)``.
 
         Args:

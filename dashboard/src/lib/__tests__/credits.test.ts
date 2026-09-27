@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { UsageSummaryResponse } from '../api';
-import { clampSeats, creditsView, degradedCopy, formatUsd, parseSeatDraft, planLine, resetLabel } from '../credits';
+import { FREE_UNENRICHED_PER_DAY, clampSeats, creditsView, degradedCopy, formatUsd, parseSeatDraft, planLine, resetLabel } from '../credits';
 
 function summary(overrides: Partial<UsageSummaryResponse> = {}, credits: Partial<UsageSummaryResponse['credits']> = {}): UsageSummaryResponse {
   return {
@@ -90,6 +90,16 @@ describe('degradedCopy', () => {
     const copy = degradedCopy(summary({ enrichment: { status: 'degraded', reason: 'free_breaker_open' } }));
     expect(copy?.title).toMatch(/paused/);
     expect(copy?.body).toMatch(/Paid plans are never paused/);
+  });
+  it("names the Free plan's daily cap on stores without enrichment, and only on Free", () => {
+    // Past it the server answers 429, so "new memories still save" is not the whole story on Free.
+    expect(FREE_UNENRICHED_PER_DAY).toBe(300);
+    for (const reason of ['credits_exhausted', 'free_breaker_open'] as const) {
+      const free = degradedCopy(summary({ enrichment: { status: 'degraded', reason } }));
+      expect(free?.body).toContain('On Free, at most 300 a day are saved this way.');
+      const paid = degradedCopy(summary({ plan: 'solo', plan_name: 'Solo', enrichment: { status: 'degraded', reason } }));
+      expect(paid?.body).not.toContain('300 a day');
+    }
   });
 });
 

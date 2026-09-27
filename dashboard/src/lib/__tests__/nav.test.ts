@@ -30,6 +30,12 @@ describe('sections', () => {
     expect(new Set(tabs)).toEqual(new Set(Object.keys(TABS)));
   });
 
+  it("says where an inbox note shows up: after the last session, not first", () => {
+    // render_brief (relay/handoff.py) puts the last session before the inbox.
+    expect(TABS.inbox.subtitle).toContain('after the last session');
+    expect(TABS.inbox.subtitle).not.toMatch(/\bleads\b/);
+  });
+
   it('maps sub-pages to their section', () => {
     expect(sectionOf('keys').id).toBe('settings');
     expect(sectionOf('entities').id).toBe('graph');

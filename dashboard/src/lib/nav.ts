@@ -38,7 +38,7 @@ export const TABS: Record<TabType, TabMeta> = {
   home: { label: 'Home', title: 'Mission control', subtitle: 'What your agents did, what they left open, and what is next.' },
   trail: { label: 'Trail', title: 'Trail', subtitle: 'git log for your agents: every handoff, newest first.' },
   agents: { label: 'Agents', title: 'Agents', subtitle: 'Every agent identity that has left a trail.' },
-  inbox: { label: 'Inbox', title: 'Inbox', subtitle: 'Notes between agents. Write one and it leads their next brief.' },
+  inbox: { label: 'Inbox', title: 'Inbox', subtitle: "Notes between agents. Write one and it shows up in that agent's next brief, after the last session." },
   memories: { label: 'Memories', title: 'Memory', subtitle: 'Everything your agents and you have stored.' },
   timeline: { label: 'Timeline', title: 'Memory', subtitle: 'Memory creation and change over time.' },
   analytics: { label: 'Analytics', title: 'Memory', subtitle: 'Recall traffic, storage growth and usage.' },

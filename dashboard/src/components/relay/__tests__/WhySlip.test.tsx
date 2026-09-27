@@ -213,7 +213,7 @@ describe('ConnectChecklist rows', () => {
     const row = /<li data-row-state="codex-waiting">(.*?)<\/li>/s.exec(html)?.[1] ?? '';
     const codex = text(row);
     expect(codex).toMatch(/^Codex waiting for its first handoff Not connected yet why\? command /);
-    expect(codex).toMatch(/using Codex\? trust its 3 hooks once: Codex Settings > Hooks > Trust · \/hooks in the CLI$/);
+    expect(codex).toMatch(/using Codex\? trust its 3 hooks, and again when one changes: Codex Settings > Hooks > Trust · \/hooks in the CLI$/);
     expect(text(html)).not.toContain('needs you');
     expect(row).not.toMatch(/text-fail|border-fail|border-dashed/); // no fail colour on an unproven claim
     expect(row).toContain('border-rule');

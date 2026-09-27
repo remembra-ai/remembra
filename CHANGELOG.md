@@ -7,11 +7,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**Upgrading a server you run.** The background pass no longer deletes old notes unless you set
+`REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_ENABLED=true`. With `REMEMBRA_ENCRYPTION_KEY` set, take a Qdrant snapshot and
+run `python scripts/maintenance/reencrypt_payloads.py --apply` once: vector-store records written before this
+release keep their facts and metadata lists in plaintext until you do. Keys already saved in status values or
+metadata are hidden when read; to rewrite the stored rows, back up the database and run
+`python scripts/maintenance/redact_stored_secrets.py --apply`. The server runs neither script by itself. A key
+whose scopes list permissions its role does not hold loses them, and a key with custom scopes needs
+`conflict:manage` to resolve conflicts. A sign-in in progress during the upgrade has to be started again.
+
 ### Changed
 
 - **`m` in a TTL now means minutes.** Until now the server read `m` as months, and the temporal guide said so.
   If you send `ttl="3m"` to mean three months, send `3mo`: `3m` now expires after three minutes.
   `REMEMBRA_CHECKPOINT_DEFAULT_TTL` is read the same way.
+- **The background pass deletes nothing unless decay cleanup is on.** Every run, the sleep-time pass deleted up
+  to 100 memories of each account that had stored or changed something since the previous run: memories over 90
+  days old, never returned by a search and with no expiry, handoffs and structured checkpoints included. Now it
+  deletes nothing unless the server operator sets
+  `REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_ENABLED=true`. It is off by default, and Remembra Cloud does not set it.
+  When it is on, each run deletes up to 100 of an account's ordinary notes that are older than
+  `REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_DAYS` (default 90), were never returned by a search and have no expiry,
+  only for accounts that stored or changed something since the previous run. Each deleted note gets a
+  `memory_decayed` entry in the account's security log. Handoffs, checkpoints, status values, pinned memories
+  and source records are never deleted or rewritten by the pass. `GET /api/v1/admin/sleep-time/status` now
+  includes `decay_cleanup_enabled`.
+- **Viewer keys are read-only.** Every API route that changes data refuses a viewer key. A viewer key can no
+  longer create, rename, revoke or delete API keys (its own included); create, change, delete, join or leave
+  teams, send team invites or link spaces to teams; send helpful/unhelpful feedback on a memory (feedback
+  changes how recall ranks it); start or stop audio capture; redeem a promo code or ask for the account's
+  verification email. It can still recall, read entities and list the account's keys. Editor keys can still
+  create editor and viewer keys, rename keys, and revoke keys with no more access than themselves.
+- **Permissions.** Scopes set on a key only narrow its role; they never add a permission the role does not
+  hold (a viewer key with the `memory:store` scope could store). New permission `account:manage` (admin and
+  editor): redeeming a promo code and sending the verification email of an account created by API signup.
+  Editors hold `key:create` and `key:revoke` explicitly. Resolving or dismissing a memory conflict needs
+  `conflict:manage` instead of `memory:store`; admin and editor hold both, so only keys with custom scopes
+  notice. Reading the audit log (`GET /api/v1/admin/audit`) needs `admin:audit` and exporting it `admin:export`;
+  only admin keys hold either. Entity routes need `entity:read` and listing keys `key:list`; every role has
+  both. `GET /api/v1/admin/permissions` returns the role table every route enforces; it returned its own
+  hardcoded copy.
+- The dashboard's **Generate Access Token** form offers Editor and Viewer only and says "Admin keys can only be
+  created with the server's master key." It says what each role can do: Editor "Store, recall, change and delete
+  memories. Manage webhooks. Create and revoke editor or viewer keys."; Viewer "Read only. Recall memories, read
+  entities and list keys. Cannot store, change or delete anything."
+- **The grade and facts label say the server does not check the facts.** For a close sent with a key scoped
+  to that agent whose client declared `facts_source` `relay-cli:git` or `relay-cli:git+transcript`, the brief's
+  health line ended "Graded by the server from the recorded facts." It now ends "Graded by the server from facts
+  sent with this agent's key, reported as collected by remembra-relay. The server does not verify them." Every
+  other close still ends "Graded by the server from facts the agent reported, not verified." The facts label on
+  the brief's Last session line now reads "reported as collected by remembra-relay from git (and the session
+  transcript) (not checked)", and new handoffs store the same words in their "Facts:" line. Handoffs stored
+  before keep the old wording in their stored text, which the trail and timeline show.
+- **Sign in with Google or GitHub no longer takes over an account whose email was never verified.** It connects
+  to an existing account by email only when that account's email is verified and the provider says its own
+  email is verified. Otherwise it is refused, and the dashboard says "You already have an account with this
+  email. Sign in with your password first. Then add Google/GitHub in Settings." Nothing is linked, the email
+  stays unverified, no account check opens and nobody is signed out. GitHub is still never connected by email,
+  only from a signed-in session (Settings > Sign-in methods). Google still connects by email to an account whose
+  email is verified, for Gmail or Google Workspace addresses Google says are verified. The only thing that opens
+  an account check now is an emailed password reset on an account whose email was never verified; checks a
+  Google or GitHub sign-in opened before keep working.
+- **2FA at every sign-in.** Every sign-in that gives a dashboard session (email and password, Google, GitHub)
+  asks for the 2FA code when 2FA is on, with no exceptions during an account check. The emailed password reset
+  that first proves the mailbox of an account whose email was never verified turns off 2FA set up before that
+  point; this is in the audit log and listed as removed in the email sent when the account check finishes. 2FA
+  turned on after the mailbox was proven stays on through later resets. A check that a Google or GitHub sign-in
+  opened before this release, with 2FA from before verification still on, asks for that code at every sign-in:
+  an emailed password reset turns it off, or the owner enters a current code in the check to keep it.
+- **A password reset during an open account check disconnects the apps connected since it opened** (Claude,
+  ChatGPT and other app connections). Their tokens stop working at once; each one is in the audit log and listed
+  as removed in the email sent when the check finishes. Apps connected before the email was verified stay
+  connected and stay listed in the check. Unchanged: a reset on a verified account with no open check, a password
+  change and deactivating the account disconnect all apps; a reset on an account whose email was never verified
+  keeps its app connections and lists them in the new check; a sign-in still on an app's consent page is refused
+  after any reset.
+- **An agent-scoped key cannot name another sender.** `POST /inbox/send` with an agent-scoped key now answers 403
+  when `from_agent` or the `X-Remembra-Agent-Id` header names a different agent; the server used to replace the
+  sender with the key's agent without saying so. Leaving `from_agent` out still sends as the key's agent. The
+  local MCP server's `send_to_inbox` returns an error in that case; it used to report success.
 
 ### Fixed
 
@@ -37,19 +111,132 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `RemembraChatMessageHistory` for every call, and each one numbered its messages from 1 again, so a
   three-turn conversation read back as q1 q2 q3 a1 a2 a3. A new history object now continues the session's
   numbering.
-- **Delete by entity and 0.16.1 pre-releases.** The Python SDK, the TypeScript SDK and the Clawdbot plugin now
-  treat a pre-release or dev build of 0.16.1 (such as `0.16.1rc1`) as older than 0.16.1, and do not send it a
-  delete by entity.
+- **Delete by entity and 0.16.1 pre-releases.** The Python SDK, the TypeScript SDK in this repository and the
+  Clawdbot plugin now treat a pre-release or dev build of 0.16.1 (such as `0.16.1rc1`) as older than 0.16.1, and
+  do not send it a delete by entity. They still refuse a server older than 0.16.1 or one that reports no
+  version. The TypeScript SDK on npm is unchanged: no npm release has the entity-delete version check yet.
+- **A revoked key kept its real-time connections.** A WebSocket opened with a key stayed open, and kept
+  receiving memory events, after the key was revoked. Now revoking or permanently deleting a key closes every
+  real-time connection opened with it at once, with close code 4001 and the reason "Access revoked or expired".
+  Signing out closes the connection opened with that sign-in; other sign-ins and API-key connections stay open.
+  Changing or resetting the password closes the connections of earlier dashboard sign-ins; API-key connections
+  stay open. Deactivating or deleting an account closes all of its connections. Before each event the server
+  checks the connection's key or sign-in again, the same way it checks every API request, and a connection that
+  gets no events is re-checked every 30 seconds; when access has ended, nothing more is sent and the connection
+  closes. This holds when access was cut some other way too, for example directly in the database, and when a
+  dashboard sign-in expires (24 hours after sign-in; it used to stay open). No event created after access is cut
+  is sent; an event already being sent at that moment may still arrive. A key that loses `memory:recall`, or
+  access to the project the connection follows, gets 4003. If the check cannot run (a database error), the event
+  is not sent and the connection closes with 1011; clients may reconnect. Re-checks do not change a key's "last
+  used" time. Only the server process that handled the revocation closes its connections at once: with several
+  processes, connections on the others get no further events and close within 30 seconds (Remembra Cloud runs
+  one). The dashboard no longer reconnects after a 4001 close until the next sign-in; after other closes (a
+  dropped network, a 1011) it still reconnects after 3 seconds.
+- **A change to a key's role, scopes or projects waited for a restart.** A key that had already been used kept
+  its old role and projects until the server restarted. The change now applies from the key's next request.
+- **Write routes answered 422 before 403.** A write request without the needed permission now gets 403 before
+  its body is checked.
+- `GET /api/v1/users/{user_id}/profile` for another account is refused for every key (it checked an
+  `admin:read` permission that no role holds). The plugin and embedding admin routes check superadmin before
+  anything else and answer 403, not 503, when the feature is off.
+- **Keys and tokens in status values and metadata were saved and shown in full.** A key, token or other
+  recognised credential in a status value or a status key is now replaced with `[REDACTED:<kind>]` before it is
+  saved, so the status list (`GET /session/status`), the session brief (its text and its JSON) and
+  `GET /timeline` show the placeholder. Sending the same value again is still a no-op: the redacted value is what
+  gets compared and saved. With the PII policy on, a status value is scanned for credentials first and then for
+  PII, as memory text already was, so a key is replaced whole instead of being cut apart by a PII pattern.
+  Metadata is scanned before it is saved: with a memory, a status value, a batch store, an import, a supersede, an
+  update and a conversation ingest. Every string is checked, inside lists and nested objects too; numbers,
+  true/false and null are saved as sent. Fields that name things (`session_id`, `relay_key`, `agent_id`,
+  `user_id`, `project_id`, `memory_id`, `source_id`, `id`, `sha`, `head_commit`, `checksum`, `content_checksum`
+  and `fingerprints`) are checked against known key formats only, so a long random session id is kept and a
+  provider key in one is still redacted. Other metadata values that look like random tokens (32 or more
+  characters mixing upper case, lower case and digits) are redacted, as in memory text. `PATCH /memories` now
+  saves the same redacted content and metadata to SQLite that it sends to the vector store. Rows saved before
+  are cleaned when they are read (the status list, the brief, `GET /timeline`, the trail, `GET /memories/{id}`,
+  export, recall results and memory lists), not rewritten. In the brief, an inbox message stored before inbox
+  redaction existed is cleaned before its 200-character preview is cut.
+- **Labelled hex keys and encoded keys got through.** Hex of 32 or more characters is redacted when a credential
+  word comes right before it: key, token, secret, credential, password or passphrase, with or without `:`, `=`
+  or `is` (`datadog key <hex>`, `Twilio auth token <hex>`, `the api key is <hex>`, `ENCRYPTION_KEY=<hex>`,
+  `private key 0x<hex>`). The hex is kept after words that name something else, such as `cache key`,
+  `primary key`, `idempotency key`, `public key` or `SSH key`. Hex with no such word before it is kept, because it
+  looks the same as a digest: git commit ids, SHA-256 and MD5 digests and UUIDs stay. A base64 or hex string of
+  24 or more characters is decoded, and if it holds a credential Remembra recognises it is replaced with
+  `[REDACTED:<kind>]`, for example a base64 GitHub token in a Kubernetes Secret. Not detected yet: a short
+  encoded value that does not decode to a recognised key, hex keys with no credential word before them, loosely
+  labelled or prose passwords ("pass: ...", "pw is ...", "the db password for prod db is ...") and all-lowercase
+  passwords. Detection is still pattern-based. `scripts/maintenance/redact_stored_secrets.py` finds the same
+  things, and now also checks identifier fields and metadata key names against the known key formats.
+  `REMEMBRA_SECRET_REDACTION_ENABLED=false` still turns all of this off; it is on by default.
+- **An agent-scoped key could name another agent on a status value or an import.** `POST /session/status` now
+  answers 403 and stores nothing when `metadata.agent_id` or the `X-Remembra-Agent-Id` header names a different
+  agent, and a status value written with an agent-scoped key carries that key's agent id, so the timeline shows
+  the right writer. `POST /transfer/import` and `POST /transfer/import/file` answer 403 and store nothing from
+  the import when any item's `metadata.agent_id`, or the header, names a different agent; every memory imported
+  with an agent-scoped key carries its agent id. With an agent-scoped key, removing a project link gets 403 when
+  the header names a different agent, as adding one and closing a session already did. These refusals use the
+  same message as `POST /session/close`: "This API key is scoped to agent 'codex'; the request claims
+  'claude-code'." Unscoped keys and dashboard sign-ins are unchanged: they may name any agent, and a close sent
+  with one still shows as self-declared. `POST /memories`, batch, bulk, `PATCH` and supersede still stamp the
+  key's agent whatever the request says; they do not refuse. An unscoped key that sends a malformed
+  `X-Remembra-Agent-Id` header to `DELETE /projects/links` gets 400, as `POST /projects/links` already did.
+- **Sign-in flows kept the PKCE verifier and the nonce in plaintext.** The PKCE code verifier is no longer
+  stored: the API computes it from the sign-in state and the browser's HttpOnly cookie, and the database keeps
+  only a SHA-256 hash of it. The OpenID nonce is stored only as a SHA-256 hash; the state and the browser secret
+  already were. A sign-in flow lasts 10 minutes; an expired flow's row is deleted when the next sign-in starts,
+  and rows the previous version left in plaintext are deleted when the server starts.
+- **Facts, entity references and metadata lists were not encrypted in the vector store.** With
+  `REMEMBRA_ENCRYPTION_KEY` set, a vector-store record now has all of its memory text encrypted with
+  AES-256-GCM: the memory text, each extracted fact, each entity reference (name, type and id) and every string
+  in its metadata, inside lists and nested objects too, such as a handoff's done and not-done lists and its
+  commit subjects. Not encrypted, because the store filters on them: the account and project ids, dates, the
+  memory type, and the scope and its prefixes. Also not encrypted: metadata key names, numbers, true/false and
+  empty values, entity confidence scores and the embedding vectors. Search and metadata filters return the same
+  results as before. Records written before this change, or while no key was set, keep their plaintext parts
+  until `scripts/maintenance/reencrypt_payloads.py --apply` runs; they still read, search and filter as before.
+  `redact_stored_secrets.py` now writes encrypted facts and metadata back. Still not field-encrypted: the database
+  that holds account records and the second copy of your notes, the keyword index and the entity graph (the
+  only field encrypted there is the two-factor secret). One key protects the vector store; it is not rotated yet.
+- **A memory the background pass deleted left pieces behind.** It is now removed completely, like a user's
+  delete: its entity links, the relationships pulled from it, its keyword-search entry, any pickup events and
+  its vector. Pickup events are deleted whenever their handoff, its project or the account is deleted. The pass
+  no longer re-sends the text of handoffs, checkpoints, status values, source records or pinned memories to the
+  embedding provider on every run, and never offers them as merge candidates.
+
+### Documentation
+
+- Dashboard sign-ins (JWT) still expire a fixed 24 hours after sign-in. `REMEMBRA_JWT_EXPIRATION_HOURS` is not
+  read, and the docs no longer say "7 days (configurable)".
+- The master key for `POST /api/v1/keys` goes in the `X-API-Key` header. The docs no longer show
+  `Authorization: Bearer`, which the server refuses with 401.
+- SECURITY.md lists what the audit log records: memory store, recall, update and delete through the REST memory
+  and ingest routes; key create, update, revoke and hard delete; relay project split and undo; sign-in method link
+  and unlink; account review events; account erasure; and `memory_decayed`. It does not record ordinary sign-ins,
+  rate limits, entity, webhook, team, space, import/export, inbox, conflict or temporal operations, or role
+  changes made with `POST /admin/roles`.
+- The public pages say that backups are not edited: when a new version of the server is deployed, it copies the
+  database as it starts, and each copy is deleted once 3 newer ones exist, so erased data can stay in those copies
+  until 3 more deploys have happened. There is no continuous backup yet. The operations doc says a Litestream
+  replica, when switched on, drops erased data within about 25 hours, not 48.
+- The privacy page says the security log records API key changes, sign-in method links and unlinks,
+  account-review events, and memory writes, reads and deletions, with the request's IP address; ordinary password
+  and Google or GitHub sign-ins are not recorded there. It says pickup events are deleted when the handoff, its
+  project or the account is deleted. The DPA page says the standard contractual clauses and the UK addendum are
+  not attached to the agreement yet.
 
 ## [0.16.1] - 2026-09-26
 
-Relay fixes, three more agents verified, a doctor for when handoffs don't arrive, and a security sweep. Every
-git repository now gets its own project, the brief skips sessions that did nothing, Codex automations and
-sub-agents stay out of the trail, a hook that another agent runs is filed under that agent, and the Gemini
-CLI, Qwen Code and Kimi Code hooks were run against the real tools. `remembra-relay doctor` (and the
-`remembra_doctor`, `remembra_setup` and `remembra_help` MCP tools) says where a handoff went missing, and
-remembra.dev has a setup guide written for your agent. Deleting by entity no longer deletes the whole account,
-billing and plan limits are tighter, and the public pages now say only what the code does.
+Relay fixes, three more agents verified, a doctor for when handoffs don't arrive, and a security sweep. Every git
+repository now gets its own project, the brief skips sessions that did nothing, Codex automations and sub-agents
+stay out of the trail, a hook that another agent runs is filed under that agent, and the Gemini CLI, Qwen Code and
+Kimi Code hooks were run against the real tools. `remembra-relay doctor` (and the `remembra_doctor`,
+`remembra_setup` and `remembra_help` MCP tools) says where a handoff went missing, and remembra.dev has a setup
+guide written for your agent. Deleting by entity no longer deletes the whole account, billing and plan limits are
+tighter, and public pages that overstated the code were corrected. [corrected 2026-09-27: this said the public
+pages now say only what the code does. They did not: more corrections followed after the release, in e6277da and
+f70abac (benchmarks, durability, pricing and limits, blog numbers, slim recall), and after the truth audit of
+2026-09-27.]
 
 **Upgrading.** Run `remembra-relay connect --apply` once after upgrading. For the agents it finds, it writes
 the Gemini CLI, Qwen Code and Kimi Code hooks (Kimi Code's go to `~/.kimi-code/config.toml`; the block an
@@ -57,11 +244,13 @@ earlier release wrote to `~/.kimi/config.toml` is removed). If 0.16.0 put severa
 project, `remembra-relay projects split` shows how it would separate them; nothing changes until you add
 `--apply`. If handoffs still don't arrive, run `remembra-relay doctor`.
 
-**Running your own server.** The dashboard and docs images now run nginx as a non-root user on port 8080
-instead of 80: point your proxy or port mapping at 8080. The database stays at schema version 10 (migration 10,
-`account_reviews`, is listed below); the new billing and relay tables are created at start or on first use.
-After upgrading, back up the database and run `python scripts/maintenance/redact_stored_secrets.py --apply` to
-redact command-line credentials from handoffs stored before this release.
+**Running your own server.** The dashboard image now runs nginx as a non-root user on port 8080 instead of 80, and
+the docs image (new since 0.16.0) does the same: point your proxy or port mapping at 8080. The database moves from
+schema version 9 to 10: migration 10 (`account_reviews`, listed below) runs at start on a server upgraded from
+0.16.0. The new billing and relay tables are created at start or on first use. [corrected 2026-09-27: this said the
+database stays at schema version 10. A 0.16.0 install is at version 9.] After upgrading, back up the database and
+run `python scripts/maintenance/redact_stored_secrets.py --apply` to redact command-line credentials from handoffs
+stored before this release.
 
 ### Added
 
@@ -112,13 +301,15 @@ redact command-line credentials from handoffs stored before this release.
 - **`remembra-relay connect` ends with "You still need to"** when something is left: saving a key, `--apply`
   after a dry run, unverified adapters it skipped, and trusting the hooks in Codex (checked, not assumed). When
   nothing is left it prints no list.
-- **`why?` on the dashboard's setup checklist.** Every agent still waiting on Home gets a `why?` button that
-  opens an exchange slip under its row: the three reads it made (your keys, the trail, the agent's own entries,
-  GET only), the call marked proven or inferred, the one fix, and the doctor lines to copy for that agent's
-  machine. Where it reaches a fault the doctor also sees, it uses the doctor's rule id, sentence and guide page
+- **`why?` on the dashboard's setup checklist.** Every agent still waiting on Home gets a `why?` button that opens
+  an exchange slip under its row: the three reads it made (your keys, the trail, the agent's own entries, GET
+  only), the call marked proven or inferred, the one fix, and the doctor lines to copy for that agent's machine.
+  Where it reaches a fault the doctor also sees, it uses the doctor's rule id, sentence and guide page
   (`KEY_MISSING`, `PICKS_UP_NEVER_CLOSES`, `CODEX_TRUST_MISSING`, `NOTHING_WAITING`, `HOOKS_NOT_FIRING`,
-  `STALE_CHECKPOINT`). Until a Codex brief or close arrives, Codex's row carries a dim reminder of the hook
-  trust step (the dashboard can't see Codex, so it never says Codex needs you).
+  `STALE_CHECKPOINT`). Until a Codex brief or close arrives, Codex's row carries a dim reminder of the hook trust
+  step, not a verdict (the dashboard can't see Codex). Its `why?` slip names the trust step as the likely cause and
+  marks it inferred (`[??]`). [corrected 2026-09-27: this said the dashboard never says Codex needs you. The slip
+  does say it, marked inferred.]
 - **remembra.dev for your agent.** The hero's install block has `terminal | your agent` tabs; the agent tab
   copies a prompt that points the agent at `remembra.dev/setup.md`, a step-by-step runbook that stops for the
   key and asks before each write, and runs `pipx ensurepath` even when pipx is already installed.
@@ -151,18 +342,19 @@ redact command-line credentials from handoffs stored before this release.
 
 ### Fixed (Relay)
 
-- **Every repository gets its own project, even with `REMEMBRA_PROJECT` set.** In 0.16.0 a configured
-  project (for example an old `REMEMBRA_PROJECT=clawdbot` namespace in an MCP config) named every repository
-  the server had not seen, so all of them shared one trail and a brief in one repository handed over another
-  repository's work. Now a git repository always gets its own project; the configured project names only
-  folders that are not repositories. `REMEMBRA_RELAY_PROJECT` keeps everything in one project on purpose.
-  New installs (`REMEMBRA_PROJECT=default`) were not affected. Older clients keep their behaviour: the new
-  client says which rule it follows (`hint_scope`, `git_repo`), and the server records where each session
-  worked with its handoff. A folder under the configured project that later becomes a repository (`git init`)
-  gets its own project too. A key restricted to projects keeps using its configured project for a new
-  repository (it records nothing). When git does not answer in time, the client says it does not know
-  instead of "not a repository", sends no configured project, and still sends the close (`repo` in
-  `incomplete`). Use `projects split` (above) for repositories already bound together.
+- **Every repository gets its own project, even with `REMEMBRA_PROJECT` set.** In 0.16.0 a configured project (for
+  example an old `REMEMBRA_PROJECT=clawdbot` namespace in an MCP config) named every repository the server had not
+  seen, so all of them shared one trail and a brief in one repository handed over another repository's work. Now a
+  git repository always gets its own project; the configured project names only folders that are not repositories.
+  `REMEMBRA_RELAY_PROJECT` keeps everything in one project on purpose. New installs (`REMEMBRA_PROJECT=default`)
+  were not affected. Older clients keep their behaviour: the new client says which rule it follows (`hint_scope`,
+  `git_repo`), and the server records where each session worked with its handoff. A folder under the configured
+  project that later becomes a repository (`git init`) gets its own project too. A key restricted to projects keeps
+  using its configured project for a new repository (it records nothing). When git does not answer in time, the
+  client says it does not know instead of "not a repository", sends no configured project, and still sends the
+  close (`repo` in `incomplete`). Use `projects split` (above) for repositories already bound together. [corrected
+  2026-09-27: an MCP agent that passes no `git_remote` or `root_path` to `session_brief` or `close_session` still
+  uses the configured project.]
 - **The brief's "Last session" is the last session that did something.** A handoff that recorded nothing
   (no commits, changes, tests, errors, todos, next step, summary or notes: an idle or automated session) no
   longer buries the one before it; the brief skips it and says how many it skipped. "Recent" lists only this
@@ -173,7 +365,9 @@ redact command-line credentials from handoffs stored before this release.
   folder. The agent's notes and summary are shown under "Last session". A recorded location, upstream name
   and every Recent handoff pass the same trust policy as the handoff text, in the text and the JSON, and the
   JSON no longer returns the location's fingerprint keys (a path key is scrubbed like the path under the
-  account's PII policy). Recorded text stays inside the untrusted-data block.
+  account's PII policy). [corrected 2026-09-27: the brief's `handoff_location` field leaves them out, but the
+  handoff's stored metadata in the same JSON still has them, under `relay.location.fingerprints`.] Recorded text
+  stays inside the untrusted-data block.
 - **An empty session leaves no handoff.** `close` sends nothing for a session that recorded nothing and
   writes one line to `relay.log`; `close --summary …` by hand still sends. A close that stopped on a usage or
   billing limit, or was written before context compaction, is sent and shown ("stopped: rate_limit"). A later
@@ -261,44 +455,54 @@ redact command-line credentials from handoffs stored before this release.
   (The TypeScript SDK's check is in the repository; no npm release has it yet.)
   The MCP `forget_memories` tool and the Clawdbot plugin can now delete by entity too, in one project and only
   after a dry run and a confirmation phrase, like their project wipe.
-- **Sign in with Google or GitHub on older accounts.** An account whose email was never verified (accounts
-  made before email verification existed) is now linked when Google, or GitHub with a verified primary email,
-  confirms the address: the email becomes verified and the user is signed in. A one-time account check then
-  lists everything on the account (API keys, connected apps, webhooks, other sign-in links, 2FA and the
-  password set before); **Keep all** is one click and keeps exactly the list shown, and single items can be
-  revoked. API keys and app connections keep working throughout; dashboard sessions opened before end. 2FA
-  from before verification stays on only if the owner enters a current code. A check with nothing to list
-  finishes silently. Only the sign-in that proved the email can act on it; every choice is audit-logged and
-  emailed. Schema migration 10 (`account_reviews`). GitHub still never links by email into an account whose
-  email is already verified.
+- **Sign in with Google or GitHub on older accounts.** An account whose email was never verified (accounts made
+  before email verification existed) is now linked when Google, or GitHub with a verified primary email, confirms
+  the address: the email becomes verified and the user is signed in. A one-time account check then lists everything
+  on the account (API keys, connected apps, webhooks, other sign-in links, 2FA and the password set before); **Keep
+  all** is one click and keeps exactly the list shown, and single items can be revoked. API keys and app
+  connections keep working throughout; dashboard sessions opened before end. 2FA from before verification stays on
+  only if the owner enters a current code. A check with nothing to list finishes silently. Only the sign-in that
+  proved the email can act on it; every choice is audit-logged. When the check is finished, an email to the account
+  address lists what was kept and removed ("Check later" is logged but not emailed, and nothing is emailed before
+  the check is finished). [corrected 2026-09-27: this said every choice is emailed.] Schema migration 10
+  (`account_reviews`). GitHub still never links by email into an account whose email is already verified. (Replaced
+  after 0.16.1: Google and GitHub no longer link an account whose email was never verified. See [Unreleased].)
 - **Forgot password** on such an account no longer revokes keys, 2FA, app connections, webhooks and sign-in
-  links. The reset verifies the email and the next sign-in shows the same account check.
+  links. The reset verifies the email and the next sign-in shows the same account check. (Changed after 0.16.1:
+  that reset turns off 2FA set up before the email was verified. See [Unreleased].)
 - **PII redaction** no longer replaces the project number of a Google OAuth client id (and UUIDs or
   similar machine identifiers) with `[REDACTED_BANK_ACCOUNT]`. Account numbers written with a suffix
   (`123456789012-checking`, `...-SAV`, `ACCT-...-01`) are still redacted.
 - **The install line connects.** On remembra.dev, the README and the docs, the copyable install ended in a bare
-  `remembra-relay connect`, a dry run that writes nothing, so a new user following it stayed unconnected. Every
-  block now asks for the free key first and ends in `remembra-relay connect --apply`; the dashboard's empty
-  trail shows its full one-line install. The site header has **Sign in** next to **Start free** (first in
-  the phone menu).
+  `remembra-relay connect`, a dry run that writes nothing, so a new user following it stayed unconnected. Those
+  blocks (the remembra.dev home, the /crew and changelog pages, the README install, the docs home and the docs
+  changelog) now ask for the free key first and end in `remembra-relay connect --apply`; the dashboard's empty
+  trail shows its full one-line install. [corrected 2026-09-27: this said every block. The quickstart,
+  installation, agent-setup and multi-agent docs and the README's self-host section still stopped at
+  `remembra-install --all` and did not set up the relay hooks.] The site header has **Sign in** next to **Start
+  free** (first in the phone menu).
 - **docs.remembra.dev no longer publishes repository notes** (the cloud runbook, an old self-host note, bug
-  write-ups, a feedback transcript and the competitor scan): `mkdocs.yml` excludes them and a test keeps the
-  list. The feedback transcript left the public repository.
-- **Public copy says what the code does.** The Founding 100 price holds while the subscription stays active,
-  and 14 days after it ends (as the Terms say), with no lifetime promise. Pages no longer claim that every agent
-  or tool is covered: the session hooks are verified for Claude Code, Codex (a prerelease), Gemini CLI, Qwen
-  Code and Kimi Code, Cursor's are not yet, and any MCP agent can call `session_brief` and `close_session`.
-  Transcript facts are read from Codex rollouts as well as Claude Code transcripts, and the pages say so. The
-  Claude and ChatGPT connector and the hosted remote MCP are marked as coming (the connector is off at
-  api.remembra.dev). The Team plan lists what the teams API enforces (one pooled allowance, not a shared
-  memory pool), and the dashboard's team role labels say what each role can do today. The PyPI summary
-  describes Remembra Relay, and the MCP Registry text names the agent its handoffs are recorded under. The DPA
-  page says a deleted account is erased automatically after 7 days (backups age out), the plans page says a
-  new yearly bank unlocks after 14 days, and the durability page no longer promises atomic writes across
-  SQLite, Qdrant and the keyword index. The SDK and REST guides show the delete calls the client and server
-  have, the MCP pages count the 24 tools the server registers (21, and Marshal's three), the site's changelog
-  states the 0.16.1 project rule, and reconstructed blog examples say so. `tests/test_site_truth_polish.py`
-  scans every public file for these claims.
+  write-ups, a feedback transcript and the competitor scan): `mkdocs.yml` excludes them and a test keeps the list.
+  The feedback transcript was removed from the main branch. [corrected 2026-09-27: this said it left the public
+  repository. It is still in the repository's history, for example at the v0.16.0 tag.]
+- **Public copy corrected.** The Founding 100 price holds while the subscription stays active, and 14 days after it
+  ends (as the Terms say), with no lifetime promise. Pages no longer claim that every agent or tool is covered: the
+  session hooks are verified for Claude Code, Codex (a prerelease), Gemini CLI, Qwen Code and Kimi Code, Cursor's
+  are not yet, and any MCP agent can call `session_brief` and `close_session`. Transcript facts are read from Codex
+  rollouts as well as Claude Code transcripts, and the pages say so. The Claude and ChatGPT connector and the
+  hosted remote MCP are marked as coming (the connector is off at api.remembra.dev). The Team plan lists what the
+  teams API enforces (one pooled allowance, not a shared memory pool), and the dashboard's team role labels say
+  what each role can do today. The PyPI summary describes Remembra Relay, and the MCP Registry text names the agent
+  its handoffs are recorded under. The DPA page says a deleted account is erased automatically after 7 days
+  (backups age out), the plans page says a new yearly bank unlocks after 14 days, and the durability page no longer
+  promises atomic writes across SQLite, Qdrant and the keyword index. The SDK and REST guides show the delete calls
+  the client and server have, the MCP pages count the 24 tools the server registers (21, and Marshal's three), the
+  site's changelog states the 0.16.1 project rule, and reconstructed blog examples say so.
+  `tests/test_site_truth_polish.py` scans a fixed list of public files for these claims: the README, the changelog
+  and release notes, package and registry metadata, the published docs, remembra.dev and the dashboard's screens.
+  [corrected 2026-09-27: the heading said public copy says what the code does, and this said the test scans every
+  public file. It did not scan ARCHITECTURE.md, SECURITY.md, DOCKER.md, CONTRIBUTING.md, sdk/typescript/README.md
+  or the dashboard's .ts files, and two of them still carried claims the test forbids.]
 
 ### Security
 
@@ -317,8 +521,9 @@ redact command-line credentials from handoffs stored before this release.
   message, and a session close counts toward the Free plan's daily cap on notes without enrichment. Memory-cap
   slots are reserved atomically, so parallel writes can't go past the cap.
 - **Server.** Request bodies are capped before authentication, including under a path prefix: 1 MiB, 64 KiB
-  for a urlencoded form, and more only where a route's own limits need it (8 MiB for a relay close, a batch or
-  bulk store and an inline import, 12 MiB for a conversation ingest, 51 MiB for a file import). An inline
+  for a urlencoded form, and more only where a route's own limits need it (4 MiB for a changelog ingest, 8 MiB
+  for a relay close, a batch or bulk store and an inline import, 12 MiB for a conversation ingest, 51 MiB for a
+  file import). [corrected 2026-09-27: the 4 MiB changelog ingest cap was missing from this list.] An inline
   import (`POST /api/v1/transfer/import`) takes at most 8,000,000 characters of data; a larger file goes to
   `/transfer/import/file`. The web framework and form parser are upgraded (FastAPI 0.141.1, Starlette 1.7.0,
   python-multipart 0.0.32). `GET
@@ -334,15 +539,18 @@ redact command-line credentials from handoffs stored before this release.
   hook, the Clawdbot plugin (2.1.0) and the dashboard's "Copy as a prompt" hand other agents' text to the
   model inside the untrusted-data block. The server refuses a branch name git would refuse, and the
   dashboard's "Continue" command never passes one that git would read as an option.
-- **Images, CI and the repository.** The Docker images use pinned, maintained base images; the dashboard and
-  docs images run nginx as a non-root user on port 8080, and docs.remembra.dev gets its own nginx config with
-  security headers. The docs workflow's OIDC and Pages write permissions sit on its deploy job only, and
-  workflow installs are hash-pinned. Dependabot watches `uv.lock` and the dashboard, and CI runs `pip-audit`.
-  CI and the git hooks refuse private notes, a built docs site, office documents, public IP addresses,
-  real-format API keys and personal details in test fixtures; internal runbooks left the repository and the
-  benchmark corpus is synthetic. CI checks every commit of a pull request and of a direct push (a key added
-  and removed within one push is still published), and the pre-commit hook reads file names with spaces.
-  Run `./scripts/install-hooks.sh` in your clone to get the current hooks.
+- **Images, CI and the repository.** The Docker images use pinned, maintained base images; the dashboard and docs
+  images run nginx as a non-root user on port 8080, and docs.remembra.dev gets its own nginx config with security
+  headers. The docs workflow's OIDC and Pages write permissions sit on its deploy job only. The workflows' tool
+  installs (build, uv, pip-audit, MkDocs) are hash-pinned and mcp-publisher is checksum-verified. The package's own
+  dependencies are not pinned: CI's lint, test and install-smoke jobs and the release job's `uvx` check install
+  them from PyPI without hashes, and `python -m build` fetches hatchling unpinned. [corrected 2026-09-27: this said
+  workflow installs are hash-pinned.] Dependabot watches `uv.lock` and the dashboard, and CI runs `pip-audit`. CI
+  and the git hooks refuse private notes, a built docs site, office documents, public IP addresses, real-format API
+  keys and personal details in test fixtures; internal runbooks left the repository and the benchmark corpus is
+  synthetic. CI checks every commit of a pull request and of a direct push (a key added and removed within one push
+  is still published), and the pre-commit hook reads file names with spaces. Run `./scripts/install-hooks.sh` in
+  your clone to get the current hooks.
 
 ## [0.16.0] - 2026-09-26 - Remembra Relay
 
@@ -359,8 +567,12 @@ remembra-relay connect            # dry run; add --apply to write the hooks
 
 - **Handoff:** done / not done / failing / next step, from git and the Claude Code transcript or Codex rollout;
   neither leaves the machine. **Brief:** about 1,500 tokens, everything recorded wrapped as untrusted data.
-  **Trail:** every handoff and checkpoint in order (`remembra-relay trail`, the dashboard's Trail page).
+  [corrected 2026-09-27: 1,500 tokens is the cap of the text brief. The MCP `session_brief` also returns the full
+  brief as JSON unless called with `compact=true`.] **Trail:** every handoff and checkpoint in order
+  (`remembra-relay trail`, the dashboard's Trail page).
 - **Agent-scoped keys:** a handoff closed with one is key-verified; that key cannot write as another agent.
+  [corrected 2026-09-27: it could still put another agent's id on a status value or an imported memory. That was
+  fixed after 0.16.1.]
 - **Adapters:** Claude Code and Codex (codex-cli 0.155.0-alpha.16.4, a prerelease) verified. Cursor, Gemini CLI,
   Qwen Code and Kimi shipped unverified (left out of `connect` unless `--include-unverified`); any MCP agent can
   use `session_brief` and `close_session`.
@@ -379,15 +591,16 @@ remembra-relay connect            # dry run; add --apply to write the hooks
 
 ### Added
 - **Codex hooks verified.** `remembra-relay connect` now writes Codex's SessionStart, UserPromptSubmit and
-  SessionEnd hooks by default, after a round trip with codex-cli 0.155.0-alpha.16.4, the prerelease bundled
-  in ChatGPT.app: a Claude Code close replayed through its verified hook path (not a live Claude Code
-  session), then a real `codex exec`, run against a local stand-in for the model, that received the brief,
-  ran commands and left its own handoff; recorded under `tests/fixtures/relay/codex/`. No stable Codex
-  release has been run, and hook trust was recorded as `/hooks` records it rather than through that screen. `connect` tells you to trust the hooks in Codex's `/hooks`, since Codex
-  skips untrusted hooks without a message. Codex rollouts are parsed for commands, exit codes, test runs,
-  edited files and plan steps. A session whose last turn stopped on Codex's usage limit is handed off as
-  `ended: usage_limit`, with Codex's message first under the errors; the brief and the trail show it as
-  `stopped: usage_limit`, like a Claude Code StopFailure.
+  SessionEnd hooks by default, after a round trip with codex-cli 0.155.0-alpha.16.4, the prerelease bundled in
+  ChatGPT.app: a Claude Code close replayed through its verified hook path (not a live Claude Code session), then a
+  real `codex exec`, run against a local stand-in for the model, that received the brief, ran commands and left its
+  own handoff; recorded under `tests/fixtures/relay/codex/`. No stable Codex release has been run, and hook trust
+  was recorded as `/hooks` records it rather than through that screen. `connect` tells you to trust the hooks in
+  Codex's `/hooks`, since Codex skips untrusted hooks without a message. [corrected 2026-09-27: Codex skips an
+  untrusted hook, but the interactive Codex CLI asks about hooks that need review when it starts.] Codex rollouts
+  are parsed for commands, exit codes, test runs, edited files and plan steps. A session whose last turn stopped on
+  Codex's usage limit is handed off as `ended: usage_limit`, with Codex's message first under the errors; the brief
+  and the trail show it as `stopped: usage_limit`, like a Claude Code StopFailure.
 - `brief --once`: the UserPromptSubmit hook delivers the brief when SessionStart did not fire (Codex
   auto-restoring a thread), once per session; a resumed Codex session does not get a second copy.
 - `close` detaches for agents that do not wait for the end hook (Codex, Gemini CLI, Qwen Code, Cursor): it
@@ -439,14 +652,17 @@ remembra-relay connect            # dry run; add --apply to write the hooks
   - MCP: new `close_session` and `resolve_project` tools. `session_brief` is compact by default
     (`verbose=True` for the full JSON). The server instructions tell every MCP agent to brief at start and close before finishing.
   - Agent-scoped API keys (`agent_id` on key creation). Relay attribution comes from the key, not the request body.
+    [corrected 2026-09-27: for handoffs, memories and inbox messages. A status value or an import could still name
+    another agent until the fix after 0.16.1.]
 - Migration 4: `project_fingerprints`, `project_links`, `api_keys.agent_id`.
-- **Relay dashboard.** The signed-in dashboard is now mission control for Relay: Home (what changed since
-  your last visit, the last handoff with a copyable continue command, unread messages, weekly recap, plan
-  usage, a connect checklist), Trail (every handoff on a dashed rail, filterable by project and agent),
-  Agents (activity per agent with a 14-day sparkline) and Inbox (write to an agent; the note leads its next
-  brief). New read endpoints back it: `GET /api/v1/trail/summary`, `GET /api/v1/inbox/messages`,
-  `GET /api/v1/inbox/summary`; `GET /api/v1/trail` gains `agent_id` and a per-item `detail`.
-  Existing pages are restyled with the new light and dark tokens and work at phone width.
+- **Relay dashboard.** The signed-in dashboard is now mission control for Relay: Home (what changed since your last
+  visit, the last handoff with a copyable continue command, unread messages, weekly recap, plan usage, a connect
+  checklist), Trail (every handoff on a dashed rail, filterable by project and agent), Agents (activity per agent
+  with a 14-day sparkline) and Inbox (write to an agent; the note leads its next brief [corrected 2026-09-27: it
+  shows up in that agent's next brief after the last session, not first]). New read endpoints back it: `GET
+  /api/v1/trail/summary`, `GET /api/v1/inbox/messages`, `GET /api/v1/inbox/summary`; `GET /api/v1/trail` gains
+  `agent_id` and a per-item `detail`. Existing pages are restyled with the new light and dark tokens and work at
+  phone width.
 
 ### Security
 - A password reset on an account whose email was never verified now clears everything set up before it: API
@@ -714,7 +930,9 @@ all live on Remembra Cloud as of this release.)
   carries a **receipt** — `metadata.source_id` pointing back to its source record —
   and is **lexically verified against the source**: facts whose content words don't
   appear in the original are stored flagged `verified=false` instead of silently
-  trusted. Store responses now include `source_id`. Config: `enable_source_records`
+  trusted. [corrected 2026-09-27: since 0.16.0 such a fact is not stored by default. It is dropped and listed
+  in the store response's `dropped_facts`, and stored flagged `verified=false` only with
+  `REMEMBRA_GROUNDING_ACTION=flag`.] Store responses now include `source_id`. Config: `enable_source_records`
   (default on), `fact_verification_threshold` (default 0.5).
 - **Async enrichment mode (opt-in fast writes).** With `REMEMBRA_ASYNC_ENRICHMENT=true`,
   `store` persists the verbatim source and returns immediately (`enrichment: "pending"`);
@@ -1008,6 +1226,8 @@ all live on Remembra Cloud as of this release.)
   - Covers relative dates, times of day and duration phrases
   - The server did not read many of the values sent (`1.5d`, `1.4w`, `1mo`), so those memories got no expiry,
     and it read `40m` ("in 10 minutes") as 40 months. Fixed after 0.16.1.
+  - [corrected 2026-09-27: this entry said 35+ patterns set the TTL automatically with zero configuration. The
+    feature is opt-in, and the server ignored many of the values it sent.]
 
 - **Strict Mode 410 GONE** — Opt-in explicit expiry awareness
   - Enable via `REMEMBRA_STRICT_MODE=true` or config
@@ -1024,6 +1244,8 @@ all live on Remembra Cloud as of this release.)
 - **Shadow TTLs Client-Side** — Python SDK, opt-in with `Memory(enable_shadow_ttl=True)`
   - The SDK records each stored memory's expiry locally
   - Your code can call `is_memory_valid()` to check it; the SDK itself does not skip any server call
+  - [corrected 2026-09-27: this entry said the SDK skips recall for known-expired memories and cuts API calls by up
+    to 40%. It never did.]
 
 ### Changed
 - Store endpoint now accepts `expires_at` parameter alongside `ttl`
@@ -1054,7 +1276,8 @@ all live on Remembra Cloud as of this release.)
 - **api.remembra.dev** — Live and verified with proper health response
 - **Encryption** — AES-256-GCM confirmed working in production
 - **Qdrant** — Vector store healthy and operational
-- **All agents** — Claude, Codex, Cursor, Gemini, Windsurf integration tested
+- **All agents** — Claude, Codex, Cursor, Gemini, Windsurf integration tested [corrected 2026-09-27: Windsurf was
+  never run and is still unverified.]
 
 ### Added
 - **Centralized Credentials** — `~/.remembra/credentials` with chmod 600
@@ -1062,6 +1285,8 @@ all live on Remembra Cloud as of this release.)
   - Priority: CLI arg > env var > credentials file
 - **Slim Recall Mode** — 90% smaller payload for token-constrained agents
   - `recall_memories(query, slim=True)` returns only synthesized context
+  - [corrected 2026-09-27: the size saving was never measured. In the MCP tool, `slim=True` returns the context and
+    a count; on the REST API and in the Python SDK it only caps the context at 800 tokens.]
 - **Bridge Lifecycle Management**
   - `remembra-bridge --stop` gracefully stops running bridge
   - `remembra-bridge --status` checks if bridge is running and healthy
@@ -1080,7 +1305,9 @@ all live on Remembra Cloud as of this release.)
   - `remembra-install --all` auto-detects and configures installed agents
   - `remembra-install --agent <name>` for specific agent setup
   - `remembra-install --detect` lists installed agents
-  - Supports: Claude Desktop, Claude Code, Codex CLI, Gemini, Cursor, Windsurf
+  - Supports: Claude Desktop, Claude Code, Codex CLI, Gemini, Cursor, Windsurf [corrected 2026-09-27: Windsurf's
+    config path was never checked against Windsurf; since 0.16.0 `--all` leaves it out. Claude Desktop is
+    configured on macOS only.]
   - Safe config merging — preserves existing MCP configurations
   - **Centralized credentials** in `~/.remembra/credentials` (chmod 600)
     - API key saved on first install, auto-loaded for future installs
@@ -1096,6 +1323,7 @@ all live on Remembra Cloud as of this release.)
   - `recall_memories(query, slim=True)` returns only synthesized context
   - Full mode still available with `slim=False` (default)
   - Reduces recall response from ~2KB to ~200 bytes
+  - [corrected 2026-09-27: the size saving was never measured, and slim was in the MCP tool only.]
 
 - **Local Bridge** — Proxy for sandboxed agents (Codex CLI)
   - `remembra-bridge` runs local HTTP proxy on 127.0.0.1:9819
@@ -1131,7 +1359,9 @@ all live on Remembra Cloud as of this release.)
 - **Temporal Knowledge Graph** — Bi-temporal relationship model
   - Relationships now track `valid_from`, `valid_to`, and `superseded_by`
   - Enables point-in-time queries: "Where did Alice work in January?"
-  - Contradiction detection: new relationships auto-supersede old ones
+  - Contradiction detection: new relationships auto-supersede old ones [corrected 2026-09-27: this was never wired
+    up. A new WORKS_AT does not supersede the old one; a relationship gets an end date only when the stored text
+    states one. Outdated facts are superseded at the memory level since v0.16.0.]
   - Foundation for full temporal knowledge graph (ahead of Zep/Graphiti)
 
 - **6 New MCP Tools** — MCP server goes from 5 tools → 11 tools
@@ -1175,11 +1405,14 @@ all live on Remembra Cloud as of this release.)
 ### Added
 - **AES-256-GCM Field Encryption** — Encrypt memory content at rest
   - PBKDF2-HMAC-SHA256 key derivation with 480,000 iterations (OWASP 2023)
-  - Transparent encrypt/decrypt for memory content and metadata
+  - Transparent encrypt/decrypt for memory content and metadata [corrected 2026-09-27: in the vector store each
+    record also kept its extracted facts, entity references and the strings in metadata lists in plaintext, until
+    the fix after 0.16.1.]
   - Passthrough mode for zero-config development
   - Set `REMEMBRA_ENCRYPTION_KEY` to enable in production
 - **Encryption Test Suite** — Comprehensive tests for encryption module
 - **Security Features Documentation** — Full guide for encryption, PII detection, anomaly detection
+  [corrected 2026-09-27: the anomaly detector is created at startup, but nothing in the server runs it.]
 
 ### Changed
 - Unified security features for enterprise deployments
@@ -1235,8 +1468,10 @@ all live on Remembra Cloud as of this release.)
 ### Fixed
 - **Security: CORS Configuration** — Removed `allow_origins=["*"]`, now configurable via `REMEMBRA_CORS_ORIGINS`
 - **API: PATCH /memories/{id}** — Full implementation (was returning 501)
-- **API: Batch Operations** — `/store/batch` and `/recall/batch` now functional
-- **Streaming: SSE Endpoint** — `/ingest/stream` for conversation ingestion
+- **API: Batch Operations** — `/store/batch` and `/recall/batch` now functional [corrected 2026-09-27: the paths
+  are `POST /api/v1/memories/batch` and `POST /api/v1/memories/batch/recall`.]
+- **Streaming: SSE Endpoint** — `/ingest/stream` for conversation ingestion [corrected 2026-09-27: the path is
+  `POST /api/v1/ingest/conversation/stream`.]
 - **Observability: OpenTelemetry** — Tracing module fully implemented
 - **Production: CORS Origins** — Added `app.remembra.dev` and `remembra.dev` to allowed origins
 - **Stripe: Environment Variables** — Accept both prefixed and non-prefixed Stripe env vars
@@ -1579,7 +1814,8 @@ all live on Remembra Cloud as of this release.)
 
 ### Added
 - **LLM-powered fact extraction** - Transforms messy text into clean atomic facts
-- **Memory consolidation** - ADD/UPDATE/DELETE/NOOP logic prevents duplicates
+- **Memory consolidation** - ADD/UPDATE/DELETE/NOOP logic prevents duplicates (replaced by ADD/NOOP/SUPERSEDE in
+  v0.16.0: an outdated memory is marked superseded, never deleted)
 - **Smart merging** - Updates preserve history (e.g., "VP of Sales (promoted from Director)")
 - New extraction module with configurable LLM backend
 - New consolidation module for memory conflict resolution
@@ -1602,7 +1838,8 @@ all live on Remembra Cloud as of this release.)
 - REST API with FastAPI
 - `store()` - Store memories with automatic fact extraction
 - `recall()` - Semantic search across memories
-- `forget()` - GDPR-compliant deletion
+- `forget()` - GDPR-compliant deletion [corrected 2026-09-27: "GDPR-compliant" overstated it. `forget()` deletes
+  the memory and its vector at once, but conflict records that quote its text stay until the account is erased.]
 - Qdrant vector store integration
 - SQLite metadata storage
 - Embedding support for OpenAI, Ollama, and Cohere

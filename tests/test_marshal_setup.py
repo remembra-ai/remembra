@@ -58,7 +58,7 @@ def test_a_new_machine_gets_every_step_key_first(fh: FakeHome) -> None:
     assert trust["action"] == (
         "Open Codex Settings > Hooks, or run /hooks in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd."
     )
-    assert trust["note"] == "Codex skips untrusted hooks without a message."
+    assert trust["note"] == "Codex runs a hook only after the user trusts it."
     assert by_title["Check"]["command"] == "remembra-relay doctor"
     for step in payload["steps"]:
         assert step["command"] is None or commands.is_allowed(step["command"])
