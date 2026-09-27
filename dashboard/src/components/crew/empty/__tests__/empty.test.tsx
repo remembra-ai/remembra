@@ -102,10 +102,17 @@ describe('empty states render the spec copy (§9.14)', () => {
 
   it('No crews: the three steps and the install command', () => {
     const out = html(<NoCrewsEmpty />);
+    // connect is a dry run without --apply (it prints the diff and writes nothing); --crew does nothing
+    expect(CREW_INSTALL_COMMAND).toBe('pipx install remembra && remembra-crew connect --apply');
     expect(out).toContain(CREW_INSTALL_COMMAND.replace(/&/g, '&amp;'));
     expect(out).toContain('you will see every change before it is written'.replace(/^y/, 'Y'));
-    expect(out).toContain('Open the repo in any connected agent; it joins automatically.');
-    expect(out).toContain('Name your zones so agents know what not to touch.');
+    // a repo is a crew repo once it has .remembra/: the agent does not join a repo without it
+    expect(out).toContain('Add <code');
+    expect(out).toContain('.remembra/zones.yml</code> to the repo and commit it on the default branch');
+    expect(out).toContain('Open the repo in Claude Code; it joins automatically.');
+    expect(out).toContain('remembra-crew connect --include-unverified --apply');
+    expect(out).toContain('remembra-crew verify --agent');
+    expect(out).not.toContain('any connected agent');
     expect(out).toContain('data-vignette="trail"');
     expect(out).toContain('aria-hidden="true"');
     expect(html(<NoCrewsEmpty project="yaadbooks" />)).toContain('No crew for yaadbooks yet');

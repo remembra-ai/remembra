@@ -5,11 +5,10 @@ import { useNow } from '../../../hooks/useResource';
 import type { InboxScope } from '../../../lib/crew/routes';
 import { CopyCommand, ErrorNotice, StaleNotice, TrailSkeleton } from '../../relay/ui';
 import { PixelGlyph } from '../channel/pixels';
+import { CREW_INSTALL_COMMAND } from '../empty/EmptyStates';
 import { TAB_COPY } from './model';
 import { NeedsYouCard } from './NeedsYouCard';
 import type { InboxData } from './useInbox';
-
-const INSTALL = 'pipx install remembra && remembra-crew connect --crew';
 
 export function InboxList({ scope, project, data }: { scope: InboxScope; project: string | null; data: InboxData }) {
   const now = useNow(30000);
@@ -21,7 +20,7 @@ export function InboxList({ scope, project, data }: { scope: InboxScope; project
         <p className="mt-2 max-w-xl text-sm text-ink-2">
           Crew items appear once a connected agent joins a project. Connect this machine (you will see every change before it is written):
         </p>
-        <CopyCommand className="mt-3 max-w-xl" command={INSTALL} label="Crew install command" />
+        <CopyCommand className="mt-3 max-w-xl" command={CREW_INSTALL_COMMAND} label="Crew install command" />
       </div>
     );
   }

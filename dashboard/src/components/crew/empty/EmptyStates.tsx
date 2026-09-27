@@ -12,7 +12,8 @@ import { CopyCommand } from '../../relay/ui';
 import { DitherCloud } from './DitherCloud';
 import { PIXEL_FILL, VIGNETTES, pixelRuns, type VignetteId } from './pixels';
 
-export const CREW_INSTALL_COMMAND = 'pipx install remembra && remembra-crew connect --crew';
+// `connect` alone is a dry run (it prints the diff and writes nothing); --apply asks at the terminal first.
+export const CREW_INSTALL_COMMAND = 'pipx install remembra && remembra-crew connect --apply';
 
 export function PixelVignette({ id, scale = 5, className }: { id: VignetteId; scale?: number; className?: string }) {
   const { width, height, runs } = pixelRuns(VIGNETTES[id]);
@@ -92,11 +93,18 @@ export function NoCrewsEmpty({ project }: { project?: string | null }) {
         </li>
         <li className="flex gap-3">
           <span aria-hidden="true" className="font-mono text-xs font-bold text-ink-3">2</span>
-          <p>Open the repo in any connected agent; it joins automatically.</p>
+          <p>
+            Add <code className="font-mono text-[12px]">.remembra/zones.yml</code> to the repo and commit it on the default
+            branch: that makes it a crew repo and names what agents must not touch.
+          </p>
         </li>
         <li className="flex gap-3">
           <span aria-hidden="true" className="font-mono text-xs font-bold text-ink-3">3</span>
-          <p>Name your zones so agents know what not to touch.</p>
+          <p>
+            Open the repo in Claude Code; it joins automatically. Other agents join once connected with{' '}
+            <code className="font-mono text-[12px]">remembra-crew connect --include-unverified --apply</code> and checked with{' '}
+            <code className="font-mono text-[12px]">remembra-crew verify --agent &lt;name&gt;</code>.
+          </p>
         </li>
       </ol>
     </CrewEmptyState>
