@@ -1166,10 +1166,13 @@ def build_parser() -> argparse.ArgumentParser:
         sp = sub.add_parser(name, help=helptext, add_help=False)
         sp.add_argument("rest", nargs=argparse.REMAINDER)
 
-    sp = sub.add_parser("bypass", help=argparse.SUPPRESS)
+    # The owner's one-time bypass at their own terminal (D34): it works, but the help does not advertise it
+    # (a parser without help= is left out of the command list; argparse's SUPPRESS would print "==SUPPRESS==").
+    sp = sub.add_parser("bypass")
     sp.add_argument("--session", required=True)
     sp.add_argument("--code")
     sp.add_argument("--minutes", type=int, default=15)
+    sub.metavar = "{" + ",".join(name for name in sub.choices if name != "bypass") + "}"
     return p
 
 

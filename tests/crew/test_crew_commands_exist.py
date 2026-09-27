@@ -244,3 +244,17 @@ def test_a_missing_command_flag_or_tool_is_caught(tmp_path: Path) -> None:
     found = {m.group(1) for m in _COMMAND.finditer('run: remembra-crew frobnicate --x "…"')}
     assert found == {"frobnicate"}
     assert {m.group("name") for m in _TOOL_MENTION.finditer('call crew_frobnicate(action="x")')} == {"crew_frobnicate"}
+
+
+def test_the_top_level_help_lists_the_public_commands_only() -> None:
+    """``bypass`` is the owner's, run at their own terminal (D34): it works but is not advertised, and the help
+    never prints argparse's ``==SUPPRESS==`` marker."""
+    from remembra.relay.crew import cli
+
+    parser = cli.build_parser()
+    help_text = parser.format_help()
+    assert "==SUPPRESS==" not in help_text
+    assert "bypass" not in help_text
+    assert "connect" in help_text and "verify" in help_text and "{start," in parser.format_usage()
+    args = parser.parse_args(["bypass", "--session", "cc-1"])
+    assert args.command == "bypass" and args.session == "cc-1" and args.minutes == 15
