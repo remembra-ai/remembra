@@ -207,7 +207,7 @@ export const KIND_LABEL: Record<string, string> = {
   task_blocked: 'blocked task',
   mention: 'mention',
   handover_offer: 'handover offer',
-  override_notice: 'from Mani',
+  override_notice: 'from a human',
   collision_notice: 'collision',
   claim_granted: 'claim granted',
 };

@@ -390,7 +390,7 @@ export function ZoneDrawer({
     },
     freeze: {
       title: `Freeze ${zone.slug}`,
-      consequence: 'Every agent is denied in this zone until you unfreeze it ("Mani is editing it himself"). Holders are told at their next tool call.',
+      consequence: 'Every agent is denied in this zone until you unfreeze it ("I am editing it myself"). Holders are told at their next tool call.',
       confirmLabel: 'Freeze',
       until: true,
     },

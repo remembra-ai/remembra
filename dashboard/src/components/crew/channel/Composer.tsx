@@ -256,7 +256,7 @@ export function Composer({
       <div id={hintId} className="mt-2 space-y-0.5 font-mono text-[11px] leading-relaxed text-ink-3" aria-live="polite">
         {intent.type === 'decide' && (
           <p className="flex items-center gap-1.5 text-ink-2">
-            <PixelGlyph name="decision" size={10} /> A decision you post is in force at once and appears in every agent brief as "confirmed by Mani".
+            <PixelGlyph name="decision" size={10} /> A decision you post is in force at once and appears in every agent brief as "confirmed by a human".
           </p>
         )}
         {intent.type === 'freeze' && (

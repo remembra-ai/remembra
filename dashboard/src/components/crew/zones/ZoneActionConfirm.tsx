@@ -114,7 +114,7 @@ export function ZoneActionConfirm({
               value={reason}
               maxLength={REASON_MAX * 2}
               onChange={(e) => setReason(e.target.value)}
-              placeholder="e.g. Mani is editing POS himself"
+              placeholder="e.g. editing POS myself"
             />
             {tooLong && <span className="text-xs text-fail">Too long (max {REASON_MAX} characters).</span>}
           </label>
