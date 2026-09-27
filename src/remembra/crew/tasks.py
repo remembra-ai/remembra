@@ -100,15 +100,16 @@ class Caller:
     human: bool = False
     session: Mapping[str, Any] | None = None
     system: bool = False
-    # humans only: False for a crew member (``CrewAccess.privileged``), who gets no (H) shortcut (§11.2)
-    privileged: bool = True
+    # humans only: True only for crew role owner or admin (``CrewAccess.privileged``); a crew member and any
+    # caller built without the route's role check get no (H) shortcut (§11.2)
+    privileged: bool = False
 
     @classmethod
     def for_session(cls, session: Mapping[str, Any]) -> Caller:
         return cls(user_id=str(session["user_id"]), session=dict(session))
 
     @classmethod
-    def for_human(cls, user_id: str, *, privileged: bool = True) -> Caller:
+    def for_human(cls, user_id: str, *, privileged: bool = False) -> Caller:
         """Only for a principal the route checked with ``is_human`` (D27); ``privileged`` is its crew role check."""
         return cls(user_id=user_id, human=True, privileged=privileged)
 

@@ -24,7 +24,7 @@ from tests.crew.wp5_support import (
     zone_id,
 )
 
-HUMAN = Z.Principal.human(OWNER)
+HUMAN = Z.Principal.human(OWNER, privileged=True)
 
 
 @pytest.fixture

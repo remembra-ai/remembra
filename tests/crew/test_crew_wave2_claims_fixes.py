@@ -30,7 +30,7 @@ from tests.crew.wp5_support import (
     zone_id,
 )
 
-HUMAN = Z.Principal.human(OWNER)
+HUMAN = Z.Principal.human(OWNER, privileged=True)
 YML = ZONES_YML.replace(
     "commons:\n  package.json: plain\n",
     "  codexonly:\n    include: [codex/**]\n    reserve_for: codex\n  vault:\n    include: [vault/**]\n    protected: true\n"

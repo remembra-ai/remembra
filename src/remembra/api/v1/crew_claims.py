@@ -177,7 +177,7 @@ async def adopt_claim(request: Request, ent: CrewEntity = Depends(crew_entity("c
 @router.post("/claims/{claim_id}/override")
 async def override_claim(request: Request, ent: CrewEntity = Depends(crew_entity("claim", PO, step_up=True))) -> Any:
     body = await read_body(request, "Override")
-    human = Z.Principal.human(ent.access.user.user_id, api_key_id=ent.access.user.api_key_id)
+    human = Z.Principal.human(ent.access.user.user_id, api_key_id=ent.access.user.api_key_id, privileged=ent.access.privileged)
     ops = crew_ops(request)
     async with crew_errors():
         return await idempotent(
@@ -225,7 +225,7 @@ async def guard(request: Request, access: CrewAccess = Depends(crew_access(PC)))
 @router.post("/crews/{crew_id}/bypass-codes", status_code=201)
 async def issue_bypass_code(request: Request, access: CrewAccess = Depends(crew_access(PO, step_up=True))) -> Any:
     body = await read_body(request, "BypassIssue")
-    human = Z.Principal.human(access.user.user_id, api_key_id=access.user.api_key_id)
+    human = Z.Principal.human(access.user.user_id, api_key_id=access.user.api_key_id, privileged=access.privileged)
     ops = crew_ops(request)
     async with crew_errors():
         return await B.issue_code(
@@ -312,7 +312,7 @@ async def resolve_collision(request: Request, ent: CrewEntity = Depends(crew_ent
 @router.post("/collisions/{collision_id}/dismiss")
 async def dismiss_collision(request: Request, ent: CrewEntity = Depends(crew_entity("collision", PO))) -> Any:
     body = closed(await read_body(request, required=False), {"reason"})
-    human = Z.Principal.human(ent.access.user.user_id, api_key_id=ent.access.user.api_key_id)
+    human = Z.Principal.human(ent.access.user.user_id, api_key_id=ent.access.user.api_key_id, privileged=ent.access.privileged)
     ops = crew_ops(request)
     async with crew_errors():
         return await CO.dismiss(ops, ent.row, human, body.get("reason"))

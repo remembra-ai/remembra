@@ -135,7 +135,7 @@ async def _item_actor(request: Request, ent: CrewEntity, action: str) -> Author:
     row = ent.row
     access = ent.access
     if access.human:
-        return Author.human(access.user.user_id)
+        return Author.human(access.user.user_id, privileged=access.privileged)
     audience = row["audience"]
     if audience == "project":
         require_human(access.user)

@@ -254,7 +254,7 @@ async def list_zone_changes(
 
 
 async def _decide(request: Request, ent: CrewEntity, approve: bool) -> Any:
-    human = Z.Principal.human(ent.access.user.user_id, api_key_id=ent.access.user.api_key_id)
+    human = Z.Principal.human(ent.access.user.user_id, api_key_id=ent.access.user.api_key_id, privileged=ent.access.privileged)
     ops = await with_limits(request, crew_ops(request), ent.access.crew.owner_user_id)
     async with crew_errors():
         return await Z.decide_zone_change(ops, ent.row, human, approve=approve)
@@ -301,7 +301,7 @@ async def put_tree(request: Request, access: CrewAccess = Depends(crew_access(PW
 @router.post("/zones/{zone_id}/freeze")
 async def freeze_zone(request: Request, ent: CrewEntity = Depends(crew_entity("zone", PO))) -> Any:
     body = await read_body(request, "Freeze")
-    human = Z.Principal.human(ent.access.user.user_id, api_key_id=ent.access.user.api_key_id)
+    human = Z.Principal.human(ent.access.user.user_id, api_key_id=ent.access.user.api_key_id, privileged=ent.access.privileged)
     ops = crew_ops(request)
     async with crew_errors():
         return await Z.freeze_zone(ops, ent.row, human, reason=body["reason"], until=body.get("until"))
@@ -310,7 +310,7 @@ async def freeze_zone(request: Request, ent: CrewEntity = Depends(crew_entity("z
 @router.post("/zones/{zone_id}/unfreeze")
 async def unfreeze_zone(request: Request, ent: CrewEntity = Depends(crew_entity("zone", PO, step_up=True))) -> Any:
     body = await read_body(request, "Reason")
-    human = Z.Principal.human(ent.access.user.user_id, api_key_id=ent.access.user.api_key_id)
+    human = Z.Principal.human(ent.access.user.user_id, api_key_id=ent.access.user.api_key_id, privileged=ent.access.privileged)
     ops = crew_ops(request)
     async with crew_errors():
         return await Z.unfreeze_zone(ops, ent.row, human, reason=body["reason"])

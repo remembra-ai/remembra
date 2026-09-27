@@ -24,7 +24,7 @@ from tests.crew.wp5_support import (
     zone_id,
 )
 
-HUMAN = Z.Principal.human(OWNER)
+HUMAN = Z.Principal.human(OWNER, privileged=True)
 
 
 @pytest.fixture
@@ -247,7 +247,7 @@ async def test_freeze_and_unfreeze(env):
     with pytest.raises(Z.CrewOpError) as err:
         await C.request_claim(ops, CREW, agent, zone_id=pos["id"])
     assert err.value.status == 423 and err.value.error == "frozen"
-    waiting = await C.request_claim(ops, CREW, Z.Principal.human("u_admin2"), zone_id=pos["id"], wait=True)
+    waiting = await C.request_claim(ops, CREW, Z.Principal.human("u_admin2", privileged=True), zone_id=pos["id"], wait=True)
     assert waiting.status == "queued"
     evs = await events(db)
     assert any(e["type"] == "zone.frozen" and e["moment"] == 1 for e in evs)

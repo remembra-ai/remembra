@@ -207,7 +207,7 @@ async def redact_message(
 ) -> dict[str, Any]:
     channel, _, _ = services(request)
     try:
-        return await channel.redact(ent.id, Author.human(ent.access.user.user_id))
+        return await channel.redact(ent.id, Author.human(ent.access.user.user_id, privileged=ent.access.privileged))
     except InboxError as e:
         raise as_http(e) from e
 
@@ -220,7 +220,11 @@ async def pin_message(
 ) -> dict[str, Any]:
     channel, _, _ = services(request)
     try:
-        return await channel.pin(ent.id, Author.human(ent.access.user.user_id), pinned=payload.pinned if payload else True)
+        return await channel.pin(
+            ent.id,
+            Author.human(ent.access.user.user_id, privileged=ent.access.privileged),
+            pinned=payload.pinned if payload else True,
+        )
     except InboxError as e:
         raise as_http(e) from e
 
@@ -276,7 +280,9 @@ async def confirm_decision(
 ) -> dict[str, Any]:
     _, decisions, _ = services(request)
     try:
-        return await decisions.confirm(ent.id, Author.human(ent.access.user.user_id), crew_ref(ent.access))
+        return await decisions.confirm(
+            ent.id, Author.human(ent.access.user.user_id, privileged=ent.access.privileged), crew_ref(ent.access)
+        )
     except InboxError as e:
         raise as_http(e) from e
 
@@ -288,7 +294,9 @@ async def reject_decision(
 ) -> dict[str, Any]:
     _, decisions, _ = services(request)
     try:
-        return await decisions.reject(ent.id, Author.human(ent.access.user.user_id), crew_ref(ent.access))
+        return await decisions.reject(
+            ent.id, Author.human(ent.access.user.user_id, privileged=ent.access.privileged), crew_ref(ent.access)
+        )
     except InboxError as e:
         raise as_http(e) from e
 
@@ -305,7 +313,7 @@ async def supersede_decision(
     try:
         return await decisions.supersede(
             ent.id,
-            Author.human(ent.access.user.user_id),
+            Author.human(ent.access.user.user_id, privileged=ent.access.privileged),
             crew_ref(ent.access),
             title=payload.title,
             decision=payload.decision,

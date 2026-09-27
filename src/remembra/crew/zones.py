@@ -87,15 +87,16 @@ class Principal:
     user_id: str
     session: Mapping[str, Any] | None = None
     api_key_id: str | None = None
-    # humans only: False for a crew member (``CrewAccess.privileged``), who gets no (H) shortcut (§11.2)
-    privileged: bool = True
+    # humans only: True only for crew role owner or admin (``CrewAccess.privileged``); a crew member and any
+    # principal built without the route's role check get no (H) shortcut (§11.2)
+    privileged: bool = False
 
     @classmethod
     def system(cls) -> Principal:
         return cls("system", "system")
 
     @classmethod
-    def human(cls, user_id: str, *, api_key_id: str | None = "jwt_auth", privileged: bool = True) -> Principal:
+    def human(cls, user_id: str, *, api_key_id: str | None = "jwt_auth", privileged: bool = False) -> Principal:
         return cls("human", user_id, None, api_key_id, privileged)
 
     @classmethod

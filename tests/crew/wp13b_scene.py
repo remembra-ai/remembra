@@ -158,7 +158,7 @@ async def build(app: FastAPI) -> dict[str, Any]:
     pa, pb, pc = (Z.Principal.for_session(s) for s in (a, b, c))
     # zones.yml saved by a human first (`remembra-crew zones push` at a TTY), then the tree snapshot
     first = await Z.upload_zones_file(
-        ops, crew_id, Z.Principal.human(user.id), yaml_text=ZONES_V1, sha="7f3a9c21d0e4", branch="main"
+        ops, crew_id, Z.Principal.human(user.id, privileged=True), yaml_text=ZONES_V1, sha="7f3a9c21d0e4", branch="main"
     )
     assert first["result"] == "applied", first
     await Z.put_tree(ops, crew_id, pa, TREE)

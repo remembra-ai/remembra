@@ -34,7 +34,7 @@ from tests.crew.wp7_support import (
     seed_crew,
 )
 
-HUMAN = Author.human(OWNER)
+HUMAN = Author.human(OWNER, privileged=True)
 SYSTEM = Actor.system()
 
 

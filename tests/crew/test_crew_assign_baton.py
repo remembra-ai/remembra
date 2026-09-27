@@ -40,7 +40,7 @@ async def test_assign_after_a_stall_closes_the_baton_items_and_moves_the_lane(tm
 
         snapshot = await CrewCore(env.db).snapshot(crew)
         before_seq = int(snapshot["as_of_seq"])
-        res = await TaskService(env.log).assign(crew, task, Caller.for_human(OWNER), b_join.session["id"])
+        res = await TaskService(env.log).assign(crew, task, Caller.for_human(OWNER, privileged=True), b_join.session["id"])
         assert res.task["owner_session_id"] == b_join.session["id"]
 
         still_open = await env.all(

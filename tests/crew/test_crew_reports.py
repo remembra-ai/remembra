@@ -35,7 +35,7 @@ from tests.crew.wp6_support import (
     valid_envelopes,
 )
 
-HUMAN = Caller.for_human("u_owner")
+HUMAN = Caller.for_human("u_owner", privileged=True)
 TEST_CRIT = {"id": "c1", "text": "POS tests pass", "kind": "test", "match": "npm test -- pos", "required": True}
 
 

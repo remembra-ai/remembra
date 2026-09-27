@@ -27,7 +27,7 @@ from tests.crew.wp6_support import (
     valid_envelopes,
 )
 
-HUMAN = Caller.for_human("u_owner")
+HUMAN = Caller.for_human("u_owner", privileged=True)
 
 
 @pytest.fixture()

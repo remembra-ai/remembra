@@ -13,7 +13,7 @@ from remembra.crew import zones as Z
 from remembra.crew.store import now_iso, parse_iso
 from tests.crew.wp5_support import CREW, OWNER, ZONES_YML, assert_chain_ok, make_ops, open_db, seed_crew, seed_session, zone_id
 
-HUMAN = Z.Principal.human(OWNER)
+HUMAN = Z.Principal.human(OWNER, privileged=True)
 
 
 @pytest.fixture

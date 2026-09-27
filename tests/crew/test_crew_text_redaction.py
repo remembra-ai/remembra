@@ -47,7 +47,7 @@ async def test_message_bodies_are_redacted_before_storage_and_events(tmp_path: P
         assert all(TOKEN not in h["prev_body"] for h in history)
 
         # a kind=decision message: the decision row and its events are redacted too
-        human = Author.human(OWNER)
+        human = Author.human(OWNER, privileged=True)
         await env.channel.post(env.crew, human, kind="decision", body=f"Use key {TOKEN}\nfor staging", client_msg_id="d1")
         rows = await env.db.fetchall("SELECT title, decision FROM crew_decisions WHERE crew_id = ?", (CREW_A,))
         assert rows and all(TOKEN not in (r["title"] + r["decision"]) for r in rows)
@@ -79,7 +79,7 @@ async def test_task_title_and_body_are_redacted(tmp_path: Path) -> None:
     env = await make_env(tmp_path)
     try:
         svc = TaskService(env.log)
-        human = Caller.for_human(OWNER)
+        human = Caller.for_human(OWNER, privileged=True)
         res = await svc.create(
             CREW_A,
             human,
@@ -112,7 +112,7 @@ async def test_a_redacted_message_leaves_the_event_feed_and_the_chain_verifies(t
         before = await fetch_events(env.db.conn, CREW_A, after_seq=0)
         assert any(secret in json.dumps(e) for e in before)
 
-        out = await env.channel.redact(res.message["id"], Author.human(OWNER))
+        out = await env.channel.redact(res.message["id"], Author.human(OWNER, privileged=True))
 
         assert out["message"]["body"] == "" and out["message"]["redacted"]
         after = await fetch_events(env.db.conn, CREW_A, after_seq=0)
@@ -128,7 +128,7 @@ async def test_a_redacted_message_leaves_the_event_feed_and_the_chain_verifies(t
         assert report.ok, report.errors
         assert report.tombstoned == 2
         # redacting again is a no-op
-        again = await env.channel.redact(res.message["id"], Author.human(OWNER))
+        again = await env.channel.redact(res.message["id"], Author.human(OWNER, privileged=True))
         assert again["seq"] is None
     finally:
         await env.db.close()

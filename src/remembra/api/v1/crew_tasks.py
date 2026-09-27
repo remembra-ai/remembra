@@ -268,7 +268,11 @@ def _action(
         if bucket:
             _rate(request, bucket, access)
         body = await _json_body(request, required=body_required)
-        caller = Caller.for_human(access.user.user_id) if human else await resolve_caller(request, access, mutation=True)
+        caller = (
+            Caller.for_human(access.user.user_id, privileged=access.privileged)
+            if human
+            else await resolve_caller(request, access, mutation=True)
+        )
 
         async def run() -> dict[str, Any]:
             result = await handler(services(request), access.crew_id, ent.id, caller, body)

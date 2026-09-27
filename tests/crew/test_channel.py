@@ -40,7 +40,7 @@ from tests.crew.wp7_support import (
     seed_crew,
 )
 
-HUMAN = Author.human(OWNER)
+HUMAN = Author.human(OWNER, privileged=True)
 
 
 async def _two_sessions(env):

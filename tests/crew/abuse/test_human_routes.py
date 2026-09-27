@@ -520,3 +520,18 @@ def test_member_role_humans_get_no_human_shortcuts(server: RedTeamServer) -> Non
 def test_every_l0_contract_route_is_mounted_by_the_real_app(server: RedTeamServer) -> None:
     """The route table of the running app covers the whole L0 contract, each with its access dependency."""
     assert audit_crew_routes(server.app.routes, require_all=True) == []
+
+
+def test_a_human_principal_is_privileged_only_when_the_route_says_so() -> None:
+    """The (H) shortcut needs an explicit crew-role check: a principal built without one is a plain person."""
+    from remembra.crew.inbox import Author
+    from remembra.crew.tasks import Caller
+    from remembra.crew.zones import Principal
+
+    assert not Principal.human("u_1").is_privileged
+    assert not Author.human("u_1").is_privileged
+    assert not Caller.for_human("u_1").is_privileged
+    assert Principal.human("u_1", privileged=True).is_privileged
+    assert Author.human("u_1", privileged=True).is_privileged
+    assert Caller.for_human("u_1", privileged=True).is_privileged
+    assert not Caller("u_1", privileged=True).is_privileged  # only a human can be the (H) principal

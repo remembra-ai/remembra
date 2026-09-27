@@ -101,11 +101,12 @@ class Author:
     callsign: str | None = None
     verified: bool = False
     parent_session_id: str | None = None  # a sub-agent's accountable parent session
-    # humans only: False for a crew member (``CrewAccess.privileged``): a person, but not the (H) principal (§11.2)
-    privileged: bool = True
+    # humans only: True only for crew role owner or admin (``CrewAccess.privileged``); a crew member is a person,
+    # but not the (H) principal (§11.2)
+    privileged: bool = False
 
     @classmethod
-    def human(cls, user_id: str, *, privileged: bool = True) -> Author:
+    def human(cls, user_id: str, *, privileged: bool = False) -> Author:
         return cls(kind="human", user_id=user_id, verified=True, privileged=privileged)
 
     @classmethod

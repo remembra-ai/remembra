@@ -260,14 +260,14 @@ async def test_decisions_record_who_was_verified(tmp_path) -> None:
     try:
         agent = await add_session(env.db, CREW_A, "cs_a", callsign="cc-1")
         proposed = await env.decisions.create(env.crew, agent, title="Use Decimal", decision="Money is Decimal")
-        human = await env.decisions.create(env.crew, Author.human(OWNER), title="GCT", decision="Round half-up")
+        human = await env.decisions.create(env.crew, Author.human(OWNER, privileged=True), title="GCT", decision="Round half-up")
         rows = {
             r["id"]: r for r in await env.db.fetchall("SELECT id, proposed_by_verified, decided_by_verified FROM crew_decisions")
         }
         assert rows[human["id"]]["proposed_by_verified"] == 1 and rows[human["id"]]["decided_by_verified"] == 1
         assert rows[proposed["id"]]["proposed_by_verified"] == (1 if agent.verified else 0)
         assert rows[proposed["id"]]["decided_by_verified"] is None
-        await env.decisions.confirm(proposed["id"], Author.human(OWNER), env.crew)
+        await env.decisions.confirm(proposed["id"], Author.human(OWNER, privileged=True), env.crew)
         row = await env.db.fetchone("SELECT decided_by_verified FROM crew_decisions WHERE id = ?", (proposed["id"],))
         assert row["decided_by_verified"] == 1
     finally:
@@ -381,7 +381,7 @@ async def test_decisions_carry_evidence(tmp_path) -> None:
         assert out["evidence"] == ["abc1234", "tests/test_money.py"]
         row = await env.db.fetchone("SELECT evidence FROM crew_decisions WHERE id = ?", (out["id"],))
         assert json.loads(row["evidence"]) == ["abc1234", "tests/test_money.py"]
-        plain = await env.decisions.create(env.crew, Author.human(OWNER), title="GCT", decision="Round half-up")
+        plain = await env.decisions.create(env.crew, Author.human(OWNER, privileged=True), title="GCT", decision="Round half-up")
         assert plain["evidence"] == []
         assert (await env.db.fetchone("SELECT evidence FROM crew_decisions WHERE id = ?", (plain["id"],)))["evidence"] is None
         with pytest.raises(ValidationFailed):

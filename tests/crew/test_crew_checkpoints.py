@@ -124,7 +124,7 @@ async def test_ingest_needs_a_live_session_of_this_crew(env):
         await svc.ingest(CREW, Caller.for_session(ended), body(ended))
     assert e.value.error == "session_ended"
     with pytest.raises(CrewServiceError) as e:
-        await svc.ingest(CREW, Caller.for_human("u_owner"), body(ended))
+        await svc.ingest(CREW, Caller.for_human("u_owner", privileged=True), body(ended))
     assert e.value.error == "session_required"
     await seed_crew(db, OTHER_CREW, owner="u_x", project="x")
     foreign = await seed_session(db, OTHER_CREW)
@@ -234,7 +234,9 @@ async def test_task_transitions_record_a_task_checkpoint(env):
     s = await seed_session(db)
     tasks = TaskService(svc.events, on_transition=svc.on_task_transition)
     t = (
-        await tasks.create(CREW, Caller.for_human("u_owner"), {"title": "T", "zone_ids": [], "acceptance": [], "depends_on": []})
+        await tasks.create(
+            CREW, Caller.for_human("u_owner", privileged=True), {"title": "T", "zone_ids": [], "acceptance": [], "depends_on": []}
+        )
     ).task
     await tasks.start(CREW, t["id"], Caller.for_session(s))
     await tasks.release(CREW, t["id"], Caller.for_session(s))

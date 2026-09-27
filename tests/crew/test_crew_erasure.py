@@ -330,9 +330,13 @@ async def _real_crews(tmp_path: Path) -> dict[str, Any]:
         crew_b, Caller.for_session(guest), {"session_id": guest["id"], "trigger": "turn", "facts": {"summary": f"{SECRET} plan"}}
     )
     guest_msg = await channel.post(ref_b, Author.session(guest), kind="note", body=f"{SECRET} session note", client_msg_id="g1")
-    human_msg = await channel.post(ref_b, Author.human(VICTIM), kind="chat", body=f"{SECRET} human chat", client_msg_id="h1")
+    human_msg = await channel.post(
+        ref_b, Author.human(VICTIM, privileged=True), kind="chat", body=f"{SECRET} human chat", client_msg_id="h1"
+    )
     proposed = await decisions.create(ref_b, Author.session(guest), title=f"{SECRET} proposal", decision="Use floats")
-    adopted = await decisions.create(ref_b, Author.human(VICTIM), title=f"{SECRET} rule", decision="Round half-up")
+    adopted = await decisions.create(
+        ref_b, Author.human(VICTIM, privileged=True), title=f"{SECRET} rule", decision="Round half-up"
+    )
     # the bystander's own work, one reply to the victim among it
     await checkpoints.ingest(
         crew_b, Caller.for_session(by_row), {"session_id": by_row["id"], "trigger": "turn", "facts": {"summary": f"{KEEP} plan"}}
@@ -534,7 +538,7 @@ async def test_tombstones_match_the_email_too(tmp_path: Path) -> None:
     channel = CrewChannel(CrewEventLog(env.db))
     await channel.post(
         CrewRef(crew_b, BYSTANDER, "yaadbooks"),
-        Author.human(BYSTANDER),
+        Author.human(BYSTANDER, privileged=True),
         kind="chat",
         body="send the alerts to Victim@Example.com",
         client_msg_id="e1",
