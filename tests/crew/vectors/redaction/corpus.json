@@ -353,6 +353,25 @@
    "must_contain": [
     "claude-code:mbp:a1b2c3d4"
    ]
+  },
+  {
+   "id": "r21",
+   "payload_type": "checkpoint",
+   "payload": {
+    "facts": {
+     "compose_env": "environment:\n  datadog_api_key: 4d8bd97f03109ac1ffd4f20894ed216d\n  HEROKU_API_KEY: ec5df277-1957-45d8-ab8c-bc3dedb4088e\n  NODE_ENV: production\n",
+     "config": "{\"datadogApiKey\": \"903590fd6f96c8e35008fecd1ea9b459\", \"region\": \"us5\"}"
+    }
+   },
+   "must_not_contain": [
+    "4d8bd97f03109ac1ffd4f20894ed216d",
+    "ec5df277-1957-45d8-ab8c-bc3dedb4088e",
+    "903590fd6f96c8e35008fecd1ea9b459"
+   ],
+   "must_contain": [
+    "NODE_ENV: production",
+    "us5"
+   ]
   }
  ]
 }

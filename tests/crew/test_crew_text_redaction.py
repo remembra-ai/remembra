@@ -56,6 +56,24 @@ async def test_message_bodies_are_redacted_before_storage_and_events(tmp_path: P
         await env.db.close()
 
 
+async def test_labelled_hex_and_uuid_keys_in_a_message_are_redacted(tmp_path: Path) -> None:
+    """Vendor-prefixed "NAME: value" keys whose values are hex or a UUID (env YAML) never reach crew.db or readers."""
+    hex_key, uuid_key = "9f2c4e6a8b0d1f3e5a7c9e1b3d5f7a9c", "1b4e28ba-2fa1-41d2-883f-0016d3cca427"
+    env = await make_env(tmp_path)
+    try:
+        a = await add_session(env.db, CREW_A, "cs_a", callsign="cc-1", agent_id="claude-code")
+        body = f"@codex-1 prod creds:\ndatadog_api_key: {hex_key}\nHEROKU_API_KEY: {uuid_key}\nregion: us5"
+        res = await env.channel.post(env.crew, a, kind="chat", body=body, client_msg_id="m1")
+        for value in (hex_key, uuid_key):
+            assert value not in res.message["body"], res.message["body"]
+            assert value not in json.dumps(await env.db.fetchall("SELECT body FROM crew_messages"))
+            assert value not in await _all_event_text(env.db)
+            assert all(value not in json.dumps(e) for e in env.events)
+        assert "region: us5" in res.message["body"]
+    finally:
+        await env.db.close()
+
+
 async def test_decisions_are_redacted(tmp_path: Path) -> None:
     env = await make_env(tmp_path)
     try:

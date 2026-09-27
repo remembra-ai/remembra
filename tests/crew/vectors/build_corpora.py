@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import uuid
 from typing import Any
 
 from remembra.crew.schemas import EVENT_SPECS, snapshot_hmac
@@ -1909,6 +1910,10 @@ def redaction_corpus() -> dict[str, Any]:
     stripe = _fake("sk_live_", 24, "stripe")
     entropy = _fake("", 44, "entropy")
     root, home = "/Users/mani/code/yaadbooks", "/Users/mani"
+    # hex and UUID values the high-entropy fallback skips: only a (vendor-prefixed) label catches them
+    dd_hex = hashlib.sha256(b"datadog").hexdigest()[:32]
+    dd_camel = hashlib.sha256(b"datadog-camel").hexdigest()[:32]
+    heroku = str(uuid.UUID(bytes=hashlib.sha256(b"heroku").digest()[:16], version=4))
     cases = [
         {
             "id": "r01",
@@ -2083,6 +2088,20 @@ def redaction_corpus() -> dict[str, Any]:
             },
             "must_not_contain": ["Manis-MacBook-Pro", home],
             "must_contain": ["claude-code:mbp:a1b2c3d4"],
+        },
+        {
+            "id": "r21",
+            "payload_type": "checkpoint",
+            "payload": {
+                "facts": {
+                    "compose_env": (
+                        f"environment:\n  datadog_api_key: {dd_hex}\n  HEROKU_API_KEY: {heroku}\n  NODE_ENV: production\n"
+                    ),
+                    "config": f'{{"datadogApiKey": "{dd_camel}", "region": "us5"}}',
+                }
+            },
+            "must_not_contain": [dd_hex, heroku, dd_camel],
+            "must_contain": ["NODE_ENV: production", "us5"],
         },
     ]
     return {

@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import secrets
 import string
+import uuid
 
 import pytest
 
@@ -87,6 +88,50 @@ def test_ordinary_text_untouched(text):
     result = redact_secrets(text)
     assert result.text == text, result.text
     assert not result.redacted
+
+
+def _hex(n: int) -> str:
+    return secrets.token_hex(n // 2)
+
+
+# A vendor-prefixed key name in "NAME: value" form (docker-compose / k8s env YAML, a JSON config) whose value
+# is hex or a UUID: the high-entropy fallback skips hex and UUIDs (commit SHAs, ids), so only the label can
+# catch these. The label must match after "_", "-" or a camelCase boundary, not only at a word start.
+@pytest.mark.parametrize(
+    "template",
+    [
+        "datadog_api_key: {hex}",
+        "HEROKU_API_KEY: {uuid}",
+        '"datadogApiKey": "{hex}"',
+        "sentry-auth-token: {hex}",
+        "  MAILCHIMP_API_KEY: {hex}-us21",
+        "POSTGRES_PASSWORD: {hex}",
+        "stripeSecretKey={hex}",
+        "github_access_token = {hex}",
+    ],
+)
+def test_prefixed_labels_redact_hex_and_uuid_values(template: str) -> None:
+    value_hex, value_uuid = _hex(32), str(uuid.uuid4())
+    text = "env:\n" + template.format(hex=value_hex, uuid=value_uuid) + "\nnext: ok"
+    out = redact_secrets(text).text
+    assert value_hex not in out and value_uuid not in out, out
+    assert "next: ok" in out
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "max_tokens: 4096 and num_tokens: 12",
+        "api_key_id: key_1234 names the key, not its value",
+        "Set sort_key: created_at and page_token: null.",
+        "my_secretary: Jane Doe",
+        "The deploy_token is rotated weekly.",
+        "commit_sha: f92e34d48005db6e70d450f9c37af320ecf5d622",
+        "session_id: 3f2b8c1e-9a4d-4e2b-8f1a-2c3d4e5f6a7b",
+    ],
+)
+def test_prefixed_label_rule_leaves_names_and_ids_alone(text: str) -> None:
+    assert redact_secrets(text).text == text
 
 
 def test_redaction_is_idempotent():

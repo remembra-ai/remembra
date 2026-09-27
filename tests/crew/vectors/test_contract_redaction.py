@@ -49,6 +49,9 @@ def test_corpus_covers_the_required_secret_forms() -> None:
         "PRIVATE KEY-----",
         CORPUS["context"]["home"],
         "hostname",
+        "datadog_api_key: ",  # vendor-prefixed labels with hex / UUID values
+        "HEROKU_API_KEY: ",
+        "datadogApiKey",
     ):
         assert form in blob, form
 

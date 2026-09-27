@@ -36,7 +36,8 @@ class _Rule:
 
 
 def _random(value: str) -> bool:
-    return _looks_random(value, min_len=8, min_entropy=2.5)
+    # "rem_…wxyz" (tools.keyinput.mask_key) is a key shown masked on purpose, never a usable credential
+    return "\u2026" not in value and _looks_random(value, min_len=8, min_entropy=2.5)
 
 
 def _password_like(value: str) -> bool:
@@ -46,6 +47,12 @@ def _password_like(value: str) -> bool:
 
 def _r(pattern: str, flags: int = 0) -> re.Pattern[str]:
     return re.compile(pattern, flags)
+
+
+# Where a credential label may start: at a word start, after "_" or "-" (a vendor-prefixed name such as
+# datadog_api_key or HEROKU_API_KEY), or at a camelCase boundary (datadogApiKey). A plain \b misses the
+# prefixed names, and their hex or UUID values are skipped by the high-entropy fallback (ids, SHAs).
+_LABEL_START = r"(?:(?<![A-Za-z0-9])|(?-i:(?<=[a-z])(?=[A-Z])))"
 
 
 # CLI-01: credentials typed on a command line ("mysql -pX", "curl -u user:X",
@@ -197,15 +204,19 @@ _RULES: tuple[_Rule, ...] = (
     _Rule("bearer_token", _r(r"(?i)\bbearer\s+([A-Za-z0-9._~+/\-]{20,}=*)"), group=1),
     _Rule(
         "password",
-        _r(r"(?i)\b(?:password|passwd|pwd|passphrase)\b[\"']?\s*(?:[:=]|\bis\b)\s*[\"']?([^\s\"',;]{6,})"),
+        # "pwd" only as a whole word: HOME_PWD / OLD_PWD name directories, not passwords
+        _r(
+            rf"(?i)(?:{_LABEL_START}(?:password|passwd|passphrase)|\bpwd)\b"
+            r"[\"']?\s*(?:[:=]|\bis\b)\s*[\"']?([^\s\"',;]{6,})"
+        ),
         group=1,
         check=_password_like,
     ),
     _Rule(
         "secret",
         _r(
-            r"(?i)\b(?:api[_\-]?key|apikey|secret(?:[_\-]?key)?|client[_\-]?secret|access[_\-]?token|auth[_\-]?token"
-            r"|refresh[_\-]?token|private[_\-]?key|token)\b[\"']?\s*[:=]\s*[\"']?([^\s\"',;]{8,})"
+            rf"(?i){_LABEL_START}(?:api[_\-]?key|apikey|secret(?:[_\-]?key)?|client[_\-]?secret|access[_\-]?token"
+            r"|auth[_\-]?token|refresh[_\-]?token|private[_\-]?key|token)\b[\"']?\s*[:=]\s*[\"']?([^\s\"',;]{8,})"
         ),
         group=1,
         check=_random,
