@@ -412,7 +412,8 @@ def test_unverified_adapter_not_written(fh: FakeHome) -> None:
     assert report.exit_code == 0
     assert f.fix is not None and f.fix.command == "remembra-relay connect --apply --agent cursor --include-unverified"
     assert f.what == (
-        "Cursor: hooks not written. Cursor's hooks are unverified: its own hook runner fired them, but no logged-in Cursor session has run them yet."
+        "Cursor: hooks not written. Cursor's hooks are unverified: its own hook runner fired them,"
+        " but no logged-in Cursor session has run them yet."
     )
     assert "connect --apply leaves unverified adapters out unless you add --include-unverified" in f.evidence
     assert not any("dry run" in e for e in f.evidence)
