@@ -323,7 +323,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    `recall(query, slim=True)` returns 90% smaller payloads—just the context string, no metadata bloat.
+    `recall(query, slim=True)` returns just the context string, without the metadata, for a smaller payload.
 
 -   :material-shield-check:{ .lg .middle } __Security Hardening__
 

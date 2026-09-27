@@ -364,7 +364,7 @@ console.log(profile);
 
 ## Slim Recall Mode (v0.12.0)
 
-Get 90% smaller responses—just the context string.
+Get a smaller response: just the context string, without the metadata.
 
 ```typescript
 // Standard recall (full response with metadata)
