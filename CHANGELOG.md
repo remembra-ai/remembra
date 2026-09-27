@@ -89,7 +89,9 @@ A required check on the git host is not part of this release.
   `POST /api/v1/inbox/send` answers 422 `reserved_sender` where 0.16 stored the message. MCP clients from 0.15
   and 0.16 send `REMEMBRA_AGENT_ID` as the sender, so an agent id such as `remembra-bridge`, `system-bot` or
   `mani-laptop` can no longer send: set `REMEMBRA_AGENT_ID` to another id (the error message says so).
-  Dashboard logins still send as `human`.
+  Dashboard logins still send as `human`. For the same reason `POST /api/v1/keys` no longer binds a key to
+  such an agent id, and a crew join under one is refused (both 422 `reserved_sender`); a key bound to one
+  before 0.17.0 is told to use a key bound to another id.
 
 ### Upgrading
 - The main database gets one new migration, **v5** (project and crew columns on the agent inbox), even with
