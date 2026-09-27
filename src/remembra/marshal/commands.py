@@ -35,7 +35,10 @@ INSTALL_KEEP_SERVER = "remembra-install --all"
 
 UNINSTALL_STEPS: tuple[tuple[str, str], ...] = (
     ("remembra-relay disconnect --apply", "removes the session hooks from every agent (a backup of each file is kept)"),
-    ("remembra-install --remove --all --apply", "removes the Remembra MCP server from every agent"),
+    (
+        "remembra-install --remove --all --apply --delete-backups",
+        "removes the Remembra MCP server from every agent and deletes the config backups that still hold your key",
+    ),
     ("pipx uninstall remembra", "removes the commands"),
     ("rm -r ~/.remembra", "deletes the saved key, the unsent-handoff queue and the log"),
 )

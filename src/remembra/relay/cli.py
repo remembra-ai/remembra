@@ -1779,11 +1779,11 @@ def cmd_disconnect(args: argparse.Namespace) -> int:
     print(
         "\nTo remove Remembra completely:\n"
         "  1. remembra-relay disconnect --apply     (the session hooks, above)\n"
-        "  2. remembra-install --remove --all --apply   (the MCP server entries)\n"
+        "  2. remembra-install --remove --all --apply --delete-backups\n"
+        "     (the MCP server entries, and the backups of agent configs, *.bak-remembra-* and *.bak-relay-*,\n"
+        "     that still hold the key)\n"
         "  3. pipx uninstall remembra\n"
-        "  4. revoke the key in the dashboard (API keys) and delete ~/.remembra (saved key, queue, log)\n"
-        "  Backups of agent configs (*.bak-remembra-*, *.bak-relay-*) can still hold the key: step 2 lists them,\n"
-        "  and remembra-install --remove --all --apply --delete-backups deletes them."
+        "  4. revoke the key in the dashboard (API keys) and delete ~/.remembra (saved key, queue, log)"
     )
     return exit_code
 

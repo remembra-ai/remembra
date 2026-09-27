@@ -88,7 +88,8 @@ redact command-line credentials from handoffs stored before this release.
   key and asks before each write, and runs `pipx ensurepath` even when pipx is already installed.
   `remembra.dev/llms.txt` and `llms-full.txt` (generated from the pages) are
   served too. setup.md, `remembra_setup` and the dashboard give the same commands in the same order, and a test
-  holds them to it.
+  holds them to it. Their uninstall steps run `remembra-install --remove --all --apply --delete-backups`, which
+  also deletes the config backups that still hold the key, and end with revoking the key.
 
 ### Changed
 

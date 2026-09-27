@@ -66,7 +66,7 @@ export function oneLineInstall(serverUrl: string): string {
 /** Taking Remembra off a machine, in order (docs/guides/relay.md#uninstall says the same). */
 export const UNINSTALL_STEPS: { command: string; what: string }[] = [
   { command: 'remembra-relay disconnect --apply', what: 'removes the session hooks from every agent (a backup of each file is kept)' },
-  { command: 'remembra-install --remove --all --apply', what: 'removes the Remembra MCP server from every agent' },
+  { command: 'remembra-install --remove --all --apply --delete-backups', what: 'removes the Remembra MCP server from every agent and deletes the config backups that still hold your key' },
   { command: 'pipx uninstall remembra', what: 'removes the commands' },
   { command: 'rm -r ~/.remembra', what: 'deletes the saved key, the unsent-handoff queue and the log' },
 ];

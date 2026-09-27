@@ -41,7 +41,8 @@ describe('uninstall steps', () => {
   it('lists disconnect, the MCP removal and pipx uninstall, in that order', () => {
     const commands = UNINSTALL_STEPS.map((step) => step.command);
     expect(commands.indexOf('remembra-relay disconnect --apply')).toBe(0);
-    expect(commands.indexOf('remembra-install --remove --all --apply')).toBe(1);
+    // --delete-backups: the *.bak-remembra-* / *.bak-relay-* copies of agent configs still hold the key.
+    expect(commands.indexOf('remembra-install --remove --all --apply --delete-backups')).toBe(1);
     expect(commands.indexOf('pipx uninstall remembra')).toBe(2);
   });
 });

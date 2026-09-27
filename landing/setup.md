@@ -119,12 +119,12 @@ In this order:
 
 ```bash
 remembra-relay disconnect --apply
-remembra-install --remove --all --apply
+remembra-install --remove --all --apply --delete-backups
 pipx uninstall remembra
 rm -r ~/.remembra
 ```
 
-The last line deletes the saved key, the unsent-handoff queue and the log.
+The second line also deletes the backups of agent configs that still hold the key, and the last line deletes the saved key, the unsent-handoff queue and the log. Then ask the user to revoke the key in the dashboard (Settings > API keys): a copy made anywhere else still works until it is revoked.
 
 ## More
 

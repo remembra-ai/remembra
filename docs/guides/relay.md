@@ -400,15 +400,15 @@ the package alone leaves hooks that call a missing command at every session star
 in this order:
 
 ```bash
-remembra-relay disconnect --apply            # removes the relay hooks from every agent (backups kept)
-remembra-install --remove --all --apply      # removes the remembra MCP server from every agent (backups kept)
+remembra-relay disconnect --apply                          # removes the relay hooks from every agent
+remembra-install --remove --all --apply --delete-backups   # removes the MCP server, and backups holding the key
 pipx uninstall remembra
-rm -r ~/.remembra                            # the saved key, the unsent-handoff queue and the log
+rm -r ~/.remembra                                          # the saved key, the unsent-handoff queue and the log
 ```
 
 The backups `remembra-install` and `connect` keep next to each config (`*.bak-remembra-<time>`,
-`*.bak-relay-<time>`) can still hold your key. `remembra-install --remove` lists every backup that does; add
-`--delete-backups` (with `--apply`) to delete them too, or delete them by hand.
+`*.bak-relay-<time>`) can still hold your key. `remembra-install --remove` lists every backup that does, and
+`--delete-backups` (with `--apply`) deletes them; without it they are kept, and you can delete them by hand.
 
 Run the first two without `--apply` to see exactly what they will change. `disconnect` removes only the
 entries the relay wrote (commands that run `remembra-relay`); your other hooks stay. Pass

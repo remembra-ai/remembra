@@ -293,3 +293,58 @@ def test_config_view_hides_secrets_in_the_remaining_common_mcp_shapes() -> None:
 def test_bridge_accepts_url_as_well_as_upstream() -> None:
     assert bridge_parser().parse_args(["--url", SELF_HOSTED]).upstream == SELF_HOSTED
     assert bridge_parser().parse_args(["--upstream", SELF_HOSTED]).upstream == SELF_HOSTED
+
+
+# --- setup.md's "Taking it off again" leaves no copy of the key ------------------------------------
+
+
+def _taken_off(tmp_path: Path, name: str, steps: list[str]) -> list[Path]:
+    """Install and connect in a fresh HOME, run ``steps`` (setup.md's uninstall lines), return files still holding KEY."""
+    import shlex
+    import shutil
+
+    home = tmp_path / name
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude.json").write_text("{}")
+    (home / ".claude" / "settings.json").write_text("{}")
+    (home / ".codex").mkdir()
+    (home / ".codex" / "config.toml").write_text('model = "gpt-5"\n')
+    installed = install(home, "--all", "--apply", "--api-key-stdin", "--url", "http://127.0.0.1:9", stdin=KEY + "\n")
+    assert installed.returncode == 0, installed.stdout + installed.stderr
+    env = {"PATH": os.environ.get("PATH", ""), "HOME": str(home), "PYTHONPATH": SRC}
+    relay = [sys.executable, "-m", "remembra.relay.cli"]
+    connected = subprocess.run([*relay, "connect", "--apply"], capture_output=True, text=True, env=env, timeout=60)
+    assert connected.returncode == 0, connected.stdout + connected.stderr
+    assert any(KEY in p.read_text(errors="replace") for p in home.rglob("*") if p.is_file())
+
+    for line in steps:
+        words = shlex.split(line)
+        if words[0] == "remembra-relay":
+            done = subprocess.run([*relay, *words[1:]], capture_output=True, text=True, env=env, timeout=60)
+            assert done.returncode == 0, done.stdout + done.stderr
+        elif words[0] == "remembra-install":
+            done = install(home, *words[1:])
+            assert done.returncode == 0, done.stdout + done.stderr
+        elif line == "pipx uninstall remembra":
+            continue  # removes the commands; nothing under HOME holds the key because of it
+        else:
+            assert line == "rm -r ~/.remembra", line
+            shutil.rmtree(home / ".remembra")
+    return [p for p in home.rglob("*") if p.is_file() and KEY.encode() in p.read_bytes()]
+
+
+def test_setup_md_taking_it_off_again_leaves_no_copy_of_the_key(tmp_path: Path) -> None:
+    """Whole-release review: the four lines setup.md gave left the key in ~/.claude.json.bak-remembra-* and
+    ~/.codex/config.toml.bak-remembra-* (the backups remembra-install keeps). The second line now deletes them."""
+    setup = (Path(__file__).resolve().parents[1] / "landing" / "setup.md").read_text()
+    section = setup.split("## Taking it off again", 1)[1].split("\n## ", 1)[0]
+    block = section.split("```bash\n", 1)[1].split("```", 1)[0]
+    steps = [line for line in block.splitlines() if line.strip()]
+    assert "remembra-install --remove --all --apply --delete-backups" in steps
+    assert "revoke the key in the dashboard (Settings > API keys)" in section
+
+    assert _taken_off(tmp_path, "now", steps) == []
+    # The review's repro, with the line as it was: the backups kept the key.
+    before = [line.replace(" --delete-backups", "") for line in steps]
+    left = _taken_off(tmp_path, "before", before)
+    assert left and all(".bak-" in p.name for p in left), left
