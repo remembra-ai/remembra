@@ -175,21 +175,16 @@ and the dashboard hides its button. Setup: [Sign-in providers](../guides/sign-in
 | `REMEMBRA_GOOGLE_CLIENT_ID` | - | Google OAuth web client ID |
 | `REMEMBRA_GOOGLE_CLIENT_SECRET` | - | Google OAuth web client secret |
 
-## Auto-Forgetting (v0.12.0)
+## Expiry
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_AUTO_TTL_ENABLED` | `true` | Enable smart auto-forgetting |
-| `REMEMBRA_STRICT_MODE` | `false` | Return 410 GONE for expired memories |
+| `REMEMBRA_CHECKPOINT_DEFAULT_TTL` | `7d` | TTL for a `memory_type="checkpoint"` store that sets no `ttl` or `expires_at`. Same format as a store `ttl` ([TTL formats](../guides/temporal.md#ttl-formats)); the server does not start if it is not one. Blank: no default |
+| `REMEMBRA_STRICT_MODE` | `false` | A GET or PATCH of an expired memory returns `410 GONE` |
 
-Smart auto-forgetting detects 35+ temporal patterns and sets appropriate TTLs:
-
-- "meeting tomorrow" → 36 hours
-- "call next week" → 8 days
-- "deadline in 2 hours" → 3 hours
-- "event next month" → 35 days
-
-No configuration needed—just store memories naturally.
+Smart auto-forgetting (a TTL from phrases such as "meeting tomorrow") is not a server setting. It runs in the
+Python SDK, when you create the client with `Memory(auto_expire_temporal=True)`; see the
+[Python SDK guide](../guides/python-sdk.md).
 
 ## Cloud metering and billing (Remembra Cloud)
 

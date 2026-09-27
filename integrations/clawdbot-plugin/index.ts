@@ -23,12 +23,15 @@ import { hostname } from "node:os";
 
 const PLUGIN_VERSION = "2.1.0";
 // Servers before 0.16.1 deleted the whole account for DELETE /api/v1/memories?entity=...
-const ENTITY_DELETE_MIN_SERVER = [0, 16, 1];
+// The last element is 1 for a release: a pre-release of 0.16.1 comes before the fix.
+const ENTITY_DELETE_MIN_SERVER = [0, 16, 1, 1];
+// What follows the number in a pre-release or dev build: 0.16.1rc1, 0.16.1.dev3, 0.16.1-beta.2.
+const PRE_RELEASE = /^[-.]?(?:a|alpha|b|beta|c|rc|pre|preview|dev)/i;
 
 function supportsEntityDelete(version: unknown): boolean {
-  const m = /^\s*v?(\d+)\.(\d+)(?:\.(\d+))?/.exec(String(version ?? ""));
+  const m = /^\s*v?(\d+)\.(\d+)(?:\.(\d+))?(\S*)/.exec(String(version ?? ""));
   if (!m) return false;
-  const v = [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)];
+  const v = [Number(m[1]), Number(m[2]), Number(m[3] ?? 0), PRE_RELEASE.test(m[4]) ? 0 : 1];
   for (let i = 0; i < ENTITY_DELETE_MIN_SERVER.length; i++) {
     if (v[i] !== ENTITY_DELETE_MIN_SERVER[i]) return v[i] > ENTITY_DELETE_MIN_SERVER[i];
   }

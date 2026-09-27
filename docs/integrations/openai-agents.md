@@ -46,14 +46,25 @@ print(result.final_output)   # "Your name is Alice."
 | `add_items(items)` | Each item stored **atomically** (never split or merged) with a monotonic sequence for exact ordering. |
 | `get_items(limit=None)` | Items oldest-first; with `limit`, the latest *N*. |
 | `pop_item()` | Removes and returns the most recent item (e.g. for retries). |
-| `clear_session()` | Deletes **only this session's** items — never the user's other memory. |
+| `clear_session()` | Deletes the items this session stored, and nothing else. |
 
 - **Isolation** is by `session_id` within a `(user_id, project)` namespace.
+  Each item also carries `remembra_integration: "openai_agents"`, and
+  `get_items`, `pop_item` and `clear_session` read and delete only memories
+  with that marker (plus items stored by earlier versions, which carry
+  `agent_item`). Another memory with the same `session_id`, such as an app
+  note, is never returned, popped or deleted.
 - **Restart-safe ordering**: a fresh `RemembraSession` over an existing
   conversation continues the sequence rather than restarting.
 - `get_items` returns up to the 50 most-recent items per read; `clear_session`
   removes all of them. Window or summarize very long conversations.
 - Pass `ttl="30d"` to auto-expire items.
+
+!!! warning "remembra 0.16.1 and earlier"
+    There, `clear_session()` deletes every memory in the user/project whose
+    metadata `session_id` matches, including other code's, and `pop_item()`
+    can delete one. With those versions, use a `session_id` that nothing else
+    uses in the project.
 
 ## Recall across sessions
 

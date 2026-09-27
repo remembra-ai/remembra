@@ -78,15 +78,22 @@ _warned_agent_ids: set[str] = set()
 
 # Servers before 0.16.1 deleted the whole account for DELETE /api/v1/memories?entity=...
 ENTITY_DELETE_MIN_SERVER = (0, 16, 1)
-_SERVER_VERSION_RE = re.compile(r"^\s*v?(\d+)\.(\d+)(?:\.(\d+))?")
+_SERVER_VERSION_RE = re.compile(r"^\s*v?(\d+)\.(\d+)(?:\.(\d+))?(\S*)")
+# What follows the number in a pre-release or dev build: 0.16.1rc1, 0.16.1.dev3, 0.16.1-beta.2.
+_PRE_RELEASE_RE = re.compile(r"[-.]?(?:a|alpha|b|beta|c|rc|pre|preview|dev)", re.IGNORECASE)
 
 
-def _server_version(version: Any) -> tuple[int, int, int] | None:
-    """``(major, minor, patch)`` from a server version string, or None."""
+def _server_version(version: Any) -> tuple[int, int, int, bool] | None:
+    """``(major, minor, patch, released)`` from a server version string, or None.
+
+    ``released`` is False for a pre-release or dev build, which comes before
+    the release with the same number (``0.16.1rc1`` is older than ``0.16.1``).
+    """
     match = _SERVER_VERSION_RE.match(str(version or ""))
     if not match:
         return None
-    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
+    released = not _PRE_RELEASE_RE.match(match.group(4))
+    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0), released
 
 
 def _header_agent_id(agent: str | None) -> str | None:
@@ -292,7 +299,8 @@ class Memory:
         Args:
             content: The text content to memorize
             metadata: Optional key-value metadata to attach
-            ttl: Optional time-to-live (e.g., "30d", "1y")
+            ttl: Optional time-to-live: a number and a unit, e.g. "30d", "36h", "90min"
+                (units in :mod:`remembra.client.ttl`; ``m`` is minutes, ``mo`` months)
             auto_expire: Override auto_expire_temporal for this call (v0.12+)
             skip_extraction: Store as one atomic memory (no fact split/merge)
             memory_type: Optional type. Agent hygiene types: "checkpoint"
@@ -639,7 +647,7 @@ class Memory:
         except MemoryError as exc:
             raise MemoryError(f"Not sent: could not read the server version before a delete by entity ({exc})") from exc
         parsed = _server_version(version)
-        if parsed is None or parsed < ENTITY_DELETE_MIN_SERVER:
+        if parsed is None or parsed < (*ENTITY_DELETE_MIN_SERVER, True):
             raise MemoryError(
                 f"Not sent: the server reports {version or 'no version'}, and a server before 0.16.1 deletes every "
                 "memory in the account for a delete by entity. Upgrade the server, or delete by memory_id."

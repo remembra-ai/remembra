@@ -5,6 +5,42 @@ All notable changes to Remembra will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`m` in a TTL now means minutes.** Until now the server read `m` as months, and the temporal guide said so.
+  If you send `ttl="3m"` to mean three months, send `3mo`: `3m` now expires after three minutes.
+  `REMEMBRA_CHECKPOINT_DEFAULT_TTL` is read the same way.
+
+### Fixed
+
+- **TTLs from temporal phrases were ignored.** With `auto_expire_temporal=True`, the Python SDK sent values such
+  as `1.5d` ("meeting tomorrow"), `1.4w` ("next week") and `1mo` ("this month"). The server read only whole
+  numbers and no `mo`, so those memories were stored with no expiry. "In 10 minutes" sent `40m`, which the
+  server read as 40 months. The SDK now sends whole hours, rounded up (`36h`, `1h`), or whole days (`10d`),
+  which servers from 0.13 on read the same way. The server now reads decimals and `mo`.
+- **One TTL format everywhere.** A TTL is a number (decimals allowed) and a unit: `s`, `min` or `m` (minutes),
+  `h`, `d`, `w`, `mo` (30 days) or `y` (365 days), from 1 second to 100 years. The server, the SDK's shadow
+  cache and `remembra.temporal.parse_ttl` now read it the same way; the shadow cache read `40m` as 40 minutes
+  while the server read 40 months.
+- **A TTL the server cannot read is refused.** A store, batch store or status write with one now gets 422, with
+  a message that lists the units, and nothing is stored. It used to be stored with no expiry. The server does
+  not start when `REMEMBRA_CHECKPOINT_DEFAULT_TTL` is not a TTL (blank still means no default).
+- **Clearing a chat history deleted other memories.** LangChain `history.clear()` and OpenAI Agents
+  `clear_session()` deleted every memory in the user/project whose metadata `session_id` matched: app notes, and
+  anything the Python SDK stored from a client created with that `session_id`. `messages` showed those memories
+  as chat turns, and `pop_item()` could delete one. Messages are now stored with `remembra_integration`
+  (`langchain` or `openai_agents`), and reading, `pop_item()` and clearing use only memories with that marker,
+  plus messages stored earlier, found by their `langchain_message` or `agent_item` metadata.
+- **LangChain history came back out of order.** `RunnableWithMessageHistory` builds a new
+  `RemembraChatMessageHistory` for every call, and each one numbered its messages from 1 again, so a
+  three-turn conversation read back as q1 q2 q3 a1 a2 a3. A new history object now continues the session's
+  numbering.
+- **Delete by entity and 0.16.1 pre-releases.** The Python SDK, the TypeScript SDK and the Clawdbot plugin now
+  treat a pre-release or dev build of 0.16.1 (such as `0.16.1rc1`) as older than 0.16.1, and do not send it a
+  delete by entity.
+
 ## [0.16.1] - 2026-09-26
 
 Relay fixes, three more agents verified, a doctor for when handoffs don't arrive, and a security sweep. Every
@@ -222,6 +258,7 @@ redact command-line credentials from handoffs stored before this release.
   entity (with an optional project) or all memories, as the server does; `forget()` with no arguments and the
   Python `user_id=` argument (the server never accepted either: the call failed with 422) fail before anything
   is sent. A delete by entity reads the server version first and is not sent to a server older than 0.16.1.
+  (The TypeScript SDK's check is in the repository; no npm release has it yet.)
   The MCP `forget_memories` tool and the Clawdbot plugin can now delete by entity too, in one project and only
   after a dry run and a confirmation phrase, like their project wipe.
 - **Sign in with Google or GitHub on older accounts.** An account whose email was never verified (accounts
@@ -965,12 +1002,12 @@ all live on Remembra Cloud as of this release.)
   - Aggregated facts summary for quick user context
   - Perfect for personalization and user insights dashboards
 
-- **Smart Auto-Forgetting** — 35+ temporal patterns automatically set TTL
-  - `"meeting tomorrow"` → 36h TTL
-  - `"call next week"` → 8 days TTL  
-  - `"deadline in 2 hours"` → 3h TTL
-  - Supports relative dates, specific times, and duration phrases
-  - Zero configuration — just store memories naturally
+- **Smart Auto-Forgetting** — Python SDK, opt-in with `Memory(auto_expire_temporal=True)`: 38 temporal
+  patterns suggest a TTL that the SDK sends with the store
+  - `"meeting tomorrow"` → 36 hours, `"call next week"` → 10 days, `"deadline in 2 hours"` → 3 hours
+  - Covers relative dates, times of day and duration phrases
+  - The server did not read many of the values sent (`1.5d`, `1.4w`, `1mo`), so those memories got no expiry,
+    and it read `40m` ("in 10 minutes") as 40 months. Fixed after 0.16.1.
 
 - **Strict Mode 410 GONE** — Opt-in explicit expiry awareness
   - Enable via `REMEMBRA_STRICT_MODE=true` or config
@@ -984,15 +1021,13 @@ all live on Remembra Cloud as of this release.)
   - Takes precedence over TTL when both specified
   - Perfect for event-driven workflows
 
-- **Shadow TTLs Client-Side** — SDK performance optimization
-  - SDK maintains local expiry cache
-  - Skip recall for known-expired memories
-  - Reduces API calls by up to 40%
-  - Automatic cache invalidation on store
+- **Shadow TTLs Client-Side** — Python SDK, opt-in with `Memory(enable_shadow_ttl=True)`
+  - The SDK records each stored memory's expiry locally
+  - Your code can call `is_memory_valid()` to check it; the SDK itself does not skip any server call
 
 ### Changed
 - Store endpoint now accepts `expires_at` parameter alongside `ttl`
-- SDK client caches expiry metadata for performance
+- The SDK can record expiry locally (opt-in, see Shadow TTLs)
 - API responses include `expires_at` in memory objects when set
 
 ### Documentation

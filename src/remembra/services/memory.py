@@ -14,6 +14,7 @@ from typing import Any
 
 import structlog
 
+from remembra.client.ttl import parse_ttl_seconds
 from remembra.config import Settings
 from remembra.core import ai_spend
 from remembra.core import metrics as core_metrics
@@ -386,43 +387,15 @@ def is_relay_record(memory_type: str | None, metadata: dict[str, Any] | None) ->
 
 
 def parse_ttl(ttl: str | None) -> timedelta | None:
+    """The TTL as a timedelta, or None when no TTL is given (None or blank).
+
+    One format everywhere (:mod:`remembra.client.ttl`): a number and a unit,
+    e.g. '30d', '1.5d', '36h', '90min'. ``m`` is minutes and ``mo`` months.
+    Raises ``ValueError`` for anything else: a TTL is never silently dropped.
     """
-    Parse TTL string like '30d', '1y', '2w' into timedelta.
-
-    Supported formats:
-    - Xh = X hours
-    - Xd = X days
-    - Xw = X weeks
-    - Xm = X months (30 days)
-    - Xy = X years (365 days)
-    """
-    if not ttl:
+    if ttl is None or not ttl.strip():
         return None
-
-    ttl = ttl.strip().lower()
-    if not ttl:
-        return None
-
-    try:
-        value = int(ttl[:-1])
-        unit = ttl[-1]
-
-        if unit == "h":
-            return timedelta(hours=value)
-        elif unit == "d":
-            return timedelta(days=value)
-        elif unit == "w":
-            return timedelta(weeks=value)
-        elif unit == "m":
-            return timedelta(days=value * 30)
-        elif unit == "y":
-            return timedelta(days=value * 365)
-        else:
-            log.warning("invalid_ttl_unit", ttl=ttl, unit=unit)
-            return None
-    except (ValueError, IndexError):
-        log.warning("invalid_ttl_format", ttl=ttl)
-        return None
+    return timedelta(seconds=parse_ttl_seconds(ttl))
 
 
 class MemoryService:
@@ -685,14 +658,13 @@ class MemoryService:
         now: datetime,
         default_ttl_days: int | None,
     ) -> datetime | None:
-        """Explicit expires_at > ttl > server default."""
+        """Explicit expires_at > ttl > server default. An unreadable ttl raises ValueError."""
         if expires_at:
             return expires_at
-        if ttl:
-            delta = parse_ttl(ttl)
-            if delta:
-                return now + delta
-        elif default_ttl_days:
+        delta = parse_ttl(ttl)
+        if delta is not None:
+            return now + delta
+        if default_ttl_days:
             return now + timedelta(days=default_ttl_days)
         return None
 

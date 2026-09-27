@@ -111,7 +111,7 @@
 
           <p class="k">Fixed</p>
           <ul>
-            <li><strong>Deleting by entity.</strong> <code>DELETE /api/v1/memories?entity=…</code>, which the SDKs' delete by entity sends, deleted every memory in the account. It now deletes only the memories linked to that entity, and the SDKs send it only to a server that has the fix.</li>
+            <li><strong>Deleting by entity.</strong> <code>DELETE /api/v1/memories?entity=…</code>, which the SDKs' delete by entity sends, deleted every memory in the account. It now deletes only the memories linked to that entity. The Python SDK sends it only to a server that has the fix. The TypeScript SDK has the same check in the repository, but no npm release has it yet: until one does, upgrade the server before you delete by entity from TypeScript.</li>
             <li><strong>Briefs.</strong> "Last session" is the last session that did something, Recent lists only this project's handoffs and checkpoints, Codex automation runs and sub-agents stay out of the trail, and a hook that another agent runs is filed under that agent.</li>
             <li><strong>Security.</strong> Billing and plan limits hold on every path, request bodies are capped before sign-in, credentials typed on a command line are redacted from handoffs, other agents' text reaches the model only as untrusted data, and the dashboard and docs images run nginx as a non-root user.</li>
           </ul>
@@ -201,13 +201,13 @@
         <p class="when"><span class="ver">v0.12.0</span><time>March 22, 2026</time></p>
         <div>
           <h3 id="v0-12-0-t">User Profiles &amp; Smart Auto-Forgetting</h3>
-          <p>User Profiles API, 35+ temporal patterns for auto-TTL, strict mode expiry, event-driven expiry, and client-side shadow TTLs.</p>
+          <p>User Profiles API, TTLs from temporal phrases in the Python SDK, strict mode expiry, event-driven expiry, and client-side shadow TTLs.</p>
           <ul>
             <li><strong>User Profiles API</strong>: <code>GET /api/v1/users/{user_id}/profile</code> returns aggregated facts, activity, topics</li>
-            <li><strong>Smart Auto-Forgetting</strong>: 35+ temporal patterns auto-set TTL (<code>"meeting tomorrow"</code> → 36h)</li>
-            <li><strong>Strict Mode 410 GONE</strong>: Opt-in mode returns 410 for expired memories instead of silent accept</li>
+            <li><strong>Smart Auto-Forgetting</strong>: Python SDK, opt-in with <code>auto_expire_temporal=True</code>. 38 temporal patterns suggest a TTL that the SDK sends with the store (<code>"meeting tomorrow"</code> → 36 hours). Servers up to 0.16.1 cannot read many of the values that SDKs up to 0.16.1 send, such as <code>1.5d</code> for "meeting tomorrow" and <code>1mo</code> for "this month": those memories get no expiry. They read <code>40m</code> ("in 10 minutes") as 40 months.</li>
+            <li><strong>Strict Mode 410 GONE</strong>: with <code>REMEMBRA_STRICT_MODE=true</code>, a GET or PATCH of an expired memory returns 410</li>
             <li><strong>Event-Driven Expiry</strong>: <code>expires_at</code> parameter for explicit timestamps</li>
-            <li><strong>Client-side shadow TTLs</strong>: the SDK caches expiry locally, so it asks the server less often</li>
+            <li><strong>Client-side shadow TTLs</strong>: Python SDK, opt-in with <code>enable_shadow_ttl=True</code>. The SDK records each memory's expiry locally, so your code can call <code>is_memory_valid()</code>. The SDK itself does not skip any server call.</li>
           </ul>
         </div>
       </article>

@@ -1,36 +1,24 @@
 """TTL (Time-To-Live) parsing and expiration calculation."""
 
-import re
 from datetime import datetime, timedelta
 
+from remembra.client.ttl import parse_ttl_seconds
 from remembra.core.time import utcnow
-
-# TTL format: <number><unit> where unit is s/m/h/d/w/M/y
-TTL_PATTERN = re.compile(r"^(\d+)([smhdwMy])$")
-
-# Unit to seconds mapping
-UNIT_SECONDS = {
-    "s": 1,  # seconds
-    "m": 60,  # minutes
-    "h": 3600,  # hours
-    "d": 86400,  # days
-    "w": 604800,  # weeks
-    "M": 2592000,  # months (30 days)
-    "y": 31536000,  # years (365 days)
-}
 
 
 def parse_ttl(ttl_string: str) -> timedelta:
     """
     Parse a TTL string into a timedelta.
 
-    Supported formats:
+    The same format the server reads for a store ``ttl``
+    (:mod:`remembra.client.ttl`): a number, decimals allowed, and a unit.
+
     - "30s" → 30 seconds
-    - "5m" → 5 minutes
+    - "5m" or "5min" → 5 minutes
     - "24h" → 24 hours
-    - "7d" → 7 days
+    - "1.5d" → 36 hours
     - "2w" → 2 weeks
-    - "1M" → 1 month (30 days)
+    - "1mo" or "1M" → 1 month (30 days)
     - "1y" → 1 year (365 days)
 
     Args:
@@ -48,27 +36,9 @@ def parse_ttl(ttl_string: str) -> timedelta:
         >>> parse_ttl("1y")
         timedelta(days=365)
     """
-    if not ttl_string:
+    if not ttl_string or not ttl_string.strip():
         raise ValueError("TTL string cannot be empty")
-
-    ttl_string = ttl_string.strip()
-    match = TTL_PATTERN.match(ttl_string)
-
-    if not match:
-        raise ValueError(
-            f"Invalid TTL format: '{ttl_string}'. "
-            f"Expected format: <number><unit> where unit is s/m/h/d/w/M/y. "
-            f"Examples: '30d', '1y', '24h'"
-        )
-
-    value = int(match.group(1))
-    unit = match.group(2)
-
-    if value <= 0:
-        raise ValueError(f"TTL value must be positive, got: {value}")
-
-    seconds = value * UNIT_SECONDS[unit]
-    return timedelta(seconds=seconds)
+    return timedelta(seconds=parse_ttl_seconds(ttl_string))
 
 
 def calculate_expires_at(

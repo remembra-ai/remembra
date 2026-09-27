@@ -64,13 +64,13 @@ class TestParseTTL:
         assert parse_ttl("  30d  ") == timedelta(days=30)
 
     def test_invalid_format_raises(self):
-        with pytest.raises(ValueError, match="Invalid TTL format"):
+        with pytest.raises(ValueError, match="Invalid TTL '30'"):
             parse_ttl("30")  # Missing unit
 
-        with pytest.raises(ValueError, match="Invalid TTL format"):
+        with pytest.raises(ValueError, match="Invalid TTL 'd30'"):
             parse_ttl("d30")  # Wrong order
 
-        with pytest.raises(ValueError, match="Invalid TTL format"):
+        with pytest.raises(ValueError, match="Invalid TTL 'abc'"):
             parse_ttl("abc")  # Not a number
 
     def test_empty_string_raises(self):
@@ -78,7 +78,7 @@ class TestParseTTL:
             parse_ttl("")
 
     def test_zero_value_raises(self):
-        with pytest.raises(ValueError, match="must be positive"):
+        with pytest.raises(ValueError, match="at least 1 second"):
             parse_ttl("0d")
 
 

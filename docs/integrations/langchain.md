@@ -67,12 +67,20 @@ chain_with_memory.invoke(
 
 ### Clearing a session
 
-`history.clear()` deletes **only that session's** messages — other sessions
-and the rest of the user's memory are untouched.
+`history.clear()` deletes the messages this history stored for its
+`session_id`, and nothing else. Other sessions are kept, and so are other
+memories with the same `session_id`: an app note, or anything a Python SDK
+client created with that `session_id` stored.
 
 ```python
-history.clear()   # removes conversation_abc; conversation_xyz is unaffected
+history.clear()   # removes conversation_abc's messages; conversation_xyz is unaffected
 ```
+
+!!! warning "remembra 0.16.1 and earlier"
+    There, `clear()` deletes every memory in the user/project whose metadata
+    `session_id` matches, including other code's, and `messages` shows those
+    memories as messages. With those versions, use a `session_id` that nothing
+    else uses in the project.
 
 ## Notes & limits
 
@@ -83,8 +91,13 @@ history.clear()   # removes conversation_abc; conversation_xyz is unaffected
   messages regardless of count. For very long histories, window the
   conversation or summarize older turns.
 - **TTL**: pass `ttl="30d"` to auto-expire messages.
-- Every stored message carries `session_id`, `role`, and `sequence` metadata,
-  so history is reconstructed in order.
+- Every stored message carries `session_id`, `role`, `sequence` and
+  `remembra_integration: "langchain"` metadata. `messages` and `clear()` use
+  only memories with that marker, plus messages stored by earlier versions
+  (they carry `langchain_message`).
+- A new history object for an existing session continues its `sequence`, so
+  `messages` comes back in the order the messages were added, also when
+  `RunnableWithMessageHistory` builds a new object for every call.
 
 ## Semantic memory (beyond chat history)
 

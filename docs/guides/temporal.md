@@ -24,13 +24,25 @@ memory.store("Annual subscription renewed", ttl="1y")
 
 ### TTL Formats
 
-| Format | Example | Description |
-|--------|---------|-------------|
-| `Nd` | `30d` | N days |
-| `Nw` | `2w` | N weeks |
-| `Nm` | `3m` | N months |
-| `Ny` | `1y` | N years |
-| `Nh` | `24h` | N hours |
+A TTL is a number and a unit. Decimals work: `1.5d` is 36 hours. Case does not matter, and a space is allowed
+(`2 weeks`).
+
+| Unit | Example | Means |
+|------|---------|-------|
+| `s` | `90s` | seconds |
+| `min` or `m` | `90min` | minutes |
+| `h` | `24h` | hours |
+| `d` | `30d` | days |
+| `w` | `2w` | weeks |
+| `mo` | `3mo` | months (30 days) |
+| `y` | `1y` | years (365 days) |
+
+A TTL runs from 1 second to 100 years. The server refuses any other value with 422 and stores nothing.
+
+!!! warning "`m` is minutes"
+    Servers 0.16.1 and earlier read `m` as months, read only whole numbers (`1.5d` was ignored and the memory
+    never expired), and did not know `min` or `mo`. For months, write `mo`. For a TTL that an older server must
+    read, use whole `h`, `d`, `w` or `y` values.
 
 ### TTL Presets
 

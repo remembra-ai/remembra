@@ -267,7 +267,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    Python SDK, opt-in (`auto_expire_temporal=True`): 38 temporal patterns set a TTL, e.g. "Meeting tomorrow" → 36h, "deadline in 2 hours" → 3h, "call next week" → 10 days.
+    Python SDK, opt-in (`auto_expire_temporal=True`): 38 temporal patterns suggest a TTL, e.g. "Meeting tomorrow" → 36h, "deadline in 2 hours" → 3h, "call next week" → 10 days. SDK 0.16.1 sends some as values a 0.16.1 server cannot read (`1.5d`, `1mo`): with both, those memories get no expiry. Later SDKs send whole hours or days, and later servers read decimals and `mo`.
 
 -   :material-calendar-clock:{ .lg .middle } __Event-Driven Expiry__
 
