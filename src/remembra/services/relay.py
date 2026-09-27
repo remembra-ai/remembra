@@ -871,22 +871,46 @@ class RelayService:
 
         from remembra.crew.core import CrewCore, parse_ts
 
-        need = offset + limit
-        memories = await self._trail_memories(user_id, project_id, need, 0, agent_id, before)
         crew_db = self.crew_db
         assert crew_db is not None  # _trail_crews returns nothing without it
-        crew_items, crew_total = await CrewCore(crew_db).trail_items(crew_ids, agent_id=agent_id, before=before, limit=need)
+        core = CrewCore(crew_db)
         epoch = datetime.min.replace(tzinfo=UTC)
-        merged = sorted(
-            memories["items"] + crew_items,
-            key=lambda item: (parse_ts(item.get("created_at")) or epoch, str(item.get("id") or "")),
-            reverse=True,
+
+        def newest_first(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            return sorted(
+                items, key=lambda item: (parse_ts(item.get("created_at")) or epoch, str(item.get("id") or "")), reverse=True
+            )
+
+        # Merge the two sources on keys only (id, time), then build just the page: a deep offset must not
+        # load and build every entry before it (the server has one worker; every tenant would wait).
+        need = offset + limit
+        memory_keys = await self.sessions.timeline(
+            user_id=user_id,
+            project_id=project_id,
+            memory_types=["handoff", "checkpoint"],
+            limit=need,
+            newest_first=True,
+            agent_id=agent_id,
+            before=before,
+            keys_only=True,
         )
+        crew_keys, crew_total = await core.trail_items(crew_ids, agent_id=agent_id, before=before, limit=need, keys_only=True)
+        memory_ids = {m["id"] for m in memory_keys["memories"]}
+        page = [k["id"] for k in newest_first(memory_keys["memories"] + crew_keys)[offset : offset + limit]]
+        page_memories = [i for i in page if i in memory_ids]
+        page_crew = [i for i in page if i not in memory_ids]
+        items: list[dict[str, Any]] = []
+        if page_memories:
+            built = await self._trail_memories(user_id, project_id, len(page_memories), 0, agent_id, before, page_memories)
+            items += built["items"]
+        if page_crew:
+            crew_built, _ = await core.trail_items(crew_ids, agent_id=agent_id, before=before, limit=len(page), ids=page_crew)
+            items += crew_built
         out: dict[str, Any] = {
             "project_id": project_id,
             "agent_id": agent_id,
-            "items": merged[offset : offset + limit],
-            "total": memories["total"] + crew_total,
+            "items": newest_first(items),
+            "total": memory_keys["total"] + crew_total,
         }
         out["before"] = {"created_at": before[0].isoformat(), "id": before[1]} if before is not None else None
         return out
@@ -911,6 +935,7 @@ class RelayService:
         offset: int,
         agent_id: str | None,
         before: tuple[datetime, str | None] | None,
+        ids: list[str] | None = None,
     ) -> dict[str, Any]:
         result = await self.sessions.timeline(
             user_id=user_id,
@@ -921,6 +946,7 @@ class RelayService:
             newest_first=True,
             agent_id=agent_id,
             before=before,
+            ids=ids,
         )
         pickups = await self.pickups_for(user_id, [m["id"] for m in result["memories"] if m.get("memory_type") == "handoff"])
         # The brief's trust policy, per entry: the trail shows the recorded text as stored (for review), and

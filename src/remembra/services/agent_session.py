@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -207,6 +207,8 @@ class AgentSessionService:
         newest_first: bool = False,
         agent_id: str | None = None,
         before: tuple[datetime, str | None] | None = None,
+        ids: Sequence[str] | None = None,
+        keys_only: bool = False,
     ) -> dict[str, Any]:
         """Chronological memories with server-side created_at range filtering.
 
@@ -220,8 +222,16 @@ class AgentSessionService:
         rows arrive. A ``None`` id keeps rows strictly older than the time.
         Returns ``{"memories": [...], "total": N}`` where ``total`` counts all
         matches (after the cursor, when given) ignoring limit/offset.
+        ``ids`` keeps only those memories (to load one merged page). With
+        ``keys_only`` each memory is just ``{"id", "created_at"}`` (no content
+        is read or parsed), for merging pages across sources by time.
         """
         where, params = self._active_clause(user_id, include_superseded)
+        if ids is not None:
+            if not ids:
+                return {"memories": [], "total": 0}
+            where += f" AND id IN ({','.join('?' for _ in ids)})"
+            params.extend(ids)
         if project_id:
             where += " AND project_id = ?"
             params.append(project_id)
@@ -266,6 +276,13 @@ class AgentSessionService:
         # julianday() keeps sub-second precision; datetime() truncates to whole
         # seconds, which made same-second writes (status v1 -> v2) sort randomly.
         order = "DESC" if newest_first else "ASC"
+        if keys_only:
+            cursor = await self.db.conn.execute(
+                f"SELECT id, created_at FROM memories WHERE {where} "
+                f"ORDER BY julianday(created_at) {order}, id {order} LIMIT ? OFFSET ?",
+                [*params, max(0, min(limit, total - offset)), min(offset, total)],
+            )
+            return {"memories": [{"id": r[0], "created_at": r[1]} for r in await cursor.fetchall()], "total": total}
         cursor = await self.db.conn.execute(
             f"SELECT {_ROW_COLUMNS} FROM memories WHERE {where} "
             f"ORDER BY julianday(created_at) {order}, id {order} LIMIT ? OFFSET ?",

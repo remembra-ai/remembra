@@ -653,3 +653,41 @@ def test_trail_merges_crew_checkpoints_reports_and_batons_by_time(api, crew):
     restricted = AuthenticatedUser(user_id=USER, api_key_id="k2", rate_limit_tier="standard", project_ids=["elsewhere"])
     api["app"].dependency_overrides[get_current_user] = lambda: restricted
     assert _get(api, "/trail", {})["items"] == []
+
+
+def test_trail_deep_offset_on_a_crew_project_builds_only_the_page(api, crew, monkeypatch):
+    """A large ``offset`` must not load and build every handoff of the account (one worker: every tenant waits)."""
+    import remembra.crew.core as crew_core
+    import remembra.services.relay as relay_service
+
+    _as(api)
+    db = crew["db"]
+    crew_id = run(api, _world, db)
+    now = datetime.now(UTC)
+
+    async def history() -> None:
+        for n in range(12):
+            await crew_seed.checkpoint(db, crew_id, f"ckp_x{n:02d}", "cs_a", facts={}, minutes_ago=30 + n * 2)
+
+    run(api, history)
+    for n in range(40):
+        seed(api, f"h-{n:02d}", f"[HANDOFF] {n}", now - timedelta(minutes=31 + n * 2), project_id=PROJECT, user_id=USER,
+             memory_type="handoff")  # fmt: skip
+    full = [i["id"] for i in _get(api, "/trail", {"project_id": PROJECT, "limit": 100})["items"]]
+    assert len(full) == 54  # 40 handoffs, 12 + 1 crew checkpoints and a report
+
+    built: list[str] = []
+    real_detail, real_item = relay_service._trail_detail, crew_core._trail_item
+    monkeypatch.setattr(relay_service, "_trail_detail", lambda mem, rel: built.append(mem["id"]) or real_detail(mem, rel))
+    monkeypatch.setattr(crew_core, "_trail_item", lambda kind, r, *a: built.append(r["id"]) or real_item(kind, r, *a))
+
+    page = _get(api, "/trail", {"project_id": PROJECT, "limit": 2, "offset": 50})
+    assert [i["id"] for i in page["items"]] == full[50:52] and page["total"] == 54
+    assert sorted(built) == sorted(full[50:52]), built  # only the page is built, not the 52 entries before it
+    built.clear()
+    page = _get(api, "/trail", {"project_id": PROJECT, "limit": 3, "offset": 9})
+    assert [i["id"] for i in page["items"]] == full[9:12] and sorted(built) == sorted(full[9:12])
+    built.clear()
+    for offset in (10**6, 2**63 - 5):  # past the end: nothing to build, and no integer overflow in SQLite
+        page = _get(api, "/trail", {"project_id": PROJECT, "limit": 20, "offset": offset})
+        assert page["items"] == [] and page["total"] == 54 and built == []

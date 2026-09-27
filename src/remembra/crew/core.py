@@ -726,14 +726,18 @@ class CrewCore:
         agent_id: str | None = None,
         before: tuple[datetime, str | None] | None = None,
         limit: int = 20,
+        ids: Sequence[str] | None = None,
+        keys_only: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         """Crew checkpoints (not yet promoted to memory), reports and batons as trail entries, newest first.
 
         Returns ``(items, total)`` where ``items`` holds at most ``limit`` entries
         per source (the caller merges and pages) and ``total`` counts every
-        matching entry after the cursor.
+        matching entry after the cursor. ``ids`` keeps only those entries (to
+        build one merged page); with ``keys_only`` each entry is just
+        ``{"id", "created_at"}``, read without building it.
         """
-        if not crew_ids:
+        if not crew_ids or (ids is not None and not ids):
             return [], 0
         crews = {
             c["id"]: c
@@ -771,9 +775,22 @@ class CrewCore:
                 else:
                     where += " AND x.created_at < ?"
                     params.append(at)
+            if ids is not None:
+                where += f" AND x.id IN ({_marks(ids)})"
+                params.extend(ids)
             count = await self.db.fetchone(f"SELECT COUNT(*) AS n FROM ({where})", params)
-            total += int(count["n"]) if count else 0
-            rows = await self.db.fetchall(where + " ORDER BY x.created_at DESC, x.id DESC LIMIT ?", [*params, limit])
+            matched = int(count["n"]) if count else 0
+            total += matched
+            if keys_only:
+                keys = await self.db.fetchall(
+                    f"SELECT id, created_at FROM ({where}) ORDER BY created_at DESC, id DESC LIMIT ?",
+                    [*params, min(limit, matched)],
+                )
+                items.extend({"id": r["id"], "created_at": r["created_at"]} for r in keys)
+                continue
+            rows = await self.db.fetchall(
+                where + " ORDER BY x.created_at DESC, x.id DESC LIMIT ?", [*params, min(limit, matched)]
+            )
             if not rows:
                 continue
             tasks = await self._task_titles([r.get("task_id") for r in rows])
