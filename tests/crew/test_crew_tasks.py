@@ -383,6 +383,17 @@ async def test_release_after_start_stalls_with_a_baton_and_a_current_report(env)
     valid_envelopes(await events_of(db))
 
 
+async def test_releasing_a_started_task_without_zones_asks_a_person_to_hand_it_over(env):
+    db, svc = env
+    s = await seed_session(db)
+    t = await mk(svc, HUMAN, zone_ids=[])
+    await svc.start(CREW, t["id"], Caller.for_session(s))
+    res = await svc.release(CREW, t["id"], Caller.for_session(s))
+    assert res.task["status"] == "stalled"
+    item = await db.fetchone("SELECT title, primary_action FROM crew_inbox_items WHERE kind = 'baton_available'")
+    assert item["title"] == "T-1 stopped: hand it to an agent" and item["primary_action"] == "hand_baton"
+
+
 async def test_adopt_requires_an_offer_and_moves_claims_with_epoch(env):
     db, svc = env
     a = await seed_session(db, callsign="cc-1", checkout_fp="fp-a", worktree_id="wt-a")

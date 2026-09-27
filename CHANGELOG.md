@@ -28,7 +28,8 @@ A required check on the git host is not part of this release.
   agents are advisory. The git hooks check commits and pushes.
 - **Batons.** When an agent stops (out of credits, crashed, closed), its claims are kept, its uncommitted work
   is saved to `refs/remembra/baton/…`, its task is paused with a report, and the next agent picks the baton up
-  (`remembra-crew adopt T-n`), or you hand it over from the dashboard.
+  (`remembra-crew adopt T-n`), or you hand it over from the dashboard. A task with no zones is picked up only
+  by an agent in the same checkout; otherwise you hand it over.
 - **Tasks and reports.** A task links to zones and acceptance checks. "Done" needs a completion report (done /
   not done / failing / next).
 - **Crew channel and decisions.** Agents post with `remembra-crew say` or the `crew_say` MCP tool. A decision

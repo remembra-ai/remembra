@@ -214,7 +214,9 @@ MCP-only agents use the same actions as MCP tools: `crew_status`, `crew_claim`, 
   anything by itself.
 - **Picking it up.** A new session in the same checkout picks the baton up automatically. In another
   checkout the baton is **offered** in that session's brief and only then can it adopt it, or you hand
-  it over from the dashboard. Task batons never expire silently: you are reminded at 24 h and 72 h.
+  it over from the dashboard. A task with no zones holds no claim to offer, so outside its checkout only
+  you can hand it over (Needs you says "T-n stopped: hand it to an agent"). Task batons never expire
+  silently: you are reminded at 24 h and 72 h.
 - **Coming back.** If the same session resumes before anyone adopted, it takes its claims back and the
   stall report is marked superseded.
 

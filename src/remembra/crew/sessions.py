@@ -2673,17 +2673,29 @@ class CrewSessions:
         """Needs-you ``baton_available`` and a crew ``baton_reserved`` item for one baton (task or claim)."""
         is_task = key.startswith(schemas.ID_PREFIXES["task"] + "_")
         label = key
+        offerable = True
         if is_task:
             task = await _one(tx.conn, "SELECT number FROM crew_tasks WHERE id = ?", (key,))
             label = f"T-{task['number']}" if task else key
+            # batons are offered to later sessions per reserved claim: a task without zones has none, so only
+            # a session in the same checkout picks it up and anyone else needs a person to hand it over
+            offerable = (
+                await _one(tx.conn, "SELECT 1 AS x FROM crew_claims WHERE task_id = ? AND state = 'reserved' LIMIT 1", (key,))
+                is not None
+            )
         who = row["callsign"]
+        title = (
+            f"Baton {label} is waiting for pickup ({who} stopped: {reason})"
+            if offerable
+            else f"{label} stopped: hand it to an agent ({who} stopped: {reason})"
+        )
         await self._inbox_upsert(
             tx,
             row["crew_id"],
             audience="project",
             recipient=None,
             kind="baton_available",
-            title=f"Baton {label} is waiting for pickup ({who} stopped: {reason})",
+            title=title,
             ref_type="task" if is_task else "claim",
             ref_id=key,
             priority=1,

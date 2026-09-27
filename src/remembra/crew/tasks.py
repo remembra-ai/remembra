@@ -1880,12 +1880,18 @@ class TaskService:
         await self._transition_hook(
             tx, crew_id, await load_task(tx.conn, crew_id, str(task["id"])), session, str(task["status"]), "stalled"
         )
+        reserved = await fetchone(
+            tx.conn, "SELECT 1 AS x FROM crew_claims WHERE task_id = ? AND state = 'reserved' LIMIT 1", (task["id"],)
+        )
         await open_inbox_item(
             tx,
             crew_id,
             audience="project",
             kind="baton_available",
-            title=f"Baton for {task_ref(task)} is waiting for pickup",
+            # no reserved claim (a task without zones): no later session is offered it, a person hands it over
+            title=f"Baton for {task_ref(task)} is waiting for pickup"
+            if reserved
+            else f"{task_ref(task)} stopped: hand it to an agent",
             dedupe_key=f"baton:{task['id']}",
             ref_type="task",
             ref_id=str(task["id"]),

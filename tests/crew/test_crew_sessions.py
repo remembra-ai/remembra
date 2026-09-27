@@ -313,6 +313,25 @@ async def _holder_with_task(env, sid="s-a", checkout="fp-a", host_pair=None):
     return j, zone, task, claim
 
 
+async def test_a_stalled_task_without_zones_asks_a_person_to_hand_it_over(mk):
+    """A task with no zones reserves no claim, so no later session is offered its baton (only one in the same
+    checkout picks it up): the Needs-you item says to hand it to an agent instead of "waiting for pickup"."""
+    env = await mk()
+    j = await _join(env, "s-a", checkout="fp-a")
+    task = await add_task(env, CREW, 1, owner=j.session, zones=[])
+    await env.svc.stall(j.session, error="billing_error", facts={}, baton_ref=None)
+    item = await env.one(
+        "SELECT title, primary_action FROM crew_inbox_items WHERE kind = 'baton_available' AND ref_id = ?", (task,)
+    )
+    assert item["title"] == "T-1 stopped: hand it to an agent (cc-1 stopped: quota)" and item["primary_action"] == "hand_baton"
+    # a task with zones keeps its baton offer, and the item says so
+    env2 = await mk()
+    a, _zone, task2, _claim = await _holder_with_task(env2)
+    await env2.svc.stall(a.session, error="billing_error", facts={}, baton_ref=None)
+    item = await env2.one("SELECT title FROM crew_inbox_items WHERE kind = 'baton_available' AND ref_id = ?", (task2,))
+    assert item["title"] == "Baton T-1 is waiting for pickup (cc-1 stopped: quota)"
+
+
 async def test_quota_stall_reserves_stalls_reports_and_queues_the_handoff(mk):
     env = await mk()
     a, zone, task, claim = await _holder_with_task(env)
