@@ -57,7 +57,7 @@
   <section class="wrap page-head" aria-labelledby="doc-title">
     <p class="eyebrow">Legal</p>
     <h1 id="doc-title">Privacy policy</h1>
-    <p class="lede">Last updated: September 26, 2026. What we collect when you use Remembra, who else handles it, and how long we keep it.</p>
+    <p class="lede">Last updated: September 27, 2026. What we collect when you use Remembra, who else handles it, and how long we keep it.</p>
     <!-- requires counsel review of privacy.html, subprocessors.html, dpa.html and refunds.html (legal bases, transfers, retention, entity name) before paid plans go live -->
     <!-- requires owner: the registered legal name of DolphyTech, exactly as registered with Paddle, in Terms, Privacy, Refunds and the DPA -->
   </section>
@@ -117,8 +117,8 @@
 <li><strong>API keys:</strong> the keys you create, with the agent and projects each is limited to.</li>
 <li><strong>What you store:</strong> notes and memories, the facts and names pulled out of them, handoffs and checkpoints your agents leave, inbox messages between agents, and the project and repository names they belong to.</li>
 <li><strong>Handoffs:</strong> when an agent's session ends, <code>remembra-relay</code> reads facts from git on your machine (branch, commit ids and messages, changed file names, whether commits are pushed) and, for Claude Code and Codex, from the local session transcript (commands run, test results, open items; for Codex, its rollout file). Secrets and personal data the redaction rules catch are removed before anything is sent. The transcript itself is never uploaded.</li>
-<li><strong>Usage:</strong> API requests, credits used, storage used and errors, for billing, plan limits and fixing problems. Our security log records sign-ins, key changes and other account events with the IP address that made them.</li>
-<li><strong>Pickup events:</strong> when an agent's session brief shows a handoff another agent left, we record which agents, which handoff and when (ids and times, never the handoff's content). They show you who picked up each handoff, and tell us, in aggregate, whether handoffs are being picked up. They are deleted with the handoff.</li>
+<li><strong>Usage:</strong> API requests, credits used, storage used and errors, for billing, plan limits and fixing problems. Our security log records API key changes, sign-in method links and unlinks, account-review events, and memory writes, reads and deletions, with the IP address of the request that made them. Ordinary password and Google or GitHub sign-ins are not recorded there.</li>
+<li><strong>Pickup events:</strong> when an agent's session brief shows a handoff another agent left, we record which agents, which handoff and when (ids and times, never the handoff's content). They show you who picked up each handoff, and tell us, in aggregate, whether handoffs are being picked up. They are deleted when the handoff, its project or your account is deleted.</li>
 <li><strong>Billing:</strong> Paddle takes the payment. It tells us your email, plan, country, subscription status and whether a payment went through. Your card details go to Paddle, never to us.</li>
 </ul>
 
@@ -161,7 +161,7 @@
 <h2 id="retention">How long we keep it</h2>
 <ul>
 <li><strong>Your account and what you store</strong> are kept while your account is open. Handoffs and structured checkpoints do not expire: they stay on your trail until you delete them or your account is erased. Free-text checkpoints expire after 7 days by default.</li>
-<li><strong>Deleting your account:</strong> Deleting your account cancels any subscription at once, with no further charges, and signs you out everywhere. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it: sign-in comes back, but a cancelled subscription and revoked API keys do not. Backups are not edited; the copies in them age out: the continuous backup keeps 24 hours of history and drops older copies every hour, so an erased copy leaves it within about 25 hours, and the database copy taken before each deploy is kept only until 3 newer deploys replace it.</li>
+<li><strong>Deleting your account:</strong> Deleting your account cancels any subscription at once, with no further charges, and signs you out everywhere. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it: sign-in comes back, but a cancelled subscription and revoked API keys do not. Backups are not edited. When a new version of the server is deployed, it copies the database as it starts. Each copy is deleted once 3 newer ones exist, so erased data can stay in those copies until 3 more deploys have happened. There is no continuous backup yet.</li>
 <li><strong>After an erasure</strong> we keep one audit entry that says an account was erased, identified only by a one-way hash of its id, with no email and no content.</li>
 <li><strong>Request logs and security logs</strong> are kept only as long as we need them to run and protect the service.</li>
 <li><strong>Billing records</strong> stay with Paddle, our Merchant of Record, under its own retention rules (for as long as tax law requires); we keep only each Paddle transaction id and its net amount for our accounts.</li>

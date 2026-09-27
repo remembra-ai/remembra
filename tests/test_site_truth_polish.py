@@ -417,6 +417,13 @@ def test_erasure_is_described_as_automatic_and_not_reaching_backups_on_every_leg
     assert f"A deleted account is erased automatically {days} days later" in security
     assert "on request rather than automatically" not in dpa
     assert "erasure does not reach backups" in dpa
+    # P-124: how long a backup keeps erased data has a bound (pre-migration copies, pruned to the newest few),
+    # and the transfer clauses of an agreement that is not drafted yet are not described as in force.
+    keep = Settings.model_fields["pre_migration_backup_keep"].default
+    assert f"deleted only after {keep} more deploys" in dpa and "age out" not in dpa
+    assert f"deleted after {keep} more deploys" in security and "age out instead" not in security
+    assert "the agreement includes the European Commission's standard contractual clauses" not in dpa
+    assert "They are not attached to the agreement yet, so they are not in place today." in dpa
 
 
 def test_the_plans_page_holds_a_new_yearly_bank_like_the_metering_code() -> None:

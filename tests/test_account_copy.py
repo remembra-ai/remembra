@@ -46,11 +46,20 @@ def test_deletion_copy_is_the_same_everywhere_and_matches_the_code() -> None:
     grace = _default("account_erasure_grace_days")
     assert f"{grace} days later everything the account holds is erased" in DELETION
     assert f"erased {grace} days later" in _text(LANDING / "about.html")
-    assert f"only until {_default('pre_migration_backup_keep')} newer deploys replace it" in DELETION
+    keep = _default("pre_migration_backup_keep")
+    assert _default("pre_migration_backup") is True
+    assert f"Each copy is deleted once {keep} newer ones exist" in DELETION
+    assert f"until {keep} more deploys have happened" in DELETION
+    # P-075: production runs no litestream replica, so no page promises a continuous backup.
+    assert "There is no continuous backup yet." in DELETION
+    for page in ("terms.html", "privacy.html", "security.html"):
+        assert "continuous backup keeps" not in _text(LANDING / page)
+    # The operator doc keeps the litestream figure for when it is switched on (P-300): 24h of history,
+    # checked hourly, so an erased copy can outlive the window by up to that hour.
     entrypoint = (ROOT / "scripts" / "cloud-entrypoint.sh").read_text()
-    assert 'RETENTION="${LITESTREAM_RETENTION:-24h}"' in entrypoint and "keeps 24 hours of history" in DELETION
-    # Retention is enforced by an hourly check: a copy can outlive the window by up to that hour.
-    assert "retention-check-interval: 1h" in entrypoint and "within about 25 hours" in DELETION
+    operations = " ".join((ROOT / "docs" / "OPERATIONS.md").read_text().split())
+    assert 'RETENTION="${LITESTREAM_RETENTION:-24h}"' in entrypoint and "retention-check-interval: 1h" in entrypoint
+    assert "leaves the replica within about 25 hours" in operations and "48 hours" not in operations
     # The undo line says what an undo does not bring back.
     assert "a cancelled subscription and revoked API keys do not" in DELETION
     # The old promise the code never kept is gone.
@@ -58,6 +67,25 @@ def test_deletion_copy_is_the_same_everywhere_and_matches_the_code() -> None:
         assert "delete your data within 30 days" not in _text(LANDING / page)
     settings_page = (DASHBOARD / "pages" / "Settings.tsx").read_text()
     assert "{DELETION_COPY}" in settings_page and "permanently delete your account and all memories" not in settings_page
+
+
+def test_retention_promises_hold_with_the_server_defaults() -> None:
+    """P-074 / P-096: what the pages say we keep, and what the security log holds, matches the code.
+
+    Handoffs and checkpoints stay until the user deletes them, and notes are kept while the account
+    is open, because the sleep-time decay cleanup is off unless an operator turns it on (and never
+    deletes relay records even then: tests/test_sleep_time_retention.py). Pickup events go with the
+    handoff, its project or the account (Database.delete_memory, delete_project_memories,
+    delete_user_memories). Ordinary sign-ins write no security-log row.
+    """
+    assert _default("sleep_time_decay_cleanup_enabled") is False
+    security, privacy = _text(LANDING / "security.html"), _text(LANDING / "privacy.html")
+    assert "Handoffs and structured checkpoints never expire." in security
+    assert "Notes and memories are kept while your account is open, unless you set an expiry on them." in security
+    assert "Handoffs and structured checkpoints do not expire" in privacy
+    assert "They are deleted when the handoff, its project or your account is deleted." in privacy
+    assert "Our security log records sign-ins" not in privacy
+    assert "Ordinary password and Google or GitHub sign-ins are not recorded there." in privacy
 
 
 def test_yearly_bank_rule_is_the_same_on_pricing_terms_and_dashboard() -> None:

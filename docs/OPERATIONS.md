@@ -142,8 +142,9 @@ that restore fails, the container exits** rather than booting on an empty databa
 `LITESTREAM_ALLOW_EMPTY_START=1` to override deliberately. Without `LITESTREAM_REPLICA_URL`, litestream is
 inert and the entrypoint prints a warning on every boot that SQLite is not backed up.
 
-Retention: the replica keeps `LITESTREAM_RETENTION` of history (default `24h`), so data erased from the live
-database leaves the replica within about 48 hours. If you publish a retention promise, change both together.
+Retention: the replica keeps `LITESTREAM_RETENTION` of history (default `24h`) and litestream enforces it
+hourly, so data erased from the live database leaves the replica within about 25 hours. If you publish a
+retention promise, change both together.
 
 Restore drill, on a scratch host:
 
@@ -356,5 +357,5 @@ and every rollback copy a rebuild kept), then every SQLite row they own, in one 
 
 Inside the grace period, `POST /api/v1/admin/users/{id}/activate?active=true` undoes a deletion;
 `DELETE /api/v1/admin/users/{id}?confirm=true` erases at once. Backups are not rewritten: pre-migration
-copies age out after 3 more deploys, the litestream replica within about 48 hours, and manual copies never,
-so delete those yourself.
+copies are deleted after 3 more deploys, the litestream replica (when it is on) drops erased data within
+about 25 hours, and manual copies are never deleted, so delete those yourself.

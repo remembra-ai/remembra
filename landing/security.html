@@ -134,7 +134,7 @@
         <li><strong>The metadata database is not field-encrypted.</strong> Encryption at rest covers the vector store; the database that holds account records and a second copy of your notes does not have field-level encryption yet. One encryption key protects the vector store, and it is not rotated yet.</li>
         <li><strong>API keys don't expire.</strong> You revoke them yourself. An agent-scoped key fixes who a handoff is from, but it can read everything the account can; limit reads with project-scoped keys.</li>
         <li><strong>No SSO or SAML</strong> for the dashboard.</li>
-        <li><strong>Backups are not edited when an account is erased.</strong> A deleted account is erased automatically 7 days later; the copies of it in backups age out instead (see <a href="#retention">retention</a>).</li>
+        <li><strong>Backups are not edited when an account is erased.</strong> A deleted account is erased automatically 7 days later; its copies in the backups taken at each deploy are deleted after 3 more deploys (see <a href="#retention">retention</a>).</li>
       </ul>
 
       <h2 id="roadmap">Roadmap</h2>
@@ -155,7 +155,7 @@
       <ul>
         <li><strong>Handoffs and structured checkpoints never expire.</strong> They stay on your trail until you delete them or your account is erased. Free-text checkpoints expire after 7 days by default.</li>
         <li><strong>Notes and memories</strong> are kept while your account is open, unless you set an expiry on them.</li>
-        <li><strong>Deleting your account</strong> cancels any subscription at once, with no further charges, and ends every session. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it. Backups are not edited; the copies in them age out: the continuous backup keeps 24 hours of history, and the database copy taken before each deploy is kept only until 3 newer deploys replace it. The <a href="/privacy#retention">privacy policy</a> has the rest.</li>
+        <li><strong>Deleting your account</strong> cancels any subscription at once, with no further charges, and ends every session. 7 days later everything the account holds is erased for good: memories, handoffs, inbox, API keys, connections and settings. Until then, email support@remembra.dev to undo it. Backups are not edited. When a new version of the server is deployed, it copies the database as it starts. Each copy is deleted once 3 newer ones exist, so erased data can stay in those copies until 3 more deploys have happened. There is no continuous backup yet. The <a href="/privacy#retention">privacy policy</a> has the rest.</li>
         <li><strong>Export</strong> your memories whenever you want, through the API.</li>
         <li><strong>No training on your data:</strong> we never use what you store to train AI models, and OpenAI, which embeds and enriches it, does not train on API data under its terms.</li>
       </ul>
