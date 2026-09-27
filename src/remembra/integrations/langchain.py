@@ -65,7 +65,7 @@ class RemembraChatMessageHistory(BaseChatMessageHistory):
     - Full entity resolution across conversations
     - Semantic search over past conversations
     - Temporal decay for old messages
-    - GDPR-compliant deletion
+    - ``clear()`` deletes only the messages this history stored
 
     Args:
         base_url: Remembra server URL.

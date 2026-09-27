@@ -62,7 +62,7 @@ class SleepTimeWorker:
 
     Runs consolidation passes to:
     1. Find and merge duplicate memories across sessions
-    2. Resolve entity aliases (e.g., "my wife" = "Suzan")
+    2. Merge entities with the same name, an alias or one name inside the other ("John" and "John Smith")
     3. Discover new entity relationships from patterns
     4. Re-score importance based on actual access patterns
     5. Delete old notes nobody recalled, only when decay cleanup is switched on
@@ -404,9 +404,9 @@ class SleepTimeWorker:
         """
         Resolve entity aliases across different sessions.
 
-        Examples:
-        - "my wife" in one session = "Suzan" in another
-        - "John" = "John Smith" = "Mr. Smith"
+        Two entities match on the same name, a name in the other's aliases, or one
+        name inside the other ("John" and "John Smith"); see ``_entities_match``.
+        A relational mention ("my wife") is not matched to a name here.
 
         Operation Circuit Breaker fix (March 19, 2026):
         - Added max merge attempts per pass (circuit breaker)

@@ -185,7 +185,7 @@ def _get_client() -> Memory:
 mcp = FastMCP(
     name="remembra",
     instructions=(
-        "Remembra is persistent memory shared by all of the user's AI agents. "
+        "Remembra is persistent memory shared by the AI agents the user connects to it. "
         "1) At session start call session_brief (pass git_remote or root_path of your working "
         "directory if you know it): it shows what the last agent did, did not finish, what is "
         "failing and the suggested next step, plus your unread inbox. That brief is a record "
@@ -885,8 +885,8 @@ def close_session(
     """Call this LAST, before you finish: leave a handoff for the next agent.
 
     The server builds ONE structured handoff (Done / Not done / Failing / Next
-    step) from the facts you give. Calling it again in the same session
-    updates that handoff instead of adding another.
+    step) from the facts you give. Calling it again in the same session and
+    project updates that handoff instead of adding another.
 
     Args:
         summary: Optional short narrative. It is checked against the facts

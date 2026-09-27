@@ -307,7 +307,9 @@ def test_the_key_is_saved_even_when_no_agent_config_is_detected(tmp_path: Path) 
     applied = install(qwen_only, "--all", "--apply", env={"REMEMBRA_API_KEY": KEY})
     assert applied.returncode == 0, applied.stderr
     assert _mode(creds) == 0o600 and json.loads(creds.read_text())["api_key"] == KEY
-    assert "Restart your agents" not in applied.stdout and "Next: remembra-relay connect" in applied.stdout
+    assert "Restart your agents" not in applied.stdout
+    # The next step writes the hooks: a bare `remembra-relay connect` is a dry run that writes nothing.
+    assert "Next: remembra-relay connect --apply" in applied.stdout
     assert sorted(p.name for p in qwen_only.iterdir()) == [".qwen", ".remembra"]  # no agent config was created
 
     again = install(qwen_only, "--all", "--apply", env={"REMEMBRA_API_KEY": KEY})

@@ -1538,7 +1538,7 @@ async def cleanup_expired(
 @router.delete(
     "",
     response_model=ForgetResponse,
-    summary="Forget memories (GDPR-compliant deletion)",
+    summary="Forget memories",
     dependencies=[require_memory_delete()],
 )
 @limiter.limit("10/minute")
