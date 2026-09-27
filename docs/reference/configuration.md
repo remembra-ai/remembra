@@ -116,6 +116,18 @@ All environment variables for Remembra.
 | `REMEMBRA_DECAY_HALF_LIFE_DAYS` | `30` | Decay half-life |
 | `REMEMBRA_ACCESS_BOOST_WEIGHT` | `0.2` | Access count boost |
 
+## Sleep-time worker
+
+What each pass does: [Sleep-Time Compute](../guides/sleep-time-compute.md).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REMEMBRA_SLEEP_TIME_ENABLED` | `true` | Start the background worker |
+| `REMEMBRA_SLEEP_TIME_TRIGGER` | `interval` | `interval` runs it on a timer; any other value means no timed runs |
+| `REMEMBRA_SLEEP_TIME_INTERVAL_HOURS` | `6` | Hours between timed runs |
+| `REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_ENABLED` | `false` | Let the worker delete old notes nobody recalled. Off: it deletes no memories. On: each run deletes up to 100 of an active account's ordinary notes older than the days below that no search has returned and that have no expiry. Handoffs, checkpoints, status values, source records and pinned memories are never deleted |
+| `REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_DAYS` | `90` | Age in days before decay cleanup (when on) deletes such a note |
+
 ## Security
 
 ### Authentication

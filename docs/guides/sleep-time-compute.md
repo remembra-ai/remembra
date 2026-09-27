@@ -1,243 +1,103 @@
 # Sleep-Time Compute
 
-**NEW in v0.7.1** — Background memory consolidation that runs during idle time.
+A background worker that tidies memories between conversations, on the server you run.
 
-Inspired by Letta/MemGPT's approach — your AI "thinks" between conversations to improve memory quality.
+## What it does
 
-## Overview
+Each run looks at every account that stored or changed a memory since the previous run (the first run looks
+back 24 hours), up to 100 accounts. For each one it runs these passes in order:
 
-Sleep-Time Compute is a background worker that processes memories when the system is idle:
+1. **Duplicate merge.** Not working yet. For each recent ordinary note it embeds the text and asks the vector
+   store for near-duplicates, but that call fails, so it merges nothing. Until it is fixed, each run still
+   sends the text of those notes to your embedding provider. With cloud metering on (Remembra Cloud) this pass
+   is charged to smart credits and skipped for an account with none left.
+2. **Entity alias resolution.** Merges entities of the same type in the same project when one name equals
+   the other, is one of its aliases, or contains it ("John" and "John Smith"). Links and relationships move
+   to the kept entity; duplicate relationships are closed, not deleted.
+3. **Importance rescoring.** For each memory a search has returned, adds 0.05 per return (at most 0.3) to its
+   stored importance, up to 1.0. This happens on every run.
+4. **Decay cleanup.** Off by default: it deletes nothing unless you turn it on (below).
+5. **Themes.** Recomputes the entity communities (themes) of each project.
 
-- **Cross-session deduplication** — Merge duplicate memories across sessions
-- **Entity alias resolution** — Link "my wife" = "Suzan" = "Mrs. Johnson"
-- **Relationship discovery** — Find patterns and connections
-- **Importance rescoring** — Adjust based on actual access patterns
-- **Memory decay cleanup** — Remove stale, unused memories
-
-## Why This Matters
-
-Real-time memory operations need to be fast. Complex consolidation takes time.
-
-**Without Sleep-Time Compute:**
-- Duplicates accumulate across sessions
-- Entity aliases remain unlinked
-- Memory quality degrades over time
-
-**With Sleep-Time Compute:**
-- Memories consolidate automatically
-- Entity graph stays connected
-- Quality improves over time
-
-## How It Works
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Real-Time Operations                      │
-│  store() → quick insert, basic dedup                        │
-│  recall() → fast retrieval                                  │
-└─────────────────────────────────────────────────────────────┘
-                           ↓
-                    (when idle)
-                           ↓
-┌─────────────────────────────────────────────────────────────┐
-│                   Sleep-Time Worker                          │
-│  1. Deep deduplication across all sessions                  │
-│  2. Entity alias resolution                                 │
-│  3. Relationship graph updates                              │
-│  4. Importance rescoring                                    │
-│  5. Decay cleanup                                           │
-└─────────────────────────────────────────────────────────────┘
-```
+It never deletes a handoff, checkpoint, status value, source record (the original text a note's facts came
+from) or pinned memory, and never changes their text.
 
 ## Configuration
 
-Enable and configure in your environment:
+| Variable | Default | What it does |
+|----------|---------|--------------|
+| `REMEMBRA_SLEEP_TIME_ENABLED` | `true` | Start the worker |
+| `REMEMBRA_SLEEP_TIME_TRIGGER` | `interval` | `interval` runs it on a timer. Any other value means no timed runs; use the endpoint below |
+| `REMEMBRA_SLEEP_TIME_INTERVAL_HOURS` | `6` | Hours between timed runs. The first run is one interval after the server starts |
+| `REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_ENABLED` | `false` | Let decay cleanup delete old notes nobody recalled |
+| `REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_DAYS` | `90` | How old such a note must be before decay cleanup deletes it |
 
-```bash
-# Enable sleep-time compute
-REMEMBRA_SLEEP_TIME_ENABLED=true
+## Decay cleanup
 
-# Run every 6 hours (in seconds)
-REMEMBRA_SLEEP_TIME_INTERVAL=21600
+With `REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_ENABLED=false` (the default) the worker deletes no memories.
 
-# Minimum idle time before running (seconds)
-REMEMBRA_SLEEP_TIME_IDLE_THRESHOLD=300
+With it set to `true`, each run deletes up to 100 of an active account's ordinary notes and facts that:
 
-# Consolidation similarity threshold (0.0-1.0)
-REMEMBRA_CONSOLIDATION_THRESHOLD=0.85
-```
+- were created more than `REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_DAYS` days ago,
+- have never been returned by a search, and
+- have no expiry set.
 
-## API Reference
+Handoffs, checkpoints, status values, source records and pinned memories are never deleted, whatever their
+age. Pin a note (`POST /api/v1/memories/{id}/pin`) to keep it out of the cleanup.
 
-### Trigger Manually
+Each delete is the same as a user's delete: the memory, its entity links, the relationships pulled from it,
+its full-text entry and its vector all go. Each one also writes a `memory_decayed` entry to the security log,
+and the run logs `decay_cleanup_deleted` with the account and the memory ids.
+
+If you run a hosted service, tell your users before you turn this on: it deletes their notes without asking.
+
+## Endpoints
+
+### Run it now
 
 ```http
-POST /api/v1/admin/consolidate
+POST /api/v1/admin/sleep-time/run?user_id=user_123
 ```
+
+Needs the admin role; once a minute. A tenant admin can run it for their own account only; a superadmin can name
+any account, or leave `user_id` out to run every active account. It answers 503 when the worker is off.
 
 ```json
 {
-  "user_id": "user_123"  // Optional - all users if omitted
+  "status": "completed",
+  "started_at": "2026-09-27T12:00:00",
+  "completed_at": "2026-09-27T12:00:02",
+  "stats": {
+    "memories_scanned": 120,
+    "duplicates_merged": 0,
+    "entities_resolved": 3,
+    "relationships_discovered": 0,
+    "importance_rescored": 14,
+    "memories_decayed": 0
+  },
+  "errors": []
 }
 ```
 
-### Response
+`relationships_discovered` is always 0: no pass finds new relationships yet.
 
-```json
-{
-  "success": true,
-  "report": {
-    "user_id": "user_123",
-    "started_at": "2026-03-03T12:00:00Z",
-    "completed_at": "2026-03-03T12:00:45Z",
-    "stats": {
-      "memories_scanned": 1250,
-      "duplicates_merged": 23,
-      "entities_linked": 8,
-      "relationships_discovered": 5,
-      "memories_decayed": 12,
-      "importance_updates": 45
-    }
-  }
-}
-```
-
-## Python SDK
-
-```python
-from remembra import Memory
-from remembra.services.sleep_time import SleepTimeWorker
-
-memory = Memory(user_id="user_123")
-
-# Trigger consolidation manually
-report = await memory.consolidate()
-
-print(report.stats)
-# ConsolidationStats(
-#     duplicates_merged=23,
-#     entities_linked=8,
-#     relationships_discovered=5,
-#     ...
-# )
-```
-
-## Consolidation Tasks
-
-### 1. Duplicate Detection
-
-Finds memories with high semantic similarity that should be merged:
-
-```
-Before:
-  - "John works at Acme Corp" (session A)
-  - "John is employed by Acme Corporation" (session B)
-
-After:
-  - "John works at Acme Corp" (merged, higher confidence)
-```
-
-### 2. Entity Alias Resolution
-
-Links entity references across memories:
-
-```
-Before:
-  - Entity: "my wife" (unlinked)
-  - Entity: "Suzan" (unlinked)
-  - Memory: "my wife's birthday is March 15"
-  - Memory: "Suzan works at Google"
-
-After:
-  - Entity: "Suzan" (aliases: ["my wife", "Mrs. Johnson"])
-  - All memories linked to same entity
-```
-
-### 3. Relationship Discovery
-
-Infers relationships from patterns:
-
-```
-Found pattern:
-  - "John works at Acme"
-  - "Sarah works at Acme"
-  - "John and Sarah had a meeting"
-
-Discovered:
-  - Relationship: John → COLLEAGUE_OF → Sarah
-```
-
-### 4. Importance Rescoring
-
-Adjusts importance based on actual usage:
-
-```
-Memory: "User prefers dark mode"
-  - Stored importance: 0.5
-  - Recalled 15 times
-  - New importance: 0.8 (frequently accessed = more important)
-```
-
-### 5. Decay Cleanup
-
-Removes memories below threshold:
-
-```
-Memory: "Weather was nice yesterday"
-  - Initial importance: 0.3
-  - TTL: 24h
-  - After decay: 0.05
-  - Action: DELETED (below 0.1 threshold)
-```
-
-## Monitoring
-
-### Check Status
+### Status
 
 ```http
-GET /api/v1/admin/consolidate/status
+GET /api/v1/admin/sleep-time/status
 ```
 
 ```json
 {
   "enabled": true,
-  "last_run": "2026-03-03T06:00:00Z",
-  "next_scheduled": "2026-03-03T12:00:00Z",
+  "decay_cleanup_enabled": false,
   "running": false,
-  "last_report": { ... }
+  "last_run": "2026-09-27T06:00:00"
 }
-```
-
-### Webhook Events
-
-Subscribe to consolidation events:
-
-- `consolidation.started` — Worker began
-- `consolidation.completed` — Worker finished
-- `consolidation.error` — Worker failed
-
-## Best Practices
-
-### Production Settings
-
-```bash
-# Conservative settings for production
-REMEMBRA_SLEEP_TIME_INTERVAL=21600      # Every 6 hours
-REMEMBRA_CONSOLIDATION_THRESHOLD=0.90   # High similarity required
-REMEMBRA_SLEEP_TIME_IDLE_THRESHOLD=600  # 10 min idle
-```
-
-### Development Settings
-
-```bash
-# Aggressive for testing
-REMEMBRA_SLEEP_TIME_INTERVAL=300        # Every 5 minutes
-REMEMBRA_CONSOLIDATION_THRESHOLD=0.80   # Lower threshold
-REMEMBRA_SLEEP_TIME_IDLE_THRESHOLD=60   # 1 min idle
 ```
 
 ## Related
 
-- [Conversation Ingestion](./conversation-ingestion.md) — Real-time extraction
-- [Entity Resolution](./entity-resolution.md) — How entities are linked
-- [Security](./security.md) — PII detection and anomaly monitoring
+- [Conversation Ingestion](./conversation-ingestion.md)
+- [Entity Resolution](./entity-resolution.md)
+- [Security](./security.md)

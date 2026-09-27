@@ -37,10 +37,12 @@ if [ -n "$LITESTREAM_REPLICA_URL" ]; then
         fi
     fi
 
-    # Retention (R-23): the replica keeps this much history, so data erased from
-    # the live database leaves the backup within about twice this window. The
-    # privacy page states 24 hours; keep them in step. The CLI form cannot set
-    # retention, so the replica is described in a generated config file.
+    # Retention (R-23): the replica keeps this much history and litestream checks
+    # it every hour, so data erased from the live database leaves the backup within
+    # this window plus an hour (about 25 hours at the default). docs/OPERATIONS.md
+    # states that figure. The public retention pages describe no continuous backup;
+    # if Remembra Cloud turns this on, add the figure there too. The CLI form cannot
+    # set retention, so the replica is described in a generated config file.
     RETENTION="${LITESTREAM_RETENTION:-24h}"
     case "$RETENTION" in
         *[!0-9hms]*|"") echo "litestream: LITESTREAM_RETENTION must look like 24h, 90m or 3600s" >&2; exit 1 ;;
