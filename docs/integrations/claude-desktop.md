@@ -138,7 +138,8 @@ Use the full path in your config:
 
 ### Memory not persisting between conversations
 
-Make sure `REMEMBRA_USER_ID` is set consistently. Without it, each conversation may use a different default user context.
+Make sure every conversation uses the same `REMEMBRA_API_KEY` (the server takes the account from the key) and the
+same `REMEMBRA_PROJECT`. Claude also has to call the memory tools: ask it to recall, or tell it to remember.
 
 ## Next Steps
 

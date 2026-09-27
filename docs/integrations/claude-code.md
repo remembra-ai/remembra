@@ -161,4 +161,4 @@ claude mcp add remembra -e REMEMBRA_URL=http://localhost:8787 -- remembra-mcp
 
 - [MCP Tool Reference](mcp-server.md) — Full documentation of all 24 tools and 2 resources
 - [Python SDK](../guides/python-sdk.md) — Programmatic access from Python
-- [Conversation Ingestion](../guides/conversation-ingestion.md) — Auto-extract memories from conversations
+- [Conversation Ingestion](../guides/conversation-ingestion.md) — Extract memories from conversations

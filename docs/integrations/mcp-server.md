@@ -200,7 +200,7 @@ Result:
 
 ### ingest_conversation <span class="md-tag">v0.8.0</span>
 
-Automatically extract memories from a conversation. This is the **primary method** for agents to add context to memory.
+Extract memories from a conversation the agent passes in. Use it to add a whole exchange to memory in one call.
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|

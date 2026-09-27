@@ -88,7 +88,7 @@ Once connected, your MCP client has 24 tools; the [MCP Tool Reference](mcp-serve
 | `recall_memories` | Search memory with natural language |
 | `forget_memories` | Delete one memory by ID, or the memories about one entity or every memory in one project (both with a confirmation phrase) |
 | `health_check` | Check server connection status |
-| `ingest_conversation` | Auto-extract memories from conversations |
+| `ingest_conversation` | Extract memories from a conversation the agent passes to it |
 
 See the [MCP Tool Reference](mcp-server.md) for full parameter documentation.
 
