@@ -902,6 +902,11 @@ async def session_brief(
     return brief
 
 
+# A deep offset still walks every matched key of the account (and past 2**63 overflowed SQLite): deeper
+# pages use the before/before_id cursor, which the dashboard and clients already send.
+TRAIL_MAX_OFFSET = 10_000
+
+
 @router.get("/trail", summary="Handoffs and checkpoints across agents, newest first")
 @limiter.limit("60/minute")
 async def trail(
@@ -910,7 +915,9 @@ async def trail(
     project_id: Annotated[str | None, Query(max_length=128)] = None,
     project: Annotated[str | None, Query(max_length=128, description="Alias of project_id")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    offset: Annotated[
+        int, Query(ge=0, le=TRAIL_MAX_OFFSET, description="Shallow pages only; page deeper with before/before_id")
+    ] = 0,
     agent_id: Annotated[str | None, Query(max_length=128, description="Only this agent's entries")] = None,
     before: Annotated[
         str | None,

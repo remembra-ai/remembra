@@ -688,6 +688,22 @@ def test_trail_deep_offset_on_a_crew_project_builds_only_the_page(api, crew, mon
     page = _get(api, "/trail", {"project_id": PROJECT, "limit": 3, "offset": 9})
     assert [i["id"] for i in page["items"]] == full[9:12] and sorted(built) == sorted(full[9:12])
     built.clear()
-    for offset in (10**6, 2**63 - 5):  # past the end: nothing to build, and no integer overflow in SQLite
+    for offset in (1000, 10_000):  # past the end: nothing to build
         page = _get(api, "/trail", {"project_id": PROJECT, "limit": 20, "offset": offset})
         assert page["items"] == [] and page["total"] == 54 and built == []
+
+
+def test_trail_offset_is_bounded_for_every_project(api, crew):
+    """Deep pages use the before/before_id cursor: an offset past 10,000 is a 422, never a scan or a 500.
+
+    Without a bound, offset=2**63 overflowed the SQLite LIMIT (500) on a project without a crew, and a deep
+    offset on a crew project still walked every matched key of the account.
+    """
+    _as(api)
+    run(api, _world, crew["db"])
+    seed(api, "h-solo", "[HANDOFF] solo", datetime.now(UTC) - timedelta(minutes=5), project_id="nocrew", user_id=USER,
+         memory_type="handoff")  # fmt: skip
+    for project in (PROJECT, "nocrew"):
+        assert _get(api, "/trail", {"project_id": project, "offset": 10_000})["items"] == []
+        for offset in (10_001, 10**6, 2**63 - 1, 2**63):
+            _get(api, "/trail", {"project_id": project, "offset": offset}, status=422)
