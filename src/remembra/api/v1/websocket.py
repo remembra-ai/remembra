@@ -874,13 +874,16 @@ async def websocket_endpoint(
             if not isinstance(msg, dict):
                 continue
             mtype = msg.get("type")
-            if msg.get("channel") == "crew" and mtype == "subscribe":
+            # With Crew mode off (no crew.db) crew frames are unknown messages here, like on a server
+            # without Crew mode: nothing names the feature.
+            crew_on = _crew_db(websocket) is not None
+            if crew_on and msg.get("channel") == "crew" and mtype == "subscribe":
                 await _handle_crew_subscribe(conn, msg)
                 continue
-            if msg.get("channel") == "crew" and mtype == "unsubscribe":
+            if crew_on and msg.get("channel") == "crew" and mtype == "unsubscribe":
                 await _handle_crew_unsubscribe(conn, msg)
                 continue
-            if mtype == "presence":
+            if crew_on and mtype == "presence":
                 await _handle_presence(conn, msg)
                 continue
             if mtype != "subscribe":

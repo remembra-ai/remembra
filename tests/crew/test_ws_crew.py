@@ -445,14 +445,24 @@ async def test_subscription_connection_and_replay_limits(tmp_path, monkeypatch):
             assert recv(a)["type"] == "crew.subscribed"
 
 
-async def test_crew_mode_disabled_is_reported(tmp_path, monkeypatch):
+async def test_with_crew_mode_off_crew_frames_get_no_crew_answer(tmp_path, monkeypatch):
+    """Flag off: /ws must not announce the unreleased feature. A crew subscribe gets the generic answer any
+    unknown channel gets, a presence frame gets nothing, and no frame mentions crews."""
     monkeypatch.setattr(websocket, "connection_manager", websocket.ConnectionManager())
     async with secure_app(tmp_path, [websocket.router], prefix="") as h:
         key, _ = await h.api_key("owner-1", "editor", scopes=CREW_SCOPES)
         with TestClient(h.app) as client, connect(client, key) as ws:
             recv_type(ws, "connected")
+            ws.send_text(json.dumps({"type": "subscribe", "channel": "nope", "crew_id": CREW_A, "topics": ["crew"]}))
+            generic = recv(ws)
             ws.send_text(sub())
-            assert recv(ws)["data"]["code"] == "unavailable"
+            answer = recv(ws)
+            assert {**answer, "timestamp": None} == {**generic, "timestamp": None}
+            ws.send_text(sub("*", topics=("crew.summary",)))
+            assert "crew" not in json.dumps(recv(ws)).lower()
+            ws.send_text(json.dumps({"type": "presence", "crew_id": CREW_A, "lanes": []}))
+            ws.send_text(json.dumps({"type": "unsubscribe", "channel": "crew", "crew_id": CREW_A}))
+            expect_silence(ws)
 
 
 async def test_pump_failure_tells_the_client_to_resync(tmp_path, monkeypatch):
