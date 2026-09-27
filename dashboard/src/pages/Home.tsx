@@ -250,7 +250,7 @@ export function Home({ userName }: { userName?: string }) {
                           agentsWaiting === 1 ? 'its' : 'their'
                         } next session brief.`
                       : forYou === 0
-                        ? 'Nothing waiting. Leave an agent a note and it leads its next session brief.'
+                        ? "Nothing waiting. Leave an agent a note and it shows up in that agent's next session brief, after the last session."
                         : ''}
                   </p>
                   {unread.data && unread.data.items.length > 0 && (

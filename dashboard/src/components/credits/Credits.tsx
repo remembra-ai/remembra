@@ -6,7 +6,7 @@ import { useId } from 'react';
 import clsx from 'clsx';
 import { AlertTriangle, ArrowRight } from 'lucide-react';
 import type { UsageSummaryResponse } from '../../lib/api';
-import { creditsView, degradedCopy, handoffsNote, planLine, resetLabel } from '../../lib/credits';
+import { FREE_UNENRICHED_PER_DAY, creditsView, degradedCopy, handoffsNote, planLine, resetLabel } from '../../lib/credits';
 import { hrefFor } from '../../lib/nav';
 import { Card, CardHeader } from '../relay/ui';
 
@@ -106,7 +106,7 @@ export function PlanMeter({ usage }: { usage: UsageSummaryResponse }) {
         )}
         {view.low && (
           <p className="mt-2 text-xs text-signal-ink">
-            Running low. When credits run out, new memories still save, just without enrichment.
+            Running low. When credits run out, new memories still save without enrichment{usage.plan === 'free' ? ` (on Free, up to ${FREE_UNENRICHED_PER_DAY} a day)` : ''}.
           </p>
         )}
         <dl className="mt-3 divide-y divide-rule border-y border-rule">

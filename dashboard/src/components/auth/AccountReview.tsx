@@ -288,7 +288,7 @@ export function AccountReview({ jwt, email, review: initial, onToken, onDone, on
             </button>
           </div>
           <p className="mt-3 font-mono text-[11px] text-ink-3">
-            {twoFactorListed ? 'Two-factor sign-in turns off unless you keep it with a code. ' : ''}We email you what you kept.
+            {twoFactorListed ? 'Two-factor sign-in turns off unless you keep it with a code. ' : ''}When you finish, we email you what you kept and removed.
           </p>
         </div>
       </main>
