@@ -8,8 +8,8 @@ TypeScript/JavaScript SDK for [Remembra](https://remembra.dev) - the AI Memory L
 ## What's New in v0.12.0
 
 - **👤 User Profiles** — Profile management with avatars and preferences
-- **🧠 Smart Auto-Forgetting** — Human-like memory that naturally fades
-- **⏰ Event-driven Expiry** — `expires_at` field for precise lifecycle control
+- **⏰ Expiry** — `store(content, { ttl: '36h' })`. This SDK takes only `ttl`; the REST API also takes
+  `expires_at`. Temporal phrases ("meeting tomorrow") set a TTL only in the Python SDK.
 - **🔒 Strict Mode 410 GONE** — Expired memories return proper HTTP 410
 - **🌐 Browser Extension** — Access memories from any webpage
 
@@ -98,6 +98,10 @@ const result = await memory.store('John is the CEO of Acme Corp', {
   ttl: '30d',  // Expires in 30 days
 });
 ```
+
+A TTL is a number and a unit: `s`, `min` (or `m`), `h`, `d`, `w`, `mo` (30 days) or `y` (365 days).
+Servers 0.16.1 and earlier read `m` as months and only whole numbers, so use whole `h`, `d`, `w` or `y` values
+with them.
 
 #### `recall(query, options?)`
 

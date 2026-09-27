@@ -378,32 +378,19 @@ const slim = await memory.recall('What does the user prefer?', { slim: true });
 
 ---
 
-## Event-Driven Expiry (v0.12.0)
+## Expiry (TTL)
 
-Set explicit expiration timestamps.
-
-```typescript
-// Expires at specific time
-await memory.store('Conference call at 3pm', {
-  expiresAt: new Date('2026-03-23T16:00:00Z')
-});
-
-// Or use TTL string
-await memory.store('Meeting tomorrow', {
-  ttl: '36h'
-});
-```
-
----
-
-## Smart Auto-Forgetting (v0.12.0)
-
-Temporal phrases automatically get appropriate TTLs:
+`store()` takes a `ttl`: a number and a unit, such as `'36h'` or `'30d'`. Every unit is in
+[TTL formats](temporal.md#ttl-formats).
 
 ```typescript
-// No explicit TTL needed - auto-detected
-await memory.store('Meeting tomorrow at 3pm');  // → 36h TTL
-await memory.store('Deadline in 2 hours');      // → 3h TTL
-await memory.store('Call next week');           // → 8 days TTL
+// Expires 36 hours after it is stored
+await memory.store('Meeting tomorrow', { ttl: '36h' });
 ```
+
+The TypeScript SDK has no `expiresAt` option. For an exact expiry time, send `expires_at` to the REST API
+(`POST /api/v1/memories`).
+
+It does not read temporal phrases either: Smart Auto-Forgetting ("Meeting tomorrow" gets a 36h TTL) is in the
+Python SDK only, with `auto_expire_temporal=True`.
 

@@ -54,19 +54,16 @@ Memory(
 
 Store memories with automatic fact extraction.
 
+```python
 memory.store(
     content: str,
-    metadata: dict = None,
-    ttl: str = None,
-    expires_at: datetime = None,  # NEW in v0.12.0
-    source: str = None
-) -> dict
-memory.store(
-    content: str,
-    metadata: dict = None,
-    ttl: str = None,
-    source: str = None
-) -> dict
+    metadata: dict | None = None,
+    ttl: str | None = None,
+    auto_expire: bool | None = None,
+    skip_extraction: bool = False,
+    memory_type: str | None = None,
+    project_id: str | None = None,
+) -> StoreResult
 ```
 
 **Parameters:**
@@ -75,9 +72,14 @@ memory.store(
 |------|------|-------------|
 | `content` | `str` | Text to store (can be messy conversation) |
 | `metadata` | `dict` | Custom metadata (tags, source, etc.) |
-| `ttl` | `str` | Time-to-live: "30d", "1w", "24h", "1y" |
-| `source` | `str` | Content provenance (e.g., "chat", "email") |
-| `expires_at` | `datetime` | Explicit expiry timestamp (ISO 8601) |
+| `ttl` | `str` | Time-to-live: a number and a unit, e.g. `"24h"`, `"30d"`, `"2w"`, `"1y"`. Every unit is in [TTL formats](temporal.md#ttl-formats) |
+| `auto_expire` | `bool` | Turn the temporal-phrase TTL on or off for this call (see Smart Auto-Forgetting below) |
+| `skip_extraction` | `bool` | Store the content as one memory, with no fact extraction or merging |
+| `memory_type` | `str` | For example `"checkpoint"` (gets the server's default TTL) or `"handoff"` |
+| `project_id` | `str` | Store into this project instead of the client's |
+
+The Python SDK has no `expires_at` argument. The REST API takes one: `POST /api/v1/memories` with
+`"expires_at": "2026-03-25T14:00:00Z"`.
 
 **Example:**
 
@@ -91,14 +93,6 @@ memory.store(
     metadata={"category": "preferences", "confidence": "high"}
 )
 
-# With TTL (expires in 30 days)
-
-# With explicit expiry (v0.12.0)
-from datetime import datetime, timedelta
-memory.store(
-    "Conference call tomorrow at 3pm",
-    expires_at=datetime.now() + timedelta(hours=36)
-)
 # With TTL (expires in 30 days)
 memory.store(
     "Meeting scheduled for March 15",
@@ -434,17 +428,24 @@ profile = memory.get_user_profile()
 
 ## Smart Auto-Forgetting (v0.12.0)
 
-Memories with temporal phrases automatically get appropriate TTLs:
+Off by default. Turn it on when you create the client, and a store with no `ttl` gets one from a temporal
+phrase in the text (38 patterns):
 
 ```python
-# No explicit TTL needed - auto-detected
-memory.store("Meeting tomorrow at 3pm")  # → 36h TTL
-memory.store("Deadline in 2 hours")      # → 3h TTL
-memory.store("Call next week")           # → 8 days TTL
+memory = Memory(auto_expire_temporal=True)
+
+memory.store("Meeting tomorrow at 3pm")  # sends ttl="36h"
+memory.store("Deadline in 2 hours")      # sends ttl="3h"
+memory.store("Call next week")           # sends ttl="10d"
+memory.store("Ping me in 10 minutes")    # sends ttl="1h"
 ```
 
-Supports 35+ patterns including:
-- Relative dates: "tomorrow", "next week", "in 3 days"
-- Specific times: "at 3pm", "this afternoon"
-- Duration phrases: "for 2 hours", "until Friday"
+The patterns cover phrases such as "tomorrow", "tonight", "next week", "in 3 days", "remember this for 2
+hours", "until Friday", "next month" and "annually". `store(..., auto_expire=False)` turns it off for one call, and an explicit
+`ttl` always wins.
+
+The SDK sends whole hours, rounded up, or whole days. SDK 0.16.1 and earlier sent many phrases as values that
+a server at 0.16.1 or earlier cannot read, such as `1.5d` for "tomorrow", `1.4w` for "next week" and `1mo` for
+"this month": with both at those versions, the memory gets no expiry. They sent `40m` for "in 10 minutes",
+which those servers read as 40 months.
 
