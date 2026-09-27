@@ -13,12 +13,14 @@
 
 Attribution: when the API key is agent-scoped, the agent id comes from the key
 and a different id in the body or the ``X-Remembra-Agent-Id`` header is
-rejected. Unscoped keys may name the agent in the body or the header (they
-must agree). Writes (close, links) require a well-formed agent id; the brief
-is lenient (a malformed id is ignored for attribution and only used, as
-before, to look up the inbox). Every stored string passes ``redact_secrets``;
-access to each project is checked with the key's project restrictions, and
-project-restricted keys never create or move location bindings.
+rejected (403), on close, links and the brief alike. Unscoped keys may name the
+agent in the body or the header (they must agree). Close requires an agent id;
+link calls take one optionally, in the header. An agent id that is sent must be
+well-formed on writes; the brief is lenient (a malformed id is ignored for
+attribution and only used, as before, to look up the inbox). Every stored
+string passes ``redact_secrets``; access to each project is checked with the
+key's project restrictions, and project-restricted keys never create or move
+location bindings.
 
 Reads never bind: GET brief and trail compute the project for an unseen
 location without recording it; only close and ``POST /projects/resolve``
@@ -41,8 +43,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 from remembra.api.v1.agent_session import screen_text
 from remembra.auth.middleware import (
+    AGENT_HEADER,
     AuthenticatedUser,
     CurrentUser,
+    enforce_agent_scope,
     get_client_ip,
     has_permission,
     require_memory_store,
@@ -59,7 +63,6 @@ from remembra.services.relay import BindingNotAllowed, ProjectAccessDenied, Rela
 router = APIRouter(tags=["relay"])
 log = structlog.get_logger(__name__)
 
-AGENT_HEADER = "X-Remembra-Agent-Id"
 _AGENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$")
 _SESSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+=-]{0,199}$")
 _RELATION_RE = re.compile(r"^[a-z][a-z0-9_-]{0,39}$")
@@ -160,14 +163,8 @@ def effective_agent(
     else:
         header_agent = _lenient_agent(request.headers.get(AGENT_HEADER), f"the {AGENT_HEADER} header", warnings, keep=False)
         claimed = _lenient_agent(body_agent, "agent_id", warnings, keep=True)
-    scoped = getattr(user, "agent_id", None)
+    scoped = enforce_agent_scope(user, ((claimed, "request"), (header_agent, f"{AGENT_HEADER} header")))
     if scoped:
-        for other, where in ((claimed, "request"), (header_agent, f"{AGENT_HEADER} header")):
-            if other and other != scoped:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=f"This API key is scoped to agent '{scoped}'; the {where} claims '{other}'.",
-                )
         return scoped, True
     if claimed and header_agent and claimed != header_agent:
         if not strict:
@@ -640,6 +637,7 @@ async def remove_link(
 ) -> dict[str, Any]:
     source = _check_project(current_user, normalize_project_id(from_project))
     target = _check_project(current_user, normalize_project_id(to_project))
+    effective_agent(request, current_user, None)  # an agent-scoped key refuses another agent in the header
     removed = await _service(request).registry.remove_link(current_user.user_id, source, target, _relation(relation))
     return {"removed": removed}
 

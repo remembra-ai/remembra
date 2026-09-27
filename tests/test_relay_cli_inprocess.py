@@ -201,7 +201,7 @@ def test_cli_close_brief_trail_resolve_in_process(wired, monkeypatch, capsys, tm
     assert last.startswith(f"Last session: claude-code (self-declared), just now, on main@{sha[:7]}")
     assert "failing: FAILING: pytest -q (1 failed in 0.1s)" in last
     assert "suggested next step (from claude-code, unverified): fix it" in last
-    assert "(facts collected by remembra-relay from git and the session transcript)" in last
+    assert "(facts reported as collected by remembra-relay from git and the session transcript (not checked))" in last
 
     code, out, _ = _run(monkeypatch, capsys, ["brief", "--agent", "codex", "--cwd", str(b), "--format", "json"])
     assert json.loads(out.splitlines()[-1])["project_id"] == "inproc"

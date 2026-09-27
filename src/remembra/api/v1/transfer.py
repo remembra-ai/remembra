@@ -8,7 +8,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from remembra.auth.middleware import (
+    AuthenticatedUser,
     CurrentUser,
+    enforce_agent_scope_header,
     require_memory_recall,
     require_memory_store,
     resolve_project_or_default,
@@ -166,9 +168,15 @@ async def import_memories(
     """Import memories from various formats.
 
     Supported formats: json, jsonl, csv, chatgpt, claude, plaintext.
+
+    With an agent-scoped key every imported memory is stamped with the key's
+    agent; an item whose ``metadata.agent_id`` names another agent (or another
+    agent in the ``X-Remembra-Agent-Id`` header) refuses the whole import (403)
+    before anything is stored.
     """
     project_id = resolve_project_or_default(current_user, body.project_id)
     parsed = _parse_import(body.format, body.data, body.split_mode)
+    agent_id = _import_agent(request, current_user, parsed)
 
     if not parsed:
         return ImportResponse(imported=0, skipped=0, errors=0, details=[])
@@ -182,6 +190,7 @@ async def import_memories(
         project_id=project_id,
         sanitization_enabled=settings.sanitization_enabled,
         grant=grant,
+        agent_id=agent_id,
     )
     await record_store_usage(request, current_user.user_id, result.imported)
     await grant.record_degraded(result.imported)
@@ -214,7 +223,7 @@ async def import_from_file(
     project_id: str | None = Query(None),
     split_mode: str = Query("paragraph"),
 ) -> ImportResponse:
-    """Import memories from an uploaded file."""
+    """Import memories from an uploaded file (same agent rule as ``POST /transfer/import``)."""
     project_id = resolve_project_or_default(current_user, project_id)
 
     # Read file content (limit to 50MB)
@@ -228,6 +237,7 @@ async def import_from_file(
 
     data = content.decode("utf-8", errors="replace")
     parsed = _parse_import(format, data, split_mode)
+    agent_id = _import_agent(request, current_user, parsed)
 
     if not parsed:
         return ImportResponse(imported=0, skipped=0, errors=0, details=[])
@@ -241,6 +251,7 @@ async def import_from_file(
         project_id=project_id,
         sanitization_enabled=settings.sanitization_enabled,
         grant=grant,
+        agent_id=agent_id,
     )
     await record_store_usage(request, current_user.user_id, result.imported)
     await grant.record_degraded(result.imported)
@@ -302,6 +313,20 @@ def _parse_import(format: str, data: str, split_mode: str = "paragraph") -> list
         )
 
 
+def _import_agent(request: Request, user: AuthenticatedUser, parsed: list[ImportedMemory]) -> str | None:
+    """The agent an agent-scoped key imports as (None for an unscoped key).
+
+    Every item's ``metadata.agent_id`` and the ``X-Remembra-Agent-Id`` header
+    must name the key's agent or nothing; otherwise the import is refused (403)
+    before any item is stored.
+    """
+    claims = [
+        (mem.metadata.get("agent_id") if isinstance(mem.metadata, dict) else None, f"imported memory at index {i}")
+        for i, mem in enumerate(parsed)
+    ]
+    return enforce_agent_scope_header(request, user, *claims)
+
+
 async def _gate_import(
     request: Request, response: Response, user_id: str, parsed: list[ImportedMemory], project_id: str
 ) -> EnrichmentGrant:
@@ -330,11 +355,18 @@ async def _store_imported_memories(
     project_id: str,
     sanitization_enabled: bool = True,
     grant: EnrichmentGrant | None = None,
+    agent_id: str | None = None,
 ) -> ImportResponse:
-    """Store a batch of parsed memories and return results."""
+    """Store a batch of parsed memories and return results.
+
+    ``agent_id`` (an agent-scoped key's agent, checked by :func:`_import_agent`)
+    is written into every item's metadata.
+    """
     grant = grant or EnrichmentGrant(mode="unmetered", user_id=user_id)
     with grant.activate():
-        return await _store_imported_items(request, memories, memory_service, user_id, project_id, sanitization_enabled, grant)
+        return await _store_imported_items(
+            request, memories, memory_service, user_id, project_id, sanitization_enabled, grant, agent_id
+        )
 
 
 async def _store_imported_items(
@@ -345,6 +377,7 @@ async def _store_imported_items(
     project_id: str,
     sanitization_enabled: bool,
     grant: EnrichmentGrant,
+    agent_id: str | None = None,
 ) -> ImportResponse:
     imported = 0
     skipped = 0
@@ -373,6 +406,7 @@ async def _store_imported_items(
                     **(strip_reserved_metadata(mem.metadata) or {}),
                     "import_source": mem.source_format,
                     "import_source_id": mem.source_id,
+                    **({"agent_id": agent_id} if agent_id else {}),
                 },
             )
             result = await memory_service.store(

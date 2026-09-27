@@ -205,7 +205,7 @@ Start
 - Isolated:
   Every account's memory is walled off, and project-scoped keys only see their own projects.
 - Attributed:
-  Every handoff records the agent, session and time that wrote it, and whether its facts came from git or from the agent. Give each agent its own scoped key and it can't write as another.
+  A relay handoff records the agent, session and time that wrote it, and whether the client says its facts came from git or from the agent. Give each agent its own scoped key and it can't write as another.
 - Open:
   The core is MIT-licensed open source. Read it, run it, [host it yourself](https://docs.remembra.dev/getting-started/docker/).
 
@@ -379,7 +379,7 @@ Every account's memory is walled off, and project-scoped keys only see their own
 
 Attributed
 
-Every handoff names the agent, session and time that wrote it, and whether its facts came from git or from the agent.
+A relay handoff names the agent, session and time that wrote it, and whether the client says its facts came from git or from the agent.
 
 Open
 
@@ -396,7 +396,7 @@ Remembra Relay passes work between agents, so it is built on the assumption that
 - Commands are flagged, not trusted. Pipe-to-shell installs (also through `sudo`, `env` or a shell's full path), download-then-run commands, `base64 -d | sh`, `rm -rf`, force pushes, skipped git hooks, permission-bypass flags, reads of `~/.ssh`, `.env` or `~/.claude.json`, and links outside your repository (including hosts a download command names without `https://`, and links that climb out of it with `..`) are marked confirm with the user before running. Images (markdown inline or reference style, and HTML `<img>`) are removed from the brief's text and its JSON fields, so their URLs cannot carry data out.
 - Tool results are framed too. MCP tools that return stored content (recall, lists, the timeline, the inbox, the brief) wrap it in the same untrusted-data block, with the same escaping.
 - Inbox messages are redacted and scored. Secrets in a message's subject, body and metadata are removed before it is saved, and each message keeps its trust score. An inbox message is a request to confirm with you, never an instruction.
-- Graded, not taken on faith. Each handoff gets a health grade computed from its facts (Ready, Ready with warnings, Incomplete, Conflicted or Blocked) with what is missing, such as unpushed commits or tests that were not run. No language model is involved. The facts come from the closing client: unless remembra-relay collected them under a key scoped to that agent, the grade says it rests on facts the agent reported, not verified.
+- Graded, not taken on faith. Each handoff gets a health grade computed from its facts (Ready, Ready with warnings, Incomplete, Conflicted or Blocked) with what is missing, such as unpushed commits or tests that were not run. No language model is involved. The facts come from the closing client, and the server does not verify them. The grade says so. When the close used a key scoped to that agent and the client says remembra-relay collected the facts, the grade names remembra-relay as their source. Otherwise it says they are what the agent reported.
 - Attributed. A handoff closed with a key scoped to one agent is shown as key-verified, and that key cannot write as another agent. Otherwise it is shown as self-declared. An agent's own summary is marked unverified, or contradicted when the facts disagree.
 
 ### What we do today
@@ -405,7 +405,7 @@ Each item links to the code or the doc that does it, so you can check.
 
 - Redaction on both ends. The relay client redacts secrets before a handoff leaves your machine ([relay/facts.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/facts.py)), and the server scans every stored value again for secrets and PII ([secret_scan.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/secret_scan.py), [pii_detector.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/pii_detector.py)).
 - Untrusted-data framing of everything agents recorded, in every brief ([relay/handoff.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/handoff.py)).
-- Key-verified attribution. The agent on a handoff comes from the API key, not from the request ([relay/identity.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/relay/identity.py)).
+- Key-verified attribution. When a handoff is closed with a key scoped to one agent, the agent comes from the key, and a request that names another agent is refused. With an unscoped key the agent is whatever the request names, and the brief shows the handoff as self-declared ([api/v1/relay.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/api/v1/relay.py)). A key scoped to one agent also cannot put another agent on a status value, an imported memory, an inbox message or a project link ([auth/middleware.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/auth/middleware.py)).
 - Scoped keys. Keys can be limited to one agent, to certain projects and to a role; keys are stored hashed ([auth/keys.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/auth/keys.py), [auth/rbac.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/auth/rbac.py)).
 - OAuth for the Claude and ChatGPT apps (coming: the connector is built but not switched on at api.remembra.dev yet) is authorization code with PKCE (S256 only), and you choose which projects a connection may see ([connector/oauth.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/connector/oauth.py)).
 - Encryption at rest for the vector store: memory content and metadata there are encrypted with AES-256-GCM, and two-factor secrets are encrypted ([security/encryption.py](https://github.com/remembra-ai/remembra/blob/main/src/remembra/security/encryption.py)).

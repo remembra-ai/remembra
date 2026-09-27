@@ -19,7 +19,8 @@ Scoping (every route):
 * **Agent scoping.** An agent-scoped key (or an agent-bound connector grant)
   reads and acks only its own inbox: rows addressed to its agent. Asking for
   another agent's inbox, or acking a row addressed to another agent, is a 404,
-  so ids cannot be probed.
+  so ids cannot be probed. It sends only as its own agent: a ``from_agent`` or
+  ``X-Remembra-Agent-Id`` header naming another agent is a 403.
 
 Unrestricted keys and dashboard logins keep the full owner view.
 """
@@ -31,7 +32,13 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 
-from remembra.auth.middleware import AuthenticatedUser, get_current_user, require_memory_recall, require_memory_store
+from remembra.auth.middleware import (
+    AuthenticatedUser,
+    enforce_agent_scope_header,
+    get_current_user,
+    require_memory_recall,
+    require_memory_store,
+)
 from remembra.cloud.limits import record_relay_usage, relay_guard
 from remembra.core.limiter import limiter
 from remembra.inbox.manager import TERMINAL_STATUSES, InboxManager
@@ -126,7 +133,10 @@ class SendInboxRequest(BaseModel):
     from_agent: str | None = Field(
         default=None,
         max_length=128,
-        description="Optional sender id. If omitted, defaults to 'unknown'.",
+        description=(
+            "Optional sender id. If omitted: an agent-scoped key's agent, else 'unknown'. "
+            "An agent-scoped key may only name its own agent (403 otherwise)."
+        ),
     )
     metadata: dict[str, Any] = Field(default_factory=dict)
     expires_at: datetime | None = Field(
@@ -223,15 +233,19 @@ async def send_to_inbox(
 
     An inbox message is a relay event: free on every plan (never uses smart
     credits), subject only to the plan's relay burst limit.
+
+    An agent-scoped key sends as its own agent: a ``from_agent`` (or an
+    ``X-Remembra-Agent-Id`` header) naming another agent is refused (403), as
+    on ``POST /session/close``.
     """
+    scoped = enforce_agent_scope_header(request, current_user, (payload.from_agent, "request"))
     project_id = _send_project(current_user, _requested_project(payload))
     metadata = {k: v for k, v in payload.metadata.items() if k != "project_id"}
     await relay_guard(request, response, current_user.user_id)
     try:
         row = await inbox.send(
             owner_user_id=current_user.user_id,
-            # An agent-scoped key sends as its own agent, whatever the payload claims.
-            from_agent=getattr(current_user, "agent_id", None) or payload.from_agent or "unknown",
+            from_agent=scoped or payload.from_agent or "unknown",
             to_agent=payload.to_agent,
             subject=payload.subject,
             body=payload.body,
