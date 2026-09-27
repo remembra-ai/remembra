@@ -935,6 +935,18 @@ def test_crew_mode_is_off_everywhere_until_it_ships() -> None:
     assert "Part of launch" not in _text(crew)
 
 
+def test_crew_page_claims_only_what_the_code_does() -> None:
+    """The fence covers unverified agents in their own worktree (crewd.apply_fence); the git gates exist only
+    where connect --git-hooks installed them; an alert needs a target and waits out quiet hours."""
+    crew = _text((LANDING / "crew.html").read_text())
+    home_section = _text((ROOT_DIR / "scripts" / "site-crew-section.html").read_text())
+    assert "in the other agents' copies of the repo" not in crew
+    assert "made read-only in that agent's own worktree" in crew and "not yet verified" in crew
+    assert "is stopped, for every agent" in crew and "where you install the git gates (connect --git-hooks)" in crew
+    for text in (crew, home_section):
+        assert "once you have added a target" in text and "quiet hours" in text, text[:80]
+
+
 def test_one_switch_brings_every_crew_link_back_and_off_again(monkeypatch: pytest.MonkeyPatch) -> None:
     partials = _script("site_partials")
     committed = {name: (LANDING / name).read_text() for name in [*partials.PAGES, partials.SITEMAP]}
