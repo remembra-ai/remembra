@@ -713,6 +713,20 @@ class Settings(BaseSettings):
         None,
         description="Not read yet: the sleep-time consolidation pass uses extraction_model.",
     )
+    sleep_time_decay_cleanup_enabled: bool = Field(
+        False,
+        description=(
+            "Let the sleep-time pass delete old notes nobody recalled. Off by default: the pass then deletes "
+            "nothing. When on, each run deletes up to 100 of an active account's ordinary notes that are older "
+            "than sleep_time_decay_cleanup_days, were never returned by a search and have no expiry. Handoffs, "
+            "checkpoints, status values, pinned memories and source records are never deleted."
+        ),
+    )
+    sleep_time_decay_cleanup_days: int = Field(
+        90,
+        ge=1,
+        description="Age in days a never-recalled note must reach before decay cleanup (when on) deletes it",
+    )
 
     # -----------------------------------------------------------------------
     # Reliability: provider failure handling, readiness, background work

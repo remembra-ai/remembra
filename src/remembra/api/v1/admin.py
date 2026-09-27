@@ -565,6 +565,7 @@ async def consolidation_status(
 
     Returns:
     - Whether sleep-time compute is enabled
+    - Whether its decay cleanup may delete old notes (REMEMBRA_SLEEP_TIME_DECAY_CLEANUP_ENABLED)
     - Last run timestamp
     - Whether a consolidation is currently running
     """
@@ -573,11 +574,13 @@ async def consolidation_status(
     if sleep_worker is None:
         return {
             "enabled": False,
+            "decay_cleanup_enabled": False,
             "message": "Sleep-time compute is not enabled",
         }
 
     return {
         "enabled": True,
+        "decay_cleanup_enabled": getattr(sleep_worker, "decay_cleanup_enabled", False) is True,
         "running": sleep_worker.running,
         "last_run": sleep_worker.last_run.isoformat() if sleep_worker.last_run else None,
     }

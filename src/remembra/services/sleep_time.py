@@ -9,10 +9,14 @@ Capabilities:
 - Entity alias resolution
 - Graph relationship discovery
 - Importance rescoring based on access patterns
-- Memory decay cleanup
+- Memory decay cleanup (off unless ``sleep_time_decay_cleanup_enabled``)
 
 This runs between conversations to improve memory quality
 without impacting real-time performance.
+
+Nothing here deletes a handoff, checkpoint, status value, source record or
+pinned memory, or changes its text (``MUTABLE_SQL``): the retention pages
+promise those stay until the user deletes them.
 """
 
 from datetime import datetime, timedelta
@@ -28,8 +32,28 @@ from remembra.extraction.consolidator import (
     ExistingMemory,
 )
 from remembra.models.memory import ConsolidationReport
+from remembra.security.audit import AuditAction, AuditLogger
 
 log = structlog.get_logger(__name__)
+
+# The only memory types the sleep-time pass may merge or delete: ordinary notes
+# and the facts pulled from them. Handoffs, checkpoints and status values (the
+# relay record), source records (a note's original text, which recall never
+# returns) and any type added later are left alone.
+MUTABLE_MEMORY_TYPES = ("observation", "fact", "inference", "task")
+# SQL test for such a row (and not pinned). Always 0 or 1.
+MUTABLE_SQL = (
+    "(COALESCE(pinned, 0) = 0 AND (memory_type IS NULL OR memory_type IN ("
+    + ", ".join(f"'{t}'" for t in MUTABLE_MEMORY_TYPES)
+    + ")))"
+)
+# Most rows the decay cleanup deletes for one account in one run.
+DECAY_CLEANUP_BATCH = 100
+
+
+def is_mutable(memory_type: str | None, pinned: Any) -> bool:
+    """Python twin of :data:`MUTABLE_SQL`."""
+    return not pinned and (memory_type is None or memory_type in MUTABLE_MEMORY_TYPES)
 
 
 class SleepTimeWorker:
@@ -41,7 +65,7 @@ class SleepTimeWorker:
     2. Resolve entity aliases (e.g., "my wife" = "Suzan")
     3. Discover new entity relationships from patterns
     4. Re-score importance based on actual access patterns
-    5. Clean up decayed memories below threshold
+    5. Delete old notes nobody recalled, only when decay cleanup is switched on
 
     Usage:
         worker = SleepTimeWorker(settings, memory_service)
@@ -64,6 +88,8 @@ class SleepTimeWorker:
         self.embeddings = memory_service.embeddings
         self.consolidator = memory_service.consolidator
         self.entity_matcher = memory_service.entity_matcher
+        # Deleting old notes is opt-in: anything but an explicit True keeps it off.
+        self.decay_cleanup_enabled = getattr(settings, "sleep_time_decay_cleanup_enabled", False) is True
 
         self.last_run: datetime | None = None
         self.running = False
@@ -71,6 +97,7 @@ class SleepTimeWorker:
         log.info(
             "sleep_time_worker_initialized",
             consolidation_threshold=settings.consolidation_threshold,
+            decay_cleanup_enabled=self.decay_cleanup_enabled,
         )
 
     async def run_consolidation(
@@ -195,7 +222,7 @@ class SleepTimeWorker:
         rescored = await self._importance_rescore_pass(user_id)
         report.importance_rescored = rescored
 
-        # Pass 4: Decay cleanup
+        # Pass 4: Decay cleanup (deletes nothing unless switched on)
         decayed = await self._decay_cleanup_pass(user_id)
         report.memories_decayed = decayed
 
@@ -268,7 +295,7 @@ class SleepTimeWorker:
         try:
             cursor = await self.db.conn.execute(
                 """
-                SELECT id, content, metadata, created_at, access_count
+                SELECT id, content, metadata, created_at, access_count, memory_type, COALESCE(pinned, 0)
                 FROM memories
                 WHERE user_id = ? AND (created_at >= ? OR updated_at >= ?)
                 ORDER BY created_at DESC
@@ -278,7 +305,7 @@ class SleepTimeWorker:
             )
             rows = await cursor.fetchall()
 
-            columns = ["id", "content", "metadata", "created_at", "access_count"]
+            columns = ["id", "content", "metadata", "created_at", "access_count", "memory_type", "pinned"]
             return [dict(zip(columns, row, strict=False)) for row in rows]
 
         except Exception as e:
@@ -294,6 +321,9 @@ class SleepTimeWorker:
         Find and merge duplicate memories across sessions.
 
         Uses lower similarity threshold than real-time for thorough dedup.
+        Only ordinary notes take part (:data:`MUTABLE_SQL`): a handoff,
+        checkpoint, status value, source record or pinned memory is never
+        embedded here, offered as a candidate, rewritten or deleted.
         """
         merged_count = 0
         processed_ids = set()
@@ -303,6 +333,8 @@ class SleepTimeWorker:
 
         for memory in memories:
             if memory["id"] in processed_ids:
+                continue
+            if not is_mutable(memory.get("memory_type"), memory.get("pinned")):
                 continue
 
             try:
@@ -317,11 +349,15 @@ class SleepTimeWorker:
                     threshold=dedup_threshold,
                 )
 
-                # Filter to exclude self and already processed
+                # Filter to exclude self, already processed and protected rows
+                mutable = await self._mutable_ids(user_id, [str(s.get("id")) for s in similar])
                 candidates = [
                     s
                     for s in similar
-                    if s.get("id") != memory["id"] and s.get("id") not in processed_ids and s.get("score", 0) >= dedup_threshold
+                    if s.get("id") != memory["id"]
+                    and s.get("id") not in processed_ids
+                    and s.get("id") in mutable
+                    and s.get("score", 0) >= dedup_threshold
                 ]
 
                 if candidates:
@@ -340,19 +376,20 @@ class SleepTimeWorker:
 
                         if result.action == ConsolidationAction.UPDATE:
                             # Merge: update existing, delete current
-                            await self._merge_memories(
+                            if await self._merge_memories(
+                                user_id=user_id,
                                 keep_id=candidate["id"],
                                 delete_id=memory["id"],
                                 merged_content=result.content,
-                            )
-                            merged_count += 1
+                            ):
+                                merged_count += 1
                             processed_ids.add(memory["id"])
                             processed_ids.add(candidate["id"])
                             break
                         elif result.action == ConsolidationAction.NOOP:
                             # Duplicate: delete current
-                            await self._delete_memory(memory["id"])
-                            merged_count += 1
+                            if await self._delete_memory(memory["id"], user_id):
+                                merged_count += 1
                             processed_ids.add(memory["id"])
                             break
 
@@ -541,62 +578,92 @@ class SleepTimeWorker:
         return rescored_count
 
     async def _decay_cleanup_pass(self, user_id: str) -> int:
-        """
-        Remove memories that have decayed below threshold.
+        """Delete the user's old notes that nobody recalled, only when switched on.
 
-        Uses the temporal decay system to identify very old,
-        unused memories that can be cleaned up.
+        Off unless ``sleep_time_decay_cleanup_enabled`` is true; then it
+        deletes nothing. When on, it deletes up to :data:`DECAY_CLEANUP_BATCH`
+        ordinary notes (:data:`MUTABLE_SQL`, so never a handoff, checkpoint,
+        status value, source record or pinned memory) created more than
+        ``sleep_time_decay_cleanup_days`` ago, never returned by a search
+        (``access_count`` 0) and with no expiry. Each delete is the full one a
+        user's delete does, and each gets a ``memory_decayed`` security-log entry.
         """
-        cleaned_count = 0
+        if not self.decay_cleanup_enabled:
+            return 0
 
+        cleaned: list[str] = []
         try:
-            # Get very old memories with low access
-            cutoff = utcnow() - timedelta(days=90)
-
+            cutoff = utcnow() - timedelta(days=self.settings.sleep_time_decay_cleanup_days)
             cursor = await self.db.conn.execute(
-                """
+                f"""
                 SELECT id
                 FROM memories
                 WHERE user_id = ?
                   AND created_at < ?
                   AND access_count = 0
                   AND expires_at IS NULL
-                LIMIT 100
-                """,
-                (user_id, cutoff.isoformat()),
+                  AND {MUTABLE_SQL}
+                ORDER BY created_at
+                LIMIT ?
+                """,  # noqa: S608 - constant fragment; values are bound
+                (user_id, cutoff.isoformat(), DECAY_CLEANUP_BATCH),
             )
             rows = await cursor.fetchall()
 
+            audit = AuditLogger(self.db)
             for row in rows:
                 memory_id = row[0]
-                # Delete very old, never-accessed memories
-                await self._delete_memory(memory_id)
-                cleaned_count += 1
+                if await self._delete_memory(memory_id, user_id):
+                    cleaned.append(memory_id)
+                    await audit.log(user_id=user_id, action=AuditAction.MEMORY_DECAYED, resource_id=memory_id)
 
         except Exception as e:
-            log.debug("decay_cleanup_failed", user_id=user_id, error=str(e))
+            log.warning("decay_cleanup_failed", user_id=user_id, error=str(e), deleted=len(cleaned))
 
-        return cleaned_count
+        if cleaned:
+            log.info("decay_cleanup_deleted", user_id=user_id, count=len(cleaned), memory_ids=cleaned)
+        return len(cleaned)
+
+    async def _mutable_ids(self, user_id: str, memory_ids: list[str]) -> set[str]:
+        """The ids among ``memory_ids`` that ``user_id`` owns and this pass may change (:data:`MUTABLE_SQL`)."""
+        if not memory_ids:
+            return set()
+        marks = ", ".join("?" for _ in memory_ids)
+        cursor = await self.db.conn.execute(
+            f"SELECT id FROM memories WHERE user_id = ? AND id IN ({marks}) AND {MUTABLE_SQL}",  # noqa: S608
+            (user_id, *memory_ids),
+        )
+        return {row[0] for row in await cursor.fetchall()}
 
     async def _merge_memories(
         self,
+        user_id: str,
         keep_id: str,
         delete_id: str,
         merged_content: str | None,
-    ) -> None:
-        """Merge two memories, keeping one and deleting the other."""
-        try:
-            if merged_content:
-                await self.db.conn.execute(
-                    "UPDATE memories SET content = ?, updated_at = ? WHERE id = ?",
-                    (merged_content, utcnow().isoformat(), keep_id),
-                )
+    ) -> bool:
+        """Merge two of the user's ordinary notes, keeping one and deleting the other.
 
-            await self._delete_memory(delete_id)
-            await self.db.conn.commit()
+        Refuses (False, nothing changed) unless the user owns both and both may
+        be changed (:data:`MUTABLE_SQL`).
+        """
+        try:
+            async with self.db.transaction():
+                if await self._mutable_ids(user_id, [keep_id, delete_id]) != {keep_id, delete_id}:
+                    log.warning("sleep_time_merge_refused", keep=keep_id, delete=delete_id, user_id=user_id)
+                    return False
+                if merged_content:
+                    await self.db.conn.execute(
+                        "UPDATE memories SET content = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                        (merged_content, utcnow().isoformat(), keep_id, user_id),
+                    )
+                await self.db.delete_memory(delete_id, user_id=user_id)
+            await self.qdrant.delete(delete_id, user_id=user_id)
+            return True
 
         except Exception as e:
             log.error("merge_memories_failed", keep=keep_id, delete=delete_id, error=str(e))
+            return False
 
     async def _merge_entities(self, keep_id: str, delete_id: str) -> None:
         """
@@ -729,20 +796,29 @@ class SleepTimeWorker:
                 error_type=type(e).__name__,
             )
 
-    async def _delete_memory(self, memory_id: str) -> None:
-        """Delete a memory from SQLite and Qdrant."""
-        try:
-            await self.db.conn.execute(
-                "DELETE FROM memories WHERE id = ?",
-                (memory_id,),
-            )
-            await self.db.conn.commit()
+    async def _delete_memory(self, memory_id: str, user_id: str) -> bool:
+        """Delete one of the user's ordinary notes the way a user's delete does.
 
-            # Also delete from Qdrant
-            await self.qdrant.delete(memory_id)
+        Refuses (False, nothing deleted) unless ``user_id`` owns the row and it
+        may be changed (:data:`MUTABLE_SQL`), so a handoff, checkpoint, status
+        value, source record or pinned memory is never deleted here. Otherwise
+        ``Database.delete_memory`` removes the row with its entity links, the
+        relationships pulled from it, its full-text entry and any pickup events
+        in one transaction, and then its vector goes.
+        """
+        try:
+            async with self.db.transaction():
+                if memory_id not in await self._mutable_ids(user_id, [memory_id]):
+                    log.warning("sleep_time_delete_refused", memory_id=memory_id, user_id=user_id)
+                    return False
+                if not await self.db.delete_memory(memory_id, user_id=user_id):
+                    return False
+            await self.qdrant.delete(memory_id, user_id=user_id)
+            return True
 
         except Exception as e:
             log.error("delete_memory_failed", memory_id=memory_id, error=str(e))
+            return False
 
 
 # ============================================================================
