@@ -146,8 +146,8 @@ async def list_messages(
     request: Request,
     access: Annotated[CrewAccess, Depends(crew_access("crew:read"))],
     thread: Annotated[str | None, Query(max_length=80)] = None,
-    since_seq: Annotated[int | None, Query(ge=0)] = None,
-    before: Annotated[int | None, Query(ge=1)] = None,
+    since_seq: Annotated[int | None, Query(ge=0, le=schemas.SEQ_MAX)] = None,
+    before: Annotated[int | None, Query(ge=1, le=schemas.SEQ_MAX)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> dict[str, Any]:
     channel, _, _ = services(request)

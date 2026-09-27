@@ -403,7 +403,7 @@ async def crew_events(
     request: Request,
     response: Response,
     access: CrewAccess = Depends(crew_access("crew:read")),
-    since_seq: Annotated[int, Query(ge=0)] = 0,
+    since_seq: Annotated[int, Query(ge=0, le=schemas.SEQ_MAX)] = 0,
     limit: Annotated[int, Query(ge=1, le=200)] = 200,
     if_none_match: Annotated[str | None, Header(alias="If-None-Match")] = None,
 ) -> Any:

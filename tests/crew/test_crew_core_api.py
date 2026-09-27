@@ -469,6 +469,10 @@ async def test_events_polling_pages_by_seq_with_etag(tmp_path):
         assert etag == '"5"'
         res = await h.client.get(url, params={"since_seq": 5}, headers={**key, "If-None-Match": etag})
         assert res.status_code == 304
+        # a cursor past SQLite's INTEGER range is a 422, never a 500 (OverflowError)
+        assert (await h.client.get(url, params={"since_seq": 2**63 - 1}, headers=key)).json()["events"] == []
+        for too_big in (2**63, 10**30):
+            assert (await h.client.get(url, params={"since_seq": too_big}, headers=key)).status_code == 422
 
 
 # ---------------------------------------------------------------------------

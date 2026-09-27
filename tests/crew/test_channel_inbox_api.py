@@ -252,6 +252,18 @@ async def test_inbox_items_audience_rules_and_cursors(tmp_path):
         assert (await h.client.get("/api/v1/crews/inbox/overview", headers=restricted)).json()["crews"] == []
 
 
+async def test_message_cursors_past_sqlite_integers_are_422_not_500(tmp_path):
+    async with api(tmp_path) as h:
+        owner = h.created["owner"]
+        human = h.jwt(owner, "owner@example.com")
+        url = f"/api/v1/crews/{CREW_A}/messages"
+        for name in ("since_seq", "before"):
+            ok = await h.client.get(url, params={name: 2**63 - 1}, headers=human)
+            assert ok.status_code == 200, (name, ok.text)
+            for too_big in (2**63, 10**30):
+                assert (await h.client.get(url, params={name: too_big}, headers=human)).status_code == 422, name
+
+
 async def test_notification_targets_rules_and_in_app_list(tmp_path):
     async with api(tmp_path) as h:
         owner, db = h.created["owner"], h.created["db"]

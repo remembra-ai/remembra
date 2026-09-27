@@ -597,6 +597,10 @@ REPLAY_MAX_EVENTS: Final = 500
 BYPASS_CODE_MAX_MINUTES: Final = 15
 
 # Agent-facing text budgets in characters (§10.4 "Token budgets").
+# The largest event seq a cursor can name: SQLite INTEGER is 64-bit signed, so a larger query value is a
+# 422 at the route instead of an OverflowError (500) when it is bound.
+SEQ_MAX: Final = 2**63 - 1
+
 TEXT_CAPS: Final[Mapping[str, int]] = {
     "session_start": 6000,  # brief 4,500 + crew block 1,500
     "crew_block": 1500,
