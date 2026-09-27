@@ -10,7 +10,7 @@ In-depth guides for using Remembra effectively.
 
 ## Memory Features
 
-- [Conversation Ingestion](conversation-ingestion.md) — Auto-extract memories from chats
+- [Conversation Ingestion](conversation-ingestion.md) — Extract memories from chats
 - [Entity Resolution](entity-resolution.md) — How entity matching works
 - [Temporal Memory](temporal.md) — TTL, decay, and point-in-time queries
 - [Multi-Agent Memory](multi-agent-shared-memory.md) — Share memories between agents
@@ -22,7 +22,7 @@ In-depth guides for using Remembra effectively.
 - [Security](security.md) — Encryption, PII detection, hardening
 - [Sign in with GitHub & Google](sign-in-providers.md) — Social sign-in setup and email verification
 - [Import/Export](import-export.md) — Migrate data in and out
-- [Plugins](plugins.md) — Extend with custom functionality
+- [Plugins](plugins.md) — The plugin framework (not wired up yet)
 
 ## Advanced
 

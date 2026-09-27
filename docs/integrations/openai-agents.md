@@ -3,7 +3,8 @@
 Give an [OpenAI Agents SDK](https://openai.github.io/openai-agents-python/)
 agent persistent memory: `RemembraSession` implements the SDK's `Session`
 protocol, so conversation history is stored in Remembra and recalled
-automatically across runs — with per-session isolation and entity resolution.
+automatically across runs, with per-session isolation. Items are stored as
+written, so no facts or entities are extracted from them.
 
 ## Install
 
@@ -48,7 +49,7 @@ print(result.final_output)   # "Your name is Alice."
 | `pop_item()` | Removes and returns the most recent item (e.g. for retries). |
 | `clear_session()` | Deletes the items this session stored, and nothing else. |
 
-- **Isolation** is by `session_id` within a `(user_id, project)` namespace.
+- **Isolation** is by `session_id` within the account's project (with auth on, the account is the API key's).
   Each item also carries `remembra_integration: "openai_agents"`, and
   `get_items`, `pop_item` and `clear_session` read and delete only memories
   with that marker (plus items stored by earlier versions, which carry

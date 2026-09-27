@@ -45,11 +45,13 @@ crew = Crew(
   fact-split or merged). A task result, an entity description, and a
   short-term observation each stay distinct and recallable.
 - **Types are isolated.** Short-term, long-term, and entity memories share the
-  `(user_id, project)` namespace but are tagged and filtered by type — a
-  short-term search never returns long-term or entity items.
-- **`reset()` is scoped.** Resetting one storage deletes only *that* memory
-  type; the crew's other memories and anything else under the user are
-  untouched.
+  account's project but are tagged (metadata `memory_type`) and filtered by
+  type — a short-term search never returns long-term or entity items.
+- **`reset()` is scoped by that tag.** Resetting one storage deletes the
+  memories in the project whose metadata `memory_type` is that storage's type
+  (`short_term`, `long_term` or `entity`). The crew's other memory types are
+  kept, and so is anything without that tag. Don't store other memories with
+  those `memory_type` values in the same project.
 - **Short-term memory auto-expires** after 24h (TTL); long-term and entity
   memory persist until reset.
 

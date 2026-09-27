@@ -10,12 +10,15 @@ http://localhost:8787/api/v1
 
 ## Authentication
 
-When `REMEMBRA_AUTH_ENABLED=true`, include your API key in the header:
+When `REMEMBRA_AUTH_ENABLED=true` (the default), send your API key in the `X-API-Key` header:
 
 ```bash
-curl -H "Authorization: Bearer rem_your_api_key" \
+curl -H "X-API-Key: rem_your_api_key" \
      http://localhost:8787/api/v1/memories
 ```
+
+A `rem_` key sent as `Authorization: Bearer rem_your_api_key` works too. The account comes from the key: a
+`user_id` in a request body is ignored.
 
 ## Endpoints
 
@@ -28,12 +31,15 @@ GET /health
 **Response:**
 ```json
 {
-  "status": "healthy",
-  "version": "0.13.2",
-  "qdrant": "connected",
-  "database": "connected"
+  "status": "ok",
+  "version": "0.16.1",
+  "dependencies": {"qdrant": {"status": "ok"}},
+  "encryption": "AES-256-GCM"
 }
 ```
+
+`status` is `degraded` (HTTP 503) when Qdrant is down. `encryption` appears only when `REMEMBRA_ENCRYPTION_KEY`
+is set, and `build_sha` when the server knows its build.
 
 ---
 
@@ -49,33 +55,39 @@ POST /api/v1/memories
 ```json
 {
   "content": "User's name is John. He works at Google as a senior engineer.",
-  "user_id": "user_123",
-  "project": "default",
+  "project_id": "default",
   "metadata": {
     "source": "chat",
     "session_id": "sess_abc"
   },
-  "ttl": "30d",
-  "expires_at": "2026-03-25T14:00:00Z"
+  "ttl": "30d"
 }
 ```
+
+Other fields: `expires_at` (an exact expiry time, instead of `ttl`), `skip_extraction` (store the content as one
+memory), `memory_type`, `scope`, `supersedes`. A `ttl` the server cannot read is refused with `422` (see
+[TTL formats](temporal.md#ttl-formats)). Credentials in `content` and `metadata` are replaced with
+`[REDACTED:<kind>]` before anything is saved.
 
 **Response:**
 ```json
 {
-  "status": "success",
-  "memories": [
-    {
-      "id": "mem_abc123",
-      "content": "John works at Google as a senior engineer",
-      "action": "ADD",
-      "entities": ["John", "Google"]
-    }
+  "id": "mem_abc123",
+  "status": "stored",
+  "extracted_facts": ["John works at Google as a senior engineer"],
+  "entities": [],
+  "entities_status": "pending",
+  "consolidation": [
+    {"fact": "John works at Google as a senior engineer", "action": "add", "memory_id": "mem_abc123", "decided_by": "llm"}
   ],
-  "entities_extracted": 2,
-  "relationships_created": 1
+  "dropped_facts": [],
+  "extraction": "llm",
+  "expires_at": "2026-04-01T10:30:00Z"
 }
 ```
+
+`status` is `stored`, `duplicate` (every fact was already known; `duplicate_of` names the memory), `pending` or
+`not_stored`. Entities are linked in the background (`entities_status: "pending"`).
 
 ---
 
@@ -91,9 +103,8 @@ POST /api/v1/memories/recall
 ```json
 {
   "query": "What do I know about John?",
-  "user_id": "user_123",
-  "project": "default",
-  "limit": 10,
+  "project_id": "default",
+  "limit": 5,
   "threshold": 0.4,
   "max_tokens": 4000,
   "enable_hybrid": true,
@@ -101,19 +112,23 @@ POST /api/v1/memories/recall
 }
 ```
 
+Leave out `project_id` to recall across all your projects. Other fields: `filters` (exact-match metadata),
+`scope`, `as_of`, `slim` (caps the context at 800 tokens), `include_superseded`, `include_decay_score`,
+`include_low_trust`.
+
 **Response:**
 ```json
 {
+  "context": "John works at Google as a senior engineer.",
   "memories": [
     {
       "id": "mem_abc123",
       "content": "John works at Google as a senior engineer",
-      "score": 0.92,
+      "relevance": 0.92,
       "created_at": "2026-03-01T10:30:00Z"
     }
   ],
-  "context": "John works at Google as a senior engineer.",
-  "total": 1
+  "entities": []
 }
 ```
 
@@ -124,24 +139,22 @@ POST /api/v1/memories/recall
 Update an existing memory.
 
 ```http
-PUT /api/v1/memories/{memory_id}
+PATCH /api/v1/memories/{memory_id}
 ```
 
 **Request Body:**
 ```json
 {
-  "content": "John was promoted to Staff Engineer at Google"
+  "content": "John was promoted to Staff Engineer at Google",
+  "metadata": {"source": "chat"}
 }
 ```
 
 **Response:**
 ```json
 {
-  "status": "success",
-  "memory": {
-    "id": "mem_abc123",
-    "content": "John is a Staff Engineer at Google (promoted from Senior)"
-  }
+  "id": "mem_abc123",
+  "updated_entities": []
 }
 ```
 
@@ -188,20 +201,21 @@ The response gives the counts deleted:
 
 ### List Memories
 
-Get all memories for a user.
+Your memories, newest first.
 
 ```http
-GET /api/v1/memories?user_id=user_123&project=default&limit=100
+GET /api/v1/memories?project_id=default&limit=20&offset=0
 ```
 
-**Response:**
-```json
-{
-  "memories": [...],
-  "total": 42,
-  "page": 1,
-  "limit": 100
-}
+`limit` is 1-100 (default 20). Leave out `project_id` to list every project.
+
+**Response:** a list of memories, each with `id`, `project_id`, `content`, `created_at`, `access_count`,
+`memory_type`, `entities` and `metadata`.
+
+### Get One Memory
+
+```http
+GET /api/v1/memories/{memory_id}
 ```
 
 ---
@@ -218,7 +232,6 @@ POST /api/v1/memories/recall
 ```json
 {
   "query": "User status",
-  "user_id": "user_123",
   "as_of": "2026-02-15T00:00:00Z"
 }
 ```
@@ -227,27 +240,20 @@ POST /api/v1/memories/recall
 
 ### Cleanup Expired
 
-Remove expired memories.
+Delete your expired memories.
 
 ```http
 POST /api/v1/memories/cleanup-expired
 ```
 
-**Request Body:**
-```json
-{
-  "dry_run": true
-}
-```
-
 **Response:**
 ```json
 {
-  "deleted": 0,
-  "would_delete": 15,
-  "dry_run": true
+  "deleted_count": 15
 }
 ```
+
+For a preview first, use `POST /api/v1/temporal/cleanup` (below).
 
 ---
 
@@ -255,35 +261,27 @@ POST /api/v1/memories/cleanup-expired
 
 ### Get User Profile
 
-Get aggregated user intelligence including facts, activity, and topics.
+Aggregated facts, activity and topics for your account.
 
 ```http
-GET /api/v1/users/{user_id}/profile
+GET /api/v1/users/me/profile
 ```
+
+`GET /api/v1/users/{user_id}/profile` works only for your own `user_id`.
 
 **Response:**
 ```json
 {
   "user_id": "user_123",
-  "memory_count": 42,
-  "entity_count": 15,
-  "last_active": "2026-03-22T10:30:00Z",
-  "first_memory": "2026-02-15T08:00:00Z",
-  "top_topics": ["work", "travel", "family"],
-  "top_entities": [
-    {"name": "Google", "type": "ORG", "mentions": 12},
-    {"name": "John Smith", "type": "PERSON", "mentions": 8}
-  ],
-  "activity": {
-    "stores_last_7d": 15,
-    "recalls_last_7d": 45,
-    "avg_memories_per_day": 2.1
-  },
-  "aggregated_facts": [
-    "Works at Google as Staff Engineer",
-    "Lives in San Francisco",
-    "Prefers dark mode interfaces"
-  ]
+  "project_id": null,
+  "total_memories": 42,
+  "total_entities": 15,
+  "total_relationships": 9,
+  "static_facts": {"facts": ["Works at Google as Staff Engineer"], "entities": [...]},
+  "activity": {"memories_last_24h": 2, "memories_last_7d": 15, "memories_last_30d": 40},
+  "top_topics": [{"topic": "work", "count": 12}],
+  "created_at": "2026-02-15T08:00:00Z",
+  "last_active": "2026-03-22T10:30:00Z"
 }
 ```
 
@@ -294,7 +292,7 @@ GET /api/v1/users/{user_id}/profile
 ### List Entities
 
 ```http
-GET /api/v1/entities?user_id=user_123
+GET /api/v1/entities
 ```
 
 **Response:**
@@ -303,17 +301,14 @@ GET /api/v1/entities?user_id=user_123
   "entities": [
     {
       "id": "ent_123",
-      "name": "John Smith",
+      "canonical_name": "John Smith",
       "type": "PERSON",
-      "aliases": ["John", "Mr. Smith"]
-    },
-    {
-      "id": "ent_456", 
-      "name": "Google",
-      "type": "ORG",
-      "aliases": ["Alphabet", "GOOG"]
+      "aliases": ["John", "Mr. Smith"],
+      "memory_count": 4
     }
-  ]
+  ],
+  "total": 1,
+  "by_type": {"PERSON": 1}
 }
 ```
 
@@ -334,12 +329,15 @@ GET /api/v1/entities/{entity_id}/relationships
 {
   "relationships": [
     {
-      "source": "John Smith",
-      "target": "Google",
+      "id": "rel_1",
+      "from_entity_name": "John Smith",
+      "to_entity_name": "Google",
       "type": "WORKS_AT",
-      "properties": {"role": "Staff Engineer"}
+      "valid_from": null,
+      "valid_to": null
     }
-  ]
+  ],
+  "total": 1
 }
 ```
 
@@ -349,31 +347,38 @@ GET /api/v1/entities/{entity_id}/relationships
 GET /api/v1/entities/{entity_id}/memories
 ```
 
+Entity routes need `entity:read`, which every role has.
+
 ---
 
 ## Temporal Endpoints
 
 ### Decay Report
 
-View memory health and decay scores.
+Relevance scores and pruning candidates.
 
 ```http
-GET /api/v1/temporal/decay/report?user_id=user_123
+GET /api/v1/temporal/decay/report?limit=50
 ```
 
 **Response:**
 ```json
 {
+  "user_id": "user_123",
+  "project_id": "default",
   "total_memories": 100,
-  "healthy": 85,
-  "decaying": 10,
-  "expired": 5,
+  "prune_candidates": 5,
+  "average_relevance": 0.62,
+  "config": {"prune_threshold": 0.1},
   "memories": [
     {
       "id": "mem_123",
-      "content": "...",
-      "decay_score": 0.75,
-      "last_accessed": "2026-02-28T10:00:00Z"
+      "content_preview": "...",
+      "relevance_score": 0.75,
+      "days_since_access": 3.5,
+      "access_count": 2,
+      "should_prune": false,
+      "is_expired": false
     }
   ]
 }
@@ -388,16 +393,11 @@ GET /api/v1/temporal/memory/{memory_id}/decay
 ### Run Cleanup
 
 ```http
-POST /api/v1/temporal/cleanup
+POST /api/v1/temporal/cleanup?dry_run=false&include_decayed=true
 ```
 
-**Request Body:**
-```json
-{
-  "dry_run": false,
-  "archive": true
-}
-```
+`dry_run` defaults to `true` (a preview). With `dry_run=false` it deletes expired memories, and with
+`include_decayed=true` it also moves decayed ones to the cold archive.
 
 ---
 
@@ -460,7 +460,7 @@ than itself. Add `?hard=true` to delete the key instead.
 
 ## Rate Limits
 
-Default rate limits (per API key):
+Limits are per route, counted per account (per IP address without a key):
 
 | Endpoint | Limit |
 |----------|-------|
@@ -482,34 +482,19 @@ X-RateLimit-Reset: 1709312400
 
 ### Strict Mode (410 GONE)
 
-When `strict_mode` is enabled, requests for expired memories return `410 GONE` instead of silently accepting the request.
-
-**Enable via environment variable:**
-```bash
-REMEMBRA_STRICT_MODE=true
-```
-
-**Or via config:**
-```json
-{
-  "strict_mode": true
-}
-```
-
-**Behavior:**
-- Without strict mode: Expired memory requests succeed silently (memory just not returned)
-- With strict mode: Expired memory requests return `410 GONE` with details
+With `REMEMBRA_STRICT_MODE=true`, a `GET` or `PATCH` of an expired memory returns `410 GONE`. Without it, those
+requests treat an expired memory like any other until cleanup deletes it. Recall never returns expired
+memories either way.
 
 **410 Response:**
 ```json
 {
-  "error": {
-    "code": "memory_expired",
-    "message": "Memory has expired",
-    "details": {
-      "memory_id": "mem_abc123",
-      "expired_at": "2026-03-21T14:00:00Z"
-    }
+  "detail": {
+    "error": "MEMORY_EXPIRED",
+    "message": "Memory mem_abc123 has expired. Re-acquire context via recall.",
+    "memory_id": "mem_abc123",
+    "expires_at": "2026-03-21T14:00:00Z",
+    "strict_mode": true
   }
 }
 ```
@@ -518,23 +503,25 @@ REMEMBRA_STRICT_MODE=true
 
 ## Error Responses
 
+Errors use FastAPI's shape: a `detail` that is a string, or an object for some errors.
+
 ```json
 {
-  "error": {
-    "code": "validation_error",
-    "message": "user_id is required",
-    "details": {...}
-  }
+  "detail": "Permission denied: memory:store required"
 }
 ```
 
-| Code | HTTP Status | Description |
-|------|-------------|-------------|
-| `validation_error` | 400 | Invalid request body |
-| `authentication_error` | 401 | Invalid or missing API key |
-| `not_found` | 404 | Resource not found |
-| `rate_limit_exceeded` | 429 | Too many requests |
-| `internal_error` | 500 | Server error |
+| HTTP Status | Meaning |
+|-------------|---------|
+| 400 | Bad request (for example PII in `block` mode) |
+| 401 | Invalid or missing API key |
+| 403 | The key lacks the permission, or the project or agent is not its own |
+| 404 | Not found |
+| 410 | Expired memory (strict mode) |
+| 422 | Invalid request body (for example an unreadable `ttl`) |
+| 429 | Rate limit or plan limit reached |
+| 500 | Server error |
+| 503 | A feature that is off (for example webhooks), or a dependency down |
 
 ---
 
@@ -551,4 +538,3 @@ Download OpenAPI spec:
 ```
 http://localhost:8787/openapi.json
 ```
-:qf{ֽo}{o|ǝ8

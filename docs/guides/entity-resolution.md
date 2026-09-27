@@ -1,6 +1,8 @@
 # Entity Resolution
 
-Remembra's killer feature: understanding that "Adam", "Mr. Smith", and "my husband" are the same person.
+Remembra links the names in your memories to entities. An LLM matcher merges name variants that fit the
+context, such as "Mr. Smith" and "John Smith". Resolving a mention like "my husband" to a named person is
+best-effort and untested.
 
 ## How It Works
 
@@ -27,28 +29,35 @@ Entity extraction supports multiple LLM providers. Configure which provider to u
 
 ```bash
 REMEMBRA_LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-...
+REMEMBRA_OPENAI_API_KEY=sk-...
 ```
 
-OpenAI is the default provider. Set your `OPENAI_API_KEY` and entity extraction works out of the box.
+OpenAI is the default provider. Set `REMEMBRA_OPENAI_API_KEY` and entity extraction works out of the box. (A
+bare `OPENAI_API_KEY` is not read.)
 
 ### Anthropic Claude
 
 ```bash
 REMEMBRA_LLM_PROVIDER=anthropic
-ANTHROPIC_API_KEY=sk-ant-...
+REMEMBRA_ANTHROPIC_API_KEY=sk-ant-...
+REMEMBRA_LLM_MODEL=claude-haiku-4-5
 ```
 
-Use Anthropic Claude for entity extraction. Requires an `ANTHROPIC_API_KEY`.
+Use Anthropic Claude for entity extraction. Requires `REMEMBRA_ANTHROPIC_API_KEY` and the `anthropic` extra.
 
 ### Ollama (local)
 
 ```bash
 REMEMBRA_LLM_PROVIDER=ollama
-OLLAMA_BASE_URL=http://localhost:11434  # default
+REMEMBRA_OLLAMA_URL=http://localhost:11434  # default
+REMEMBRA_LLM_MODEL=llama3.1                 # a chat model you have pulled
 ```
 
-Run entity extraction entirely locally with Ollama. No API key needed -- just a running Ollama instance with a compatible model.
+Run entity extraction locally with Ollama. No API key needed, just a running Ollama instance with the model
+pulled.
+
+The provider setting covers entity extraction only. Fact extraction, consolidation and entity matching use
+OpenAI (`REMEMBRA_EXTRACTION_MODEL`) whatever it says.
 
 ### Provider Selection
 
@@ -90,13 +99,12 @@ memory.store("David mentioned they need the contract by Friday")
 # All three are linked to the same entity: David Kim
 ```
 
-### Matching Strategies
+### How matching works
 
-1. **Exact Match**: "David Kim" = "David Kim"
-2. **Partial Match**: "David" → "David Kim" (if only one David)
-3. **Title Match**: "Mr. Kim" → "David Kim"
-4. **Nickname Match**: "Dave" → "David Kim" (configurable)
-5. **Semantic Match**: Uses embedding similarity for fuzzy matching
+The existing entities closest to the new mention by name are ranked first. An LLM then decides whether the
+mention is one of them, using the name, type and context ("David" or "Mr. Kim" → "David Kim"). It merges the
+mention when its confidence is at least `REMEMBRA_ENTITY_MATCHING_THRESHOLD` (default `0.6`); otherwise a new
+entity is created. Matching uses the OpenAI extraction model, so it needs an OpenAI key.
 
 ## Relationships
 
@@ -156,10 +164,10 @@ context = memory.recall("What's John working on?")
 
 ```bash
 # How many hops to traverse
-REMEMBRA_GRAPH_TRAVERSAL_DEPTH=2  # Default
+REMEMBRA_GRAPH_MAX_DEPTH=2  # Default
 
 # Disable graph retrieval
-REMEMBRA_GRAPH_RETRIEVAL_ENABLED=false
+REMEMBRA_ENABLE_GRAPH_RETRIEVAL=false
 ```
 
 ## Entity API
@@ -167,28 +175,18 @@ REMEMBRA_GRAPH_RETRIEVAL_ENABLED=false
 ### List Entities
 
 ```python
-entities = memory.get_entities()
-for e in entities:
-    print(f"{e['name']} ({e['type']}): {e['aliases']}")
+result = memory.list_entities()
+for e in result["entities"]:
+    print(f"{e['canonical_name']} ({e['type']}): {e['aliases']}")
 ```
 
-### Get Relationships
+### Relationships and Memories of an Entity
 
-```python
-# Get all relationships for an entity
-rels = memory.get_entity_relationships(entity_id="ent_123")
+The Python SDK has no methods for these. Use the REST API (any key with `entity:read`):
 
-# Output:
-# John Smith --WORKS_AT--> Google
-# John Smith --KNOWS--> Sarah Chen
-# John Smith --REPORTS_TO--> Mike Johnson
-```
-
-### Get Entity Memories
-
-```python
-# Find all memories mentioning an entity
-memories = memory.get_entity_memories(entity_id="ent_123")
+```http
+GET /api/v1/entities/{entity_id}/relationships
+GET /api/v1/entities/{entity_id}/memories
 ```
 
 ## Dashboard Visualization
@@ -247,19 +245,20 @@ memory.store("Talked to Sarah about John's performance review")
 ## Configuration
 
 ```bash
-# Enable/disable entity extraction
-REMEMBRA_ENTITY_EXTRACTION_ENABLED=true
+# Enable/disable entity extraction and matching
+REMEMBRA_ENABLE_ENTITY_RESOLUTION=true
 
 # Matching threshold (0-1, higher = stricter)
-REMEMBRA_ENTITY_MATCHING_THRESHOLD=0.85
+REMEMBRA_ENTITY_MATCHING_THRESHOLD=0.6
 
 # Graph traversal depth
-REMEMBRA_GRAPH_TRAVERSAL_DEPTH=2
+REMEMBRA_GRAPH_MAX_DEPTH=2
 ```
 
 ## Limitations
 
 - **Ambiguous Pronouns**: "He" and "she" aren't resolved automatically
 - **Cross-Project**: Entities are scoped to user+project
-- **Performance**: Very large graphs (10k+ entities) may need tuning
+- **Performance**: Large graphs have not been measured
+- **Relational mentions**: "my husband" or "the CEO" are resolved to a named person only on a best-effort basis
 - **Language**: Currently optimized for English

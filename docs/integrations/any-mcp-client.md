@@ -74,7 +74,7 @@ Configure Remembra via environment variables in your MCP client config:
 |----------|---------|-------------|
 | `REMEMBRA_URL` | `http://localhost:8787` | Remembra server URL |
 | `REMEMBRA_API_KEY` | — | API key (if auth is enabled) |
-| `REMEMBRA_USER_ID` | `default` | User ID for memory isolation |
+| `REMEMBRA_USER_ID` | `default` | Sent as the user id. With auth on, the server takes the user from the API key instead |
 | `REMEMBRA_PROJECT` | `default` | Project namespace |
 | `REMEMBRA_MCP_TRANSPORT` | `stdio` | Transport: `stdio`, `sse`, or `streamable-http` |
 

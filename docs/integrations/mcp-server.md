@@ -16,7 +16,7 @@ pip install "remembra[mcp]"
 remembra-install --all   # asks for your API key at a hidden prompt, shows the changes, writes after a "y"
 ```
 
-This auto-detects and configures: Claude Desktop, Claude Code, Codex, Cursor and Gemini CLI. Windsurf is unverified: `remembra-install --agent windsurf` writes it, `--all` does not.
+This auto-detects and configures Claude Code, Codex, Cursor and Gemini CLI. It configures Claude Desktop on macOS only: the Windows config (`%APPDATA%\Claude\claude_desktop_config.json`) is not detected or written. Windsurf is unverified: `remembra-install --agent windsurf` writes it, `--all` does not.
 
 **Verify setup:**
 ```bash
@@ -59,7 +59,7 @@ Store information in persistent memory.
 |-----------|------|----------|-------------|
 | `content` | string | ✅ | Text content to memorize |
 | `metadata` | object | ❌ | Key-value metadata (e.g., `{"source": "meeting"}`) |
-| `ttl` | string | ❌ | Time-to-live: `24h`, `7d`, `30d`, `1y`, or omit for permanent |
+| `ttl` | string | ❌ | Time-to-live: a number and a unit, e.g. `24h`, `7d`, `30d`, `1y` ([TTL formats](../guides/temporal.md#ttl-formats)); a value the server cannot read is refused. Omit for permanent |
 
 **Example:**
 ```
@@ -513,10 +513,10 @@ Returns server status and configuration.
 
 | Tool | Purpose |
 |------|---------|
-| `session_brief(project_id?, agent_id?, recent_n=10, git_remote?, root_path?, root_commit?, compact=false)` | Call first at session start. Returns the latest `handoff` for the project, this agent's unread inbox (count + previews), current `status_items`, `linked_projects` and the most recent memories **by time**, plus `brief` (the compact text, ~1500 tokens, with everything other agents recorded inside an untrusted-data block), `handoff_id` and `inbox_unread`. Pass `git_remote` or `root_path` to resolve the project from where you work (a local server reads the repository from `root_path` itself). `compact=true` returns only `status`, `project_id`, `agent_id`, `brief`, `handoff_id`, `inbox_unread` and `warnings`. |
+| `session_brief(project_id?, agent_id?, recent_n=10, git_remote?, root_path?, root_commit?, compact=false)` | Call first at session start. Returns the latest `handoff` for the project, this agent's unread inbox (count + previews), current `status_items`, `linked_projects` and the most recent memories **by time**, plus `brief` (the compact text, at most 6,000 characters or about 1,500 tokens, with everything other agents recorded inside an untrusted-data block), `handoff_id` and `inbox_unread`. By default the response also carries the structured JSON, so it is several times larger than the brief. Pass `git_remote` or `root_path` to resolve the project from where you work (a local server reads the repository from `root_path` itself). `compact=true` returns only `status`, `project_id`, `agent_id`, `brief`, `handoff_id`, `inbox_unread` and `warnings`. |
 | `close_session(summary?, next_step?, todos_open?, errors?, facts?, end_reason?, project_id?, git_remote?, root_path?, session_id?)` | Call last. Stores ONE structured handoff (Done / Not done / Failing / Next step); a repeat call in the same session updates it. Without a project or location it uses the project your `session_brief` resolved. Facts passed here are shown to the next agent as *declared by the agent*. |
 | `resolve_project(git_remote?, root_path?, root_commit?, repo_name?, hint_project?, bind=false)` | Map a location to its project id (see the [Relay guide](../guides/relay.md)). |
-| `store_status(key, value, project_id?, ttl?)` | Set the current value of a key (deploy status, active sprint). The previous value for the same key+project is superseded (kept as history, hidden from recall). Re-sending the current value is a no-op. |
+| `store_status(key, value, project_id?, ttl?)` | Set the current value of a key (deploy status, active sprint). The previous value for the same key+project is superseded (kept as history, hidden from recall). Re-sending the current value is a no-op. A key, token or other recognised credential in the key or the value is replaced with `[REDACTED:<kind>]` before it is saved. |
 | `list_status(project_id?)` | Current value per key. |
 | `list_spaces()` / `create_space(name, ...)` | Find or create a space id for `share_memory`. |
 
@@ -538,13 +538,15 @@ Recall, timeline and list results include `metadata`, `memory_type`, `source_id`
 
 `recall_memories` also accepts `retrieval_mode` (`balanced`, `debug` for recent-first,
 `operational`, `strategic`), `scope`, `as_of`, `max_tokens`, `include_superseded` and
-`project_id`. `slim` is sent to the server, which caps the context at 800 tokens. The
-full response lists only entities that are named in the returned memories
-(`entities_total` holds the unfiltered count).
+`project_id`. With `slim=true` the server caps the context at 800 tokens, and the tool returns only
+`context` and `count`, without the memories or their metadata. The full response lists only entities that are
+named in the returned memories (`entities_total` holds the unfiltered count).
 
 `get_inbox(summary=true)` returns subject, sender and a 200-character preview instead of full bodies.
 `ack_inbox(inbox_id, result?, note?)` marks an inbox item read after you act on it, or `done`, `blocked` or `rejected` with an optional note.
 `send_to_inbox` warns when the recipient is not in `REMEMBRA_KNOWN_AGENTS` and accepts `expires_in` (`12h`, `7d`, `2w`).
+With an agent-scoped API key it sends as the key's agent; given a `from_agent` that is not the key's agent, it returns
+an error and sends nothing.
 `list_memories` accepts `offset` and returns `next_offset`.
 
 ---
@@ -557,9 +559,9 @@ show as it is) plus structured fields. On a remote transport (`sse`, `streamable
 
 | Tool | Purpose |
 |------|---------|
-| `remembra_doctor(agent?, check_server=true)` | Why briefs or handoffs aren't arriving on this machine: the key, the unsent-handoff queue, each agent's hooks, Codex hook trust, and (with `check_server`) at most four GETs of your trail. Each finding has `evidence`, `inferred`, and one `fix` with `runs_where` (`agent_ok`, `user_terminal`, `codex_ui`, `dashboard`). Same rules as `remembra-relay doctor`. |
+| `remembra_doctor(agent?, check_server=true)` | Why briefs or handoffs aren't arriving on this machine: the key, the unsent-handoff queue, each agent's hooks, Codex hook trust, and (with `check_server`) at most four GETs of your trail. Each finding has `evidence`, `inferred`, and at most one `fix`, with `runs_where` (`agent_ok`, `user_terminal`, `codex_ui`, `dashboard` or `none`). Info findings such as `CODEX_AUTOMATIONS` have none (`fix` is null). `none` means there is no command to run: either nothing to do, or a manual step described in words (set `REMEMBRA_URL`, repair a config file). Same rules as `remembra-relay doctor`. |
 | `remembra_setup(agents?)` | The install and connect steps for this machine's OS and agents, each with its command (from a fixed set), where it runs, what it writes and whether it is already done. The key step is always the user's. |
-| `remembra_help(question)` | An answer quoted from the relay guide and the plans page (`answered`), the page to read for refunds, security, privacy and similar topics (`read_the_page`), or `cant_confirm`. |
+| `remembra_help(question)` | An answer (`answered`) made of sections quoted from the relay guide and the plans page and/or facts taken from the installed package (plan limits, crew mode, Windows); a crew-mode question can be answered from the code alone, with no quote. Or the page to read for refunds, security, privacy and similar topics (`read_the_page`), or `cant_confirm`. |
 
 The `doctor` prompt (Claude Code: `/mcp__remembra__doctor`) runs `remembra_doctor` and walks the fixes one at a
 time. See [Doctor](../guides/relay.md#doctor).
@@ -572,7 +574,7 @@ time. See [Doctor](../guides/relay.md#doctor).
 |----------|---------|-------------|
 | `REMEMBRA_URL` | `http://localhost:8787` | Remembra server URL |
 | `REMEMBRA_API_KEY` | - | API key for authentication |
-| `REMEMBRA_USER_ID` | `default` | User ID for memory isolation |
+| `REMEMBRA_USER_ID` | `default` | Sent as the user id. With auth on, the server takes the user from the API key instead |
 | `REMEMBRA_PROJECT` | `default` | Project namespace. Use the same value for every agent |
 | `REMEMBRA_AGENT_ID` | - | This agent's id (`claude-code`, `claude-desktop`, `codex`, `gemini`, `clawdbot`). Required for the inbox. Stamped on every store. `health_check` warns when it is missing |
 | `REMEMBRA_PROJECT_ALIASES` | - | `alias=canonical,...`. For example `clawdbot=clawbot` makes both names resolve to `clawbot`. Case is kept for ids that are not aliases |

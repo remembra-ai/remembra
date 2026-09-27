@@ -2,7 +2,7 @@
 
 Add persistent memory to Claude Code in 2 minutes.
 
-Claude Code is Anthropic's CLI-based AI coding assistant. With Remembra, Claude remembers your preferences, project context, and decisions across sessions.
+Claude Code is Anthropic's CLI-based AI coding assistant. With Remembra, Claude Code can store your preferences, project context and decisions and recall them in later sessions, when it calls Remembra's memory tools. The relay hooks (below) add a brief at session start and a handoff at session end.
 
 ## Prerequisites
 
@@ -53,18 +53,19 @@ If `REMEMBRA_AGENT_ID` is missing, `health_check` returns a warning and the serv
 
 ### Load context automatically at session start (Remembra Relay)
 
-`remembra-relay connect --apply` adds a SessionStart hook (`remembra-relay brief`) and a
-SessionEnd hook (`remembra-relay close`) to `~/.claude/settings.json`. At session start
-Claude Code gets the pickup brief: what the last agent did, what it did not finish, what
-is failing and its suggested next step, plus your unread inbox and recent memories. At
-session end the hook records a structured handoff from git and the session transcript.
-The hooks read the key from the `env` block of the `remembra` MCP server in
-`~/.claude.json`, so the API key stays in one place, and they never block a session.
+`remembra-relay connect --apply` adds a SessionStart hook (`remembra-relay brief`) and
+SessionEnd, StopFailure and PreCompact hooks (`remembra-relay close`) to
+`~/.claude/settings.json`. At session start Claude Code gets the pickup brief: what the last
+agent did, what it did not finish, what is failing and its suggested next step, plus your
+unread inbox, status values and this project's recent handoffs and checkpoints. At session end
+the hook records a structured handoff from git and the session transcript. The hooks read the
+key from the `env` block of the `remembra` MCP server in `~/.claude.json`, so the API key stays
+in one place. They finish within 10 seconds and always exit 0, so they never stop a session.
 
 `connect` replaces the older `integrations/claude-code/session_start.py` hook if it finds
-it. The project comes from the repository; your `REMEMBRA_PROJECT` names a repository the
-first time it is seen, so your existing memories stay in view. See the
-[Relay guide](../guides/relay.md) for details.
+it. The project comes from the repository: every git repository gets its own project, and
+`REMEMBRA_PROJECT` names only folders that are not git repositories. See
+[Which project a repository uses](../guides/relay.md#which-project-a-repository-uses).
 
 ### Keep the MCP server in step with the API
 

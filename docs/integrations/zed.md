@@ -2,7 +2,7 @@
 
 Add persistent memory to Zed in 2 minutes.
 
-Zed is a fast, collaborative code editor with built-in AI. With Remembra, Zed's AI assistant remembers your project context and preferences across sessions.
+Zed is a fast, collaborative code editor with built-in AI. With Remembra, Zed's AI assistant can store your project context and preferences and recall them in later sessions, when it calls Remembra's memory tools.
 
 ## Prerequisites
 
