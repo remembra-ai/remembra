@@ -102,14 +102,18 @@ remembra-crew connect --apply               # same diff, then asks you at the te
 
 `connect` writes nothing until you confirm at an interactive terminal (`--yes` skips only the question,
 never the terminal check, so an agent cannot run it for you). It keeps a backup of each file it
-changes, is safe to re-run, and replaces the plain Relay hooks. What it can install:
+changes, is safe to re-run, and replaces the plain Relay hooks. In a session that is not a crew session
+(a repository without Crew mode, a Codex automation or sub-agent thread, a hook another agent runs) the crew
+hooks do what the Relay hooks did: the plain Relay brief at the start and `remembra-relay close` at the end
+and on a usage-limit stop, with the same skips, routing, and duplicate and empty-close checks. What it can
+install:
 
 | What | Where | Option |
 |---|---|---|
 | The gate (`crew-gate.py`, standard library only) | `~/.remembra/crew/bin/` | always |
 | Claude Code crew hooks (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, StopFailure, PreCompact, SessionEnd) | `~/.claude/settings.json` | default (`--scope global`); in repos without crew mode the hooks exit in under 10 ms |
 | The same hooks for chosen repos only | `<repo>/.claude/settings.json` (or `settings.local.json` if the former is tracked) | `--scope project --repo PATH` |
-| Observe-mode crew hooks, not yet verified for Crew mode: Codex (its Relay hooks are verified), Cursor, Gemini, Qwen, Kimi | their own config files | `--include-unverified` |
+| Observe-mode crew hooks, not yet verified for Crew mode: Codex, Gemini, Qwen and Kimi (their Relay hooks are verified), and Cursor. They replace the Relay hooks' brief on the first prompt, so Kimi Code (which throws SessionStart output away) and Gemini CLI after `/clear` get no brief from them | their own config files | `--include-unverified` |
 | The `remembra-crewd` supervisor | launchd LaunchAgent (macOS) or systemd `--user` unit (Linux) | on unless `--no-service` |
 | `pre-commit`, `prepare-commit-msg`, `pre-push` gates, chained after Husky, lefthook or existing hooks | the repo's hooks directory, never committed | `--git-hooks --repo PATH` |
 | The Relay + Crew section of an AGENTS.md | the file you name | `--agents-md PATH` |

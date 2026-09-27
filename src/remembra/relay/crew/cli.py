@@ -6,6 +6,13 @@ Hook commands (read the agent's hook payload from stdin; never fail the agent; e
     remembra-crew end   --hook claude-code --agent claude-code   # SessionEnd: ≤300 ms, crewd finishes the rest
     remembra-crew stall --hook claude-code --agent claude-code   # StopFailure: baton ref + stalled report
 
+These hooks replace ``remembra-relay brief`` / ``close`` in the agent's config, so they keep the relay's
+hook order (0.16.1): a Codex automation or sub-agent thread is skipped and a hook another agent runs is
+routed (:func:`relay_hook_verdict`) before any crew work; a session that is not a crew session gets the
+plain ``remembra-relay brief`` / ``close``, which drops a repeated end, skips an empty close and then sends
+(:func:`relay_brief_passthrough`, :func:`relay_close_passthrough`); crewd skips an empty close of a crew
+session too.
+
 Agent and human commands (act as the caller's crew session, resolved by crewd from the process
 tree; they never read a token)::
 
@@ -56,6 +63,10 @@ START_BUDGET_S: Final = 9.0
 # One deadline for the whole SessionStart hook (§10.4: 10 s hard; the hook's own timeout is 15 s). Every
 # step gets what is left, so a black-holed server can never push start past it.
 START_DEADLINE_S: Final = 8.0
+# The plain relay close run for a session that is not a crew session: inline for Claude Code (whose relay
+# close has its own ~10 s budget), detached by the relay itself for agents that do not wait. Kept under the
+# crew SessionEnd hook's 20 s timeout.
+END_PASSTHROUGH_S: Final = 17.0
 CREW_EXISTS_TIMEOUT_S: Final = 5.0
 MIN_STEP_S: Final = 0.3
 HOOK_OUTPUT: Final[Mapping[str, str]] = {
@@ -216,10 +227,58 @@ def crew_enabled_locally(layout: Layout, toplevel: str) -> bool:
     return any(isinstance(r, str) and os.path.realpath(os.path.expanduser(r)) == real for r in repos)
 
 
+def relay_hook_verdict(adapter: str, payload: Mapping[str, Any], verb: str) -> tuple[str, str] | None:
+    """Steps 1 and 2 of the relay's hook order (0.16.1) for a crew hook: ``("skip", why)``, ``("route", host)``
+    or None when the hook is this adapter's own session.
+
+    1. **skip**: a Codex automation or sub-agent thread (:mod:`remembra.relay.background`) joins no crew,
+       gets no brief and leaves no handoff (``REMEMBRA_RELAY_INCLUDE_AUTOMATIONS=1`` keeps automations).
+    2. **route**: a hook another agent runs (:func:`remembra.relay.hosts.detect_host`: Cursor, Grok,
+       Devin or Continue running Claude Code's hook file, a hook ``kimi migrate`` copied) is not a session
+       of this adapter's agent, so it joins no crew here; that agent's own hooks handle its session.
+
+    Each writes one line to relay.log, as ``remembra-relay brief`` / ``close`` do. Never raises: an error
+    here lets the hook go on. Only a hook with a payload is checked (the markers are in it).
+    """
+    if not payload:
+        return None
+    try:
+        from remembra.relay import background, hosts
+        from remembra.relay.adapters import get_adapter
+
+        spec_adapter = get_adapter(adapter)
+        if spec_adapter is None:
+            return None
+        home = Path(os.environ.get("HOME") or Path.home())
+        skipped = background.skip_hook_session(spec_adapter, payload, verb, home)
+        if skipped:
+            return "skip", skipped
+        host = hosts.detect_host(spec_adapter, payload, os.environ, home)
+        if host is not None:
+            from remembra.relay import outbox
+
+            outbox.log(home, f"crew {verb} --hook {adapter}: run by {host}, not a crew session of {adapter}")
+            return "route", host
+    except Exception as e:
+        _err(f"hook check failed: {e.__class__.__name__}")
+    return None
+
+
+def _hook_ack(adapter: str) -> None:
+    """What a hook prints when it has nothing to say: ``{}`` for Cursor, which logs empty stdout as a failed hook."""
+    if HOOK_OUTPUT.get(adapter) == "cursor-json":
+        sys.stdout.write("{}\n")
+
+
 def relay_brief_passthrough(adapter: str, agent: str, payload: Mapping[str, Any], *, timeout: float = START_BUDGET_S) -> None:
-    """Not a crew checkout: the plain relay brief (the SessionStart hook replaces ``remembra-relay brief``, §8.2)."""
+    """Not a crew checkout: the plain relay brief (the SessionStart hook replaces ``remembra-relay brief``, §8.2).
+
+    ``remembra-relay brief`` prints its own notice when the brief is unavailable, and nothing when there is
+    nothing to print (a skipped or routed hook, a brief this session already has); its output is passed on as
+    it is. Only a brief that could not run at all (timed out, not started) prints the notice here.
+    """
     fmt = {"hook-json": "hook-json", "cursor-json": "cursor-json"}.get(HOOK_OUTPUT.get(adapter, "text"), "text")
-    out = ""
+    out: str | None = None
     if timeout >= MIN_STEP_S:
         try:
             res = subprocess.run(  # noqa: S603
@@ -230,13 +289,65 @@ def relay_brief_passthrough(adapter: str, agent: str, payload: Mapping[str, Any]
                 timeout=timeout,
                 check=False,
             )
-            out = res.stdout
+            out = res.stdout if res.returncode == 0 else None
         except (OSError, subprocess.SubprocessError):
-            out = ""
-    if out.strip():
+            out = None
+    if out is None:
+        _emit_start(adapter, "Remembra brief unavailable. Call the session_brief tool.")
+    elif out.strip():
         sys.stdout.write(out if out.endswith("\n") else out + "\n")
     else:
-        _emit_start(adapter, "Remembra brief unavailable. Call the session_brief tool.")
+        _hook_ack(adapter)
+
+
+def relay_close_passthrough(adapter: str, agent: str, payload: Mapping[str, Any], *, timeout: float = END_PASSTHROUGH_S) -> None:
+    """Not a crew session: the plain relay close (the SessionEnd hook replaces ``remembra-relay close``, §8.2).
+
+    ``remembra-relay close`` keeps its own order: skip a Codex automation or sub-agent thread, route a hook
+    another agent runs, drop a repeat of the same end, skip an empty close, then send (queued when the server
+    cannot be reached, detached for agents that do not wait for their end hook). Its stdout (Cursor's ``{}``)
+    is passed on.
+    """
+    try:
+        res = subprocess.run(  # noqa: S603
+            [sys.executable, "-m", "remembra.relay.cli", "close", "--hook", adapter, "--agent", agent],
+            input=json.dumps(dict(payload)),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        _err(f"relay close failed: {e.__class__.__name__}")
+        _hook_ack(adapter)
+        return
+    if res.stdout.strip():
+        sys.stdout.write(res.stdout if res.stdout.endswith("\n") else res.stdout + "\n")
+    else:
+        _hook_ack(adapter)
+
+
+def relay_close_event(adapter: str, payload: Mapping[str, Any]) -> bool:
+    """Whether the relay's own hooks would close on this event (Claude Code: a StopFailure on a usage or
+    billing limit), so a crew hook on the same event runs the plain relay close for a non-crew session."""
+    try:
+        import re
+
+        from remembra.relay.adapters import get_adapter
+
+        spec_adapter = get_adapter(adapter)
+        event = str(payload.get("hook_event_name") or "")
+        if spec_adapter is None or not event:
+            return False
+        value = str(payload.get("error") or "")
+        for extra in spec_adapter.spec.extra_close_events:
+            if extra.event != event:
+                continue
+            if extra.matcher is None or re.fullmatch(extra.matcher, value):
+                return True
+    except Exception:
+        return False
+    return False
 
 
 def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
@@ -251,6 +362,11 @@ def cmd_start(args: argparse.Namespace, layout: Layout) -> int:
 
     try:
         payload = _hook_payload(args)
+        # The relay's order first: a Codex automation or sub-agent thread, or a hook another agent runs,
+        # joins no crew and prints no brief (that agent's own hooks brief its session).
+        if relay_hook_verdict(adapter, payload, "brief"):
+            _hook_ack(adapter)
+            return 0
         sid = payload.get("session_id") or args.session_id
         cwd = payload.get("cwd") or args.cwd or os.getcwd()
         if not sid:
@@ -349,15 +465,27 @@ def _spool_hook(layout: Layout, kind: str, key: str, args: dict[str, Any]) -> No
 
 
 def cmd_end(args: argparse.Namespace, layout: Layout) -> int:
-    """SessionEnd fast path (≤300 ms): hand off to crewd (or spool) and return."""
+    """SessionEnd fast path (≤300 ms): hand off to crewd (or spool) and return.
+
+    A session that is not a crew session (it never joined: not a crew checkout, or skipped or routed at
+    start) gets the plain relay close instead, with the relay's whole order.
+    """
     try:
         payload = _hook_payload(args)
         adapter = args.hook or "claude-code"
-        sid = payload.get("session_id") or args.session_id
-        if not sid:
+        verdict = relay_hook_verdict(adapter, payload, "close")
+        if verdict is not None and verdict[0] == "skip":
+            # A Codex sub-agent thread carries its PARENT's session id: it must not end the parent's crew session.
+            _hook_ack(adapter)
             return 0
-        key = session_key(adapter, str(sid))
-        if not layout.session_file(key).exists():
+        sid = payload.get("session_id") or args.session_id
+        key = session_key(adapter, str(sid)) if sid and verdict is None else ""
+        if not key or not layout.session_file(key).exists():
+            if payload:  # an empty payload is an orphaned end hook (Gemini's third SessionEnd): nothing to do
+                # the relay routes a hook another agent runs itself: it files that agent's handoff
+                relay_close_passthrough(adapter, args.agent or adapter, payload)
+            else:
+                _hook_ack(adapter)
             return 0
         body = {
             "key": key,
@@ -372,15 +500,22 @@ def cmd_end(args: argparse.Namespace, layout: Layout) -> int:
 
 
 def cmd_stall(args: argparse.Namespace, layout: Layout) -> int:
-    """StopFailure: crewd saves the baton ref and records the stall (the hook survives ``-p`` exit, S0)."""
+    """StopFailure: crewd saves the baton ref and records the stall (the hook survives ``-p`` exit, S0).
+
+    Not a crew session: the plain relay close when the relay's own hooks would close on this stop (a usage
+    or billing limit), so the handoff is written when the work stops, as without Crew mode.
+    """
     try:
         payload = _hook_payload(args)
         adapter = args.hook or "claude-code"
-        sid = payload.get("session_id") or args.session_id
-        if not sid:
+        verdict = relay_hook_verdict(adapter, payload, "close")
+        if verdict is not None and verdict[0] == "skip":
             return 0
-        key = session_key(adapter, str(sid))
-        if not layout.session_file(key).exists():
+        sid = payload.get("session_id") or args.session_id
+        key = session_key(adapter, str(sid)) if sid and verdict is None else ""
+        if not key or not layout.session_file(key).exists():
+            if payload and relay_close_event(adapter, payload):
+                relay_close_passthrough(adapter, args.agent or adapter, payload)
             return 0
         body = {
             "key": key,

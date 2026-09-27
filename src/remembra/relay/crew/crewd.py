@@ -130,6 +130,17 @@ ADAPTER_CONFIG_SOURCE: Final[Mapping[str, str]] = {"claude-code": "claude", "cod
 log = logging.getLogger("remembra.crewd")
 
 
+def nothing_to_hand_off(body: Mapping[str, Any]) -> bool:
+    """The relay CLI's empty-close rule (:func:`remembra.relay.cli.nothing_to_hand_off`) for a crewd close body."""
+    from remembra.relay.handoff import build_sections, sections_have_substance
+
+    facts = body.get("facts") or {}
+    sections = build_sections(dict(facts), facts.get("next_step"))
+    return not sections_have_substance(
+        sections, summary=body.get("summary"), notes=facts.get("notes"), end_reason=body.get("end_reason")
+    )
+
+
 # ===========================================================================
 # Peer credentials and process ancestry
 # ===========================================================================
@@ -2107,6 +2118,11 @@ class Crewd:
             "project_id": sess["project_id"],
             "end_reason": reason,
         }
+        if nothing_to_hand_off(body):
+            # The relay's order (0.16.1): an empty close is not sent. This is the crew session's one relay
+            # close, so nothing of it is on the server to retire. The crew side (``leave``) still runs.
+            log.info("relay close skipped: nothing to hand off for %s", str(sess["client_session_id"])[:40])
+            return
         with contextlib.suppress(Unreachable):
             await self.request(self.api_for(sess), "POST", "/session/close", json_body=body, timeout=8.0)
 

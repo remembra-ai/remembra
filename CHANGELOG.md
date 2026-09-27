@@ -67,6 +67,13 @@ A required check on the git host is not part of this release.
   account's name removed. Events in that crew's log that carry the account's identity keep their place and
   chain links but lose their content, so the chain still verifies. The 0.16.1 erasure rules (account reviews,
   project re-files and the rest) are unchanged.
+- **Crew hooks keep the Relay hooks' rules.** `remembra-crew connect` replaces the `remembra-relay brief` and
+  `close` hooks, and the crew hooks now keep what 0.16.1 added to them. A Codex automation or sub-agent thread
+  joins no crew, gets no brief and writes no handoff (a sub-agent's end no longer ends its parent's crew
+  session); a hook another agent runs (Cursor running Claude Code's, say) joins no crew under the wrong
+  agent. A session that is not a crew session gets the plain `remembra-relay close` at its end and on a
+  usage-limit stop, which Crew mode had dropped, with its duplicate and empty-close checks and its queue.
+  A crew session that did nothing sends no empty handoff.
 - **Hook entries go where the agent reads them.** `remembra-crew connect` writes each agent's crew hooks to
   the same file `remembra-relay connect` uses, including when `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
   `GEMINI_CLI_HOME`, `QWEN_HOME` or `KIMI_CODE_HOME` moves it (Kimi Code's is `~/.kimi-code/config.toml`).
