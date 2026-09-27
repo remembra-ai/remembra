@@ -151,8 +151,11 @@ class TestDictEncryption:
         assert encrypted["source"] != "user_input"
         assert encrypted["source"].startswith(_ENCRYPTED_PREFIX)
 
-        # Non-string values should be untouched
-        assert encrypted["tags"] == ["memory", "test"]
+        # Strings inside lists are encrypted too (P-065: tag lists were plaintext)
+        assert len(encrypted["tags"]) == 2
+        assert all(tag.startswith(_ENCRYPTED_PREFIX) for tag in encrypted["tags"])
+
+        # Numbers and booleans keep their type
         assert encrypted["count"] == 42
         assert encrypted["active"] is True
 
@@ -189,3 +192,68 @@ class TestDictEncryption:
         assert result["encrypted_field"] == "secret"
         assert result["plain_field"] == "not encrypted"
         assert result["number"] == 123
+
+    def test_encrypt_dict_nested_lists_and_dicts(self):
+        """Strings at any depth are encrypted; numbers, booleans, None and keys are not."""
+        enc = FieldEncryptor(key="nested-test")
+        metadata = {
+            "relay": {
+                "done": ["shipped the fix", "wrote tests"],
+                "commits": [{"sha": "abc", "subject": "fix: bug"}],
+                "matrix": [["a", 1], [True, None]],
+            },
+            "score": 0.5,
+            "none": None,
+        }
+
+        encrypted = enc.encrypt_dict(metadata)
+        assert encrypted is not None
+        assert set(encrypted["relay"]) == {"done", "commits", "matrix"}
+        assert all(v.startswith(_ENCRYPTED_PREFIX) for v in encrypted["relay"]["done"])
+        assert encrypted["relay"]["commits"][0]["subject"].startswith(_ENCRYPTED_PREFIX)
+        assert encrypted["relay"]["matrix"][0][0].startswith(_ENCRYPTED_PREFIX)
+        assert encrypted["relay"]["matrix"][0][1] == 1
+        assert encrypted["relay"]["matrix"][1] == [True, None]
+        assert encrypted["score"] == 0.5 and encrypted["none"] is None
+        assert "shipped the fix" not in str(encrypted)
+
+        assert enc.decrypt_dict(encrypted) == metadata
+        assert metadata["relay"]["done"] == ["shipped the fix", "wrote tests"]  # input not mutated
+
+    def test_decrypt_dict_reads_plaintext_lists_from_older_writes(self):
+        """Lists stored in plaintext before list encryption read back unchanged."""
+        enc = FieldEncryptor(key="legacy-list-test")
+        legacy = {"tags": ["memory", "test"], "note": enc.encrypt("secret"), "mixed": [enc.encrypt("a"), "b"]}
+        assert enc.decrypt_dict(legacy) == {"tags": ["memory", "test"], "note": "secret", "mixed": ["a", "b"]}
+
+
+class TestValueEncryption:
+    """encrypt_value / decrypt_value: any JSON-like value."""
+
+    def test_list_of_strings_roundtrip(self):
+        enc = FieldEncryptor(key="value-test")
+        facts = ["Alice banks at First National", "", "Bob likes tea"]
+        encrypted = enc.encrypt_value(facts)
+        assert encrypted[0].startswith(_ENCRYPTED_PREFIX) and encrypted[2].startswith(_ENCRYPTED_PREFIX)
+        assert encrypted[1] == ""  # empty strings stay empty, as with encrypt()
+        assert enc.decrypt_value(encrypted) == facts
+
+    def test_tuple_becomes_list(self):
+        enc = FieldEncryptor(key="value-test")
+        assert enc.decrypt_value(enc.encrypt_value(("a", 1))) == ["a", 1]
+
+    def test_scalars_pass_through(self):
+        enc = FieldEncryptor(key="value-test")
+        for value in (0, 1.5, True, False, None):
+            assert enc.encrypt_value(value) is value
+            assert enc.decrypt_value(value) is value
+
+    def test_already_encrypted_values_are_kept(self):
+        enc = FieldEncryptor(key="value-test")
+        once = enc.encrypt_value(["x", {"k": "y"}])
+        assert enc.encrypt_value(once) == once
+
+    def test_passthrough_without_key(self):
+        enc = FieldEncryptor(key=None)
+        data = ["a", {"b": ["c"]}]
+        assert enc.encrypt_value(data) is data

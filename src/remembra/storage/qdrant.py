@@ -26,6 +26,8 @@ FIELD_CONTENT = "content"
 FIELD_CREATED_AT = "created_at"
 FIELD_EXPIRES_AT = "expires_at"
 FIELD_METADATA = "metadata"
+FIELD_EXTRACTED_FACTS = "extracted_facts"
+FIELD_ENTITIES = "entities"
 # RET-7 / UPG-1: plain (unencrypted) filterable fields
 FIELD_MEMORY_TYPE = "memory_type"
 FIELD_SCOPE = "scope"
@@ -46,6 +48,32 @@ def rebuild_base(collection: str) -> str:
 
 
 PLAIN_FILTER_FIELDS = frozenset({FIELD_MEMORY_TYPE, FIELD_SCOPE, FIELD_SCOPE_PREFIXES, FIELD_PROJECT_ID})
+
+# Payload fields that hold memory text. When encryption is on, every string in
+# them is encrypted, at any depth (numbers, booleans, None and dict keys stay
+# plain). Qdrant never filters on them then (metadata filters run on the SQLite
+# row, see ``metadata_filterable``), and recall re-reads every hit from SQLite.
+# All other payload fields (ids, dates, memory_type, scope) stay plain so
+# Qdrant can filter on them.
+ENCRYPTED_FIELDS = (FIELD_CONTENT, FIELD_METADATA, FIELD_EXTRACTED_FACTS, FIELD_ENTITIES)
+
+
+def encrypt_text_fields(encryptor: FieldEncryptor, fields: dict[str, Any]) -> dict[str, Any]:
+    """Copy of ``fields`` with every string of its ``ENCRYPTED_FIELDS`` encrypted (a no-op without a key)."""
+    out = dict(fields)
+    for key in ENCRYPTED_FIELDS:
+        if key in out:
+            out[key] = encryptor.encrypt_value(out[key])
+    return out
+
+
+def decrypt_text_fields(encryptor: FieldEncryptor, payload: dict[str, Any]) -> dict[str, Any]:
+    """Copy of ``payload`` with its ``ENCRYPTED_FIELDS`` decrypted; plaintext values from older writes pass through."""
+    out = dict(payload)
+    for key in ENCRYPTED_FIELDS:
+        if key in out:
+            out[key] = encryptor.decrypt_value(out[key])
+    return out
 
 
 def scope_prefixes(scope: str | None) -> list[str]:
@@ -95,7 +123,7 @@ class QdrantStore:
     - Collection initialization with proper schema
     - Upsert/delete operations
     - Semantic search with filtering
-    - Transparent AES-256-GCM encryption of content fields
+    - Transparent AES-256-GCM encryption of the text fields (``ENCRYPTED_FIELDS``)
     """
 
     def __init__(self, settings: Settings, encryptor: FieldEncryptor | None = None) -> None:
@@ -237,21 +265,20 @@ class QdrantStore:
         await self._create_indexes(client)
 
     def build_payload(self, memory: Memory) -> dict[str, Any]:
-        """Full Qdrant payload for a memory (content + metadata encrypted when enabled)."""
+        """Full Qdrant payload for a memory (its ``ENCRYPTED_FIELDS`` encrypted when enabled)."""
         payload: dict[str, Any] = {
             FIELD_USER_ID: memory.user_id,
             FIELD_PROJECT_ID: memory.project_id,
-            FIELD_CONTENT: self._encryptor.encrypt(memory.content),
+            FIELD_CONTENT: memory.content,
             FIELD_CREATED_AT: memory.created_at.isoformat(),
-            FIELD_METADATA: self._encryptor.encrypt_dict(memory.metadata),
+            FIELD_METADATA: memory.metadata,
+            FIELD_EXTRACTED_FACTS: memory.extracted_facts or [],
+            FIELD_ENTITIES: [e.model_dump() for e in (memory.entities or [])],
             **filterable_payload(memory),
         }
         if memory.expires_at:
             payload[FIELD_EXPIRES_AT] = memory.expires_at.isoformat()
-        # Add extracted facts and entity refs to payload for retrieval
-        payload["extracted_facts"] = memory.extracted_facts or []
-        payload["entities"] = [e.model_dump() for e in (memory.entities or [])]
-        return payload
+        return encrypt_text_fields(self._encryptor, payload)
 
     async def upsert(self, memory: Memory) -> None:
         """
@@ -661,13 +688,8 @@ class QdrantStore:
         return {"id": point.id}
 
     def _decrypt_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
-        """Decrypt content and metadata fields in a Qdrant payload."""
-        result = dict(payload)
-        if FIELD_CONTENT in result and isinstance(result[FIELD_CONTENT], str):
-            result[FIELD_CONTENT] = self._encryptor.decrypt(result[FIELD_CONTENT])
-        if FIELD_METADATA in result and isinstance(result[FIELD_METADATA], dict):
-            result[FIELD_METADATA] = self._encryptor.decrypt_dict(result[FIELD_METADATA])
-        return result
+        """Decrypt the text fields (``ENCRYPTED_FIELDS``) of a Qdrant payload."""
+        return decrypt_text_fields(self._encryptor, payload)
 
     async def health_check(self, timeout: float = 3.0) -> bool:
         """Check Qdrant over the transport the app actually uses (gRPC when
