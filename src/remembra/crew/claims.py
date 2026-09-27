@@ -47,6 +47,8 @@ from remembra.crew import gatecore as G
 from remembra.crew import policy as P
 from remembra.crew import schemas as S
 from remembra.crew.events import Actor, EventTx
+from remembra.crew.limits import OBSERVE_ONLY_MESSAGE, CrewLimits, seat_upgrade_hint
+from remembra.crew.sessions import has_seat
 from remembra.crew.settings import load_settings
 from remembra.crew.store import dumps, is_accountable_for, loads, new_id, now_iso, parse_iso
 from remembra.crew.zones import (
@@ -395,6 +397,21 @@ def _session_live(session: Mapping[str, Any]) -> None:
         raise CrewOpError(423, "paused", "This session is paused by a human.")
 
 
+async def has_claim_seat(conn: aiosqlite.Connection, crew_id: str, session: Mapping[str, Any], limits: CrewLimits | None) -> bool:
+    """True when the session holds one of the plan's live-session seats (its parent's, for a sub-agent).
+
+    ``limits`` is the crew owner's plan (``CrewOps.limits``, set by the routes); without it nothing is refused.
+    """
+    return limits is None or await has_seat(conn, crew_id, str(session["id"]), limits.max_sessions_live)
+
+
+async def require_seat(conn: aiosqlite.Connection, crew_id: str, session: Mapping[str, Any], limits: CrewLimits | None) -> None:
+    """403 ``observe_only`` for a session that joined over the live-session cap: it cannot claim (§12)."""
+    if not await has_claim_seat(conn, crew_id, session, limits):
+        assert limits is not None
+        raise CrewOpError(403, "observe_only", OBSERVE_ONLY_MESSAGE, upgrade_hint=seat_upgrade_hint(limits))
+
+
 # ---------------------------------------------------------------------------
 # Waiters (long-poll wait_s) and event helpers
 # ---------------------------------------------------------------------------
@@ -614,6 +631,8 @@ async def request_claim(
             session = await _session(conn, str(session["id"])) or session
             principal = Principal.for_session(session, api_key_id=principal.api_key_id)
             _session_live(session)
+            if source != "micro_lease":  # a serialize micro-lease orders writes; it is not a claim of work
+                await require_seat(conn, crew_id, session, ops.limits)
             if settings.get("require_verified_agents_for_claims") and not session.get("agent_verified"):
                 raise CrewOpError(403, "unverified_agent", "This crew only accepts claims from key-verified agents.")
         target = await _resolve_target(
@@ -1154,6 +1173,7 @@ async def accept_handover(ops: CrewOps, claim: Mapping[str, Any], principal: Pri
             raise CrewOpError(409, "offer_expired", "The handover offer expired.")
         session = await _session(tx.conn, str(session["id"])) or session
         _session_live(session)
+        await require_seat(tx.conn, crew_id, session, ops.limits)
         await check_taker_zones(tx.conn, [row], session, human_granted=False)
         settings = load_settings((await crew_row(tx.conn, crew_id))["settings"])
         if row["mode"] == "exclusive" and await _over_cap(tx.conn, session, settings):
@@ -1309,6 +1329,7 @@ async def adopt(ops: CrewOps, claim: Mapping[str, Any], principal: Principal, *,
         conn = tx.conn
         session = await _session(conn, str(session["id"])) or session
         _session_live(session)
+        await require_seat(conn, crew_id, session, ops.limits)
         row = await _reload(conn, str(claim["id"]))
         if row["state"] != "reserved":
             raise CrewOpError(409, "not_reserved", f"This claim is {row['state']}, not a reserved baton.")
@@ -2027,6 +2048,9 @@ async def server_guard(
         await ensure_policy_zone(tx, crew_id)
     session = await _session(conn, str(session["id"])) or session
     caller = Principal.for_session(session, api_key_id=caller.api_key_id)
+    # an observe-only session (over the plan's live-session cap) is still denied by others' claims,
+    # but never auto-claims: its write in a free zone is allowed without a claim (§12)
+    seated = await has_claim_seat(conn, crew_id, session, ops.limits)
     snapshot = await guard_snapshot(conn, crew_id, session)
     level = snapshot["settings"]["enforcement"]
     top = _toplevel(session)
@@ -2055,7 +2079,8 @@ async def server_guard(
     requested: dict[tuple[str | None, str | None], G.ClaimRequest] = {}
 
     def record(req: G.ClaimRequest) -> G.ClaimResult:
-        requested[(req.zone_id, req.path_glob)] = req
+        if seated:
+            requested[(req.zone_id, req.path_glob)] = req
         return G.ClaimResult("granted")
 
     def run(claim_fn: Any) -> list[G.Verdict]:
@@ -2107,6 +2132,10 @@ async def server_guard(
     worst = max(verdicts, key=lambda v: _RANK.get(v.decision, 0))
     decision = worst.decision
     effects = sorted({e for v in verdicts for e in v.effects})
+    variant = worst.variant
+    if not seated:
+        effects = [e for e in effects if e != "claim.granted"]
+        variant = "observe_only" if variant == "auto_claimed" else variant
     # row 12: serialize micro-lease and the schema claim for migrations, made for real
     extra_reasons: list[str] = []
     if decision in ("allow", "warn") and op in ("write", "delete", "mcp"):
@@ -2190,7 +2219,7 @@ async def server_guard(
     return {
         "decision": decision,
         "rule": worst.rule,
-        "variant": worst.variant,
+        "variant": variant,
         "reasons": reasons[:10],
         "auto_claimed": auto_claimed,
         "blockers": blockers[:10],
@@ -2209,6 +2238,7 @@ __all__ = [
     "claim_view",
     "decline_handover",
     "handover",
+    "has_claim_seat",
     "hash_session_token",
     "list_claims",
     "override",
@@ -2219,6 +2249,7 @@ __all__ = [
     "release_session_claims",
     "renew_session_leases",
     "request_claim",
+    "require_seat",
     "reserve_session_claims",
     "retake_session_claims",
     "server_guard",

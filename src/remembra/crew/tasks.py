@@ -47,6 +47,8 @@ from typing import Any, Final, Protocol
 
 from remembra.crew import schemas
 from remembra.crew.events import Actor, CrewEventLog, EventTx
+from remembra.crew.limits import OBSERVE_ONLY_MESSAGE, CrewLimits, seat_upgrade_hint
+from remembra.crew.sessions import has_seat
 from remembra.crew.settings import load_settings
 from remembra.crew.store import dumps, is_accountable_for, loads, new_id, now_iso, parse_iso
 from remembra.security.secrets import scrub
@@ -1269,6 +1271,7 @@ async def synthesize_report(
 # ---------------------------------------------------------------------------
 
 CheckpointHook = Callable[[EventTx, str, Mapping[str, Any], Mapping[str, Any], str, str], Awaitable[Any]]
+LimitsResolver = Callable[[str], Awaitable[CrewLimits]]
 
 
 @dataclass
@@ -1287,9 +1290,13 @@ class TaskService:
         *,
         claims: TaskClaims | None = None,
         on_transition: CheckpointHook | None = None,
+        limits_for: LimitsResolver | None = None,
     ) -> None:
         self.events = events
         self.claims: TaskClaims = claims or SqlTaskClaims()
+        # The crew owner's plan limits (routes pass the metered plan): a session over the live-session
+        # cap is observe-only and cannot take a task or its zones (§12). None checks nothing.
+        self.limits_for = limits_for
         # Called with (tx, crew_id, task, session, from_status, to_status) after an owner transition;
         # crew/checkpoints.py records the ``task`` trigger checkpoint through it (§5.5).
         self.on_transition = on_transition
@@ -1388,6 +1395,19 @@ class TaskService:
         ):
             return
         raise _err(403, "not_task_owner", f"Only the session that owns {task_ref(task)} (or its parent) can do this.")
+
+    async def _seat_limits(self, crew_id: str) -> CrewLimits | None:
+        """The crew owner's limits, read before the crew transaction (the resolver may meter the main DB)."""
+        if self.limits_for is None:
+            return None
+        crew = await crew_row(self.events.db.conn, crew_id)
+        return await self.limits_for(str(crew["owner_user_id"]))
+
+    @staticmethod
+    async def _require_seat(conn: Any, crew_id: str, session: Mapping[str, Any], limits: CrewLimits | None) -> None:
+        """403 ``observe_only`` for a session that joined over the plan's live-session cap (§12)."""
+        if limits is not None and not await has_seat(conn, crew_id, str(session["id"]), limits.max_sessions_live):
+            raise _err(403, "observe_only", OBSERVE_ONLY_MESSAGE, upgrade_hint=seat_upgrade_hint(limits))
 
     def _require_session(self, caller: Caller) -> Mapping[str, Any]:
         if caller.session is None:
@@ -1653,6 +1673,7 @@ class TaskService:
     async def claim(self, crew_id: str, task_id: str, caller: Caller) -> TaskResult:
         """ready → claimed: owner set, every zone claimed (all or nothing)."""
         session = self._require_session(caller)
+        limits = await self._seat_limits(crew_id)
         async with self.events.transaction() as tx:
             task = await load_task(tx.conn, crew_id, task_id)
             if task["status"] == "claimed" and task["owner_session_id"] == session["id"]:
@@ -1661,6 +1682,7 @@ class TaskService:
                 raise _err(409, "deps_pending", f"{task_ref(task)} waits for its dependencies to be done.")
             if task["status"] != "ready":
                 raise _err(409, "invalid_transition", f"{task_ref(task)} is {task['status']}; only a ready task can be claimed.")
+            await self._require_seat(tx.conn, crew_id, session, limits)
             claims = await self._claim_in_tx(tx, crew_id, task, session)
             detail, seq = await self._set_status(
                 tx,
@@ -1685,6 +1707,7 @@ class TaskService:
         session = self._require_session(caller)
         if head is not None and not _is_sha_prefix(head):
             raise _err(422, "invalid_head", "head must be a commit sha")
+        limits = await self._seat_limits(crew_id)
         async with self.events.transaction() as tx:
             task = await load_task(tx.conn, crew_id, task_id)
             claims: list[dict[str, Any]] = []
@@ -1693,6 +1716,7 @@ class TaskService:
             if task["status"] == "backlog":
                 raise _err(409, "deps_pending", f"{task_ref(task)} waits for its dependencies to be done.")
             if task["status"] == "ready":
+                await self._require_seat(tx.conn, crew_id, session, limits)
                 claims = await self._claim_in_tx(tx, crew_id, task, session)
                 await resolve_inbox_items(tx, crew_id, [f"task_ready:{task_id}"], resolved_by=str(session["id"]))
             elif task["status"] == "claimed":
@@ -2055,10 +2079,12 @@ class TaskService:
     async def adopt(self, crew_id: str, task_id: str, caller: Caller) -> TaskResult:
         """Adopt a stalled task (D33): claims move to the caller with epoch + 1, a baton row and ``baton.passed``."""
         session = self._require_session(caller)
+        limits = await self._seat_limits(crew_id)
         async with self.events.transaction() as tx:
             task = await load_task(tx.conn, crew_id, task_id)
             if task["status"] != "stalled":
                 raise _err(409, "invalid_transition", f"{task_ref(task)} is {task['status']}; only a stalled task is adopted.")
+            await self._require_seat(tx.conn, crew_id, session, limits)
             settings = await crew_settings(tx.conn, crew_id)
             kind, offer_id = await self._authorise_adopt(tx, crew_id, task, session, settings)
             if kind == "reserved_for" and task.get("owner_session_id") == session["id"]:
@@ -2201,6 +2227,7 @@ class TaskService:
         """(H) Hand a task to a live session: overrides dependencies, moves or grants its claims (``human_assign``)."""
         if not caller.is_privileged:
             raise _err(403, "human_only", "Only a human can assign a task.")
+        limits = await self._seat_limits(crew_id)
         async with self.events.transaction() as tx:
             task = await load_task(tx.conn, crew_id, task_id)
             if not schemas.is_id("session", to_session_id):
@@ -2210,6 +2237,7 @@ class TaskService:
                 raise _err(422, "cross_crew_reference", "The referenced session is not part of this crew.")
             if target["state"] in ("ended", "lost"):
                 raise _err(409, "session_not_live", f"{target['callsign']} is {target['state']}.")
+            await self._require_seat(tx.conn, crew_id, target, limits)
             if task["status"] in ("done", "cancelled"):
                 raise _err(409, "invalid_transition", f"{task_ref(task)} is {task['status']}.")
             settings = await crew_settings(tx.conn, crew_id)

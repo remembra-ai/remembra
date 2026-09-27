@@ -72,7 +72,7 @@ class CrewTaskServices:
                 worker.wake()
 
         self.checkpoints = CheckpointService(events, limits_resolver=limits, pii=pii, outbox_wake=wake)
-        self.tasks = TaskService(events, on_transition=self.checkpoints.on_task_transition)
+        self.tasks = TaskService(events, on_transition=self.checkpoints.on_task_transition, limits_for=limits)
         self.reports = ReportService(events, self.tasks, pii=pii)
 
     @staticmethod

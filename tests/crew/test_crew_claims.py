@@ -9,6 +9,7 @@ import pytest
 
 from remembra.crew import claims as C
 from remembra.crew import zones as Z
+from remembra.crew.limits import crew_limits_for_tier
 from remembra.crew.store import now_iso
 from tests.crew.wp5_support import (
     CREW,
@@ -178,6 +179,7 @@ async def test_hoarding_alarm(env):
 
 async def test_concurrent_requests_grant_exactly_one(env):
     db, ops, _, _a, _b = env
+    ops.limits = crew_limits_for_tier("enterprise")  # 22 live sessions: each needs a seat to claim (§12)
     sessions = []
     for i in range(20):
         row, _ = await seed_session(db, f"cs_r{i:02d}", callsign=f"rc-{i + 1}")

@@ -21,6 +21,7 @@ from remembra.api.v1.crew_zones import (
     json_response,
     principal_for,
     read_body,
+    with_limits,
 )
 from remembra.auth.middleware import AuthenticatedUser, get_current_user
 from remembra.crew import bypass as B
@@ -51,7 +52,7 @@ async def create_claim(request: Request, access: CrewAccess = Depends(crew_acces
     principal = await principal_for(request, access)
     _limit("claims", request, principal)
     body = await read_body(request, "Claim")
-    ops = crew_ops(request)
+    ops = await with_limits(request, crew_ops(request), access.crew.owner_user_id)  # observe-only sessions cannot claim
 
     async def run() -> dict[str, Any]:
         outcome = await C.request_claim(
@@ -138,7 +139,7 @@ async def handover_claim(request: Request, ent: CrewEntity = Depends(crew_entity
 async def accept_claim(request: Request, ent: CrewEntity = Depends(crew_entity("claim", PC))) -> Any:
     principal = await principal_for(request, ent.access)
     _limit("claims", request, principal)
-    ops = crew_ops(request)
+    ops = await with_limits(request, crew_ops(request), ent.access.crew.owner_user_id)
     async with crew_errors():
         return await idempotent(
             request, ops, principal, "claims.accept", {"id": ent.id}, lambda: C.accept_handover(ops, ent.row, principal)
@@ -161,7 +162,7 @@ async def adopt_claim(request: Request, ent: CrewEntity = Depends(crew_entity("c
     principal = await principal_for(request, ent.access)
     _limit("adopt", request, principal)
     body = closed(await read_body(request, required=False), {"task_id"})
-    ops = crew_ops(request)
+    ops = await with_limits(request, crew_ops(request), ent.access.crew.owner_user_id)
     async with crew_errors():
         return await idempotent(
             request,
@@ -203,7 +204,7 @@ async def guard(request: Request, access: CrewAccess = Depends(crew_access(PC)))
     body = await read_body(request, "Guard")
     if body["session_id"] != principal.session_id:
         raise crew_error(422, "session_mismatch", "session_id must be the session of the token.")
-    ops = crew_ops(request)
+    ops = await with_limits(request, crew_ops(request), access.crew.owner_user_id)
     async with crew_errors():
         return await C.server_guard(
             ops,

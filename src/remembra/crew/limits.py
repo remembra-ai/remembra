@@ -341,12 +341,24 @@ class SeatDecision:
         return not self.observe_only
 
 
+def seat_upgrade_hint(limits: CrewLimits) -> str | None:
+    """The upgrade prompt for a session over the live-session cap (None at the top plan)."""
+    return _upgrade_hint(limits, "max_crew_sessions_live", limits.max_sessions_live, "live sessions per crew")
+
+
 def seat_for_join(live_sessions: int, limits: CrewLimits) -> SeatDecision:
     """``live_sessions`` = live full-seat sessions of the crew excluding the joiner (observe-only ones do not count)."""
     if live_sessions < limits.max_sessions_live:
         return SeatDecision(False, live_sessions, limits.max_sessions_live)
-    hint = _upgrade_hint(limits, "max_crew_sessions_live", limits.max_sessions_live, "live sessions per crew")
-    return SeatDecision(True, live_sessions, limits.max_sessions_live, hint)
+    return SeatDecision(True, live_sessions, limits.max_sessions_live, seat_upgrade_hint(limits))
+
+
+# The refusal a session without a seat gets from every path that would grant it a claim (§12:
+# an observe-only session "cannot claim"). Routes answer 403 ``observe_only`` with the upgrade hint.
+OBSERVE_ONLY_MESSAGE: Final = (
+    "This session joined over the plan's live-session limit (observe-only): it cannot claim zones, files, "
+    "resources or tasks. It gets a seat when an earlier session of this crew ends."
+)
 
 
 def enforce_zone_capacity(existing_zones: int, adding: int, limits: CrewLimits) -> None:
