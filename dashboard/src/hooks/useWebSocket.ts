@@ -6,6 +6,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { shouldReconnect } from '../lib/wsClose';
 
 export interface WebSocketEvent {
   type: string;
@@ -133,8 +134,9 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
         onConnectionChange?.(false);
         console.log('[WebSocket] Disconnected:', event.code, event.reason);
 
-        // Auto-reconnect if enabled and not a clean close
-        if (autoReconnect && event.code !== 1000) {
+        // Auto-reconnect unless the close was deliberate or the server refused the
+        // credentials (4001: revoked, expired or signed out; retrying would be refused too).
+        if (autoReconnect && shouldReconnect(event.code)) {
           reconnectTimeoutRef.current = setTimeout(() => {
             console.log('[WebSocket] Attempting reconnect...');
             connectRef.current();
