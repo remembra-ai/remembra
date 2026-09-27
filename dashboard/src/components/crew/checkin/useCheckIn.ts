@@ -2,7 +2,7 @@
 // its summary subscription) is only kept live on a phone-sized screen.
 
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
-import { useCrewList } from '../../../lib/crew/hooks';
+import { useCrewList, useCrewMode } from '../../../lib/crew/hooks';
 import { useRoute } from '../../../lib/nav';
 import { checkInItems, lastCrewProjectSeen, moreSections, rememberCrewProject, type CheckInItem } from './checkin';
 
@@ -30,12 +30,13 @@ export function useIsPhone(): boolean {
 export function useCheckIn(agentInboxUnread: number, isAdmin: boolean): { items: CheckInItem[]; more: ReturnType<typeof moreSections> } {
   const route = useRoute();
   const phone = useIsPhone();
-  const list = useCrewList(phone);
+  const crewOff = useCrewMode() === 'off';
+  const list = useCrewList(phone && !crewOff);
   useEffect(() => rememberCrewProject(route), [route]);
   const items = useMemo(
-    () => checkInItems(route, list.items, agentInboxUnread, lastCrewProjectSeen()),
-    [route, list.items, agentInboxUnread],
+    () => checkInItems(route, list.items, agentInboxUnread, lastCrewProjectSeen(), crewOff),
+    [route, list.items, agentInboxUnread, crewOff],
   );
-  const more = useMemo(() => moreSections(isAdmin), [isAdmin]);
+  const more = useMemo(() => moreSections(isAdmin, crewOff), [isAdmin, crewOff]);
   return { items, more };
 }

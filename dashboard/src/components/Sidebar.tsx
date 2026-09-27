@@ -23,7 +23,8 @@ import {
   Sun,
   X,
 } from 'lucide-react';
-import { SECTIONS, hrefFor, sectionOf, type SectionId, type TabType } from '../lib/nav';
+import { hrefFor, navSections, sectionOf, type SectionId, type TabType } from '../lib/nav';
+import { useCrewMode } from '../lib/crew/hooks';
 import { BrandLockup, BrandMark } from '../brand/Brand';
 import { useCheckIn } from './crew/checkin/useCheckIn';
 import type { CheckInId } from './crew/checkin/checkin';
@@ -42,8 +43,8 @@ const ICONS: Record<SectionId, ElementType> = {
   admin: Shield,
 };
 
-function visibleSections(isAdmin: boolean) {
-  return SECTIONS.filter((section) => !section.adminOnly || isAdmin);
+function useVisibleSections(isAdmin: boolean) {
+  return navSections(isAdmin, useCrewMode() === 'off');
 }
 
 function Badge({ count, className }: { count: number; className?: string }) {
@@ -85,6 +86,7 @@ export function Sidebar({
   onLogout: () => void;
 }) {
   const active = sectionOf(activeTab).id;
+  const sections = useVisibleSections(isAdmin);
   return (
     <nav
       aria-label="Primary"
@@ -96,7 +98,7 @@ export function Sidebar({
       </a>
 
       <ul className="flex-1 space-y-0.5 overflow-y-auto px-2.5 py-3">
-        {visibleSections(isAdmin).map((section) => {
+        {sections.map((section) => {
           const Icon = ICONS[section.id];
           const isActive = active === section.id;
           const badge = section.id === 'inbox' ? inboxUnread : 0;
@@ -196,6 +198,9 @@ const CHECKIN_ICONS: Record<CheckInId, ElementType> = {
   'needs-you': Flag,
   feed: Activity,
   inbox: Inbox,
+  home: House,
+  trail: GitCommitVertical,
+  agents: Bot,
 };
 
 /** Phone navigation, the crew check-in (§9.12): Crews · Needs you · Feed · Inbox, and a "More" sheet. */
@@ -226,7 +231,8 @@ export function MobileNav({
   const sheetRef = useRef<HTMLDivElement>(null);
   const active = sectionOf(activeTab).id;
   const checkIn = useCheckIn(inboxUnread, isAdmin);
-  const secondary = visibleSections(isAdmin).filter((s) => checkIn.more.includes(s.id));
+  const visible = useVisibleSections(isAdmin);
+  const secondary = visible.filter((s) => checkIn.more.includes(s.id));
   const moreActive = secondary.some((s) => s.id === active);
 
   useEffect(() => {

@@ -21,6 +21,22 @@ function crew(project: string, needs: number, last: string | null): CrewListItem
 
 const crews = [crew('yaadbooks', 2, '2026-09-25T20:00:00Z'), crew('trademind', 1, '2026-09-25T21:00:00Z')];
 
+describe('phone bar when Crew mode is off on the server', () => {
+  it('is the bar of a server without crews: Home · Trail · Agents · Inbox, and More has no Crews', () => {
+    const items = checkInItems(parseHash('#/trail'), [], 2, null, true);
+    expect(items.map((i) => i.label)).toEqual(['Home', 'Trail', 'Agents', 'Inbox']);
+    expect(items.map((i) => i.href)).toEqual(['#/home', '#/trail', '#/agents', '#/inbox']);
+    expect(items.find((i) => i.active)?.id).toBe('trail');
+    expect(items[3]).toMatchObject({ badge: 2, badgeText: '2 unread for you' });
+    expect(checkInItems(parseHash('#/inbox'), [], 0, null, true)[3].active).toBe(true);
+    const more = moreSections(false, true);
+    expect(more).not.toContain('crews');
+    expect(more).not.toContain('home');
+    expect(more).toContain('memory');
+    expect(moreSections(false)).toContain('home'); // crew mode on: home sits in More
+  });
+});
+
 describe('phone check-in bar (§9.12)', () => {
   it('is Crews · Needs you · Feed · Inbox, with the needs-you total across crews', () => {
     const items = checkInItems(parseHash('#/home'), crews, 3, null);

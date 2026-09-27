@@ -31,6 +31,66 @@ function setup() {
   return { timers, factory, runtime, requests };
 }
 
+function runtimeAnswering(status: number) {
+  const requests: string[] = [];
+  const api = createCrewApi({
+    baseUrl: '',
+    credentials: () => ({ jwt: 't' }),
+    fetch: async (url) => {
+      requests.push(url);
+      const body = status === 200 ? { crews: [], count: 0 } : { detail: 'Not Found' };
+      return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+    },
+  });
+  const runtime = new CrewRuntime({
+    api,
+    socketUrl: 'ws://x/ws',
+    credentials: () => ({ jwt: 't' }),
+    createSocket: new SocketFactory().create,
+    timers: new ManualTimers(),
+    lingerMs: 15000,
+  });
+  return { runtime, requests };
+}
+
+describe('crew mode of the server (REMEMBRA_CREW_MODE)', () => {
+  it('is off when GET /crews answers 404, from one probe, and tells its listeners', async () => {
+    const { runtime, requests } = runtimeAnswering(404);
+    expect(runtime.crewMode()).toBe('unknown');
+    let told = 0;
+    runtime.onCrewMode(() => (told += 1));
+    runtime.probeCrewMode();
+    runtime.probeCrewMode(); // one request in flight at a time
+    await flush(20);
+    expect(runtime.crewMode()).toBe('off');
+    expect(told).toBe(1);
+    runtime.probeCrewMode(); // known: no more requests
+    await flush(20);
+    expect(requests.filter((u) => u.endsWith('/crews'))).toHaveLength(1);
+  });
+
+  it('is on when GET /crews answers, and the crew list keeps it current', async () => {
+    const { runtime } = runtimeAnswering(200);
+    runtime.probeCrewMode();
+    await flush(20);
+    expect(runtime.crewMode()).toBe('on');
+    const off = runtimeAnswering(404).runtime;
+    const release = off.leaseCrewList();
+    await flush(20);
+    expect(off.crewMode()).toBe('off'); // the list's own 404 says so too
+    release();
+  });
+
+  it('stays unknown on other failures (signed out, server error), so the crew screens still show', async () => {
+    for (const status of [401, 500]) {
+      const { runtime } = runtimeAnswering(status);
+      runtime.probeCrewMode();
+      await flush(20);
+      expect(runtime.crewMode()).toBe('unknown');
+    }
+  });
+});
+
 describe('CrewRuntime', () => {
   it('shares one live store per crew between leases and one socket between crews', async () => {
     const { runtime, factory, requests } = setup();

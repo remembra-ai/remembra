@@ -2,10 +2,18 @@
 // useSyncExternalStore's subscribe, so a store runs exactly while something
 // on screen shows it (plus a short linger).
 
-import { useCallback, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useCrewRuntime } from './context';
 import type { CrewListView } from './crews';
+import type { CrewMode } from './runtime';
 import type { ConnectionStatus } from './socket';
+
+/** Whether the server runs Crew mode ('off': hide the crew screens). Asks the server once per tab. */
+export function useCrewMode(): CrewMode {
+  const runtime = useCrewRuntime();
+  useEffect(() => runtime.probeCrewMode(), [runtime]);
+  return useSyncExternalStore(runtime.onCrewMode, runtime.crewMode, runtime.crewMode);
+}
 
 /** Status of the shared crew WebSocket (for the connection pill). */
 export function useCrewConnection(): ConnectionStatus {

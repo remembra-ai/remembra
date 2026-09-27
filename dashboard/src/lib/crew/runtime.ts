@@ -7,7 +7,7 @@
 // `dispose()` closes everything (sign-out). A later lease starts again from a
 // fresh socket, so a disposed runtime is never left half-dead.
 
-import type { CrewApi, CrewCredentials } from './api';
+import { CrewApiError, type CrewApi, type CrewCredentials } from './api';
 import { CrewListStore } from './crews';
 import { CrewSocket, realTimers, type ConnectionStatus, type SocketFactory, type Timers } from './socket';
 import { CrewStore } from './store';
@@ -21,6 +21,13 @@ export interface CrewRuntimeOptions {
   lingerMs?: number;
   pollMs?: number;
 }
+
+/**
+ * Whether this server runs Crew mode. The crew routers exist only with REMEMBRA_CREW_MODE on, so
+ * `GET /crews` answering 404 means off: the dashboard then shows what it showed before crews
+ * (no Crews section, the agent inbox as the Inbox). Unknown until the server has answered.
+ */
+export type CrewMode = 'unknown' | 'on' | 'off';
 
 interface Entry<T> {
   value: T;
@@ -37,6 +44,9 @@ export class CrewRuntime {
   private list: Entry<CrewListStore> | null = null;
   private readonly statusListeners = new Set<() => void>();
   private unsubscribeStatus: (() => void) | null = null;
+  private mode: CrewMode = 'unknown';
+  private modeProbe: Promise<void> | null = null;
+  private readonly modeListeners = new Set<() => void>();
 
   constructor(options: CrewRuntimeOptions) {
     this.api = options.api;
@@ -65,6 +75,35 @@ export class CrewRuntime {
     this.statusListeners.add(listener);
     return () => this.statusListeners.delete(listener);
   };
+
+  crewMode = (): CrewMode => this.mode;
+
+  onCrewMode = (listener: () => void): (() => void) => {
+    this.modeListeners.add(listener);
+    return () => this.modeListeners.delete(listener);
+  };
+
+  /** Ask the server once whether it runs Crew mode (`GET /crews`); the crew list keeps the answer current. */
+  probeCrewMode(): void {
+    if (this.mode !== 'unknown' || this.modeProbe) return;
+    this.modeProbe = this.api
+      .listCrews()
+      .then(
+        () => this.setCrewMode('on'),
+        (err: unknown) => {
+          if (err instanceof CrewApiError && err.status === 404) this.setCrewMode('off');
+        },
+      )
+      .finally(() => {
+        this.modeProbe = null;
+      });
+  }
+
+  private setCrewMode(mode: 'on' | 'off'): void {
+    if (this.mode === mode) return;
+    this.mode = mode;
+    for (const listener of [...this.modeListeners]) listener();
+  }
 
   /** The store of a crew without starting it (for render-time reads). */
   storeFor(crewId: string): CrewStore {
@@ -95,7 +134,12 @@ export class CrewRuntime {
   crewList(): CrewListStore {
     if (!this.list) {
       this.list = {
-        value: new CrewListStore({ api: this.api, socket: this.socket, timers: this.opts.timers }),
+        value: new CrewListStore({
+          api: this.api,
+          socket: this.socket,
+          timers: this.opts.timers,
+          onMode: (mode) => this.setCrewMode(mode),
+        }),
         leases: 0,
         started: false,
         linger: null,

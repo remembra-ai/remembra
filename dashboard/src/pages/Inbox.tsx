@@ -1,5 +1,8 @@
 // Inbox (`#/inbox?scope=needs-you|crew[&project=X]`, spec §5.8, §9.9).
 //
+// On a server with Crew mode off (`GET /crews` is a 404) the Inbox is the
+// agent inbox, as it was before crews.
+//
 // Two visible tabs: Needs you ("things only a person can decide") and Crew
 // ("work any agent on this crew can pick up"). "Details" reveals the agent
 // inbox (notes between agents, the former Inbox page) and the per-session
@@ -8,7 +11,7 @@
 
 import { useEffect } from 'react';
 import clsx from 'clsx';
-import { useCrewList } from '../lib/crew/hooks';
+import { useCrewList, useCrewMode } from '../lib/crew/hooks';
 import { hrefFor, useRoute } from '../lib/nav';
 import { AgentInbox } from '../components/crew/inbox/AgentInbox';
 import { InboxList } from '../components/crew/inbox/InboxList';
@@ -82,6 +85,11 @@ function Details({ details, project, crewId }: { details: InboxDetails; project:
 }
 
 export function Inbox() {
+  const crewMode = useCrewMode();
+  return crewMode === 'off' ? <AgentInbox /> : <CrewInbox />;
+}
+
+function CrewInbox() {
   const { params } = useRoute();
   const route = parseInboxRoute(params);
   const data = useInboxItems(route.scope, route.project);

@@ -285,7 +285,8 @@ rolling back step by step are in [Operations: Crew mode](../OPERATIONS.md#crew-m
 | `REMEMBRA_NOTIFY_SIGNING_KEY` | the JWT secret | Key the per-target webhook signing secrets are derived from. Changing it (or the JWT secret when this is unset) changes every webhook's secret. |
 
 With the flag off, the server behaves exactly as it does without Crew mode: the crew routes return 404,
-no `crew.db` is created, and memory, Relay and the dashboard work as before. A `crew.db` left from an
+no `crew.db` is created, and memory, Relay and the dashboard work as before. The dashboard reads that 404:
+it shows no Crews section, its Inbox is the agent inbox, and an old crew link says Crew mode is off. A `crew.db` left from an
 earlier run with the flag on is opened for account erasure only, so an account erased while the flag is
 off loses its crew rows too; while it exists but cannot be opened, erasure waits. `GET /health/ready` shows
 the state under `components.crew`: `disabled`, or `ok` with `schema_version` and `latest_version`

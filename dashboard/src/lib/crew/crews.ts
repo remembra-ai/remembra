@@ -26,6 +26,8 @@ export interface CrewListStoreOptions {
   pollMs?: number;
   /** Minimum time between list refetches triggered by summary frames. */
   refetchThrottleMs?: number;
+  /** Told what each refresh learned about the server: the list answered ('on') or `/crews` is a 404 ('off'). */
+  onMode?: (mode: 'on' | 'off') => void;
 }
 
 /** Site Board order: Needs-you first, then live, then idle; project id breaks ties. */
@@ -52,7 +54,8 @@ export function applySummary(items: CrewListItem[], summary: Record<string, Crew
 }
 
 export class CrewListStore {
-  private readonly opts: Required<Omit<CrewListStoreOptions, 'socket'>> & { socket: CrewListStoreOptions['socket'] };
+  private readonly opts: Required<Omit<CrewListStoreOptions, 'socket' | 'onMode'>> &
+    Pick<CrewListStoreOptions, 'socket' | 'onMode'>;
   private view: CrewListView = { status: 'loading', items: [], needsYou: 0, error: null };
   private readonly listeners = new Set<() => void>();
   private base: CrewListItem[] = [];
@@ -106,6 +109,7 @@ export class CrewListStore {
       try {
         const res = await this.opts.api.listCrews();
         if (this.stopped) return;
+        this.opts.onMode?.('on');
         this.lastFetchAt = this.opts.timers.now();
         this.base = res.crews ?? [];
         // The fresh list is authoritative over summary frames that arrived before the request;
@@ -124,6 +128,7 @@ export class CrewListStore {
       } catch (err) {
         if (this.stopped) return;
         const error = err instanceof CrewApiError ? err : new CrewApiError(String(err), 0, 'client_error');
+        if (error.status === 404) this.opts.onMode?.('off');
         this.publish({ status: this.view.items.length ? 'ready' : 'error', error });
       } finally {
         this.inflight = null;

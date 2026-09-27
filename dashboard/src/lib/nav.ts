@@ -79,6 +79,11 @@ export const SECTIONS: {
   { id: 'admin', label: 'Admin', tabs: ['admin'], adminOnly: true },
 ];
 
+/** The sections the primary navigation shows: Admin only to admins, Crews only on a server with Crew mode on. */
+export function navSections(isAdmin: boolean, crewOff: boolean) {
+  return SECTIONS.filter((section) => (!section.adminOnly || isAdmin) && !(crewOff && section.id === 'crews'));
+}
+
 export function sectionOf(tab: TabType) {
   return SECTIONS.find((section) => section.tabs.includes(tab)) ?? SECTIONS[0];
 }

@@ -103,6 +103,18 @@ export function NoCrewsEmpty({ project }: { project?: string | null }) {
   );
 }
 
+/** The server runs without Crew mode (`GET /crews` is a 404): say so, instead of "update Remembra". */
+export function CrewModeOff() {
+  return (
+    <CrewEmptyState art="quiet" eyebrow="Crew mode is off" title="This server runs without Crew mode.">
+      <p>
+        Memory, Relay handoffs and the agent inbox work as before. Whoever runs the server turns crews on with{' '}
+        <code className="font-mono text-[12px]">REMEMBRA_CREW_MODE=true</code> and a restart.
+      </p>
+    </CrewEmptyState>
+  );
+}
+
 /** One agent on the crew (Mission Control). `holds` are zone slugs the agent holds. */
 export function OneAgentEmpty({ callsign, holds = [], compact = true }: { callsign?: string | null; holds?: string[]; compact?: boolean }) {
   return (

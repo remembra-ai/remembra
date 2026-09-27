@@ -1,13 +1,18 @@
 // Phone "check-in" (spec §9.12): the bottom bar on a phone is
 //   Crews · Needs you · Feed · Inbox · More
 // so a glance from the phone answers "is the crew fine, and does anything
-// need me?". Pure: which tabs, where they go, which is current, the badges.
+// need me?". On a server with Crew mode off it is the bar of a server without
+// crews: Home · Trail · Agents · Inbox · More. Pure: which tabs, where they
+// go, which is current, the badges.
 
-import { SECTIONS, hrefFor, type Route, type SectionId } from '../../../lib/nav';
+import { SECTIONS, hrefFor, sectionOf, type Route, type SectionId } from '../../../lib/nav';
 import { crewHref, crewsHref, inboxHref, parseCrewRoute, parseInboxScope } from '../../../lib/crew/routes';
 import type { CrewListItem } from '../../../lib/crew/types';
 
-export type CheckInId = 'crews' | 'needs-you' | 'feed' | 'inbox';
+export type CheckInId = 'crews' | 'needs-you' | 'feed' | 'inbox' | 'home' | 'trail' | 'agents';
+
+/** The phone bar when the server runs no Crew mode (the bar before crews existed). */
+const PLAIN_BAR: readonly SectionId[] = ['home', 'trail', 'agents', 'inbox'];
 
 export interface CheckInItem {
   id: CheckInId;
@@ -41,7 +46,27 @@ export function needsYouTotal(crews: readonly CrewListItem[]): number {
   return crews.reduce((n, c) => n + Math.max(0, c.needs_you || 0), 0);
 }
 
-export function checkInItems(route: Route, crews: readonly CrewListItem[], agentInboxUnread: number, lastProject: string | null): CheckInItem[] {
+export function checkInItems(
+  route: Route,
+  crews: readonly CrewListItem[],
+  agentInboxUnread: number,
+  lastProject: string | null,
+  crewOff = false,
+): CheckInItem[] {
+  if (crewOff) {
+    const current = sectionOf(route.tab).id;
+    return SECTIONS.filter((s) => PLAIN_BAR.includes(s.id)).map((s) => {
+      const badge = s.id === 'inbox' ? Math.max(0, agentInboxUnread) : 0;
+      return {
+        id: s.id as CheckInId,
+        label: s.label,
+        href: hrefFor(s.tabs[0]),
+        active: current === s.id,
+        badge,
+        badgeText: badge > 0 ? `${badge} unread for you` : '',
+      };
+    });
+  }
   const project = feedProject(route, crews, lastProject);
   const crewScreen = route.tab === 'crew' ? parseCrewRoute(route.params).screen : null;
   const scope = route.tab === 'inbox' ? parseInboxScope(route.params) : null;
@@ -82,9 +107,10 @@ export function checkInItems(route: Route, crews: readonly CrewListItem[], agent
   ];
 }
 
-/** What the More sheet holds on a phone: everything the bar does not. */
-export function moreSections(isAdmin: boolean): SectionId[] {
-  return SECTIONS.filter((s) => (!s.adminOnly || isAdmin) && s.id !== 'crews' && s.id !== 'inbox').map((s) => s.id);
+/** What the More sheet holds on a phone: everything the bar does not (never Crews). */
+export function moreSections(isAdmin: boolean, crewOff = false): SectionId[] {
+  const bar: readonly SectionId[] = crewOff ? PLAIN_BAR : ['crews', 'inbox'];
+  return SECTIONS.filter((s) => (!s.adminOnly || isAdmin) && s.id !== 'crews' && !bar.includes(s.id)).map((s) => s.id);
 }
 
 /** Last crew project opened in this tab (a per-tab convenience, not state that must persist). */

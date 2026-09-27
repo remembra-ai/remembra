@@ -17,7 +17,7 @@ import { absoluteTime, relativeTime } from '../time';
 import { Card, CardHeader, ErrorNotice, Pill, PulseDot, TrailSkeleton } from '../../components/relay/ui';
 import { CrewGoKeys, CrewLiveRegions, CrewMomentAnnouncer } from '../../components/crew/a11y/CrewA11y';
 import { ChannelScreen } from '../../components/crew/channel/ChannelScreen';
-import { NoCrewsEmpty } from '../../components/crew/empty/EmptyStates';
+import { CrewModeOff, NoCrewsEmpty } from '../../components/crew/empty/EmptyStates';
 import { EventFeed } from '../../components/crew/feed/EventFeed';
 import { Board } from '../../pages/crew/Board';
 import { MissionControl } from '../../pages/crew/MissionControl';
@@ -25,7 +25,7 @@ import { PolicyPage } from '../../pages/crew/Policy';
 import { Receipt } from '../../pages/crew/Receipt';
 import { SiteBoard } from '../../pages/crew/SiteBoard';
 import { ZonesPage } from '../../pages/crew/Zones';
-import { useCrewForProject } from './hooks';
+import { useCrewForProject, useCrewMode } from './hooks';
 import { inboxHref, useCrewRoute, type CrewRoute } from './routes';
 import { describeHolder, liveSessions, presenceText, sessionLabel, sortedZones, taskRef } from './selectors';
 import type { ConnectionStatus } from './socket';
@@ -210,6 +210,8 @@ function CrewScreen() {
 
 export function CrewRoutes({ tab }: { tab: 'crews' | 'crew' }) {
   const route = useCrewRoute();
+  const crewMode = useCrewMode();
+  if (crewMode === 'off') return <CrewModeOff />; // an old link on a server without crews
   return (
     <section aria-label={tab === 'crews' ? 'Crews' : 'Crew'} className="space-y-3">
       <h1 className="sr-only">

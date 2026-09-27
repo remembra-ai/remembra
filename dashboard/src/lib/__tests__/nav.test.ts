@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SECTIONS, TABS, hrefFor, parseHash, sectionOf } from '../nav';
+import { SECTIONS, TABS, hrefFor, navSections, parseHash, sectionOf } from '../nav';
 
 describe('hash routes', () => {
   it('parses the tab and its parameters', () => {
@@ -35,5 +35,14 @@ describe('sections', () => {
     expect(sectionOf('entities').id).toBe('graph');
     expect(sectionOf('timeline').id).toBe('memory');
     expect(sectionOf('admin').adminOnly).toBe(true);
+  });
+});
+
+describe('primary navigation', () => {
+  it('hides Admin from non-admins and Crews when Crew mode is off on the server', () => {
+    expect(navSections(false, false).map((s) => s.id)).not.toContain('admin');
+    expect(navSections(true, false).map((s) => s.id)).toContain('admin');
+    expect(navSections(false, false).map((s) => s.id)).toContain('crews');
+    expect(navSections(false, true).map((s) => s.id)).toEqual(['home', 'trail', 'agents', 'inbox', 'memory', 'graph', 'settings']);
   });
 });
