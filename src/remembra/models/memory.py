@@ -6,6 +6,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from remembra.client.ttl import parse_ttl_seconds
+
 
 def _scrub_secrets(value: str) -> str:
     """Remove terminal control characters (CLI-02) and redact credentials (SEC-23).
@@ -144,6 +146,17 @@ RETRIEVAL_MODES = ("auto", "balanced", "debug", "operational", "strategic")
 # ---------------------------------------------------------------------------
 
 
+def checked_ttl(ttl: str | None) -> str | None:
+    """A request's TTL, stripped; None when blank. Raises ValueError when the server cannot read it.
+
+    An unreadable TTL used to be stored as no expiry at all; now the request fails.
+    """
+    if ttl is None or not ttl.strip():
+        return None
+    parse_ttl_seconds(ttl)
+    return ttl.strip()
+
+
 class StoreRequest(BaseModel):
     content: str = Field(..., max_length=50000, description="Content to memorize (max 50,000 characters)")
     project_id: str = "default"
@@ -192,6 +205,11 @@ class StoreRequest(BaseModel):
         # source row, FTS) ever sees them.
         return _scrub_secrets(v.strip())
 
+    @field_validator("ttl")
+    @classmethod
+    def validate_ttl(cls, v: str | None) -> str | None:
+        return checked_ttl(v)
+
     @field_validator("visibility")
     @classmethod
     def validate_visibility(cls, v: str) -> str:
@@ -203,7 +221,11 @@ class StoreRequest(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     ttl: str | None = Field(
         default=None,
-        description="Optional time-to-live, e.g. '30d', '1y'. Use expires_at for explicit expiry timestamps.",
+        description=(
+            "Optional time-to-live: a number and a unit, e.g. '30d', '1.5d', '36h', '90min'. "
+            "Units: s, min (or m), h, d, w, mo (months, 30 days), y (365 days). "
+            "A TTL the server cannot read is refused (422). Use expires_at for explicit expiry timestamps."
+        ),
         examples=["30d"],
     )
     expires_at: datetime | None = Field(

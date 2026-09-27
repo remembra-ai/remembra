@@ -15,12 +15,13 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from remembra.auth.middleware import CurrentUser, has_permission, resolve_project_access
 from remembra.cloud.limits import gate_write, record_relay_usage
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
+from remembra.models.memory import checked_ttl
 from remembra.services.agent_session import AgentSessionService
 from remembra.services.relay import strip_reserved_metadata
 
@@ -87,7 +88,13 @@ class StatusUpsertRequest(BaseModel):
     value: str = Field(..., min_length=1, max_length=5000, description="Current value for the key")
     project_id: str | None = Field(default=None, max_length=128)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    ttl: str | None = Field(default=None, description="Optional TTL for this value, e.g. '30d'")
+    ttl: str | None = Field(default=None, description="Optional TTL for this value, e.g. '30d', '36h', '90min'")
+
+    @field_validator("ttl")
+    @classmethod
+    def validate_ttl(cls, v: str | None) -> str | None:
+        # Refused here (422), before the plan gate runs, rather than after it.
+        return checked_ttl(v)
 
 
 @router.post("/session/status", summary="Set the current value for a status key")
