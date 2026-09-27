@@ -124,7 +124,7 @@ def test_environment_variables_named_in_the_docs_are_read_by_the_code() -> None:
     settings_env = {f"REMEMBRA_{f.upper()}" for f in Settings.model_fields}
     sections = {
         "crew.md": (None, None),
-        "OPERATIONS.md": ("## Backups (litestream)", "## Health, readiness, metrics"),
+        "OPERATIONS.md": ("## Scheduled snapshots", "## Health, readiness, metrics"),
         "configuration.md": ("## Crew mode", "## Embeddings"),
     }
     for doc in (*DOCS, ROOT / "docs" / "reference" / "configuration.md"):
@@ -159,6 +159,17 @@ def test_trust_model_states_the_honest_limit() -> None:
 def test_docs_are_in_the_site_navigation() -> None:
     assert "relay/crew.md" in (ROOT / "mkdocs.yml").read_text()
     operations = OPERATIONS.read_text()
-    for heading in ("## Crew mode", "### Turning it on", "### Rollback plan"):
+    for heading in ("## Scheduled snapshots", "## Crew mode", "### Turning it on", "### Rollback plan"):
         assert heading in operations
     assert not (ROOT / "docs" / "DEPLOYING.md").exists()  # the hosted runbook left the repository (LEAK-5)
+
+
+def test_scheduled_snapshot_command_keeps_a_bounded_number_and_covers_crew_db() -> None:
+    """The documented scheduled task is a real `create` with retention, and says crew.db is in it."""
+    operations = OPERATIONS.read_text()
+    section = operations[operations.index("## Scheduled snapshots") : operations.index("## Backups (litestream)")]
+    command = "python -m remembra.storage.snapshot create --out /data/backups --keep 7"
+    assert f"| Command | `{command}` |" in section
+    args = snapshot._parser().parse_args(shlex.split(command)[3:])
+    assert (args.command, args.out, args.keep) == ("create", "/data/backups", 7)
+    assert "`crew.db`" in section and "Coolify" in section and "0 3 * * *" in section

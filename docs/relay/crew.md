@@ -270,8 +270,8 @@ repositories, `zones.yml` and the server's crew history are untouched.
 
 ## Running the server
 
-This section is for self-hosters and operators. Deploying Crew mode, turning it on and rolling back step by
-step are in [Operations: Crew mode](../OPERATIONS.md#crew-mode).
+This section is for self-hosters and operators. Deploying Crew mode, turning it on, scheduled backups and
+rolling back step by step are in [Operations: Crew mode](../OPERATIONS.md#crew-mode).
 
 ### The feature flag
 
@@ -322,7 +322,15 @@ Back up **both** files. They sit in the same directory by default.
     ```
 
     Each snapshot holds `remembra.db`, `crew.db` (when it exists) and `manifest.json` with checksums,
-    schema versions and row counts. Take one before turning Crew mode on and before upgrades.
+    schema versions and row counts. Take one before turning Crew mode on and before upgrades, and run
+    one every day with `--keep` so older ones are deleted:
+
+    ```bash
+    python -m remembra.storage.snapshot create --out /data/backups --keep 7   # a scheduled task, daily
+    ```
+
+    [Operations: Scheduled snapshots](../OPERATIONS.md#scheduled-snapshots) sets it up (a Coolify
+    Scheduled Task or cron) and covers retention and copies off the volume.
 - **Volume backups** (Docker named volume, disk snapshot) cover both files as long as `crew.db` was
   not moved elsewhere with `REMEMBRA_CREW_DB_PATH`.
 

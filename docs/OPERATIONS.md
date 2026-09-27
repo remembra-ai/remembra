@@ -129,9 +129,66 @@ The printed plans must be only `free`, `pro`, `team` and `enterprise`. The scrip
 ignores `agent_id`, so they would act for the whole account). Review accounts that bought a new plan during
 the deploy window by hand; deploying relay-launch again re-runs the migration.
 
+## Scheduled snapshots
+
+`python -m remembra.storage.snapshot create` copies the main database **and** `crew.db` (Crew mode's
+database, next to it in `/data`) with SQLite's online backup API, so it is safe while the server is running.
+Each run writes one folder, `remembra-snapshot-<UTC time>`, holding `remembra.db`, `crew.db` (once Crew mode
+has created it) and `manifest.json` with checksums, schema versions and row counts. The folder is readable
+by the server's user only (`0700`, files `0600`), like the pre-migration copies. It needs no litestream, no
+bucket and no other service.
+
+Run it once a day. On **Coolify**: the API application, **Scheduled Tasks**, **Add**:
+
+| Field | Value |
+|---|---|
+| Name | `remembra-snapshot` |
+| Command | `python -m remembra.storage.snapshot create --out /data/backups --keep 7` |
+| Frequency | `0 3 * * *` (every day at 03:00, server time) |
+| Container | the API container, if Coolify asks which one |
+
+Any other host runs the same command in the API container from cron, for example
+`0 3 * * * docker exec <api container> python -m remembra.storage.snapshot create --out /data/backups --keep 7`.
+Run the command once by hand after adding the task and check its output: the manifest as JSON, with
+`"crew_included": true` once Crew mode is on. A failed run prints `snapshot create failed: <why>`, exits 1 and
+deletes nothing; check the task's run log after the first scheduled run too.
+
+- **Retention:** `--keep 7` keeps the 7 newest snapshots in `--out` and deletes older `remembra-snapshot-*`
+  folders only after the new one is written and checked. Nothing else in the folder is touched: the
+  pre-migration copies (`remembra-predeploy-*.db`) keep their own limit, and a `*.partial` folder left by a
+  crash stays until you delete it. With a daily run, data erased from the live databases leaves the
+  snapshots within 7 days. If you publish a retention promise, change both together.
+- **Space:** each snapshot is about the size of both databases. Check the volume's free space
+  (`docker exec "$CTR" df -h /data`) before you raise `--keep`.
+- **Off the volume:** snapshots on `/data` protect against a bad change, not against losing the volume. Copy
+  the newest one somewhere else regularly:
+
+```bash
+docker exec "$CTR" ls /data/backups
+docker cp "$CTR:/data/backups/remembra-snapshot-<stamp>" .
+```
+
+Check a snapshot, and restore one with the server stopped (a running process keeps writing to the files it
+has open), from a one-off container of the same image on the same volume:
+
+```bash
+docker exec "$CTR" python -m remembra.storage.snapshot verify /data/backups/remembra-snapshot-<stamp>
+VOL=$(docker inspect "$CTR" --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}'); echo "$VOL"
+IMG=$(docker inspect "$CTR" --format '{{.Config.Image}}'); echo "$IMG"
+docker stop "$CTR"
+docker run --rm -v "$VOL":/data "$IMG" python -m remembra.storage.snapshot restore /data/backups/remembra-snapshot-<stamp> --force
+docker start "$CTR"
+```
+
+The restore verifies the snapshot first, never deletes anything (without `--force` it refuses while the
+database files exist; with it they are kept as `*.pre-restore-<stamp>`), and restores only the databases the
+snapshot holds (a snapshot from before Crew mode leaves `crew.db` alone). See
+[Crew mode: Backups](relay/crew.md#backups).
+
 ## Backups (litestream)
 
-`Dockerfile.cloud` ships litestream. To enable continuous SQLite replication, set:
+`Dockerfile.cloud` also ships litestream, for continuous replication to a bucket (a service that then holds
+your data). To enable it, set:
 
 ```
 LITESTREAM_REPLICA_URL=s3://<bucket>/remembra   # plus the bucket's credentials env vars
@@ -148,7 +205,8 @@ restore fails, the container exits** rather than booting on an empty database; s
 `LITESTREAM_ALLOW_EMPTY_START=1` to override deliberately. For `crew.db` this applies when Crew mode is on;
 with Crew mode off a failed `crew.db` restore only warns, and `crew.db` is left out of replication for that
 boot so the crew replica is never overwritten by an empty file. Without `LITESTREAM_REPLICA_URL`, litestream
-is inert and the entrypoint prints a warning on every boot that SQLite is not backed up.
+is inert and the entrypoint prints a warning on every boot that SQLite is not backed up (the scheduled
+snapshots above do not change that message).
 
 Retention: each replica keeps `LITESTREAM_RETENTION` of history (default `24h`), so data erased from a live
 database leaves its replica within about 48 hours. If you publish a retention promise, change both together.
@@ -190,8 +248,9 @@ persistent volume too, and the snapshot command needs `--crew-db`).
 
 1. Deploy the release with the flag still off and check it as in [Checking a deploy](#checking-a-deploy);
    `/health/ready` shows `components.crew.status` `disabled`.
-2. Confirm backups: `LITESTREAM_REPLICA_URL` is set (the crew replica is derived from it unless
-   `LITESTREAM_CREW_REPLICA_URL` is set), or you take snapshots (below).
+2. Confirm backups: the [scheduled snapshot](#scheduled-snapshots) task exists and its last run succeeded (or,
+   if you run litestream, `LITESTREAM_REPLICA_URL` is set; the crew replica is derived from it unless
+   `LITESTREAM_CREW_REPLICA_URL` is set).
 3. Take a snapshot now, inside the API container:
    `python -m remembra.storage.snapshot create --out /data/backups`
 4. Set `REMEMBRA_CREW_MODE=true` in the deployment's environment and restart (no rebuild is needed).
@@ -205,6 +264,8 @@ persistent volume too, and the snapshot command needs `--crew-db`).
    docker exec "$CTR" ls -l /data/crew.db
    ```
 
+   The next scheduled snapshot must say `"crew_included": true`.
+
 Crew mode assumes one server process (the image runs a single uvicorn worker). More than one process needs
 `REMEMBRA_CREW_DB_TAILER=1`.
 
@@ -216,7 +277,7 @@ first step that fixes the problem.
 1. **Flag off.** Set `REMEMBRA_CREW_MODE=false` and restart. Crew routes return 404, briefs lose the crew
    block, MCP crew tools answer "unavailable"; memory, Relay and the dashboard are unaffected. `crew.db` is
    opened for account erasure only (no crew route or job uses it), so it stays as it was apart from erased
-   accounts, and it keeps being backed up; switching the flag on again brings every crew back.
+   accounts, and the scheduled snapshots keep copying it; switching the flag on again brings every crew back.
    `/health/ready` shows `components.crew.status: "disabled"`. Agents that joined before the switch keep
    their last local view until they end, so restart them; new sessions get the plain Relay brief.
 2. **Local side.** On each machine: exit the agents, then run `remembra-crew connect --uninstall --apply`, and
@@ -229,8 +290,8 @@ first step that fixes the problem.
    boots again, whose erasure job erases them on its first run (an account with an `account_erased` receipt
    and rows in `crew.db`); keep the rollback short.
 4. **Data restore** (only if data is wrong): stop the container, then restore the snapshot taken before the
-   flip (step 3 of [Turning it on](#turning-it-on)) with `python -m remembra.storage.snapshot restore <dir>`
-   (see [Crew mode: Restoring](relay/crew.md#restoring)). With litestream, a restore needs a point in time from
+   flip (step 3 of [Turning it on](#turning-it-on)) with `python -m remembra.storage.snapshot restore <dir>`,
+   as in [Scheduled snapshots](#scheduled-snapshots). With litestream, a restore needs a point in time from
    before the problem, because the replica holds the latest state, bad data included:
    `litestream restore -timestamp <RFC3339> -o <file> <replica>` for the affected file, moved into place while
    the container is stopped. `crew.db` gets no automatic pre-migration copy; take a snapshot before an
@@ -434,5 +495,5 @@ and every rollback copy a rebuild kept), then every SQLite row they own, in one 
 
 Inside the grace period, `POST /api/v1/admin/users/{id}/activate?active=true` undoes a deletion;
 `DELETE /api/v1/admin/users/{id}?confirm=true` erases at once. Backups are not rewritten: pre-migration
-copies age out after 3 more deploys, the litestream replica within about 48 hours, and manual copies never,
-so delete those yourself.
+copies age out after 3 more deploys, scheduled snapshots once `--keep` newer ones exist, the litestream replica
+within about 48 hours, and manual copies never, so delete those yourself.

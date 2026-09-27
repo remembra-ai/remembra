@@ -219,3 +219,88 @@ async def test_cli_create_verify_restore(tmp_path: Path, monkeypatch) -> None:
     err = io.StringIO()
     assert snap.main(["verify", str(tmp_path / "nope")], out=io.StringIO(), err=err) == 1
     assert "no manifest.json" in err.getvalue()
+
+
+async def test_scheduled_create_with_keep_covers_crew_db_and_prunes_only_old_snapshots(tmp_path: Path, monkeypatch) -> None:
+    """The scheduled task (`create --out /data/backups --keep N`) on a 0.17.0 volume: the main database at
+    schema 10 with v5, and crew.db. Each run snapshots both files; only older snapshot folders are deleted."""
+    volume = tmp_path / "data"
+    db, crew_db, _crew_id = await _open_world(volume)
+    applied = sorted(await main_migrations().applied_versions(db.conn))
+    await crew_db.close()
+    await db.close()
+    assert applied == list(range(1, 11))  # 1-4, 5 (crew_agent_inbox_scoping), 6-9, 10 (account_reviews)
+    monkeypatch.setenv("REMEMBRA_DATABASE_URL", f"sqlite+aiosqlite:///{volume / 'remembra.db'}")
+    import remembra.config as config_module
+
+    monkeypatch.setattr(config_module, "_settings", None)
+    backups = volume / "backups"
+    backups.mkdir(mode=0o700)
+    # What else lives in /data/backups: pre-migration copies, a crashed run, a folder without a manifest.
+    predeploy = backups / "remembra-predeploy-4d335ce0000-20260926T000000Z.db"
+    predeploy.write_bytes(b"predeploy")
+    (backups / "remembra-snapshot-20200101T000000Z.partial").mkdir()
+    (backups / "remembra-snapshot-20200101T000000Z").mkdir()  # no manifest: not a snapshot, never deleted
+    (backups / "notes").mkdir()
+
+    stamps = iter(datetime(2026, 9, 26 + day, 3, 0, 0, tzinfo=UTC) for day in range(4))
+    monkeypatch.setattr(snap, "datetime", type("_Clock", (), {"now": staticmethod(lambda tz=None: next(stamps))}))
+    runs = []
+    for _ in range(4):
+        out, err = io.StringIO(), io.StringIO()
+        assert snap.main(["create", "--out", str(backups), "--keep", "2"], out=out, err=err) == 0, err.getvalue()
+        runs.append(json.loads(out.getvalue()))
+
+    assert [r["crew_included"] for r in runs] == [True] * 4
+    by_role = {d["role"]: d for d in runs[-1]["databases"]}
+    assert by_role["main"]["schema_version"] == 10 and by_role["crew"]["counts"]["crews"] == 1
+    assert [len(r["pruned"]) for r in runs] == [0, 0, 1, 1]
+    assert [Path(p).name for r in runs for p in r["pruned"]] == [
+        "remembra-snapshot-20260926T030000Z",
+        "remembra-snapshot-20260927T030000Z",
+    ]
+    assert sorted(p.name for p in backups.iterdir()) == [
+        "notes",
+        "remembra-predeploy-4d335ce0000-20260926T000000Z.db",
+        "remembra-snapshot-20200101T000000Z",
+        "remembra-snapshot-20200101T000000Z.partial",
+        "remembra-snapshot-20260928T030000Z",
+        "remembra-snapshot-20260929T030000Z",
+    ]
+    assert predeploy.read_bytes() == b"predeploy"
+    newest = backups / "remembra-snapshot-20260929T030000Z"
+    assert snap.verify_snapshot(newest)["verified"] is True
+    # A snapshot holds every account's data: owner-only, like the pre-migration copies.
+    assert newest.stat().st_mode & 0o777 == 0o700
+    assert {p.name: p.stat().st_mode & 0o777 for p in newest.iterdir()} == {
+        "crew.db": 0o600,
+        "manifest.json": 0o600,
+        "remembra.db": 0o600,
+    }
+
+
+def test_keep_refuses_nonsense_before_taking_a_snapshot(tmp_path: Path) -> None:
+    main_db = tmp_path / "remembra.db"
+    sqlite3.connect(main_db).close()
+    for bad in ("0", "-3", "1001"):
+        err = io.StringIO()
+        code = snap.main(
+            ["create", "--db", str(main_db), "--out", str(tmp_path / "b"), "--keep", bad], out=io.StringIO(), err=err
+        )
+        assert code == 1 and "--keep must be between 1 and 1000" in err.getvalue()
+    assert not (tmp_path / "b").exists()
+    with pytest.raises(snap.SnapshotError, match="at least 1"):
+        snap.prune_snapshots(tmp_path, 0)
+
+
+def test_prune_orders_same_second_snapshots_by_their_suffix(tmp_path: Path) -> None:
+    for name in (
+        "remembra-snapshot-20260926T030000Z",
+        "remembra-snapshot-20260926T030000Z-2",
+        "remembra-snapshot-20260926T030000Z-10",
+    ):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "manifest.json").write_text("{}")
+    deleted = snap.prune_snapshots(tmp_path, 1)
+    assert sorted(Path(p).name for p in deleted) == ["remembra-snapshot-20260926T030000Z", "remembra-snapshot-20260926T030000Z-2"]
+    assert [p.name for p in tmp_path.iterdir()] == ["remembra-snapshot-20260926T030000Z-10"]

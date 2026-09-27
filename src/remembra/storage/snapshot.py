@@ -11,6 +11,9 @@ and the backup for self-hosted installs that do not run litestream.
   rollback journal, hashed, and described in ``manifest.json`` (schema version
   and row counts of the tables a restore drill compares).
 * ``verify`` re-hashes and re-checks a snapshot.
+* ``create --keep N`` (for a scheduled task) then deletes the older snapshots in
+  the same directory, keeping the newest ``N``; nothing else there (the
+  pre-migration copies, ``*.partial`` leftovers, other files) is touched.
 * ``restore`` verifies first, never deletes anything (an existing database and
   its ``-wal``/``-shm`` files are renamed to ``*.pre-restore-<stamp>``), writes
   through a temp file plus an atomic rename, and checks the result. **Stop the
@@ -22,7 +25,7 @@ before Crew mode was ever enabled simply has no ``crew.db`` entry.
 
 CLI (prints JSON on stdout)::
 
-    python -m remembra.storage.snapshot create  [--out DIR] [--db PATH] [--crew-db PATH]
+    python -m remembra.storage.snapshot create  [--out DIR] [--db PATH] [--crew-db PATH] [--keep N]
     python -m remembra.storage.snapshot verify  SNAPSHOT_DIR
     python -m remembra.storage.snapshot restore SNAPSHOT_DIR [--db PATH] [--crew-db PATH] [--force]
 """
@@ -34,6 +37,8 @@ import contextlib
 import hashlib
 import json
 import os
+import re
+import shutil
 import sqlite3
 import sys
 from collections.abc import Callable, Sequence
@@ -49,6 +54,10 @@ CREW_FILE: Final = "crew.db"
 SIDE_SUFFIXES: Final = ("-wal", "-shm", "-journal")
 # Row counts recorded for the main database (the crew database records every crew table).
 MAIN_COUNT_TABLES: Final = ("memories", "entities", "api_keys", "agent_inbox")
+SNAPSHOT_PREFIX: Final = "remembra-snapshot-"
+# A complete snapshot directory as create_snapshot names it: the UTC stamp, then -2, -3, ... for a clash.
+SNAPSHOT_DIR_RE: Final = re.compile(r"^remembra-snapshot-(\d{8}T\d{6}Z)(?:-(\d+))?$")
+KEEP_MAX: Final = 1000
 
 
 class SnapshotError(Exception):
@@ -159,14 +168,16 @@ def create_snapshot(
     if not paths.main.is_file():
         raise SnapshotError(f"main database {paths.main} does not exist")
     taken = now()
-    out_root.mkdir(parents=True, exist_ok=True)
-    target = out_root / f"remembra-snapshot-{_utc_stamp(taken)}"
+    out_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    target = out_root / f"{SNAPSHOT_PREFIX}{_utc_stamp(taken)}"
     suffix = 1
     while target.exists():
         suffix += 1
-        target = out_root / f"remembra-snapshot-{_utc_stamp(taken)}-{suffix}"
+        target = out_root / f"{SNAPSHOT_PREFIX}{_utc_stamp(taken)}-{suffix}"
     work = target.with_name(target.name + ".partial")
-    work.mkdir(parents=True)
+    # Owner-only, like the pre-migration copies: a snapshot holds every account's data.
+    work.mkdir(mode=0o700, parents=True)
+    os.chmod(work, 0o700)  # mkdir's mode is filtered by the umask
     try:
         databases = [_copy_db(paths.main, work / MAIN_FILE, "main")]
         if paths.crew.is_file():
@@ -178,6 +189,8 @@ def create_snapshot(
             "databases": databases,
         }
         (work / MANIFEST_NAME).write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+        for child in work.iterdir():
+            os.chmod(child, 0o600)
         os.replace(work, target)  # a snapshot directory only ever exists complete
     except BaseException:
         for child in work.glob("*"):
@@ -185,6 +198,40 @@ def create_snapshot(
         work.rmdir()
         raise
     return {**manifest, "path": str(target)}
+
+
+def _snapshot_order(name: str) -> tuple[str, int] | None:
+    """Sort key of a directory ``create_snapshot`` named (oldest first), None for anything else."""
+    match = SNAPSHOT_DIR_RE.match(name)
+    if match is None:
+        return None
+    return match.group(1), int(match.group(2) or 1)
+
+
+def prune_snapshots(out_root: Path, keep: int, *, protect: Path | None = None) -> list[str]:
+    """Delete all but the newest ``keep`` snapshot directories in ``out_root``; returns the deleted paths.
+
+    Only complete snapshots (a ``remembra-snapshot-<stamp>[-n]`` directory with a
+    manifest) count and are deleted. ``protect`` (the snapshot just taken) is never
+    deleted. Everything else in ``out_root`` is left alone.
+    """
+    if keep < 1:
+        raise SnapshotError("--keep must be at least 1")
+    found: list[tuple[tuple[str, int], Path]] = []
+    for child in out_root.iterdir():
+        order = _snapshot_order(child.name)
+        if order is None or child.is_symlink() or not child.is_dir() or not (child / MANIFEST_NAME).is_file():
+            continue
+        found.append((order, child))
+    found.sort()
+    older = [path for _order, path in found[:-keep]] if len(found) > keep else []
+    deleted: list[str] = []
+    for path in older:
+        if protect is not None and path.resolve() == protect.resolve():
+            continue
+        shutil.rmtree(path)
+        deleted.append(str(path))
+    return deleted
 
 
 def _read_manifest(snapshot_dir: Path) -> dict[str, Any]:
@@ -284,6 +331,12 @@ def _parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
     create = sub.add_parser("create", help="take a consistent snapshot (safe while the server runs)")
     create.add_argument("--out", help="parent directory (default: <main db dir>/backups)")
+    create.add_argument(
+        "--keep",
+        type=int,
+        metavar="N",
+        help=f"after the new snapshot is written, delete older snapshots in --out, keeping the newest N (1-{KEEP_MAX})",
+    )
     verify = sub.add_parser("verify", help="re-hash and integrity-check a snapshot")
     verify.add_argument("snapshot")
     restore = sub.add_parser("restore", help="restore a snapshot (stop the server first)")
@@ -305,7 +358,12 @@ def main(argv: Sequence[str] | None = None, *, out: Any = None, err: Any = None)
         else:
             paths = default_paths(args.db, args.crew_db)
             if args.command == "create":
-                result = create_snapshot(paths, Path(args.out) if args.out else paths.main.parent / "backups")
+                if args.keep is not None and not 1 <= args.keep <= KEEP_MAX:
+                    raise SnapshotError(f"--keep must be between 1 and {KEEP_MAX}")
+                out_root = Path(args.out) if args.out else paths.main.parent / "backups"
+                result = create_snapshot(paths, out_root)
+                if args.keep is not None:
+                    result["pruned"] = prune_snapshots(out_root, args.keep, protect=Path(result["path"]))
             else:
                 result = restore_snapshot(Path(args.snapshot), paths, force=args.force)
     except (SnapshotError, sqlite3.Error, OSError) as e:

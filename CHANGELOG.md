@@ -56,6 +56,11 @@ A required check on the git host is not part of this release.
 - **Seats and teammates.** A plan's live-session limit counts running top-level sessions. An agent stopped on
   its credits gives its seat to the agent that picks up its baton, and sub-agents use their parent's seat. On
   a plan with crew teammates (Team), the crew owner adds people who have joined their team.
+- **Scheduled snapshots of both databases.** `python -m remembra.storage.snapshot create --keep N` copies the
+  main database and `crew.db` together (with checksums, while the server runs) and then deletes all but the
+  newest N snapshots; each snapshot is readable by the server's user only. [Operations: Scheduled
+  snapshots](docs/OPERATIONS.md#scheduled-snapshots) shows the Coolify Scheduled Task (daily, `--keep 7`)
+  and how to copy snapshots off the volume. No new service holds your data.
 - Optional fields for later releases: `provider`, `capabilities`, `sub_agent_id`, `run_id` and
   `context_window` on join; `decisions`, `state_before` and `run_id` on checkpoints; a file's sha256 on
   heartbeat footprints; `evidence` on decisions. Leaving them out changes nothing.
