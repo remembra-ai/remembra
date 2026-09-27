@@ -21,6 +21,7 @@ from remembra.auth.middleware import CurrentUser, has_permission, require_memory
 from remembra.cloud.limits import gate_write, record_relay_usage
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
+from remembra.security.secrets import scrub
 from remembra.services.agent_session import AgentSessionService
 from remembra.services.relay import strip_reserved_metadata
 
@@ -47,13 +48,16 @@ def _require(current_user: Any, permission: str) -> None:
 
 
 def screen_text(request: Request, text: str, apply_pii: bool = True) -> tuple[str, float, str | None]:
-    """Same content protections as POST /memories: PII policy + sanitizer.
+    """Same content protections as POST /memories: credential redaction, PII policy, sanitizer.
 
+    Credentials are redacted first, as ``StoreRequest`` does for a memory, so
+    a PII pattern cannot cut a key apart and leave the rest of it readable.
     Returns ``(text, trust_score, checksum)``; raises 400 when the PII policy
     blocks the content outright. ``apply_pii=False`` is for text assembled
     from values that were already PII-scrubbed one by one (relay close-out):
-    only the sanitizer runs.
+    the PII policy is skipped.
     """
+    text = scrub(text)
     pii_detector = getattr(request.app.state, "pii_detector", None) if apply_pii else None
     if pii_detector:
         pii_result = pii_detector.scan(text, source="user_input")

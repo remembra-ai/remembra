@@ -16,6 +16,17 @@ def _scrub_secrets(value: str) -> str:
     return scrub(strip_controls(value))
 
 
+def _scrub_metadata(value: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Credentials redacted (SEC-23) from every string in client metadata, at any depth.
+    Imported lazily for the same reason as :func:`_scrub_secrets`."""
+    if value is None:
+        return None
+    from remembra.security.secrets import scrub_value
+
+    cleaned = scrub_value(value)
+    return cleaned if isinstance(cleaned, dict) else value
+
+
 # Agent-hygiene types (AGT-5): "checkpoint" = short-lived progress note (default
 # TTL applied on store), "handoff" = a session snapshot stored as ONE unit (never
 # fact-split), "status" = current value for a key, upserted via the session
@@ -135,6 +146,12 @@ class Memory(BaseModel):
     def facts_without_secrets(cls, v: list[str]) -> list[str]:
         return [_scrub_secrets(f) for f in v]
 
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any]) -> dict[str, Any]:
+        # SEC-23: metadata (status values, client tags, the relay block) is persisted like content.
+        return _scrub_metadata(v) or {}
+
 
 RETRIEVAL_MODES = ("auto", "balanced", "debug", "operational", "strategic")
 
@@ -199,6 +216,11 @@ class StoreRequest(BaseModel):
         if v not in valid:
             raise ValueError(f"visibility must be one of: {', '.join(valid)}")
         return v
+
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _scrub_metadata(v) or {}
 
     metadata: dict[str, Any] = Field(default_factory=dict)
     ttl: str | None = Field(
@@ -492,6 +514,11 @@ class RecallResult(BaseModel):
         # scrubbed on the way out.
         return _scrub_secrets(v)
 
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _scrub_metadata(v) or {}
+
 
 class DivergenceDetail(BaseModel):
     """Details about a detected divergence between recency and semantic signals."""
@@ -576,6 +603,11 @@ class MemorySummary(BaseModel):
     def content_without_secrets(cls, v: str) -> str:
         return _scrub_secrets(v)
 
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _scrub_metadata(v) or {}
+
 
 class UpdateRequest(BaseModel):
     content: str
@@ -585,6 +617,11 @@ class UpdateRequest(BaseModel):
     @classmethod
     def content_without_secrets(cls, v: str) -> str:
         return _scrub_secrets(v)
+
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _scrub_metadata(v)
 
 
 class UpdateResponse(BaseModel):
@@ -620,6 +657,11 @@ class SupersedeRequest(BaseModel):
     @classmethod
     def content_without_secrets(cls, v: str) -> str:
         return _scrub_secrets(v)
+
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _scrub_metadata(v)
 
 
 class SupersedeResponse(BaseModel):
@@ -735,6 +777,11 @@ class ConversationMessage(BaseModel):
         # SEC-23: redact before conversation extraction sends it to the LLM.
         return _scrub_secrets(v)
 
+    @field_validator("metadata")
+    @classmethod
+    def metadata_without_secrets(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _scrub_metadata(v)
+
 
 class IngestOptions(BaseModel):
     """Options for conversation ingestion."""
@@ -776,6 +823,11 @@ class ConversationIngestRequest(BaseModel):
         description="Context metadata (channel, timezone, etc.)",
     )
     options: IngestOptions = Field(default_factory=IngestOptions)
+
+    @field_validator("context")
+    @classmethod
+    def context_without_secrets(cls, v: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _scrub_metadata(v)
 
 
 class ExtractedFact(BaseModel):

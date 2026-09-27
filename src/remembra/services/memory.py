@@ -2704,12 +2704,13 @@ class MemoryService:
         )
         await self.qdrant.upsert(memory)
 
-        # 5. Update metadata in SQLite (also refreshes the FTS row)
+        # 5. Update metadata in SQLite (also refreshes the FTS row). The Memory's fields, not the
+        # inputs: its validators redacted credentials (SEC-23), so SQLite and Qdrant hold the same text.
         await self.db.update_memory(
             memory_id=memory_id,
-            content=new_content,
-            extracted_facts=extracted_facts,
-            metadata=merged_metadata,
+            content=memory.content,
+            extracted_facts=memory.extracted_facts,
+            metadata=memory.metadata,
         )
 
         # 6. Update entities (delete old links, create new ones) — background
