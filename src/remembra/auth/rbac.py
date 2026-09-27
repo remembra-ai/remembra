@@ -4,17 +4,24 @@ Role-Based Access Control (RBAC) for Remembra.
 Defines roles, permissions, and enforcement helpers.
 
 Roles:
-  admin   – Full access: manage keys, manage users, read/write memories, export audit logs.
-  editor  – Read/write memories, manage own keys.
-  viewer  – Read-only: recall memories, list entities.
+  admin   – every permission. Created only with the server's master key (an admin
+            key can then give another of the account's keys the admin role).
+  editor  – every permission except the ``admin:*`` ones.
+  viewer  – read-only: recall memories, read entities, list keys.
 
-Permissions are stored alongside API keys (via a join table) and enforced
-via FastAPI dependencies that compose with the existing ``CurrentUser`` flow.
+``ROLE_PERMISSIONS`` below is the only role table: ``has_permission`` in
+``remembra.auth.middleware``, the ``remembra.auth.scopes`` dependencies and
+``GET /admin/permissions`` all read it, and ``permission_table()`` renders it
+for docs/guides/rbac.md and SECURITY.md (tests keep those equal to it).
+
+A key's role is stored in the ``api_key_roles`` table. Explicit scopes on a
+key only ever narrow its role; they never add a permission the role lacks.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -60,6 +67,9 @@ class Permission(StrEnum):
     ADMIN_EXPORT = "admin:export"
     ADMIN_USERS = "admin:users"
 
+    # Account changes made with an API key (accounts created by API signup)
+    ACCOUNT_MANAGE = "account:manage"
+
 
 # Credential ids that are not real API keys (shared by every JWT / dev session).
 SYNTHETIC_KEY_IDS = frozenset({"jwt_auth", "dev_key"})
@@ -74,10 +84,13 @@ ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
         Permission.MEMORY_STORE,
         Permission.MEMORY_RECALL,
         Permission.MEMORY_DELETE,
+        Permission.KEY_CREATE,
         Permission.KEY_LIST,
+        Permission.KEY_REVOKE,
         Permission.ENTITY_READ,
         Permission.WEBHOOK_MANAGE,
         Permission.CONFLICT_MANAGE,
+        Permission.ACCOUNT_MANAGE,
     },
     Role.VIEWER: {
         Permission.MEMORY_RECALL,
@@ -85,6 +98,63 @@ ROLE_PERMISSIONS: dict[Role, set[Permission]] = {
         Permission.ENTITY_READ,
     },
 }
+
+# What each permission lets a key do, in the words the docs use.
+PERMISSION_SUMMARIES: dict[Permission, str] = {
+    Permission.MEMORY_STORE: (
+        "Store, change, pin, import and ingest memories; send recall feedback; write inbox messages, "
+        "relay handoffs and session status; change spaces, teams and project links; recompute the brain "
+        "layer; start audio capture"
+    ),
+    Permission.MEMORY_RECALL: (
+        "Recall, list, read and export memories; read spaces, inbox messages, relay briefs and trails, "
+        "conflicts, timelines and brain insights"
+    ),
+    Permission.MEMORY_DELETE: "Delete memories and clean up expired or decayed ones",
+    Permission.KEY_CREATE: "Create API keys (never above the caller's own role, never admin) and rename them",
+    Permission.KEY_LIST: "List the account's API keys",
+    Permission.KEY_REVOKE: "Revoke or delete API keys (an API key only ones with no more access than itself)",
+    Permission.WEBHOOK_MANAGE: "Create, read, change and delete webhooks and read their deliveries",
+    Permission.CONFLICT_MANAGE: "Resolve or dismiss memory conflicts",
+    Permission.ENTITY_READ: "Read entities, their relationships and the memories that mention them",
+    Permission.ADMIN_AUDIT: "Read the account's audit log",
+    Permission.ADMIN_EXPORT: "Export the account's audit log as JSON or CSV",
+    Permission.ADMIN_USERS: "Nothing yet: no route checks it",
+    Permission.ACCOUNT_MANAGE: "Redeem a promo code; email the verification link of an account created by API signup",
+}
+
+# Attribute a permission-checking FastAPI dependency carries, so a route's
+# required permissions can be read from its dependency tree.
+PERMISSION_ATTR = "__remembra_permission__"
+
+
+def effective_permissions(role: str, scopes: Iterable[str] | None = None) -> frozenset[Permission]:
+    """What a credential may do: its role's permissions, narrowed to ``scopes`` when it has any.
+
+    Scopes only ever remove permissions: a viewer key scoped to ``memory:store``
+    still cannot store. An unknown role holds no permission.
+    """
+    try:
+        granted = ROLE_PERMISSIONS[Role(role)]
+    except ValueError:
+        return frozenset()
+    if scopes:
+        allowed = set(scopes)
+        return frozenset(p for p in granted if p.value in allowed)
+    return frozenset(granted)
+
+
+def permission_table() -> str:
+    """The role/permission table as Markdown, as docs/guides/rbac.md and SECURITY.md show it."""
+    roles = (Role.ADMIN, Role.EDITOR, Role.VIEWER)
+    lines = [
+        "| Permission | " + " | ".join(role.value for role in roles) + " | What it allows |",
+        "|---|" + ":---:|" * len(roles) + "---|",
+    ]
+    for perm in Permission:
+        marks = " | ".join("yes" if perm in ROLE_PERMISSIONS[role] else "no" for role in roles)
+        lines.append(f"| `{perm.value}` | {marks} | {PERMISSION_SUMMARIES[perm]} |")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -103,13 +173,8 @@ class KeyRole:
 
     @property
     def permissions(self) -> set[Permission]:
-        """Effective permissions from role + any explicit scope overrides."""
-        perms = set(ROLE_PERMISSIONS.get(self.role, set()))
-        # Scopes can further restrict permissions (whitelist model)
-        if self.scopes:
-            allowed = {Permission(s) for s in self.scopes if s in {p.value for p in Permission}}
-            perms = perms & allowed
-        return perms
+        """Effective permissions: the role's, narrowed by any explicit scopes."""
+        return set(effective_permissions(self.role, self.scopes))
 
     def has_permission(self, perm: Permission) -> bool:
         return perm in self.permissions

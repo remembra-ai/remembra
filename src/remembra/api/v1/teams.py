@@ -10,12 +10,14 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
-from remembra.auth.middleware import CurrentUser
+from remembra.auth.middleware import CurrentUser, require_memory_store
 from remembra.cloud.email import EmailService, email_service_or_none
 from remembra.config import get_settings
 from remembra.core.limiter import limiter
 from remembra.teams.manager import TeamManager
 
+# Every route that changes a team needs memory:store (like the spaces it shares),
+# so viewer keys can read teams but never change one.
 router = APIRouter(prefix="/teams", tags=["teams"])
 
 log = structlog.get_logger(__name__)
@@ -193,6 +195,7 @@ class LinkSpaceRequest(BaseModel):
     status_code=status.HTTP_201_CREATED,
     summary="Create team",
     description="Create a new team. You become the owner.",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("10/minute")
 async def create_team(
@@ -273,6 +276,7 @@ async def get_team(
     response_model=TeamDetail,
     summary="Update team",
     description="Update team settings. Admin or owner only.",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("20/minute")
 async def update_team(
@@ -303,6 +307,7 @@ async def update_team(
     response_model=None,
     summary="Delete team",
     description="Delete the team. Owner only.",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("5/minute")
 async def delete_team(
@@ -351,6 +356,7 @@ async def list_members(
     response_model=MemberInfo,
     summary="Update member role",
     description="Change a member's role. Admin or owner only.",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("10/minute")
 async def update_member_role(
@@ -389,6 +395,7 @@ async def update_member_role(
     response_model=None,
     summary="Remove member",
     description="Remove a member from the team. Admin or owner only.",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("10/minute")
 async def remove_member(
@@ -417,6 +424,7 @@ async def remove_member(
     response_model=None,
     summary="Leave team",
     description="Leave the team. Owners cannot leave.",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("10/minute")
 async def leave_team(
@@ -444,6 +452,7 @@ async def leave_team(
     status_code=status.HTTP_201_CREATED,
     summary="Invite member",
     description="Send an invite email. Admin or owner only.",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("20/minute")
 async def invite_member(
@@ -528,6 +537,7 @@ async def list_invites(
     response_model=None,
     summary="Revoke invite",
     description="Revoke a pending invite. Admin or owner only.",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("10/minute")
 async def revoke_invite(
@@ -550,6 +560,7 @@ async def revoke_invite(
     response_model=AcceptInviteResponse,
     summary="Accept invite",
     description="Accept a team invite using the token from the email.",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("10/minute")
 async def accept_invite(
@@ -588,6 +599,7 @@ async def accept_invite(
     status_code=status.HTTP_201_CREATED,
     summary="Link space to team",
     description="Link a memory space to the team. Admin or owner only.",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("20/minute")
 async def link_space(
@@ -636,6 +648,7 @@ async def list_team_spaces(
     response_model=None,
     summary="Unlink space from team",
     description="Unlink a space from the team. Admin or owner only.",
+    dependencies=[require_memory_store()],
 )
 @limiter.limit("10/minute")
 async def unlink_space(

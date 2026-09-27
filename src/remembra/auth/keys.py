@@ -215,12 +215,24 @@ class APIKeyManager:
             await self._deactivate_published_key(raw_key, cache_key)
             return None
 
-        # 1) In-memory cache (revalidate active flag against the DB)
+        # 1) In-memory cache. The active flag, role, scopes and projects are read
+        #    again from the DB, so a revocation or an access change made by any
+        #    process applies to the key's next request.
         if cache_key in _key_cache:
             cached = _key_cache[cache_key]
-            cursor = await self.db.conn.execute("SELECT active FROM api_keys WHERE id = ?", (cached["id"],))
-            active_row = await cursor.fetchone()
-            if active_row and active_row[0]:
+            cursor = await self.db.conn.execute(
+                """
+                SELECT k.active, COALESCE(r.role, 'editor'), r.scopes, r.project_ids
+                FROM api_keys k
+                LEFT JOIN api_key_roles r ON k.id = r.api_key_id
+                WHERE k.id = ?
+                """,
+                (cached["id"],),
+            )
+            current = await cursor.fetchone()
+            if current and current[0]:
+                cached = self._normalize_key_data({**cached, "role": current[1], "scopes": current[2], "project_ids": current[3]})
+                _key_cache[cache_key] = cached
                 await self.db.update_api_key_last_used(cached["id"])
                 log.debug("api_key_validated_cached", key_id=cached["id"])
                 return cached

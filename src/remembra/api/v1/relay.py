@@ -45,6 +45,7 @@ from remembra.auth.middleware import (
     CurrentUser,
     get_client_ip,
     has_permission,
+    require_memory_store,
     resolve_project_access,
 )
 from remembra.client.project import normalize_project_id
@@ -601,10 +602,9 @@ def _relation(value: str) -> str:
     return relation
 
 
-@router.post("/projects/links", summary="Link two projects")
+@router.post("/projects/links", summary="Link two projects", dependencies=[require_memory_store()])
 @limiter.limit("60/minute")
 async def add_link(request: Request, body: LinkRequest, current_user: CurrentUser) -> dict[str, Any]:
-    _require(current_user, "memory:store")
     source = _check_project(current_user, normalize_project_id(body.from_project))
     target = _check_project(current_user, normalize_project_id(body.to_project))
     agent, _ = effective_agent(request, current_user, None)
@@ -629,7 +629,7 @@ async def list_links(
     return {"project_id": project, "count": len(items), "items": items}
 
 
-@router.delete("/projects/links", summary="Remove a project link")
+@router.delete("/projects/links", summary="Remove a project link", dependencies=[require_memory_store()])
 @limiter.limit("60/minute")
 async def remove_link(
     request: Request,
@@ -638,7 +638,6 @@ async def remove_link(
     to_project: Annotated[str, Query(min_length=1, max_length=128)],
     relation: Annotated[str, Query(max_length=40)] = "related",
 ) -> dict[str, Any]:
-    _require(current_user, "memory:store")
     source = _check_project(current_user, normalize_project_id(from_project))
     target = _check_project(current_user, normalize_project_id(to_project))
     removed = await _service(request).registry.remove_link(current_user.user_id, source, target, _relation(relation))
@@ -650,7 +649,7 @@ async def remove_link(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/session/close", summary="Close a session: store ONE structured handoff")
+@router.post("/session/close", summary="Close a session: store ONE structured handoff", dependencies=[require_memory_store()])
 @limiter.limit("60/minute")
 async def close_session(
     request: Request,
@@ -669,7 +668,6 @@ async def close_session(
     A close is a relay event: it never uses smart credits (the handoff is stored
     without LLM enrichment); it counts toward the plan's relay burst limit and
     soft monthly cap."""
-    _require(current_user, "memory:store")
     await relay_guard(request, response, current_user.user_id)
     agent, verified = effective_agent(request, current_user, body.agent_id)
     if not agent:

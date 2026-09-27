@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException
 
 from remembra.audio_adapter import AudioAdapter
-from remembra.auth.middleware import CurrentUser
+from remembra.auth.middleware import CurrentUser, require_memory_store
 
 log = logging.getLogger(__name__)
 
@@ -23,12 +23,12 @@ _adapter = AudioAdapter()
 _session_owners: dict[str, str] = {}
 
 
-@router.post("/start")
+@router.post("/start", dependencies=[require_memory_store()])
 async def start_audio(
     current_user: CurrentUser,
     body: dict[str, Any] = Body(default_factory=dict),
 ) -> dict[str, Any]:
-    """Start audio capture (requires auth). Optional body: { meeting_id }."""
+    """Start audio capture (needs ``memory:store``). Optional body: { meeting_id }."""
     meeting_id = (body or {}).get("meeting_id")
     try:
         session = _adapter.start(meeting_id=meeting_id)
@@ -39,12 +39,12 @@ async def start_audio(
     return {"session": _adapter.session_dict(session)}
 
 
-@router.post("/stop")
+@router.post("/stop", dependencies=[require_memory_store()])
 async def stop_audio(
     current_user: CurrentUser,
     body: dict[str, Any] = Body(...),
 ) -> dict[str, Any]:
-    """Stop capture and transcribe (requires auth). Body: { session_id, transcribe?: bool }."""
+    """Stop capture and transcribe (needs ``memory:store``). Body: { session_id, transcribe?: bool }."""
     session_id = (body or {}).get("session_id")
     if not session_id:
         raise HTTPException(status_code=400, detail="'session_id' is required")

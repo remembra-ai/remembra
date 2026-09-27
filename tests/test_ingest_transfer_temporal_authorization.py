@@ -196,10 +196,24 @@ async def test_role_matrix_preserves_allowed_project_access(auth_api, endpoint, 
 
 @pytest.mark.parametrize("endpoint", ENDPOINTS, ids=lambda e: e.path)
 async def test_explicit_required_scope_is_sufficient(auth_api, endpoint):
-    auth_api.user.role = "viewer"
+    auth_api.user.role = "editor"
     auth_api.user.scopes = [endpoint.permission]
     response = await call_endpoint(auth_api, endpoint)
     assert response.status_code in (200, 201), response.text
+
+
+@pytest.mark.parametrize("endpoint", ENDPOINTS, ids=lambda e: e.path)
+async def test_scope_never_lifts_a_viewer_above_read_only(auth_api, endpoint):
+    # Scopes narrow a role and never widen it (truth audit P-347): a viewer key
+    # scoped to memory:store or memory:delete is still read-only.
+    auth_api.user.role = "viewer"
+    auth_api.user.scopes = [endpoint.permission]
+    response = await call_endpoint(auth_api, endpoint)
+    if endpoint.permission == "memory:recall":
+        assert response.status_code in (200, 201), response.text
+    else:
+        assert response.status_code == 403, response.text
+        assert_no_effects(auth_api)
 
 
 @pytest.mark.parametrize("path", ["/temporal/memory/own/decay", "/temporal/archive/own", "/temporal/archive/own/restore"])

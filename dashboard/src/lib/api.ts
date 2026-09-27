@@ -1,4 +1,5 @@
 // API client for Remembra backend
+import type { CreatableKeyRole } from './keyRoles';
 
 // Use environment variable for API URL, fallback to relative path for dev proxy
 const API_BASE = import.meta.env.VITE_API_URL
@@ -687,7 +688,7 @@ class ApiClient {
 
   async createKey(
     name: string,
-    permission: 'admin' | 'editor' | 'viewer',
+    permission: CreatableKeyRole,
     projectIds: string[] = [],
   ): Promise<CreateApiKeyResponse> {
     return this.fetchApi<CreateApiKeyResponse>('/keys', {
@@ -1118,7 +1119,7 @@ export interface ApiKeyListResponse {
 
 export interface CreateApiKeyRequest {
   name: string;
-  permission: 'admin' | 'editor' | 'viewer';
+  permission: CreatableKeyRole;
   project_ids?: string[];
 }
 

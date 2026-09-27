@@ -14,6 +14,7 @@ from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 
 from remembra.auth.keys import APIKeyManager
+from remembra.auth.rbac import PERMISSION_ATTR, Permission, effective_permissions
 from remembra.config import get_settings
 
 log = structlog.get_logger(__name__)
@@ -530,48 +531,14 @@ RequireMasterKey = Annotated[None, Depends(require_master_key)]
 # RBAC Permission Checking
 # ---------------------------------------------------------------------------
 
-# Role hierarchy: admin > editor > viewer
-# Permission names aligned with remembra.auth.rbac.Permission
-ROLE_PERMISSIONS = {
-    "admin": {
-        "memory:store",
-        "memory:recall",
-        "memory:delete",
-        "entity:read",
-        "entity:merge",
-        "webhook:manage",
-        "admin:audit",
-        "admin:users",
-        "key:create",
-        "key:list",
-        "key:revoke",
-    },
-    "editor": {
-        "memory:store",
-        "memory:recall",
-        "memory:delete",
-        "entity:read",
-        "key:list",
-        "webhook:manage",
-        "conflict:manage",
-    },
-    "viewer": {
-        "memory:recall",
-        "entity:read",
-        "key:list",
-    },
-}
-
 
 def has_permission(user: AuthenticatedUser, permission: str) -> bool:
-    """Check if user has a specific permission based on their role."""
-    role_perms = ROLE_PERMISSIONS.get(user.role, set())
+    """True when the user's role holds ``permission`` and its scopes, if any, keep it.
 
-    # If user has explicit scopes, use those instead of role defaults
-    if user.scopes:
-        return permission in user.scopes
-
-    return permission in role_perms
+    The role table is ``remembra.auth.rbac.ROLE_PERMISSIONS`` (the only one).
+    Scopes narrow a role and never widen it.
+    """
+    return permission in {p.value for p in effective_permissions(user.role, user.scopes)}
 
 
 def require_permission(permission: str) -> Any:
@@ -579,32 +546,33 @@ def require_permission(permission: str) -> Any:
     Dependency factory that requires a specific permission.
 
     Usage:
-        @router.post("/memories")
-        async def store_memory(
-            _perm: RequirePermission("memory:create"),
-            current_user: CurrentUser,
-        ):
-            ...
+        @router.post("/memories", dependencies=[require_permission("memory:store")])
+        async def store_memory(current_user: CurrentUser): ...
+
+    Declared in the route decorator, the check runs before the request body is
+    validated. An unknown permission name fails at import time, not at request time.
     """
+    required = Permission(permission)
 
     async def check_permission(current_user: CurrentUser) -> None:
-        if not has_permission(current_user, permission):
+        if not has_permission(current_user, required.value):
             log.warning(
                 "permission_denied",
                 user_id=current_user.user_id,
                 role=current_user.role,
-                required_permission=permission,
+                required_permission=required.value,
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permission denied: {permission} required",
+                detail=f"Permission denied: {required.value} required",
             )
         return None
 
+    setattr(check_permission, PERMISSION_ATTR, required)
     return Depends(check_permission)
 
 
-# Permission dependency factories (aligned with remembra.auth.rbac.Permission)
+# Permission dependency factories (one per remembra.auth.rbac.Permission a route checks this way)
 def require_memory_store() -> Any:
     return require_permission("memory:store")
 
@@ -621,17 +589,13 @@ def require_entity_read() -> Any:
     return require_permission("entity:read")
 
 
-def require_entity_merge() -> Any:
-    return require_permission("entity:merge")
-
-
 def require_webhook_manage() -> Any:
     return require_permission("webhook:manage")
 
 
-def require_audit_read() -> Any:
-    return require_permission("admin:audit")
+def require_conflict_manage() -> Any:
+    return require_permission("conflict:manage")
 
 
-def require_user_manage() -> Any:
-    return require_permission("admin:users")
+def require_account_manage() -> Any:
+    return require_permission("account:manage")

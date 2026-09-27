@@ -572,7 +572,7 @@ class Settings(BaseSettings):
     )
     jwt_expiration_hours: int = Field(
         24,  # 24 hours (OWASP recommendation: 1 day max for web sessions)
-        description="JWT token expiration in hours",
+        description="Not read yet: dashboard sessions last a fixed 24 hours (auth/users.py JWT_EXPIRATION_HOURS)",
     )
 
     # Rate Limiting
