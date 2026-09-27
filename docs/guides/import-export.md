@@ -201,6 +201,12 @@ counts (`imported`, `skipped`, `errors`). Split a larger export into several fil
 stores up to 100 pre-structured memories per call on paid plans (10 on Free), up to 50,000 characters each
 (8,000 on Free), in an 8 MiB request, without fact extraction.
 
+### Agent-scoped keys
+
+A key scoped to one agent imports as that agent. Every memory it imports gets that `agent_id`. If any item's
+`metadata.agent_id` (or the `X-Remembra-Agent-Id` header) names another agent, the whole import is refused
+(403) and nothing is stored. To keep other agents' ids, import with an unscoped key.
+
 ## Data Migration
 
 ### Between Remembra Instances

@@ -456,7 +456,7 @@
       <dl class="trust" aria-label="How your memory is protected">
         <div><dt>Redacted</dt><dd>Keys, tokens and other secrets are stripped out before anything is saved.</dd></div>
         <div><dt>Isolated</dt><dd>Every account's memory is walled off, and project-scoped keys only see their own projects.</dd></div>
-        <div><dt>Attributed</dt><dd>Every handoff records the agent, session and time that wrote it, and whether its facts came from git or from the agent. Give each agent its own scoped key and it can't write as another.</dd></div>
+        <div><dt>Attributed</dt><dd>A relay handoff records the agent, session and time that wrote it, and whether the client says its facts came from git or from the agent. Give each agent its own scoped key and it can't write as another.</dd></div>
         <div><dt>Open</dt><dd>The core is MIT-licensed open source. Read it, run it, <a href="https://docs.remembra.dev/getting-started/docker/">host it yourself</a>.</dd></div>
       </dl>
     </div>
