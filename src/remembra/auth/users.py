@@ -329,7 +329,8 @@ class UserManager:
             # with it opens a review of everything set up before.
             #
             # The email is now verified (which also lets Sign in with Google
-            # link to it), unless another account already verified the same
+            # link to it: a provider links by email only into a verified
+            # account), unless another account already verified the same
             # address: one free account per verified email.
             if await email_verified_on_another_account(self.db, user_data["email"], exclude_user_id=user_data["id"]):
                 log.warning("password_reset_email_verified_elsewhere", user_id=user_data["id"])
@@ -346,18 +347,35 @@ class UserManager:
             # (they are listed in the review, like the API keys).
             await security_state.invalidate_user_sessions(self.db, user_data["id"], keep_app_connections=True)
             await account_review.audit_opened(self.db, review, ip=None)
+            # Every sign-in asks for 2FA while it is on. 2FA set up before this
+            # proof may be the squatter's, so it goes now, with the reset that
+            # proves the mailbox, instead of locking the owner out.
+            await account_review.turn_off_unproven_two_factor(
+                self.db, review, ip=None, method=account_review.ORIGIN_PASSWORD_RESET
+            )
             await account_review.finish_if_empty(self.db, review, ip=None)
         elif await account_review.is_pending(self.db, user_data["id"]):
-            # A review still open (e.g. from Sign in with Google): the password
-            # is now the mailbox owner's, so signing in with it may finish it.
-            await account_review.open_review(
+            # A review still open: the password is now the mailbox owner's, so
+            # signing in with it may finish it.
+            review = await account_review.open_review(
                 self.db,
                 user_data["id"],
                 origin=account_review.ORIGIN_PASSWORD_RESET,
                 verified_at=account_review.now_iso(),
                 totp_enabled=False,
             )
-            await security_state.invalidate_user_sessions(self.db, user_data["id"], keep_app_connections=True)
+            cutoff = await security_state.invalidate_user_sessions(self.db, user_data["id"], keep_app_connections=True)
+            # Apps connected since the review opened were signed in with the
+            # proven password this reset replaces (it may be known to someone
+            # else): they are disconnected, as on any reset. Apps from before
+            # verification stay listed in the review for the owner to decide.
+            await account_review.revoke_connections_since_review(
+                self.db, review, until_ms=cutoff, ip=None, method=account_review.ORIGIN_PASSWORD_RESET
+            )
+            await account_review.turn_off_unproven_two_factor(
+                self.db, review, ip=None, method=account_review.ORIGIN_PASSWORD_RESET
+            )
+            await account_review.finish_if_empty(self.db, review, ip=None)
         else:
             # A reset means the old password may be compromised: kill every
             # session, app connections included.
@@ -644,8 +662,7 @@ async def email_verified_on_another_account(db: Any, email: str, *, exclude_user
     tenants (``cloud_tenants``, which have no users row). Every path that
     marks an address verified or creates a pre-verified account calls it:
     dashboard verify-email, API-signup verify-email, password reset, and
-    Sign in with Google / GitHub account creation or Google linking into an
-    unverified account.
+    Sign in with Google / GitHub account creation.
     """
     import sqlite3
 

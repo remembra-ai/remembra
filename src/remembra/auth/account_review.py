@@ -4,20 +4,19 @@ Accounts made before email verification existed (and any account whose owner
 never clicked the link) have ``email_verified = 0``. Anyone could have
 registered such an account with somebody else's address and a password, then
 added API keys, 2FA, app connections, webhooks and sign-in links to it
-("email squatting"). So the first time somebody proves they own the mailbox:
-
-* Sign in with Google or GitHub with a verified email (see
-  :mod:`remembra.auth.social`), or
-* an emailed password reset,
-
-the account is NOT wiped. The email is marked verified, every dashboard
-session issued before that ends (app connections and API keys keep working),
-and a review opens. Everything keeps working (agents stay connected) until the
-owner either keeps it all with one click or revokes single items. The review
-lists every active API key, app connection and webhook, every sign-in link
-except the one that proved the mailbox, 2FA turned on before it, and the
-password when nobody has proven it belongs to the mailbox owner. A review with
-nothing to list finishes by itself, without a screen or an email.
+("email squatting"). So the first time somebody proves they own the mailbox
+with an emailed password reset, the account is NOT wiped. (Reviews opened
+earlier by a Google or GitHub sign-in with a verified email can still be
+open and work the same way; a provider sign-in no longer links into an
+account whose email was never verified, see :mod:`remembra.auth.social`.)
+The email is marked verified, every dashboard session issued before that ends
+(app connections and API keys keep working), and a review opens. Everything
+keeps working (agents stay connected) until the owner either keeps it all
+with one click or revokes single items. The review lists every active API
+key, app connection and webhook, every sign-in link except the ones that
+proved the mailbox, 2FA turned on before verification while it is still on,
+and the password when nobody has proven it belongs to the mailbox owner. A
+review with nothing to list finishes by itself, without a screen or an email.
 
 Only a session that proved the mailbox can act on the review. Such sessions
 carry the review's id as the ``rvw`` JWT claim, which the server signs:
@@ -31,10 +30,21 @@ Any other session (the squatter's password, a GitHub link the squatter added)
 still signs in, but sees no review, cannot connect or disconnect sign-in
 methods, turn on 2FA, or create API keys and webhooks until the review is
 done, and gets no superadmin rights (or owner plan) from an owner address. A
-Settings connect started before the review opened never lands. 2FA set up
-before verification does not stand between the mailbox owner and the
-account: it is one of the items under review, and it is turned off when the
-review finishes unless the owner keeps it by entering a current code.
+Settings connect started before the review opened never lands.
+
+2FA: every sign-in asks for the TOTP code while 2FA is on, including the
+sessions that proved the mailbox. 2FA set up before verification may be the
+squatter's, so the emailed reset that proves the mailbox turns it off
+(:func:`turn_off_unproven_two_factor`, audited and reported as removed). In a
+review opened by a provider sign-in it stays on until an emailed reset turns
+it off, the owner keeps it with a current code, or the review finishes (it is
+turned off then unless kept).
+
+A reset while the review is open disconnects the app connections signed in
+since the review opened (:func:`revoke_connections_since_review`): they were
+authorized with the proven password that the reset replaces, which is why any
+reset cuts app connections. Connections from before verification stay listed;
+the owner keeps or revokes them.
 
 "Keep all" keeps exactly the list the owner saw: the dashboard sends the
 list's ``version`` and a changed list is refused (409) and shown again.
@@ -308,24 +318,25 @@ def session_is_trusted(review: Review | None, payload: dict[str, Any] | None) ->
     return isinstance(claim, str) and secrets.compare_digest(claim, review.review_id)
 
 
-async def login_claims(db: Any, user_id: str, *, provider: str | None, subject: str | None = None) -> tuple[dict[str, Any], bool]:
-    """Extra JWT claims for a new session, and whether a pre-verification 2FA is skipped.
+async def login_claims(db: Any, user_id: str, *, provider: str | None, subject: str | None = None) -> dict[str, Any]:
+    """Extra JWT claims for a new session (the ``rvw`` claim when it may act on the review).
 
     ``provider``/``subject`` identify the provider account used, or
-    ``provider=None`` for a password sign-in. Returns ``({}, False)`` when no
-    review is pending or the sign-in method does not prove the mailbox. Call
-    :func:`audit_session` once the session is actually issued.
+    ``provider=None`` for a password sign-in. Returns ``{}`` when no review is
+    pending or the sign-in method does not prove the mailbox. The claim never
+    changes what the sign-in must show: 2FA, when on, is asked for either way.
+    Call :func:`audit_session` once the session is actually issued.
     """
     review = await pending_review(db, user_id)
     if review is None:
-        return {}, False
+        return {}
     if provider is None:
         trusted = review.password_status == PASSWORD_TRUSTED
     else:
         trusted = bool(subject) and identity_key(provider, subject) in review.trusted_identities
     if not trusted:
-        return {}, False
-    return {REVIEW_CLAIM: review.review_id}, review.totp_status == TOTP_PREDATES
+        return {}
+    return {REVIEW_CLAIM: review.review_id}
 
 
 async def audit_session(
@@ -651,6 +662,89 @@ async def _turn_off_two_factor(db: Any, user_id: str) -> None:
     await db.disable_totp(user_id)
     await db.conn.execute("UPDATE account_reviews SET totp_status = ? WHERE user_id = ?", (TOTP_NONE, user_id))
     await db.conn.commit()
+
+
+async def turn_off_unproven_two_factor(db: Any, review: Review, *, ip: str | None, method: str) -> bool:
+    """Turn off 2FA that was set up before the email was verified (the emailed reset calls this).
+
+    The reset proves the mailbox; an authenticator set up before that proof
+    may be someone else's, and every sign-in asks for the code while 2FA is
+    on. Audited as a revoke (reason ``set_before_email_verified``), so the
+    finished review reports it as removed. True when it was turned off.
+    """
+    current = await get_review(db, review.user_id)
+    if current is None or not current.pending or current.totp_status != TOTP_PREDATES:
+        return False
+    if not await _totp_enabled(db, current.user_id):
+        return False
+    await _turn_off_two_factor(db, current.user_id)
+    await audit(
+        db,
+        current.user_id,
+        AuditAction.ACCOUNT_REVIEW_REVOKED,
+        resource_id="two_factor",
+        ip=ip,
+        details={"kind": "two_factor", "label": TWO_FACTOR_LABEL, "by": method, "reason": "set_before_email_verified"},
+    )
+    log.info("account_review_unproven_two_factor_off", user_id=current.user_id)
+    return True
+
+
+async def revoke_connections_since_review(db: Any, review: Review, *, until_ms: int, ip: str | None, method: str) -> list[str]:
+    """Revoke the app connections signed in after the review opened and up to ``until_ms``.
+
+    A reset during the review calls this with its session cut-off. While a
+    review is open only a password proven through the mailbox can connect an
+    app (:func:`password_sign_in_block`), so these connections were authorized
+    with a password the reset now replaces: the same reason a reset cuts every
+    app connection on an account without a review. Connections signed in
+    before verification are items of the review and are left to the owner.
+    Each revoke is audited. Returns the labels of what was revoked.
+    """
+    current = await get_review(db, review.user_id)
+    if current is None or not current.pending:
+        return []
+    signed_in = "COALESCE(g.authenticated_at, g.created_at)"
+    sql = (
+        "SELECT g.grant_id, c.client_name, g.client_id FROM oauth_grants g"
+        " LEFT JOIN oauth_clients c ON c.client_id = g.client_id"
+        f" WHERE g.user_id = ? AND g.revoked_at IS NULL AND {signed_in} * 1000 >= ? AND {signed_in} * 1000 <= ?"
+        " ORDER BY g.created_at"
+    )
+    args = (current.user_id, current.verified_at_ms, until_ms)
+    try:
+        rows = await _rows(db, sql, args)
+    except sqlite3.OperationalError as e:
+        if "no such column" not in str(e).lower():
+            raise
+        # A grants table from before sign-in times were recorded: the consent time is the closest.
+        rows = await _rows(db, sql.replace(signed_in, "g.created_at"), args)
+    labels: list[str] = []
+    now = time.time()
+    for grant_id, client_name, client_id in rows:
+        async with db.transaction():
+            await db.conn.execute(
+                "UPDATE oauth_grants SET revoked_at = ?, revoke_reason = 'password_reset'"
+                " WHERE grant_id = ? AND user_id = ? AND revoked_at IS NULL",
+                (now, grant_id, current.user_id),
+            )
+            await db.conn.execute(
+                "UPDATE oauth_tokens SET revoked_at = ? WHERE grant_id = ? AND revoked_at IS NULL", (now, grant_id)
+            )
+            await db.conn.execute("UPDATE oauth_codes SET used_at = COALESCE(used_at, ?) WHERE grant_id = ?", (now, grant_id))
+        label = f"App connection '{client_name or client_id or 'App'}'"
+        labels.append(label)
+        await audit(
+            db,
+            current.user_id,
+            AuditAction.ACCOUNT_REVIEW_REVOKED,
+            resource_id=f"connection:{grant_id}",
+            ip=ip,
+            details={"kind": "connection", "label": label, "by": method, "reason": "signed_in_during_review"},
+        )
+    if labels:
+        log.info("account_review_connections_revoked_by_reset", user_id=current.user_id, count=len(labels))
+    return labels
 
 
 async def revoke_item(db: Any, review: Review, kind: str, item_id: str | None, *, ip: str | None, method: str) -> dict[str, Any]:

@@ -4,18 +4,20 @@ Real routers on SQLite with auth on (tests.security_harness), and the real
 production app for the MCP connector (tests.connector_harness); only the
 Google / GitHub HTTP edge is faked (tests.test_social_login.FakeProviders).
 
-1. A Settings connect armed by a squatter before the owner proves the mailbox
-   (Google sign-in or emailed reset) never lands, and review trust belongs to
-   the exact provider account that proved the mailbox.
+1. A Settings connect armed by a squatter before a review opens (an emailed
+   reset, or a Google sign-in before sign-ins stopped linking into
+   never-verified accounts) never lands, and review trust belongs to the
+   exact provider account that proved the mailbox.
 2. "Keep all" keeps exactly the list the owner was shown.
-3. The squatter's sessions end at the Google link; disconnecting a sign-in
-   method is gated during the review and always audited.
+3. The squatter's sessions end when the review opens; disconnecting a
+   sign-in method is gated during the review and always audited.
 4. An owner address gets no owner plan while its review is open.
-5. 2FA set up before verification is kept only with a current code.
+5. 2FA set up before verification is asked for at every sign-in while it is
+   on, and is kept past the review only with a current code.
 6. Trust changes and trusted sign-ins are audited.
 7. The review never disconnects app connections (MCP grants).
 8. A review with nothing to list finishes by itself: no screen, no email.
-9. GitHub (verified primary) signs in to a never-verified account under the same review.
+9. GitHub (verified primary) never signs in to a never-verified account.
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ from remembra.security import state as security_state
 from remembra.webhooks.manager import WebhookManager
 from tests.connector_harness import connector_app, pkce
 from tests.security_harness import JWT_SECRET, secure_app
+from tests.test_oauth_link_2fa_reset_rules import legacy_provider_review, reset
 from tests.test_social_login import FakeProviders, count, exchange, oauth_settings, query_of, sign_in
 from tests.test_social_review_fixes import other_browser
 
@@ -104,6 +107,12 @@ async def google_session(h: Any, fake: FakeProviders, email: str, code: str = "g
     return dict(r.json())
 
 
+async def password_session(h: Any, email: str, password: str) -> str:
+    r = await h.client.post("/api/v1/auth/login", json={"email": email, "password": password})
+    assert r.status_code == 200 and r.json()["access_token"], r.text
+    return str(r.json()["access_token"])
+
+
 async def github_login(client: httpx.AsyncClient, fake: FakeProviders, code: str) -> dict[str, str]:
     """GitHub sign-in in the browser ``client`` (start -> consent -> callback). Returns the fragment."""
     s = await client.get("/api/v1/auth/oauth/github/start", params={"from": "login"})
@@ -158,18 +167,18 @@ async def arm_github_connect(browser: httpx.AsyncClient, headers: dict[str, str]
 # ---------------------------------------------------------------------------
 
 
-async def test_github_connect_armed_before_the_google_sign_in_never_lands(tmp_path, providers, mail) -> None:
+async def test_github_connect_armed_before_a_google_review_opened_never_lands(tmp_path, providers, mail) -> None:
     async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
         email = "victim@gmail.com"
         uid = await h.create_user(email, verified=False)
-        squatter_totp = await with_totp(h, uid)
+        await with_totp(h, uid)  # the squatter's authenticator
+        await h.api_key(uid)  # something to check, so the check stays open
         async with other_browser(h) as sq:
             authorize_at, state = await arm_github_connect(sq, h.jwt(uid, email))
             assert await count(h, "SELECT COUNT(*) FROM oauth_login_states WHERE link_user_id = ?", uid) == 1
 
-            # The owner signs in with Google: the review opens and the armed connect is cancelled.
-            owner = (await google_session(h, providers, email))["access_token"]
-            assert claims_of(owner)["rvw"]
+            # A Google review opens: the armed connect is cancelled.
+            await legacy_provider_review(h.db, uid, email)
             assert await count(h, "SELECT COUNT(*) FROM oauth_login_states WHERE link_user_id = ?", uid) == 0
 
             # The squatter finishes the held GitHub consent: refused, nothing linked.
@@ -189,11 +198,17 @@ async def test_github_connect_armed_before_the_google_sign_in_never_lands(tmp_pa
                 and "rvw" not in claims_of(ex["access_token"])
             )
 
-        # The owner keeps the list; the squatter's 2FA does not lock them out afterwards.
+        # The squatter's 2FA is asked for at the owner's Google sign-in too, until the
+        # emailed reset turns it off. Then the owner's Google account finishes the check.
+        providers.google_claims = {"email": email}
+        frag = await sign_in(h, providers, "google", code="g-0")
+        assert (await exchange(h, frag["code"])).json()["requires_2fa"] is True
+        await reset(h, email, "N3w!Passw0rd-owner")
+        owner = (await google_session(h, providers, email))["access_token"]
+        assert claims_of(owner)["rvw"]
         assert (await keep_all(h, owner)).status_code == 200
         again = await google_session(h, providers, email, code="g-2")
         assert again["requires_2fa"] is False and again["user"]["id"] == uid
-        assert squatter_totp  # (their authenticator no longer matters)
 
 
 async def test_github_connect_armed_before_an_emailed_reset_never_lands(tmp_path, providers, mail) -> None:
@@ -225,17 +240,20 @@ async def test_the_callback_rechecks_the_session_and_the_review(tmp_path, provid
     async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
         uid = await h.create_user("legacy@gmail.com", verified=False)
         await h.api_key(uid)
+        await legacy_provider_review(h.db, uid, "legacy@gmail.com")
         owner = (await google_session(h, providers, "legacy@gmail.com"))["access_token"]
         review = await account_review.pending_review(h.db, uid)
         assert review is not None
-        identity = social.ProviderIdentity(provider="github", subject="31", email="me@example.org", name=None)
+        identity = social.ProviderIdentity(
+            provider="github", subject="31", email="me@example.org", name=None, email_verified=True
+        )
         now_ms = int(time.time() * 1000) + 1
 
         def flow(review_id: str | None, session_ms: int | None) -> social.LoginState:
             return social.LoginState(
                 provider="github",
                 code_verifier="v",
-                nonce="n",
+                nonce_hash="n",
                 from_page="settings",
                 link_user_id=uid,
                 link_review_id=review_id,
@@ -253,11 +271,11 @@ async def test_the_callback_rechecks_the_session_and_the_review(tmp_path, provid
         refreshed = await account_review.get_review(h.db, uid)
         assert refreshed is not None and "github:31" in refreshed.trusted_identities
         assert (await review_of(h, owner))["items"]["identities"] == []
-        claims, _ = await account_review.login_claims(h.db, uid, provider="github", subject="31")
+        claims = await account_review.login_claims(h.db, uid, provider="github", subject="31")
         assert claims == {"rvw": review.review_id}
         # Another account at the same provider proves nothing.
-        assert (await account_review.login_claims(h.db, uid, provider="github", subject="32")) == ({}, False)
-        assert (await account_review.login_claims(h.db, uid, provider="github", subject=None)) == ({}, False)
+        assert (await account_review.login_claims(h.db, uid, provider="github", subject="32")) == {}
+        assert (await account_review.login_claims(h.db, uid, provider="github", subject=None)) == {}
         updated = await audit_rows(h, uid, "account_review_updated")
         assert updated == [{"change": "identity_trusted", "provider": "github", "subject": "31"}]
         linked = await audit_rows(h, uid, "identity_linked")
@@ -275,7 +293,8 @@ async def test_keep_all_refuses_a_list_that_changed_since_it_was_shown(tmp_path,
         h.app.state.webhook_manager = WebhookManager(h.db)
         uid = await h.create_user("victim@gmail.com", verified=False)
         admin_key, _ = await h.api_key(uid, "admin")
-        owner = (await google_session(h, providers, "victim@gmail.com"))["access_token"]
+        await reset(h, "victim@gmail.com", "N3w!Passw0rdX")
+        owner = await password_session(h, "victim@gmail.com", "N3w!Passw0rdX")
         first = await review_of(h, owner)
         assert len(first["items"]["keys"]) == 1 and first["version"]
         # Using a key does not change the list (last-used times are not part of it).
@@ -320,9 +339,10 @@ async def test_untrusted_sessions_add_no_keys_or_webhooks_during_the_review(tmp_
         h.app.state.webhook_manager = WebhookManager(h.db)
         uid = await h.create_user("victim@gmail.com", verified=False)
         await h.api_key(uid)
-        owner = (await google_session(h, providers, "victim@gmail.com"))["access_token"]
-        squatter = h.jwt(uid, "victim@gmail.com")  # a fresh password sign-in: not trusted
-        blocked = "Sign in with Google and finish checking your account first."
+        await reset(h, "victim@gmail.com", "N3w!Passw0rdX")
+        owner = await password_session(h, "victim@gmail.com", "N3w!Passw0rdX")
+        squatter = h.jwt(uid, "victim@gmail.com")  # a session without the review claim: not trusted
+        blocked = "Sign in with your password and finish checking your account first."
         r = await h.client.post("/api/v1/keys", headers=squatter, json={"name": "backup"})
         assert r.status_code == 403 and r.json()["detail"] == blocked
         body = {"url": "https://hooks.example.com/a", "events": ["memory.stored"]}
@@ -343,6 +363,7 @@ async def test_sessions_from_before_the_link_end_and_disconnects_are_gated_and_a
         uid = await h.create_user("victim@gmail.com", verified=False)
         raw_key, _ = await h.api_key(uid)
         before = h.jwt(uid, "victim@gmail.com")
+        await legacy_provider_review(h.db, uid, "victim@gmail.com")
         owner = (await google_session(h, providers, "victim@gmail.com"))["access_token"]
         assert (await h.client.get("/api/v1/auth/me", headers=before)).status_code == 401
         assert (await h.client.get("/api/v1/auth/me", headers=bearer(owner))).status_code == 200
@@ -387,7 +408,8 @@ async def test_owner_address_gets_no_owner_plan_until_the_review_is_done(tmp_pat
         await h.api_key(uid, "admin")
         meter = UsageMeter(h.db)
         assert await meter.get_tenant_plan(uid) == PlanTier.FREE  # unverified (unchanged)
-        owner = (await google_session(h, providers, "boss@gmail.com"))["access_token"]
+        await reset(h, "boss@gmail.com", "N3w!Passw0rdX")
+        owner = await password_session(h, "boss@gmail.com", "N3w!Passw0rdX")
         assert await meter.get_tenant_plan(uid) == PlanTier.FREE  # verified, but the review is open
         assert (await keep_all(h, owner)).status_code == 200
         assert await meter.get_tenant_plan(uid) == PlanTier.ENTERPRISE
@@ -401,15 +423,17 @@ async def test_owner_address_gets_no_owner_plan_until_the_review_is_done(tmp_pat
 async def test_keep_all_turns_off_2fa_from_before_unless_kept_with_a_code(tmp_path, providers, mail) -> None:
     async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
         uid = await h.create_user("victim@gmail.com", verified=False)
-        await with_totp(h, uid)  # the squatter's authenticator
-        owner = (await google_session(h, providers, "victim@gmail.com"))["access_token"]
+        totp = await with_totp(h, uid)  # set up before the email was verified
+        await legacy_provider_review(h.db, uid, "victim@gmail.com")
+        # Asked for at the Google sign-in like at any other while it is on.
+        owner = (await google_session(h, providers, "victim@gmail.com", totp=next_code(totp)))["access_token"]
         assert (await review_of(h, owner))["items"]["two_factor"] is True
         done = await keep_all(h, owner)
         assert done.status_code == 200, done.text
         assert done.json() == {"done": True, "kept": ["Password"], "removed": ["Two-factor sign-in"]}
         assert not (await h.db.get_user_by_id(uid))["totp_enabled"]
         assert mail["review"] == [("victim@gmail.com", ["Password"], ["Two-factor sign-in"])]
-        # The owner is not locked out by an authenticator they never had.
+        # Turned off: no longer asked for.
         again = await google_session(h, providers, "victim@gmail.com", code="g-2")
         assert again["requires_2fa"] is False
         r = await h.client.post("/api/v1/auth/login", json={"email": "victim@gmail.com", "password": PASSWORD})
@@ -420,11 +444,13 @@ async def test_2fa_from_before_is_kept_only_with_a_current_code(tmp_path, provid
     async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
         uid = await h.create_user("legacy@gmail.com", verified=False)
         totp = await with_totp(h, uid)  # a real legacy owner's own authenticator
-        owner = (await google_session(h, providers, "legacy@gmail.com"))["access_token"]
+        await legacy_provider_review(h.db, uid, "legacy@gmail.com")
+        owner = (await google_session(h, providers, "legacy@gmail.com", totp=next_code(totp)))["access_token"]
         keep = "/api/v1/auth/review/keep"
         wrong = await h.client.post(keep, headers=bearer(owner), json={"kind": "two_factor", "code": "000000"})
         assert wrong.status_code == 400 and wrong.json()["detail"] == "That code did not work. Try the current one."
-        ok = await h.client.post(keep, headers=bearer(owner), json={"kind": "two_factor", "code": next_code(totp)})
+        previous_step = str(totp.at(time.time() - 30))  # the sign-in used the next step, enabling the current one
+        ok = await h.client.post(keep, headers=bearer(owner), json={"kind": "two_factor", "code": previous_step})
         assert ok.status_code == 200, ok.text
         assert ok.json()["kept"] == "Two-factor sign-in" and ok.json()["review"]["items"]["two_factor"] is False
         again = await h.client.post(keep, headers=bearer(owner), json={"kind": "two_factor", "code": next_code(totp)})
@@ -451,6 +477,7 @@ async def test_trusted_sign_ins_and_trust_changes_are_audited(tmp_path, provider
     async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
         uid = await h.create_user("legacy@gmail.com", verified=False)
         await h.api_key(uid)
+        await legacy_provider_review(h.db, uid, "legacy@gmail.com")
         owner = (await google_session(h, providers, "legacy@gmail.com"))["access_token"]
         setup = await h.client.post("/api/v1/auth/2fa/setup", headers=bearer(owner))
         assert setup.status_code == 200, setup.text
@@ -601,6 +628,7 @@ async def test_reset_with_nothing_to_check_finishes_silently(tmp_path, providers
 async def test_a_review_emptied_by_revokes_finishes_and_says_what_was_removed(tmp_path, providers, mail) -> None:
     async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
         uid = await h.create_user("legacy@gmail.com", verified=False)
+        await legacy_provider_review(h.db, uid, "legacy@gmail.com")
         owner = (await google_session(h, providers, "legacy@gmail.com"))["access_token"]
         review = await review_of(h, owner)
         assert review["pending"] is True and review["items"]["password"] is True  # the only item
@@ -615,26 +643,23 @@ async def test_a_review_emptied_by_revokes_finishes_and_says_what_was_removed(tm
 # ---------------------------------------------------------------------------
 
 
-async def test_github_verified_primary_signs_in_to_a_legacy_account_under_review(tmp_path, providers, mail) -> None:
+async def test_github_verified_primary_never_signs_in_to_a_legacy_account(tmp_path, providers, mail) -> None:
     async with secure_app(tmp_path, ROUTERS, settings=oauth_settings()) as h:
         uid = await h.create_user("legacy@example.org", verified=False)
-        raw_key, key_id = await h.api_key(uid)
+        raw_key, _ = await h.api_key(uid)
         providers.github_user = {"id": 4242, "login": "legacy", "name": "Legacy"}
         providers.github_emails = [{"email": "legacy@example.org", "primary": True, "verified": True}]
         frag = await github_login(h.client, providers, "gh-1")
-        body = (await exchange(h, frag["code"])).json()
-        assert body["user"]["id"] == uid and body["user"]["email_verified"] is True and body["requires_2fa"] is False
-        token = body["access_token"]
-        assert claims_of(token)["rvw"]
-        assert mail["linked"] == [("legacy@example.org", "GitHub", "legacy@example.org")]
-        review = await review_of(h, token)
-        assert review["origin"] == "github" and review["items"]["identities"] == []
-        assert [k["id"] for k in review["items"]["keys"]] == [key_id] and review["items"]["password"] is True
+        assert frag == {"error": "account_exists_unverified", "provider": "github", "from": "login"}
+        assert not (await h.db.get_user_by_id(uid))["email_verified"]
+        assert await count(h, "SELECT COUNT(*) FROM user_identities") == 0
+        assert await account_review.get_review(h.db, uid) is None
+        assert mail["linked"] == []
         assert (await h.client.get("/api/v1/keys", headers={"X-API-Key": raw_key})).status_code == 200
-        # A password session is not the proof here.
-        mine = await review_of(h, h.jwt(uid, "legacy@example.org")["Authorization"][7:])
-        assert mine["can_review"] is False and mine["message"] == "Sign in with GitHub and finish checking your account first."
-        assert (await keep_all(h, token)).status_code == 200
+        # Once the owner proves the mailbox (emailed reset), GitHub is still connected only from Settings.
+        await reset(h, "legacy@example.org", "N3w!Passw0rdX")
+        frag = await github_login(h.client, providers, "gh-2")
+        assert frag == {"error": "account_exists_link_required", "provider": "github", "from": "login"}
 
 
 # ---------------------------------------------------------------------------
@@ -644,11 +669,12 @@ async def test_github_verified_primary_signs_in_to_a_legacy_account_under_review
 
 
 async def _review_with_squatter(h: Any, fake: FakeProviders) -> tuple[str, str, str, Any]:
-    """The owner proves the mailbox with Google (review opens); the squatter signs in with the password."""
+    """A Google review is open (the owner proved the mailbox); the squatter signs in with the password."""
     from types import SimpleNamespace
 
     uid = await h.create_user("victim@gmail.com", password=PASSWORD, verified=False)
     app_connection = SimpleNamespace(user_id=uid, signed_in_at_ms=int(time.time() * 1000) - 5000)
+    await legacy_provider_review(h.db, uid, "victim@gmail.com")
     owner = (await google_session(h, fake, "victim@gmail.com"))["access_token"]
     assert claims_of(owner).get("rvw")
     assert await account_review.pending_review(h.db, uid) is not None
