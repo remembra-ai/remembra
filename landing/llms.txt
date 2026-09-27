@@ -10,7 +10,7 @@ When a session ends, Remembra keeps the facts, not the chatter: commits, changed
 - Never ask for the API key in this chat. The user types it into remembra-install's hidden prompt, in their own terminal.
 - `pipx install --force 'remembra[mcp]>=0.16'`. Keep the quotes: zsh reads the brackets as a pattern without them.
 - Never edit hook files by hand. `remembra-relay connect --apply` writes them and keeps a backup of each file. `remembra-relay connect` without `--apply` is a dry run: it shows the changes and writes nothing.
-- Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. Codex runs a hook only after the user trusts it. Codex skips untrusted hooks without a message. The hooks for Cursor are unverified: they follow Cursor's docs but have not been run against it yet.
+- Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. Codex runs a hook only after the user trusts it. Codex skips untrusted hooks without a message. The hooks for Cursor are unverified: cursor-agent's own hook runner ran them, but no logged-in Cursor session has yet.
 - Whenever handoffs don't arrive, run `remembra-relay doctor`. Doctor reads this machine's files and the trail, changes nothing and prints the one fix for each problem.
 - Windows setup has not been tested.
 - Crew mode, several agents on one project at once, is not available yet.

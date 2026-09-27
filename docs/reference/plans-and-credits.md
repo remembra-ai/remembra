@@ -7,10 +7,10 @@ applies to the hosted service, Remembra Cloud. Prices are in USD and exclude tax
 
 | Plan | Price | Smart credits | Memories | Recalls / month | Projects | API keys |
 |------|-------|---------------|----------|-----------------|----------|----------|
-| **Free** | $0, no card | 500 / month (new accounts: 25 until the email is verified, once that check is enabled) | 10,000 | 10,000 | 3 | 3 |
-| **Solo** | $12 / month or $120 / year | 2,200 / month | 50,000 | 50,000 | Unlimited | 10 |
-| **Pro** | $29 / month or $290 / year | 5,000 / month | 125,000 | 250,000 | Unlimited | 25 |
-| **Team** | $15 per seat / month or $150 per seat / year, 3-seat minimum | 2,200 per seat, pooled | 50,000 per seat, pooled | 50,000 per seat, pooled | Unlimited | 10 per seat |
+| **Free** | $0, no card | 500 / month (new accounts: 25 until the email is verified, once that check is enabled) | 10,000 (25,000 until the announced change takes effect) | 10,000 | 3 | 3 |
+| **Solo** | $12 / month or $120 / year | 2,200 / month | 50,000 | 50,000 | Up to 1,000 | 10 |
+| **Pro** | $29 / month or $290 / year | 5,000 / month | 125,000 | 250,000 | Up to 1,000 | 25 |
+| **Team** | $15 per seat / month or $150 per seat / year, 3-seat minimum | 2,200 per seat, pooled | 50,000 per seat, pooled | 50,000 per seat, pooled | Up to 1,000 | 10 per seat |
 | **Enterprise** | Custom (from $399 / month) | Contracted | Contracted | Contracted | Contracted | Contracted |
 
 **Founding 100.** The first 100 customers can take Solo at **$108 a year**,
@@ -37,8 +37,8 @@ cap and limits. Notes themselves are shared only through shared spaces.
 | Characters per stored item | 8,000 | 50,000 |
 | Items per batch request | 10 | 100 |
 | Queries per batch recall | 5 | 20 |
-| Recall burst | 20 / minute | 60 (Solo), 120 (Pro, Team) / minute |
-| Relay burst | 30 / minute | 60 (Solo), 120 (Pro, Team) / minute |
+| Recall burst | 20 / minute | 60 / minute |
+| Handoff burst | 30 / minute | 60 / minute |
 | Stores without enrichment (atomic, relay, out of credits) | 300 / day | No daily limit |
 
 ## What is free on every plan
@@ -87,8 +87,9 @@ no AI work and use no credits.
 
 **Running out never blocks you.** Stores keep saving verbatim and stay
 searchable; only the AI enrichment pauses until credits renew. A store is
-rejected (HTTP 429) only when it would pass your plan's memory cap, or on
-Free, past 300 stores without enrichment in a UTC day.
+rejected with HTTP 429 when it would pass your plan's memory cap, on Free
+past 300 stores without enrichment in a UTC day, or past the request limit
+(30 stores a minute per account).
 
 ### Response headers
 

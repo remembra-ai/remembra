@@ -143,7 +143,7 @@ def _benchmark_problems(text: str, run: dict) -> list[str]:
     ]
     problems = []
     for section in re.split(r"\n(?=#{1,3} )", text):
-        if "100%" in section:
+        if "100%" in section and "not valid" not in section:  # a section retracting the old score names it
             problems += [f"{section.splitlines()[0]}: missing {m!r}" for m in must if m not in section]
     if "the standard academic benchmark" in text:
         problems.append("calls one conversation 'the standard academic benchmark'")
@@ -155,7 +155,9 @@ def test_benchmark_claims_match_the_only_result_file() -> None:
     assert run["conversations_ingested"] == 1 and run["total_questions"] == 199  # what the wording says
     docs = (ROOT / "docs" / "benchmarks.md").read_text()
     for name, text in (("README.md", README), ("docs/benchmarks.md", docs)):
-        assert "100%" in text, f"{name}: the benchmark section is gone; retire this test with it"
+        # the March run's judge counted INCORRECT as correct (fixed in a19fb29), so no score from it is published
+        assert "No valid benchmark result has been published yet." in text, name
+        assert "not valid" in text and "a19fb29" in text, name
         assert _benchmark_problems(text, run) == [], name
 
 

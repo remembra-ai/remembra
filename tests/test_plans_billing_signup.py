@@ -438,6 +438,7 @@ async def test_free_project_cap_blocks_only_new_projects(tmp_path) -> None:
             assert r.status_code == 201, r.text
         r = await c.h.client.post("/api/v1/memories", json={"content": "fourth", "project_id": "delta"}, headers=hdr)
         assert r.status_code == 403 and "Project limit reached (3" in r.text
+        assert "paid plans include up to 1,000 projects." in r.text and "unlimited" not in r.text
         r = await c.h.client.post("/api/v1/memories", json={"content": "more alpha", "project_id": "alpha"}, headers=hdr)
         assert r.status_code == 201
 

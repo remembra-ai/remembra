@@ -267,7 +267,7 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    35+ temporal patterns automatically set TTL. "Meeting tomorrow" → 36h, "deadline in 2 hours" → 3h, "call next week" → 8 days. Zero configuration needed.
+    Python SDK, opt-in (`auto_expire_temporal=True`): 38 temporal patterns set a TTL, e.g. "Meeting tomorrow" → 36h, "deadline in 2 hours" → 3h, "call next week" → 10 days.
 
 -   :material-calendar-clock:{ .lg .middle } __Event-Driven Expiry__
 
@@ -279,13 +279,13 @@ Every AI app needs memory. Developers hack together solutions using vector datab
 
     ---
 
-    Enable `REMEMBRA_STRICT_MODE=true` for explicit expiry handling. Expired memory requests return `410 GONE` instead of silent accept.
+    With `REMEMBRA_STRICT_MODE=true`, a GET or PATCH of an expired memory returns `410 GONE`.
 
 -   :material-lightning-bolt:{ .lg .middle } __Shadow TTLs__
 
     ---
 
-    SDK maintains local expiry cache, skipping recall for known-expired memories. Reduces API calls by up to 40%.
+    Python SDK, opt-in (`enable_shadow_ttl=True`): a local TTL cache you can check with `is_memory_valid()`. Recall does not use it.
 
 </div>
 

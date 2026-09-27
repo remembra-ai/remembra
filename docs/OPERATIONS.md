@@ -170,8 +170,11 @@ embedding probe makes at most one real embedding call per `REMEMBRA_READINESS_PR
 
 What "degraded" means per component:
 
-- `embeddings.reason = quota_exhausted`: the provider account is out of credits. Store and recall return
-  **503** with an operator message and `Retry-After: 900`. Top up the account; the circuit probes again after
+- `embeddings.reason = quota_exhausted`: the provider account is out of credits. With the defaults, stores are
+  kept (status `pending`, keyword-searchable, embedded later by the worker) and recalls answer from keyword and
+  graph search (`degraded: keyword_only`). Only when `REMEMBRA_STORE_PENDING_ON_EMBEDDING_FAILURE` /
+  `REMEMBRA_RECALL_KEYWORD_FALLBACK` are turned off (and on other routes that must embed) do they return
+  **503** with `Retry-After: 900`. Top up the account; the circuit probes again after
   `REMEMBRA_PROVIDER_QUOTA_RESET_SECONDS` (default 900 s) and closes itself.
 - `embeddings.reason = auth` / `missing_credentials`: fix or rotate the key.
 - `embeddings.reason = rate_limited`: transient; clients get 429 with the upstream `Retry-After`.

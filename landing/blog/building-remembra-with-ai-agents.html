@@ -102,7 +102,7 @@ Spawning Codex with context... storing current state to Remembra so it can pick 
 <div>⚡ Codex CLI</div>
 Got the context. I see the partial implementation in <code>sync/async_bridge.py</code>. The issue is the batch size—we're syncing one memory at a time. Implementing batch operations now...<br><br>
 <em>[30 minutes of autonomous coding]</em><br><br>
-Done. Recall latency down to 180ms. PR ready for review.
+Done. The sync now runs in batches. PR ready for review.
 </div>
 </div>
 <p>Without Remembra, that entire context—the previous optimization attempt, the branch name, the specific file—would have been lost. The human would need to re-explain everything.</p>
@@ -138,16 +138,16 @@ Found 3 new endpoints added this week: <code>/api/v1/slim-recall</code>, <code>/
 <h2>The Meta Result</h2>
 <p>Remembra v0.10.0 shipped with:</p>
 <ul>
-<li>Universal installer supporting 6 agents</li>
+<li>An installer for Claude Desktop, Claude Code, Gemini, Cursor and Windsurf (plus a separate Codex installer)</li>
 <li>Setup diagnostics (<code>remembra-doctor</code>)</li>
 <li>Local bridge for sandboxed agents</li>
-<li>Security hardening (RBAC, SSRF protection)</li>
-<li>90% smaller recall payloads</li>
+<li>Security hardening (RBAC, webhook SSRF protection)</li>
+<li>A slim recall mode for smaller payloads</li>
 </ul>
 <p>All built by AI agents that remember what they're doing. The recursion is satisfying.</p>
 <div>
 <h3>Try It Yourself</h3>
-<p>Give your AI agents persistent memory. Self-host in 5 minutes or use our cloud.</p>
+<p>Give your AI agents persistent memory. Self-host in minutes or use our cloud.</p>
 <a href="https://docs.remembra.dev/">
 Get started with Remembra →
 </a>

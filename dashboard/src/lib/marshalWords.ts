@@ -42,7 +42,7 @@ export type SharedRule = keyof typeof SHARED_RULES;
 export const DASHBOARD_ONLY = ["KEY_NEVER_USED", "HANDED_OFF"] as const;
 
 /** Said of every adapter that has never been run against its tool. */
-export const UNVERIFIED = "{name}'s adapter is built from its hook docs and has never been run against the real tool.";
+export const UNVERIFIED = "{name}'s hooks are unverified: its own hook runner fired them, but no logged-in {name} session has run them yet.";
 
 /** The Codex hooks connect writes, which Codex runs only once they are trusted. */
 export const CODEX_TRUST_EVENTS = ["SessionStart", "UserPromptSubmit", "SessionEnd"] as const;

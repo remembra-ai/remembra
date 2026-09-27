@@ -20,7 +20,7 @@ echo "$SHELL"
 command -v claude codex cursor-agent cursor gemini qwen kimi pipx
 ```
 
-Tell the user which agents you found. Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. The hooks for Cursor are unverified: they follow Cursor's docs but have not been run against it yet.
+Tell the user which agents you found. Claude Code's and Codex's session hooks are verified. So are Gemini CLI's, Qwen Code's and Kimi Code's: each was run against the real tool. The hooks for Cursor are unverified: cursor-agent's own hook runner ran them, but no logged-in Cursor session has yet.
 
 ## 2. pipx
 
@@ -83,7 +83,7 @@ The name is `cursor`.
 
 ## 8. Codex: the user trusts the hooks
 
-Codex runs a hook only after the user trusts it. Codex skips untrusted hooks without a message. Tell the user: Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Open Codex Settings > Hooks, or run `/hooks` in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd. Codex asks again whenever a hook's command changes.
+Codex runs a hook only after the user trusts it. Codex skips untrusted hooks without a message. Tell the user: Codex needs you to trust 3 hooks: Codex Settings > Hooks > Trust. Open Codex Settings > Hooks, or run `/hooks` in the Codex CLI, and trust SessionStart, UserPromptSubmit and SessionEnd. When a hook's command changes, Codex marks it modified and skips it, again without a message, until you trust it again. `remembra-relay doctor` shows which hooks need it.
 
 ## 9. Restart the agents
 

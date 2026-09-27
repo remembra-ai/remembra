@@ -90,7 +90,7 @@ SHARED_RULES: dict[str, dict[str, str]] = {
 DASHBOARD_ONLY: tuple[str, ...] = ("KEY_NEVER_USED", "HANDED_OFF")
 
 # Said of every adapter that has never been run against its tool.
-UNVERIFIED = "{name}'s adapter is built from its hook docs and has never been run against the real tool."
+UNVERIFIED = "{name}'s hooks are unverified: its own hook runner fired them, but no logged-in {name} session has run them yet."
 
 # The hooks Codex must trust: the events connect writes for it, in order.
 CODEX_TRUST_EVENTS: tuple[str, ...] = tuple(dict.fromkeys(event for _, event in REGISTRY["codex"].events()))

@@ -8,7 +8,7 @@
 
 ## The Challenge
 
-Remembra needed a major UX overhaul. Setup was taking 20+ minutes. Users were getting lost in config files. Different agents couldn't share context.
+Remembra needed a major UX overhaul. Setup took too long (the agents guessed 20+ minutes; we did not time it). Users were getting lost in config files. Different agents couldn't share context.
 
 We had a crazy idea: **What if we asked the AI agents themselves to redesign their own onboarding?**
 
@@ -71,7 +71,7 @@ Each agent proposed solutions from their expertise:
 - Handoff tokens for context transfer
 
 **Claude Code** (performance):
-- `response_format=slim` to cut payloads 90%
+- A slim recall response (`slim: true`) for smaller payloads (the agents estimated a 90% cut; not measured)
 - Memory pinning for critical facts
 - Agent attribution on memories
 
@@ -130,7 +130,7 @@ When 4 different agents independently identify the same problems, you know what 
 
 > **Gemini:** "Agents should be completely DUMB to authentication."
 
-> **Claude Code:** "response_format=slim alone cuts payload 90%."
+> **Claude Code:** "A slim response alone cuts the payload by most of it." (an estimate, not a measurement)
 
 ---
 
@@ -140,7 +140,7 @@ Based on this session, we're shipping:
 
 **v0.9.1** (Hotfix)
 - Fix store timeout (entity extraction bottleneck)
-- Add `response_format=slim`
+- Add a slim recall response (`slim: true`)
 
 **v0.10.0** (Major)
 - Universal installer (`remembra-install`)

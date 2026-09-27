@@ -71,7 +71,7 @@ SPEC = AdapterSpec(
     home_env="CODEX_HOME",
     setup_note=(
         "Open Codex and run /hooks to trust the three remembra-relay hooks (SessionStart, UserPromptSubmit, SessionEnd); "
-        "they will not run until you do. Codex asks again whenever a hook's command changes."
+        "they will not run until you do. When a hook's command changes, Codex skips it until you trust it again."
     ),
     notes=(
         f"Verified with codex-cli {', '.join(_tested(v) for v in TESTED_VERSIONS)}, "

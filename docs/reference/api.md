@@ -86,12 +86,15 @@ See [REST API Guide](../guides/rest-api.md) for detailed endpoint documentation 
 
 ## Rate Limits
 
+Limits are per route, per account (per IP address without a key). The main ones:
+
 | Endpoint | Limit |
 |----------|-------|
-| POST /store | 30/minute |
-| POST /recall | 60/minute |
-| DELETE /memories | 10/minute |
-| Others | 120/minute |
+| `POST /api/v1/memories` | 30/minute |
+| `POST /api/v1/memories/recall` | 60/minute |
+| `DELETE /api/v1/memories` | 10/minute |
+
+Other routes have their own limits, and a few have none. See [Security](../guides/security.md#limits).
 
 ## SDKs
 

@@ -395,7 +395,7 @@
       "expect": {
         "code": "NOTHING_WAITING",
         "proven": true,
-        "unverified": "Cursor's adapter is built from its hook docs and has never been run against the real tool.",
+        "unverified": "Cursor's hooks are unverified: its own hook runner fired them, but no logged-in Cursor session has run them yet.",
         "commands": [
           "remembra-relay connect --apply --agent cursor --include-unverified",
           "remembra-relay doctor --agent cursor",
@@ -520,7 +520,7 @@
           "connect ran as a dry run (the old homepage lines did this)",
           "Cursor runs on a machine without the install"
         ],
-        "unverified": "Cursor's adapter is built from its hook docs and has never been run against the real tool.",
+        "unverified": "Cursor's hooks are unverified: its own hook runner fired them, but no logged-in Cursor session has run them yet.",
         "commands": [
           "remembra-relay connect --apply --agent cursor --include-unverified",
           "remembra-relay doctor --agent cursor",

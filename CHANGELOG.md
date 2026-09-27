@@ -198,8 +198,9 @@ redact command-line credentials from handoffs stored before this release.
   - `connect --agent gemini` wrote `~/.gemini/settings.json` into Antigravity's `~/.gemini` without `--force`;
     an agent that is not detected is written only with `--force`. An unverified adapter that `connect` skips
     anyway no longer fails the run when its config cannot be read.
-  - A close sends at most what the server keeps (500 paths per file list, 200 commands, 100 test runs, ...), so
-    a repository with thousands of changed files no longer sends a body of several megabytes.
+  - A close cuts every list to what the server keeps (500 paths per file list, 200 commands, 100 test runs,
+    ...), so a repository with thousands of changed files no longer sends a body of several megabytes. Free-text
+    notes are still sent in full; the server clips them.
   - On a branch longer than 255 characters (git takes longer names) the brief failed with 422. The server
     keeps the first 255 characters and drops a `/`, `.` or `.lock` the cut leaves at the end, so the stored
     name is still one git accepts; a name git refuses is refused whatever its length.

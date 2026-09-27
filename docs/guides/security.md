@@ -464,27 +464,26 @@ memory = Memory(
 
 Protect against abuse and DoS attacks.
 
-### Default Limits
+### Limits
+
+Rate limiting is on by default (`REMEMBRA_RATE_LIMIT_ENABLED=true`). Limits are set per route and
+counted per account (per IP address for requests without a key). The main ones:
 
 | Endpoint | Limit |
 |----------|-------|
-| `POST /store` | 30/minute |
-| `POST /recall` | 60/minute |
-| `DELETE /memories` | 10/minute |
-| Other endpoints | 120/minute |
+| `POST /api/v1/memories` (store) | 30/minute |
+| `POST /api/v1/memories/recall` | 60/minute |
+| `DELETE /api/v1/memories` | 10/minute |
 
-### Enable Rate Limiting
+Other routes have their own limits, from a few a minute on sensitive sign-in routes up to 240/minute
+on inbox reads, and a few have none. The per-route limits are fixed in the code; there are no
+settings to change them. On Remembra Cloud, plans add their own per-minute bursts for recall and
+handoffs (see [Plans and credits](../reference/plans-and-credits.md)).
 
-```bash
-REMEMBRA_RATE_LIMIT_ENABLED=true
-```
-
-### Custom Limits
+To turn rate limiting off on a self-hosted server (not recommended):
 
 ```bash
-REMEMBRA_RATE_LIMIT_STORE=50/minute
-REMEMBRA_RATE_LIMIT_RECALL=100/minute
-REMEMBRA_RATE_LIMIT_FORGET=5/minute
+REMEMBRA_RATE_LIMIT_ENABLED=false
 ```
 
 ---

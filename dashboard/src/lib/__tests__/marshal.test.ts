@@ -119,7 +119,7 @@ describe('diagnoseAgent: the shared fixture', () => {
     );
     expect(CODEX_TRUST_EVENTS).toEqual(['SessionStart', 'UserPromptSubmit', 'SessionEnd']);
     expect(say(UNVERIFIED, { name: 'Cursor' })).toBe(
-      "Cursor's adapter is built from its hook docs and has never been run against the real tool.",
+      "Cursor's hooks are unverified: its own hook runner fired them, but no logged-in Cursor session has run them yet.",
     );
   });
 

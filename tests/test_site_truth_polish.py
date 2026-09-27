@@ -274,7 +274,7 @@ def test_pages_name_the_verified_agents_the_registry_verifies(page: Path) -> Non
     assert set(AGENT_NAMES) == set(REGISTRY)
     clauses = _sentences(_text(page.read_text()))
     verified = next(c for c in clauses if re.search(r"hooks are verified", c) and "not" not in c.split("verified")[0])
-    unverified = next(c for c in clauses if re.search(r"have not been run against it yet|are not yet\b", c))
+    unverified = next(c for c in clauses if re.search(r"have not been run against it yet|are not yet\b|hooks are unverified", c))
     for name, adapter in REGISTRY.items():
         shown = AGENT_NAMES[name]
         if adapter.spec.verified:

@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Remembra pricing</title>
-<meta name="description" content="Handoffs, pickups, inbox, trail and search are always free. Smart credits are only for AI enrichment of new notes. Free $0, Solo $12/mo, Pro $29/mo, Team $15/seat. Founding 100: $9/mo billed $108 yearly, a price that holds while you stay subscribed.">
+<meta name="description" content="Handoffs, pickups, inbox, trail and search are always free. Smart credits pay for AI work on your notes. Free $0, Solo $12/mo, Pro $29/mo, Team $15/seat. Founding 100: $9/mo billed $108 yearly, a price that holds while you stay subscribed.">
 <meta property="og:title" content="Remembra pricing">
-<meta property="og:description" content="Handoffs are always free. Smart credits are only for AI enrichment of new notes. Start free, no card.">
+<meta property="og:description" content="Handoffs are always free. Smart credits pay for AI work on your notes. Start free, no card.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://remembra.dev/pricing">
 <meta property="og:image" content="https://remembra.dev/social-preview.png">
@@ -166,8 +166,8 @@
 <main id="main" class="pricing" data-billing="yearly">
   <section class="wrap page-head" aria-labelledby="pricing-title">
     <p class="eyebrow">Pricing</p>
-    <h1 id="pricing-title">Every handoff is free. Credits are only for <mark>new notes.</mark></h1>
-    <p class="lede"><strong>Handoffs, pickups, inbox, trail and search are always free.</strong> Smart credits are only for AI enrichment of new notes. Run out, and your notes still save.</p>
+    <h1 id="pricing-title">Every handoff is free. Credits are for <mark>AI work on notes.</mark></h1>
+    <p class="lede"><strong>Handoffs, pickups, inbox, trail and search are always free.</strong> Smart credits pay for AI work on your notes: enriching new or edited notes and the background de-duplication pass. Run out, and your notes still save without enrichment (on Free, up to 300 a day).</p>
 
     <div class="billing" id="billing" hidden>
       <div class="toggle" role="group" aria-label="Billing period">
@@ -222,7 +222,7 @@
         <p class="credits"><span class="y-only"><b>26,400</b> credits for the year, in one bank</span><span class="m-only"><b>2,200</b> credits every month</span></p>
         <ul>
           <li class="free-note">Handoffs, pickups, inbox and trail (fair use 25,000 a month)</li>
-          <li>Unlimited agents and projects</li>
+          <li>Unlimited agents, up to 1,000 projects</li>
           <li>50,000 searches a month</li>
           <li>50,000 notes kept</li>
           <li>Notes up to 50,000 characters</li>
@@ -268,7 +268,7 @@
     <p class="after">Prices in US dollars, excluding tax. Sign up free, then pick a paid plan from Billing in your dashboard.</p>
 
     <div class="enterprise">
-      <p><b>Enterprise</b> SSO, an SLA, audit logs, a dedicated instance or support for your own hosting. Custom pricing.</p>
+      <p><b>Enterprise</b> An SLA, audit logs, a dedicated instance or support for your own hosting, and custom limits. SSO on request. Custom pricing.</p>
       <a class="link" href="/contact">Talk to us <span aria-hidden="true">&rarr;</span></a>
     </div>
   </section>
@@ -300,7 +300,7 @@
         </div>
         <div class="plain">
           <p><b>One credit is about one normal note.</b> A note up to 8,000 characters (a few pages) uses one credit, and 8,000 characters is the longest note Free takes. On paid plans, where notes run to 50,000 characters, a longer note uses one credit for each 8,000 characters. A fact-dense note on any plan can use more: the note's actual AI cost, when that is larger.</p>
-          <p><b>Run out, and nothing breaks.</b> Your notes still save and stay searchable, and your handoffs keep working; new notes just skip the AI enrichment until your credits renew. Nothing is rejected for credits, and your dashboard shows where you stand.</p>
+          <p><b>Run out, and your notes still save.</b> They stay searchable and simply skip the AI enrichment until your credits renew. On Free, saves without enrichment (handoffs included) are capped at 300 a day. Your dashboard shows where you stand.</p>
           <p><b>Self-hosting is free.</b> The core is open source under the MIT license. Run it on your own server with your own AI key and there is nothing to meter.</p>
         </div>
       </div>
@@ -340,8 +340,8 @@
         <h2 id="faq-title">Short answers.</h2>
       </div>
       <dl class="faq">
-        <div><dt>Do handoffs ever cost credits?</dt><dd>No. Handoffs, checkpoints, pickups, the inbox, the trail and search never use credits on any plan, and the handoffs your agents leave when they close a session never count toward your notes-kept cap, however many sessions they close. A project that holds only handoffs does not use one of Free's 3 projects either. Each plan has a fair-use soft cap on handoff events a month; going over it is reported, not rejected. A per-minute burst limit (30 a minute on Free, 60 on Solo, 120 on Pro and Team) slows a runaway script, and on Free handoffs count toward the 300 unenriched saves a day.</dd></div>
-        <div><dt>What happens when my credits run out?</dt><dd>Your notes keep saving without AI enrichment until your credits renew, and they stay searchable. Running out of credits never blocks a save. A save is refused only at your plan's limits: the notes-kept cap (session handoffs are not counted in it), the note length (8,000 characters on Free, 50,000 on paid plans), the project count (3 on Free; projects with only handoffs are not counted), the notes per request (10 on Free, 100 on paid plans), and on Free, 300 unenriched saves a day.</dd></div>
+        <div><dt>Do handoffs ever cost credits?</dt><dd>No. Handoffs, checkpoints, pickups, the inbox, the trail and search never use credits on any plan, and the handoffs your agents leave when they close a session never count toward your notes-kept cap, however many sessions they close. A project that holds only handoffs does not use one of Free's 3 projects either. Each plan has a fair-use soft cap on handoff events a month; going over it is reported, not rejected. A per-minute burst limit (30 a minute on Free, 60 on paid plans) slows a runaway script, and on Free handoffs count toward the 300 unenriched saves a day.</dd></div>
+        <div><dt>What happens when my credits run out?</dt><dd>Your notes keep saving without AI enrichment until your credits renew, and they stay searchable. Running out of credits never blocks a save. A save is refused only at your plan's limits: the notes-kept cap (session handoffs are not counted in it), the note length (8,000 characters on Free, 50,000 on paid plans), the project count (3 on Free; projects with only handoffs are not counted), the notes per request (10 on Free, 100 on paid plans), on Free, 300 unenriched saves a day, and past the request limit of 30 saves a minute per account.</dd></div>
         <div><dt>What changes on a yearly plan?</dt><dd>You pay for 10 months instead of 12, and the whole year's credits go into one bank to use in any month. A new yearly plan unlocks its full credit bank 14 days after purchase; until then one month's credits are available. A refund or chargeback ends the plan and its credit bank at once, and cancels the subscription so it does not renew.</dd></div>
         <div><dt>Can I get a refund?</dt><dd>Yes. The first payment on any paid plan, Founding 100 included, has a 14-day money-back guarantee: ask within 14 days and Paddle refunds it in full. Renewals and part periods are not refunded, and you can cancel any time. <a href="/refunds">Refund policy</a>.</dd></div>
         <div><dt>Is a card required for Free?</dt><dd>No. Free is $0 with no card. New Free accounts may start with 25 credits until the email address is verified.</dd></div>

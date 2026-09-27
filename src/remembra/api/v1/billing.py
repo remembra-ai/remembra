@@ -136,7 +136,7 @@ PLAN_FEATURES: dict[PlanTier, list[str]] = {
         "2,200 smart credits/mo",
         "50K memories",
         "Relay, pickups, inbox and trail free",
-        "Unlimited projects",
+        "Up to 1,000 projects",
         "Webhooks",
         "Email support",
     ],
