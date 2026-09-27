@@ -7,13 +7,16 @@ TypeScript/JavaScript SDK for [Remembra](https://remembra.dev) - the AI Memory L
 
 ## What's New in v0.12.0
 
-- **👤 User Profiles** — Profile management with avatars and preferences
 - **⏰ Expiry** — `store(content, { ttl: '36h' })`. This SDK takes only `ttl`; the REST API also takes
   `expires_at`. Temporal phrases ("meeting tomorrow") set a TTL only in the Python SDK.
-- **🔒 Strict Mode 410 GONE** — Expired memories return proper HTTP 410
-- **🌐 Browser Extension** — Access memories from any webpage
+- **🔒 Strict Mode 410 GONE** — On a server with `REMEMBRA_STRICT_MODE=true`, `get()` of an expired memory throws a
+  `RemembraError` with `status` 410.
 
-> **Note:** The TypeScript SDK is for client-side usage. For AI agent setup (Claude, Codex, Cursor), use the Python package: `pip install remembra && remembra-install --all`
+> **Note:** This SDK is a client for the Remembra REST API. It needs Node.js 18 or later and uses only `fetch`, so
+> Deno and Bun should work, but they have not been tested. In a browser, the hosted API accepts requests only from
+> Remembra's own sites (`https://app.remembra.dev`, `https://remembra.dev`), so a browser app needs a self-hosted
+> server with `REMEMBRA_CORS_ORIGINS` set. For AI agent setup (Claude, Codex, Cursor), use the Python package:
+> `pipx install --force 'remembra[mcp]>=0.16'`, then `remembra-install --all`.
 
 ## Installation
 
@@ -24,6 +27,11 @@ yarn add remembra
 # or
 pnpm add remembra
 ```
+
+This README describes the SDK in this repository (0.13.2). As of 2026-09-27 the latest release on npm is 0.12.1,
+and no npm release has the checks described under `forget()` below: its `forget({ entity })` sends the delete
+without reading the server version first. On a server older than 0.16.1 that call deleted every memory in the
+account, so update the server before you delete by entity with the npm release.
 
 ## Quick Start
 
@@ -111,20 +119,16 @@ Recall relevant memories.
 const result = await memory.recall('Who is John?', {
   limit: 10,
   threshold: 0.5,
-  slim: false,  // Set true for 90% smaller response (context only)
+  maxTokens: 800,  // Optional cap on the context string
 });
 
 console.log(result.context);   // Synthesized context
-console.log(result.memories);  // Individual memories (omitted if slim=true)
-console.log(result.entities);  // Related entities (omitted if slim=true)
+console.log(result.memories);  // Individual memories
+console.log(result.entities);  // Related entities
 ```
 
-**Slim mode** (v0.10.1+): For token-constrained environments, use `slim: true` to get only the context string:
-
-```typescript
-const result = await memory.recall('Who is John?', { slim: true });
-// Returns just: { context: "John is the CEO of Acme Corp." }
-```
+This SDK has no `slim` option. The MCP `recall_memories` tool has one; on the REST API, `slim` only caps the
+context at 800 tokens and still returns memories and entities.
 
 #### `ingestConversation(messages, options?)`
 
@@ -143,8 +147,9 @@ const result = await memory.ingestConversation(messages, {
 
 #### `forget(options)`
 
-Delete memories (GDPR-compliant). Give exactly one of `memoryId`, `entity` or `allMemories: true`;
-anything else throws a `ValidationError` before a request is sent.
+Delete memories. Give exactly one of `memoryId`, `entity` or `allMemories: true`; anything else throws a
+`ValidationError` before a request is sent. A delete by entity reads the server version first and is not sent to a
+server older than 0.16.1 (or to a pre-release or dev build of 0.16.1).
 
 ```typescript
 // Delete specific memory
@@ -159,6 +164,10 @@ await memory.forget({ allMemories: true });
 
 `entity` deletes only memories that entity extraction linked to that entity, in every project unless
 `projectId` is given, then the entity itself once no memory mentions it.
+
+The server deletes the memories and their vectors at once. Conflict records that quoted the text stay until the
+account is erased, and database copies taken when a new server build starts keep deleted data until 3 newer copies
+exist.
 
 #### `get(memoryId)`
 
