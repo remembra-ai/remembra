@@ -24,7 +24,7 @@ Content is scanned for personal-data patterns before it is stored.
 | `credit_card` | Card numbers (4 groups of 4 digits) | `4111-1111-1111-1111` |
 | `email` | Email addresses | `john@example.com` |
 | `phone_us` | US phone numbers | `(555) 123-4567` |
-| `phone_intl` | `+`, country code and an unbroken run of digits, right after a letter or digit | |
+| `phone_intl` | `+`, a country code and 6-14 digits (at most one separator), right after a letter or digit | |
 | `api_key` | Words such as `sk_`, `api_` or `token_` followed by 16+ letters and digits | `sk_...` |
 | `password` | A value after `password`, `passwd` or `pwd` and `:`, `=` or `is` | `password: ...` |
 | `aws_key` | AWS access key ids | `AKIA...` |
