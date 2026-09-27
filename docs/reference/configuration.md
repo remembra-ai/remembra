@@ -1,12 +1,16 @@
 # Configuration Reference
 
-All environment variables for Remembra.
+Server settings are environment variables with the `REMEMBRA_` prefix. A variable without the prefix (a bare
+`OPENAI_API_KEY`, `QDRANT_HOST`) is not read.
 
 ## Required
 
+With the default OpenAI embedding provider:
+
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `OPENAI_API_KEY` | OpenAI API key | `sk-...` |
+| `REMEMBRA_OPENAI_API_KEY` | OpenAI API key (embeddings, fact extraction, consolidation, entity matching) | `sk-...` |
+| `REMEMBRA_JWT_SECRET` | Secret for dashboard sign-in tokens (JWTs). Unless `REMEMBRA_DEBUG=true`, the server does not start without a unique value of 32+ characters | 64 random hex characters |
 
 ## Server
 
@@ -14,28 +18,31 @@ All environment variables for Remembra.
 |----------|---------|-------------|
 | `REMEMBRA_HOST` | `0.0.0.0` | Server bind address |
 | `REMEMBRA_PORT` | `8787` | Server port |
-| `REMEMBRA_WORKERS` | `1` | Number of worker processes |
-| `REMEMBRA_LOG_LEVEL` | `INFO` | Logging level |
+| `REMEMBRA_DEBUG` | `false` | Development mode (relaxes the startup security checks) |
+| `REMEMBRA_LOG_LEVEL` | `info` | Logging level |
+| `REMEMBRA_CORS_ORIGINS` | localhost:3000, localhost:8787, app.remembra.dev, remembra.dev | Allowed browser origins, as a JSON list or comma-separated. Localhost origins are dropped unless `REMEMBRA_DEBUG=true` |
 
 ## Database
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_DATABASE_PATH` | `./remembra.db` | SQLite database path |
-| `QDRANT_HOST` | `localhost` | Qdrant server host |
-| `QDRANT_PORT` | `6333` | Qdrant server port |
-| `QDRANT_API_KEY` | - | Qdrant API key (if secured) |
-| `QDRANT_COLLECTION` | `remembra` | Qdrant collection name |
+| `REMEMBRA_DATABASE_URL` | `sqlite+aiosqlite:///remembra.db` (`/data/remembra.db` in the Docker image) | SQLite database |
+| `REMEMBRA_QDRANT_URL` | `http://qdrant:6333` (`http://localhost:6333` in the Docker image) | Qdrant server |
+| `REMEMBRA_QDRANT_API_KEY` | - | Qdrant API key (if secured) |
+| `REMEMBRA_QDRANT_COLLECTION` | `memories` | Qdrant collection name |
 
 ## Embeddings
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_EMBEDDING_PROVIDER` | `openai` | Provider: `openai`, `ollama`, `cohere` |
+| `REMEMBRA_EMBEDDING_PROVIDER` | `openai` | `openai`, `azure_openai`, `ollama`, `cohere`, `voyage` or `jina` |
 | `REMEMBRA_EMBEDDING_MODEL` | `text-embedding-3-small` | Model name |
-| `REMEMBRA_EMBEDDING_DIMENSIONS` | `1536` | Vector dimensions |
-| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `COHERE_API_KEY` | - | Cohere API key |
+| `REMEMBRA_EMBEDDING_DIMENSIONS` | `1536` | Vector dimensions (768 for Ollama's `nomic-embed-text`) |
+| `REMEMBRA_OLLAMA_URL` | `http://localhost:11434` | Ollama server URL |
+| `REMEMBRA_COHERE_API_KEY` | - | Cohere API key |
+| `REMEMBRA_VOYAGE_API_KEY` | - | Voyage API key |
+| `REMEMBRA_JINA_API_KEY` | - | Jina API key |
+| `REMEMBRA_AZURE_OPENAI_API_KEY`, `REMEMBRA_AZURE_OPENAI_ENDPOINT`, `REMEMBRA_AZURE_OPENAI_DEPLOYMENT` | - | Azure OpenAI |
 
 ## Extraction
 
@@ -45,7 +52,7 @@ All environment variables for Remembra.
 | `REMEMBRA_EXTRACTION_MODEL` | `gpt-4o-mini` | OpenAI model for fact extraction, consolidation (including sleep-time), entity matching and conversation ingest. Must be an OpenAI model |
 | `REMEMBRA_LLM_PROVIDER` | `openai` | Entity-extraction backend only: `openai`, `anthropic`, `ollama` |
 | `REMEMBRA_LLM_MODEL` | `gpt-4o-mini` | Entity-extraction model, used only when `REMEMBRA_EXTRACTION_MODEL` does not fit `REMEMBRA_LLM_PROVIDER`. Never changes fact extraction |
-| `REMEMBRA_EXTRACTION_TEMPERATURE` | `0.0` | Extraction temperature |
+| `REMEMBRA_ANTHROPIC_API_KEY` | - | API key for Anthropic entity extraction |
 
 !!! note "Which variable changes which model"
     `REMEMBRA_EXTRACTION_MODEL` is the model that matters: every OpenAI call
@@ -63,30 +70,29 @@ All environment variables for Remembra.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_ENTITY_EXTRACTION_ENABLED` | `true` | Extract entities |
-| `REMEMBRA_ENTITY_MATCHING_THRESHOLD` | `0.85` | Alias matching threshold |
+| `REMEMBRA_ENABLE_ENTITY_RESOLUTION` | `true` | Extract and match entities |
+| `REMEMBRA_ENTITY_MATCHING_THRESHOLD` | `0.6` | Minimum confidence for the matcher to merge a mention into an existing entity |
 
 ## Retrieval
 
+The recall defaults (`limit` 5, `threshold` 0.40) are fields of the recall request, not server settings.
+
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_DEFAULT_THRESHOLD` | `0.40` | Default similarity threshold |
-| `REMEMBRA_DEFAULT_LIMIT` | `10` | Default recall limit |
-| `REMEMBRA_DEFAULT_MAX_TOKENS` | `4000` | Max context tokens |
+| `REMEMBRA_CONTEXT_MAX_TOKENS` | `4000` | Max context tokens |
 
 ### Hybrid Search
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_HYBRID_SEARCH_ENABLED` | `true` | Enable hybrid search |
+| `REMEMBRA_ENABLE_HYBRID_SEARCH` | `true` | Enable hybrid search |
 | `REMEMBRA_HYBRID_ALPHA` | `0.4` | Keyword weight (0-1) |
-| `REMEMBRA_HYBRID_FUSION` | `weighted` | Fusion: `weighted` or `rrf` |
 
 ### Reranking
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_RERANK_ENABLED` | `false` | Enable CrossEncoder reranking |
+| `REMEMBRA_ENABLE_RERANKING` | `true` | CrossEncoder reranking. It runs only when the install has the `rerank` extra (the default Docker image does not); `docker-compose.yml` and `docker-compose.prod.yml` set it to `false` |
 | `REMEMBRA_RERANK_MODEL` | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Reranker model |
 | `REMEMBRA_RERANK_TOP_K` | `20` | Candidates to rerank |
 
@@ -98,23 +104,24 @@ All environment variables for Remembra.
 | `REMEMBRA_RANKING_RECENCY_WEIGHT` | `0.15` | Recency boost weight |
 | `REMEMBRA_RANKING_ENTITY_WEIGHT` | `0.15` | Entity match weight |
 | `REMEMBRA_RANKING_KEYWORD_WEIGHT` | `0.1` | Keyword match weight |
-| `REMEMBRA_RANKING_RECENCY_DECAY_DAYS` | `30` | Recency half-life (days) |
+| `REMEMBRA_RANKING_RECENCY_DECAY_DAYS` | `30` | Recency half-life (days); also the half-life of the recall decay score |
 
 ### Graph Retrieval
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_GRAPH_RETRIEVAL_ENABLED` | `true` | Enable graph traversal |
-| `REMEMBRA_GRAPH_TRAVERSAL_DEPTH` | `2` | Max hop depth |
+| `REMEMBRA_ENABLE_GRAPH_RETRIEVAL` | `true` | Enable graph traversal |
+| `REMEMBRA_GRAPH_MAX_DEPTH` | `2` | Max hop depth |
 
 ## Temporal
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_DEFAULT_TTL_DAYS` | - | Default TTL (optional) |
-| `REMEMBRA_DECAY_ENABLED` | `true` | Enable memory decay |
-| `REMEMBRA_DECAY_HALF_LIFE_DAYS` | `30` | Decay half-life |
-| `REMEMBRA_ACCESS_BOOST_WEIGHT` | `0.2` | Access count boost |
+| `REMEMBRA_DEFAULT_TTL_DAYS` | - | Default TTL in days for memories stored without one |
+| `REMEMBRA_TEMPORAL_CLEANUP_ENABLED` | `false` | Run cleanup on a timer (moves expired memories to the cold archive) |
+| `REMEMBRA_TEMPORAL_CLEANUP_INTERVAL_SECONDS` | `3600` | Seconds between timed cleanups |
+
+See [Temporal Memory](../guides/temporal.md) for how decay scores work.
 
 ## Sleep-time worker
 
@@ -135,7 +142,13 @@ What each pass does: [Sleep-Time Compute](../guides/sleep-time-compute.md).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REMEMBRA_AUTH_ENABLED` | `true` | Enable API key auth |
-| `REMEMBRA_AUTH_MASTER_KEY` | - | Master admin key |
+| `REMEMBRA_AUTH_MASTER_KEY` | - | Master key: creates keys for any `user_id`, including admin keys |
+| `REMEMBRA_JWT_SECRET` | - | Secret for dashboard sign-in tokens (see Required) |
+
+| `REMEMBRA_SECRET_REDACTION_ENABLED` | `true` | Replace recognised credentials with `[REDACTED:<kind>]` |
+| `REMEMBRA_ENCRYPTION_KEY` | - | AES-256-GCM key for the text fields of Qdrant payloads ([what it covers](../guides/security.md#encryption-at-rest)) |
+
+Dashboard sign-ins expire after a fixed 24 hours.
 
 ### Rate Limiting
 
@@ -143,9 +156,16 @@ What each pass does: [Sleep-Time Compute](../guides/sleep-time-compute.md).
 |----------|---------|-------------|
 | `REMEMBRA_RATE_LIMIT_ENABLED` | `true` | Enable rate limiting |
 | `REMEMBRA_RATE_LIMIT_STORAGE` | `memory` | Backend: `memory` or `redis://...` |
-| `REMEMBRA_RATE_LIMIT_STORE` | `30/minute` | Store endpoint limit |
-| `REMEMBRA_RATE_LIMIT_RECALL` | `60/minute` | Recall endpoint limit |
-| `REMEMBRA_RATE_LIMIT_FORGET` | `10/minute` | Forget endpoint limit |
+
+The per-route limits (store 30/minute, recall 60/minute, delete 10/minute, and others) are fixed in the code.
+
+### PII Detection
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REMEMBRA_PII_DETECTION_ENABLED` | `true` | Scan content for PII |
+| `REMEMBRA_PII_MODE` | `redact` | `detect`, `redact` or `block` |
+| `REMEMBRA_PII_EXCLUSIONS` | - | PII types to skip, comma-separated |
 
 ### Sanitization
 
@@ -158,7 +178,15 @@ What each pass does: [Sleep-Time Compute](../guides/sleep-time-compute.md).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_STATIC_DIR` | - | Path to dashboard build |
+| `REMEMBRA_STATIC_DIR` | - (`/app/static` in the Docker image) | Path to dashboard build |
+
+## Webhooks
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `REMEMBRA_WEBHOOKS_ENABLED` | `false` | Turn on webhooks ([Webhooks](../guides/webhooks.md)) |
+| `REMEMBRA_WEBHOOK_TIMEOUT` | `10` | Seconds to wait for your endpoint |
+| `REMEMBRA_WEBHOOK_MAX_RETRIES` | `3` | Delivery attempts in total |
 
 ## Sign in with GitHub / Google
 
@@ -250,16 +278,16 @@ holds an active subscription; plan changes go through the Paddle portal.
 
 ```bash
 # Required
-OPENAI_API_KEY=sk-your-key-here
+REMEMBRA_OPENAI_API_KEY=sk-your-key-here
+REMEMBRA_JWT_SECRET=replace-with-64-random-hex-characters
 
 # Server
 REMEMBRA_HOST=0.0.0.0
 REMEMBRA_PORT=8787
 
 # Database
-REMEMBRA_DATABASE_PATH=/app/data/remembra.db
-QDRANT_HOST=qdrant
-QDRANT_PORT=6333
+REMEMBRA_DATABASE_URL=sqlite:////data/remembra.db
+REMEMBRA_QDRANT_URL=http://qdrant:6333
 
 # Security (enable in production!)
 REMEMBRA_AUTH_ENABLED=true
@@ -271,11 +299,10 @@ REMEMBRA_SMART_EXTRACTION_ENABLED=true
 REMEMBRA_EXTRACTION_MODEL=gpt-4o-mini
 
 # Retrieval
-REMEMBRA_HYBRID_SEARCH_ENABLED=true
-REMEMBRA_RERANK_ENABLED=false
-REMEMBRA_DEFAULT_MAX_TOKENS=4000
+REMEMBRA_ENABLE_HYBRID_SEARCH=true
+REMEMBRA_ENABLE_RERANKING=false
+REMEMBRA_CONTEXT_MAX_TOKENS=4000
 
 # Temporal
 REMEMBRA_DEFAULT_TTL_DAYS=365
-REMEMBRA_DECAY_ENABLED=true
 ```

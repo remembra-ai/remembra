@@ -1,27 +1,31 @@
 # Agent Setup
 
-Configure the AI agents `remembra-install` supports on this machine (Claude Desktop, Claude Code, Codex, Cursor
-and Gemini CLI) to share memory with one command. Others you add by hand.
+Configure the AI agents `remembra-install` supports on this machine (Claude Code, Codex, Cursor and Gemini CLI,
+and Claude Desktop on macOS) to share memory with one command. Others you add by hand.
 
 ## Quick Setup (Recommended)
 
 ```bash
 # Install Remembra with its MCP server
-pip install "remembra[mcp]"
+pipx install --force 'remembra[mcp]>=0.16'
 
 # Configure all detected agents
 remembra-install --all
+
+# Write the relay hooks, so handoffs are saved when a session ends
+remembra-relay connect --apply
 ```
 
-This command:
+`remembra-install --all`:
 
-1. **Detects** the installed AI agents (Claude Desktop, Claude Code, Codex, Cursor, Gemini CLI)
+1. **Detects** the installed AI agents (Claude Code, Codex, Cursor, Gemini CLI, and Claude Desktop on macOS)
 2. **Configures** MCP settings for each agent
 3. **Stores** credentials securely in `~/.remembra/credentials` (chmod 600)
 4. **Saves your API key and server** so a later run keeps them (it never switches a self-hosted server to Remembra Cloud unless you pass `--url`)
 
-!!! success "Zero manual config"
-    No JSON editing. No copy-pasting. Just run and restart your agents.
+!!! success "No JSON editing"
+    Copy your API key from the dashboard once (paste it when asked, or set `REMEMBRA_API_KEY`), confirm the
+    write, then restart your agents.
 
 !!! tip "Verify setup with doctor"
     After installation, run `remembra-doctor all` to verify everything is working.
@@ -32,7 +36,7 @@ This command:
 
 | Agent | Config Location | Status |
 |-------|----------------|--------|
-| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | ✅ Auto-configured |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | ✅ Auto-configured on macOS (the Windows config is not detected or written) |
 | Claude Code | `~/.claude.json` (user scope, as `claude mcp add --scope user` writes it) | ✅ Auto-configured |
 | Codex CLI | `~/.codex/config.toml` | ✅ Auto-configured |
 | Gemini | `~/.gemini/settings.json` | ✅ Auto-configured |
@@ -95,7 +99,7 @@ remembra-install --all --user-id user_123
 
 ## What Gets Configured
 
-The installer adds this MCP block to each agent's config:
+The installer adds this MCP block to each agent's config (here, Cursor's):
 
 ```json
 {
@@ -106,12 +110,16 @@ The installer adds this MCP block to each agent's config:
         "REMEMBRA_URL": "https://api.remembra.dev",
         "REMEMBRA_API_KEY": "your-api-key",
         "REMEMBRA_PROJECT": "default",
-        "REMEMBRA_USER_ID": "default"
+        "REMEMBRA_USER_ID": "default",
+        "REMEMBRA_AGENT_ID": "cursor"
       }
     }
   }
 }
 ```
+
+Each agent's entry gets its own `REMEMBRA_AGENT_ID` (`claude-code`, `codex`, `cursor`, ...). Codex gets the same
+settings as a TOML table in `~/.codex/config.toml`.
 
 ---
 
@@ -119,14 +127,13 @@ The installer adds this MCP block to each agent's config:
 
 Credentials are stored in `~/.remembra/credentials`:
 
-```toml
-[credentials]
-api_key = "rem_xxx"
-url = "https://api.remembra.dev"
-
-[defaults]
-project_id = "default"
-user_id = "default"
+```json
+{
+  "api_key": "rem_xxx",
+  "project": "default",
+  "user_id": "default",
+  "url": "https://api.remembra.dev"
+}
 ```
 
 This file is created with `600` permissions (readable only by you).
@@ -141,11 +148,8 @@ For self-hosted Remembra instances:
 remembra-install --all --url http://localhost:8787
 ```
 
-Or with a custom API key:
-
-```bash
-remembra-install --all --url http://localhost:8787
-```
+It asks for an API key from your server's dashboard. A server with auth off ignores the key, so any value that
+looks like one (`rem_` and 20 or more letters or digits) works there.
 
 ## Sandboxed Agents (Codex, Claude Code)
 

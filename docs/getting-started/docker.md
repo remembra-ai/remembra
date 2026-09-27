@@ -1,21 +1,10 @@
 # Docker Deployment
 
-Production-ready Docker deployment for Remembra.
-
-## Quick Start
-
-```bash
-docker run -d \
-  --name remembra \
-  -p 8787:8787 \
-  -e OPENAI_API_KEY=sk-your-key \
-  -v remembra-data:/app/data \
-  remembra/remembra
-```
+Run Remembra with Docker.
 
 ## Zero-Config Quick Start
 
-The fastest way to try Remembra — no API keys required. This uses Ollama for local embeddings and entity extraction.
+The fastest way to try Remembra, with no API keys. It uses Ollama for local embeddings.
 
 **One-line install:**
 
@@ -28,98 +17,95 @@ This pulls and starts [`docker-compose.quickstart.yml`](https://github.com/remem
 | Service | Port | Purpose |
 |---------|------|---------|
 | **qdrant** | `6333` | Vector database for semantic search |
-| **ollama** | `11434` | Local embeddings and LLM (no API key needed) |
-| **remembra** | `8787` | Memory server |
+| **ollama** | `11434` | Local embeddings (no API key needed) |
+| **remembra** | `8787` | Memory server, with auth and rate limiting off |
 
-Once running, connect your MCP client to `http://localhost:8787` and start storing memories immediately.
+Once running, connect your MCP client to `http://localhost:8787` and start storing memories.
 
-> **Note:** The quickstart configuration uses Ollama for both embeddings and entity extraction, so no external API keys are required. For production use, see the standard or production compose files below.
+> **Note:** LLM fact and entity extraction are off in the quickstart until you add an OpenAI key
+> (`REMEMBRA_OPENAI_API_KEY`), or set `REMEMBRA_LLM_PROVIDER=ollama` and pull a chat model for entity extraction.
+> Auth is off, so do not expose it to a network. For production use, see the standard or production compose
+> files below.
 
-### Docker Compose Profiles
+### Docker Compose Files
 
-Remembra ships with 3 compose files for different use cases:
+Remembra ships with 4 compose files:
 
 | File | Use Case | Description |
 |------|----------|-------------|
-| `docker-compose.quickstart.yml` | Learning / Evaluation | Zero-config setup with Ollama — no API keys needed |
-| `docker-compose.yml` | Standard Development | Configurable providers, external API keys supported |
-| `docker-compose.prod.yml` | Production | Hardened security, auth enabled, rate limiting, health checks |
+| `docker-compose.quickstart.yml` | Learning / Evaluation | Zero-config setup with Ollama, no API keys, auth off |
+| `docker-compose.yml` | Standard | Remembra and Qdrant; configurable providers, auth on |
+| `docker-compose.prod.yml` | Production | Auth on, health checks, reranking off, requires `REMEMBRA_OPENAI_API_KEY` |
+| `docker-compose.mcp.yml` | Remote MCP | Runs `remembra-mcp` as a streamable-HTTP MCP server on port 8765 |
 
-## Docker Compose (Recommended)
+## Docker Compose
 
-For production, use Docker Compose with persistent storage:
+The image does not include Qdrant, so run one next to it. The repository's `docker-compose.yml` does this. A
+minimal file:
 
 ```yaml title="docker-compose.yml"
-version: '3.8'
-
 services:
   remembra:
     image: remembra/remembra:latest
     ports:
       - "8787:8787"
     environment:
-      # Required
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      
-      # Database
-      - REMEMBRA_DATABASE_PATH=/app/data/remembra.db
-      
-      # Qdrant (built-in)
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      
-      # Security (enable in production!)
+      # Settings use the REMEMBRA_ prefix; a bare OPENAI_API_KEY is ignored
+      - REMEMBRA_OPENAI_API_KEY=${REMEMBRA_OPENAI_API_KEY}
+
+      # Database: the image keeps SQLite at /data/remembra.db
+      - REMEMBRA_DATABASE_URL=sqlite:////data/remembra.db
+
+      # Qdrant (a separate container)
+      - REMEMBRA_QDRANT_URL=http://qdrant:6333
+
+      # Security
       - REMEMBRA_AUTH_ENABLED=true
-      - REMEMBRA_AUTH_MASTER_KEY=${REMEMBRA_MASTER_KEY}
-      
-      # Performance
+      - REMEMBRA_AUTH_MASTER_KEY=${REMEMBRA_AUTH_MASTER_KEY}
+      - REMEMBRA_JWT_SECRET=${REMEMBRA_JWT_SECRET}
       - REMEMBRA_RATE_LIMIT_ENABLED=true
     volumes:
-      - remembra-data:/app/data
+      - remembra-data:/data
     depends_on:
       - qdrant
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8787/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
 
   qdrant:
     image: qdrant/qdrant:latest
     volumes:
       - qdrant-data:/qdrant/storage
-    ports:
-      - "6333:6333"
 
 volumes:
   remembra-data:
   qdrant-data:
 ```
 
+The image has its own health check (`GET /health`).
+
 Start with:
 
 ```bash
 # Create .env file
-echo "OPENAI_API_KEY=sk-your-key" > .env
-echo "REMEMBRA_MASTER_KEY=$(openssl rand -hex 32)" >> .env
+echo "REMEMBRA_OPENAI_API_KEY=sk-your-key" > .env
+echo "REMEMBRA_AUTH_MASTER_KEY=$(openssl rand -hex 32)" >> .env
+echo "REMEMBRA_JWT_SECRET=$(openssl rand -hex 32)" >> .env
 
 # Start services
-docker-compose up -d
+docker compose up -d
 ```
 
 ## Environment Variables
 
-### Required
+### Required (with the default OpenAI provider)
 
 | Variable | Description | Example |
 |----------|-------------|---------|
-| `OPENAI_API_KEY` | OpenAI API key for embeddings | `sk-...` |
+| `REMEMBRA_OPENAI_API_KEY` | OpenAI API key for embeddings and extraction | `sk-...` |
 
 ### Providers
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_EMBEDDING_PROVIDER` | `openai` | Embedding provider (`openai`, `ollama`, `cohere`, `voyage`, `jina`, `azure`) |
+| `REMEMBRA_EMBEDDING_PROVIDER` | `openai` | Embedding provider (`openai`, `azure_openai`, `ollama`, `cohere`, `voyage`, `jina`) |
 | `REMEMBRA_LLM_PROVIDER` | `openai` | Backend for entity extraction only (`openai`, `anthropic`, `ollama`) |
 | `REMEMBRA_LLM_MODEL` | `gpt-4o-mini` | Entity-extraction model, used only when `REMEMBRA_EXTRACTION_MODEL` does not fit the provider (e.g. `claude-haiku-4-5` with `anthropic`) |
 | `REMEMBRA_ANTHROPIC_API_KEY` | - | API key for Anthropic entity extraction |
@@ -128,16 +114,17 @@ docker-compose up -d
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_DATABASE_PATH` | `./remembra.db` | SQLite database path |
-| `QDRANT_HOST` | `localhost` | Qdrant host |
-| `QDRANT_PORT` | `6333` | Qdrant port |
+| `REMEMBRA_DATABASE_URL` | `sqlite:////data/remembra.db` in the image | SQLite database |
+| `REMEMBRA_QDRANT_URL` | `http://localhost:6333` in the image | Qdrant server |
+| `REMEMBRA_QDRANT_API_KEY` | - | Qdrant API key (if secured) |
 
 ### Security
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `REMEMBRA_AUTH_ENABLED` | `true` | Enable API key auth |
-| `REMEMBRA_AUTH_MASTER_KEY` | - | Master admin key |
+| `REMEMBRA_AUTH_MASTER_KEY` | - | Master key (creates keys, including admin keys) |
+| `REMEMBRA_JWT_SECRET` | - | Secret for dashboard sign-in tokens (JWTs). The server does not start without a unique value of 32+ characters (unless `REMEMBRA_DEBUG=true`) |
 | `REMEMBRA_RATE_LIMIT_ENABLED` | `true` | Enable rate limiting |
 
 ### Extraction
@@ -151,16 +138,16 @@ docker-compose up -d
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `REMEMBRA_HYBRID_SEARCH_ENABLED` | `true` | Enable hybrid search |
-| `REMEMBRA_RERANK_ENABLED` | `false` | Enable CrossEncoder reranking |
-| `REMEMBRA_DEFAULT_MAX_TOKENS` | `4000` | Max context tokens |
+| `REMEMBRA_ENABLE_HYBRID_SEARCH` | `true` | Enable hybrid search |
+| `REMEMBRA_ENABLE_RERANKING` | `true` | CrossEncoder reranking. It runs only when the image was built with the `rerank` extra (the default image is not); `docker-compose.yml` and `docker-compose.prod.yml` set it to `false` |
+| `REMEMBRA_CONTEXT_MAX_TOKENS` | `4000` | Max context tokens |
 
 See [Configuration Reference](../reference/configuration.md) for all options.
 
 ## Production Checklist
 
 - [ ] Set `REMEMBRA_AUTH_ENABLED=true`
-- [ ] Generate strong `REMEMBRA_AUTH_MASTER_KEY`
+- [ ] Generate strong `REMEMBRA_AUTH_MASTER_KEY` and `REMEMBRA_JWT_SECRET`
 - [ ] Enable rate limiting
 - [ ] Use persistent volumes for data
 - [ ] Set up health checks
@@ -211,11 +198,15 @@ services:
       replicas: 3
 ```
 
-Note: Use Redis for rate limiting when scaling horizontally:
+Note: Use Redis for rate limiting when scaling horizontally (it needs the `redis` package from the `cloud`
+extra):
 
 ```bash
 REMEMBRA_RATE_LIMIT_STORAGE=redis://redis:6379
 ```
+
+Real-time (WebSocket) connections are closed at once only by the process that handled a key revocation or
+sign-out. Connections held by the other processes get no further events and close within 30 seconds.
 
 ### Qdrant Clustering
 
@@ -267,7 +258,8 @@ docker logs remembra
 ```
 
 Common issues:
-- Missing `OPENAI_API_KEY`
+- Missing `REMEMBRA_OPENAI_API_KEY` (a bare `OPENAI_API_KEY` is ignored)
+- Missing or short `REMEMBRA_JWT_SECRET`
 - Port 8787 already in use
 - Insufficient permissions for volume mount
 
@@ -282,4 +274,4 @@ curl http://localhost:6333/health
 
 ### Out of memory
 
-Increase Docker memory limit or reduce `REMEMBRA_DEFAULT_MAX_TOKENS`.
+Increase Docker memory limit or reduce `REMEMBRA_CONTEXT_MAX_TOKENS`.
