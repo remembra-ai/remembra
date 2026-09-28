@@ -8,6 +8,7 @@ that previously broke deploys (Docker itself is not required for these tests).
 from __future__ import annotations
 
 import os
+import re
 import stat
 import subprocess
 from pathlib import Path
@@ -126,6 +127,56 @@ def test_cloud_dockerfile_installs_from_lock_with_rerank_and_checks_litestream()
     assert "ADD https://github.com/benbjohnson/litestream" not in text
     assert "ARG SOURCE_COMMIT" in text and "ENV REMEMBRA_BUILD_SHA=${REMEMBRA_BUILD_SHA}" in text
     assert "CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')" in text
+
+
+def _litestream_run_block(text: str) -> str:
+    """The Dockerfile.cloud RUN that installs Litestream, as the one shell command BuildKit runs."""
+    start = text.rindex("\nRUN ", 0, text.index("releases/download/v${LITESTREAM_VERSION}")) + 1
+    end = text.index("litestream version", start) + len("litestream version")
+    return text[start + len("RUN ") : end].replace("\\\n", " ")
+
+
+@pytest.mark.parametrize(
+    ("target_arch", "want"),
+    [
+        (None, "amd64"),  # the classic builder sets no TARGETARCH: production's amd64
+        ("amd64", "amd64"),
+        ("arm64", "arm64"),  # buildx --platform linux/arm64 (Apple silicon): no x86-64 binary
+    ],
+)
+def test_cloud_dockerfile_fetches_litestream_for_the_platform_buildx_sets(
+    tmp_path: Path, target_arch: str | None, want: str
+) -> None:
+    """ARG TARGETARCH with a default (``=amd64``) stops BuildKit from filling in the target platform, so an arm64
+    build shipped the amd64 binary. Declared without a default, BuildKit sets it; the RUN falls back to amd64."""
+    text = (ROOT / "Dockerfile.cloud").read_text()
+    assert "\nARG TARGETARCH\n" in text and "ARG TARGETARCH=" not in text
+    args = dict(re.findall(r"^ARG (LITESTREAM_[A-Z0-9_]+)=(\S+)$", text, re.M))
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    log = tmp_path / "calls.log"
+    _fake_bin(bindir, "curl", f'echo "curl $*" >> "{log}"\nwhile [ $# -gt 0 ]; do [ "$1" = "-o" ] && touch "$2"; shift; done\n')
+    _fake_bin(bindir, "sha256sum", f'echo "sha256sum $(cat)" >> "{log}"\n')
+    _fake_bin(bindir, "tar", "")
+    _fake_bin(bindir, "litestream", "")
+    script = _litestream_run_block(text).replace("/tmp/litestream.tar.gz", str(tmp_path / "litestream.tar.gz"))
+    env = {"PATH": f"{bindir}:/usr/bin:/bin", **args}
+    if target_arch is not None:
+        env["TARGETARCH"] = target_arch
+    proc = subprocess.run(["sh", "-c", script], env=env, capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+    calls = log.read_text()
+    assert f"litestream-v{args['LITESTREAM_VERSION']}-linux-{want}.tar.gz" in calls
+    assert args[f"LITESTREAM_SHA256_{want.upper()}"] in calls
+
+
+def test_cloud_dockerfile_refuses_a_platform_without_a_pinned_litestream(tmp_path: Path) -> None:
+    script = _litestream_run_block((ROOT / "Dockerfile.cloud").read_text())
+    proc = subprocess.run(
+        ["sh", "-c", script], env={"PATH": "/usr/bin:/bin", "TARGETARCH": "s390x"}, capture_output=True, text=True
+    )
+    assert proc.returncode == 1 and "unsupported TARGETARCH=s390x" in proc.stderr
 
 
 def test_selfhost_dockerfile_installs_from_lock() -> None:
